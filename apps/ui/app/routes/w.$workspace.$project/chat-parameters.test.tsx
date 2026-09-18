@@ -646,15 +646,18 @@ describe('ParameterGroupSelector', () => {
     expect(groupTriggers).toHaveLength(2);
   });
 
-  it('keeps saved-group state persistent and gates only secondary actions', async () => {
+  it('reveals the group selector with the other actions and owns its tone (nested-action surfaces R3)', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const controls = screen.getByTestId('paneview-header-controls');
     const actions = screen.getByTestId('paneview-header-actions');
+    const selector = screen.getByLabelText('Parameter groups');
     expect(controls.className).not.toContain('opacity-0');
-    expect(screen.getByLabelText('Parameter groups')).toBeVisible();
+    // Choosing a group is an action, not status: it is hidden at rest with the rest of the group.
+    expect(actions).toContainElement(selector);
+    expect(selector).toHaveClass('hover:bg-nested-action-hover', 'data-[state=open]:bg-nested-action-hover');
     expect(actions.className).toContain('opacity-0');
     expect(actions.className).toContain('group-hover/paneview-header:opacity-100');
     expect(actions.className).toContain('group-focus-within/paneview-header:opacity-100');

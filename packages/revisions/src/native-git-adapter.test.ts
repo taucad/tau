@@ -1,4 +1,4 @@
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { Revision } from '#revision-authority.js';
 import { describe, expect, it } from 'vitest';
 import { createNativeGitAdapter } from '#native-git-adapter.js';

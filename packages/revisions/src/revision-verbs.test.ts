@@ -14,8 +14,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import type { RevisionId } from '#algorithms/index.js';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';

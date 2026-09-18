@@ -13,7 +13,6 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
-import { captureRevisionTree } from '#revision-capture.js';
 import {
   parseProjectManifestBytes,
   projectManifestSchemaUrl,
@@ -440,7 +439,12 @@ describe('WorkspaceFileService', () => {
       await expect(view.readFile('main.ts')).rejects.toMatchObject({ code: 'ESTALE' });
     });
 
-    it('should capture a checkout from its entry kinds without a stat per file', async () => {
+    /* The capture walk itself is `@taucad/revisions/algorithms` (D9/W8), and its
+       own suite pins that it takes kinds from `readdirEntries` and stats
+       nothing. What is this service's claim is the half below: a rooted view
+       over a checkout offers `readdirEntries` and asks the provider for
+       mount-prefixed paths. */
+    it('should list a checkout from its entry kinds without a stat per file', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       await service.configureProjectRoots({
         projects: [{ projectId, backend: 'indexeddb', providerBasePath: projectId }],
@@ -453,9 +457,20 @@ describe('WorkspaceFileService', () => {
       const stat = vi.spyOn(provider, 'stat');
       const readdirEntries = vi.spyOn(provider, 'readdirEntries');
 
-      const tree = await captureRevisionTree(view);
+      const listing = view.readdirEntries;
+      if (listing === undefined) {
+        throw new TypeError('A rooted checkout view offers readdirEntries.');
+      }
+      const kinds = async (path: string): Promise<readonly string[]> => {
+        const entries = await listing(path);
+        return entries.map(({ name, kind }) => `${kind}:${name}`);
+      };
 
-      expect(tree.entries().map(({ path }) => path)).toEqual(['main.ts', 'parts/fillet.ts']);
+      expect([...(await kinds('')), ...(await kinds('parts'))]).toEqual([
+        'file:main.ts',
+        'dir:parts',
+        'file:fillet.ts',
+      ]);
       expect(stat).not.toHaveBeenCalled();
       expect(readdirEntries.mock.calls).toEqual([[checkoutBasePath], [`${checkoutBasePath}/parts`]]);
     });

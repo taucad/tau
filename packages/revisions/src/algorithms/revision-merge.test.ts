@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ImmutableRevisionTree } from '#revision-tree.js';
-import { mergeRevisionTrees, renderConflictMarkers } from '#revision-merge.js';
+import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
+import { mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
 
 const tree = (files: Readonly<Record<string, string | Uint8Array<ArrayBuffer>>>): ImmutableRevisionTree =>
   new ImmutableRevisionTree(Object.entries(files));

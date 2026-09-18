@@ -11,7 +11,7 @@
  * second projection of it in this process was a copy nothing constructed.
  */
 
-import type { ImmutableRevisionTree, RevisionId } from '@taucad/filesystem/revisions';
+import type { ImmutableRevisionTree, RevisionId } from '#algorithms/index.js';
 
 declare const branchNameBrand: unique symbol;
 

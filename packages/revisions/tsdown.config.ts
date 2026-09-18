@@ -4,6 +4,7 @@ import type { UserConfig } from 'tsdown';
 const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
+    'src/algorithms/index.ts',
     'src/node/index.ts',
     'src/revision-effects.ts',
     'src/project-revisions.machine.ts',

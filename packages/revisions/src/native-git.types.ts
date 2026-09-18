@@ -1,4 +1,4 @@
-import type { RevisionId, RevisionTreeConflict } from '@taucad/filesystem/revisions';
+import type { RevisionId, RevisionTreeConflict } from '#algorithms/index.js';
 import type { Checkout } from '#revision-port.js';
 import type {
   BranchHeadUpdateResult,

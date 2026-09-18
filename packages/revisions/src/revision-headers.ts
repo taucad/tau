@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { RevisionId } from '#algorithms/index.js';
 import type { RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import type { GitSignature } from '#git-objects.js';
 import { digest } from '#object-hash.js';

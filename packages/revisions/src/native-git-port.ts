@@ -18,8 +18,10 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { ImmutableRevisionTree, ResourceQueue, revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionFileMode, RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
+import { ResourceQueue } from '@taucad/filesystem';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import type { FileMode } from '@taucad/filesystem';
+import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
@@ -690,11 +692,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return textDecoder.decode(result.stdout).trim();
   };
 
-  const listTree = async (
-    commit: string,
-  ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: RevisionFileMode }>>> => {
+  const listTree = async (commit: string): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: FileMode }>>> => {
     const stdout = await output(['ls-tree', '-rz', '--full-tree', commit]);
-    const paths = new Map<string, Readonly<{ oid: string; mode: RevisionFileMode }>>();
+    const paths = new Map<string, Readonly<{ oid: string; mode: FileMode }>>();
     for (const record of textDecoder.decode(stdout).split('\0')) {
       if (record === '') {
         continue;

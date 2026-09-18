@@ -1,5 +1,5 @@
 import { classify } from '@taucad/filesystem/path-registry';
-import type { ImmutableRevisionTree } from '@taucad/filesystem/revisions';
+import type { ImmutableRevisionTree } from '#algorithms/index.js';
 
 import { RevisionPortError } from '#revision-port.js';
 

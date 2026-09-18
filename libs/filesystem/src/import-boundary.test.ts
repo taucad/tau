@@ -91,7 +91,6 @@ const boundaryRules: readonly BoundaryRule[] = [
  * | W3 | `archive-format` |
  * | W6 | `route-literals` |
  * | W7 | `project-manifest` |
- * | W8 | `revision-algorithms` |
  * | W9 | `backend-identity` |
  * | W10 | `path-registry` |
  */
@@ -101,14 +100,6 @@ const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage
   ['workspace-file-service.ts', 'archive-format', 'W3'],
   ['mount-table.ts', 'project-manifest', 'W7'],
   ['workspace-file-service.ts', 'project-manifest', 'W7'],
-  ['backend/node/client.ts', 'revision-algorithms', 'W8'],
-  ['backend/node/protocol.ts', 'revision-algorithms', 'W8'],
-  ['backend/node/provider.ts', 'revision-algorithms', 'W8'],
-  ['index.ts', 'revision-algorithms', 'W8'],
-  ['revision-capture.ts', 'revision-algorithms', 'W8'],
-  ['revision-merge.ts', 'revision-algorithms', 'W8'],
-  ['revisions/index.ts', 'revision-algorithms', 'W8'],
-  ['types.ts', 'revision-algorithms', 'W8'],
   ['workspace-file-service.ts', 'backend-identity', 'W9'],
   ['cross-tab-coordinator.ts', 'route-literals', 'W6'],
   ['workspace-file-service.ts', 'route-literals', 'W6'],

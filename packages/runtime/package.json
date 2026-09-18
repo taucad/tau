@@ -313,6 +313,7 @@
     "@taucad/json-schema": "workspace:*",
     "@taucad/memory": "workspace:*",
     "@taucad/nx": "workspace:*",
+    "@taucad/revisions": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",

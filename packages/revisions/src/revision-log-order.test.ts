@@ -7,8 +7,8 @@
  * carry the *same* committer time, a criss-cross, and two unrelated heads.
  */
 
-import { revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import { revisionId } from '#algorithms/index.js';
+import type { RevisionId } from '#algorithms/index.js';
 import { describe, expect, it } from 'vitest';
 import { integrationOf, mergeBaseOf, walkRevisionLog } from '#revision-log-order.js';
 

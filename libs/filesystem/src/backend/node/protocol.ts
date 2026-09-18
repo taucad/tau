@@ -12,8 +12,7 @@
 import { z } from 'zod';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
-import type { FileStat } from '#types.js';
-import type { RevisionFileMode } from '#revision-tree.js';
+import type { FileMode, FileStat } from '#types.js';
 
 /** Wire version. Bump on any incompatible request/response shape change. @public */
 export const nodeFsProtocolVersion = 2;
@@ -133,7 +132,7 @@ const fileStatSchema = z.union([
     lineCount: z.number(),
   }),
 ]) as z.ZodType<FileStat>;
-const fileModeSchema = z.enum(['100644', '100755']) as z.ZodType<RevisionFileMode>;
+const fileModeSchema = z.enum(['100644', '100755']) as z.ZodType<FileMode>;
 
 const watchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), path: z.string(), kind: z.enum(['file', 'dir']) }),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ImmutableRevisionTree } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree } from '#algorithms/index.js';
 
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 

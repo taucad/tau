@@ -385,7 +385,7 @@ const refusalBody = (body: string | undefined): RemoteRefusal => {
   }
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed body is `unknown` until read.
   const record = parsed as Readonly<{ code?: unknown; message?: unknown; error?: unknown }>;
-  /* git-lfs's batch body names its sentence `message`; the API's envelope,
+  /* The git-lfs batch body names its sentence `message`; the API's envelope,
    * which is what every browser request receives, names it `error`. */
   const sentence = [record.message, record.error].find(
     (candidate): candidate is string => typeof candidate === 'string' && candidate !== '',

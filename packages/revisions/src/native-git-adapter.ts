@@ -2,17 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import {
-  ImmutableRevisionTree,
-  ResourceQueue,
-  mergeRevisionTrees,
-  revisionMetadataSchema,
-  revisionId,
-} from '@taucad/filesystem/revisions';
+import { ResourceQueue } from '@taucad/filesystem';
+import { ImmutableRevisionTree, mergeRevisionTrees, revisionMetadataSchema, revisionId } from '#algorithms/index.js';
 import { revisionBranchName } from '#revision-authority.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import { refPatternIsHostLocal } from '#remotes.js';
-import type { RevisionFileMode, RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
+import type { FileMode } from '@taucad/filesystem';
+import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { BranchHeadUpdateResult, Revision, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import { runGitCommand } from '#git-command.js';
@@ -608,7 +604,7 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
         }
         const objectId = await asObjectId(header[2]);
         const path = decodePath(new Uint8Array(record.subarray(tab + 1)));
-        return [path, new Uint8Array(await readObject(objectId, 'blob')), header[0] as RevisionFileMode];
+        return [path, new Uint8Array(await readObject(objectId, 'blob')), header[0] as FileMode];
       }),
     );
     return new ImmutableRevisionTree(entries);

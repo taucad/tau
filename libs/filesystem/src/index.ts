@@ -1,6 +1,7 @@
 export type {
   DirectoryEntry,
   ProviderCapabilities,
+  FileMode,
   FileStat,
   FileStatEntry,
   FileSystemProvider,
@@ -91,22 +92,10 @@ export {
 export { UnboundProjectRouteError } from '#workspace-file-service.js';
 export type { WorkspaceMutationErrorCode } from '#workspace-errors.js';
 
-export { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
-export type { RevisionFileMode, RevisionId, RevisionTreeEntry, RevisionTreeInput } from '#revision-tree.js';
-export { mergeRevisionTrees } from '#revision-merge.js';
-export type {
-  AddAddConflict,
-  BinaryConflict,
-  ModeConflict,
-  ModifyDeleteConflict,
-  RevisionTreeConflict,
-  RevisionTreeMergeResult,
-  TextConflict,
-} from '#revision-merge.js';
-/* The revision authority, its persistence port and `revisionBranchName` are
- * `@taucad/revisions`. The frozen S6 boundary is that nothing reachable from
- * this library's export map can initialize a revision authority (RC8 work 10);
- * what an authority is built out of — trees, ids, merges, the resource queue —
- * stays here and is imported by it. */
-export { captureRevisionTree } from '#revision-capture.js';
-export type { CaptureRevisionTreeOptions } from '#revision-capture.js';
+/* No revision symbol is exported here, and none is imported either (D9/W8):
+ * revision trees, identity, metadata, the three-way merge and the capture walk
+ * are `@taucad/revisions/algorithms`. The frozen S6 boundary — nothing
+ * reachable from this library's export map can initialize a revision authority
+ * (RC8 work 10) — therefore holds by construction. What stays here is the
+ * filesystem's own: `FileMode` (a provider reports and sets it) and
+ * `ResourceQueue` (serializing writes per resource is not a revision concern). */

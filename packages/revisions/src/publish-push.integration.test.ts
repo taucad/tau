@@ -22,8 +22,8 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import type { RevisionId } from '#algorithms/index.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createNativeGitRevisionPort } from '#native-git-port.js';

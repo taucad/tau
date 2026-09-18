@@ -19,10 +19,11 @@ import {
 import {
   acquireViewCameraSession,
   getGraphicsCameraState,
+  getViewCameraSession,
   hasGraphicsCameraRig,
   notifyViewCameraSession,
 } from '#services/graphics-camera-registry.js';
-import type { ViewCameraFraming } from '#services/graphics-camera-registry.js';
+import type { ViewCameraFraming, ViewCameraSession } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const actors: Array<ActorRefFrom<typeof graphicsMachine>> = [];
@@ -49,10 +50,19 @@ const compiledGraphics = await (async () => {
     )
     .replaceAll(/^export /gm, '');
   // oxlint-disable-next-line no-new-func -- this pin executes the app's compiler output.
-  const factory = new Function('__modules', `${linked}\nreturn { useGraphicsCameraRigQuery };`) as (
-    dependencies: Record<string, unknown>,
-  ) => { useGraphicsCameraRigQuery: () => (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => boolean };
-  return { code: compiled.code, useGraphicsCameraRigQuery: factory(modules).useGraphicsCameraRigQuery };
+  const factory = new Function(
+    '__modules',
+    `${linked}\nreturn { useGraphicsCameraRigQuery, useViewCameraSession };`,
+  ) as (dependencies: Record<string, unknown>) => {
+    useGraphicsCameraRigQuery: () => (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => boolean;
+    useViewCameraSession: (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => ViewCameraSession | undefined;
+  };
+  const compiledHooks = factory(modules);
+  return {
+    code: compiled.code,
+    useGraphicsCameraRigQuery: compiledHooks.useGraphicsCameraRigQuery,
+    useViewCameraSession: compiledHooks.useViewCameraSession,
+  };
 })();
 
 const createGraphicsActor = () => {
@@ -168,6 +178,27 @@ describe('GraphicsProvider camera rig ownership', () => {
     await waitFor(() => {
       expect(result.current(graphicsActor)).toBe(false);
     });
+  });
+
+  /* The React Compiler runs on this app in every real build and is off under vitest, so only the
+   * compiled hook catches this one: a registry read memoised on `graphicsRef` alone hands a reader
+   * that rendered before any canvas the `undefined` it saw then, for the life of the actor. The
+   * write-side host is exactly that reader, and the view's camera keys were never written. */
+  it('should give the compiled session hook the session that appeared after its first render', async () => {
+    expect(compiledGraphics.code).toMatch(/useViewCameraSession = \(graphicsRef\) => {\s*const \$ = _c\(/);
+    expect(compiledGraphics.code).toContain('useSyncExternalStore(subscribeGraphicsCameraRegistry, getSession');
+    const graphicsActor = createGraphicsActor();
+    const { result } = renderHook(() => compiledGraphics.useViewCameraSession(graphicsActor));
+    expect(result.current).toBeUndefined();
+
+    act(() => {
+      notifyViewCameraSession(acquireViewCameraSession(graphicsActor));
+    });
+
+    await waitFor(() => {
+      expect(result.current).toBe(getViewCameraSession(graphicsActor));
+    });
+    expect(result.current).toBeDefined();
   });
 
   /* Acquiring a session is a render-phase call, so publishing it to the registry's

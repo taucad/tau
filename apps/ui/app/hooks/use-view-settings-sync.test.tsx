@@ -8,7 +8,11 @@ import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentManifest } from '@taucad/types';
 import type { ThreeCameraRig } from '@taucad/three/camera';
 import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.js';
-import { getViewCameraSession } from '#services/graphics-camera-registry.js';
+import {
+  acquireViewCameraSession,
+  getViewCameraSession,
+  notifyViewCameraSession,
+} from '#services/graphics-camera-registry.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -247,6 +251,42 @@ describe('useViewSettingsSync', () => {
       expect(event).not.toHaveProperty('settings.cameraView');
       expect(event).not.toHaveProperty('settings.cameraFovAngle');
     }
+    graphicsRef.stop();
+  });
+
+  /* The pane opens after the project does, so the host's first render sees no session at all. The
+   * camera keys have to start being written when one appears -- a reader that caches the first
+   * `undefined` writes a record with no pose in it for the life of the actor. */
+  it('starts writing the camera keys when a pane opens after the host has mounted', async () => {
+    const graphicsRef = createGraphicsActor();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+
+    render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
+    expect(getViewCameraSession(graphicsRef)).toBeUndefined();
+
+    const session = acquireViewCameraSession(graphicsRef, { camera: { cameraFovAngle: 42 } });
+    act(() => {
+      notifyViewCameraSession(session);
+    });
+    markSeedConsumed(graphicsRef);
+    act(() => {
+      session.rig.actorRef.send({
+        type: 'setView',
+        target: [3, 4, 5],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 12,
+        perspectiveZoom: 1,
+      });
+    });
+
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        type: 'updateViewSettings',
+        settings: { cameraFovAngle: 42, cameraView: { target: [3, 4, 5], verticalSpan: 12 } },
+      });
+    });
     graphicsRef.stop();
   });
 

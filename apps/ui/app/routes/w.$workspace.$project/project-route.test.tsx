@@ -143,7 +143,7 @@ vi.mock('#hooks/use-project.js', () => ({
     projectProviderChatInputs.push({ requestedChatId, createdChatId });
     return <div>{children}</div>;
   },
-  useProject: () => ({ projectRef, editorRef, parameterService }),
+  useProject: () => ({ projectRef, editorRef, parameterService, viewGraphics }),
 }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({
   useFlushOnClose: () => undefined,

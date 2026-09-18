@@ -47,7 +47,8 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
 
     expectTypeOf<undefined>().toExtend<ReadFileOptions>();
     expectTypeOf<undefined>().toExtend<RmdirOptions>();
-    expectTypeOf<undefined>().toExtend<GetZippedDirectoryOptions>();
+    /* The authority archive is scope-only: a routed path has a view to serve it. */
+    expectTypeOf<undefined>().not.toExtend<GetZippedDirectoryOptions>();
   });
 
   it('does not expose the deleted *Scoped suffix surface', () => {

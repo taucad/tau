@@ -67,7 +67,7 @@ const boundaryRules: readonly BoundaryRule[] = [
     id: 'revision-algorithms',
     forbids: 'importing a revision algorithm module (D9: they move to `@taucad/revisions`)',
     appliesTo: () => true,
-    pattern: /['"][^'"]*revision-(?:merge|tree|metadata)[^'"]*['"]/u,
+    pattern: /['"][^'"]*revision-(?:merge|tree|metadata|capture)[^'"]*['"]/u,
   },
   {
     id: 'backend-identity',

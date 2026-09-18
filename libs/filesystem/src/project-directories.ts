@@ -57,6 +57,7 @@ import type { MutationPipeline } from '#mutation-pipeline.js';
 import { isProjectDirectoryPath } from '#mutation-pipeline.js';
 import type { TreeIndexes } from '#tree-index.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
+import { isNotFoundError } from '#workspace-errors.js';
 import { projectRoute } from '#project-routes.js';
 
 /** Concurrent `tau.json` probes while scanning a discovery root. */
@@ -234,24 +235,6 @@ function readAdoptableManifest(bytes: Uint8Array<ArrayBuffer>): AdoptableProject
     parsed.issue.code === 'manifest-invalid' && parsed.issue.issues.every((issue) => issue.path[0] === 'id');
   const adoptable = idOnlyInvalid ? parseAdoptableProjectManifestBytes(bytes) : undefined;
   return adoptable?.success === true ? adoptable.data : undefined;
-}
-
-/**
- * Whether a provider rejected a path because nothing is there.
- *
- * Lives here because discovery's manifest probe is its first caller; the
- * external-observation plane borrows it until W9 gives that concern its own
- * module.
- *
- * @param error - Rejection from a provider read or stat.
- * @returns Whether the rejection means the path is absent.
- */
-export function isNotFoundError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const { code, name } = error as NodeJS.ErrnoException;
-  return code === 'ENOENT' || code === 'ENOTDIR' || name === 'NotFoundError';
 }
 
 /**

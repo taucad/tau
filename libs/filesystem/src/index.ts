@@ -1,5 +1,6 @@
 export type {
   DirectoryEntry,
+  ExternalChangeFact,
   ProviderCapabilities,
   FileMode,
   FileStat,

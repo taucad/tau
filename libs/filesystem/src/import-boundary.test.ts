@@ -96,10 +96,11 @@ const boundaryRules: readonly BoundaryRule[] = [
  */
 const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage: string]> = [
   /* Discovery locators and the pending-commit scope schema discriminate on the
-   * backend. They moved out of the Service with W7's extraction, so the same
-   * violation now has two homes until W9 gives backends a declared capability. */
+   * backend. W9 cleared the authority and gave backends the `observe()`
+   * capability; these three sites map one config union onto another rather than
+   * selecting a mechanism, and clearing them needs a `ProjectLocator` factory
+   * this package did not own. */
   ['project-directories.ts', 'backend-identity', 'W9'],
-  ['workspace-file-service.ts', 'backend-identity', 'W9'],
 ];
 
 describe('@taucad/filesystem layer-1 core boundary', () => {

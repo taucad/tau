@@ -12,7 +12,7 @@ import type { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
-import type { FileMode, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
+import type { ExternalChangeFact, FileMode, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
 import {
@@ -35,6 +35,24 @@ type Pending = {
  * treating the root as broken.
  * @public
  */
+/** The kernel's own cache burst must never reach the tree (blueprint Q-R3). */
+const hostWatchExcludes = ['.tau/cache/**'];
+
+/**
+ * Translate one host watch event into the port's fact vocabulary.
+ *
+ * @param event - One event the host published for this root.
+ * @returns The equivalent {@link ExternalChangeFact}.
+ */
+const toExternalChangeFact = (event: NodeFsWatchEvent): ExternalChangeFact => {
+  if (event.type === 'reset') {
+    return { kind: 'reset' };
+  }
+  return event.type === 'delete'
+    ? { kind: 'deleted', path: event.path }
+    : { kind: 'modified', path: event.path, entry: event.kind };
+};
+
 export class NodeFsChannelClosedError extends Error {
   public override readonly name = 'NodeFsChannelClosedError';
 
@@ -349,6 +367,23 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
    */
   public async watch(request: WatchRequest, handler: (event: NodeFsWatchEvent) => void): Promise<() => void> {
     return this._channel.watch(this._root, request, handler);
+  }
+
+  /**
+   * Observe this root through the host's own watcher (charter D13).
+   *
+   * The watcher lives with the bytes in the host; a `reset` event — the host lost
+   * a watcher — becomes a `reset` fact, exactly as a lost browser observer does.
+   * A node root has no snapshot fallback, so a refused arming rejects rather than
+   * resolving `undefined`.
+   *
+   * @param listener - Receives every normalised fact batch.
+   * @returns A disposer, once the host has armed the watcher.
+   */
+  public async observe(listener: (facts: readonly ExternalChangeFact[]) => void): Promise<() => void> {
+    return this.watch({ paths: [''], recursive: true, excludes: hostWatchExcludes }, (event) => {
+      listener([toExternalChangeFact(event)]);
+    });
   }
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {

@@ -18,7 +18,7 @@ export function ProjectExportAction({
         <Button
           variant='ghost'
           size='xs'
-          className={className ?? 'max-md:size-8'}
+          className={className ?? 'h-7 px-2 max-md:size-8'}
           aria-label='Export'
           onClick={() => {
             openPanel('export');

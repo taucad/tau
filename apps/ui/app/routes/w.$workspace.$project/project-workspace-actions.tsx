@@ -79,6 +79,9 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
   const chatVisible = getLaneVisibility('chat');
   const workbenchVisible = getLaneVisibility('workbench');
   return (
+    /* One 28 px control height at `gap-1`, the same rhythm as the workbench and
+       viewer pane actions; the row used to mix 32 px (`sm`) and 24 px (`xs`)
+       buttons, which read as loose spacing next to those panes. */
     <div className='flex h-full items-center gap-1'>
       {isMobile && !openMobile ? (
         <SidebarTrigger className='h-7 w-auto max-w-44 gap-1.5 px-2'>
@@ -93,7 +96,7 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
             <Button
               variant='ghost'
               size='sm'
-              className='gap-1.5 px-2'
+              className='h-7 gap-1.5 px-2'
               aria-label='Toggle Chat lane'
               aria-pressed={chatVisible}
               onClick={() => {

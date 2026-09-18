@@ -130,7 +130,7 @@ describe('Controls spatial section boundary', () => {
     mocks.renderFrame = {
       anchorFrameId: 'tau:root',
       originMeters: [10.01, 20, 30],
-      metersPerRenderUnit: 0.000_001,
+      metersPerRenderUnit: 0.000001,
     };
     view.rerender(<Controls enableGizmo={false} enableDamping={false} enableZoom enablePan zoomSpeed={2} />);
 

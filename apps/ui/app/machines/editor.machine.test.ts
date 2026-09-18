@@ -1249,7 +1249,7 @@ describe('ready.operation.ensuringFocusedChat', () => {
       },
     });
     expect(ensureInvocationCount).toBe(1);
-    const focusedChatId = actor.getSnapshot().context.focusedChatId;
+    const { focusedChatId } = actor.getSnapshot().context;
 
     actor.send({ type: 'setRequestedChatId', chatId: undefined });
 

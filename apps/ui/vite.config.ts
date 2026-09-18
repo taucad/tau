@@ -489,9 +489,9 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
-      // *.browser.test.ts files need a real browser (OPFS, Web Locks) and run
+      // *.browser.test.ts(x) files need a real browser (OPFS, Web Locks, WebGL) and run
       // under their own vitest browser configs, not the jsdom sweep.
-      exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts'],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts', '**/*.browser.test.tsx'],
       typecheck: {
         enabled: true,
         include: ['**/*.test-d.ts'],

@@ -201,7 +201,10 @@
         "cwd": "{projectRoot}",
         "command": "node --env-file-if-exists=.env --import @oxc-node/core/register server.ts",
         "env": {
-          "NODE_ENV": "production"
+          "NODE_ENV": "production",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
         }
       },
       "configurations": {},

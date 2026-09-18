@@ -94,11 +94,16 @@ export const createCanvasConfig = (
           if (fixture) {
             return fixture;
           }
-          const candidate = resolve(appRoot, source.slice(1).replace(/\.js$/, ''));
+          // Asset imports such as `sprite.svg?raw` keep their query for Vite's asset plugins.
+          const [specifier = '', query] = source.split('?');
+          const candidate = resolve(appRoot, specifier.slice(1).replace(/\.js$/, ''));
           if (!candidate.startsWith(`${appRoot}${sep}`)) {
             return undefined;
           }
-          return ['', '.tsx', '.ts'].map((extension) => `${candidate}${extension}`).find((path) => existsSync(path));
+          const found = ['', '.tsx', '.ts']
+            .map((extension) => `${candidate}${extension}`)
+            .find((path) => existsSync(path));
+          return found !== undefined && query !== undefined ? `${found}?${query}` : found;
         },
         transform: {
           order: 'pre',

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- LangChain usage metadata and provider wire fields use snake_case. */
 import type { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 import { AIMessageChunk } from '@langchain/core/messages';
 import { DefaultChatTransport, readUIMessageStream } from 'ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +19,17 @@ const exhaustedBody = {
     code: 'credit_balance_exhausted',
     message: providerMessage,
     param: null,
+  },
+};
+
+/* The body Vertex answered on 2026-09-19, with a credential-shaped field added: the
+ * operator needs the schema path in the log and must never find the token there. */
+const vertexSchemaRefusal = {
+  error: {
+    code: 400,
+    status: 'INVALID_ARGUMENT',
+    message: 'ref loops are only supported if they include optional or nullable property values',
+    metadata: { authorization: 'Bearer ya29.a0AfH6SMBx-secret-token' },
   },
 };
 
@@ -155,6 +167,79 @@ describe('DirectModelInvocationService', () => {
     await expect(service.invoke(gatewayIntent())).rejects.toThrow(
       'Configured provider returned HTTP 400. max_output_tokens is too large.',
     );
+  });
+
+  it('should log the refused upstream body, bounded and redacted, without forwarding it', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(vertexSchemaRefusal), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    try {
+      await service.invoke(gatewayIntent());
+      expect.fail('The refused relay should throw');
+    } catch (error) {
+      // The envelope keeps only the provider's sentence; the rest of the body stays server-side.
+      expect(errorDetails(error).message).not.toContain('INVALID_ARGUMENT');
+    }
+
+    expect(warn).toHaveBeenCalledWith(
+      {
+        providerId: 'openai',
+        routeId: 'openai-gpt-5.6-luna',
+        modelId: 'gpt-5.6-luna',
+        upstreamStatus: 400,
+        upstreamBody: JSON.stringify({
+          error: { ...vertexSchemaRefusal.error, metadata: { authorization: '[redacted]' } },
+        }),
+      },
+      'Upstream model provider refused the request',
+    );
+  });
+
+  it('should answer an upstream 429 as RATE_LIMITED carrying the upstream retry estimate', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { type: 'rate_limit_error', message: 'Rate limit reached.' } }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': '7' },
+      }),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    try {
+      await service.invoke(gatewayIntent());
+      expect.fail('The rate-limited relay should throw');
+    } catch (error) {
+      expect((error as LlmGatewayError).getStatus()).toBe(429);
+      expect(errorDetails(error)).toMatchObject({
+        type: 'RATE_LIMITED',
+        details: { retryAfterSeconds: 7 },
+      });
+    }
+  });
+
+  it('should answer the Vertex 499 CANCELLED as a provider outage', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 499, message: 'The operation was cancelled.' } }), {
+        status: 499,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    try {
+      await service.invoke(gatewayIntent());
+      expect.fail('The cancelled relay should throw');
+    } catch (error) {
+      expect((error as LlmGatewayError).getStatus()).toBe(503);
+      expect(errorDetails(error).type).toBe('PROVIDER_UNAVAILABLE');
+    }
   });
 
   it('should replace a recognized in-stream refusal with the Tau-coded frame it relays', async () => {

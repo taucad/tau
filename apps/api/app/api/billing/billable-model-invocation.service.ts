@@ -11,12 +11,9 @@ import {
 } from '#api/billing/credit-ledger.service.js';
 import { and, eq, inArray } from 'drizzle-orm';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import {
-  cloudProviderAccountMessage,
-  readBoundedProviderBody,
-  recognizeProviderAccountRefusal,
-} from '#api/llm/provider-account-refusal.js';
+import { cloudProviderAccountMessage, recognizeProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
+import { classifyUpstreamRefusal, readUpstreamRefusal, upstreamRetryAfterSeconds } from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
 import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
@@ -377,14 +374,23 @@ export class BillableModelInvocationService {
       );
     }
     if (!response.ok || !response.body) {
-      this.logger.warn(
-        { status: response.status, operationId: row.id },
-        'The model provider returned no streamable response',
-      );
       intent.signal.removeEventListener('abort', recordCancellation);
       const evidence = collector.failed(response.ok ? 'malformed_response' : 'provider_rejected');
-      // One bounded read of the refused body: enough to classify it, never forwarded.
-      const body = response.ok ? undefined : await readBoundedProviderBody(response);
+      // One bounded read of the refused body: enough to classify it and to log it, never forwarded.
+      const { body, loggedBody } = response.ok
+        ? { body: undefined, loggedBody: undefined }
+        : await readUpstreamRefusal(response);
+      this.logger.warn(
+        {
+          providerId: qualification.providerId,
+          routeId: qualification.routeId,
+          modelId: qualification.modelId,
+          upstreamStatus: response.status,
+          upstreamBody: loggedBody,
+          operationId: row.id,
+        },
+        'Upstream model provider refused the request',
+      );
       if (response.ok && response.body) {
         await response.body.cancel();
       }
@@ -394,19 +400,20 @@ export class BillableModelInvocationService {
         // Settled as provider_rejected above: the customer is charged nothing for it.
         throw this.providerAccountExhausted(intent, recognized.providerId, recognized.refusal);
       }
-      const upstreamRejected =
-        response.status >= 400 && response.status < 500 && ![401, 403, 429].includes(response.status);
-      throw upstreamRejected
-        ? new LlmGatewayError(
-            HttpStatus.BAD_GATEWAY,
-            'UPSTREAM_REJECTED',
-            `The model provider rejected the request (HTTP ${response.status}).`,
-          )
-        : new LlmGatewayError(
-            HttpStatus.SERVICE_UNAVAILABLE,
-            'PROVIDER_UNAVAILABLE',
-            'The model provider is unavailable.',
-          );
+      const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers);
+      const classification = classifyUpstreamRefusal({
+        status: response.status,
+        accountOwner: 'tau',
+        ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+      });
+      // Tau owns the key here, so the supplier's own sentence never leaves the API.
+      const message =
+        classification.type === 'UPSTREAM_REJECTED'
+          ? `The model provider rejected the request (HTTP ${response.status}).`
+          : classification.type === 'RATE_LIMITED'
+            ? 'The model provider is rate limiting this request.'
+            : 'The model provider is unavailable.';
+      throw new LlmGatewayError(classification.status, classification.type, message, classification.details);
     }
     // The supplier answered: the operation is in flight, not abandoned. Losing this
     // transition to recovery never abandons a response that is already being charged.

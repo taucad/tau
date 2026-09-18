@@ -7,7 +7,6 @@ import type { Server } from 'node:http';
 import { release } from 'node:os';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { BrowserContext } from 'playwright';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type {
@@ -31,12 +30,6 @@ import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau
 import type { TauServeFixture, TauServeFixtureOptions } from './tau-serve-fixture.ts';
 import { browserHostScript } from './agent-host-gateway-script.ts';
 import type { GatewayScriptTurn } from './agent-host-gateway-script.ts';
-
-declare module 'vitest/node' {
-  interface BrowserCommandContext {
-    readonly context: BrowserContext;
-  }
-}
 
 type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;

@@ -14,8 +14,6 @@ import { ChatCerebras } from '@langchain/cerebras';
 import type { ChatCerebrasInput } from '@langchain/cerebras';
 import type { Environment } from '#config/environment.config.ts';
 import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
-import type { ProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
-import { createGoogleProviderDiagnosticsFetch } from '#api/chat/utils/provider-diagnostics.js';
 import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
 import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';
 import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
@@ -44,7 +42,6 @@ type ProviderOptionsMap = {
 };
 
 type ProviderRuntimeOptions = {
-  diagnosticsContext?: ProviderDiagnosticsContext;
   maximumOutputTokens?: number;
 };
 
@@ -149,12 +146,6 @@ export class ProviderService {
           if (!credentials) {
             throw new Error('GOOGLE_VERTEX_AI_CREDENTIALS is required for Vertex AI');
           }
-          const diagnosticsFetch = runtimeOptions?.diagnosticsContext
-            ? createGoogleProviderDiagnosticsFetch({
-                baseFetch: globalThis.fetch,
-                context: runtimeOptions.diagnosticsContext,
-              })
-            : globalThis.fetch;
 
           return new ChatVertexAI({
             ...options,
@@ -171,7 +162,7 @@ export class ProviderService {
                 transporterOptions: {
                   // Gaxios defaults to node-fetch in Node; node-fetch emits an unhandled
                   // request-body Readable error when aborted before/during a POST.
-                  fetchImplementation: diagnosticsFetch,
+                  fetchImplementation: globalThis.fetch,
                 },
               },
             },
@@ -247,7 +238,6 @@ export class ProviderService {
           new TauChatXaiResponses({
             apiKey: configService.get('XAI_API_KEY', { infer: true }),
             baseURL: 'https://api.x.ai/v1',
-            conversationId: runtimeOptions?.diagnosticsContext?.chatId,
             ...options,
             maxOutputTokens: runtimeOptions?.maximumOutputTokens ?? options.maxOutputTokens,
           }),
@@ -270,7 +260,6 @@ export class ProviderService {
               apiKey: configService.get('MOONSHOT_API_KEY', { infer: true }),
               baseURL: 'https://api.moonshot.ai/v1',
             },
-            promptCacheKey: runtimeOptions?.diagnosticsContext?.chatId,
             outputVersion: 'v1',
           }),
       },

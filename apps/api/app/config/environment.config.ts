@@ -86,9 +86,6 @@ const environmentSchemaBase = z.object({
   LANGSMITH_ENDPOINT: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),
   LANGSMITH_API_KEY: z.string().optional(),
-  TAU_PROVIDER_DIAGNOSTICS_VERBOSE: strictEnvironmentBoolean(false).describe(
-    'Emit sanitized provider request diagnostics for successful model calls. Failures are always logged.',
-  ),
 
   // Authentication
   AUTH_SECRET: z.string(),

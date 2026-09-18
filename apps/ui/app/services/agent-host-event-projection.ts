@@ -64,8 +64,18 @@ const blockId = (type: 'text' | 'thinking', messageId: string, contentIndex: num
 /** Run-scoped blocks, including closed identities to fence late live frames. */
 export type AgentHostLiveBlocks = Map<
   string,
-  { readonly type: 'text' | 'thinking'; content: string; closed: boolean; startedAtMs?: number | undefined }
+  | { readonly type: 'text' | 'thinking'; content: string; closed: boolean; startedAtMs?: number | undefined }
+  | { readonly type: 'tool'; content: ''; closed: true }
 >;
+
+/**
+ * The key a settled tool call is fenced under. Durable and live rows travel on
+ * independent subscriptions, so a live `tool-input-*` row can land after the
+ * call's durable `tool-output`; projecting it would rewind the settled part and
+ * drop its output, after which the finalize pass marks a successful call as
+ * orphaned ("File edits failed", lane H5).
+ */
+const settledToolKey = (toolCallId: string): string => `tool:${toolCallId}`;
 
 const reasoningTiming = (
   metadata: ProviderMessageMetadata | undefined,
@@ -396,6 +406,7 @@ const messageChunks = (
       ];
     }
     case 'tool-output': {
+      streamedBlocks?.set(settledToolKey(message.toolCallId), { type: 'tool', content: '', closed: true });
       const { title: _title, ...facts } = toolChunkFacts(message);
       const output: UIMessageChunk = message.isError
         ? {
@@ -574,6 +585,9 @@ export const projectAgentHostLiveEvent = (
   event: AgentLiveEvent,
   streamedBlocks: AgentHostLiveBlocks,
 ): readonly UIMessageChunk[] => {
+  if ('toolCallId' in event && streamedBlocks.get(settledToolKey(event.toolCallId))?.closed) {
+    return [];
+  }
   if (event.type === 'tool-input-start') {
     return [{ type: 'tool-input-start', toolCallId: event.toolCallId, toolName: event.toolName }];
   }

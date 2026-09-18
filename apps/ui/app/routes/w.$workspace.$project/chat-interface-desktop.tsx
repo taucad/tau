@@ -21,6 +21,20 @@ import { cn } from '@taucad/ui/utils/cn';
 
 export const compactWorkspaceWidth = 1120;
 
+/**
+ * Reserve the titlebar-controls width in front of the top-left group's tab
+ * bar only: a group inside any non-first `.dv-view` sits below or right of
+ * another one. A `::before` flex item rather than padding so the tab bar's
+ * bottom border, which the children draw, continues under the controls.
+ */
+const topLeftTabBarInset = [
+  "[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:content-['']",
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:w-(--titlebar-controls-width)',
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:shrink-0',
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:border-b',
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:border-b-border',
+].join(' ');
+
 export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const { editorRef } = useProject();
   const { open: sidebarOpen } = useSidebar();
@@ -108,7 +122,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                 <div
                   className={cn(
                     '@container/viewer relative size-full overflow-hidden',
-                    !sidebarOpen && !chatVisible && '[&_.dv-tabs-and-actions-container]:pl-(--titlebar-controls-width)',
+                    !sidebarOpen && !chatVisible && topLeftTabBarInset,
                   )}
                 >
                   <ViewerDockview />

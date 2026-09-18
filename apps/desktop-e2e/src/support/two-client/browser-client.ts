@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
-import type { Browser, BrowserContext, Page } from 'playwright';
+import type { Browser, BrowserContext, Locator, Page } from 'playwright';
 import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
 
 /**
@@ -62,12 +62,27 @@ export const browserFileDigest = async (
     [slug, ...path],
   );
 
+/**
+ * One chat's sidebar row, and the link inside it.
+ *
+ * Addressed by the route the link opens, not by its description: sidebar v2
+ * gives a row an `aria-describedby` only while it has something to say, so a
+ * finished chat the person is looking at has none (`selectChatFacts`,
+ * `apps/ui/app/hooks/use-sidebar-status.ts`).
+ */
+export const chatRow = (page: Page, chatId: string): Locator =>
+  page
+    .locator('[data-slot="chat-trigger"]')
+    .filter({ has: page.locator(`a[href*="chat=${chatId}"]`) })
+    .first();
+
+/** That row's name link. */
+export const chatRowLink = (page: Page, chatId: string): Locator =>
+  chatRow(page, chatId).locator(`a[href*="chat=${chatId}"]`).first();
+
 /** Open one known chat through the same sidebar link a person uses. */
 export const openBrowserChat = async (client: Pick<BrowserClient, 'page'>, chatId: string): Promise<void> => {
-  await client.page
-    .locator(`a[aria-describedby="chat-status-${chatId}"][href*="chat="]`)
-    .first()
-    .click({ timeout: 120_000 });
+  await chatRowLink(client.page, chatId).click({ timeout: 120_000 });
   await client.page.waitForURL((url) => url.searchParams.get('chat') === chatId, { timeout: 60_000 });
 };
 

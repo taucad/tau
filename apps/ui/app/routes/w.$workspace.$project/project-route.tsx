@@ -328,9 +328,16 @@ export function ProjectRouteGate({
         }
       : undefined;
 
+  /*
+   * This gate is app-wide: `ProjectSessionsHost` mounts it from the root layout on every route, so
+   * live projects survive navigation. Only a project URL may wear the project's skeleton while the
+   * file service connects — elsewhere the wait is not about a project, and the placeholder would be
+   * a workspace the person never asked for.
+   */
+  const isProjectRoute = slugs !== undefined || requestedProjectId !== undefined;
+
   return (
-    /* The file service is part of opening this project, so its wait wears the project's own skeleton. */
-    <SharedWorkerGate placeholder={<WorkspaceSkeleton withShellFrame />}>
+    <SharedWorkerGate placeholder={isProjectRoute ? <WorkspaceSkeleton withShellFrame /> : undefined}>
       <ProjectRouteStateContext.Provider value={state}>
         <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
           <div className='contents' inert={pending || undefined} aria-busy={pending}>

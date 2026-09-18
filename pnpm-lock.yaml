@@ -4149,6 +4149,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../revisions
       '@taucad/units':
         specifier: workspace:*
         version: link:../units
@@ -4198,9 +4201,6 @@ importers:
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx
-      '@taucad/revisions':
-        specifier: workspace:*
-        version: link:../revisions
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../../libs/rpc

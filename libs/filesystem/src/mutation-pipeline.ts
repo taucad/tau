@@ -51,6 +51,7 @@ import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-
 import { getFileContentMetadata } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
+import { parseRoute } from '#project-routes.js';
 
 const maximumCheckedWritePreconditions = 32;
 const maximumCheckedWriteBytes = 8 * 1024 * 1024;
@@ -1237,9 +1238,9 @@ export class MutationPipeline {
    * @returns Owning project id, or `undefined` when no project owns the bytes.
    */
   private _projectLockOwner(logicalPath: string, resolution: MountResolution): string | undefined {
-    const segments = logicalPath.split('/');
-    if (segments[1] === 'projects' && segments[2]) {
-      return segments[2];
+    const route = parseRoute(logicalPath);
+    if (route.kind === 'project' && route.id !== undefined) {
+      return route.id;
     }
     const storageRootKey = resolution.entry?.storageRootKey;
     if (storageRootKey === undefined) {
@@ -1258,9 +1259,8 @@ export class MutationPipeline {
       ) {
         continue;
       }
-      const owner = mount.prefix.split('/');
-      if (owner[1] === 'projects' && owner[2]) {
-        return owner[2];
+      if (mount.kind === 'project' && mount.routeId !== undefined) {
+        return mount.routeId;
       }
     }
     return undefined;

@@ -9,6 +9,7 @@
 
 import { z } from 'zod';
 import { assertRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
+import { projectRoute } from '#project-routes.js';
 
 const lockPrefix = 'tau-fs-write:';
 const channelName = 'tau-fs-changes';
@@ -172,7 +173,7 @@ export class CrossTabCoordinator {
   public notifyProjectUnavailable(projectId: string, authority: PhysicalAuthority): void {
     this._postChangeNotification({
       type: 'project-unavailable',
-      path: `/projects/${projectId}`,
+      path: projectRoute(projectId),
       authority,
     });
   }

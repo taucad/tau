@@ -87,6 +87,9 @@ export type {
   StorageRootConfig,
   WorkspaceScope,
 } from '#mount-table.js';
+/* `MountEntry.kind` is a `RouteKind`, so the type ships with it; the route
+ * builders stay module-private until a consumer outside L1 needs one (D10). */
+export type { RouteKind } from '#project-routes.js';
 
 export {
   MissingWorkspaceHandleError,

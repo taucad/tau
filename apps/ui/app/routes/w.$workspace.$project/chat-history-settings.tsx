@@ -1,21 +1,28 @@
 import { useCallback } from 'react';
-import { EllipsisVertical, Download } from 'lucide-react';
+import { Download, EllipsisVertical, Pencil } from 'lucide-react';
 import { FloatingPanelMenuButton } from '#components/ui/floating-panel.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { useChatContext } from '#hooks/use-chat.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
+import { ChatOptionsMeta } from '#routes/w.$workspace.$project/chat-options-meta.js';
 import { downloadBlob } from '@taucad/utils/file';
 import { serializeTranscript } from '#utils/chat.utils.js';
 import { toSnakeCase } from '#utils/string.utils.js';
 
-export function ChatHistorySettings(): React.ReactNode {
+/**
+ * The chat menu: rename, export, then the chat's activity, model and credits as
+ * a read-only block.
+ *
+ * @param props - `onRename` opens the header's inline editor.
+ * @returns The ⋯ trigger and its menu.
+ */
+export function ChatHistorySettings({ onRename }: { readonly onRename: () => void }): React.ReactNode {
   const { chat, activeChatId } = useChatContext();
   const { projectId } = useProject();
   const { chats } = useChats(projectId);
@@ -49,11 +56,15 @@ export function ChatHistorySettings(): React.ReactNode {
           event.preventDefault();
         }}
       >
-        <DropdownMenuLabel>Export</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={onRename}>
+          <Pencil />
+          Rename
+        </DropdownMenuItem>
         <DropdownMenuItem disabled={!chat || chat.messages.length === 0} onSelect={handleExport}>
           <Download />
-          Export Transcript
+          Export transcript
         </DropdownMenuItem>
+        <ChatOptionsMeta />
       </DropdownMenuContent>
     </DropdownMenu>
   );

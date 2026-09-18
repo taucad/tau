@@ -155,11 +155,7 @@ vi.mock('#routes/w.$workspace.$project/chat-error.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
-  ChatTitleBar: () => null,
-}));
-
-vi.mock('#routes/w.$workspace.$project/chat-history-status.js', () => ({
-  ChatHistoryStatus: () => null,
+  ChatTitleBar: () => <span data-testid='chat-title-bar' />,
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-history-empty.js', () => ({
@@ -170,7 +166,17 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanel: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelClose: () => null,
   FloatingPanelContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-  FloatingPanelContentHeader: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+  FloatingPanelContentHeader: ({
+    children,
+    className,
+  }: {
+    readonly children: React.ReactNode;
+    readonly className?: string;
+  }) => (
+    <div data-slot='floating-panel-content-header' className={className}>
+      {children}
+    </div>
+  ),
   FloatingPanelErrorContent: () => null,
 }));
 
@@ -249,6 +255,16 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     capturedTextarea.onSubmit = undefined;
     capturedTextarea.className = undefined;
     setMockMessages([]);
+  });
+
+  it('opens with one header row that holds the title bar, and no status row under it', () => {
+    const { container } = render(<ChatHistory />);
+
+    const headers = container.querySelectorAll('[data-slot=floating-panel-content-header]');
+    expect(headers).toHaveLength(1);
+    expect(headers[0]).toHaveClass('gap-1');
+    expect(headers[0]?.querySelector('[data-testid=chat-title-bar]')).not.toBeNull();
+    expect(container.querySelector('.sticky')).toBeNull();
   });
 
   it('leaves the surface styling with ChatTextarea and caps the composer width', () => {

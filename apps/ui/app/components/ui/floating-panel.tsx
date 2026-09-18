@@ -34,6 +34,9 @@ const floatingPanelContentHeaderVariants = cva(
     'h-9',
     isDesktopTarget() ? '[app-region:drag] [&_button]:[app-region:no-drag]' : 'max-md:h-10',
     'border-b bg-sidebar py-0.5',
+    /* The header owns the fade its title may use (`fade-label`): the row widens the mask once its
+     * actions are reachable, and the actions' scrim resolves against this background. */
+    'fade-row [--fade-scrim-into:var(--sidebar-background)]',
     'text-sm font-medium text-muted-foreground',
   ),
   {
@@ -447,8 +450,12 @@ function FloatingPanelContentHeaderActions({
       className={cn(
         // `gap-1` and no inset: the same spacing the Dockview pane-action rows use.
         'flex items-center max-md:gap-1',
+        /* The trailing control of a `fade-row` header: `fade-action` paints the scrim that
+         * finishes a `fade-label` name's dissolve, over the row's own background. */
+        'fade-action relative bg-(--fade-scrim-into)',
         'md:opacity-0 md:transition-opacity md:duration-150 md:ease-in-out',
-        'group-hover/floating-panel:opacity-100',
+        // Keyboard focus reveals the slot too, or a tabbed-to action is an invisible focus ring.
+        'group-hover/floating-panel:opacity-100 md:focus-within:opacity-100',
         className,
       )}
       data-slot='floating-panel-content-header-actions'

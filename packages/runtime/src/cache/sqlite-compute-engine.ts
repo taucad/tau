@@ -111,10 +111,10 @@ const schema = [
 /**
  * The store directory must be host state, never a project tree.
  *
- * A `.tau` segment is the tree-local family — `.tau/cache`, `.tau/revisions`,
- * `.tau/revisions` — that D9/I4 place the store outside of. The host's own
- * state-directory resolver produces the right location; this only refuses the
- * wrong one loudly instead of silently seeding cache bytes into a revision.
+ * A `.tau` segment is the tree-local family — `.tau/cache`, `.tau/chats` — that
+ * D9/I4 place the store outside of. The host's own state-directory resolver
+ * produces the right location; this only refuses the wrong one loudly instead of
+ * silently seeding cache bytes into a project tree.
  */
 const assertHostStateDirectory = (directory: string): void => {
   if (!(directory.startsWith('/') || /^[A-Za-z]:[/\\]/.test(directory))) {

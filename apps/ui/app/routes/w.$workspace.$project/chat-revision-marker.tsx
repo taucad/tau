@@ -38,6 +38,21 @@ const stateKey = (state: TurnRevisionState | undefined): string =>
     : `${state.kind}:${state.kind === 'saved' ? state.revision.revisionId : ''}:${turnRevisionLabel(state, 0)}`;
 
 /**
+ * The revision a turn recorded, never the base mint that opened it.
+ *
+ * A turn that starts dirty mints the pre-turn tree under its *own* turn id
+ * (`turn.machine` D17) — on a new project, the scaffold — so the graph names a
+ * card for a turn that has saved nothing yet. The turn's lease says which
+ * revision that base is, and a starting point is not a result.
+ *
+ * @param card - The card the graph attached to this turn.
+ * @param baseRevisionId - The revision this turn started from.
+ * @returns The card, unless it is this turn's own base.
+ */
+const turnSave = (card: RevisionCard | undefined, baseRevisionId: string | undefined): RevisionCard | undefined =>
+  card?.revisionId === baseRevisionId ? undefined : card;
+
+/**
  * The revision facts for one request, read from their existing owners.
  *
  * @param userMessageId - The user message that anchors the turn.
@@ -75,7 +90,7 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
         : { kind: 'revision', n: revisions.find((revision) => revision.revisionId === baseRevisionId)?.n };
 
   const state = deriveTurnRevisionState({
-    revision: byTurnId.get(userMessageId),
+    revision: turnSave(byTurnId.get(userMessageId), baseRevisionId),
     outcome,
     isSettledWithoutChange:
       settlement?.type === 'turn.finalized' &&

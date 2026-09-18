@@ -145,6 +145,44 @@ const cardOf = (row: RevisionRow): RevisionCard => ({
   trigger: row.trigger,
 });
 
+/**
+ * Attach one card to the turn it recorded, keeping the turn's own save.
+ *
+ * A turn can hold *two* rows, and only one of them is its save.
+ * `turn.machine`'s `basing` mints the pre-turn tree under this turn's own id
+ * (D17), so a turn that started dirty — which the first turn of a new project
+ * always does, its scaffold still uncommitted — is named by both that base
+ * mint and its own later cut. Plain last-write-wins over a newest-first log
+ * handed every surface the base: `Rev 1 saved` for a turn still working,
+ * pointing at the scaffold.
+ *
+ * The settlement names the row the host actually recorded for the turn, so it
+ * decides. With no settlement in this tab, the turn's save is the newer row,
+ * because its base can only precede it.
+ *
+ * @param byTurnId - The map being built.
+ * @param settledIds - Revision ids the host attested, by turn.
+ * @param card - The card to attach.
+ */
+const attachTurnCard = (
+  byTurnId: Map<string, RevisionCard>,
+  settledIds: ReadonlyMap<string, string>,
+  card: RevisionCard,
+): void => {
+  if (card.turnId === undefined) {
+    return;
+  }
+  const held = byTurnId.get(card.turnId);
+  if (held === undefined) {
+    byTurnId.set(card.turnId, card);
+    return;
+  }
+  const settledId = settledIds.get(card.turnId);
+  if (settledId === undefined ? card.createdAt > held.createdAt : card.revisionId === settledId) {
+    byTurnId.set(card.turnId, card);
+  }
+};
+
 /** Host-attested settlements this tab holds for the project on screen. */
 type FinalizedRevision = Readonly<{ branch: string | undefined; card: RevisionCard }>;
 
@@ -256,24 +294,20 @@ export function useRevisions(): RevisionsView {
     }
     const revisions = (rows ?? []).map((row) => cardOf(row));
     const byTurnId = new Map<string, RevisionCard>();
-    /* The graph first, then the settlements it does not name: a turn a remote
+    const settledIdByTurn = new Map(
+      finalized.flatMap(({ card }) => (card.turnId === undefined ? [] : [[card.turnId, card.revisionId] as const])),
+    );
+    /* The settlements first, then the graph that names them: a turn a remote
      * host recorded has no row here, and a turn this graph holds is the better
      * card because it carries its own number. */
     for (const { card } of finalized) {
-      if (card.turnId !== undefined) {
-        byTurnId.set(card.turnId, card);
-      }
+      attachTurnCard(byTurnId, settledIdByTurn, card);
     }
     for (const card of revisions) {
-      if (card.turnId !== undefined) {
-        byTurnId.set(card.turnId, card);
-      }
+      attachTurnCard(byTurnId, settledIdByTurn, card);
     }
     for (const row of settledBranchRows.rows) {
-      const card = cardOf(row);
-      if (card.turnId !== undefined) {
-        byTurnId.set(card.turnId, card);
-      }
+      attachTurnCard(byTurnId, settledIdByTurn, cardOf(row));
     }
     const selectedIds = new Set((rows ?? []).map((row) => row.revisionId));
     const branchFacts = new Map<string, { revisionNumber: number | undefined; ahead: number; behind: number }>();

@@ -20,6 +20,38 @@ import type {
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
 export type { ChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
 
+/** Rule 16's four storage classes. @public */
+export type PathClass = 'authored' | 'records' | 'cache' | 'control-plane';
+
+/** What a composed view lets an agent do with a path. @public */
+export type PathAgentAccess = 'read-write' | 'read-only' | 'hidden';
+
+/** Which watch plane observes a path. @public */
+export type PathWatchPlane = 'ui' | 'kernel' | 'none';
+
+/** Everything a path policy answers about one path. @public */
+export type PathClassification = Readonly<{
+  class: PathClass;
+  /** Whether the bytes enter a revision. */
+  versioned: boolean;
+  agentAccess: PathAgentAccess;
+  watch: PathWatchPlane;
+}>;
+
+/**
+ * The classifier a composed view is given, never the one it imports (D6).
+ *
+ * The mask is the mechanism and the project's reserved layout is data, so the
+ * classification types live here while the table that answers them is the
+ * registry subpath's. Tau's own instance is `tauPathPolicy`; a test or a future
+ * layout passes its own.
+ *
+ * @public
+ */
+export type PathPolicy = {
+  readonly classify: (path: string) => PathClassification;
+};
+
 /**
  * Git mode supported for a regular file a provider reports and sets.
  *

@@ -6,7 +6,7 @@ import { ChangeEventBus } from '#change-event-bus.js';
 import { composeView } from '#composed-view.js';
 import { archive, contents, walk } from '#content-ops/index.js';
 import { MountTable } from '#mount-table.js';
-import { classify } from '#path-registry.js';
+import { classify, tauPathPolicy } from '#path-registry.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
@@ -141,7 +141,7 @@ describe('content operations over a composed view', () => {
   } as const;
 
   it('should omit every hidden entry without an admits argument', async () => {
-    const view = composeView({ filesystem: await seeded(checkout) }, { consumer: 'user' });
+    const view = composeView({ filesystem: await seeded(checkout) }, { consumer: 'user', policy: tauPathPolicy });
 
     const files = await contents(view, '');
 
@@ -149,7 +149,7 @@ describe('content operations over a composed view', () => {
   });
 
   it('should archive only what the view shows', async () => {
-    const view = composeView({ filesystem: await seeded(checkout) }, { consumer: 'user' });
+    const view = composeView({ filesystem: await seeded(checkout) }, { consumer: 'user', policy: tauPathPolicy });
 
     expect(Object.keys(await archived(await archive(view, '')))).toEqual(['.tau/chats/c1.json', 'src/main.ts']);
   });
@@ -160,7 +160,7 @@ describe('content operations over a composed view', () => {
 // ---------------------------------------------------------------------------
 
 describe('archive against the authority archive', () => {
-  it('should produce the same entries and bytes as getZippedDirectory for an unmasked tree', async () => {
+  it('should be the one ZIP encoder the authority delegates to for an unmasked tree', async () => {
     const providerRegistry = new ProviderRegistry({ databasePrefix: 'tau-content-ops-test' });
     const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:0' });
     const mountTable = new MountTable();

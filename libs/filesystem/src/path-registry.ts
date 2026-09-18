@@ -22,23 +22,7 @@
  * @module
  */
 
-/** Rule 16's four storage classes. @public */
-export type PathClass = 'authored' | 'records' | 'cache' | 'control-plane';
-
-/** What the composed view lets an agent do with a path. @public */
-export type PathAgentAccess = 'read-write' | 'read-only' | 'hidden';
-
-/** Which watch plane observes a path. @public */
-export type PathWatchPlane = 'ui' | 'kernel' | 'none';
-
-/** Everything the registry answers about one path. @public */
-export type PathClassification = Readonly<{
-  class: PathClass;
-  /** Whether the bytes enter a revision. */
-  versioned: boolean;
-  agentAccess: PathAgentAccess;
-  watch: PathWatchPlane;
-}>;
+import type { PathClassification, PathPolicy } from '#types.js';
 
 /** One reserved path family and its answers. @public */
 export type PathRegistryRow = PathClassification &
@@ -337,3 +321,14 @@ export const classify = (projectRelativePath: string): PathClassification => {
     (relative.startsWith('.tau/') ? reservedTauPathClassification : unlistedPathClassification)
   );
 };
+
+/**
+ * Tau's own reserved layout as the port a composed view takes (D6).
+ *
+ * The one instance every composition site passes: `composeView` never imports
+ * this module, so the mask carries no layout of its own and a test can compose
+ * a view over a layout that is not Tau's at all.
+ *
+ * @public
+ */
+export const tauPathPolicy: PathPolicy = Object.freeze({ classify });

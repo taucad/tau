@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { composeView } from '#composed-view.js';
+import { tauPathPolicy } from '#path-registry.js';
 import type { ComposedViewOverlay } from '#composed-view.js';
 
 const encoder = new TextEncoder();
@@ -56,8 +57,10 @@ const skillOverlay = (): ComposedViewOverlay => ({
   read: async (path) => reads(path),
 });
 
-const agentView = () => composeView({ filesystem: provider }, { consumer: 'agent', overlays: [skillOverlay()] });
-const userView = () => composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()] });
+const agentView = () =>
+  composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy, overlays: [skillOverlay()] });
+const userView = () =>
+  composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy, overlays: [skillOverlay()] });
 
 beforeEach(async () => {
   provider = new MemoryProvider();
@@ -160,7 +163,10 @@ describe('composeView overlay root', () => {
     const projection = skillOverlay();
     const unit = vi.fn(projection.unit);
     const node = vi.fn(projection.node);
-    const view = composeView({ filesystem: provider }, { consumer: 'user', overlays: [{ ...projection, unit, node }] });
+    const view = composeView(
+      { filesystem: provider },
+      { consumer: 'user', policy: tauPathPolicy, overlays: [{ ...projection, unit, node }] },
+    );
 
     expect(await view.readFile('main.ts', 'utf8')).toBe('export {};\n');
     expect(unit).not.toHaveBeenCalled();
@@ -177,6 +183,7 @@ describe('composeView overlay root', () => {
       { filesystem: provider },
       {
         consumer: 'user',
+        policy: tauPathPolicy,
         overlays: [
           {
             root: '',
@@ -210,7 +217,10 @@ describe('composeView optional provider members', () => {
         }),
       refresh,
     });
-    return { refresh, view: composeView({ filesystem: base }, { consumer: 'agent', overlays: [skillOverlay()] }) };
+    return {
+      refresh,
+      view: composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy, overlays: [skillOverlay()] }),
+    };
   };
 
   const collect = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<string> =>
@@ -267,7 +277,7 @@ describe('composeView provenance', () => {
   });
 
   it('should report the registry answer and the checkout identity for a project entry', async () => {
-    const view = composeView({ filesystem: provider, id: 'chk_live' }, { consumer: 'user' });
+    const view = composeView({ filesystem: provider, id: 'chk_live' }, { consumer: 'user', policy: tauPathPolicy });
 
     expect(await view.provenance('main.ts')).toStrictEqual({
       source: 'project',
@@ -359,5 +369,38 @@ describe('composeView agent mask', () => {
     expect(await view.exists('.git/HEAD')).toBe(false);
     await expect(view.readFile('.git/HEAD', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
     await expect(view.writeFile('.tau/chats/chat-1/events.jsonl', '')).resolves.toBeUndefined();
+  });
+});
+
+/*
+ * D6: the view is a mechanism and the reserved layout is data. The registry is
+ * one instance of the port, not a dependency of the mask.
+ */
+describe('composeView path policy', () => {
+  it('should mask by the injected policy rather than by the Tau registry', async () => {
+    await provider.writeFile('secret/key.pem', 'private\n');
+    await provider.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
+    const view = composeView(
+      { filesystem: provider },
+      {
+        consumer: 'agent',
+        policy: {
+          classify: (path) =>
+            path === 'secret' || path.startsWith('secret/')
+              ? { class: 'control-plane', versioned: false, agentAccess: 'hidden', watch: 'none' }
+              : { class: 'authored', versioned: true, agentAccess: 'read-write', watch: 'ui' },
+        },
+      },
+    );
+
+    await expect(view.readFile('secret/key.pem')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    expect(await view.readdir('')).not.toContain('secret');
+    /* The Tau registry hides `.git`; this policy does not, and the view obeys
+     * the policy it was given. */
+    expect(await view.readFile('.git/HEAD', 'utf8')).toBe('ref: refs/heads/main\n');
+    expect(await view.provenance('.git/HEAD')).toMatchObject({ versioned: true, agentAccess: 'read-write' });
   });
 });

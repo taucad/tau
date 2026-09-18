@@ -4,6 +4,7 @@ import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
 import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -1568,9 +1569,9 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
    * adapts the RPC shape over it. */
   const agentView = composeView(
     { filesystem: workspaceProvider },
-    { consumer: 'agent', overlays: [systemSkillsOverlay()] },
+    { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
   );
-  const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user' });
+  const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user', policy: tauPathPolicy });
   const toolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),

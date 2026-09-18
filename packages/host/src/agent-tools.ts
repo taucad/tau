@@ -25,6 +25,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { rpcClientErrorCode } from '@taucad/chat';
@@ -303,9 +304,13 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
     const provider = options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot);
     const view = composeView(
       { filesystem: provider },
-      { consumer: 'agent', ...(skillOverlay === undefined ? {} : { overlays: [skillOverlay] }) },
+      {
+        consumer: 'agent',
+        policy: tauPathPolicy,
+        ...(skillOverlay === undefined ? {} : { overlays: [skillOverlay] }),
+      },
     );
-    const recordView = composeView({ filesystem: provider }, { consumer: 'user' });
+    const recordView = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
     const mutations = new ResourceQueue();
     const { runtimeClient } = options;
 

@@ -155,7 +155,7 @@ const expectHealthyServer = async (mode: 'development' | 'production', port: num
   }
 };
 
-describe.sequential('API server modes', () => {
+describe('API server modes', { concurrent: false }, () => {
   it('should serve liveness through the Vite development server', async () => {
     await expectHealthyServer('development', 3210);
   });

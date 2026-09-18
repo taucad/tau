@@ -22,6 +22,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
@@ -406,21 +407,43 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
 };
 
 /**
- * A document as ACP carries it (D23): an embedded resource with its bytes.
+ * A document as ACP carries it (D23): a link to the file *and* its bytes.
  *
- * @param hash - The document's SHA-256, as its attachment path names it.
- * @param document - The bytes and media type read for this prompt.
- * @param reference - The durable reference, whose extension the uri keeps.
- * @returns The `resource` block {@link contentBlockOf} maps.
+ * Two carriers, because the adapters have no document item. A `resource` blob
+ * reaches the model as raw base64 inside a text block (codex-acp's
+ * `buildPromptItems`), which it can only read by hand-inflating the stream — an
+ * observed ~190 s of reasoning for one PDF. The `resource_link` names the path
+ * the agent's own document tooling opens; the blob stays so an agent whose
+ * sandbox excludes the workspace root still receives the bytes.
+ *
+ * The attachment always lives under the workspace root, in every revision mode
+ * ({@link createAcpExternalAgentPort}'s reader is rooted there), so the path is
+ * always derivable.
+ *
+ * @param workspaceRoot - The root the chat's `.tau/chats` lives under.
+ * @param chatId - The chat owning the attachment directory.
+ * @returns The builder {@link materializeAttachments} calls per document.
  */
-const acpDocumentBlock: DocumentBlockBuilder = (hash, document, reference) => ({
-  type: 'resource',
-  resource: {
-    uri: `tau://attachments/${hash}${reference.path.slice(reference.path.lastIndexOf('.'))}`,
-    mimeType: document.mediaType,
-    blob: document.data,
-  },
-});
+const acpDocumentBlock =
+  (workspaceRoot: string, chatId: string): DocumentBlockBuilder =>
+  (hash, document, reference): readonly JsonValue[] => {
+    const extension = reference.path.slice(reference.path.lastIndexOf('.'));
+    return [
+      {
+        type: 'resource_link',
+        uri: pathToFileURL(join(workspaceRoot, '.tau', 'chats', chatId, reference.path)).href,
+        name: reference.filename ?? `${hash}${extension}`,
+      },
+      {
+        type: 'resource',
+        resource: {
+          uri: `tau://attachments/${hash}${extension}`,
+          mimeType: document.mediaType,
+          blob: document.data,
+        },
+      },
+    ];
+  };
 
 const stringField = (state: JsonObject | undefined, name: string): string | undefined => {
   const value = state?.[name];
@@ -539,7 +562,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     const outcome = await materializeAttachments(
       [turn.message],
       async (path) => attachments.read(turn.chatId, path),
-      acpDocumentBlock,
+      acpDocumentBlock(options.workspaceRoot, turn.chatId),
     );
     for (const path of outcome.absent) {
       if (!warnedAbsent.has(`${turn.chatId}/${path}`)) {

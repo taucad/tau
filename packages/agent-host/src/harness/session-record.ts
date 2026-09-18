@@ -323,12 +323,23 @@ export const documentSentinel = (hash: string): string => `⟃tau:document:${has
  */
 export const absentAttachmentMarker = '[attachment not available on this device]';
 
-/** Builds the transient block a document reference becomes. @public */
+/**
+ * Builds the transient block — or blocks — a document reference becomes.
+ *
+ * An array is carried through flattened, so one document may reach the agent by
+ * more than one carrier at once (a link it can open *and* the bytes themselves).
+ * A block is always an object, so a returned array is never mistaken for one.
+ * Annotate a multi-block builder's return as `readonly JsonValue[]`: an
+ * unannotated heterogeneous array literal normalises to `prop?: undefined`
+ * members, which no index signature of `JsonValue` accepts.
+ *
+ * @public
+ */
 export type DocumentBlockBuilder = (
   hash: string,
   document: MaterializedDocument,
   reference: FileRefContentBlock,
-) => JsonValue;
+) => JsonValue | readonly JsonValue[];
 
 /** The transient result of {@link materializeAttachments}. @public */
 export type MaterializedAttachments = {
@@ -345,6 +356,17 @@ export type MaterializedAttachments = {
 const hashOf = (path: string): string => path.slice('attachments/'.length, path.lastIndexOf('.'));
 
 const isFileRef = (block: unknown): boolean => zodUtility.isObject(block) && block['type'] === 'file-ref';
+
+/**
+ * Whether a builder returned several blocks rather than one.
+ *
+ * `Array.isArray` alone widens a readonly array to `any[]`, so the predicate is
+ * written out. A content block is always an object, never an array.
+ *
+ * @param built - What {@link DocumentBlockBuilder} returned.
+ * @returns `true` when the blocks must be flattened into the message.
+ */
+const isBlockList = (built: JsonValue | readonly JsonValue[]): built is readonly JsonValue[] => Array.isArray(built);
 
 /**
  * Replace every attachment reference in user messages with the bytes a model reads (D15).
@@ -407,7 +429,8 @@ export const materializeAttachments = async (
       ...(reference.filename === undefined ? {} : { filename: reference.filename }),
     };
     documents.set(hash, document);
-    return [buildDocument(hash, document, reference)];
+    const built = buildDocument(hash, document, reference);
+    return isBlockList(built) ? [...built] : [built];
   };
   const materialized = await Promise.all(
     messages.map(async (message): Promise<ProviderMessage> => {

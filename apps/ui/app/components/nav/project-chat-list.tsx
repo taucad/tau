@@ -208,10 +208,15 @@ function ProjectChatItem({
   return (
     <SidebarMenuSubItem>
       <SidebarRowContextMenu items={menuItems} isDisabled={isEditing} className='w-40'>
-        <div data-slot='chat-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
+        <div
+          data-slot='chat-trigger'
+          data-active={isActive}
+          className={sidebarRowClass(isEditing)}
+          onDoubleClick={isEditing ? undefined : onRename}
+        >
           {/* D8: the status column leads every chat row and is never hidden —
               hover reveals the actions at the far end, and renaming keeps it. */}
-          <StatusMark data-slot='chat-status' facts={facts} />
+          <StatusMark data-slot='chat-status' facts={facts} isPending={isPending} />
           {isEditing ? (
             <InlineTextEditor
               value={chat.name}

@@ -333,15 +333,19 @@ function ProjectNavigationItem({
               void onToggle();
             }}
           >
-            {hasMark ? (
-              <StatusMark facts={facts} className='group-focus-within/row:hidden group-hover/row:hidden' />
+            {hasMark || isPending ? (
+              <StatusMark
+                facts={facts}
+                isPending={isPending}
+                className='group-focus-within/row:hidden group-hover/row:hidden'
+              />
             ) : null}
             <ChevronRight
               aria-hidden
               className={cn(
                 'size-3.5 transition-transform motion-reduce:transition-none',
                 isExpanded && 'rotate-90',
-                hasMark && 'hidden group-focus-within/row:block group-hover/row:block',
+                (hasMark || isPending) && 'hidden group-focus-within/row:block group-hover/row:block',
               )}
             />
           </Button>

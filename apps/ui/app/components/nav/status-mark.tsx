@@ -14,6 +14,7 @@
 import { Circle, CircleAlert, CircleDot } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
+import { Loader } from '#components/ui/loader.js';
 
 const markGlyph = ({ mark, count }: SidebarFacts): React.JSX.Element | undefined => {
   switch (mark) {
@@ -67,26 +68,37 @@ const markTone: Record<SidebarFacts['mark'], string> = {
  * The mark, in its 24 px slot. The slot renders for `none` too, so a column of
  * rows keeps one straight edge.
  *
- * @param props - The row's facts, and the slot's class and data slot.
+ * A row whose route is loading spins in this same slot, over whatever mark it
+ * would otherwise show: the loader never sits beside the name, so it cannot
+ * move it.
+ *
+ * @param props - The row's facts, whether its route is loading, and the slot's
+ *   class and data slot.
  * @returns The slot.
  * @public
  */
 export function StatusMark({
   facts,
+  isPending = false,
   className,
   ...props
 }: {
   readonly facts: SidebarFacts;
+  readonly isPending?: boolean;
   readonly className?: string;
   readonly 'data-slot'?: string;
 }): React.JSX.Element {
   return (
     <span
-      data-glyph={facts.mark}
-      className={cn('relative flex size-6 shrink-0 items-center justify-center', markTone[facts.mark], className)}
+      data-glyph={isPending ? 'pending' : facts.mark}
+      className={cn(
+        'relative flex size-6 shrink-0 items-center justify-center',
+        isPending ? undefined : markTone[facts.mark],
+        className,
+      )}
       {...props}
     >
-      {markGlyph(facts)}
+      {isPending ? <Loader className='size-3.5' /> : markGlyph(facts)}
     </span>
   );
 }

@@ -54,6 +54,7 @@ import { SearchInput } from '#components/search-input.js';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import {
   PaneviewHeader,
   PaneviewHeaderAction,
@@ -494,7 +495,10 @@ function ParameterGroupSelector({
           <button
             type='button'
             aria-label='Parameter groups'
-            className='flex h-6 max-w-28 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors duration-150 motion-reduce:transition-none'
+            className={nestedActionVariants({
+              className:
+                'flex h-6 max-w-28 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground duration-150 outline-none focus-visible:focus-outline motion-reduce:transition-none',
+            })}
           >
             <span className='truncate'>{activeGroup}</span>
             <ChevronDown className='size-2.5 shrink-0 opacity-60' />
@@ -787,16 +791,17 @@ function ParametersPanelHeader({
                   className='size-6 [.dv-pane:hover_&]:**:data-[slot=dot]:opacity-0 [.dv-pane:hover_&]:**:data-[slot=icon]:opacity-100'
                 />
               ) : null}
-              <ParameterGroupSelector
-                filePath={params.entryPath}
-                manifest={parameterManifest}
-                groups={displayEntry.groups}
-                activeGroup={displayEntry.activeGroup}
-              />
               <PaneviewHeaderActionGroup
                 data-testid='paneview-header-actions'
                 className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'
               >
+                {/* Choosing a group is an action, not status: it is revealed with the others. */}
+                <ParameterGroupSelector
+                  filePath={params.entryPath}
+                  manifest={parameterManifest}
+                  groups={displayEntry.groups}
+                  activeGroup={displayEntry.activeGroup}
+                />
                 <PaneviewHeaderContentActions>
                   {showCollapseToggle ? (
                     <PaneviewHeaderAction

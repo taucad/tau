@@ -619,11 +619,14 @@ describe('composite fields', () => {
     expect(itemHeader).toHaveClass(
       'rounded-md',
       'group-data-[state=open]/parameter-group:rounded-b-none',
-      'hover:bg-accent',
+      'hover:bg-sidebar-accent',
+      'focus-within:bg-sidebar-accent',
     );
     expect(itemTrigger).toHaveClass('hover:bg-transparent');
     expect(outerContent).toHaveClass('px-2.5');
     expect(remove).not.toHaveClass('bg-destructive');
+    // The sidebar row's action (nested-action surfaces R4): 24 px with the nested-action tone.
+    expect(remove).toHaveClass('size-6', 'hover:bg-nested-action-hover');
 
     fireEvent.click(remove);
 

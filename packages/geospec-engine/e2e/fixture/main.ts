@@ -18,8 +18,19 @@ import { createCollector, discoverGeoSpecFiles, installCollector } from 'geospec
 // smoke test of a narrower graph.
 import { createGeoSpecWebRunner } from 'geospec/runner/web';
 import { loadModel } from 'geospec/model';
+import { loadStep } from 'geospec/step';
 import '@taucad/geospec-engine/register';
 import type { WorkerEvidenceReport } from '#e2e/fixture/evidence.worker.js';
+
+/**
+ * The engine's XDE fixture, fetched as a build-emitted asset.
+ *
+ * STEP evidence is the only path that reaches the OCCT wasm, and it only
+ * resolves inside a bundle when the adapter's dynamic import stays literal and
+ * the glue is handed the emitted `.wasm` URL. Nothing else in this fixture
+ * loads it, so without this the bundler never even emits the glue.
+ */
+const stepFixtureUrl = new URL('../../fixtures/xde/two-cube-assembly.step', import.meta.url).href;
 
 /** A closed unit box: 8 corners, 12 triangles, every edge shared exactly twice. */
 const boxCorners = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1];
@@ -76,11 +87,21 @@ const run = async (): Promise<BrowserEngineReport> => {
     throw new Error(`analyzeMesh failed: ${analysis.diagnostics.map((issue) => issue.message).join('; ')}`);
   }
 
+  const stepResponse = await fetch(stepFixtureUrl);
+  if (!stepResponse.ok) {
+    throw new Error(`STEP fixture request failed with ${stepResponse.status}.`);
+  }
+  const stepSubject = await loadStep({ source: new Uint8Array(await stepResponse.arrayBuffer()) });
+
   const collector = createCollector();
   installCollector(collector);
   collector.describe('geospec engine in the browser', () => {
     collector.it('proves the box mesh is watertight', () => {
       collector.expectGeo(analysis.subject).toHaveMeshIntegrity({ watertight: true });
+    });
+    collector.it('proves the STEP assembly is an exact BRep', () => {
+      collector.expectGeo(stepSubject).toBeValidBrep();
+      collector.expectGeo(stepSubject).toHaveTopologyCounts({ solids: 2, faces: 12 });
     });
   });
   await collector.waitForCompletion(60_000);

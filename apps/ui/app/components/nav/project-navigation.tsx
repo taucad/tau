@@ -116,9 +116,10 @@ export function ProjectNavigation(): React.JSX.Element {
     <TooltipProvider delayDuration={500} skipDelayDuration={300}>
       <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
         <ProjectsLabel />
-        {/* D10: collapsed rows sit flush at the row pitch; an expanded project
-          takes its own separation. */}
-        <SidebarMenu className='gap-0'>
+        {/* One row pitch throughout: projects, a project and its first chat, and
+          chats between themselves all sit `gap-0.5` apart, so expanding or
+          collapsing a project shifts nothing. */}
+        <SidebarMenu className='gap-0.5'>
           {isLoading && projects.length === 0
             ? Array.from({ length: 3 }, (_, index) => (
                 <SidebarMenuItem key={index} aria-hidden data-testid='project-navigation-skeleton'>
@@ -317,7 +318,7 @@ function ProjectNavigationItem({
   );
 
   return (
-    <SidebarMenuItem className={cn(isExpanded && 'my-1 first:mt-0 last:mb-0')}>
+    <SidebarMenuItem>
       <SidebarRowContextMenu items={menuItems} isDisabled={isEditing} className='w-48'>
         <div data-slot='project-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
           <Button

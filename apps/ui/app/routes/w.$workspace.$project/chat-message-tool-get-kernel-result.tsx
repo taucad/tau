@@ -209,7 +209,7 @@ export function ChatMessageToolGetKernelResult({
       })();
 
       return (
-        <ChatToolCard isCookieDefaultOpen variant='minimal' status={cardStatus} isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status={cardStatus} isDefaultOpen={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={headerIcon} tone={headerIconTone} />
             <ChatToolCardTitle>{titleLabel}</ChatToolCardTitle>

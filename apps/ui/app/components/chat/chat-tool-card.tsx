@@ -7,8 +7,6 @@ import { Button } from '@taucad/ui/components/button';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { useCookie } from '#hooks/use-cookie.js';
-import type { CookieName } from '#constants/cookie.constants.js';
 
 // ============================================================================
 // Context
@@ -49,16 +47,6 @@ type ChatToolCardProps = {
   readonly onOpenChange?: (open: boolean) => void;
   readonly className?: string;
   /**
-   * Cookie name to read the default open state from.
-   * The cookie value is only used to determine the initial state,
-   * it does NOT persist the current state.
-   */
-  readonly cookieName?: CookieName;
-  /**
-   * Default value when using cookie for initial state. Defaults to true (open).
-   */
-  readonly isCookieDefaultOpen?: boolean;
-  /**
    * When false, the card has no collapsible content and the chevron is hidden.
    * Defaults to true.
    */
@@ -69,22 +57,14 @@ function ChatToolCard({
   children,
   variant = 'card',
   status = 'ready',
-  isDefaultOpen: defaultOpen = true,
+  isDefaultOpen: defaultOpen = false,
   isOpen: controlledIsOpen,
   onOpenChange,
   className,
-  cookieName,
-  isCookieDefaultOpen: cookieDefault = true,
   isCollapsible = true,
 }: ChatToolCardProps): React.JSX.Element {
-  // Read cookie value for initial state (if cookieName provided)
-  const [cookieValue] = useCookie(cookieName ?? ('__unused' as CookieName), cookieDefault);
-
-  // Use cookie value as default, but don't persist state changes back to cookie
-  const initialOpen = cookieName ? cookieValue : defaultOpen;
-
   // Internal state for uncontrolled mode
-  const [internalIsOpen, setInternalIsOpen] = useState(initialOpen);
+  const [internalIsOpen, setInternalIsOpen] = useState(defaultOpen);
 
   // Determine if controlled
   const isControlled = controlledIsOpen !== undefined;
@@ -417,64 +397,6 @@ function ChatToolCardListItem({
   );
 }
 
-// ============================================================================
-// ChatToolCardSection (nested collapsible within content)
-// ============================================================================
-
-type ChatToolCardSectionProps = {
-  readonly children: React.ReactNode;
-  readonly title: React.ReactNode;
-  readonly icon?: LucideIcon;
-  readonly isDefaultOpen?: boolean;
-  readonly className?: string;
-  /**
-   * Cookie name to read the default open state from.
-   * The cookie value is only used to determine the initial state,
-   * it does NOT persist the current state.
-   */
-  readonly cookieName?: CookieName;
-  /**
-   * Default value when using cookie for initial state. Defaults to true (open).
-   */
-  readonly isCookieDefaultOpen?: boolean;
-};
-
-function ChatToolCardSection({
-  children,
-  title,
-  icon: Icon,
-  isDefaultOpen: defaultOpen = false,
-  className,
-  cookieName,
-  isCookieDefaultOpen: cookieDefault = true,
-}: ChatToolCardSectionProps): React.JSX.Element {
-  // Read cookie value for initial state (if cookieName provided)
-  const [cookieValue] = useCookie(cookieName ?? ('__unused' as CookieName), cookieDefault);
-
-  // Use cookie value as default, but don't persist state changes back to cookie
-  const initialOpen = cookieName ? cookieValue : defaultOpen;
-  const [isOpen, setIsOpen] = useState(initialOpen);
-
-  return (
-    <Collapsible open={isOpen} className={cn('group/section', className)} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <Button
-          variant='ghost'
-          size='sm'
-          className='flex h-auto w-full justify-start gap-1.5 rounded-none p-2 text-muted-foreground hover:bg-transparent'
-        >
-          <ChevronRight className={cn('size-3 shrink-0 transition-transform duration-200', isOpen && 'rotate-90')} />
-          {Icon ? <Icon className='size-3 shrink-0' /> : undefined}
-          <span className='text-left text-xs font-normal'>{title}</span>
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className='border-t'>
-        <div className='p-2 text-xs'>{children}</div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
 export {
   ChatToolCard,
   ChatToolCardHeader,
@@ -484,7 +406,6 @@ export {
   ChatToolCardContent,
   ChatToolCardList,
   ChatToolCardListItem,
-  ChatToolCardSection,
   useChatToolCard,
 };
 

@@ -54,9 +54,7 @@ export const cookieName = {
   // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- ctx is conventional for context
   chatCtxOpen: 'chat-ctx-open',
 
-  /* Chat Tool Sections - collapse state (true = open, false = collapsed) */
-  // Whether code preview section is open in file operations.
-  chatToolCodePreview: 'chat-tool-code-preview',
+  /* Chat Tools */
   // Whether GeoSpec testing tools are enabled.
   chatTestingEnabled: 'chat-testing-enabled',
 

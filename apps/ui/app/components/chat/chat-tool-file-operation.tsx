@@ -17,9 +17,7 @@ import {
 } from '#components/chat/chat-tool-card.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
-import { cookieName } from '#constants/cookie.constants.js';
 import { ChangeIndicator } from '#components/chat/change-indicator.js';
 import { OpenRenderButton } from '#components/files/open-render-button.js';
 import { shouldShowOpenRenderButton } from '#components/files/open-render-button.ignore.js';
@@ -189,7 +187,6 @@ type CollapsibleFileOperationProps = {
   readonly children?: React.ReactNode;
   readonly actions?: React.ReactNode;
   readonly footer?: React.ReactNode;
-  readonly isDefaultOpen?: boolean;
   readonly enableFileLink?: boolean;
   readonly diffStats?: DiffStatsWithContent;
 };
@@ -203,18 +200,16 @@ export function CollapsibleFileOperation({
   children,
   actions,
   footer,
-  isDefaultOpen = false,
   enableFileLink = false,
   diffStats,
 }: CollapsibleFileOperationProps): React.JSX.Element {
   const isStreaming = toolStatus === 'input-streaming' || toolStatus === 'input-available';
-  const [showCodePreview] = useCookie(cookieName.chatToolCodePreview, true);
   const [userOpen, setUserOpen] = useState<boolean>();
   const hasPreview = diffStats !== undefined || (content !== undefined && (!isStreaming || content.length > 0));
   const isCollapsible = isStreaming || hasPreview || children !== undefined || footer !== undefined;
-  // Derive automatic expansion from available evidence; an explicit toggle wins
-  // across streaming completion, including edits whose modified content is empty.
-  const isOpen = isCollapsible && (userOpen ?? (isDefaultOpen || (showCodePreview && hasPreview)));
+  // A mutation row never opens itself: the reader's toggle is the only thing
+  // that expands it, and that choice survives streaming completion.
+  const isOpen = isCollapsible && (userOpen ?? false);
   const { icon, past, active } = fileOperations[operation];
   const filename = getFilename(targetFile);
   const language = getLanguageFromFilename(filename);

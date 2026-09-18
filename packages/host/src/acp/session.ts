@@ -336,6 +336,68 @@ const airSessionFailureOf = (meta: unknown): AcpSessionFailure | undefined => {
   };
 };
 
+/** When an exhausted limit refreshes, and the agent's own name for its window. */
+type AcpLimitReset = { readonly resetsAt: number; readonly window?: string };
+
+/**
+ * One reported reset, kept only when it is a usable epoch second.
+ *
+ * @param resetsAt - The reset as the agent reported it, unvalidated.
+ * @param window - The window name, when the agent named one Tau understands.
+ * @returns The reset, or `undefined` when there is no usable one.
+ */
+const limitResetOf = (resetsAt: unknown, window: string | undefined): AcpLimitReset | undefined =>
+  typeof resetsAt === 'number' && Number.isInteger(resetsAt) && resetsAt > 0
+    ? { resetsAt, ...(window === undefined ? {} : { window }) }
+    : undefined;
+
+/**
+ * The reset Claude Code reported on a `usage_update`, folded into the held one.
+ *
+ * The pinned adapter forwards the CLI's `rate_limit_event` verbatim as
+ * `_meta['_claude/rateLimit']`, one update per status change. Only a `rejected`
+ * status is a limit the person is sitting behind; any other status the CLI
+ * reports means it has lifted, so the held reset goes. An update carrying no
+ * report Tau can read changes nothing: unreadable is not "allowed again".
+ *
+ * @param prior - The reset held from an earlier update of this session.
+ * @param meta - The `_meta` of the update that just arrived.
+ * @returns The reset to hold now.
+ */
+const claudeLimitReset = (prior: AcpLimitReset | undefined, meta: unknown): AcpLimitReset | undefined => {
+  const report = asRecord(asRecord(meta)?.['_claude/rateLimit']);
+  const status = report?.['status'];
+  if (typeof status !== 'string') {
+    return prior;
+  }
+  if (status !== 'rejected') {
+    return undefined;
+  }
+  const window = report?.['rateLimitType'];
+  return limitResetOf(report?.['resetsAt'], typeof window === 'string' ? window : undefined) ?? prior;
+};
+
+/** Claude's window vocabulary for the window lengths `codex-acp` measures in minutes. */
+const codexWindowNames: Record<number, string> = { 300: 'five_hour', 10_080: 'seven_day' };
+
+/**
+ * The reset the patched `codex-acp` attached beside its AIR failure.
+ *
+ * Codex sends no reset on `usage_update` at all: its snapshot reaches the
+ * adapter on `account/rateLimits/updated`, and the patch forwards the earliest
+ * exhausted window of it as `_meta['_codex/rateLimit']` on the same response
+ * that carries the failure. Its window is a length in minutes, translated here
+ * into the one vocabulary a surface reads (Claude's).
+ *
+ * @param meta - The `_meta` of the prompt response.
+ * @returns The reset, or `undefined` when the adapter attached none.
+ */
+const codexLimitReset = (meta: unknown): AcpLimitReset | undefined => {
+  const report = asRecord(asRecord(meta)?.['_codex/rateLimit']);
+  const minutes = report?.['windowMinutes'];
+  return limitResetOf(report?.['resetsAt'], typeof minutes === 'number' ? codexWindowNames[minutes] : undefined);
+};
+
 /**
  * The sentence inside a provider error body an agent passed through as a title.
  *
@@ -1587,6 +1649,13 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
    */
   let { priorUsage } = options;
   let modeId: string | undefined;
+  /**
+   * The reset of the limit this session is currently behind, if it is behind one.
+   *
+   * Session-scoped because the report arrives on its own update, which may
+   * precede the turn that fails on it (see {@link claudeLimitReset}).
+   */
+  let limitReset: AcpLimitReset | undefined;
   const pendingElicitations = new Map<string, { readonly sessionId: string; readonly turn: AcpPromptTurn }>();
   /* Empty until `initialize` answers, so a handshake that fails with `-32000`
    * still refuses with the right code — just with no methods to offer. */
@@ -1667,17 +1736,25 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
    * agent could still name. The provider's sentence is the message, verbatim,
    * with no stderr: the agent already said what happened.
    *
+   * A `limit` also carries its reset when the agent reported one as data —
+   * Codex beside this failure, Claude on an earlier `usage_update` — and only
+   * while that reset is still ahead. A reset already past would release a card's
+   * held Resume the moment it rendered, into the same limit.
+   *
    * @param stop - The AIR failure the agent sent.
+   * @param meta - The `_meta` the failure travelled in.
    * @returns The error the run records.
    */
-  const stopped = (stop: AcpSessionFailure): Error => {
+  const stopped = (stop: AcpSessionFailure, meta: unknown): Error => {
     if (stop.category === 'access') {
       return authRequired();
     }
     const title = providerSentence(stop.title);
+    const reset = stop.category === 'limit' ? (codexLimitReset(meta) ?? limitReset) : undefined;
     const details: ExternalAgentStop = {
       agentId: options.adapter.id,
       failure: { category: stop.category, title, actions: stop.actions },
+      ...(reset && reset.resetsAt * 1000 > Date.now() ? reset : {}),
     };
     return Object.assign(new Error(title), {
       code: stop.category === 'limit' ? 'EXTERNAL_AGENT_LIMIT_REACHED' : 'EXTERNAL_AGENT_FAILED',
@@ -1755,6 +1832,9 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       }
       if (params.update.sessionUpdate === 'current_mode_update') {
         modeId = params.update.currentModeId;
+      }
+      if (params.update.sessionUpdate === 'usage_update') {
+        limitReset = claudeLimitReset(limitReset, params.update._meta);
       }
       if (active) {
         active.update(params.update);
@@ -2259,7 +2339,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
            * fails this one. */
           const stop = airSessionFailureOf(answered._meta);
           if (stop) {
-            throw stopped(stop);
+            throw stopped(stop, answered._meta);
           }
           return {
             stopReason: answered.stopReason,

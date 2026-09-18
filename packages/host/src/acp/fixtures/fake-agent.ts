@@ -30,6 +30,8 @@
  * | `clear-title` | clears the write call title on its terminal update, exercising ACP presence semantics |
  * | `skills` / `skill-names` | reports complete native skill files, or only their names for packaged-host checks |
  * | `fail:quota` / `fail:rate` / `fail:context` / `fail:model` | stops on that provider failure the way both pinned adapters do: a typed AIR `sessionFailure` on an `end_turn` response when the client advertised it, else the provider sentence as text and a `-32603` rejection; `model` is a service failure whose title is a raw provider JSON body, as Codex sends one |
+ * | `reset:soon` / `reset:lifted` / `reset:past` | reports Claude Code's `_claude/rateLimit` on `usage_update` before answering: rejected with a reset an hour out then a report no client can read, rejected then allowed again, or rejected with a reset that has already passed |
+ * | `reset:codex` | attaches Codex's own `_codex/rateLimit` snapshot beside the AIR failure, as the patched adapter does |
  * | `crash` | writes a stack to stderr and rejects `-32603 Internal error`, whatever the client advertised |
  *
  * Anything that has to be decided *before* a prompt exists is steered by
@@ -159,6 +161,44 @@ const providerFailures: Record<
     }),
     actions: ['retry'],
   },
+};
+
+/**
+ * An epoch second offset from now, the unit both vendors report a reset in.
+ *
+ * @param seconds - How far from now, negative for a reset that has passed.
+ * @returns That instant in whole epoch seconds.
+ */
+const epochIn = (seconds: number): number => Math.floor(Date.now() / 1000) + seconds;
+
+/**
+ * The `_claude/rateLimit` reports one prompt asks the agent to send.
+ *
+ * Claude Code forwards the CLI's `rate_limit_event` verbatim on a
+ * `usage_update`, one per status change, which is where a reset reaches a
+ * client — the failure object itself never carries one.
+ *
+ * @param text - The prompt text, which steers the sequence.
+ * @returns The reports to send, in order, before the turn answers.
+ */
+const claudeRateLimits = (text: string): ReadonlyArray<Record<string, unknown>> => {
+  if (text.includes('reset:soon')) {
+    /* A readable reset, then a report no client can parse: the held reset has
+     * to survive the unreadable one rather than be cleared by it. */
+    return [
+      { status: 'rejected', resetsAt: epochIn(3600), rateLimitType: 'five_hour', utilization: 100 },
+      { status: 7, resetsAt: 'soon' },
+    ];
+  }
+  if (text.includes('reset:lifted')) {
+    return [
+      { status: 'rejected', resetsAt: epochIn(3600), rateLimitType: 'five_hour' },
+      { status: 'allowed', utilization: 12 },
+    ];
+  }
+  return text.includes('reset:past')
+    ? [{ status: 'rejected', resetsAt: epochIn(-60), rateLimitType: 'five_hour' }]
+    : [];
 };
 
 /**
@@ -935,10 +975,22 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the prompt block list is fixed by ACP.
       const text = promptText((params['prompt'] ?? []) as readonly unknown[]);
       const limit = providerFailures[/fail:([a-z]+)/u.exec(text)?.[1] ?? ''];
+      for (const rateLimit of claudeRateLimits(text)) {
+        // oxlint-disable-next-line no-await-in-loop -- one status change per update, in the order the CLI reports them.
+        await update(promptSessionId, {
+          sessionUpdate: 'usage_update',
+          used: 1200,
+          size: 200_000,
+          _meta: { '_claude/rateLimit': rateLimit },
+        });
+      }
       if (limit && airSessionFailures) {
         reply({
           stopReason: 'end_turn',
           _meta: {
+            ...(text.includes('reset:codex')
+              ? { '_codex/rateLimit': { resetsAt: epochIn(3600), windowMinutes: 300 } }
+              : {}),
             jetbrains: {
               air: {
                 version: 1,

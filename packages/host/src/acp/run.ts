@@ -450,6 +450,34 @@ const stringField = (state: JsonObject | undefined, name: string): string | unde
   return typeof value === 'string' ? value : undefined;
 };
 
+/**
+ * What a resumed turn says when it has no new message of its own.
+ *
+ * A resume re-enters the vendor session that already holds this turn, so it
+ * sends no user message: replaying the one the turn started from would make
+ * the agent begin it again, and the host cannot re-append that message's id
+ * anyway. One sentence is the whole prompt — the agent's own transcript, still
+ * live in its session, is the context (R9/S11).
+ */
+const continuationPrompt = 'Continue from where you stopped.';
+
+/**
+ * Whether this run already recorded the stop a resume continues from.
+ *
+ * A turn arriving with no message is one of two things. The agent stopped and
+ * said so — a usage or rate limit the person can retry — which leaves a
+ * terminal failure on this run and an idle vendor session holding the whole
+ * turn; or a restart found the turn still `running`, and ACP can report
+ * nothing about whether it finished. Only the first can be continued.
+ *
+ * @param turn - The turn being run.
+ * @returns Whether this run has a recorded failure to continue from.
+ */
+const stopRecorded = (turn: ExternalAgentTurn): boolean =>
+  turn.history.some(
+    (event) => event.runId === turn.runId && event.type === 'run.lifecycle' && event.state === 'failed',
+  );
+
 const usageNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 
@@ -821,10 +849,14 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         /* The vendor session Tau is about to prompt is not the one this chat's
          * record remembers: it is new (or a lost one was replaced), so it has
          * never seen Tau's CAD context and this prompt carries it (V12). */
-        const prompt = promptBlocksOf(
-          await materializedTurn(turn),
-          entry.session.acpSessionId !== stringField(turn.state, 'acpSessionId'),
-        );
+        const reattached = entry.session.acpSessionId === stringField(turn.state, 'acpSessionId');
+        const prompt =
+          promptBlocksOf(await materializedTurn(turn), !reattached) ??
+          /* Reattached to the session the agent stopped in: it still holds the
+           * turn, so the resume nudges it on rather than replaying anything. */
+          (reattached && stopRecorded(turn)
+            ? [{ type: 'text', text: continuationPrompt } satisfies ContentBlock]
+            : undefined);
         if (prompt === undefined) {
           throw Object.assign(
             new Error('Tau restored the ACP session, but ACP cannot prove whether the interrupted turn completed.'),

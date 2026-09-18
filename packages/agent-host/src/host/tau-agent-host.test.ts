@@ -8,8 +8,8 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-import { createTauAgentHost, hostRunStateOfLifecycle, isHostRunOperationLegal } from '#host/tau-agent-host.js';
-import type { ExternalAgentPort, HostRunOperation, HostRunState } from '#host/tau-agent-host.js';
+import { createTauAgentHost, hostRunStateOfLifecycle, runLedgerOf } from '#host/tau-agent-host.js';
+import type { ExternalAgentPort } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
@@ -1011,6 +1011,60 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  /**
+   * F2, closeout: a rewind of any turn but the first.
+   *
+   * The client's transcript and this log do not share assistant message ids —
+   * one run is one assistant message on a page and any number of provider
+   * messages here — so a client can only ever name the *user* message its turn
+   * belongs to. Matching its `retainedMessageIds` against this projection
+   * refused every *Try again* and every edit whose retained prefix contained
+   * an assistant message, which is every one after the first turn.
+   */
+  it('rewinds to the turn the client names, not to the prefix it guessed', async () => {
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 3)),
+        toolRegistry: tools(async () => ({ content: 'fixture-main', isError: false })),
+        idPrefix: 'anchor',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-one',
+      trigger: 'submit',
+      message: { id: 'turn-one', role: 'user', content: 'First.' },
+    });
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-two',
+      trigger: 'submit',
+      message: { id: 'turn-two', role: 'user', content: 'Second.' },
+    });
+
+    /* What the page retains: its own ids, where the assistant message of turn
+     * one is named after the run that produced it. */
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-three',
+      trigger: 'regenerate',
+      retainedMessageIds: ['turn-one', 'run-one'],
+      message: { id: 'turn-two', role: 'user', content: 'Second.' },
+    });
+
+    const log = await file.open();
+    const events = await log.read();
+    expect(events).toContainEqual(expect.objectContaining({ type: 'history.rewound', trigger: 'regenerate' }));
+    expect(
+      reduceEventLog(events)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.id),
+    ).toEqual(['turn-one', 'turn-two']);
+    await host.close();
+  });
+
   it('resolves every tool call of a turn that fires four of them at once', async () => {
     // The API-coordinated placement deadlocked here (Postgres 40P01): three
     // delivery transactions locked `chat_rpc_exchange` rows and the
@@ -1438,24 +1492,118 @@ the cancelled tools left the system unchanged.
 });
 
 /**
- * The run ledger's whole table, stated once (R9).
+ * The run ledger, driven through a real host (R9, C5).
  *
- * `admit`, `resume`, `recordSettlement` and `cancel` each used to decide their
- * own legality from a different reading of the same facts. This is the table
- * they now agree on, written out in full so a change to any one cell is a
- * change to this file rather than a surprise in one of the four.
+ * `admit`, `resume` and the settlement writers each used to decide their own
+ * legality from a different reading of the same facts, and the table that was
+ * meant to unify them was read by two of the four operations and pinned by a
+ * test that re-declared it. These rows drive a host over scripted logs instead,
+ * one per cell of the fold.
  */
 describe('the host run ledger', () => {
-  const states: readonly HostRunState[] = ['none', 'reserved', 'admitted', 'running', 'paused', 'terminal'];
-  const legal: Readonly<Record<HostRunOperation, readonly HostRunState[]>> = {
-    admit: ['none', 'terminal'],
-    resume: ['admitted', 'running', 'paused', 'terminal'],
-    settle: ['reserved', 'admitted', 'running', 'paused', 'terminal'],
-    cancel: ['reserved', 'admitted', 'running', 'paused'],
-  };
+  const ledgerHost = (file: ReturnType<typeof createMemoryLogFile>, idPrefix: string) =>
+    createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix,
+      }),
+    );
 
-  it.each(Object.keys(legal) as HostRunOperation[])('should allow %s from exactly its own states', (operation) => {
-    expect(states.filter((state) => isHostRunOperationLegal(operation, state))).toEqual(legal[operation]);
+  const settlement = {
+    type: 'turn.failed',
+    turnId: 'turn-1',
+    chatId: 'chat-ledger',
+    reason: 'The turn ended before it recorded a revision.',
+  } as const;
+
+  /** One seeded body under the envelope the fold reads it through. */
+  const recorded = (event: SeededLogEvent, sequence: number): AgentLogEvent =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- one envelope over a closed union of seeded bodies.
+    ({ ...event, version: 1, leaderEpoch: 'epoch-fold', sequence, recordedAt: '' }) as AgentLogEvent;
+
+  it('should fold one log into the chat run and every run append state', () => {
+    const seeded: readonly SeededLogEvent[] = [
+      ...completedFirstTurn,
+      {
+        type: 'turn.finalized',
+        runId: 'run-1',
+        turnId: 'turn-1',
+        chatId: 'chat-ledger',
+        projectId: 'project-1',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-1'],
+      },
+      { type: 'run.lifecycle', runId: 'run-2', state: 'admitted' },
+      settlementOnlySecondRun,
+    ];
+
+    const ledger = runLedgerOf(seeded.map((event, index) => recorded(event, index)));
+
+    expect(ledger.chat).toEqual({ runId: 'run-2', state: 'admitted' });
+    expect(ledger.runs.get('run-1')?.state).toBe('settled');
+    /* `run-2` carries both an admission and, from the seeded tail, a
+     * settlement — the shape a fixed host will no longer write. */
+    expect(ledger.runs.get('run-2')?.state).toBe('settled');
+    expect(runLedgerOf([]).chat).toBeUndefined();
+  });
+
+  it('should treat an identical repeat of a settlement as a no-op', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = ledgerHost(file, 'settle-twice');
+
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    const once = await readLog(file);
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+
+    /* At-least-once delivery is what makes "exactly one settlement" reachable
+     * at all, so the repeat has to add nothing rather than refuse (V10). */
+    expect(await readLog(file)).toHaveLength(once.length);
+    await host.close();
+  });
+
+  it('should refuse a second settlement that says something else', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = ledgerHost(file, 'settle-conflict');
+
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+
+    await expect(
+      host.recordSettlement({
+        chatId: 'chat-ledger',
+        runId: 'run-1',
+        event: {
+          type: 'turn.finalized',
+          turnId: 'turn-1',
+          chatId: 'chat-ledger',
+          projectId: 'project-1',
+          changedPaths: [],
+          trigger: 'turn',
+          runIds: ['run-1'],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_CONFLICT' });
+    await host.close();
+  });
+
+  it('should refuse to describe a chat whose log admitted no run', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [settlementOnlySecondRun]);
+    const host = ledgerHost(file, 'no-run');
+
+    /* R2: a run with no lifecycle record is not a run. `snapshot` answered
+     * `admitted` for one, which is the same default that made an abandoned
+     * lease's settlement look like a live turn. */
+    await expect(host.snapshot('chat-no-run')).rejects.toMatchObject({ code: 'NO_RUN_ADMITTED' });
+    await host.close();
   });
 
   it.each([
@@ -1468,15 +1616,5 @@ describe('the host run ledger', () => {
     ['cancelled', 'terminal'],
   ] as const)('should read the lifecycle %s as %s', (lifecycle, expected) => {
     expect(hostRunStateOfLifecycle(lifecycle)).toBe(expected);
-  });
-
-  it('should refuse a settlement only where the ledger does', () => {
-    /* The invariant the wedge broke: a run with no lifecycle record is `none`,
-     * and `none` is the one state a settlement may not be recorded from. */
-    expect(isHostRunOperationLegal('settle', hostRunStateOfLifecycle(undefined))).toBe(false);
-    expect(isHostRunOperationLegal('settle', hostRunStateOfLifecycle('completed'))).toBe(true);
-    /* And the mirror: a run the log already admitted may not be admitted again. */
-    expect(isHostRunOperationLegal('admit', hostRunStateOfLifecycle('running'))).toBe(false);
-    expect(isHostRunOperationLegal('admit', hostRunStateOfLifecycle('completed'))).toBe(true);
   });
 });

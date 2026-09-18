@@ -2,11 +2,19 @@ import { util as zodUtility } from 'zod';
 import { createActor, fromCallback } from 'xstate';
 import type { AnyActorRef, EventObject } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { MyUIMessage } from '@taucad/chat';
 import * as machineModule from './chat-session.machine.js';
 import { chatSessionMachine } from './chat-session.machine.js';
-import type { ChatSessionMachineEvent } from './chat-session.machine.js';
+import type {
+  ChatRequest,
+  ChatSessionMachineEvent,
+  ChatTurn,
+  ChatTurnGesture,
+  ChatTurnSettlementInput,
+} from './chat-session.machine.js';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -61,7 +69,7 @@ const agentStateRows: ReadonlyArray<{
   readonly run: string;
 }> = [
   { signal: 'no session, no run', events: [], run: 'idle' },
-  { signal: 'run.lifecycle: admitted', events: [{ type: 'runLifecycle', phase: 'admitted' }], run: 'queued' },
+  { signal: 'run.lifecycle: admitted', events: [{ type: 'runLifecycle', phase: 'admitted' }], run: 'queued.observing' },
   {
     signal: 'run.lifecycle: running with no tool part in flight',
     events: [{ type: 'runLifecycle', phase: 'running' }],
@@ -109,7 +117,11 @@ const agentStateRows: ReadonlyArray<{
     ],
     run: 'running.reconnecting',
   },
-  { signal: 'run.lifecycle: completed', events: [{ type: 'runLifecycle', phase: 'completed' }], run: 'finishing' },
+  {
+    signal: 'run.lifecycle: completed',
+    events: [{ type: 'runLifecycle', phase: 'completed' }],
+    run: 'finishing.observing',
+  },
   {
     signal: 'turn.finalized after run.lifecycle: completed',
     events: [
@@ -226,9 +238,9 @@ describe('chatSessionMachine', () => {
       [
         'done',
         'failed',
-        'finishing',
+        'finishing.observing',
         'idle',
-        'queued',
+        'queued.observing',
         'running.generating',
         'running.reconnecting',
         'running.tool',
@@ -370,13 +382,357 @@ describe('chatSessionMachine', () => {
     actor.stop();
   });
 
-  it('starts and stops without leaking children', () => {
+  it('starts and stops with its host binding as its only child', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'running' });
 
-    expect(Object.keys(actor.getSnapshot().children)).toEqual([]);
+    /* The binding is the chat session's one owned resource (C1): it lives for
+     * the actor's whole life, so a run reaching `running` must not have added
+     * a second child beside it. */
+    expect(Object.keys(actor.getSnapshot().children)).toEqual(['hostBinding']);
 
     actor.stop();
     expect(actor.getSnapshot().status).toBe('stopped');
+  });
+});
+
+/**
+ * The chat's agent-host binding (C1, V6).
+ *
+ * The defect these rows exist for: the binding was registered from an effect in
+ * `useCadChatClient`, a hook mounted once per transcript message plus four
+ * other places. Every instance wrote one module-level registry and the last to
+ * unmount deleted the entry, so a rewinding dispatch — which unmounts exactly
+ * those newest instances — found the chat unconfigured. One actor, one
+ * invocation.
+ */
+describe('chatSessionMachine host region', () => {
+  /** Counts binding invocations and releases, in order. */
+  const countingBinding = (): {
+    readonly logic: ReturnType<typeof fromCallback<EventObject, { chatId: string; placement: string }>>;
+    readonly bound: string[];
+    readonly released: string[];
+  } => {
+    const bound: string[] = [];
+    const released: string[] = [];
+    const logic = fromCallback<EventObject, { chatId: string; placement: string }>(({ input }) => {
+      bound.push(input.placement);
+      return () => {
+        released.push(input.placement);
+      };
+    });
+    return { logic, bound, released };
+  };
+
+  const startWithBinding = (binding: ReturnType<typeof countingBinding>) => {
+    const actor = createActor(chatSessionMachine.provide({ actors: { hostBinding: binding.logic } }), {
+      input: { chatId: 'chat-1', projectId: 'proj_1' },
+    });
+    actor.start();
+    return actor;
+  };
+
+  it('should bind the chat host exactly once, however often the agent config changes', () => {
+    const binding = countingBinding();
+    const actor = startWithBinding(binding);
+
+    for (const model of ['a', 'b', 'c']) {
+      actor.send({ type: 'agentConfigChanged', placement: 'tau' });
+      expect(model).toBeDefined();
+    }
+
+    expect(binding.bound).toEqual(['', 'tau']);
+    expect(binding.released).toEqual(['']);
+  });
+
+  it('should rebind once when the placement moves', () => {
+    const binding = countingBinding();
+    const actor = startWithBinding(binding);
+
+    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
+    actor.send({ type: 'agentConfigChanged', placement: 'desktop' });
+    actor.send({ type: 'agentConfigChanged', placement: 'desktop' });
+
+    expect(binding.bound).toEqual(['', 'tau', 'desktop']);
+    expect(binding.released).toEqual(['', 'tau']);
+  });
+
+  it('should release the binding when the chat session stops', () => {
+    const binding = countingBinding();
+    const actor = startWithBinding(binding);
+    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
+
+    actor.stop();
+
+    expect(binding.released).toEqual(['', 'tau']);
+  });
+});
+
+/*
+ * The chat's turn, owned here (C3, policy §16).
+ *
+ * `queued` admits and `finishing` settles; every row drives the two invoked
+ * actors through `machine.provide` so the machine stays headless.
+ */
+describe('chatSessionMachine run ownership', () => {
+  const turnOf = (runId: string, leaseTurnId: string): ChatTurn => ({
+    runId,
+    leaseTurnId,
+    request: { kind: 'regenerate' },
+  });
+
+  /** A scripted admission and settlement, with the inputs each was given. */
+  const turnActors = (
+    script: {
+      readonly admit?: (input: { readonly chatId: string; readonly gesture: ChatTurnGesture }) => Promise<ChatTurn>;
+      readonly settle?: (input: ChatTurnSettlementInput) => Promise<void>;
+    } = {},
+  ) => {
+    const admissions: Array<{ readonly chatId: string; readonly gesture: ChatTurnGesture }> = [];
+    const settlements: ChatTurnSettlementInput[] = [];
+    const abandoned: string[] = [];
+    const admit = fromSafeAsync<{ type: 'turnAdmitted'; turn: ChatTurn }, { chatId: string; gesture: ChatTurnGesture }>(
+      async ({ input, signal }) => {
+        admissions.push(input);
+        const turn = await (script.admit?.(input) ?? Promise.resolve(turnOf('run-1', 'user-1')));
+        if (signal.aborted) {
+          abandoned.push(turn.leaseTurnId ?? '(none)');
+          throw new Error('aborted');
+        }
+        return { type: 'turnAdmitted', turn };
+      },
+    );
+    const settle = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
+      settlements.push(input);
+      await (script.settle?.(input) ?? Promise.resolve());
+    });
+    return { admissions, settlements, abandoned, actors: { admitTurn: admit, settleTurn: settle } };
+  };
+
+  const startOwning = (actors: ReturnType<typeof turnActors>['actors']) => {
+    const actor = createActor(chatSessionMachine.provide({ actors }), {
+      input: { chatId: 'chat-1', projectId: 'proj_1' },
+    });
+    actor.start();
+    return actor;
+  };
+
+  const sendGesture: ChatTurnGesture = { kind: 'regenerate' };
+
+  it('should queue a turn requested while finishing and admit it once the settlement resolves', async () => {
+    const released = Promise.withResolvers<void>();
+    const script = turnActors({ settle: async () => released.promise });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
+    expect(runState(actor)).toBe('finishing.settling');
+
+    actor.send({ type: 'requestTurn', gesture: { kind: 'edit', messageId: 'user-1', text: 'Edited.' } });
+    expect(runState(actor)).toBe('finishing.settling');
+    expect(script.admissions).toHaveLength(1);
+
+    released.resolve();
+    await vi.waitFor(() => {
+      expect(script.admissions).toHaveLength(2);
+    });
+    expect(script.admissions[1]?.gesture).toEqual({ kind: 'edit', messageId: 'user-1', text: 'Edited.' });
+
+    actor.stop();
+  });
+
+  it('should abandon only its own admission when a second gesture replaces it', async () => {
+    const first = Promise.withResolvers<ChatTurn>();
+    const script = turnActors({
+      admit: async ({ gesture }) => (gesture.kind === 'regenerate' ? first.promise : turnOf('run-2', 'user-2')),
+    });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    actor.send({ type: 'requestTurn', gesture: { kind: 'edit', messageId: 'user-2', text: 'Second.' } });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+
+    first.resolve(turnOf('run-1', 'user-1'));
+    await vi.waitFor(() => {
+      expect(script.abandoned).toEqual(['user-1']);
+    });
+    expect(actor.getSnapshot().context.turn?.runId).toBe('run-2');
+
+    actor.stop();
+  });
+
+  it('should settle a turn whose run failed before the host admitted it', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+    actor.send({ type: 'runLifecycle', phase: 'failed', runId: 'run-1', reason: 'Refused once.' });
+
+    await vi.waitFor(() => {
+      expect(script.settlements).toHaveLength(1);
+    });
+    expect(script.settlements[0]).toMatchObject({ chatId: 'chat-1', runId: 'run-1', outcome: 'failed' });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('failed');
+    });
+    expect(actor.getSnapshot().context.failureReason).toBe('Refused once.');
+
+    actor.stop();
+  });
+
+  it('should ignore adoptRun once this chat owns a turn', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'adoptRun', runId: 'run-discovered' });
+    expect(runState(actor)).toBe('running.reconnecting');
+    expect(actor.getSnapshot().context.activeRunId).toBe('run-discovered');
+
+    actor.send({ type: 'adoptRun', runId: 'run-other' });
+    expect(runState(actor)).toBe('running.reconnecting');
+    expect(actor.getSnapshot().context.activeRunId).toBe('run-discovered');
+
+    actor.stop();
+  });
+
+  it('should record a rejected settlement as the failure it is', async () => {
+    const script = turnActors({
+      settle: async () => {
+        throw new Error('The revision root never answered.');
+      },
+    });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
+
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('failed');
+    });
+    expect(actor.getSnapshot().context.failureReason).toBe('The revision root never answered.');
+    expect(actor.getSnapshot().context.turn).toBeUndefined();
+
+    actor.stop();
+  });
+
+  /**
+   * C6/V10: a reload finds a run the host carried to a terminal state with no
+   * settlement in its log — the tab that ran it died before the revision root
+   * answered. Nobody is coming to attest it, so the page that adopted it
+   * settles it, once, and the chat leaves `finishing` instead of sitting in it.
+   */
+  it('should settle a terminal run the log holds no settlement for, once', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-reloaded' });
+    expect(runState(actor)).toBe('finishing.observing');
+
+    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
+    await vi.waitFor(() => {
+      expect(script.settlements).toHaveLength(1);
+    });
+    expect(script.settlements[0]).toMatchObject({
+      chatId: 'chat-1',
+      runId: 'run-reloaded',
+      leaseTurnId: undefined,
+      outcome: 'completed',
+    });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('done');
+    });
+
+    /* A second reconciliation of the same run — a later reattach, another
+     * `onFinish` — settles nothing: the run it named is over. */
+    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('done');
+    });
+    expect(script.settlements).toHaveLength(1);
+
+    actor.stop();
+  });
+
+  /**
+   * V2 on a run this page adopted: the gesture made over it is held, and the
+   * thing that releases it is the run ending. An adopted run ends on the
+   * host's own attestation, and the held gesture has to be admitted there too
+   * — navigating away mid-turn and back left the second message queued behind
+   * a run that had already finished.
+   */
+  it('should admit a gesture held over an adopted run once the host attests it', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'adoptRun', runId: 'run-adopted' });
+    expect(runState(actor)).toBe('running.reconnecting');
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    expect(script.admissions).toEqual([]);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-adopted' });
+    expect(runState(actor)).toBe('finishing.observing');
+    actor.send({ type: 'turnFinalizedObserved', runId: 'run-adopted', turnId: 'user-adopted' });
+
+    await vi.waitFor(() => {
+      expect(script.admissions).toHaveLength(1);
+    });
+    expect(script.admissions[0]?.gesture).toEqual(sendGesture);
+
+    actor.stop();
+  });
+
+  it('should refuse to dispatch a turn no host can admit', async () => {
+    const script = turnActors({
+      admit: async () => {
+        throw new Error('Browser agent host is not configured for this chat.');
+      },
+    });
+    const actor = startOwning(script.actors);
+    const dispatched: unknown[] = [];
+    actor.on('startTurnRequest', (event) => dispatched.push(event));
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('failed');
+    });
+    expect(actor.getSnapshot().context.failureReason).toBe('Browser agent host is not configured for this chat.');
+    expect(dispatched).toEqual([]);
+    expect(script.settlements).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('should dispatch exactly what the admission composed', async () => {
+    const message: MyUIMessage = { id: 'user-9', role: 'user', parts: [] };
+    const request: ChatRequest = { kind: 'send', message };
+    const script = turnActors({
+      admit: async (): Promise<ChatTurn> => ({ runId: 'run-9', leaseTurnId: 'user-9', request }),
+    });
+    const actor = startOwning(script.actors);
+    const dispatched: Array<{ readonly chatId: string; readonly request: unknown }> = [];
+    actor.on('startTurnRequest', (event) => dispatched.push(event));
+
+    actor.send({ type: 'requestTurn', gesture: { kind: 'send', message } });
+
+    await vi.waitFor(() => {
+      expect(dispatched).toHaveLength(1);
+    });
+    expect(dispatched[0]).toMatchObject({ chatId: 'chat-1', request });
+    expect(actor.getSnapshot().context.turn).toEqual({ runId: 'run-9', leaseTurnId: 'user-9', request });
+
+    actor.stop();
   });
 });

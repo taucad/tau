@@ -104,7 +104,6 @@ type LeaderBroadcast =
       readonly type: 'command';
       readonly senderId: string;
       readonly targetGeneration?: string | undefined;
-      readonly replay: boolean;
       readonly command: AgentHostWorkerCommand;
     }
   | {
@@ -365,7 +364,6 @@ const leaderBroadcastSchema = z.union([
     type: z.literal('command'),
     senderId: z.string().min(1),
     targetGeneration: z.string().optional(),
-    replay: z.boolean(),
     command: agentHostWorkerCommandSchema,
   }),
   z.strictObject({
@@ -634,7 +632,12 @@ const acknowledgeRun = async (
   chatId: string,
   completion: Promise<unknown>,
 ): Promise<HostRunSnapshot> => {
-  const admitted = await active.host.waitForAdmission(chatId);
+  /* A refused admission is an answer, not a race to lose: `waitForAdmission`
+   * asks the *chat* what is running, so a command the host refused — because
+   * the chat's previous run has not ended — used to be answered with that
+   * previous run's snapshot, and the caller reported a run-id mismatch while
+   * the real reason was swallowed with the rejected promise. */
+  const admitted = await Promise.race([active.host.waitForAdmission(chatId), completion.then(() => undefined)]);
   if (!admitted) {
     await completion;
     return active.host.snapshot(chatId);
@@ -650,7 +653,6 @@ const acknowledgeRun = async (
 
 const executeCommand = async (
   command: AgentHostWorkerCommand,
-  replay = false,
   takeover = false,
 ): Promise<AgentHostWorkerResultResponse | AgentHostWorkerTailResponse | AgentHostWorkerAttachResponse> => {
   const active = session;
@@ -722,11 +724,18 @@ const executeCommand = async (
         snapshot.state !== 'cancelled',
     };
   }
-  if (replay && command.type === 'start') {
+  if (command.type === 'start') {
     try {
       /* The whole log, because the fact that decides this is a record anywhere
-       * in it — the run's committed turn — not the state of its tail. Replay
-       * only happens when leadership changes hands mid-dispatch. */
+       * in it — the run's committed turn — not the state of its tail.
+       *
+       * V9: the run id *is* the admission idempotency key, so every `start` is
+       * checked, not only a replayed one. A duplicate dispatch under a key the
+       * log already carries is the same turn arriving twice — it attaches or
+       * answers as settled — and only the worker's own log can tell it apart
+       * from a new turn. ponytail: one whole-log read per start; the ceiling is
+       * the log's size, and the upgrade path is the host's own run ledger
+       * (`runLedgerOf`) exposed as a cached read. */
       const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
       const outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
       if (outcome !== 'admit') {
@@ -838,9 +847,8 @@ const postForwardedResponse = async (options: {
   readonly channel: BroadcastChannel;
   readonly senderId: string;
   readonly command: AgentHostWorkerCommand;
-  readonly replay: boolean;
 }): Promise<void> => {
-  const { channel, senderId, command, replay } = options;
+  const { channel, senderId, command } = options;
   const active = session;
   const state = leadership.get(command.chatId);
   if (!active || !state) {
@@ -848,7 +856,7 @@ const postForwardedResponse = async (options: {
   }
   let response: ForwardedResponse;
   try {
-    response = await executeCommand(command, replay);
+    response = await executeCommand(command);
   } catch (error) {
     response = errorResponse(command.requestId, error);
   }
@@ -1055,7 +1063,6 @@ function channelFor(chatId: string): BroadcastChannel {
             channel,
             senderId: commandMessage.senderId,
             command: commandMessage.command,
-            replay: commandMessage.replay,
           }),
         (error) => {
           channel.postMessage({
@@ -1150,7 +1157,6 @@ const ensureLeadership = async (chatId: string): Promise<boolean> => {
 const waitForForwardedResponse = async (
   active: WorkerSession,
   command: AgentHostWorkerCommand,
-  replay: boolean,
 ): Promise<ForwardedResponse | undefined> => {
   const pending = Promise.withResolvers<ForwardedResponse>();
   forwarded.set(command.requestId, pending);
@@ -1159,7 +1165,6 @@ const waitForForwardedResponse = async (
     type: 'command',
     senderId: active.tabId,
     targetGeneration: leaderGenerations.get(command.chatId),
-    replay,
     command,
   } satisfies LeaderBroadcast);
   const deadline = new Promise<undefined>((resolve) => {
@@ -1179,7 +1184,7 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
       code: 'SESSION_NOT_INITIALIZED',
     });
   }
-  const first = await waitForForwardedResponse(active, command, false);
+  const first = await waitForForwardedResponse(active, command);
   if (first) {
     if (first.type === 'tail' || first.type === 'attach') {
       followerCursors.set(command.chatId, first.batch.nextCursor);
@@ -1197,9 +1202,9 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
   }
   leaderGenerations.delete(command.chatId);
   if (await ensureLeadership(command.chatId)) {
-    return executeCommand(command, true, command.type === 'attach');
+    return executeCommand(command, command.type === 'attach');
   }
-  const replay = await waitForForwardedResponse(active, command, true);
+  const replay = await waitForForwardedResponse(active, command);
   if (!replay) {
     throw Object.assign(new Error(`No chat leader answered command ${command.requestId} before its deadline.`), {
       code: 'LEADER_RESPONSE_TIMEOUT',
@@ -1277,7 +1282,7 @@ const recoverFollower = async (chatId: string): Promise<void> => {
     sessionId: active.sessionId,
   };
   const becameLeader = await ensureLeadership(chatId);
-  const response = becameLeader ? await executeCommand(command, true, true) : await forwardCommand(command);
+  const response = becameLeader ? await executeCommand(command, true) : await forwardCommand(command);
   if (response.type === 'error') {
     throw Object.assign(new Error(response.message), { code: response.code });
   }
@@ -1746,6 +1751,12 @@ const close = async (): Promise<void> => {
     tailInFlight.clear();
     leaderGenerations.clear();
   }
+  /* The flag guards a *re-entrant* close, not the worker's whole lifetime.
+   * Leaving it latched made `close` permanently a no-op, so the next
+   * `initialize` kept the released session and refused the new one with
+   * SESSION_CONFLICT — invisible in a real worker, which terminates after
+   * closing, and fatal to anything that reuses the module. */
+  closing = false;
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Browser agent host could not release every session resource.');
   }
@@ -1784,7 +1795,7 @@ export const handleAgentHostWorkerRequest = async (
   const alreadyLeader = leadership.has(request.chatId);
   const isLeader = await ensureLeadership(request.chatId);
   const response = isLeader
-    ? await executeCommand(command, false, request.type === 'attach' && !alreadyLeader)
+    ? await executeCommand(command, request.type === 'attach' && !alreadyLeader)
     : await forwardCommand(command);
   if (response.type === 'error') {
     throw Object.assign(new Error(response.message), { code: response.code });

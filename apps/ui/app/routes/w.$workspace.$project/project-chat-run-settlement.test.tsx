@@ -8,6 +8,8 @@
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserAgentHostRun } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { chatTurnSettle, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
+import type { ChatTurnOutcome } from '#machines/chat-session.machine.js';
 
 const harness = {
   workspace: undefined as unknown,
@@ -106,10 +108,23 @@ describe('ProjectChatRunSettlement', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    resetChatTurnServices();
   });
+
+  /**
+   * End the turn the way its owner does (C3): the chat's session actor invokes
+   * the settlement this component published, once, for the run it holds.
+   */
+  const settleTurn = async (outcome: ChatTurnOutcome = 'completed', runId = 'run_1'): Promise<void> => {
+    await waitFor(() => {
+      expect(chatTurnSettle('chat_1')).toBeDefined();
+    });
+    await chatTurnSettle('chat_1')!({ chatId: 'chat_1', runId, leaseTurnId: 'turn_1', outcome });
+  };
 
   it('publishes a completed run this tab owns and releases the hold', async () => {
     render(<ProjectChatRunSettlement />);
+    await settleTurn();
 
     await waitFor(() => {
       expect(harness.finalize).toHaveBeenCalledWith('chat_1', 'run_1');
@@ -131,6 +146,7 @@ describe('ProjectChatRunSettlement', () => {
     };
 
     render(<ProjectChatRunSettlement />);
+    await settleTurn('failed');
 
     await waitFor(() => {
       expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
@@ -142,13 +158,18 @@ describe('ProjectChatRunSettlement', () => {
     });
   });
 
-  it('retires a claim whose run no host log owns rather than wedging the chat', async () => {
+  /* No host log owns this run any more, so there is no completion to publish
+   * over the reader's newer live edits — the claim is discarded and the hold
+   * released, which is what keeps the chat from wedging behind an admission
+   * that can never settle. */
+  it('discards a run no host log owns rather than wedging the chat', async () => {
     harness.browserRun = undefined;
 
     render(<ProjectChatRunSettlement />);
+    await settleTurn();
 
     await waitFor(() => {
-      expect(harness.retireClaim).toHaveBeenCalledWith('chat_1', 'run_1');
+      expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({
@@ -166,6 +187,7 @@ describe('ProjectChatRunSettlement', () => {
     harness.finalizedTurns = [{ runId: 'run_1' }];
 
     render(<ProjectChatRunSettlement />);
+    await settleTurn();
 
     await waitFor(() => {
       expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
@@ -178,20 +200,20 @@ describe('ProjectChatRunSettlement', () => {
     expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
   });
 
-  it('leaves a still-running host run active instead of settling it', async () => {
+  /* Whether a turn is over at all is the chat session actor's to know, and it
+   * settles only once the request lifecycle ended (V1). What this owes is the
+   * narrower fact: a run its host never carried to `completed` publishes no
+   * revision, whatever outcome the turn is settled under. */
+  it('publishes no revision for a run its host never completed', async () => {
     harness.browserRun = { runId: 'run_1', state: 'running', eventCount: 1 };
 
     render(<ProjectChatRunSettlement />);
+    await settleTurn('cancelled');
 
     await waitFor(() => {
-      expect(harness.retainDurableRun).toHaveBeenCalledWith({
-        chatId: 'chat_1',
-        runId: 'run_1',
-        state: 'active',
-      });
+      expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
-    expect(harness.discard).not.toHaveBeenCalled();
   });
 
   it('does not reattach a new local lease before its send starts', async () => {
@@ -283,43 +305,9 @@ describe('ProjectChatRunSettlement', () => {
     expect(harness.releaseDurableRun).not.toHaveBeenCalled();
   });
 
-  /**
-   * The retry budget is five attempts per effect instance, and there is no
-   * other publisher: a run whose settlement exhausts it is simply left
-   * unsettled — claim still admitted, durable hold still held, no revision.
-   * It publishes only because the effect re-runs (the authority mints a fresh
-   * prepared object on every claim change), which restarts the budget.
-   */
-  it('stops after five failures, publishes nothing, and resumes when the effect re-runs', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    harness.finalize.mockRejectedValue(
-      Object.assign(new Error('Live project verification did not match.'), {
-        code: 'WORKSPACE_VERIFY_FAILED',
-      }),
-    );
-
-    const view = render(<ProjectChatRunSettlement />);
-
-    await waitFor(
-      () => {
-        expect(harness.finalize).toHaveBeenCalledTimes(5);
-      },
-      { timeout: 10_000 },
-    );
-    expect(harness.releaseDurableRun).not.toHaveBeenCalled();
-    expect(harness.clearBrowserAgentHostRun).not.toHaveBeenCalled();
-
-    harness.finalize.mockResolvedValue(undefined);
-    harness.workspace = { ...workspace };
-    view.rerender(<ProjectChatRunSettlement />);
-
-    await waitFor(() => {
-      expect(harness.releaseDurableRun).toHaveBeenCalledWith({
-        chatId: 'chat_1',
-        runId: 'run_1',
-      });
-    });
-    expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
-  });
+  /* The five-attempt retry timer is gone with the effect that owned it: a
+   * settlement is attempted once, by the turn's owner, and its rejection is
+   * the chat session actor's failure to record — pinned by
+   * `chat-session.machine.test.ts` > 'should record a rejected settlement as
+   * the failure it is'. */
 });

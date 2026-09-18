@@ -319,12 +319,66 @@ describe('projectRevisionsMachine', () => {
 
     expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
     expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
-    /* Ignoring the second admission left its caller waiting out the whole
-     * admission bound before hearing that the turn was never leased. */
+
+    harness.actor.stop();
+  });
+
+  /*
+   * V8: a held turn id delays an admission inside its owner.
+   *
+   * An edit or a *Try again* leases the turn id of the message it rewinds to,
+   * which is the id the previous run of that turn leased. Refusing the second
+   * admission outright — which is what `TURN_ALREADY_LEASED` did — put a
+   * banner in front of the person for a condition that clears itself in well
+   * under a second. The root knows when the hold ends, so the root waits.
+   */
+  it('queues an admission for a held turn id and answers it when that turn retires', async () => {
+    const harness = start();
+
+    registerCheckouts(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+
+    expect(harness.emitted.filter((event) => event.type === 'turnRefused')).toEqual([]);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([
+      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' },
+    ]);
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
+
+    harness.actor.send({
+      type: 'turnReleased',
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-1',
+      outcome: 'released',
+    });
+    await flush();
+
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    expect(harness.promises.inputsFor('prepare')).toEqual([
+      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' },
+      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' },
+    ]);
+
+    harness.actor.stop();
+  });
+
+  /* The one thing `TURN_ALREADY_LEASED` still means (V9): a run id is minted
+   * once per gesture and is the idempotency key, so the same one admitted
+   * twice is a bug in the caller, never a queue. */
+  it('refuses the same run id admitted twice', async () => {
+    const harness = start();
+
+    registerCheckouts(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
     expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
       turnId: 'turn-1',
       chatId: 'chat-1',
-      runId: 'run-2',
+      runId: 'run-1',
       code: 'TURN_ALREADY_LEASED',
     });
 

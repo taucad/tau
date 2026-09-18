@@ -23,6 +23,8 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
+import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
+import { chatTurnAdmit, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import { listAgentHostPlacements } from '#lib/agent-host-placement.js';
 import type { TauHostDescriptor } from '#lib/agent-host-placement.js';
 
@@ -224,7 +226,6 @@ const buildAgent = (overrides: Partial<CadAgentConfigInput> = {}): CadAgentConfi
 type ActionsMock = {
   sendMessage: ReturnType<typeof vi.fn>;
   regenerate: ReturnType<typeof vi.fn>;
-  retryMessage: ReturnType<typeof vi.fn>;
   editMessage: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   setMessages: ReturnType<typeof vi.fn>;
@@ -233,7 +234,6 @@ type ActionsMock = {
 const buildActions = (): ActionsMock => ({
   sendMessage: vi.fn(),
   regenerate: vi.fn(),
-  retryMessage: vi.fn(),
   editMessage: vi.fn(),
   stop: vi.fn(),
   setMessages: vi.fn(),
@@ -261,7 +261,14 @@ const sessionWithPersistedErrors = ((): ChatSessionStore['get'] =>
   })) as unknown as ChatSessionStore['get'])();
 
 const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
-  vi.mocked(useChatSessionStore).mockReturnValue(partial as ChatSessionStore);
+  /* Merged, not replaced: the chat's turn host mounts beside the view these
+   * rows render, and it calls the store's placement and reattach seams. */
+  vi.mocked(useChatSessionStore).mockReturnValue({
+    requestTurn: vi.fn(),
+    setTurnPlacement: vi.fn(),
+    reattachHostChat,
+    ...partial,
+  } as ChatSessionStore);
 };
 
 /** The store's host-log reattach, re-armed per test. */
@@ -293,13 +300,13 @@ beforeEach(() => {
     workspaceHarness.current = workspaceHarness.current ?? mintedClaim;
     return workspaceHarness.current;
   });
+  resetChatTurnServices();
   mountAgentMock(buildAgent());
   useChatSelectorMock.mockReturnValue('ready');
   installActiveSession('chat_test');
   persistedErrors.length = 0;
   reattachHostChat = vi.fn();
   installSessionStore({
-    setLatestAgentBody: vi.fn(),
     startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
     endRun: vi.fn(),
     reattachHostChat,
@@ -329,15 +336,26 @@ describe('admission against the placement book a real discovery pass filled', ()
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderHook(() => useCadChatClient(), {
+      wrapper: ({ children }) => (
+        <>
+          <ChatTurnHost />
+          {children}
+        </>
+      ),
+    });
     act(() => {
-      result.current.submit({ text: 'Build it.' });
+      void result.current.submit({ text: 'Build it.' });
     });
 
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalled();
     });
-    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    await waitFor(() => {
+      expect(chatTurnAdmit('chat_test')).toBeDefined();
+    });
+    const turn = await chatTurnAdmit('chat_test')!({ kind: 'send', message: { id: 'm', role: 'user', parts: [] } });
+    const body = turn.request.body as Record<string, unknown>;
     expect(body['execution']).toEqual({ hostId: 'origin' });
     expect(persistedErrors).toEqual([]);
   });

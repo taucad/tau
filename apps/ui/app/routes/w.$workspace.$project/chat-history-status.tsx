@@ -11,6 +11,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useChats } from '#hooks/use-chats.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { useActiveChatNaming } from '#routes/w.$workspace.$project/use-active-chat-naming.js';
 import {
   formatReceiptTotal,
   sumReceiptCredits,
@@ -27,11 +28,18 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
   const { resolveModel } = useModels();
 
   // Get active chat info
-  const { editorRef, projectId } = useProject();
+  const { editorRef, projectRef, projectId } = useProject();
   const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
-  const { chats } = useChats(projectId);
+  const { chats, applyGeneratedChatName, isLoading: isChatsLoading } = useChats(projectId);
+  const isProjectLoading = useSelector(projectRef, (state) => state.context.isLoading);
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
   const recencyAt = activeChat ? getChatRecencyAt(activeChat) : undefined;
+  const isGeneratingName = useActiveChatNaming({
+    activeChat,
+    isProjectLoading,
+    isChatsLoading,
+    applyGeneratedChatName,
+  });
 
   // Force re-render every minute to update relative time
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
@@ -80,14 +88,17 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
     <div
       className={cn(
         '@container',
-        'sticky top-0 z-10 flex items-center justify-between gap-2 border-b px-3 py-1.5 text-xs',
+        'sticky top-0 z-10 flex min-h-9 items-center justify-between gap-2 border-b px-3 py-1 text-xs',
         className,
       )}
     >
-      {/* Left side: Last activity */}
-      <div className='flex items-center gap-3'>
+      {/* Left side: Chat name, then last activity */}
+      <div className='flex min-w-0 items-center gap-3'>
+        <span className={cn('truncate text-sm font-medium text-foreground', isGeneratingName && 'animate-pulse')}>
+          {activeChat?.name ?? 'Chat'}
+        </span>
         {recencyAt ? (
-          <div className='flex items-center gap-1 text-muted-foreground'>
+          <div className='flex shrink-0 items-center gap-1 text-muted-foreground'>
             <Clock className='size-3' />
             <span className='@[20rem]:hidden'>{formatRelativeTime(recencyAt, { short: true })}</span>
             <span className='hidden @[20rem]:inline'>{formatRelativeTime(recencyAt)}</span>
@@ -96,7 +107,7 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
       </div>
 
       {/* Right side: Model and cost */}
-      <div className='flex items-center gap-3'>
+      <div className='flex shrink-0 items-center gap-3'>
         {model ? (
           <div className='flex items-center gap-1 text-muted-foreground'>
             <SvgIcon id={model.family} className='size-3 grayscale' />

@@ -11,6 +11,15 @@ import {
 } from '#api/billing/credit-ledger.service.js';
 import { and, eq, inArray } from 'drizzle-orm';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import {
+  cloudProviderAccountMessage,
+  readBoundedProviderBody,
+  recognizeProviderAccountRefusal,
+} from '#api/llm/provider-account-refusal.js';
+import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
+import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
+import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
+import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
 import { supplierBlockingFinancialCaseKinds } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { billingFinancialCase, creditOperation } from '#database/schema.js';
 import { DatabaseService } from '#database/database.service.js';
@@ -58,6 +67,18 @@ const assertDigestBoundary = (value: unknown): void => {
     }
   }
 };
+/** A provider-account refusal in the body, with its provider narrowed to the gateway's own set. */
+const providerAccountRefusal = (
+  providerId: string,
+  body: unknown,
+): { readonly providerId: GatewayProviderId; readonly refusal: ProviderAccountRefusal } | undefined => {
+  if (!isGatewayProviderId(providerId)) {
+    return undefined;
+  }
+  const refusal = recognizeProviderAccountRefusal({ providerId, body });
+  return refusal === undefined ? undefined : { providerId, refusal };
+};
+
 const canonicalize = (value: unknown): unknown =>
   Array.isArray(value)
     ? value.map((item) => canonicalize(item))
@@ -362,10 +383,17 @@ export class BillableModelInvocationService {
       );
       intent.signal.removeEventListener('abort', recordCancellation);
       const evidence = collector.failed(response.ok ? 'malformed_response' : 'provider_rejected');
-      if (response.body) {
+      // One bounded read of the refused body: enough to classify it, never forwarded.
+      const body = response.ok ? undefined : await readBoundedProviderBody(response);
+      if (response.ok && response.body) {
         await response.body.cancel();
       }
       await this.finish(qualification, row, generation, evidence);
+      const recognized = providerAccountRefusal(qualification.providerId, body);
+      if (recognized) {
+        // Settled as provider_rejected above: the customer is charged nothing for it.
+        throw this.providerAccountExhausted(intent, recognized.providerId, recognized.refusal);
+      }
       const upstreamRejected =
         response.status >= 400 && response.status < 500 && ![401, 403, 429].includes(response.status);
       throw upstreamRejected
@@ -393,10 +421,21 @@ export class BillableModelInvocationService {
       recordCancellation,
       signal,
     );
+    const relayed = isGatewayProviderId(qualification.providerId)
+      ? observed.body.pipeThrough(
+          createProviderAccountFrameFilter({
+            providerId: qualification.providerId,
+            accountOwner: 'tau',
+            onRefusal: (refusal) => {
+              this.recordProviderAccountExhausted(intent, qualification.providerId, refusal);
+            },
+          }),
+        )
+      : observed.body;
     return {
       state: 'streaming',
       operationId: row.id,
-      response: new Response(observed.body, {
+      response: new Response(relayed, {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
@@ -746,6 +785,47 @@ export class BillableModelInvocationService {
       HttpStatus.SERVICE_UNAVAILABLE,
       'PROVIDER_UNAVAILABLE',
       'This model route is paused while Tau reconciles its supplier evidence.',
+    );
+  }
+
+  /**
+   * Records a recognised supplier-account refusal for Tau's operators. The
+   * supplier's own sentence stays in the log, where only Tau reads it; the
+   * customer only ever gets the opaque message.
+   *
+   * @param intent - The invocation whose supplier account refused.
+   * @param providerId - The refusing supplier.
+   * @param refusal - The provider's own code and sentence.
+   */
+  private recordProviderAccountExhausted(
+    intent: BillableInvocationIntent,
+    providerId: string,
+    refusal: ProviderAccountRefusal,
+  ): void {
+    this.metrics?.billingProviderAccountRefusals.add(1, {
+      'deployment.environment': intent.environment,
+      providerId,
+    });
+    this.logger.warn(
+      `Supplier account exhausted on ${providerId} (${refusal.providerCode ?? 'no code'}) in ${intent.environment}: ${refusal.message}`,
+    );
+  }
+
+  private providerAccountExhausted(
+    intent: BillableInvocationIntent,
+    providerId: GatewayProviderId,
+    refusal: ProviderAccountRefusal,
+  ): LlmGatewayError {
+    this.recordProviderAccountExhausted(intent, providerId, refusal);
+    return new LlmGatewayError(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      'PROVIDER_ACCOUNT_EXHAUSTED',
+      cloudProviderAccountMessage,
+      {
+        providerId,
+        ...(refusal.providerCode === undefined ? {} : { providerCode: refusal.providerCode }),
+        accountOwner: 'tau',
+      },
     );
   }
 

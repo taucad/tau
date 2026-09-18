@@ -110,6 +110,26 @@ describe('ChatError', () => {
     expect(screen.queryByText('Rate limit exceeded')).not.toBeInTheDocument();
   });
 
+  /* The refusal arrives as `overloaded` (the 503 it mirrors); the code, not the
+   * category, picks the provider-account card over the service-unavailable one. */
+  it('should route a provider-account refusal to its own card ahead of the category', () => {
+    const refusal: ChatErrorPayload = {
+      category: errorCategory.overloaded,
+      title: 'Service Temporarily Unavailable',
+      message: "The model provider's account is unavailable.",
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      details: { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' },
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ error: undefined, persistedError: refusal } as unknown as CombinedChatState),
+    );
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('status', { name: 'OpenAI models are unavailable right now' })).toBeInTheDocument();
+    expect(screen.queryByText('Service Temporarily Unavailable')).not.toBeInTheDocument();
+  });
+
   it('should keep the generic fallback for an external failure whose details do not match the stop schema', () => {
     const malformed: ChatErrorPayload = {
       category: errorCategory.generic,

@@ -36,6 +36,7 @@ export const gatewayModelErrorCodes = [
   'MODEL_NOT_IN_CATALOG',
   'MODEL_PROVIDER_UNSUPPORTED',
   'ORIGIN_NOT_ALLOWED',
+  'PROVIDER_ACCOUNT_EXHAUSTED',
   'RATE_LIMITED',
   'UNAUTHENTICATED',
   'INVALID_REQUEST',
@@ -320,21 +321,152 @@ const networkError = (message: string, cause: unknown, status?: number): Gateway
     cause,
   });
 
+/**
+ * Tau's own in-stream refusal envelope. The gateway rewrites a recognised
+ * provider-account refusal into a single SSE `error` frame carrying this
+ * marker; relayed provider bytes escape their own quotes, so nothing else on
+ * the wire can produce it.
+ */
+const tauGatewayFrameMarker = '"type":"tau_gateway"';
+const sseEventBoundary = /\r\n\r\n|\n\n|\r\r/gu;
+
+/**
+ * Drop the relayed text pi-ai has already been handed, bounding the scan buffer.
+ *
+ * @param text - Relayed SSE text scanned so far.
+ * @returns The text after the last complete event boundary.
+ */
+const sinceLastEventBoundary = (text: string): string => {
+  let start = 0;
+  for (const match of text.matchAll(sseEventBoundary)) {
+    start = match.index + match[0].length;
+  }
+  return text.slice(start);
+};
+
+/**
+ * Read Tau's coded provider-account refusal out of relayed gateway bytes.
+ *
+ * Only the frame carrying the marker is decoded, and an incomplete one answers
+ * undefined so the caller reads on until the event boundary or EOF completes
+ * it.
+ *
+ * @param relayed - Relayed SSE text since the last delivered event boundary.
+ * @param status - HTTP status of the relayed gateway response.
+ * @returns The coded refusal, or undefined when no complete Tau frame is present.
+ */
+/**
+ * Whether the frame carrying the Tau marker has been terminated by an event boundary.
+ *
+ * @param relayed - Relayed text since the last delivered event boundary.
+ * @returns True once a boundary follows the marker-bearing frame.
+ */
+const markerFrameComplete = (relayed: string): boolean => {
+  const frames = relayed.split(sseEventBoundary);
+  const index = frames.findIndex((event) => event.includes(tauGatewayFrameMarker));
+  return index !== -1 && index < frames.length - 1;
+};
+
+const providerAccountRefusal = (relayed: string, status: number): GatewayModelTransportError | undefined => {
+  const frame = relayed.split(sseEventBoundary).find((event) => event.includes(tauGatewayFrameMarker));
+  if (frame === undefined) {
+    return undefined;
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(
+      frame
+        .split('\n')
+        .flatMap((line) => (line.startsWith('data:') ? [line.slice('data:'.length).trim()] : []))
+        .join('\n'),
+    );
+  } catch {
+    return undefined;
+  }
+  const envelope = zodUtility.isObject(payload) && zodUtility.isObject(payload['error']) ? payload['error'] : undefined;
+  if (envelope?.['type'] !== 'tau_gateway' || readString(envelope, 'code') !== 'PROVIDER_ACCOUNT_EXHAUSTED') {
+    return undefined;
+  }
+  const details = readDetails(envelope);
+  return new GatewayModelTransportError({
+    code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+    message: readString(envelope, 'message') ?? 'The model provider account is unavailable.',
+    status,
+    ...(details === undefined ? {} : { details }),
+  });
+};
+
 const guardedResponse = (options: {
   readonly response: Response;
   readonly state: GatewayFetchState;
   readonly signal: AbortSignal;
 }): Response => {
   const reader = options.response.body!.getReader();
+  const decoder = new TextDecoder();
+  // Relayed text since the last delivered event boundary, so a refusal frame
+  // split across chunks is still recognised. Trimming stops once the marker
+  // appears: from there the whole frame is needed to read its code.
+  let relayed = '';
+  let refusing = false;
+  // Chunks held back while a marker-bearing frame is still incomplete; they
+  // are replayed in order if that frame turns out not to be a refusal.
+  let withheld: Array<Uint8Array<ArrayBuffer>> = [];
+  /**
+   * Holds one more chunk of a marker-bearing frame; releases them all once the frame proves harmless.
+   *
+   * @param chunk - The chunk just read, not yet delivered.
+   * @param controller - The guarded stream the released chunks are delivered on.
+   */
+  const hold = (
+    chunk: Uint8Array<ArrayBuffer>,
+    controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>,
+  ): void => {
+    withheld.push(chunk);
+    if (!markerFrameComplete(relayed)) {
+      return;
+    }
+    // A complete Tau frame that is not this refusal belongs to the SDK after all.
+    refusing = false;
+    for (const held of withheld) {
+      controller.enqueue(held);
+    }
+    withheld = [];
+    relayed = sinceLastEventBoundary(relayed);
+  };
   const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
     async pull(controller) {
       try {
         const next = await reader.read();
         if (next.done) {
+          const trailing = refusing ? providerAccountRefusal(relayed, options.response.status) : undefined;
+          if (trailing) {
+            options.state.failure = trailing;
+            controller.error(trailing);
+            return;
+          }
           controller.close();
-        } else {
-          controller.enqueue(next.value);
+          return;
         }
+        relayed += decoder.decode(next.value, { stream: true });
+        refusing ||= relayed.includes(tauGatewayFrameMarker);
+        if (refusing) {
+          // The refusal frame never reaches pi-ai's codec: Tau raises the coded
+          // failure itself rather than letting the SDK report an opaque stream
+          // error. An incomplete frame just withholds its bytes and reads on.
+          // ponytail: bytes sharing the refusal's chunk are dropped with it
+          // rather than re-encoded; the turn is terminal either way.
+          const failure = providerAccountRefusal(relayed, options.response.status);
+          if (failure) {
+            options.state.failure = failure;
+            controller.error(failure);
+            await reader.cancel(failure);
+            return;
+          }
+          hold(next.value, controller);
+          return;
+        }
+        relayed = sinceLastEventBoundary(relayed);
+        controller.enqueue(next.value);
       } catch (error) {
         if (options.signal.aborted) {
           controller.error(error);

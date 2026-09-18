@@ -311,6 +311,14 @@ export class MetricsService {
     },
   );
 
+  public readonly billingProviderAccountRefusals = this.apiMeter.createCounter(
+    TauMetrics.billingProviderAccountRefusals.name,
+    {
+      description: TauMetrics.billingProviderAccountRefusals.description,
+      unit: TauMetrics.billingProviderAccountRefusals.unit,
+    },
+  );
+
   public readonly billingFundedOperationDenials = this.apiMeter.createCounter(
     TauMetrics.billingFundedOperationDenials.name,
     {

@@ -435,47 +435,54 @@ const guardedResponse = (options: {
   };
   const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
     async pull(controller) {
+      let next: ReadableStreamReadResult<Uint8Array<ArrayBuffer>>;
+      // Only the read is a gateway failure. Guarding this stream's own `close`
+      // and `enqueue` too would record the SDK's cancel-then-close race as
+      // `NETWORK_ERROR` and mask the provider's terminal frame behind it.
       try {
-        const next = await reader.read();
-        if (next.done) {
-          const trailing = refusing ? providerAccountRefusal(relayed, options.response.status) : undefined;
-          if (trailing) {
-            options.state.failure = trailing;
-            controller.error(trailing);
-            return;
-          }
-          controller.close();
-          return;
-        }
-        relayed += decoder.decode(next.value, { stream: true });
-        refusing ||= relayed.includes(tauGatewayFrameMarker);
-        if (refusing) {
-          // The refusal frame never reaches pi-ai's codec: Tau raises the coded
-          // failure itself rather than letting the SDK report an opaque stream
-          // error. An incomplete frame just withholds its bytes and reads on.
-          // ponytail: bytes sharing the refusal's chunk are dropped with it
-          // rather than re-encoded; the turn is terminal either way.
-          const failure = providerAccountRefusal(relayed, options.response.status);
-          if (failure) {
-            options.state.failure = failure;
-            controller.error(failure);
-            await reader.cancel(failure);
-            return;
-          }
-          hold(next.value, controller);
-          return;
-        }
-        relayed = sinceLastEventBoundary(relayed);
-        controller.enqueue(next.value);
+        next = await reader.read();
       } catch (error) {
-        if (options.signal.aborted) {
+        // An abort is the consumer's own: Tau's signal, the person pressing
+        // Stop, or the bundled SDK leaving the stream on a terminal frame.
+        if (options.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
           controller.error(error);
           return;
         }
         const failure = networkError('Tau model gateway response stream failed.', error, options.response.status);
         options.state.failure = failure;
         controller.error(failure);
+        return;
       }
+      if (next.done) {
+        const trailing = refusing ? providerAccountRefusal(relayed, options.response.status) : undefined;
+        if (trailing) {
+          options.state.failure = trailing;
+          controller.error(trailing);
+          return;
+        }
+        controller.close();
+        return;
+      }
+      relayed += decoder.decode(next.value, { stream: true });
+      refusing ||= relayed.includes(tauGatewayFrameMarker);
+      if (refusing) {
+        // The refusal frame never reaches pi-ai's codec: Tau raises the coded
+        // failure itself rather than letting the SDK report an opaque stream
+        // error. An incomplete frame just withholds its bytes and reads on.
+        // ponytail: bytes sharing the refusal's chunk are dropped with it
+        // rather than re-encoded; the turn is terminal either way.
+        const failure = providerAccountRefusal(relayed, options.response.status);
+        if (failure) {
+          options.state.failure = failure;
+          controller.error(failure);
+          await reader.cancel(failure);
+          return;
+        }
+        hold(next.value, controller);
+        return;
+      }
+      relayed = sinceLastEventBoundary(relayed);
+      controller.enqueue(next.value);
     },
     cancel: async (reason) => reader.cancel(reason),
   });
@@ -724,7 +731,17 @@ const streamedToolCall = (
 const abortError = (signal: AbortSignal): Error =>
   signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
 
+/**
+ * A provider refusal naming the context window is the request's own fault: it
+ * will be refused identically until the request changes, so it must not read as
+ * a transient outage the person is invited to resume into (R6).
+ */
+const contextWindowRefusal = /context_length_exceeded|exceeds? the context|maximum context length/iu;
+
 const piStreamError = (message: string): GatewayModelTransportError => {
+  if (contextWindowRefusal.test(message)) {
+    return new GatewayModelTransportError({ code: 'INVALID_REQUEST', message });
+  }
   const malformed = /(?:parse|malformed|SSE|stream ended|finish_reason|message_stop|content block)/iu.test(message);
   return new GatewayModelTransportError({
     code: malformed ? 'MALFORMED_RESPONSE' : 'PROVIDER_UNAVAILABLE',

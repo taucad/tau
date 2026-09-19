@@ -56,9 +56,16 @@ fn band_engagement_inner(
         maximum: None,
         tolerance: 0.,
     }) {
-        Outcome::Decided { .. } => {}
+        Outcome::Decided { evidence, .. } => drop(evidence),
         Outcome::Unsupported { reason, .. } => return Err(reason),
     }
+    // This phase fits NOMINAL_ANALYTIC_RESERVATION_BYTES: <=12 persistent
+    // rationals (four limits, four span endpoints, depth/offset/allowance and
+    // the offset accumulator's replacement), plus <=14 nested temporaries.
+    // Helpers normalize retained integers to <=2048 bits and preflight each
+    // operation; their existing 32 BigInt scratch slots cover normalization.
+    // Three ExactScalars fit the reserved four, including conversion while
+    // the rationals remain live. The C1 phase above owns none of these slots.
     use super::nominal_analytic::{add, mul, rat, square, sub};
     use num_traits::Signed;
     fn axis(v: [f64; 3]) -> Result<(usize, f64), ContinuousError> {

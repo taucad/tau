@@ -191,11 +191,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "commands": [
-          "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo build --manifest-path packages/geospec-engine-native/bindings/wasm/Cargo.toml --locked --release --target wasm32-unknown-unknown --target-dir node_modules/.cache/geospec-engine-native/wasm-target",
-          "node_modules/.cache/geospec-engine-native/wasm-tools/bin/wasm-bindgen node_modules/.cache/geospec-engine-native/wasm-target/wasm32-unknown-unknown/release/geospec_engine_native_wasm.wasm --target web --out-dir packages/geospec-engine-native/bindings/wasm/generated --out-name geospec_engine_native_wasm"
-        ],
-        "parallel": false,
+        "command": "node packages/geospec-engine-native/scripts/build-mixed-wasm.mts",
         "forwardAllArgs": false
       }
     },

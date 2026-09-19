@@ -17,18 +17,19 @@ import { util as zodUtility } from 'zod';
 
 const thinkClose = '</think>';
 
-interface ToolCallDelta {
+type ToolCallDelta = {
   index?: number;
   id?: string;
   extra_content?: { google?: { thought_signature?: string } };
-}
+};
 
-interface ChoiceDelta {
+type ChoiceDelta = {
+  // oxlint-disable-next-line typescript/no-restricted-types -- Gemini sends an explicit JSON `null` here on a delta that carries only a tool call; `undefined` would stop modelling what arrives on the wire.
   content?: string | null;
   reasoning_content?: string;
   tool_calls?: ToolCallDelta[];
   extra_content?: { google?: { thought?: boolean } };
-}
+};
 
 /**
  * Rewrite Vertex AI Gemini SSE bytes into the OpenAI-compatible shape pi's
@@ -43,7 +44,9 @@ interface ChoiceDelta {
  * @returns A transform stream to pipe a Vertex response body through.
  * @public
  */
-export const createVertexResponseShim = (signatures: Map<string, string>): TransformStream<Uint8Array, Uint8Array> => {
+export const createVertexResponseShim = (
+  signatures: Map<string, string>,
+): TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>> => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   // A JSON object can be split across chunk boundaries, so only whole lines are
@@ -139,7 +142,7 @@ export const createVertexResponseShim = (signatures: Map<string, string>): Trans
     return changed ? `data: ${JSON.stringify(chunk)}` : line;
   };
 
-  return new TransformStream<Uint8Array, Uint8Array>({
+  return new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
     transform(bytes, controller) {
       carry += decoder.decode(bytes, { stream: true });
       const lines = carry.split('\n');
@@ -147,7 +150,7 @@ export const createVertexResponseShim = (signatures: Map<string, string>): Trans
       // A chunk that closed no line adds nothing to the wire; enqueueing here
       // would inject a newline the upstream never sent.
       if (lines.length > 0) {
-        controller.enqueue(encoder.encode(`${lines.map(rewriteLine).join('\n')}\n`));
+        controller.enqueue(encoder.encode(`${lines.map((line) => rewriteLine(line)).join('\n')}\n`));
       }
     },
     flush(controller) {

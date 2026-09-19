@@ -27,19 +27,24 @@ describe('ChatErrorPausedTurn', () => {
   });
 
   it('should name the failure in the provider words and promise the turn is saved', () => {
-    render(<ChatErrorPausedTurn reason='server_error: The server had an error while processing your request.' />);
+    const { container } = render(
+      <ChatErrorPausedTurn resumable reason='server_error: The server had an error while processing your request.' />,
+    );
 
     expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
-    expect(
-      screen.getByText('server_error: The server had an error while processing your request.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
-    expect(screen.queryByText(/kept/iu)).not.toBeInTheDocument();
+    // The consequence is its own paragraph after the provider's sentence and
+    // ahead of the action, never folded into a disclosure (DESIGN).
+    const paragraphs = [...container.querySelectorAll('p')].map((node) => node.textContent);
+    expect(paragraphs).toEqual([
+      'Tau paused this turn',
+      'server_error: The server had an error while processing your request.',
+      'Everything up to here is saved.',
+    ]);
   });
 
   it('should resume the paused turn instead of offering to try again', async () => {
     const user = userEvent.setup();
-    render(<ChatErrorPausedTurn reason='The model provider is unavailable right now.' />);
+    render(<ChatErrorPausedTurn resumable reason='The model provider is unavailable right now.' />);
 
     expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Resume' }));
@@ -48,9 +53,23 @@ describe('ChatErrorPausedTurn', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  /* F5: the card may only promise what the host will do. A failure the host
+     rules unrecoverable gets the gesture it will actually receive. */
+  it('should promise nothing and keep Try again when the host will not resume the run', async () => {
+    const user = userEvent.setup();
+    render(<ChatErrorPausedTurn resumable={false} reason='The agent host worker crashed.' />);
+
+    expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
   it('should offer a model switch ahead of Resume when the request itself was refused', () => {
     render(
       <ChatErrorPausedTurn
+        resumable
         title='The model refused this request'
         reason='Vertex does not support xhigh reasoning effort.'
         guidance='Change the model or its settings, then resume.'
@@ -68,7 +87,9 @@ describe('ChatErrorPausedTurn', () => {
 
   it('should keep the raw failure behind a disclosure, outside the consequence and the action', async () => {
     const user = userEvent.setup();
-    render(<ChatErrorPausedTurn reason='Tau could not read the reply.' raw='{"code":"MALFORMED_RESPONSE"}' />);
+    render(
+      <ChatErrorPausedTurn resumable reason='Tau could not read the reply.' raw='{"code":"MALFORMED_RESPONSE"}' />,
+    );
 
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();

@@ -44,7 +44,7 @@ describe('ChatErrorServiceUnavailable', () => {
 
   it('should resume the paused turn and say that it is saved', async () => {
     const user = userEvent.setup();
-    render(<ChatErrorServiceUnavailable />);
+    render(<ChatErrorServiceUnavailable resumable />);
 
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
@@ -54,5 +54,20 @@ describe('ChatErrorServiceUnavailable', () => {
 
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  /* F5: this card is category-routed, so it also serves 503 codes the host
+     rules unrecoverable (`BILLING_RECOVERY_UNAVAILABLE`). */
+  it('should promise nothing and keep Try again for an outage the host will not resume', async () => {
+    const user = userEvent.setup();
+    render(<ChatErrorServiceUnavailable resumable={false} />);
+
+    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(continueChat).toHaveBeenCalledTimes(1);
   });
 });

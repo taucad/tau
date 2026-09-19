@@ -44,8 +44,8 @@ type StopNotice = {
 const usageWindowWord = (agentWindow: string | undefined): string =>
   agentWindow === 'five_hour' ? '5-hour' : agentWindow?.startsWith('seven_day') === true ? 'weekly' : 'usage';
 
-/** The span over which a weekday still names one day without a date. */
-const weekdayHorizonMs = 6 * 24 * 60 * 60 * 1000;
+/** The span over which a weekday still names one day without a date. Milliseconds. */
+const weekdayHorizon = 6 * 24 * 60 * 60 * 1000;
 
 /**
  * A reset time in the reader's own locale and zone.
@@ -55,17 +55,17 @@ const weekdayHorizonMs = 6 * 24 * 60 * 60 * 1000;
  * that can be right here is the reader's. A reset on another day carries its
  * weekday, or its date once a weekday would be ambiguous.
  *
- * @param resetsAtMs - When the limit refreshes, in epoch milliseconds.
- * @param nowMs - The instant the card is reading, in epoch milliseconds.
+ * @param resetAt - When the limit refreshes, in epoch milliseconds.
+ * @param now - The instant the card is reading, in epoch milliseconds.
  * @returns The formatted time, e.g. `3:00 pm` or `Sat 3:00 pm`.
  */
-const formatResetTime = (resetsAtMs: number, nowMs: number): string => {
-  const reset = new Date(resetsAtMs);
+const formatResetTime = (resetAt: number, now: number): string => {
+  const reset = new Date(resetAt);
   const time = { hour: 'numeric', minute: '2-digit' } as const;
   const options: Intl.DateTimeFormatOptions =
-    reset.toDateString() === new Date(nowMs).toDateString()
+    reset.toDateString() === new Date(now).toDateString()
       ? time
-      : resetsAtMs - nowMs < weekdayHorizonMs
+      : resetAt - now < weekdayHorizon
         ? { weekday: 'short', ...time }
         : { month: 'short', day: 'numeric', ...time };
   // Only the day period is lowered; a locale's own weekday or month casing is
@@ -180,13 +180,22 @@ function ProviderSentence({ text }: { readonly text: string }): React.JSX.Elemen
  * A limit is an ordinary account state, so it reads as a neutral notice with
  * the provider's own sentence, not a destructive error. Adapter logs appear
  * only on request.
+ *
+ * Whether the notice may promise the turn and offer Resume is not the card's
+ * to decide: the host rules an external stop resumable by the `actions` the
+ * agent itself reported, and `chat-error.tsx` reads that one rule for every
+ * card. A stop the host will not continue keeps the notice and drops the
+ * promise.
  */
 export const ChatErrorAgentStop = memo(function ({
   className,
   stop,
+  resumable,
 }: {
   readonly className?: string;
   readonly stop: ExternalAgentStop;
+  /** Whether the host will continue this run rather than replay it. */
+  readonly resumable: boolean;
 }): React.JSX.Element {
   const { continueChat } = useChatActions();
   const {
@@ -195,29 +204,34 @@ export const ChatErrorAgentStop = memo(function ({
   const { isOffered: isAgentSelectorOffered } = useChatAgentSelection();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const resetsAtMs = stop.resetsAt === undefined ? undefined : stop.resetsAt * 1000;
+  /** When the reported limit refreshes. Milliseconds. */
+  const resetAt = stop.resetsAt === undefined ? undefined : stop.resetsAt * 1000;
   /* Ruling Q8: the card owns this clock. One timer, armed for the reset the
    * agent reported, is all that stands between a held Resume and a live one —
    * no host timer and no new run state. */
   const [readAt, setReadAt] = useState(() => Date.now());
   useEffect(() => {
-    if (resetsAtMs === undefined || resetsAtMs <= Date.now()) {
+    if (resetAt === undefined || resetAt <= Date.now()) {
       return undefined;
     }
     const timer = globalThis.setTimeout(() => {
       setReadAt(Date.now());
-    }, resetsAtMs - Date.now());
+    }, resetAt - Date.now());
     return () => {
       globalThis.clearTimeout(timer);
     };
-  }, [resetsAtMs]);
+  }, [resetAt]);
 
   const notice = describeAgentStop(stop);
   const showSwitchAgent = notice.canSwitchAgent && isAgentSelectorOffered;
-  const heldUntil = resetsAtMs !== undefined && resetsAtMs > readAt ? formatResetTime(resetsAtMs, readAt) : undefined;
+  const heldUntil = resetAt !== undefined && resetAt > readAt ? formatResetTime(resetAt, readAt) : undefined;
+  /* A stop the host will not continue offers no Resume and makes no promise;
+   * Switch agent, which resolves it, is left standing. */
+  const keepsTurn = notice.keepsTurn === true && resumable;
+  const primary = notice.primary === 'resume' && !resumable ? undefined : notice.primary;
 
   const primaryAction =
-    notice.primary === 'retry' ? (
+    primary === 'retry' ? (
       <Button
         variant='outline'
         size='sm'
@@ -228,7 +242,7 @@ export const ChatErrorAgentStop = memo(function ({
         <RefreshCcw className='size-3.5' />
         Try again
       </Button>
-    ) : notice.primary === 'resume' ? (
+    ) : primary === 'resume' ? (
       <Button
         variant='outline'
         size='sm'
@@ -240,7 +254,7 @@ export const ChatErrorAgentStop = memo(function ({
         <Play className='size-3.5' />
         {heldUntil === undefined ? 'Resume' : `Resume at ${heldUntil}`}
       </Button>
-    ) : notice.primary === 'new-chat' ? (
+    ) : primary === 'new-chat' ? (
       <Button
         variant='outline'
         size='sm'
@@ -268,7 +282,7 @@ export const ChatErrorAgentStop = memo(function ({
   ) : null;
 
   const actions =
-    showSwitchAgent || notice.primary ? (
+    showSwitchAgent || primary ? (
       notice.switchAgentFirst === true ? (
         <>
           {switchAgentAction}
@@ -300,7 +314,7 @@ export const ChatErrorAgentStop = memo(function ({
       className={className}
       title={notice.heading}
       description={
-        notice.keepsTurn === true ? (
+        keepsTurn ? (
           <>
             <p>{reason}</p>
             <p>{turnSavedSentence}</p>

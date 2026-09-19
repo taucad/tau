@@ -15,6 +15,7 @@ import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
 import { StorageModule } from '#storage/storage.module.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
 import { applyBlobReferences } from '#api/publications/publication-materializer.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 
 /**
  * S6's publication half (charter D10): a content-addressed blob nothing
@@ -24,7 +25,7 @@ import { applyBlobReferences } from '#api/publications/publication-materializer.
  * "Publications and LFS on the Same Discipline").
  */
 
-describe('zero-count blob collector', () => {
+describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('zero-count blob collector', () => {
   let moduleRef: TestingModule;
   let driver: ObjectStorageService;
   let client: postgres.Sql;

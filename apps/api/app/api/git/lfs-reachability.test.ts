@@ -22,6 +22,7 @@ import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryLocator } from '#api/git/store/port.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { markLfsReachability, referencedLfsOids } from '#api/git/lfs-reachability.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 
 /**
  * D6/D18 at push time: the objects a repository still reaches lose their
@@ -78,7 +79,7 @@ const pointerFor = (content: string): { text: string; oid: string; size: number 
   };
 };
 
-describe('LFS reachability over a lease', () => {
+describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS reachability over a lease', () => {
   let moduleRef: TestingModule;
   let driver: ObjectStorageService;
   let store: S3RepositoryStore;

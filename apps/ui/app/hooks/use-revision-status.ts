@@ -703,8 +703,10 @@ export const useProjectRole = (): ProjectAccessRole | undefined => {
   const { projectId } = useProject();
   const status = useRevisionStatus();
   /* N3: only a Tau remote has a cloud project that can hold a role, so a
-     GitHub-backed or unconnected project never makes the listing request. */
-  return useProjectAccessRole(projectId, status?.remote.kind === 'tau');
+     GitHub-backed or unconnected project never makes the listing request.
+     `connected`, because `kind` is assigned the moment *Connect* is pressed and
+     the project is only registered on the way there. */
+  return useProjectAccessRole(projectId, status?.remote.kind === 'tau' && status.remote.phase === 'connected');
 };
 
 /**

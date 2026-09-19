@@ -20,7 +20,7 @@ import type { RemoteFacet } from '@taucad/revisions';
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 
-const { isSyncReadOnly, useProjectAccessRole } = await import('#hooks/use-cloud-projects.js');
+const { cloudProjectsQueryKey, isSyncReadOnly, useProjectAccessRole } = await import('#hooks/use-cloud-projects.js');
 
 const openProjectId = 'proj_open0000000000000';
 
@@ -63,6 +63,36 @@ describe('useProjectAccessRole', () => {
     await waitFor(() => {
       expect(result.current).toBe('revoked');
     });
+  });
+
+  /* Connect Tau Cloud registers the project, so a listing read before it — the
+     library's, seconds ago, still fresh in the shared cache — cannot name it.
+     That is a stale listing, not a revoke. */
+  it('re-reads a cached listing when the project connects, never answering revoked from it', async () => {
+    answerProjects([{ id: openProjectId, name: 'Open', role: 'owner' }]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(cloudProjectsQueryKey, []);
+    const seen: unknown[] = [];
+    const { result, rerender } = renderHook(
+      ({ connected }: { readonly connected: boolean }) => {
+        const role = useProjectAccessRole(openProjectId, connected);
+        seen.push(role);
+        return role;
+      },
+      {
+        initialProps: { connected: false },
+        wrapper: ({ children }: { readonly children: React.ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+
+    rerender({ connected: true });
+
+    await waitFor(() => {
+      expect(result.current).toBe('owner');
+    });
+    expect(seen).not.toContain('revoked');
   });
 
   it('answers nothing when the API cannot be reached, rather than revoked', async () => {

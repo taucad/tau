@@ -109,9 +109,14 @@ export const fetchCloudProjects = async (): Promise<readonly CloudProject[]> => 
  * @public
  */
 export const useCloudProjects = (
-  options?: Readonly<{ enabled?: boolean }>,
-): Readonly<{ projects: readonly CloudProject[]; isSettled: boolean; isFailed: boolean }> => {
-  const { data = [], isSuccess, isError } = useQuery({
+  options?: Readonly<{ enabled?: boolean; staleTime?: number }>,
+): Readonly<{ projects: readonly CloudProject[]; isSettled: boolean; isFailed: boolean; isFetching: boolean }> => {
+  const {
+    data = [],
+    isSuccess,
+    isError,
+    isFetching,
+  } = useQuery({
     queryKey: cloudProjectsQueryKey,
     queryFn: fetchCloudProjects,
     enabled: options?.enabled ?? true,
@@ -120,9 +125,9 @@ export const useCloudProjects = (
        missed either — which is react-query's `refetchOnWindowFocus` default
        (`true`), left at its default deliberately. The stale window only stops
        rapid navigations re-asking. */
-    staleTime: 30_000,
+    staleTime: options?.staleTime ?? 30_000,
   });
-  return { projects: data, isSettled: isSuccess, isFailed: isError };
+  return { projects: data, isSettled: isSuccess, isFailed: isError, isFetching };
 };
 
 /**
@@ -134,13 +139,18 @@ export const useCloudProjects = (
  * exist for it.
  *
  * @param projectId - The project being asked about.
- * @param isTauRemote - Whether this project's remote is the Tau one.
+ * @param isTauRemote - Whether this project is *connected* to the Tau remote.
+ * Connected, not merely chosen: the row is written while connecting, so a
+ * listing asked for any earlier races the registration and loses.
  * @returns The role held, `revoked` when a successful listing did not name it,
  * or `undefined` when nothing is known.
  * @public
  */
 export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): ProjectAccessRole | undefined => {
-  const { projects, isSettled } = useCloudProjects({ enabled: isTauRemote });
+  /* Never from the shared cache's stale window: *Connect Tau Cloud* is what
+     registers the project, so a listing the library read seconds earlier cannot
+     name it, and answering from it told the owner their access was revoked. */
+  const { projects, isSettled, isFetching } = useCloudProjects({ enabled: isTauRemote, staleTime: 0 });
   if (!isTauRemote) {
     return undefined;
   }
@@ -149,6 +159,7 @@ export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): P
     return listed.role;
   }
   /* Settled and absent is the owner's revoke arriving at an open tab. Unsettled
-     and absent is a listing nobody has read yet, which says nothing. */
-  return isSettled ? 'revoked' : undefined;
+     and absent is a listing nobody has read yet — or one being re-read right
+     now — which says nothing. */
+  return isSettled && !isFetching ? 'revoked' : undefined;
 };

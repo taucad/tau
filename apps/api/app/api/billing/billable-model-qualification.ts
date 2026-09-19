@@ -84,7 +84,7 @@ const catalogRouteIds: Readonly<Record<string, string>> = {
   'gpt-5.6-terra': 'openai-gpt-5.6-terra',
   'gpt-5.6-luna': 'openai-gpt-5.6-luna',
   'gpt-5.5': 'openai-gpt-5.5',
-  'gemini-3.1-pro-preview': 'google-gemini-3.1-pro',
+  'gemini-3.1-pro-preview-customtools': 'google-gemini-3.1-pro',
   'gemini-3.7-flash': 'google-gemini-3.7-flash',
   'gemini-3.5-flash-lite': 'google-gemini-3.5-flash-lite',
   'gemini-3.5-flash': 'google-gemini-3.5-flash',
@@ -217,7 +217,7 @@ const routes = [
   route('openai', 'gpt-5.5', 'GPT-5.5', 'openai-responses', 1_050_000, 128_000, rates('10', '1', undefined, '45')),
   route(
     'vertexai',
-    'gemini-3.1-pro-preview',
+    'gemini-3.1-pro-preview-customtools',
     'Gemini 3.1 Pro',
     'openai-completions',
     1_000_000,
@@ -294,7 +294,7 @@ const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly 
   ['gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
   ['gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
   ['gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
-  ['gemini-3.1-pro-preview', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
+  ['gemini-3.1-pro-preview-customtools', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
   ['grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
 ]);
 const jointInputProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);

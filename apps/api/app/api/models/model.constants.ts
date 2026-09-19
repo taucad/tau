@@ -576,7 +576,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-3.1-pro-preview',
+      model: 'gemini-3.1-pro-preview-customtools',
       support: {
         modalities: imageInputModalities,
       },

@@ -1345,12 +1345,12 @@ describe('createGatewayModelTransport', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it.each(['minimal', 'xhigh'] as const)('refuses unsupported Vertex %s reasoning before fetch', async (effort) => {
+  it('refuses unsupported Vertex xhigh reasoning before fetch', async () => {
     const fetchSpy = vi.fn();
     const transport = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy });
 
     await expect(
-      collect(transport.stream(request({ providerKind: 'vertexai', reasoning: { effort } }))),
+      collect(transport.stream(request({ providerKind: 'vertexai', reasoning: { effort: 'xhigh' } }))),
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });

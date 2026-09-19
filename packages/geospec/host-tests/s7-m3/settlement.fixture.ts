@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import type { GeoSpecVolumeExpectation } from '#runner/types.js';
 import { installGeoSpecVitest } from '#vitest/index.js';
-// oxlint-disable-next-line no-restricted-imports, import/extensions -- Reserved host fixtures share private support outside the package build graph.
+/* oxlint-disable no-restricted-imports -- Reserved host fixtures share private support outside the package build graph. */
 import {
   completedCount,
   createSettlementClient,
@@ -9,6 +9,7 @@ import {
   resetCompletedCount,
   subject,
 } from './fixture-support.js';
+/* oxlint-enable no-restricted-imports */
 
 beforeEach(() => {
   resetCompletedCount();

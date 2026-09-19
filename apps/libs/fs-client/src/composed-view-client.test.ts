@@ -4,6 +4,8 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { WorkspaceMutationError } from '@taucad/filesystem';
+import type { FileStat } from '@taucad/types';
 import { createComposedViewClient } from '#composed-view-client.js';
 import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
 import type { FileSystemClient } from '#file-system-client.js';
@@ -267,6 +269,27 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     ]) {
       expect(method).not.toHaveBeenCalled();
     }
+  });
+
+  /*
+   * Callers match a batch's outcomes to the edits they sent, so the answer has
+   * to come back in the namespace the question was asked in.
+   */
+  it('should answer a routed bulk move in the absolute paths it was asked in', async () => {
+    const { client, view } = await harness();
+    const error = new WorkspaceMutationError('NAME_EXISTS', 'c.ts', { target: 'b/c.ts' });
+    vi.mocked(view.bulkMove).mockResolvedValueOnce({
+      moved: [{ edit: { source: 'a.ts', target: 'b/a.ts' }, stat: {} as FileStat }],
+      failed: [{ edit: { source: 'c.ts', target: 'b/c.ts' }, error }],
+    });
+
+    const result = await client.bulkMove([
+      { source: `${root}/a.ts`, target: `${root}/b/a.ts` },
+      { source: `${root}/c.ts`, target: `${root}/b/c.ts` },
+    ]);
+
+    expect(result.moved.map(({ edit }) => edit)).toEqual([{ source: `${root}/a.ts`, target: `${root}/b/a.ts` }]);
+    expect(result.failed.map(({ edit }) => edit)).toEqual([{ source: `${root}/c.ts`, target: `${root}/b/c.ts` }]);
   });
 
   /*

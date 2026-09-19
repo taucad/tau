@@ -1,3 +1,14 @@
+GeoSpec uses facilities provided by Open CASCADE Technology (OCCT).
+OCCT upstream revision: 3d097a0328e71b826377d4814ab05ec3c3d23871.
+Its unmodified GNU LGPL 2.1 license and Open CASCADE exception accompany this
+package as OCCT-LGPL-2.1.txt and OCCT-LGPL-exception.txt.
+
+GeoSpec includes Manifold Rust, derived from upstream revision
+f3aab1414e5b45037b848624b143d3287d8d3842, with GeoSpec-owned port corrections.
+Its unmodified Apache 2.0 license accompanies this package as
+Manifold-Rust-LICENSE.txt. The corresponding source manifest distinguishes the
+upstream revision from the owned changes.
+
 This distribution includes an adaptation of V8 FastMathHypot (three arguments).
 Source: Node v24.10.0 commit 9b72b88f4c4565687e3a8c4d8e1232f63a501e15,
 deps/v8/src/builtins/math.tq. Original V8 license follows unchanged.

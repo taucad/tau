@@ -22,6 +22,7 @@
     "README.md",
     "!dist/**/*.node",
     "NOTICE",
+    "licenses",
     "trust/canonicalize.mjs",
     "trust/evaluate-worker.mjs",
     "trust/index.d.mts",

@@ -5,11 +5,6 @@ import type { FastifyReply } from 'fastify';
 import type { ModelInvocationService, ModelProviderWire } from '#api/llm/model-invocation.types.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 
-/* oxlint-disable no-barrel-files/no-barrel-files -- retained test-facing transport utility exports */
-export { consumeSseBody } from '#api/llm/llm-gateway.stream.js';
-export type { SseEvent } from '#api/llm/llm-gateway.stream.js';
-/* oxlint-enable no-barrel-files/no-barrel-files */
-
 export type LlmGatewayRelayInput = {
   readonly provider: ModelProviderWire;
   readonly body: unknown;

@@ -1,6 +1,12 @@
 import type { KnipConfig } from 'knip';
 
 const config: KnipConfig = {
+  // Blind spot worth knowing before trusting a clean run: this flag plus a broad
+  // entry glob hides exports whose only remaining importers are tests. Knip
+  // reported neither `consumeSseBody` (re-exported from a non-test file that is
+  // itself reachable) nor `TokenBudgetService` (reached from an `apps/api`
+  // `*.module.ts` entry) while both were dead. A dead-code sweep still needs a
+  // per-export importer scan that partitions test from non-test importers.
   ignoreExportsUsedInFile: true,
 
   // Build output is not a source of truth. Knip follows published `exports`

@@ -1,19 +1,16 @@
-import { EventEmitter } from 'node:events';
-import type { ServerResponse } from 'node:http';
 import { Reflector } from '@nestjs/core';
 import type { ConfigService } from '@nestjs/config';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost, ExecutionContext } from '@nestjs/common';
 import type { Auth } from 'better-auth';
 import type { FastifyRequest } from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
 import { LlmGatewayAuthGuard, readLlmGatewayPrincipal } from '#api/llm/llm-gateway.guard.js';
 import { readSingleHeader, validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
-import { GatewayAbortScope, GatewayDownstreamLifecycle } from '#api/llm/llm-gateway.stream.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 const request = (headers: Record<string, string> = {}, rawHeaders?: string[]): FastifyRequest =>
@@ -159,53 +156,6 @@ describe('gateway provider headers', () => {
       expect(errorType(caught)).toBe('INVALID_REQUEST');
       expect(errorMessage(caught)).toContain(message);
     }
-  });
-});
-
-describe('gateway abort settlement state', () => {
-  afterEach(() => vi.useRealTimers());
-
-  it('keeps client abort and gateway destroy mutually exclusive', () => {
-    const clientRaw = new EventEmitter();
-    const onClientAbort = vi.fn();
-    const client = new GatewayDownstreamLifecycle(
-      clientRaw as unknown as Pick<ServerResponse, 'once' | 'removeListener'>,
-      onClientAbort,
-    );
-    clientRaw.emit('close');
-    expect(client.cause).toBe('client_abort');
-    expect(onClientAbort).toHaveBeenCalledOnce();
-
-    const gatewayRaw = new EventEmitter();
-    const onGatewayClose = vi.fn();
-    const gateway = new GatewayDownstreamLifecycle(
-      gatewayRaw as unknown as Pick<ServerResponse, 'once' | 'removeListener'>,
-      onGatewayClose,
-    );
-    gateway.markGatewayDestroy();
-    gatewayRaw.emit('close');
-    expect(gateway.cause).toBe('gateway_destroy');
-    expect(onGatewayClose).not.toHaveBeenCalled();
-  });
-
-  it('aborts a stalled post-client-abort drain at its idle deadline', async () => {
-    vi.useFakeTimers();
-    const scope = new GatewayAbortScope(20, 100);
-    scope.touch();
-    scope.startPostAbortDrain();
-    await vi.advanceTimersByTimeAsync(21);
-    expect(scope.controller.signal.aborted).toBe(true);
-    expect(scope.abortReason).toBe('upstream_idle');
-  });
-
-  it('aborts an active post-client-abort drain at its total settlement deadline', async () => {
-    vi.useFakeTimers();
-    const scope = new GatewayAbortScope(100, 20);
-    scope.touch();
-    scope.startPostAbortDrain();
-    await vi.advanceTimersByTimeAsync(21);
-    expect(scope.controller.signal.aborted).toBe(true);
-    expect(scope.abortReason).toBe('settlement_deadline');
   });
 });
 

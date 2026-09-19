@@ -122,8 +122,8 @@ export const interopExpectations: InteropExpectation[] = [
     ],
     datumPlacementNames: ['ABC', 'DBC', 'DCJ', 'DCK', 'DG', 'DH', 'EAB', 'F1', 'F2', 'F3', 'F4'],
     pinnedOrigins: {
-      DBC: [0, 31.750_000_000_127, 0],
-      'Datum Plane 1': [152.400_000_000_61, 2.842_170_943_040_4e-14, 0],
+      DBC: [0, 31.750000000127, 0],
+      'Datum Plane 1': [152.40000000061, 2.8421709430404e-14, 0],
     },
   },
   {
@@ -177,7 +177,7 @@ export const interopExpectations: InteropExpectation[] = [
     ],
     pinnedOrigins: {
       'Datum Plane (7)': [82.55, -76.2, 64.77],
-      'Datum Plane (29)': [117.475, 0, 82.544_92],
+      'Datum Plane (29)': [117.475, 0, 82.54492],
     },
     partAabbMinDiagonalMm: 50,
   },
@@ -202,8 +202,8 @@ export const interopExpectations: InteropExpectation[] = [
       'DKL',
     ],
     pinnedOrigins: {
-      ABC: [142.875_000_000_572, 98.425_000_000_393_7, 0],
-      'Datum Plane 1': [-155.797_250_000_623, 108.299_250_000_433, 0],
+      ABC: [142.875000000572, 98.4250000003937, 0],
+      'Datum Plane 1': [-155.797250000623, 108.299250000433, 0],
     },
   },
 ];

@@ -47,9 +47,12 @@ not accept a `files` field or change either behavior. An empty discovery
 result is not a successful test run; existing runner selection rules apply.
 
 Tau descriptors contain imported JSON data and a normalized project-relative
-manifestPath. The loader validates the descriptor's supported outer fields,
-but does not parse original manifest bytes, validate the Tau manifest schema,
-resolve an asset, export geometry, or establish finalized geometry/provenance.
-Those host integration obligations remain separate. Similarly, cacheDirectory
+manifestPath. The loader validates only the descriptor's supported outer
+fields. `exportTauProjectArtifact({ descriptor, createRuntime })` separately
+validates the current Tau schema, asks Runtime for the authoritative source
+closure, and exports that immutable snapshot through a fresh runtime. It
+returns the exact finalized STEP/GLB bytes with manifest, asset, frame, route,
+and source metadata. Runtime owns dependency discovery; the helper does not
+certify mathematical geometry or grant trusted-evaluator authority. Similarly, cacheDirectory
 requests a location; loading configuration creates no store and confers no
 cache authority. Returned options are not a canonical Rust run plan.

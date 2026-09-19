@@ -19,6 +19,11 @@ export type OrderBy = ConstantRecord<typeof orderBy>;
 // Redact value of these paths from logs
 export const loggingRedactPaths = [
   'req.headers.authorization',
+  // The Basic→bearer translation on the git routes moves an `sk_…` key here,
+  // and the git proxy carries a third-party token in its own header; both are
+  // live credentials and neither is covered by `authorization`.
+  'req.headers["x-api-key"]',
+  'req.headers["x-tau-proxy-authorization"]',
   'req.headers.cookie',
   'req.headers["set-cookie"]',
   'req.body.token',

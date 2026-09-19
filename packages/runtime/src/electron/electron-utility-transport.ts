@@ -26,8 +26,11 @@
 
 import { defineRuntimeTransport } from '#transport/index.js';
 
-import { electronUtilityClient } from '#electron/electron-utility-client.js';
-import { electronUtilityClientOptionsSchema } from '#electron/electron-utility-transport.schemas.js';
+import { electronUtilityClient, electronUtilityMainClient } from '#electron/electron-utility-client.js';
+import {
+  electronUtilityClientOptionsSchema,
+  electronUtilityMainClientOptionsSchema,
+} from '#electron/electron-utility-transport.schemas.js';
 
 const electronUtilityId = 'electron-utility';
 
@@ -36,4 +39,11 @@ export const electronUtilityTransport = defineRuntimeTransport({
   id: electronUtilityId,
   clientOptionsSchema: electronUtilityClientOptionsSchema,
   client: electronUtilityClient,
+});
+
+/** Main-brokered utility-to-utility variant of the Electron runtime transport. @public */
+export const electronUtilityMainTransport = defineRuntimeTransport({
+  id: electronUtilityId,
+  clientOptionsSchema: electronUtilityMainClientOptionsSchema,
+  client: electronUtilityMainClient,
 });

@@ -58,7 +58,7 @@
   },
   "dependencies": {
     "@taucad/geometry-core": "workspace:*",
-    "libassimp": "^0.2.0"
+    "libassimp": "catalog:"
   },
   "devDependencies": {
     "@taucad/esbuild": "workspace:*",
@@ -69,5 +69,9 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Transcoder; its options are already tool schemas"
   }
 }

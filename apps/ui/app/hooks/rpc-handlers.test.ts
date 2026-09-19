@@ -249,6 +249,7 @@ function buildDeps(overrides?: {
   fileManager?: ReturnType<typeof createMockFileManager>;
   fileTree?: Map<string, FileEntry>;
   projectRef?: ReturnType<typeof createMockProjectRef>;
+  editorRef?: RpcHandlerDependencies['editorRef'];
   headlessImageService?: RpcHandlerDependencies['headlessImageService'];
   treeService?: MockTreeService;
   createGeoSpecClient?: RpcHandlerDependencies['createGeoSpecClient'];
@@ -265,6 +266,7 @@ function buildDeps(overrides?: {
     chatId: 'chat_rpc_handlers_test_deps',
     fileManager: mockFm as RpcHandlerDependencies['fileManager'],
     projectRef: (overrides?.projectRef ?? createMockProjectRef()) as unknown as RpcHandlerDependencies['projectRef'],
+    editorRef: overrides?.editorRef,
     headlessImageService: overrides?.headlessImageService,
     createGeoSpecClient: overrides?.createGeoSpecClient,
   });
@@ -1407,6 +1409,30 @@ describe('rpc-handlers', () => {
           success: true,
           status: 'ready',
           kernelIssues: [],
+        });
+      });
+
+      /* E1: a unit this adapter spawns for an agent turn is seeded from the entry's durable record,
+       * the same as one a viewer pane spawns. Nothing pushes the value in afterwards. */
+      it('should seed a unit it spawns with the durable render timeout', async () => {
+        const cadUnit = createMockCadUnit({ value: 'idle' });
+        const geometryUnits = new Map<string, unknown>();
+        const projectRef = createMockProjectRef({ geometryUnits });
+        projectRef.send.mockImplementation(() => {
+          geometryUnits.set('main.scad', cadUnit);
+        });
+        const editorRef = {
+          getSnapshot: () => ({ context: { unitSettings: { 'main.scad': { renderTimeout: 30_000 } } } }),
+        } as unknown as RpcHandlerDependencies['editorRef'];
+        mockWaitFor.mockResolvedValue({ value: 'idle', context: { kernelIssues: new Map<string, unknown[]>() } });
+
+        const deps = buildDeps({ projectRef, editorRef });
+        await deps.kernelClient.getKernelResult('main.scad');
+
+        expect(projectRef.send).toHaveBeenCalledWith({
+          type: 'createGeometryUnit',
+          entryPath: 'main.scad',
+          renderTimeout: 30_000,
         });
       });
 

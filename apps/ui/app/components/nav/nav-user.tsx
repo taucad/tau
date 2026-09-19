@@ -1,5 +1,4 @@
-import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { Bug, CircleHelp, CreditCard, Settings, Sparkles, WifiOff } from 'lucide-react';
+import { BookOpen, Bug, CircleHelp, Files, FileText, Settings, Shield, WifiOff } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -10,13 +9,13 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
-import { ProBadge } from '#components/tier-badge.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { metaConfig } from '#constants/meta.constants.js';
+import { legalUrl, metaConfig } from '#constants/meta.constants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
+import { NavBillingItem } from '#cloud/nav-billing.js';
 
 /**
  * Nav user button: delegates avatar, sign-in/up/out chrome to the registry
@@ -28,23 +27,26 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
  */
 export function NavUser(): React.JSX.Element {
   const isOnline = useNetworkConnectivity();
-  const { tier } = useEntitlements();
-
-  const upgradeItem = (
-    <DropdownMenuItem
-      key='upgrade'
-      className='cursor-pointer'
-      onSelect={() => {
-        openSettingsDialog('billing');
-      }}
-    >
-      <Sparkles />
-      Upgrade to Pro
-      <ProBadge className='ml-auto' />
-    </DropdownMenuItem>
-  );
-
+  const { open: openSettings } = useSettingsDialog();
   const helpItems = [
+    <DropdownMenuItem key='documentation' asChild>
+      <a href='https://docs.tau.new' target='_blank' rel='noopener noreferrer'>
+        <BookOpen />
+        Documentation
+      </a>
+    </DropdownMenuItem>,
+    <DropdownMenuItem key='privacy' asChild>
+      <a href={legalUrl('privacy')} target='_blank' rel='noopener noreferrer'>
+        <Shield />
+        Privacy
+      </a>
+    </DropdownMenuItem>,
+    <DropdownMenuItem key='terms' asChild>
+      <a href={legalUrl('terms')} target='_blank' rel='noopener noreferrer'>
+        <FileText />
+        Terms
+      </a>
+    </DropdownMenuItem>,
     <DropdownMenuItem key='bug' asChild>
       <a href={`${metaConfig.githubUrl}/issues/new?labels=bug`} target='_blank' rel='noopener noreferrer'>
         <Bug />
@@ -86,25 +88,12 @@ export function NavUser(): React.JSX.Element {
                       Offline — online features unavailable
                     </DropdownMenuItem>,
                   ]),
-              tier === 'free' ? (
-                upgradeItem
-              ) : (
-                <DropdownMenuItem
-                  key='billing'
-                  className='cursor-pointer'
-                  onSelect={() => {
-                    openSettingsDialog('billing');
-                  }}
-                >
-                  <CreditCard />
-                  Billing
-                </DropdownMenuItem>
-              ),
+              <NavBillingItem key='billing' />,
+              { label: 'Files', href: '/files', icon: <Files /> },
               <DropdownMenuItem
                 key='settings'
-                className='cursor-pointer'
                 onSelect={() => {
-                  openSettingsDialog('general');
+                  openSettings('general');
                 }}
               >
                 <Settings />

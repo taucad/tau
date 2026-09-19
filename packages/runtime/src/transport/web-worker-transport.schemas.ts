@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
+import type { ComputeBinding } from '#types/runtime-compute.types.js';
 
 type WebWorkerLike = {
   postMessage(value: unknown, transfer?: readonly Transferable[]): void;
@@ -61,6 +62,7 @@ export const webWorkerClientOptionsSchema = z
      * Optional filesystem handle produced by a `fromX` factory.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
+    compute: z.custom<ComputeBinding>().optional(),
     /** Explicit Chrome DevTools Performance Timeline mirroring. */
     devtoolsTelemetry: z.boolean().optional(),
     compiledWasmModules: z

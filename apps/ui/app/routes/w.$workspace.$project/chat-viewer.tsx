@@ -3,7 +3,6 @@ import { useSelector } from '@xstate/react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
-import { SceneTimelineControl } from '#components/geometry/cad/scene-timeline-control.js';
 import { RuntimeErrorOverlay } from '#components/model-viewer.js';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
@@ -22,7 +21,7 @@ import {
   useGraphicsSelector,
   useModelInteractionSelector,
 } from '#hooks/use-graphics.js';
-import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
+import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
@@ -33,16 +32,12 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
-  selectCanSaveSelectedSceneStage,
+  selectCadGeometry,
+  selectCadKernelClient,
+  selectCadUnits,
   selectCadFailureIssues,
-  selectProgressiveSceneCapability,
-  selectSceneTimelineArtifactSave,
-  selectSceneTimelineEntries,
-  selectSceneTimelineFollowLive,
-  selectSceneTimelineSelection,
-  selectSceneTimelineStreamState,
+  selectIsCadLoading,
 } from '#machines/cad.machine.js';
-import { selectProgressiveSceneSnapshot } from '#machines/graphics.machine.js';
 import {
   attachViewerSecondaryGestureTarget,
   beginViewerSecondaryGesture,
@@ -61,13 +56,6 @@ import type {
 const bottomControlsGutterPx = 16;
 const componentNameBadgeRightEdgeThresholdPx = 220;
 const componentNameBadgeBottomEdgeThresholdPx = 56;
-
-type ViewerPointerPosition = {
-  readonly x: number;
-  readonly y: number;
-  readonly horizontal: 'left' | 'right';
-  readonly vertical: 'above' | 'below';
-};
 
 const getViewerSecondaryGesturePoint = (event: React.PointerEvent<HTMLDivElement>): ViewerSecondaryGesturePoint => ({
   clientX: event.clientX,
@@ -161,14 +149,33 @@ export const ChatViewer = memo(function ({
 
   // Get the current view settings from editor state for this panel
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
+  /* Create-only seed for this view's camera session, built when the viewer mounts its canvas. The
+   * canvas-less branches mount no provider, so a directory or a missing file builds no camera (R8). */
+  const cameraSeed: ViewCameraSeed = {
+    identity: entryPath,
+    camera: {
+      cameraFovAngle: viewSettings[viewId]?.graphicsSettings.cameraFovAngle,
+      cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
+    },
+  };
 
   // Handle file selection in the viewport FileSelector
   const handleFileSelect = useCallback(
     (path: string) => {
       // Ensure geometry unit exists for the selected file
       if (!geometryUnits.has(path)) {
-        projectRef.send({ type: 'createGeometryUnit', entryPath: path });
+        projectRef.send({
+          type: 'createGeometryUnit',
+          entryPath: path,
+          renderTimeout: unitSettings[path]?.renderTimeout,
+        });
       }
+
+      /* The cut is entry-scoped and the graphics actor is retained across a file switch, so the
+       * live cut is closed here too. Clearing only the record would let the next persist write the
+       * previous file's cut -- pivoted on geometry that is gone -- straight back into it. */
+      graphicsActor?.send({ type: 'setSectionViewActive', payload: false });
 
       // Preserve existing view settings (FOV, visibility, environment preset, etc.)
       // But clear geometry-dependent state (camera pose, measurements) on file switch
@@ -183,6 +190,7 @@ export const ChatViewer = memo(function ({
             ...(existingGraphics ?? defaultGraphicsSettings),
             // Clear geometry-dependent state on file switch
             cameraView: undefined,
+            sectionView: undefined,
             pinnedMeasurements: undefined,
           },
         },
@@ -195,7 +203,7 @@ export const ChatViewer = memo(function ({
       const fileName = path.split('/').pop() ?? path;
       panelApi.setTitle(fileName);
     },
-    [projectRef, editorRef, geometryUnits, viewId, panelApi, viewSettings],
+    [projectRef, editorRef, geometryUnits, graphicsActor, viewId, panelApi, viewSettings, unitSettings],
   );
 
   // If no graphics actor yet, render a placeholder
@@ -210,81 +218,69 @@ export const ChatViewer = memo(function ({
   // If no file selected, render empty state with file selector
   if (!entryPath) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor}>
-        <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-          <span className='text-sm'>No file selected</span>
-          <FileSelector
-            selectedFile={undefined}
-            placeholder='Select file to render...'
-            className='h-8 w-[200px]'
-            title='Viewport File'
-            description='Choose which file to render in the viewport'
-            searchPlaceholder='Search files...'
-            emptyMessage='No files found.'
-            onSelect={handleFileSelect}
-          />
-        </div>
-      </GraphicsProvider>
+      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+        <span className='text-sm'>No file selected</span>
+        <FileSelector
+          selectedFile={undefined}
+          placeholder='Select file to render...'
+          className='h-8 w-[200px]'
+          title='Viewport File'
+          description='Choose which file to render in the viewport'
+          searchPlaceholder='Search files...'
+          emptyMessage='No files found.'
+          onSelect={handleFileSelect}
+        />
+      </div>
     );
   }
 
   // If the entry path is a directory, show a friendly screen with a file selector
   if (isDirectory) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor}>
-        <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-          <FolderOpen className='size-12 stroke-1' />
-          <p className='text-sm'>The viewer cannot display a directory.</p>
-          <FileSelector
-            selectedFile={undefined}
-            initialPath={entryPath}
-            placeholder='Select a file to render...'
-            className='h-8 w-[200px]'
-            title='Viewport File'
-            description='Choose a file to render in the viewport'
-            searchPlaceholder='Search files...'
-            emptyMessage='No files found.'
-            onSelect={handleFileSelect}
-          />
-        </div>
-      </GraphicsProvider>
+      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+        <FolderOpen className='size-12 stroke-1' />
+        <p className='text-sm'>The viewer cannot display a directory.</p>
+        <FileSelector
+          selectedFile={undefined}
+          initialPath={entryPath}
+          placeholder='Select a file to render...'
+          className='h-8 w-[200px]'
+          title='Viewport File'
+          description='Choose a file to render in the viewport'
+          searchPlaceholder='Search files...'
+          emptyMessage='No files found.'
+          onSelect={handleFileSelect}
+        />
+      </div>
     );
   }
 
   // If the entry path doesn't exist in the file tree, show a friendly "not found" screen
   if (isMissing) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor}>
-        <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-          <FileX className='size-12 stroke-1' />
-          <div className='flex flex-col items-center gap-1'>
-            <p className='text-sm font-medium'>File not found</p>
-            <p className='max-w-60 truncate text-xs'>{entryPath}</p>
-          </div>
-          <FileSelector
-            selectedFile={undefined}
-            placeholder='Select a file to render...'
-            className='h-8 w-[200px]'
-            title='Viewport File'
-            description='Choose a file to render in the viewport'
-            searchPlaceholder='Search files...'
-            emptyMessage='No files found.'
-            onSelect={handleFileSelect}
-          />
+      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+        <FileX className='size-12 stroke-1' />
+        <div className='flex flex-col items-center gap-1'>
+          <p className='text-sm font-medium'>File not found</p>
+          <p className='max-w-60 truncate text-xs'>{entryPath}</p>
         </div>
-      </GraphicsProvider>
+        <FileSelector
+          selectedFile={undefined}
+          placeholder='Select a file to render...'
+          className='h-8 w-[200px]'
+          title='Viewport File'
+          description='Choose a file to render in the viewport'
+          searchPlaceholder='Search files...'
+          emptyMessage='No files found.'
+          onSelect={handleFileSelect}
+        />
+      </div>
     );
   }
 
   return (
     <CadProvider cadRef={cadActor}>
-      <GraphicsProvider
-        graphicsRef={graphicsActor}
-        cameraViewRestore={{
-          identity: entryPath,
-          cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
-        }}
-      >
+      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
         <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
       </GraphicsProvider>
     </CadProvider>
@@ -308,18 +304,11 @@ const ViewerContent = memo(function ({
 }): React.JSX.Element {
   const { editorRef, projectRef } = useProject();
   const cadRef = useCad();
-  const geometry = useCadSelector((state) => state.context.geometry, undefined);
+  const geometry = useCadSelector(selectCadGeometry, undefined);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const isCadLoading = useCadSelector((state) => state.hasTag('cad-loading'), false);
-  const units = useCadSelector((state) => state.context.units, undefined);
-  const kernelClient = useCadSelector((state) => state.context.kernelClient, undefined);
-  const timelineEntries = useCadSelector(selectSceneTimelineEntries, []);
-  const selectedSceneSequence = useCadSelector(selectSceneTimelineSelection, undefined);
-  const followLiveScene = useCadSelector(selectSceneTimelineFollowLive, true);
-  const sceneTimelineStreamState = useCadSelector(selectSceneTimelineStreamState, 'idle');
-  const sceneTimelineArtifactSave = useCadSelector(selectSceneTimelineArtifactSave, { status: 'idle' });
-  const canSaveSelectedSceneStage = useCadSelector(selectCanSaveSelectedSceneStage, false);
-  const progressiveSceneCapability = useCadSelector(selectProgressiveSceneCapability, undefined);
+  const isCadLoading = useCadSelector(selectIsCadLoading, false);
+  const units = useCadSelector(selectCadUnits, undefined);
+  const kernelClient = useCadSelector(selectCadKernelClient, undefined);
   const failureMessage =
     failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
   const overlayFailureMessage = profile === 'shared' ? failureMessage : undefined;
@@ -329,9 +318,14 @@ const ViewerContent = memo(function ({
   // stays open. Surface a "Reopen renderer" overlay so the user can re-spawn
   // the cad actor without having to re-add the panel.
   const isGeometryUnitClosed = !cadRef;
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   const handleReopenRenderer = useCallback(() => {
-    projectRef.send({ type: 'createGeometryUnit', entryPath });
-  }, [projectRef, entryPath]);
+    projectRef.send({
+      type: 'createGeometryUnit',
+      entryPath,
+      renderTimeout: unitSettings[entryPath]?.renderTimeout,
+    });
+  }, [projectRef, entryPath, unitSettings]);
 
   // Bridge geometry data from the headless CadMachine to the per-view GraphicsMachine
   const graphicsActor = useGraphics();
@@ -346,47 +340,6 @@ const ViewerContent = memo(function ({
     }
   }, [entryPath, graphicsActor, geometry, units]);
 
-  useEffect(() => {
-    if (timelineEntries.length === 0) {
-      graphicsActor.send({ type: 'clearProgressiveScene' });
-      return;
-    }
-    graphicsActor.send({
-      type: 'syncProgressiveScene',
-      updates: timelineEntries.flatMap((entry) => (entry.update ? [entry.update] : [])),
-      selectedSequence: selectedSceneSequence,
-    });
-  }, [graphicsActor, selectedSceneSequence, timelineEntries]);
-
-  useEffect(() => {
-    if (sceneTimelineStreamState === 'failed' || sceneTimelineStreamState === 'cancelled') {
-      graphicsActor.send({ type: 'clearProgressiveScene' });
-    }
-  }, [graphicsActor, sceneTimelineStreamState]);
-
-  // Sync graphics + render timeout settings back to editor state for persistence
-  useViewSettingsSync({
-    viewId,
-    graphicsRef: graphicsActor,
-    cadRef,
-    editorRef,
-    persistCameraView: geometry === undefined ? 'pending' : geometry.format === 'gltf',
-  });
-
-  // Restore persisted render timeout on mount
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
-  const restoredTimeoutRef = useRef(false);
-  useEffect(() => {
-    if (restoredTimeoutRef.current || !cadRef) {
-      return;
-    }
-    const persisted = viewSettings[viewId]?.graphicsSettings.renderTimeout;
-    if (persisted !== undefined) {
-      restoredTimeoutRef.current = true;
-      cadRef.send({ type: 'setRenderTimeout', renderTimeout: persisted });
-    }
-  }, [cadRef, viewId, viewSettings]);
-
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference
   // on every emission, causing unnecessary re-renders.
@@ -397,21 +350,13 @@ const ViewerContent = memo(function ({
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-  const progressiveSceneSnapshot = useGraphicsSelector(selectProgressiveSceneSnapshot);
-  const displayedProgressiveScene =
-    sceneTimelineStreamState !== 'failed' &&
-    sceneTimelineStreamState !== 'cancelled' &&
-    !(sceneTimelineStreamState === 'complete' && followLiveScene)
-      ? progressiveSceneSnapshot
-      : undefined;
-
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
   const canvasRegionRef = useRef<HTMLDivElement>(null);
   const canvasEventSource = canvasRegionRef as React.RefObject<HTMLElement>;
   const { width: viewerLayoutWidth } = useResizeObserver({ ref: viewerLayoutRef });
   const toolbarAvailableWidth =
     viewerLayoutWidth === undefined ? undefined : Math.max(0, viewerLayoutWidth - bottomControlsGutterPx);
-  const [viewerPointerPosition, setViewerPointerPosition] = useState<ViewerPointerPosition | undefined>(undefined);
+  const [isPointerOverViewer, setIsPointerOverViewer] = useState(false);
   const [viewerActionMenu, setViewerActionMenu] = useState<ViewerSecondaryGestureMenu | undefined>(undefined);
   const secondaryGestureRef = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
   const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryPath }), [entryPath]);
@@ -449,25 +394,35 @@ const ViewerContent = memo(function ({
     };
   });
 
+  // Pointer moves arrive at display rate, including throughout a camera orbit.
+  // The hover badge is placed from custom properties written straight to the
+  // layout element so a move never re-renders this subtree; only pointer
+  // entry/exit is React state.
   const updateViewerPointerPosition = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
-    const viewerBounds = viewerLayoutRef.current?.getBoundingClientRect();
-    if (!viewerBounds) {
-      setViewerPointerPosition(undefined);
+    const layout = viewerLayoutRef.current;
+    const viewerBounds = layout?.getBoundingClientRect();
+    if (!layout || !viewerBounds) {
+      setIsPointerOverViewer(false);
       return;
     }
 
     const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
     const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
-    setViewerPointerPosition({
-      x,
-      y,
-      horizontal: x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'right' : 'left',
-      vertical: y > viewerBounds.height - componentNameBadgeBottomEdgeThresholdPx ? 'above' : 'below',
-    });
+    layout.style.setProperty('--viewer-hover-label-x', `${x}px`);
+    layout.style.setProperty('--viewer-hover-label-y', `${y}px`);
+    layout.style.setProperty(
+      '--viewer-hover-label-translate-x',
+      x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'calc(-100% - 8px)' : '8px',
+    );
+    layout.style.setProperty(
+      '--viewer-hover-label-translate-y',
+      y > viewerBounds.height - componentNameBadgeBottomEdgeThresholdPx ? 'calc(-100% - 10px)' : '10px',
+    );
+    setIsPointerOverViewer(true);
   }, []);
 
   const clearViewerPointerPosition = useCallback((): void => {
-    setViewerPointerPosition(undefined);
+    setIsPointerOverViewer(false);
   }, []);
 
   const handleModelComponentSecondaryPointerCandidate = useCallback(
@@ -526,7 +481,7 @@ const ViewerContent = memo(function ({
   const handleCanvasRegionPointerCancelCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
     secondaryGestureRef.current = cancelViewerSecondaryGesture(secondaryGestureRef.current, event.pointerId);
     releaseViewerPointerCapture({ element: event.currentTarget, pointerId: event.pointerId });
-    setViewerPointerPosition(undefined);
+    setIsPointerOverViewer(false);
   }, []);
 
   const handleCanvasRegionLostPointerCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
@@ -547,7 +502,7 @@ const ViewerContent = memo(function ({
   useEffect(() => {
     if (isGeometryUnitClosed) {
       queueMicrotask(() => {
-        setViewerPointerPosition(undefined);
+        setIsPointerOverViewer(false);
         setViewerActionMenu(undefined);
       });
       secondaryGestureRef.current = idleViewerSecondaryGestureState;
@@ -555,7 +510,7 @@ const ViewerContent = memo(function ({
   }, [isGeometryUnitClosed]);
 
   return (
-    <div ref={viewerLayoutRef} className='group/viewer relative flex h-full flex-col'>
+    <div ref={viewerLayoutRef} data-testid='chat-viewer-layout' className='group/viewer relative flex h-full flex-col'>
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
         <ChatInterfaceStatus />
@@ -576,9 +531,8 @@ const ViewerContent = memo(function ({
         onContextMenu={handleCanvasRegionContextMenu}
         onPointerMove={updateViewerPointerPosition}
         onPointerLeave={clearViewerPointerPosition}
-        onPointerCancel={clearViewerPointerPosition}
       >
-        {(geometry ?? displayedProgressiveScene) ? (
+        {geometry ? (
           <CadViewer
             enableZoom
             enablePan
@@ -591,7 +545,6 @@ const ViewerContent = memo(function ({
             enableMatcap={enableMatcap}
             upDirection={upDirection}
             geometry={geometry}
-            progressiveSceneSnapshot={displayedProgressiveScene}
             sourceFile={entryPath}
             // Keep R3F on default offsetX/Y compute; eventPrefix='client'
             // is window-relative and mis-rays docked panels.
@@ -626,8 +579,8 @@ const ViewerContent = memo(function ({
         onOpenChange={handleViewerActionMenuOpenChange}
       />
 
-      {!isGeometryUnitClosed && viewerPointerPosition && componentNameForPointer ? (
-        <ModelComponentNameBadge componentName={componentNameForPointer} position={viewerPointerPosition} />
+      {!isGeometryUnitClosed && isPointerOverViewer && componentNameForPointer ? (
+        <ModelComponentNameBadge componentName={componentNameForPointer} />
       ) : undefined}
 
       {/* Reopen-renderer overlay — shown when the geometry unit was closed */}
@@ -654,21 +607,6 @@ const ViewerContent = memo(function ({
         data-testid='chat-viewer-bottom-controls-overlay'
         className='pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2 [&>*]:pointer-events-auto'
       >
-        {progressiveSceneCapability?.type === 'supported' ? (
-          <SceneTimelineControl
-            entries={timelineEntries}
-            selectedSequence={selectedSceneSequence}
-            isFollowingLive={followLiveScene}
-            streamState={sceneTimelineStreamState}
-            artifactSave={sceneTimelineArtifactSave}
-            isSaveSelectedStageEnabled={canSaveSelectedSceneStage}
-            onSelectSequence={(sequence) => cadRef?.send({ type: 'selectSceneSequence', sequence })}
-            onLive={() => cadRef?.send({ type: 'followLiveScene' })}
-            onSaveSelectedStage={
-              profile === 'editor' ? () => cadRef?.send({ type: 'saveSelectedSceneStage' }) : undefined
-            }
-          />
-        ) : null}
         <ChatInterfaceGraphics />
         {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
         <ChatViewerControls
@@ -681,13 +619,7 @@ const ViewerContent = memo(function ({
   );
 });
 
-function ModelComponentNameBadge({
-  componentName,
-  position,
-}: {
-  readonly componentName: string;
-  readonly position: ViewerPointerPosition;
-}): React.JSX.Element {
+function ModelComponentNameBadge({ componentName }: { readonly componentName: string }): React.JSX.Element {
   return (
     <div
       aria-hidden='true'
@@ -695,17 +627,12 @@ function ModelComponentNameBadge({
       className={cn(
         popoverSurfaceVariants(),
         'pointer-events-none absolute z-20 max-w-[min(18rem,calc(100%-1rem))] truncate px-2 py-1 text-xs font-medium',
-        position.horizontal === 'right' ? '-translate-x-[calc(100%+8px)]' : 'translate-x-2',
-        position.vertical === 'above' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-2.5',
       )}
-      style={
-        {
-          left: `${position.x}px`,
-          top: `${position.y}px`,
-          '--viewer-hover-label-x': `${position.x}px`,
-          '--viewer-hover-label-y': `${position.y}px`,
-        } as React.CSSProperties
-      }
+      style={{
+        left: 'var(--viewer-hover-label-x, 0px)',
+        top: 'var(--viewer-hover-label-y, 0px)',
+        translate: 'var(--viewer-hover-label-translate-x, 8px) var(--viewer-hover-label-translate-y, 10px)',
+      }}
     >
       {componentName}
     </div>

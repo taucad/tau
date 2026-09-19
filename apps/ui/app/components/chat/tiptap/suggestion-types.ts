@@ -29,6 +29,8 @@ export type SlashCommandItem = {
   group: string;
   source?: string;
   enabled?: boolean;
+  /** Exact text inserted for an agent-native command; commands are never executed by the suggestion itself. */
+  commandText?: string;
 };
 
 export type SuggestionPopupState<I> = {

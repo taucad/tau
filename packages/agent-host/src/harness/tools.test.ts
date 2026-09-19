@@ -62,6 +62,7 @@ describe('EagerDispatch', () => {
     };
     const [tool] = createAgentTools({
       registry,
+      runId: 'run-1',
       substitute: async () => ({ content: { cached: true }, isError: false }),
     });
 
@@ -71,6 +72,28 @@ describe('EagerDispatch', () => {
     expect(result.content).toEqual([{ type: 'text', text: '{"cached":true}' }]);
     expect(result.details).toEqual({ content: { cached: true }, isError: false, substituted: true });
     expect(applyHostToolResult({ result })).toEqual({ isError: false });
+  });
+
+  it('forwards genuine registry progress through Pi tool updates', async () => {
+    const update = vi.fn();
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'render', description: 'Render', inputSchema: { type: 'object' } }],
+      invoke: async (invocation) => {
+        const onUpdate = Reflect.get(invocation, 'onUpdate') as
+          | ((result: { content: string; isError: boolean }) => void)
+          | undefined;
+        onUpdate?.({ content: 'halfway', isError: false });
+        return { content: 'done', isError: false };
+      },
+    };
+    const [tool] = createAgentTools({ registry, runId: 'run-progress' });
+
+    await tool!.execute('call-progress', {}, undefined, update);
+
+    expect(update).toHaveBeenCalledWith({
+      content: [{ type: 'text', text: 'halfway' }],
+      details: { content: 'halfway', isError: false, substituted: false },
+    });
   });
 });
 
@@ -105,7 +128,7 @@ const captureRegistry = (views: readonly string[]): ToolRegistry => ({
 });
 
 const captureToolResult = async (views: readonly string[]): Promise<AgentMessage> => {
-  const [tool] = createAgentTools({ registry: captureRegistry(views) });
+  const [tool] = createAgentTools({ registry: captureRegistry(views), runId: 'run-capture' });
   const result = await tool!.execute('call-capture', { targetFile: 'main.scad', mode: 'multi_angle' });
   // Restated rather than read off `AgentToolResult`, whose `details` is `any`.
   const details: HostToolExecutionDetails = { content: captureResult(views), isError: false, substituted: false };
@@ -227,7 +250,7 @@ describe('CaptureToolResults', () => {
       list: () => [{ name: 'get_kernel_result', description: 'Render', inputSchema: { type: 'object' } }],
       invoke: async () => ({ content: { success: true, status: 'ready' }, isError: false }),
     };
-    const [tool] = createAgentTools({ registry });
+    const [tool] = createAgentTools({ registry, runId: 'run-1' });
 
     const result = await tool!.execute('call-1', { targetFile: 'main.scad' });
 

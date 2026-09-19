@@ -35,7 +35,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./agent/SKILL.md",
+    "./agent": "./agent/skills.json",
+    "./agent/*": "./agent/*",
     "./annotations": "./src/annotations/index.ts",
     "./package.json": "./package.json"
   },
@@ -47,7 +48,8 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./agent": "./agent/SKILL.md",
+      "./agent": "./agent/skills.json",
+      "./agent/*": "./agent/*",
       "./annotations": {
         "types": "./dist/annotations/index.d.mts",
         "import": "./dist/annotations/index.mjs",
@@ -67,6 +69,7 @@
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/occt-core": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "culori": "catalog:",
     "replicad": "catalog:",
     "replicad-opencascadejs": "catalog:",
@@ -80,11 +83,15 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "geist": "catalog:",
     "type-fest": "catalog:",
     "zod": "catalog:"
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
   }
 }

@@ -1,6 +1,6 @@
 import { getEnvironment } from '#environment.config.js';
 import { canonicalProductionUrl, isCanonicalProductionUrl } from '#lib/canonical-url.js';
-import { listStaticPrerenderPaths } from '#lib/static-paths.js';
+import { listSitemapPaths } from '#lib/static-paths.js';
 
 const sitemapExcludePathSet = new Set(['/robots.txt', '/sitemap.xml', '/manifest.webmanifest']);
 
@@ -50,7 +50,7 @@ function classifyPath(path: string): PathClassification {
 type BuildSitemapXmlInput = {
   /** Live frontend URL. Non-canonical origins emit an empty `<urlset>`. */
   readonly frontendUrl: string;
-  /** Static prerender paths from {@link listStaticPrerenderPaths}. */
+  /** Public crawlable paths from {@link listSitemapPaths}. */
   readonly paths: readonly string[];
   /** ISO-8601 date (`YYYY-MM-DD`) used for every `<lastmod>`. */
   readonly lastmod: string;
@@ -98,7 +98,7 @@ function todayIsoDate(): string {
 
 export async function loader(): Promise<Response> {
   const environment = await getEnvironment();
-  const paths = listStaticPrerenderPaths();
+  const paths = listSitemapPaths();
   const xml = buildSitemapXml({
     frontendUrl: environment.TAU_FRONTEND_URL,
     paths,

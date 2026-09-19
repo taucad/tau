@@ -8,12 +8,21 @@ import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
+  clearBrowserAgentHostRun,
   getBrowserAgentHostRun,
+  getHostFinalizedTurns,
+  isBrowserAgentHostRunResumable,
+  persistBrowserTurnSettlement,
+  recordHostTurnSettlement,
   registerAgentHost,
   registerAgentHostRunReset,
+  requestBrowserAgentHostResume,
   resolveBrowserAgentHostInterrupt,
+  subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
+import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -42,11 +51,50 @@ const clientFor = (chatId: string, runId: string, overrides: Partial<AgentHostCl
         type: 'run.lifecycle',
         state: 'completed',
       });
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: 'leader-start',
+        sequence: 2,
+        recordedAt: '2026-09-01T00:00:02.000Z',
+        runId,
+        type: 'turn.finalized',
+        turnId: `message-${chatId}`,
+        chatId,
+        projectId: `project-${chatId}`,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
       return snapshot(chatId, runId);
     }),
     steer: vi.fn(async () => snapshot(chatId, runId)),
     cancel: vi.fn(async () => snapshot(chatId, runId, 'cancelled')),
-    resume: vi.fn(async () => snapshot(chatId, runId)),
+    resume: vi.fn(async () => {
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: 'leader-resume',
+        sequence: 1,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId,
+        type: 'run.lifecycle',
+        state: 'completed',
+      });
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: 'leader-resume',
+        sequence: 2,
+        recordedAt: '2026-09-01T00:00:02.000Z',
+        runId,
+        type: 'turn.finalized',
+        turnId: `message-${chatId}`,
+        chatId,
+        projectId: `project-${chatId}`,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
+      return snapshot(chatId, runId);
+    }),
     resolveInterrupt: vi.fn(async () => snapshot(chatId, runId)),
     attach: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
     tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
@@ -89,17 +137,17 @@ const browserConfig = {
     { type: 'text', text: '' },
     { type: 'text', text: 'dynamic' },
   ],
-  model: { id: 'openai/gpt-5.5', providerKind: 'openai', contextWindow: 200_000 },
+  model: { id: 'openai-gpt-5.5', providerKind: 'openai', contextWindow: 200_000 },
   toolChoice: 'auto',
   allowedTools: ['read_file'],
 } as const;
 
 const browserBody = (input: {
   readonly runId: string;
-  readonly trigger: 'submit' | 'retry' | 'edit' | 'regenerate';
+  readonly trigger: 'submit' | 'edit' | 'regenerate';
   readonly retainedMessageIds?: readonly string[];
 }) => ({
-  agent: { execution: { kind: 'tau', model: 'openai/gpt-5.5', placement: 'browser-host' } },
+  agent: { execution: { kind: 'tau', model: 'openai-gpt-5.5', placement: 'browser-host' } },
   admission: { version: 1, idempotencyKey: input.runId },
   browserHost:
     input.trigger === 'submit'
@@ -202,6 +250,77 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  it('should not re-publish a cleared run when its late settlement replays', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-cleared-run';
+    const runId = 'run-cleared-run';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const lifecycleOnly = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-cleared',
+          sequence: 1,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, runId);
+      }),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-cleared-run',
+        backend: 'opfs',
+        providerBasePath: 'project-cleared-run',
+      }),
+      createClient: async () => lifecycleOnly,
+      markRunId: async () => undefined,
+    });
+    const chat = new Chat<MyUIMessage>({ id: chatId, transport: new BrowserPlacementChatTransport() });
+
+    await chat.sendMessage(
+      { id: 'user-cleared-run', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] },
+      { body: browserBody({ runId, trigger: 'submit' }) },
+    );
+    await vi.waitFor(() => {
+      expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'completed' });
+    });
+
+    /* What project settlement does the moment it finalizes the turn. The
+     * stream is still subscribed, waiting out this run's settlement. */
+    clearBrowserAgentHostRun(chatId);
+    listener?.(chatId, {
+      version: 1,
+      leaderEpoch: 'leader-cleared',
+      sequence: 2,
+      recordedAt: '2026-09-01T00:00:02.000Z',
+      runId,
+      type: 'turn.finalized',
+      turnId: `message-${chatId}`,
+      chatId,
+      projectId: `project-${chatId}`,
+      revisionId: 'revision-cleared-run',
+      changedPaths: ['main.ts'],
+      treeId: 'tree-cleared-run',
+      trigger: 'turn',
+      runIds: [runId],
+    });
+
+    await vi.waitFor(() => {
+      expect(getHostFinalizedTurns().some((settlement) => settlement.runId === runId)).toBe(true);
+    });
+    expect(getBrowserAgentHostRun(chatId)).toBeUndefined();
+    unregister();
+  });
+
   it('refuses a Tau turn whose admission does not parse, naming the real reason', async () => {
     installBrowserGlobals();
     const chatId = 'chat-unparseable-admission';
@@ -265,6 +384,451 @@ describe('BrowserPlacementChatTransport', () => {
       type: 'start',
       runId,
       agent: { kind: 'acp', id: 'codex' },
+    });
+    unregister();
+  });
+
+  it('uses authoritative durable tool rows for an external-agent turn', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-external-tools';
+    const runId = 'run-external-tools';
+    const toolCallId = 'call-external-tools';
+    let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
+    const start = vi.fn(async () => {
+      liveListener?.(chatId, {
+        type: 'tool-input-start',
+        chatId,
+        runId,
+        messageId: 'assistant-external-tools',
+        contentIndex: 0,
+        toolCallId,
+        toolName: 'Read main.scad',
+      });
+      liveListener?.(chatId, {
+        type: 'tool-input-end',
+        chatId,
+        runId,
+        messageId: 'assistant-external-tools',
+        contentIndex: 0,
+        toolCallId,
+        toolName: 'Read main.scad',
+        input: { path: 'main.scad' },
+      });
+      const event = (sequence: number, message: Record<string, unknown>): AgentLogEvent =>
+        parseLogEvent({
+          version: 1,
+          leaderEpoch: 'leader-external-tools',
+          sequence,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId,
+          type: 'message.appended',
+          message,
+        });
+      durableListener?.(
+        chatId,
+        event(1, {
+          id: 'input-external-tools',
+          role: 'tool-input',
+          toolCallId,
+          toolName: 'Read main.scad',
+          call: { toolCallId, kind: 'read', title: 'Read main.scad', status: 'completed' },
+          content: { path: 'main.scad' },
+          metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+        }),
+      );
+      liveListener?.(chatId, {
+        type: 'tool-output-update',
+        chatId,
+        runId,
+        messageId: 'assistant-external-tools',
+        contentIndex: 0,
+        toolCallId,
+        toolName: 'Read main.scad',
+        output: 'reading line 1',
+        isError: false,
+      });
+      durableListener?.(
+        chatId,
+        event(2, {
+          id: 'output-external-tools',
+          role: 'tool-output',
+          toolCallId,
+          toolName: 'Read main.scad',
+          call: { toolCallId, kind: 'read', title: 'Read main.scad', status: 'completed' },
+          content: 'cube(20);',
+          isError: false,
+          metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+        }),
+      );
+      durableListener?.(
+        chatId,
+        parseLogEvent({
+          version: 1,
+          leaderEpoch: 'leader-external-tools',
+          sequence: 3,
+          recordedAt: '2026-09-01T00:00:03.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        }),
+      );
+      durableListener?.(
+        chatId,
+        parseLogEvent({
+          version: 1,
+          leaderEpoch: 'leader-external-tools',
+          sequence: 4,
+          recordedAt: '2026-09-01T00:00:04.000Z',
+          runId,
+          type: 'turn.finalized',
+          turnId: 'user-external-tools',
+          chatId,
+          projectId: 'project-external-tools',
+          changedPaths: [],
+          trigger: 'turn',
+          runIds: [runId],
+        }),
+      );
+      return snapshot(chatId, runId);
+    });
+    const client = clientFor(chatId, runId, {
+      start,
+      subscribe: vi.fn((listener: Parameters<AgentHostClient['subscribe']>[0]) => {
+        durableListener = listener;
+        return () => {
+          durableListener = undefined;
+        };
+      }),
+      subscribeLive: vi.fn((listener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0]) => {
+        liveListener = listener;
+        return () => {
+          liveListener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('An external-agent turn reads its workspace from the daemon.');
+      },
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: 'user-external-tools',
+      messages: [{ id: 'user-external-tools', role: 'user', parts: [{ type: 'text', text: 'Read it.' }] }],
+      abortSignal: undefined,
+      body: {
+        agent: { execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } },
+        admission: { version: 1, idempotencyKey: runId },
+        browserHost: { trigger: 'submit', agent: { kind: 'acp', id: 'codex' } },
+      },
+    });
+    const reader = stream.getReader();
+    const collect = async (): Promise<UIMessageChunk[]> => {
+      const next = await reader.read();
+      if (next.done) {
+        return [];
+      }
+      return [next.value, ...(await collect())];
+    };
+    const chunks = await collect();
+
+    expect(chunks.filter((chunk) => 'toolCallId' in chunk && chunk.toolCallId === toolCallId)).toEqual([
+      expect.objectContaining({ type: 'tool-input-available', dynamic: true }),
+      expect.objectContaining({ type: 'tool-output-available', output: 'reading line 1' }),
+      expect.objectContaining({ type: 'tool-output-available', dynamic: true }),
+    ]);
+    unregister();
+  });
+
+  /* The store is module-scoped and lives as long as the tab: a session that
+     sees thousands of host-recorded turns must not retain every one of them,
+     and the snapshot the graph reads is rebuilt on each arrival (5-review N6). */
+  it('keeps only the most recent host-attested turn settlements this tab has seen', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-host-finalized-cap';
+    const runId = 'run-host-finalized-cap';
+    const transport = new BrowserPlacementChatTransport();
+    const recorded = 300;
+    const finalized = (index: number): AgentLogEvent =>
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-cap',
+        sequence: index + 1,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId,
+        type: 'turn.finalized',
+        turnId: `user-${String(index)}`,
+        chatId,
+        projectId: 'project-cap',
+        checkoutId: 'live',
+        revisionId: `rev-${String(index)}`,
+        branch: 'main',
+        changedPaths: ['main.scad'],
+        treeId: `tree-${String(index)}`,
+        trigger: 'turn',
+        runIds: [runId],
+      });
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+      start: vi.fn(async () => {
+        for (let index = 0; index < recorded; index += 1) {
+          listener?.(chatId, finalized(index));
+        }
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-cap',
+          sequence: recorded + 1,
+          recordedAt: '2026-09-01T00:00:02.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, runId);
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A host-placed turn reads its workspace from the daemon.');
+      },
+      markRunId: async () => undefined,
+      createClient: async () => client,
+    });
+
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+      abortSignal: undefined,
+      body: {
+        agent: { execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } },
+        admission: { version: 1, idempotencyKey: runId },
+        browserHost: { trigger: 'submit', agent: { kind: 'acp', id: 'codex' } },
+      },
+    });
+    await drain(stream.getReader());
+
+    const kept = getHostFinalizedTurns();
+    expect(kept).toHaveLength(256);
+    expect(kept.at(0)?.revisionId).toBe(`rev-${String(recorded - 256)}`);
+    expect(kept.at(-1)?.revisionId).toBe(`rev-${String(recorded - 1)}`);
+    unregister();
+  });
+
+  it('publishes finalized, failed and conflicted outcomes replayed from a host log', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-host-settlement-union';
+    const runId = 'run-host-settlement-union';
+    const events = [
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 1,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId: 'run-finalized',
+        type: 'turn.finalized',
+        turnId: 'turn-finalized',
+        chatId,
+        projectId: 'project-settlement-union',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-finalized'],
+      }),
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 2,
+        recordedAt: '2026-09-01T00:00:02.000Z',
+        runId: 'run-failed',
+        type: 'turn.failed',
+        turnId: 'turn-failed',
+        chatId,
+        reason: 'revision cut failed',
+      }),
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 3,
+        recordedAt: '2026-09-01T00:00:03.000Z',
+        runId,
+        type: 'run.lifecycle',
+        state: 'completed',
+      }),
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 4,
+        recordedAt: '2026-09-01T00:00:04.000Z',
+        runId,
+        type: 'turn.conflicted',
+        turnId: 'turn-conflicted',
+        chatId,
+      }),
+    ];
+    const observed: Array<{ type: string; runState: string | undefined }> = [];
+    const unsubscribe = subscribeHostTurnSettlements((event) => {
+      observed.push({ type: event.type, runState: getBrowserAgentHostRun(chatId)?.state });
+    });
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: events.length,
+        endCursor: events.length,
+        events,
+        snapshot: snapshot(chatId, runId),
+      })),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A host-placed turn reads its workspace from the daemon.');
+      },
+      markRunId: async () => undefined,
+      createClient: async () => client,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().reconnectToStream({ chatId });
+      expect(stream).not.toBeNull();
+      if (stream === null) {
+        return;
+      }
+      await drain(stream.getReader());
+      expect(observed.map((event) => event.type)).toEqual(['turn.finalized', 'turn.failed', 'turn.conflicted']);
+      expect(observed.at(-1)).toEqual({ type: 'turn.conflicted', runState: 'completed' });
+    } finally {
+      unsubscribe();
+      unregister();
+    }
+  });
+
+  it('keeps the host lease alive when browser-root settlement follows completed lifecycle', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-late-turn-settlement';
+    const runId = 'run-late-turn-settlement';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const recordSettlement = vi.fn(async () => undefined);
+    const client = clientFor(chatId, runId, {
+      recordSettlement,
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-late-settlement',
+          sequence: 1,
+          recordedAt: '2026-09-14T00:00:01.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, runId);
+      }),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-late-turn-settlement',
+        backend: 'opfs',
+        providerBasePath: 'project-late-turn-settlement',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const observed: HostTurnSettlement[] = [];
+    const unsubscribe = subscribeHostTurnSettlements((event) => {
+      if (event.chatId === chatId) {
+        observed.push(event);
+      }
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: 'turn-late-settlement', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+
+      expect(client.close).not.toHaveBeenCalled();
+      const finalized = {
+        type: 'turn.finalized',
+        turnId: 'turn-late-settlement',
+        runId,
+        chatId,
+        projectId: 'project-late-turn-settlement',
+        checkoutId: undefined,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      } as const;
+      expect(await persistBrowserTurnSettlement(finalized)).toBe(true);
+      expect(recordSettlement).toHaveBeenCalledWith(finalized);
+      recordHostTurnSettlement(finalized);
+
+      await vi.waitFor(() => {
+        expect(observed).toEqual([
+          expect.objectContaining({ type: 'turn.finalized', chatId, runId, turnId: 'turn-late-settlement' }),
+        ]);
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+    } finally {
+      unsubscribe();
+      unregister();
+    }
+  });
+
+  /* G-REV-MODE: the host that runs the turn is the host that records it, so
+     the composer's revision selection has to leave the page with the admission.
+     The body's `execution` is where `createRunBody` puts it. */
+  it("carries the turn's revision mode from the durable body to the host's start command", async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-revision-mode';
+    const runId = 'run-revision-mode';
+    const transport = new BrowserPlacementChatTransport();
+    const commands: Array<Record<string, unknown>> = [];
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A Tau Host turn reads its workspace from the daemon.');
+      },
+      markRunId: async () => undefined,
+      createClient: async () => scriptedClient(commands),
+    });
+
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+      abortSignal: undefined,
+      body: {
+        ...browserBody({ runId, trigger: 'submit' }),
+        execution: { hostId: 'origin', mode: 'candidate', baseRevisionId: 'rev:base-1' },
+      },
+    });
+    await drain(stream.getReader());
+
+    expect(commands.find((command) => command['type'] === 'start')).toMatchObject({
+      type: 'start',
+      runId,
+      mode: 'candidate',
+      baseRevisionId: 'rev:base-1',
     });
     unregister();
   });
@@ -339,7 +903,11 @@ describe('BrowserPlacementChatTransport', () => {
         sequence: 4,
         type: 'run.lifecycle',
         state: 'failed',
-        detail: { message: 'The model gateway refused this run.', code: 'GATEWAY_UNAUTHORIZED', status: 401 },
+        detail: {
+          message: 'The funded-operation failsafe is active. Try again after current work finishes.',
+          code: 'FUNDED_OPERATION_LIMIT',
+          status: 429,
+        },
       },
     ] satisfies AgentLogEvent[];
     const markRunId = vi.fn(async () => undefined);
@@ -385,12 +953,157 @@ describe('BrowserPlacementChatTransport', () => {
 
     expect(client.start).not.toHaveBeenCalled();
     expect(client.resume).not.toHaveBeenCalled();
-    expect(chunks).toContainEqual({ type: 'error', errorText: 'The model gateway refused this run.' });
+    const failure = chunks.find((chunk) => chunk.type === 'error');
+    if (failure?.type !== 'error') {
+      throw new Error('Expected the durable failure chunk');
+    }
+    expect(parseErrorForPersistence(new Error(failure.errorText))).toMatchObject({
+      category: 'rate_limit',
+      code: 'FUNDED_OPERATION_LIMIT',
+      httpStatus: 429,
+      message: 'The funded-operation failsafe is active. Try again after current work finishes.',
+    });
     // Settlement reads this: a terminal browser run must never be looked up
     // through the API projection, and a failed one releases its claim.
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'failed', turnId: 'user-reload-failed' });
     expect(markRunId).toHaveBeenCalledWith(runId);
     expect(transport.getBoundRunId(chatId)).toBe(runId);
+    unregister();
+  });
+
+  /*
+   * R9 / Journey 2. A credit refusal never reached the provider, so the run's
+   * history is whole and the host can continue it at the one call it could not
+   * fund. That makes the run resumable — but only when someone asked: a reload
+   * reattaches this chat on its own, and spending the credit the user has just
+   * topped up without being asked is the failure this guard exists to prevent.
+   */
+  it('continues a credit-refused run only when the resume was asked for', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refused-credit';
+    const runId = 'run-refused-credit';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-refused-credit',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const details = {
+      requiredCreditAtoms: '3084332',
+      availableCreditAtoms: '1000000',
+      routeId: 'openai-gpt-6-astra',
+    };
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      {
+        ...base,
+        sequence: 2,
+        type: 'message.appended',
+        message: { id: 'user-refused-credit', role: 'user', content: 'Build it.' },
+      },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      {
+        ...base,
+        sequence: 4,
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: {
+          message: 'Insufficient Tau credit for this model request.',
+          code: 'INSUFFICIENT_CREDIT',
+          status: 402,
+          details,
+        },
+      },
+    ] satisfies AgentLogEvent[];
+    const refusedSnapshot = {
+      chatId,
+      runId,
+      turnId: 'user-refused-credit',
+      state: 'failed',
+      messages: [{ id: 'user-refused-credit', role: 'user', content: 'Build it.' }],
+      failure: {
+        code: 'INSUFFICIENT_CREDIT',
+        message: 'Insufficient Tau credit for this model request.',
+        status: 402,
+        details,
+      },
+    } as const;
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({ cursor: 0, nextCursor: 4, endCursor: 4, events, snapshot: refusedSnapshot })),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refused-credit',
+        backend: 'opfs',
+        providerBasePath: 'project-refused-credit',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    // A reload's own reattach: reads the log, spends nothing.
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).not.toHaveBeenCalled();
+    expect(client.start).not.toHaveBeenCalled();
+    expect(getBrowserAgentHostRun(chatId)).toMatchObject({
+      runId,
+      state: 'failed',
+      failure: { code: 'INSUFFICIENT_CREDIT', details },
+    });
+    // The store's `continue` dispatch answers the Resume the credits card
+    // offers, and reads the same answer before choosing its verb.
+    expect(isBrowserAgentHostRunResumable(chatId)).toBe(true);
+    requestBrowserAgentHostResume(chatId);
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).toHaveBeenCalledWith(chatId);
+    // The turn is continued, never re-admitted: `start` is what rewinds history.
+    expect(client.start).not.toHaveBeenCalled();
+    // One-shot: the next reattach this caller did not ask for spends nothing.
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  it('leaves a non-retryable failed run unresumable even when a resume was asked for', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refused-catalog';
+    const runId = 'run-refused-catalog';
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: {
+          chatId,
+          runId,
+          turnId: 'user-refused-catalog',
+          state: 'failed',
+          messages: [],
+          failure: { code: 'MODEL_NOT_IN_CATALOG', message: 'That model is not in the catalog.', status: 400 },
+        } as const,
+      })),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refused-catalog',
+        backend: 'opfs',
+        providerBasePath: 'project-refused-catalog',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    requestBrowserAgentHostResume(chatId);
+    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+
+    expect(client.resume).not.toHaveBeenCalled();
+    expect(isBrowserAgentHostRunResumable(chatId)).toBe(false);
     unregister();
   });
 
@@ -463,7 +1176,6 @@ describe('BrowserPlacementChatTransport', () => {
 
   it.each([
     { hostTrigger: 'submit', sdkTrigger: 'submit-message', messageId: undefined, retained: undefined },
-    { hostTrigger: 'retry', sdkTrigger: 'regenerate-message', messageId: 'assistant-1', retained: [] },
     { hostTrigger: 'edit', sdkTrigger: 'regenerate-message', messageId: undefined, retained: [] },
     { hostTrigger: 'regenerate', sdkTrigger: 'regenerate-message', messageId: undefined, retained: [] },
   ] as const)(
@@ -548,7 +1260,7 @@ describe('BrowserPlacementChatTransport', () => {
 
     const retry = chat.regenerate({
       messageId: 'assistant-1',
-      body: browserBody({ runId: retryRunId, trigger: 'retry', retainedMessageIds: [] }),
+      body: browserBody({ runId: retryRunId, trigger: 'regenerate', retainedMessageIds: [] }),
     });
     const releaseTimer = globalThis.setTimeout(() => {
       releaseClose.resolve();
@@ -565,7 +1277,7 @@ describe('BrowserPlacementChatTransport', () => {
       chatId,
       runId: retryRunId,
       message: { id: 'user-1', role: 'user', content: 'Build it.' },
-      trigger: 'retry',
+      trigger: 'regenerate',
       retainedMessageIds: [],
       config: browserConfig,
     });
@@ -618,6 +1330,96 @@ describe('BrowserPlacementChatTransport', () => {
     expect(client.resume).not.toHaveBeenCalled();
     unregister();
   });
+
+  it.each(['completed', 'running'] as const)(
+    'replays a %s attach snapshot before concurrent frames',
+    async (snapshotState) => {
+      installBrowserGlobals();
+      const chatId = 'chat-attach-race';
+      const runId = 'run-attach-race';
+      let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
+      let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      const base = { version: 1, leaderEpoch: 'leader', recordedAt: '2026-09-01T00:00:00.000Z', runId } as const;
+      const events: AgentLogEvent[] = [
+        { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
+        ...['Earlier', 'Later'].map(
+          (text, index): AgentLogEvent => ({
+            ...base,
+            sequence: index + 1,
+            type: 'message.appended',
+            message: {
+              id: text,
+              role: 'assistant',
+              content: text,
+              metadata: { tauInternal: { kind: 'external-tool', origin: 'external', streamState: 'final' } },
+            },
+          }),
+        ),
+        { ...base, sequence: 3, type: 'run.lifecycle', state: 'completed' },
+      ];
+      const client = clientFor(chatId, runId, {
+        subscribe: (listener) => {
+          durableListener = listener;
+          return () => {
+            durableListener = undefined;
+          };
+        },
+        subscribeLive: (listener) => {
+          liveListener = listener;
+          return () => {
+            liveListener = undefined;
+          };
+        },
+        attach: async () => {
+          liveListener?.(chatId, {
+            type: 'text-delta',
+            chatId,
+            runId,
+            messageId: 'Later',
+            contentIndex: 0,
+            delta: 'Later',
+            offset: 0,
+          });
+          if (snapshotState === 'running') {
+            durableListener?.(chatId, events[3]!);
+          }
+          const attachedEvents = snapshotState === 'running' ? events.slice(0, 3) : events;
+          return {
+            cursor: 0,
+            nextCursor: attachedEvents.length,
+            endCursor: attachedEvents.length,
+            events: attachedEvents,
+            snapshot: { ...snapshot(chatId, runId), state: snapshotState },
+          };
+        },
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({ projectId: 'project-race', backend: 'opfs', providerBasePath: 'project-race' }),
+        createClient: async () => client,
+        markRunId: async () => undefined,
+      });
+      try {
+        const transport = new BrowserPlacementChatTransport();
+        transport.bindRun(chatId, runId);
+        const stream = await transport.reconnectToStream({ chatId });
+        const chunks: UIMessageChunk[] = [];
+        await stream!.pipeTo(
+          new WritableStream({
+            write(chunk) {
+              chunks.push(chunk);
+            },
+          }),
+        );
+        expect(chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.delta)).toEqual([
+          'Earlier',
+          'Later',
+        ]);
+        expect(getBrowserAgentHostRun(chatId)?.state).toBe('completed');
+      } finally {
+        unregister();
+      }
+    },
+  );
 
   it('projects a real live partial before start settles and closes it without durable replay', async () => {
     installBrowserGlobals();
@@ -930,6 +1732,214 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  /**
+   * V10/C6: every admitted run settles exactly once, whatever ended its stream.
+   *
+   * A stopped turn closed its writer the moment the abort landed, so the
+   * settlement the page produced a beat later had nowhere durable to go: the
+   * run's outcome depended on whether the revision root answered before the
+   * stream closed (F6). The stream that drove the admission holds its writer
+   * open for the settlement of the run it admitted.
+   */
+  it('keeps the settlement writer open for a run whose turn was stopped', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-cancel-settlement';
+    const runId = 'run-cancel-settlement';
+    const completion = Promise.withResolvers<Awaited<ReturnType<AgentHostClient['start']>>>();
+    const recordSettlement = vi.fn(async () => undefined);
+    const client = clientFor(chatId, runId, {
+      recordSettlement,
+      start: vi.fn(async () => completion.promise),
+      cancel: vi.fn(async () => {
+        const value = snapshot(chatId, runId, 'cancelled');
+        completion.resolve(value);
+        return value;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-cancel-settlement',
+        backend: 'opfs',
+        providerBasePath: 'project-cancel-settlement',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const operation = new AbortController();
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-cancel-settlement',
+        messages: [{ id: 'message-cancel-settlement', role: 'user', parts: [{ type: 'text', text: 'Stop this.' }] }],
+        abortSignal: operation.signal,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      operation.abort();
+      await drain(stream.getReader());
+
+      const failed = {
+        type: 'turn.failed',
+        turnId: 'message-cancel-settlement',
+        runId,
+        chatId,
+        checkoutId: undefined,
+        reason: 'the person stopped this turn',
+      } as const;
+      expect(await persistBrowserTurnSettlement(failed)).toBe(true);
+      expect(recordSettlement).toHaveBeenCalledWith(failed);
+      recordHostTurnSettlement(failed);
+      await vi.waitFor(() => {
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+    } finally {
+      unregister();
+    }
+  });
+
+  /* The same run of the same invariant for a refusal: `start` throws, the
+   * stream aborts, and the turn is settled as failed by its owner afterwards. */
+  it('keeps the settlement writer open for a run the host refused', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refusal-settlement';
+    const runId = 'run-refusal-settlement';
+    const recordSettlement = vi.fn(async () => undefined);
+    const client = clientFor(chatId, runId, {
+      recordSettlement,
+      start: vi.fn(async () => {
+        throw new Error('Refused once.');
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refusal-settlement',
+        backend: 'opfs',
+        providerBasePath: 'project-refusal-settlement',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-refusal-settlement',
+        messages: [{ id: 'message-refusal-settlement', role: 'user', parts: [{ type: 'text', text: 'Refuse this.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader()).catch(() => undefined);
+
+      const failed = {
+        type: 'turn.failed',
+        turnId: 'message-refusal-settlement',
+        runId,
+        chatId,
+        checkoutId: undefined,
+        reason: 'Refused once.',
+      } as const;
+      expect(await persistBrowserTurnSettlement(failed)).toBe(true);
+      expect(recordSettlement).toHaveBeenCalledWith(failed);
+      recordHostTurnSettlement(failed);
+      await vi.waitFor(() => {
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+    } finally {
+      unregister();
+    }
+  });
+
+  /**
+   * The page came back to a chat mid-turn: this document never attached to the
+   * run the worker is still driving, and the workspace claim that reload
+   * discovery reads was dropped when the previous document unloaded. The host
+   * is the only authority that knows, and it says so — `admit is refused`
+   * because the chat has a running run. Ending the turn on that banner made
+   * *navigate away mid-turn and back* a dead chat; the stream waits for the
+   * live run to end and admits once, which is what the person asked for.
+   */
+  it('waits out a live run the host refuses to admit over, then admits once', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-live-refusal';
+    const runId = 'run-live-refusal';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let refusals = 0;
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+        refusals += 1;
+        if (refusals === 1) {
+          throw new AgentHostWorkerError(
+            'RUN_ADMISSION_CONFLICT',
+            `Chat ${chatId} has a running run; admit is refused.`,
+          );
+        }
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-live-refusal',
+          sequence: 9,
+          recordedAt: '2026-09-18T00:00:09.000Z',
+          runId: input.runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, input.runId);
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: snapshot(chatId, 'run-previous', 'running'),
+      })),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        /* The run this page never attached to ends on its own. */
+        globalThis.setTimeout(() => {
+          next(chatId, {
+            version: 1,
+            leaderEpoch: 'leader-live-refusal',
+            sequence: 4,
+            recordedAt: '2026-09-18T00:00:04.000Z',
+            runId: 'run-previous',
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+        }, 10);
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-live-refusal',
+        backend: 'opfs',
+        providerBasePath: 'project-live-refusal',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-live-refusal',
+        messages: [{ id: 'message-live-refusal', role: 'user', parts: [{ type: 'text', text: 'Second.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+
+      expect(client.start).toHaveBeenCalledTimes(2);
+      expect(refusals).toBe(2);
+    } finally {
+      unregister();
+    }
+  });
+
   it('resolves an approval on the attached run without creating another admission', async () => {
     installBrowserGlobals();
     const chatId = 'chat-browser-approval';
@@ -1130,6 +2140,394 @@ describe('BrowserPlacementChatTransport', () => {
     );
     expect(assistantTexts(corrupted)).toHaveLength(58);
     expect(await reattach(corrupted)).toEqual(rebuilt);
+
+    const lossy = structuredClone(rebuilt);
+    const assistant = lossy.find((message) => message.role === 'assistant');
+    const text = assistant?.parts.find((part) => part.type === 'text');
+    if (text?.type === 'text') {
+      text.text = `${text.text.slice(0, 8)}${text.text.slice(-8)}`;
+    }
+    expect(lossy).not.toEqual(rebuilt);
+    expect(await reattach(lossy)).toEqual(rebuilt);
     unregister();
+  });
+
+  it('should fail a submit whose prior stream never settles within the deadline', async () => {
+    installBrowserGlobals();
+    vi.useFakeTimers();
+    try {
+      const chatId = 'chat-prior-never-settles';
+      /* Two streams for one chat serialise through the same settlement. This
+         reattach never gets its log back, and the submit behind it used to wait
+         on it forever, silently, with the composer stuck on "Planning next
+         moves…". */
+      const wedged = clientFor(chatId, 'run-wedged', {
+        attach: vi.fn(
+          async () =>
+            new Promise<never>(() => {
+              /* The log this reattach asked for never comes back. */
+            }),
+        ),
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({
+          projectId: 'project-prior-settlement',
+          backend: 'opfs',
+          providerBasePath: 'project-prior-settlement',
+        }),
+        createClient: async () => wedged,
+        markRunId: async () => undefined,
+      });
+      const transport = new BrowserPlacementChatTransport();
+      // The reattach that never comes back, holding this chat's settlement.
+      await transport.sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: 'user-wedged', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId: 'run-wedged', trigger: 'submit' }),
+      });
+
+      const chat = new Chat<MyUIMessage>({ id: chatId, transport });
+      const sending = chat.sendMessage(
+        { id: 'user-after-wedge', role: 'user', parts: [{ type: 'text', text: 'And again.' }] },
+        { body: browserBody({ runId: 'run-after-wedge', trigger: 'submit' }) },
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      await sending;
+
+      expect(chat.status).toBe('error');
+      expect(chat.error).toMatchObject({ code: 'BROWSER_HOST_SETTLEMENT_TIMEOUT' });
+      unregister();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should fail a turn whose settlement never arrives within the deadline', async () => {
+    installBrowserGlobals();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const chatId = 'chat-settlement-never-arrives';
+      let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      /* The run completes and the stream closes — the turn looks done on screen
+         — but no `turn.finalized` ever lands, so the late-settlement wait keeps
+         this chat's settlement and every later submit behind it. */
+      const lifecycleOnly = clientFor(chatId, 'run-unsettled', {
+        start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+          listener?.(chatId, {
+            version: 1,
+            leaderEpoch: 'leader-unsettled',
+            sequence: 1,
+            recordedAt: '2026-09-01T00:00:01.000Z',
+            runId: input.runId,
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+          return snapshot(chatId, input.runId);
+        }),
+        subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+          listener = next;
+          return () => {
+            listener = undefined;
+          };
+        }),
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({
+          projectId: 'project-turn-settlement',
+          backend: 'opfs',
+          providerBasePath: 'project-turn-settlement',
+        }),
+        createClient: async () => lifecycleOnly,
+        markRunId: async () => undefined,
+      });
+      const transport = new BrowserPlacementChatTransport();
+      const send = async (runId: string): Promise<ReadableStream<UIMessageChunk>> =>
+        transport.sendMessages({
+          chatId,
+          trigger: 'submit-message',
+          messageId: undefined,
+          messages: [{ id: `user-${runId}`, role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+          abortSignal: undefined,
+          body: browserBody({ runId, trigger: 'submit' }),
+        });
+
+      const unsettled = await send('run-unsettled');
+      await drain(unsettled.getReader());
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(consoleError).toHaveBeenCalledWith(
+        '[browserAgentHost] stream failed after it settled',
+        chatId,
+        expect.objectContaining({ code: 'BROWSER_HOST_SETTLEMENT_TIMEOUT' }),
+      );
+      // And the chat is free: the next turn runs rather than inheriting the wait.
+      const next = await send('run-after-unsettled');
+      await drain(next.getReader());
+      expect(lifecycleOnly.start).toHaveBeenCalledTimes(2);
+      unregister();
+    } finally {
+      vi.useRealTimers();
+      consoleError.mockRestore();
+    }
+  });
+});
+
+/* W9: a durable turn references its attachments by content-addressed path. The
+   bytes are already on disk when the part is built, so the log row names them
+   instead of re-inlining base64 on every retry, edit and reattach (D14). */
+describe('BrowserPlacementChatTransport attachments', () => {
+  const attachmentHash = 'c'.repeat(64);
+
+  /** Admit one submit turn and hand back the message the host was started with. */
+  const admittedMessage = async (
+    chatId: string,
+    parts: MyUIMessage['parts'],
+  ): Promise<Record<string, unknown> | undefined> => {
+    installBrowserGlobals();
+    const runId = `run-${chatId}`;
+    const transport = new BrowserPlacementChatTransport();
+    const commands: Array<Record<string, unknown>> = [];
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
+      markRunId: async () => undefined,
+      createClient: async () =>
+        clientFor(chatId, runId, {
+          start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+            commands.push({ ...input });
+            return snapshot(input.chatId, input.runId, 'completed');
+          }),
+        }),
+    });
+    try {
+      const stream = await transport.sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: `user-${chatId}`, role: 'user', parts }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+    } finally {
+      unregister();
+    }
+    const message = commands[0]?.['message'];
+    return isRecord(message) ? message : undefined;
+  };
+
+  it('should record an attachment image part as a file-ref block', async () => {
+    const message = await admittedMessage('chat-attachment-image', [
+      { type: 'text', text: 'Match this.' },
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        url: `attachments/${attachmentHash}.png`,
+        providerMetadata: { common: { byteLength: 1234 } },
+      },
+    ]);
+
+    expect(message?.['content']).toEqual([
+      { type: 'text', text: 'Match this.' },
+      { type: 'file-ref', path: `attachments/${attachmentHash}.png`, mimeType: 'image/png', byteLength: 1234 },
+    ]);
+  });
+
+  it('should record an attachment document part as a file-ref block carrying its filename', async () => {
+    const message = await admittedMessage('chat-attachment-pdf', [
+      {
+        type: 'file',
+        mediaType: 'application/pdf',
+        filename: 'bracket-spec.pdf',
+        url: `attachments/${attachmentHash}.pdf`,
+        providerMetadata: { common: { byteLength: 20_480 } },
+      },
+    ]);
+
+    expect(message?.['content']).toEqual([
+      {
+        type: 'file-ref',
+        path: `attachments/${attachmentHash}.pdf`,
+        mimeType: 'application/pdf',
+        byteLength: 20_480,
+        filename: 'bracket-spec.pdf',
+      },
+    ]);
+  });
+
+  it('should still record a legacy data URL part as an inline image block', async () => {
+    const message = await admittedMessage('chat-attachment-legacy', [
+      { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA' },
+    ]);
+
+    expect(message?.['content']).toEqual([{ type: 'image', mimeType: 'image/png', data: 'AAAA' }]);
+  });
+
+  it('should refuse a file part whose URL is neither an attachment nor a data URL', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-attachment-unknown-url';
+    const runId = `run-${chatId}`;
+    const transport = new BrowserPlacementChatTransport();
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
+      markRunId: async () => undefined,
+      createClient: async () => clientFor(chatId, runId),
+    });
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [
+        {
+          id: 'user-unknown-url',
+          role: 'user',
+          parts: [{ type: 'file', mediaType: 'image/png', url: 'https://example.invalid/cat.png' }],
+        },
+      ],
+      abortSignal: undefined,
+      body: browserBody({ runId, trigger: 'submit' }),
+    });
+
+    await expect(drain(stream.getReader())).rejects.toThrow('https://example.invalid/cat.png');
+    unregister();
+  });
+
+  it('should refuse a legacy data URL that is not an image rather than record it as one (G8)', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-attachment-legacy-pdf';
+    const runId = `run-${chatId}`;
+    const transport = new BrowserPlacementChatTransport();
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
+      markRunId: async () => undefined,
+      createClient: async () => clientFor(chatId, runId),
+    });
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [
+        {
+          id: 'user-legacy-pdf',
+          role: 'user',
+          parts: [{ type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,JVBERg==' }],
+        },
+      ],
+      abortSignal: undefined,
+      body: browserBody({ runId, trigger: 'submit' }),
+    });
+
+    await expect(drain(stream.getReader())).rejects.toThrow('data:application/pdf;base64,JVBERg==');
+    unregister();
+  });
+
+  /* P29: a draft hydrated from a record carries a file part with no size — the
+     reload-then-send path. The reference is still recorded; only the optional
+     field is absent. */
+  it('should record an attachment part that names no byte length, without the field', async () => {
+    const message = await admittedMessage('chat-attachment-no-size', [
+      { type: 'file', mediaType: 'image/png', url: `attachments/${attachmentHash}.png` },
+    ]);
+
+    expect(message?.['content']).toEqual([
+      { type: 'file-ref', path: `attachments/${attachmentHash}.png`, mimeType: 'image/png' },
+    ]);
+  });
+  /* R7: the consumer cancels the readable side the moment it reads the error
+     chunk this stream wrote, which errors the transform's writable side. The
+     close that followed then rejected into the settled-stream branch, and the
+     console carried "Cannot close a ERRORED writable stream" for a failure the
+     card had already reported. */
+  it('should not log a settled-stream failure when the reader cancels on the error chunk', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-errored-writer-close';
+    const runId = 'run-errored-writer-close';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    /* Held open so the cancel lands while the stream body is still running,
+       which is the field ordering: the SDK reads the error chunk and drops the
+       reader long before the body reaches its close. */
+    const started = Promise.withResolvers<void>();
+    const failing = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-errored-close',
+          sequence: 1,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'failed',
+          detail: {
+            message: 'server_error: The server had an error while processing your request.',
+            code: 'PROVIDER_UNAVAILABLE',
+            status: 200,
+          },
+        });
+        await started.promise;
+        return { chatId, runId, turnId: `message-${chatId}`, state: 'failed', messages: [] } as const;
+      }),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-errored-close',
+        backend: 'opfs',
+        providerBasePath: 'project-errored-close',
+      }),
+      createClient: async () => failing,
+      markRunId: async () => undefined,
+    });
+    const logged: unknown[] = [];
+    const consoleError = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(...args);
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: 'user-errored-close', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      const reader = stream.getReader();
+      const readUntilFailure = async (): Promise<UIMessageChunk | undefined> => {
+        const next = await reader.read();
+        if (next.done) {
+          return undefined;
+        }
+        return next.value.type === 'error' ? next.value : readUntilFailure();
+      };
+      const failureChunk = await readUntilFailure();
+      expect(failureChunk).toMatchObject({ type: 'error' });
+
+      // What the AI SDK does with an error chunk: stop reading and drop the
+      // reader, which errors the writable side the body still holds.
+      await reader.cancel();
+      started.resolve();
+      await vi.waitFor(() => {
+        expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'failed' });
+      });
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+
+      expect(
+        logged.filter((entry) => typeof entry === 'string' && entry.includes('stream failed after it settled')),
+      ).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+      unregister();
+      clearBrowserAgentHostRun(chatId);
+    }
   });
 });

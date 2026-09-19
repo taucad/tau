@@ -14,7 +14,12 @@ const credentialSchema = z.object({
 /** Durable device credential stored only by the daemon parent. @public */
 export type HostCredential = z.infer<typeof credentialSchema>;
 
-const defaultConfigDirectory = (): string => {
+/**
+ * Resolve Tau's existing platform config directory.
+ * @returns The configured override or platform application-data location.
+ * @public
+ */
+export const defaultConfigDirectory = (): string => {
   if (process.env['TAU_CONFIG_DIR']) {
     return process.env['TAU_CONFIG_DIR'];
   }

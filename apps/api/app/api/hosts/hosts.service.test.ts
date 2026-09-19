@@ -546,7 +546,9 @@ describe('HostsService session lifetime', () => {
     return {
       close: vi.fn(),
       readyState,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors ws's own readyState constant names
       OPEN: 1,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors ws's own readyState constant names
       CLOSED: 3,
       once: vi.fn((event: string, listener: () => void) => {
         if (event === 'close') {
@@ -1149,6 +1151,64 @@ describe('hostControlMessageSchema', () => {
     expect(hostControlMessageSchema.safeParse({ ...ready, capabilities: { agent: {} } }).success).toBe(false);
     expect(
       hostControlMessageSchema.safeParse({ ...ready, capabilities: { agent: { workspaceRoot: '' } } }).success,
+    ).toBe(false);
+  });
+
+  it('relays the canonical agent descriptor verbatim, and refuses the string list it replaced', () => {
+    /* VSC1: the API validates the shape and stores nothing, so a model list —
+       or the refusal code that says why an agent cannot run — reaches the
+       browser exactly as the daemon wrote it. VI9: there is no string form to
+       fall back to, so one is a parse failure rather than a silent downgrade. */
+    const externalAgents = [
+      {
+        id: 'codex',
+        displayName: 'Codex',
+        models: [
+          { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
+          { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3-Codex-Spark' },
+        ],
+        defaultModel: 'gpt-5.6-sol',
+      },
+      { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
+    ];
+
+    expect(
+      hostControlMessageSchema.parse({
+        ...ready,
+        capabilities: { agent: { workspaceRoot: '/home/tau', externalAgents, revisions: ['direct'] } },
+      }),
+    ).toMatchObject({ capabilities: { agent: { externalAgents, revisions: ['direct'] } } });
+
+    expect(
+      hostControlMessageSchema.safeParse({
+        ...ready,
+        capabilities: { agent: { workspaceRoot: '/home/tau', externalAgents: ['codex'] } },
+      }).success,
+    ).toBe(false);
+    /* Daemon-authored text a browser renders: bounded here, not on trust. */
+    expect(
+      hostControlMessageSchema.safeParse({
+        ...ready,
+        capabilities: {
+          agent: {
+            workspaceRoot: '/home/tau',
+            externalAgents: [{ id: 'codex', displayName: 'x'.repeat(65), models: [] }],
+          },
+        },
+      }).success,
+    ).toBe(false);
+    /* The relay owns no refusal vocabulary (the browser validates the code at
+     * its own edge); it bounds the string like every other daemon-authored one. */
+    expect(
+      hostControlMessageSchema.safeParse({
+        ...ready,
+        capabilities: {
+          agent: {
+            workspaceRoot: '/home/tau',
+            externalAgents: [{ id: 'codex', displayName: 'Codex', models: [], refusal: 'x'.repeat(65) }],
+          },
+        },
+      }).success,
     ).toBe(false);
   });
 

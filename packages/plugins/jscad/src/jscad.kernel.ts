@@ -22,6 +22,7 @@ import {
   enrichIssueLocation,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   createFrameClassifier,
   parseStackTrace,
   resolveSourcePath,
@@ -33,7 +34,6 @@ import type { KernelRuntime } from '@taucad/runtime/kernel';
 import { jscadExportSchemas } from '#jscad.schemas.js';
 
 import { jscadToGltf } from '#jscad-to-gltf.js';
-import { collectJscadPartIssues } from '#jscad-diagnostics.js';
 import { resolveJscadModeling } from '#jscad-modeling.js';
 import type { JscadModeling } from '#jscad-modeling.js';
 import { assignJscadPartName, isRenderableJscadPart, normalizeJscadParts } from '#jscad-parts.js';
@@ -276,6 +276,8 @@ export const jscadKernel = defineKernel({
   name: 'JscadKernel',
   version: '1.0.0',
   render: { content: ['includeEdges'] },
+  // D2: in-worker CSG yields cooperatively, so a superseded drag render is abandoned, not killed.
+  liveEdit: true,
   exportFormats: {
     glb: { optionsSchema: jscadExportSchemas.glb, content: ['includeEdges'] },
   },
@@ -324,7 +326,12 @@ export const jscadKernel = defineKernel({
         jsonSchema = await jsonSchemaFromJson(defaultParameters);
       }
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:jscad:parameters',
+          name: 'JscadParameters',
+        }),
+      );
     } catch (error) {
       return createKernelError([
         {
@@ -384,29 +391,25 @@ export const jscadKernel = defineKernel({
       return { nativeHandle: [] };
     }
 
-    const parts = normalizeJscadParts(shapes, context.modeling);
-    const issues = collectJscadPartIssues(parts, context.modeling);
-
-    return { nativeHandle: parts, issues };
+    return { nativeHandle: normalizeJscadParts(shapes, context.modeling) };
   },
 
-  async meshGeometry({ nativeHandle, content }, runtime, context) {
+  async meshGeometry({ nativeHandle, content }, _runtime, context) {
     const artifacts: GeometryResponse[] = [];
-    const renderableParts = nativeHandle.filter((part) => isRenderableJscadPart(part, context.modeling));
-    if (renderableParts.length > 0) {
-      try {
-        artifacts.push({
-          format: 'gltf',
-          content: jscadToGltf(renderableParts, { includeEdges: content?.includeEdges === true }, context.modeling),
-        });
-      } catch (error) {
-        runtime.logger.warn('Failed to convert JSCAD assembly to GLTF', { data: error });
-      }
+    const issues: KernelIssue[] = [];
+    if (nativeHandle.some((part) => isRenderableJscadPart(part, context.modeling))) {
+      /* The GLB packer owns the single normalization, so it also owns the topology verdict derived
+       * from it. A throw here is not caught: catching saved nothing — the finalizer refuses a phase
+       * with no artifact anyway — and it replaced the conversion's own message with
+       * `NO_RENDER_GEOMETRY`, leaving the cause in a log line no product surface reads. */
+      const gltf = jscadToGltf(nativeHandle, { includeEdges: content?.includeEdges === true }, context.modeling);
+      artifacts.push({ format: 'gltf', content: gltf.content });
+      issues.push(...gltf.issues);
     } else {
       artifacts.push(createEmptyGltfGeometry());
     }
 
-    return finalizeMeshOutput({ artifacts });
+    return finalizeMeshOutput({ artifacts, issues });
   },
 
   serializeNativeHandle({ nativeHandle }, _runtime, context) {
@@ -415,13 +418,25 @@ export const jscadKernel = defineKernel({
     return parts.map((part): JscadSerializedNativeHandleEntry => {
       const { shape } = part;
       if (geom3.isA(shape)) {
-        return { type: 'geom3', data: geom3.toCompactBinary(shape), name: part.name };
+        return {
+          type: 'geom3',
+          data: geom3.toCompactBinary(shape),
+          name: part.name,
+        };
       }
       if (geom2.isA(shape)) {
-        return { type: 'geom2', data: geom2.toCompactBinary(shape), name: part.name };
+        return {
+          type: 'geom2',
+          data: geom2.toCompactBinary(shape),
+          name: part.name,
+        };
       }
       if (path2.isA(shape)) {
-        return { type: 'path2', data: path2.toCompactBinary(shape), name: part.name };
+        return {
+          type: 'path2',
+          data: path2.toCompactBinary(shape),
+          name: part.name,
+        };
       }
       throw new Error(`Unsupported JSCAD geometry type for serialized handle at index ${part.index}.`);
     });
@@ -436,8 +451,16 @@ export const jscadKernel = defineKernel({
     const serializedEntries: unknown[] = serializedNativeHandle;
     return serializedEntries.map((rawEntry, index): JscadPartDescriptor => {
       const entry = parseSerializedNativeHandleEntry(rawEntry, index);
-      const compactBinary = normalizeCompactBinaryData({ data: entry.data, index, type: entry.type });
-      const name = resolveShapeName({ index, name: entry.name, source: 'authored' });
+      const compactBinary = normalizeCompactBinaryData({
+        data: entry.data,
+        index,
+        type: entry.type,
+      });
+      const name = resolveShapeName({
+        index,
+        name: entry.name,
+        source: 'authored',
+      });
       let shape: unknown;
       switch (entry.type) {
         case 'geom2': {
@@ -475,14 +498,12 @@ export const jscadKernel = defineKernel({
         }
 
         const { coordinateSystem, unit } = options;
-        const renderableParts = nativeHandle.filter((part) => isRenderableJscadPart(part, context.modeling));
-        const issues = collectJscadPartIssues(nativeHandle, context.modeling);
-        if (renderableParts.length === 0) {
-          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))], issues);
+        if (!nativeHandle.some((part) => isRenderableJscadPart(part, context.modeling))) {
+          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
         }
 
-        const gltfData = jscadToGltf(
-          renderableParts,
+        const gltf = jscadToGltf(
+          nativeHandle,
           {
             coordinateSystem,
             unit,
@@ -490,7 +511,7 @@ export const jscadKernel = defineKernel({
           },
           context.modeling,
         );
-        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(gltfData))], issues);
+        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(gltf.content))], gltf.issues);
       }
 
       default: {

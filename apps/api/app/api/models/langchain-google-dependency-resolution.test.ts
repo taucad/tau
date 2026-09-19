@@ -1,4 +1,19 @@
 // @vitest-environment node
+/**
+ * Guards the API's LangChain Google path, which is the server-side helper
+ * surface only: `project_name`, `commit_name` and `code_completion` reach
+ * `DirectModelInvocationService.invokeHelper` -> `ModelService.buildModel` ->
+ * `ProviderService` -> `ChatVertexAI`, so a self-host deployment whose only
+ * configured provider is Vertex runs those helpers on `@langchain/google-*`.
+ *
+ * Chat does NOT come through here. Tau's chat turns run on the portable agent
+ * host over the model gateway's OpenAI-compatible Vertex route
+ * (`packages/agent-host/src/transport/gateway-model-transport.ts`), which never
+ * loads LangChain. The thought-signature and streamed-function-call cases below
+ * therefore pin the `@taulabs/langchain-google-common` fork's patch contract
+ * across rebases (testing policy 14) rather than any live Tau chat behaviour;
+ * helper invocations send no tools.
+ */
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
@@ -76,7 +91,7 @@ const toolCallsField = 'tool_calls';
 const additionalKwargsField = 'additional_kwargs';
 const toolCallIdField = 'tool_call_id';
 
-describe('LangChain Google dependency resolution', () => {
+describe('LangChain Google dependency resolution (API helper path)', () => {
   it('loads upstream google-vertexai with only the forked google-common override', () => {
     const rootRequire = createRequire(import.meta.url);
     const vertexPackageJsonPath = rootRequire.resolve('@langchain/google-vertexai/package.json');

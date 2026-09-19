@@ -14,7 +14,13 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { WorkspaceFileService, WorkspaceMutationContext } from '@taucad/filesystem';
 import { bindMutationContextForPort } from '@taucad/fs-bridge';
-import type { FileSystemBridgeHello, MutationMethodNameInternal, MutationOverrideMapInternal } from '@taucad/fs-bridge';
+import type {
+  FileSystemBridgeHello,
+  FileSystemBridgeRootedProxy,
+  FileSystemBridgeWorkspaceProxy,
+  MutationMethodNameInternal,
+  MutationOverrideMapInternal,
+} from '@taucad/fs-bridge';
 import type { createBridgeServer } from '@taucad/rpc/bridge';
 
 /**
@@ -69,15 +75,64 @@ describe('bindMutationContextForPort — type guarantees', () => {
     expectTypeOf<MutationOverrideMapInternal['unlink']>().toEqualTypeOf<WorkspaceFileService['unlink']>();
     expectTypeOf<MutationOverrideMapInternal['rmdir']>().toEqualTypeOf<WorkspaceFileService['rmdir']>();
     expectTypeOf<MutationOverrideMapInternal['writeFile']>().toEqualTypeOf<WorkspaceFileService['writeFile']>();
+    expectTypeOf<MutationOverrideMapInternal['writeFileChecked']>().toEqualTypeOf<
+      WorkspaceFileService['writeFileChecked']
+    >();
     expectTypeOf<MutationOverrideMapInternal['appendFile']>().toEqualTypeOf<WorkspaceFileService['appendFile']>();
     expectTypeOf<MutationOverrideMapInternal['writeFiles']>().toEqualTypeOf<WorkspaceFileService['writeFiles']>();
     expectTypeOf<MutationOverrideMapInternal['mkdir']>().toEqualTypeOf<WorkspaceFileService['mkdir']>();
     expectTypeOf<MutationOverrideMapInternal['move']>().toEqualTypeOf<WorkspaceFileService['move']>();
-    expectTypeOf<MutationOverrideMapInternal['duplicateFile']>().toEqualTypeOf<WorkspaceFileService['duplicateFile']>();
-    expectTypeOf<MutationOverrideMapInternal['copyDirectory']>().toEqualTypeOf<WorkspaceFileService['copyDirectory']>();
     expectTypeOf<MutationOverrideMapInternal['commitPendingProjectDirectory']>().toEqualTypeOf<
       WorkspaceFileService['commitPendingProjectDirectory']
     >();
+  });
+});
+
+/**
+ * The rooted and workspace proxy types are split (gate G-A F9, G-B G5).
+ *
+ * One proxy type used to promise every call the wire carries, so a workspace
+ * connection's type offered `search`, `statTree`, `copyTree`, `duplicate`,
+ * `archive`, `contents`, `provenance` and `readdirWithStats` — none of which the
+ * authority serves. W12(d) split them; these rows fail if the halves merge again.
+ */
+describe('bridge proxy surfaces — rooted / workspace split', () => {
+  it('keeps every rooted-only call off a workspace proxy', () => {
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('search');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('statTree');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('copyTree');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('duplicate');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('archive');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('contents');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('provenance');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('readdirWithStats');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('rename');
+  });
+
+  it('keeps the authority surface and the transport on it', () => {
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('mount');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('configureProjectRoots');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('listProjectManifests');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('pollExternalChanges');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('dispose');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('listen');
+  });
+
+  it('serves both halves on a rooted proxy', () => {
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('search');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('statTree');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('copyTree');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('duplicate');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('provenance');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('writeFile');
+  });
+
+  /* And the authority's four unmasked members are on neither half (W12d). */
+  it('carries no unmasked authority walk, copy or index on the wire', () => {
+    expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('duplicateFile');
+    expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('copyDirectory');
+    expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('searchFiles');
+    expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('getDirectoryStat');
   });
 });
 

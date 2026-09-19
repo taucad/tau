@@ -8,7 +8,6 @@ import type {
 } from '@earendil-works/pi-ai';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { util as zodUtility } from 'zod';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentToolChoice,
   JsonValue,
@@ -17,9 +16,7 @@ import type {
   TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ModelCallMiddleware } from '#harness/model-call-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { HostToolExecutionDetails } from '#harness/tools.js';
 
 const mapFinalAssistant = async (

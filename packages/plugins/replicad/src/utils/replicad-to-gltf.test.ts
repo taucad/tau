@@ -86,6 +86,46 @@ function readTopologyPayload(glb: Uint8Array<ArrayBuffer>) {
 // =============================================================================
 
 describe('convertReplicadGeometriesToGltf', () => {
+  it('should assign stable per-component occurrence topology identifiers', () => {
+    const first = createSimpleGeometry({
+      faces: {
+        triangles: [0, 1, 2, 0, 2, 3],
+        vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
+        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+        faceGroups: [
+          { start: 0, count: 3, faceId: 123_456 },
+          { start: 3, count: 3, faceId: 654_321 },
+        ],
+      },
+      edges: {
+        lines: [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0],
+        edgeGroups: [
+          { start: 0, count: 2, edgeId: 111_111 },
+          { start: 2, count: 2, edgeId: 222_222 },
+        ],
+      },
+    });
+    const second = createSimpleGeometry({
+      ...first,
+      faces: {
+        ...first.faces,
+        faceGroups: first.faces.faceGroups.map((group) => ({ ...group, faceId: group.faceId + 7 })),
+      },
+      edges: {
+        ...first.edges,
+        edgeGroups: first.edges.edgeGroups.map((group) => ({ ...group, edgeId: group.edgeId + 9 })),
+      },
+    });
+
+    const firstGlb = convertReplicadGeometriesToGltf({ geometries: [first], includeTauTopology: true });
+    const secondGlb = convertReplicadGeometriesToGltf({ geometries: [second], includeTauTopology: true });
+
+    expect(secondGlb).toEqual(firstGlb);
+    const component = readTopologyPayload(firstGlb).payload.components[0]!;
+    expect(component.faceGroups?.map(({ faceId }) => faceId)).toEqual([0, 1]);
+    expect(component.edgeGroups?.map(({ edgeId }) => edgeId)).toEqual([0, 1]);
+  });
+
   it('should convert empty geometries array to valid GLB', async () => {
     const result = convertReplicadGeometriesToGltf({ geometries: [], format: 'glb' });
 
@@ -117,7 +157,7 @@ describe('convertReplicadGeometriesToGltf', () => {
     const geometry = createSimpleGeometry({
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0],
-        triangles: [0, 1, 2, 0, 1, 3],
+        triangles: [0, 1, 3, 0, 1, 2],
         normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
         faceGroups: [
           { start: 0, count: 3, faceId: 1 },
@@ -371,13 +411,13 @@ describe('convertReplicadGeometriesToGltf', () => {
       tauComponentId: 'component:planet-gear',
       tauComponentKind: 'body',
       tauComponentSelector: 'node/0/surface',
-      faceGroups: [{ start: 0, count: 3, faceId: 7 }],
+      faceGroups: [{ start: 0, count: 3, faceId: 0 }],
     });
     expect(json.meshes[0]!.primitives[1]!.extras).toMatchObject({
       tauComponentId: 'component:planet-gear',
       tauComponentKind: 'line',
       tauComponentSelector: 'node/0/edges',
-      edgeGroups: [{ start: 0, count: 6, edgeId: 11 }],
+      edgeGroups: [{ start: 0, count: 6, edgeId: 0 }],
     });
   });
 
@@ -410,8 +450,8 @@ describe('convertReplicadGeometriesToGltf', () => {
       name: 'Housing',
       selector: 'node/0',
       nodeIndex: 0,
-      faceGroups: [{ faceId: 123 }],
-      edgeGroups: [{ edgeId: 456 }],
+      faceGroups: [{ faceId: 0 }],
+      edgeGroups: [{ edgeId: 0 }],
       capabilities: { hasPreciseTopology: true },
     });
   });

@@ -20,6 +20,7 @@ const textViewerProperties = (request: FileViewerRenderRequest): ChatEditorViewe
     filePath: request.path,
     content: decodeTextFile(request.resource.outcome.content),
     language: request.textEditor.language,
+    isEditorReady: request.textEditor.isReady,
     onChange: request.textEditor.onChange,
     onValidate: request.textEditor.onValidate,
     readOnly: request.readOnly,

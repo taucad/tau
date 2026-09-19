@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyReply } from 'fastify';
 import { mockDeep } from 'vitest-mock-extended';
 import { ForbiddenException, GoneException, HttpException, NotFoundException, StreamableFile } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -17,17 +17,15 @@ import {
 import { PublicationsService } from '#api/publications/publications.service.js';
 import { ViewerIdentityInterceptor } from '#api/publications/viewer-identity.interceptor.js';
 import { ViewerIdentityService } from '#api/publications/viewer-identity.service.js';
-import type { MultipartRequest } from '#api/publications/publish-multipart.decorator.js';
-import { collectPublishMultipart } from '#api/publications/publish-multipart.decorator.js';
 import type { PublicationWireRow } from '#api/publications/publications.dto.js';
-import { PublishUploadDto } from '#api/publications/publications.dto.js';
+import { PublishRequestDto } from '#api/publications/publications.dto.js';
 import { MetricsService } from '#telemetry/metrics.js';
 
 const validationPipe = new ZodValidationPipe();
 
-async function validatePublishUpload(request: FastifyRequest): Promise<PublishUploadDto> {
-  const raw = await collectPublishMultipart(request as MultipartRequest);
-  return validationPipe.transform(raw, { type: 'custom', metatype: PublishUploadDto }) as PublishUploadDto;
+/** The JSON body as the route's pipe validates it (no multipart anywhere). */
+function validatePublishRequest(body: unknown): PublishRequestDto {
+  return validationPipe.transform(body, { type: 'body', metatype: PublishRequestDto }) as PublishRequestDto;
 }
 
 describe('PublicationsController', () => {
@@ -39,7 +37,7 @@ describe('PublicationsController', () => {
 
   beforeEach(async () => {
     const mockService = {
-      publishFromUpload: vi.fn(),
+      publishFromRevision: vi.fn(),
       getPublicationForViewer: vi.fn(),
       getProjectShareEnvelope: vi.fn(),
       listAccessGrants: vi.fn(),
@@ -85,17 +83,18 @@ describe('PublicationsController', () => {
     await module.close();
   });
 
-  it('should delegate publishFromUpload to PublicationsService', async () => {
-    const entryPath = 'main.ts';
-    const manifest = {
+  it('should delegate a publish to PublicationsService as a graph pointer', async () => {
+    const request = {
       projectId: 'proj',
       projectName: 'Demo',
-      entryPath: entryPath,
+      tag: 'v1',
+      revisionId: 'a'.repeat(40),
+      entryPath: 'main.ts',
       visibility: 'private',
       title: 'Hello',
     };
 
-    vi.mocked(service.publishFromUpload).mockResolvedValue({
+    vi.mocked(service.publishFromRevision).mockResolvedValue({
       id: 'pub_test',
       urls: {
         view: 'https://example/s/tau~pub_test',
@@ -105,27 +104,22 @@ describe('PublicationsController', () => {
       },
     });
 
-    const multipartRequest = {
-      parts: async function* parts() {
-        yield { type: 'field', fieldname: 'manifest', value: JSON.stringify(manifest) };
-        yield {
-          type: 'file',
-          fieldname: entryPath,
-          filename: entryPath,
-          encoding: 'utf8',
-          mimetype: 'text/plain',
-          file: (async function* file() {
-            yield new TextEncoder().encode('export default () => {}');
-          })(),
-        };
-      },
-    } as unknown as FastifyRequest;
+    const payload = await controller.publish('owner-1', validatePublishRequest(request));
 
-    const upload = await validatePublishUpload(multipartRequest);
-    const payload = await controller.publish('owner-1', upload);
-
-    expect(service.publishFromUpload).toHaveBeenCalledTimes(1);
+    expect(service.publishFromRevision).toHaveBeenCalledWith({ ownerId: 'owner-1', request });
     expect(payload.id).toBe('pub_test');
+  });
+
+  it('should refuse a publish body that carries no named version', () => {
+    expect(() =>
+      validatePublishRequest({
+        projectId: 'proj',
+        projectName: 'Demo',
+        entryPath: 'main.ts',
+        visibility: 'public',
+        title: 'Hello',
+      }),
+    ).toThrow(ZodValidationException);
   });
 
   it('should delegate viewer lookups to PublicationsService with viewer id', async () => {
@@ -133,12 +127,14 @@ describe('PublicationsController', () => {
     const publicationWire: PublicationWireRow = {
       id: 'pub_x',
       projectId: 'proj',
+      tag: 'v1',
+      revisionId: 'a'.repeat(40),
       ownerId: 'owner-1',
       parentPublicationId: null,
       visibility: 'public',
       runtimePin: 'x',
       kernels: ['replicad'],
-      entryPath: entryPath,
+      entryPath,
       title: 'T',
       description: null,
       forkCount: 0,
@@ -160,7 +156,7 @@ describe('PublicationsController', () => {
       manifest: {
         version: 1,
         projectId: 'proj',
-        entryPath: entryPath,
+        entryPath,
         files: { [entryPath]: 'sha256:' + 'a'.repeat(64) },
         kernels: [],
         runtime: '@taucad/runtime@pin',
@@ -185,12 +181,14 @@ describe('PublicationsController', () => {
       publication: {
         id: 'pub_x',
         projectId: 'proj',
+        tag: 'v1',
+        revisionId: 'a'.repeat(40),
         ownerId: 'owner-1',
         parentPublicationId: null,
         visibility: 'public',
         runtimePin: 'x',
         kernels: [],
-        entryPath: entryPath,
+        entryPath,
         title: 'T',
         description: null,
         forkCount: 0,
@@ -209,7 +207,7 @@ describe('PublicationsController', () => {
       manifest: {
         version: 1,
         projectId: 'proj',
-        entryPath: entryPath,
+        entryPath,
         files: { [entryPath]: 'sha256:' + 'a'.repeat(64) },
         kernels: [],
         runtime: '@taucad/runtime@pin',
@@ -436,30 +434,49 @@ describe('fileRequestFailureOutcome', () => {
   });
 });
 
-describe('PublishUploadDto validation (ZodValidationPipe)', () => {
+describe('PublishRequestDto validation (ZodValidationPipe)', () => {
   const pipe = new ZodValidationPipe();
+  const valid = {
+    projectId: 'proj',
+    projectName: 'Demo',
+    tag: 'v1',
+    revisionId: 'a'.repeat(40),
+    entryPath: 'main.ts',
+    visibility: 'private',
+    title: 'T',
+  } as const;
 
-  it('rejects missing manifest', () => {
+  it('accepts a pointer into the graph', () => {
+    expect(pipe.transform(valid, { type: 'body', metatype: PublishRequestDto })).toMatchObject({ tag: 'v1' });
+  });
+
+  it('rejects a body with no named version', () => {
+    const { tag: _tag, ...withoutTag } = valid;
     expect(() => {
-      pipe.transform({ files: new Map() }, { type: 'custom', metatype: PublishUploadDto });
+      pipe.transform(withoutTag, { type: 'body', metatype: PublishRequestDto });
     }).toThrow(ZodValidationException);
   });
 
-  it('rejects invalid JSON manifest', () => {
+  it('rejects a body with no revision', () => {
+    const { revisionId: _revisionId, ...withoutRevision } = valid;
     expect(() => {
-      pipe.transform({ manifest: '{', files: new Map() }, { type: 'custom', metatype: PublishUploadDto });
+      pipe.transform(withoutRevision, { type: 'body', metatype: PublishRequestDto });
     }).toThrow(ZodValidationException);
   });
 
-  it('rejects manifest missing entryPath', () => {
-    const manifestJson = JSON.stringify({
-      projectId: 'proj',
-      projectName: 'Demo',
-      visibility: 'private',
-      title: 'T',
-    });
+  it('rejects a body missing entryPath', () => {
+    const { entryPath: _entryPath, ...withoutEntry } = valid;
     expect(() => {
-      pipe.transform({ manifest: manifestJson, files: new Map() }, { type: 'custom', metatype: PublishUploadDto });
+      pipe.transform(withoutEntry, { type: 'body', metatype: PublishRequestDto });
+    }).toThrow(ZodValidationException);
+  });
+
+  it('refuses shared emails on a public publication', () => {
+    expect(() => {
+      pipe.transform(
+        { ...valid, visibility: 'public', sharedEmails: ['a@b.test'] },
+        { type: 'body', metatype: PublishRequestDto },
+      );
     }).toThrow(ZodValidationException);
   });
 });

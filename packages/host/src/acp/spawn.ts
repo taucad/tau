@@ -82,15 +82,24 @@ const stderrRetention = 8192;
  */
 export const acpAdapterEnvironment = (
   base: NodeJS.ProcessEnv,
-  adapter: Pick<AcpAdapter, 'configEnv'>,
+  adapter: Pick<AcpAdapter, 'configEnv'> & Partial<Pick<AcpAdapter, 'spawnEnv'>>,
 ): NodeJS.ProcessEnv => {
   const allowed = new Set([...acpEnvironmentAllowlist, ...adapter.configEnv]);
-  return Object.fromEntries(
-    Object.entries(base).filter(
-      ([name, value]) =>
-        value !== undefined && (allowed.has(name) || acpEnvironmentPrefixAllowlist.some((p) => name.startsWith(p))),
+  return {
+    ...Object.fromEntries(
+      Object.entries(base).filter(
+        ([name, value]) =>
+          value !== undefined && (allowed.has(name) || acpEnvironmentPrefixAllowlist.some((p) => name.startsWith(p))),
+      ),
     ),
-  );
+    /* The adapter is spawned from `process.execPath`; inside Electron (the desktop
+     * services utility) that is the Tau binary, which only runs a script as Node
+     * when told so. Plain Node ignores the name. */
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable name is Electron's, not ours.
+    ...('electron' in process.versions ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+    /* After the allowlist, so a pin's own requirement cannot be filtered away. */
+    ...adapter.spawnEnv,
+  };
 };
 
 /** One newline-delimited JSON-RPC frame observed on the adapter's stdio. @public */
@@ -123,7 +132,7 @@ export type SpawnedAcpAdapter = {
  */
 export const spawnAcpAdapter = (options: {
   readonly adapter: AcpAdapter;
-  /** Absolute cwd — the materialized branch, never the workspace root. */
+  /** Absolute cwd — the workspace root in direct mode, a revision checkout in candidate mode (V2, R-W3). */
   readonly cwd: string;
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;

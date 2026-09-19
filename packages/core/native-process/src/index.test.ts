@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -18,12 +19,15 @@ import type { readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { createMockFileSystem, createMockLogger } from '@taucad/runtime-testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createWorkspaceMirror,
   NativeProcessSession,
+  NativeRuntimeUnavailableError,
+  nativeSandboxPolicy,
   NativeWorkerReportedError,
   processEnvironment,
   terminateProcessTree,
@@ -32,6 +36,38 @@ import {
 const fsOverrides = vi.hoisted(() => ({
   readFile: undefined as undefined | (() => Promise<Uint8Array<ArrayBuffer>>),
   unlink: undefined as undefined | (() => Promise<void>),
+}));
+/**
+ * The sandbox runtime is replaced by a controllable double: its default wrap runs the
+ * quoted command through `/bin/sh` unsandboxed so lifecycle cases stay portable, while
+ * a wrap failure proves the fail-closed seam. Initialization knobs are exercised in
+ * `native-sandbox.test.ts`; real containment in `native-sandbox.integration.test.ts`.
+ */
+const sandbox = vi.hoisted(() => ({
+  supported: true,
+  dependencyErrors: [] as string[],
+  initialize: vi.fn(async () => undefined),
+  wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
+  wrapFailure: undefined as unknown,
+  launcher: '/bin/sh',
+}));
+vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
+  // The default write roots stay real: the profile's deny list is derived from them.
+  ...(await importActual<{ getDefaultWritePaths: typeof getDefaultWritePaths }>()),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the runtime's exported class.
+  SandboxManager: {
+    isSupportedPlatform: () => sandbox.supported,
+    checkDependenciesAsync: async () => ({ errors: sandbox.dependencyErrors, warnings: [] }),
+    initialize: sandbox.initialize,
+    wrapWithSandboxArgv: async (command: string, ...rest: unknown[]) => {
+      sandbox.wrap(command, ...rest);
+      if (sandbox.wrapFailure !== undefined) {
+        // oxlint-disable-next-line typescript/only-throw-error -- launchers can reject with bare strings.
+        throw sandbox.wrapFailure;
+      }
+      return { argv: [sandbox.launcher, '-c', command], env: process.env };
+    },
+  },
 }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<{ readFile: typeof readFile; unlink: typeof unlink }>();
@@ -60,21 +96,19 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => 
   const executablePath = join(root, 'native-worker');
   const workerPath = join(root, 'worker.cjs');
   const resourcePath = join(root, 'resource');
-  const trustFile = join(root, 'trust.json');
   const executableBody = `#!/bin/sh\nexec "${process.execPath}" "$@"\n`;
   writeFileSync(executablePath, executableBody);
   chmodSync(executablePath, 0o700);
   writeFileSync(workerPath, workerBody);
   writeFileSync(resourcePath, 'resource');
-  writeFileSync(trustFile, '{"version":1,"trusted":true}\n');
   const logger = createMockLogger();
   const options = {
     executablePath,
     executableSha256: hash(executableBody),
     arguments: [workerPath],
+    runtimePath: root,
     workspacePath,
     artifactPath,
-    trustFile,
     resources: [{ path: resourcePath, sha256: hash('resource'), label: 'support resource' }],
     protocolVersion: 1,
     parseReady: (value: unknown) => {
@@ -108,7 +142,7 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => 
       },
     },
   };
-  return { root, artifactPath, trustFile, logger, options, session: new NativeProcessSession<Issue>(options) };
+  return { root, artifactPath, logger, options, session: new NativeProcessSession<Issue>(options) };
 };
 
 const request = async <T>(
@@ -120,6 +154,7 @@ const request = async <T>(
       readonly parseEvent: (value: unknown) => { readonly stage: string };
       readonly onEvent: (event: { readonly stage: string }) => void;
     };
+    readonly cancelMethod?: string;
   } = {},
 ): Promise<T> =>
   session.request({
@@ -128,6 +163,7 @@ const request = async <T>(
     signal: options.signal ?? new AbortController().signal,
     parseResult: options.parseResult ?? ((value) => value as T),
     ...(options.events ? { events: options.events } : {}),
+    ...(options.cancelMethod === undefined ? {} : { cancelMethod: options.cancelMethod }),
   });
 
 const respondingWorker = (response: string): string => `${ready}
@@ -164,6 +200,11 @@ const withPlatform = async (platform: NodeJS.Platform, callback: () => Promise<v
 afterEach(() => {
   fsOverrides.readFile = undefined;
   fsOverrides.unlink = undefined;
+  sandbox.supported = true;
+  sandbox.dependencyErrors = [];
+  sandbox.wrapFailure = undefined;
+  sandbox.wrap.mockClear();
+  sandbox.initialize.mockClear();
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -337,14 +378,8 @@ ${keepAlive}`;
     await value.session.cleanup();
   });
 
-  it('validates trust, closure, resources, and generation state', async () => {
+  it('validates closure, resources, runtime confinement, and generation state', async () => {
     const absent = fixture();
-    unlinkSync(absent.trustFile);
-    await expect(absent.session.assertTrusted()).rejects.toThrow(/not trusted/);
-    for (const marker of ['null', '{}', '{"version":2,"trusted":true}', '{"version":1,"trusted":false}']) {
-      writeFileSync(absent.trustFile, marker);
-      await expect(absent.session.assertTrusted()).rejects.toThrow(/invalid/);
-    }
     expect(absent.session.isGenerationValid(0)).toBe(false);
     await absent.session.recycle();
     await absent.session.cleanup();
@@ -354,16 +389,81 @@ ${keepAlive}`;
     for (const [field, message] of [
       ['executableSha256', 'executable'],
       ['resources', 'support resource'],
+      ['runtimePath', 'is outside the native runtime root'],
     ] as const) {
       const value = fixture();
       const options =
         field === 'resources'
           ? { ...value.options, resources: [{ ...value.options.resources[0]!, sha256: '0'.repeat(64) }] }
-          : { ...value.options, executableSha256: '0'.repeat(64) };
+          : field === 'runtimePath'
+            ? { ...value.options, runtimePath: join(value.root, 'workspace') }
+            : { ...value.options, executableSha256: '0'.repeat(64) };
       const session = new NativeProcessSession<Issue>(options);
       await expect(request(session)).rejects.toThrow(new RegExp(message));
+      expect(sandbox.wrap).not.toHaveBeenCalled();
       await session.cleanup();
     }
+  });
+
+  it('verifies one signed runtime payload once per process, not once per session', async () => {
+    const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+    await request(value.session);
+    await value.session.cleanup();
+    /* D24: the payload is verified where it becomes trusted — once, for the whole process. A second
+     * session over the same signed root starts without re-hashing it, which is observable here as a
+     * post-verification edit that no longer fails the second session. */
+    writeFileSync(value.options.resources[0]!.path, 'tampered');
+    const second = new NativeProcessSession<Issue>(value.options);
+    await expect(request(second)).resolves.toBeDefined();
+    await second.cleanup();
+
+    const fresh = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+    writeFileSync(fresh.options.resources[0]!.path, 'tampered');
+    const unverified = new NativeProcessSession<Issue>(fresh.options);
+    await expect(request(unverified)).rejects.toThrow(/support resource/);
+    await unverified.cleanup();
+  });
+
+  it('should refuse to spawn the worker when the sandbox cannot wrap it', async () => {
+    for (const failure of [new Error('profile rejected'), 'launcher exited']) {
+      const value = fixture(
+        `require('node:fs').writeFileSync(process.argv[1] + '.started', '');${ready}${keepAlive}`,
+        1500,
+      );
+      sandbox.wrapFailure = failure;
+      const rejection = request(value.session);
+      await expect(rejection).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
+      await expect(rejection).rejects.toThrow(/profile rejected|launcher exited/);
+      expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(false);
+      expect(privateSession(value.session).child).toBeUndefined();
+      expect(value.session.generation).toBe(0);
+      // The next request retries the sandbox instead of remembering the failure.
+      sandbox.wrapFailure = undefined;
+      await expect(request(value.session)).rejects.toThrow(/timed out/);
+      expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(true);
+      await value.session.cleanup();
+    }
+  }, 15_000);
+
+  it('should wrap only host-owned quoted arguments with the fixed capability profile', async () => {
+    const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+    await request(value.session);
+    const [command, shell, policy, signal, workingDirectory, attribution] = sandbox.wrap.mock.calls[0]!;
+    const artifact = `'${value.options.artifactPath}'`;
+    expect(command).toBe(
+      `TMPDIR=${artifact} TEMP=${artifact} TMP=${artifact} exec '${value.options.executablePath}' '${value.options.arguments[0]}'`,
+    );
+    expect(shell).toBe('/bin/sh');
+    expect(signal).toBeUndefined();
+    expect(workingDirectory).toBe(value.options.workspacePath);
+    expect(attribution).toEqual({ commandId: 'Test native#1' });
+    expect(policy).toEqual(
+      nativeSandboxPolicy({
+        readablePaths: [value.root, value.options.workspacePath],
+        writablePath: value.artifactPath,
+      }),
+    );
+    await value.session.cleanup();
   });
 
   it('serializes chunked requests, validates results, redacts stderr, and shuts down gracefully', async () => {
@@ -379,8 +479,6 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     expect(second.value).toBe('1:2');
     expect(value.session.isGenerationValid(1)).toBe(true);
     expect(value.logger.debug).toHaveBeenCalledWith(expect.stringContaining('<private>'));
-    writeFileSync(value.trustFile, '{"version":1,"trusted":true,"refreshed":true}\n');
-    await delay(300);
     await expect(
       request(value.session, {
         parseResult: () => {
@@ -432,27 +530,58 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     await delay(10);
     expect(duplicate.session.isGenerationValid(1)).toBe(false);
     await duplicate.session.cleanup();
-  });
+  }, 15_000);
 
-  it('should preserve sibling trust revocation watches when one session is cleaned up', async () => {
-    const value = fixture(`${ready}${keepAlive}`);
-    const sibling = new NativeProcessSession<Issue>(value.options);
-    try {
-      await value.session.cleanup();
-      const operation = request(sibling);
-      const rejection = expect(operation).rejects.toThrow('Native-code trust was revoked.');
-      await vi.waitFor(() => {
-        expect(privateSession(sibling).pending.size).toBe(1);
-      });
-      unlinkSync(value.trustFile);
-      await rejection;
-    } finally {
-      await value.session.cleanup();
-      await sibling.cleanup();
+  it('cancels cooperatively when a request names a cancel method, and kills when it cannot', async () => {
+    // The worker answers the cancel notification itself; the process is never recycled.
+    const cooperative = fixture(`${ready}
+const readline=require('node:readline').createInterface({input:process.stdin});
+let pending;
+readline.on('line',(line)=>{
+ const frame=JSON.parse(line);
+ if(frame.method==='cancel'){
+  process.stdout.write(JSON.stringify({protocolVersion:1,requestId:pending,issues:[{message:'cancelled'}]})+'\\n');
+  return;
+ }
+ pending=frame.requestId;
+});
+${keepAlive}`);
+    const controller = new AbortController();
+    const operation = request(cooperative.session, { signal: controller.signal, cancelMethod: 'cancel' });
+    while (privateSession(cooperative.session).pending.size === 0) {
+      await delay(2);
     }
+    const { generation } = cooperative.session;
+    const { child } = privateSession(cooperative.session);
+    controller.abort(new Error('user edited again'));
+    await expect(operation).rejects.toThrow(NativeWorkerReportedError);
+    expect(cooperative.session.generation).toBe(generation);
+    expect(privateSession(cooperative.session).child).toBe(child);
+    // The same worker still serves the next request, so its resident prefix survives.
+    const next = request(cooperative.session, { cancelMethod: 'cancel' });
+    await vi.waitFor(() => {
+      expect(privateSession(cooperative.session).pending.size).toBe(1);
+    });
+    expect(privateSession(cooperative.session).child).toBe(child);
+    // Observe the rejection before cleanup settles it, or the settled promise reports as unhandled.
+    const nextRejection = expect(next).rejects.toThrow();
+    await cooperative.session.cleanup();
+    await nextRejection;
+
+    // Kill remains the fallback when the worker's input is gone.
+    const unwritable = fixture(`${ready}${keepAlive}`);
+    const killController = new AbortController();
+    const killed = request(unwritable.session, { signal: killController.signal, cancelMethod: 'cancel' });
+    while (privateSession(unwritable.session).pending.size === 0) {
+      await delay(2);
+    }
+    privateSession(unwritable.session).child!.stdin.end();
+    killController.abort(new Error('deadline'));
+    await expect(killed).rejects.toThrow(/deadline/);
+    await unwritable.session.cleanup();
   });
 
-  it('bounds the queue and handles abort, timeout, trust revocation, spawn, and write failures', async () => {
+  it('bounds the queue and handles abort, timeout, spawn, and write failures', async () => {
     const stalled = fixture(`${ready}${keepAlive}`, 5000);
     const operations = Array.from({ length: 16 }, async () => request(stalled.session));
     await expect(request(stalled.session)).rejects.toThrow(/queue exceeds/);
@@ -485,15 +614,6 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     const handshakeTimeout = fixture(keepAlive, 20);
     await expect(request(handshakeTimeout.session)).rejects.toThrow(/handshake timed out/);
     await handshakeTimeout.session.cleanup();
-    const revoked = fixture(`${ready}${keepAlive}`);
-    const revocation = request(revoked.session);
-    while (privateSession(revoked.session).pending.size === 0) {
-      await delay(2);
-    }
-    unlinkSync(revoked.trustFile);
-    await expect(revocation).rejects.toThrow(/revoked/);
-    await revoked.session.cleanup();
-
     const writable = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
     await request(writable.session);
     const writableChild = privateSession(writable.session).child!;
@@ -508,6 +628,12 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     chmodSync(spawnFailure.options.executablePath, 0o600);
     await expect(request(spawnFailure.session)).rejects.toThrow();
     await spawnFailure.session.cleanup();
+
+    const missingLauncher = fixture();
+    sandbox.launcher = join(missingLauncher.root, 'missing-sandbox-launcher');
+    await expect(request(missingLauncher.session)).rejects.toThrow(/ENOENT/);
+    sandbox.launcher = '/bin/sh';
+    await missingLauncher.session.cleanup();
 
     const writeFailure = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
     await request(writeFailure.session);
@@ -605,24 +731,37 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     const environment = processEnvironment('/artifacts');
     expect(environment['LANG']).toBe('C.UTF-8');
     expect(environment['TMPDIR']).toBe('/artifacts');
+    expect(environment['HOME']).toBe('/artifacts');
+    expect(environment['PATH']).toBe('/usr/bin:/bin');
+    await withPlatform('win32', async () => {
+      expect(processEnvironment('/artifacts')).not.toHaveProperty('PATH');
+    });
   });
 });
 
+/** Wire a mocked filesystem's batched listing from a directory-to-names description. */
+const mockListing = (
+  filesystem: ReturnType<typeof createMockFileSystem>,
+  names: (directory: string) => string[],
+  stat: (path: string) => { type: 'dir' | 'file'; size: number; mtimeMs: number },
+): void => {
+  filesystem.mocks.readdirStat.mockImplementation(async (directory: string) =>
+    names(directory).map((name) => {
+      const path = directory === '' ? name : `${directory}/${name}`;
+      const entry = stat(path);
+      return entry.type === 'dir' ? { ...entry, path, name } : { ...entry, path, name, contentKind: 'binary' };
+    }),
+  );
+};
+
 describe('createWorkspaceMirror', () => {
   it('excludes only exact rooted paths before stat or read, preserving nested assets and context', async () => {
-    const filesystem = createMockFileSystem({
-      readdirResult: (directory) =>
-        directory === '' ? ['thumbnail.webp', 'nested', 'tau.json', 'package.json'] : ['thumbnail.webp'],
-      readFileResult: 'x',
-    });
-    filesystem.mocks.lstat.mockImplementation(async (path: string) => {
-      if (path === 'thumbnail.webp') {
-        throw new Error('Generated thumbnail changed');
-      }
-      return path === 'nested'
-        ? { type: 'dir', size: 0, mtimeMs: 0 }
-        : { type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' };
-    });
+    const filesystem = createMockFileSystem({ readFileResult: 'x' });
+    mockListing(
+      filesystem,
+      (directory) => (directory === '' ? ['thumbnail.webp', 'nested', 'tau.json', 'package.json'] : ['thumbnail.webp']),
+      (path) => (path === 'nested' ? { type: 'dir', size: 0, mtimeMs: 0 } : { type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const options = { temporaryPrefix: 'tau-mirror-test-', displayName: 'Test', excludedPaths: ['thumbnail.webp'] };
     const mirror = await createWorkspaceMirror(options);
     try {
@@ -637,9 +776,13 @@ describe('createWorkspaceMirror', () => {
     }
   });
 
-  it.each(['lstat', 'readFile'] as const)('propagates unrelated %s failures', async (operation) => {
-    const filesystem = createMockFileSystem({ readdirResult: ['main.cs'], readFileResult: 'x' });
-    filesystem.mocks.lstat.mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' });
+  it.each(['readdirStat', 'readFile'] as const)('propagates unrelated %s failures', async (operation) => {
+    const filesystem = createMockFileSystem({ readFileResult: 'x' });
+    mockListing(
+      filesystem,
+      () => ['main.cs'],
+      () => ({ type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const error = new Error('Workspace unavailable');
     filesystem.mocks[operation].mockRejectedValue(error);
     const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
@@ -659,19 +802,20 @@ describe('createWorkspaceMirror', () => {
       ['nested/helper.cs', new TextEncoder().encode('helper')],
       ['nested/data.dll', new TextEncoder().encode('excluded')],
     ]);
-    const filesystem = createMockFileSystem({
-      readdirResult: (directory) =>
+    const mtimes = new Map([...files.keys()].map((path) => [path, 1000]));
+    const filesystem = createMockFileSystem({ readFileResult: (path) => files.get(path)! });
+    mockListing(
+      filesystem,
+      (directory) =>
         directory === ''
           ? ['node_modules', 'nested', 'main.cs']
           : directory === 'nested'
             ? ['helper.cs', 'data.dll']
             : [],
-      readFileResult: (path) => files.get(path)!,
-    });
-    filesystem.mocks.lstat.mockImplementation(async (path: string) =>
-      path === 'nested' || path === 'node_modules'
-        ? { type: 'dir', size: 0, mtimeMs: 0 }
-        : { type: 'file', size: files.get(path)!.byteLength, mtimeMs: 0, contentKind: 'text' },
+      (path) =>
+        path === 'nested' || path === 'node_modules'
+          ? { type: 'dir', size: 0, mtimeMs: 0 }
+          : { type: 'file', size: files.get(path)!.byteLength, mtimeMs: mtimes.get(path)! },
     );
     const mirror = await createWorkspaceMirror({
       temporaryPrefix: 'tau-mirror-test-',
@@ -683,11 +827,35 @@ describe('createWorkspaceMirror', () => {
     expect(process.listenerCount('SIGTERM')).toBe(terminateListeners + 1);
     roots.push(mirror.rootPath);
     await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs', 'nested/helper.cs']);
+    // D6: one listing call per directory, and every mirrored file read exactly once.
+    expect(filesystem.mocks.readdirStat.mock.calls.map((call) => String(call[0]))).toEqual(['', 'nested']);
+    expect(filesystem.mocks.lstat).not.toHaveBeenCalled();
+    expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
+
+    filesystem.mocks.readFile.mockClear();
     await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs', 'nested/helper.cs']);
+    // An unchanged workspace reads no file bytes at all.
+    expect(filesystem.mocks.readFile).not.toHaveBeenCalled();
+
+    /* Racily clean: main.cs is stamped in the millisecond the last sync ran, so its stat cannot
+     * prove it unchanged — it is read again even though size and mtime repeat. helper.cs is older
+     * than that sync and stays trusted. */
+    files.set('main.cs', new TextEncoder().encode('ONE'));
+    mtimes.set('main.cs', Date.now());
+    await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs', 'nested/helper.cs']);
+    expect(filesystem.mocks.readFile.mock.calls.map((call) => String(call[0]))).toEqual(['main.cs']);
+    expect(readFileSync(join(mirror.workspacePath, 'main.cs'), 'utf8')).toBe('ONE');
+
     files.set('main.cs', new TextEncoder().encode('two'));
+    mtimes.set('main.cs', 2000);
     files.delete('nested/helper.cs');
-    filesystem.mocks.readdir.mockImplementation(async (directory: string) => (directory === '' ? ['main.cs'] : []));
+    mockListing(
+      filesystem,
+      (directory) => (directory === '' ? ['main.cs'] : []),
+      (path) => ({ type: 'file', size: files.get(path)!.byteLength, mtimeMs: mtimes.get(path)! }),
+    );
     await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs']);
+    expect(readFileSync(join(mirror.workspacePath, 'main.cs'), 'utf8')).toBe('two');
     await mirror.cleanup();
     expect(existsSync(mirror.rootPath)).toBe(false);
     expect(process.listenerCount('exit')).toBe(exitListeners);
@@ -695,32 +863,69 @@ describe('createWorkspaceMirror', () => {
     expect(process.listenerCount('SIGTERM')).toBe(terminateListeners);
   });
 
+  it('takes bytes the runtime already read from its content cache', async () => {
+    const filesystem = createMockFileSystem({ readFileResult: () => new TextEncoder().encode('from disk') });
+    mockListing(
+      filesystem,
+      (directory) => (directory === '' ? ['main.cs', 'notes.md'] : []),
+      () => ({ type: 'file', size: 9, mtimeMs: 0 }),
+    );
+    const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
+    roots.push(mirror.rootPath);
+    try {
+      await mirror.sync(
+        filesystem,
+        new Map<string, Uint8Array<ArrayBuffer> | string>([
+          ['main.cs', 'in memory'],
+          // Shorter than the stat says: the cache entry is stale, so the file is read instead.
+          ['notes.md', new Uint8Array(3)],
+        ]),
+      );
+      expect(filesystem.mocks.readFile.mock.calls.map((call) => String(call[0]))).toEqual(['notes.md']);
+      expect(readFileSync(join(mirror.workspacePath, 'main.cs'), 'utf8')).toBe('in memory');
+      expect(readFileSync(join(mirror.workspacePath, 'notes.md'), 'utf8')).toBe('from disk');
+    } finally {
+      await mirror.cleanup();
+    }
+  });
+
   it('rejects case collisions, concurrent changes, depth, and size limits', async () => {
-    const collision = createMockFileSystem({ readdirResult: ['A.cs', 'a.cs'], readFileResult: 'x' });
-    collision.mocks.lstat.mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' });
+    const collision = createMockFileSystem({ readFileResult: 'x' });
+    mockListing(
+      collision,
+      () => ['A.cs', 'a.cs'],
+      () => ({ type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const collisionMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(collisionMirror.rootPath);
     await expect(collisionMirror.sync(collision)).rejects.toThrow(/case-colliding/);
 
-    const deep = createMockFileSystem({ readdirResult: (directory) => [directory ? 'next' : 'root'] });
-    deep.mocks.lstat.mockResolvedValue({ type: 'dir', size: 0, mtimeMs: 0 });
+    const deep = createMockFileSystem();
+    mockListing(
+      deep,
+      (directory) => [directory ? 'next' : 'root'],
+      () => ({ type: 'dir', size: 0, mtimeMs: 0 }),
+    );
     const deepMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(deepMirror.rootPath);
     await expect(deepMirror.sync(deep)).rejects.toThrow(/directory levels/);
 
-    const large = createMockFileSystem({ readdirResult: ['large.cs'] });
-    large.mocks.lstat.mockResolvedValue({
-      type: 'file',
-      size: 32 * 1024 * 1024 + 1,
-      mtimeMs: 0,
-      contentKind: 'binary',
-    });
+    const large = createMockFileSystem();
+    mockListing(
+      large,
+      () => ['large.cs'],
+      () => ({ type: 'file', size: 32 * 1024 * 1024 + 1, mtimeMs: 0 }),
+    );
     const largeMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(largeMirror.rootPath);
     await expect(largeMirror.sync(large)).rejects.toThrow(/size limits/);
 
-    const changed = createMockFileSystem({ readdirResult: ['main.cs'], readFileResult: 'xx' });
-    changed.mocks.lstat.mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' });
+    const changed = createMockFileSystem({ readFileResult: 'xx' });
+    mockListing(
+      changed,
+      () => ['main.cs'],
+      () => ({ type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(mirror.rootPath);
     await expect(mirror.sync(changed)).rejects.toThrow(/changed while mirroring/);

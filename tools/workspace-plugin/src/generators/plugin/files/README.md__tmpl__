@@ -20,20 +20,27 @@
 npm i <%= importPath %> @taucad/runtime
 ```
 
-`@taucad/runtime` is a required peer — one install must hold one runtime. A capability with an
-options schema adds `zod` as a second required peer.
+`@taucad/runtime` is a required peer — one install must hold one runtime.<% if (usesZod) { %> This toolkit's
+generated configuration schemas make `zod` a second required peer.<% } else { %> A capability with an options
+schema adds `zod` as a second required peer.<% } %>
 
 ## Quick start
 
 ```typescript
-import { defineRuntime } from '@taucad/runtime/worker';
+import { defineRuntime } from '@taucad/runtime/<%= hasHostRoles ? 'host' : 'worker' %>';
 import { <%= alias %> } from '<%= importPath %>';
 
 const runtime = defineRuntime({ plugins: [<%= alias %>()] });
 ```
 
+<% if (hasHostRoles) { %>
+This creates an outer host definition with separate `cad`, `jobs`, and `machines` capabilities. Bind it to a
+trusted host implementation; do not pass the host definition to the four-role CAD worker or a CAD-only client.
+The generated job execution and machine connection remain explicit throwing scaffolds until implemented.
+<% } else { %>
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
+<% } %>
 
 ## API
 

@@ -8,14 +8,23 @@
  * @public
  */
 
-import type {
-  AdoptableProjectManifest,
-  FileSystemBackend,
-  ProjectManifest,
-  ProjectManifestParseIssue,
-} from '@taucad/types';
+import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
+import type { RouteKind } from '#project-routes.js';
+import { parseRoute } from '#project-routes.js';
+
+/**
+ * What the bytes behind one mount are to a revision: `authored` content a
+ * revision carries, `derived` content a producer regenerates, or
+ * `authority-metadata` an authority owns.
+ *
+ * @public
+ */
+export type MountPathClass = 'authored' | 'derived' | 'authority-metadata';
+
+/** Every admitted mount class, for the fail-closed registration check. @public */
+export const mountPathClasses: readonly MountPathClass[] = Object.freeze(['authored', 'derived', 'authority-metadata']);
 
 /**
  * Common option fields shared by every {@link MountConfig} variant.
@@ -27,6 +36,12 @@ export type MountConfigCommon = {
    * Defaults to `''` for a provider rooted at the mount itself.
    */
   readonly providerBasePath?: string;
+  /**
+   * Required, with no default: an unclassified mount is a compile error, and
+   * {@link MountTable.mount} refuses one at runtime. A mount whose class is a
+   * guess is how derived bytes reach a revision (RC6 / S5 work 2).
+   */
+  readonly class: MountPathClass;
 };
 
 /**
@@ -112,9 +127,27 @@ export type StorageRootConfig =
       readonly path: string;
     };
 
-/** Complete persisted project-route and discovery-root configuration. @public */
+/**
+ * Persisted route for one linked checkout: git's worktree made addressable
+ * (charter D4, blueprint S4).
+ *
+ * It rides the *project's* storage root at `.tau/checkouts/<projectId>/<id>`,
+ * so `createRootedFileSystem('/checkouts/<id>')` needs no new capability and
+ * Rule 15's boundary is untouched. It is installed explicitly and is never a
+ * discovery candidate: `.tau` is dot-prefixed, so a scan skips it by the same
+ * rule that keeps app state out of project discovery.
+ *
+ * @public
+ */
+export type CheckoutRootConfig = ProjectRootConfig & {
+  readonly checkoutId: string;
+};
+
+/** Complete persisted project-route, checkout-route and discovery-root configuration. @public */
 export type ProjectRootConfiguration = {
   readonly projects: readonly ProjectRootConfig[];
+  /** Linked checkouts of those projects. Absent means none; the call replaces the whole set. */
+  readonly checkouts?: readonly CheckoutRootConfig[];
   readonly roots: readonly StorageRootConfig[];
 };
 
@@ -143,59 +176,6 @@ export type ProjectLocator =
       readonly path: string;
     };
 
-/** Validated or quarantined result from project discovery. @public */
-export type ProjectDiscoveryEntry =
-  | {
-      readonly status: 'valid';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      readonly status: 'duplicate-id';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      /**
-       * The project is discoverable here, but its persisted route still points
-       * at a storage root this pass could not observe, so re-pointing would be
-       * unsafe. Synthesized by the UI reconciliation layer — the worker scan
-       * never emits it.
-       */
-      readonly status: 'route-blocked';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      readonly status: 'adoption-required';
-      readonly manifest: AdoptableProjectManifest;
-      readonly locator: ProjectLocator;
-      readonly issue: ProjectManifestParseIssue;
-    }
-  | {
-      readonly status: 'invalid';
-      readonly locator: ProjectLocator;
-      readonly issue: ProjectManifestParseIssue;
-    };
-
-/** Completeness of one configured physical-root scan. @public */
-export type ProjectRootDiscoveryStatus =
-  | {
-      readonly status: 'complete';
-      readonly root: StorageRootConfig;
-    }
-  | {
-      readonly status: 'inaccessible';
-      readonly root: StorageRootConfig;
-      readonly reason: string;
-    };
-
-/** Complete project-discovery result. Entries never imply an unreported root was empty. @public */
-export type ProjectDiscoveryResult = {
-  readonly entries: readonly ProjectDiscoveryEntry[];
-  readonly roots: readonly ProjectRootDiscoveryStatus[];
-};
-
 /** Exact scoped request for permanently removing one project directory. @public */
 export type PermanentDeleteProjectDirectoryInput = {
   readonly projectId: string;
@@ -213,7 +193,9 @@ export type PermanentDeleteProjectDirectoryResult =
 export type CommitPendingProjectDirectoryInput = {
   readonly providerBasePath: string;
   readonly scope: StorageRootConfig;
-  readonly files: Readonly<Record<string, { readonly content: Uint8Array<ArrayBuffer> }>>;
+  readonly files: Readonly<
+    Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>
+  >;
   readonly manifest: Uint8Array<ArrayBuffer>;
 };
 
@@ -254,6 +236,14 @@ export type MountMetadata = {
   readonly backend: FileSystemBackend;
   readonly storageRootKey?: string;
   readonly providerBasePath?: string;
+  /** Required; {@link MountTable.mount} refuses an unclassified mount. */
+  readonly class: MountPathClass;
+  /**
+   * What this mount is to the product. Defaults to the route its prefix
+   * spells; declare it to install a mount the route grammar would otherwise
+   * claim (charter D10).
+   */
+  readonly kind?: RouteKind;
 };
 
 /**
@@ -266,6 +256,14 @@ export type MountEntry = {
   readonly backend: FileSystemBackend;
   readonly storageRootKey?: string;
   readonly providerBasePath: string;
+  readonly class: MountPathClass;
+  /**
+   * What this mount is to the product, so a classifier reads the kind instead
+   * of re-parsing the prefix (charter D10).
+   */
+  readonly kind: RouteKind;
+  /** Route identity carried by the prefix: project id, checkout id or preview instance. */
+  readonly routeId?: string;
 };
 
 /**
@@ -296,8 +294,8 @@ export type MountResolution = {
  * declare const opfsProvider: FileSystemProvider;
  *
  * const table = new MountTable();
- * table.mount('/', projectProvider, { backend: 'indexeddb' });
- * table.mount('/node_modules', opfsProvider, { backend: 'opfs' });
+ * table.mount('/', projectProvider, { backend: 'indexeddb', class: 'authored' });
+ * table.mount('/node_modules', opfsProvider, { backend: 'opfs', class: 'derived' });
  *
  * const { provider, path } = table.resolve('/node_modules/lodash/index.js');
  * // provider === opfsProvider, path === 'lodash/index.js'
@@ -316,6 +314,9 @@ export class MountTable {
    * @param config - Backend identifier and additional mount options.
    */
   public mount(prefix: string, provider: FileSystemProvider, config: MountMetadata): void {
+    if (!mountPathClasses.includes(config.class)) {
+      throw new TypeError(`Mount ${prefix} must declare authored | derived | authority-metadata.`);
+    }
     const normalized = this._normalizePrefix(prefix);
 
     const existingIndex = this._mounts.findIndex((m) => m.prefix === normalized);
@@ -324,12 +325,16 @@ export class MountTable {
     }
 
     const providerBasePath = assertRootedPath(config.providerBasePath ?? '');
+    const route = parseRoute(normalized);
     this._mounts.push({
       prefix: normalized,
       provider,
       backend: config.backend,
       storageRootKey: config.storageRootKey,
       providerBasePath,
+      class: config.class,
+      kind: config.kind ?? route.kind,
+      routeId: route.id,
     });
     this._mounts.sort((a, b) => b.prefix.length - a.prefix.length);
   }

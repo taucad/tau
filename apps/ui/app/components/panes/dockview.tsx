@@ -1,4 +1,4 @@
-import type { ComponentProps, FunctionComponent } from 'react';
+import type { ComponentProps, FunctionComponent, MouseEvent as ReactMouseEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { DockviewApi, DockviewReadyEvent, DockviewTheme, IDockviewHeaderActionsProps } from 'dockview-react';
 import { DockviewReact } from 'dockview-react';
@@ -67,6 +67,7 @@ export const dockviewStyleOverrides = cn(
   // ── Scrollbar ──
   '[--dv-tabs-container-scrollbar-color:var(--border)]',
   '[--dv-scrollbar-background-color:var(--border)]',
+  '[&_.dv-scrollbar-horizontal]:!h-[calc(var(--scrollbar-thickness)/2)]',
   // ── Tab scroll shadows: horizontal fade preserving top/bottom borders ──
   // Two mask layers composited with `add` (union):
   //   Layer 1 – border strips: 1px top + 1px bottom always fully opaque
@@ -163,9 +164,9 @@ export const dockviewStyleOverrides = cn(
   // masks the title beneath the close action without showing a separate pill.
   '[&_.dv-tab:hover_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
   '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
-  '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--scroll-fade-size:42px]',
+  '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:text-foreground',
-  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-input',
+  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-nested-action-hover',
 
   // ═══════════════════════════════════════════════════════════════════════════
   // TAB STATES
@@ -175,9 +176,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-tab]:transition-colors',
   '[&_.dv-tab:not(.dv-active-tab):hover]:!bg-accent',
   '[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground',
-  '[&_.dv-tab:focus-visible]:outline-none',
-  '[&_.dv-tab:focus-visible]:ring-2',
-  '[&_.dv-tab:focus-visible]:ring-ring',
+  '[&_.dv-tab:focus-visible]:focus-outline',
   '[&_.dv-tab.dv-active-tab_.dv-default-tab-action]:opacity-100',
   '[&_.dv-tab:focus-within_.dv-default-tab-action]:visible',
   '[&_.dv-tab:focus-within_.dv-default-tab-action]:opacity-100',
@@ -215,7 +214,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-right-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_.dv-pre-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
-  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-muted-foreground/15',
+  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-accent',
 
   // ── Group-hover action button visibility ──
   // Hidden by default, shown on group hover to reduce visual noise.
@@ -270,14 +269,15 @@ const desktopDockviewStyleOverrides = isDesktopTarget()
   : undefined;
 
 /**
- * Scroll the active tab fully into view within its group's tab bar.
+ * Scroll the active tab fully beyond its group's tab-bar fades.
  *
  * Dockview's built-in scroll fires synchronously before the browser
  * reflows newly added tabs, so their widths can be zero. This helper
- * runs after layout to correct the scroll position.
+ * runs after layout, then once more after Dockview's custom scrollbar update,
+ * to correct the scroll position.
  */
 export function scrollActiveTabIntoView(api: DockviewApi): void {
-  requestAnimationFrame(() => {
+  const correctScrollPosition = (): void => {
     const group = api.activeGroup;
     if (!group) {
       return;
@@ -292,13 +292,25 @@ export function scrollActiveTabIntoView(api: DockviewApi): void {
     const tabLeft = activeTab.offsetLeft;
     const tabRight = tabLeft + activeTab.offsetWidth;
     const { scrollLeft } = tabsContainer;
-    const visibleRight = scrollLeft + tabsContainer.clientWidth;
+    const fadeSize = Number.parseFloat(getComputedStyle(tabsContainer).getPropertyValue('--scroll-fade-size')) || 0;
+    const visibleLeft = scrollLeft + fadeSize;
+    const visibleRight = scrollLeft + tabsContainer.clientWidth - fadeSize;
 
-    if (tabLeft < scrollLeft) {
-      tabsContainer.scrollLeft = tabLeft;
+    if (tabLeft < visibleLeft) {
+      tabsContainer.scrollLeft = Math.max(0, tabLeft - fadeSize);
+      tabsContainer.dispatchEvent(new Event('scroll'));
     } else if (tabRight > visibleRight) {
-      tabsContainer.scrollLeft = Math.min(tabLeft, tabRight - tabsContainer.clientWidth);
+      tabsContainer.scrollLeft = Math.max(
+        0,
+        Math.min(tabLeft - fadeSize, tabRight - tabsContainer.clientWidth + fadeSize),
+      );
+      tabsContainer.dispatchEvent(new Event('scroll'));
     }
+  };
+
+  requestAnimationFrame(() => {
+    correctScrollPosition();
+    requestAnimationFrame(correctScrollPosition);
   });
 }
 
@@ -330,6 +342,7 @@ export function Dockview({
   tabLeadingIcon,
   ...properties
 }: DockviewProperties): React.JSX.Element {
+  const apiRef = useRef<DockviewApi | undefined>(undefined);
   const disposableRef = useRef<{ dispose(): void } | undefined>(undefined);
   const RightHeaderActions = useMemo<FunctionComponent<IDockviewHeaderActionsProps>>(() => {
     const CallerActions = rightHeaderActionsComponent;
@@ -349,6 +362,7 @@ export function Dockview({
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {
       disposableRef.current?.dispose();
+      apiRef.current = event.api;
       disposableRef.current = event.api.onDidActivePanelChange(() => {
         scrollActiveTabIntoView(event.api);
       });
@@ -357,9 +371,19 @@ export function Dockview({
     [onReady],
   );
 
+  const handleTabClick = useCallback((clickEvent: ReactMouseEvent<HTMLDivElement>): void => {
+    const api = apiRef.current;
+    if (!api || !(clickEvent.target instanceof Element) || !clickEvent.target.closest('.dv-tab')) {
+      return;
+    }
+
+    scrollActiveTabIntoView(api);
+  }, []);
+
   useEffect(() => {
     return () => {
       disposableRef.current?.dispose();
+      apiRef.current = undefined;
     };
   }, []);
 
@@ -367,13 +391,14 @@ export function Dockview({
     <OmniScroller
       className={cn('size-full', dockviewStyleOverrides, desktopDockviewStyleOverrides)}
       viewportSelector='.dv-tabs-container'
+      onClickCapture={handleTabClick}
     >
       <DockviewReact
         {...properties}
         className={className}
         disableTabsOverflowList
         rightHeaderActionsComponent={RightHeaderActions}
-        scrollbars='native'
+        scrollbars='custom'
         theme={tauDockviewTheme}
         onReady={handleReady}
       />

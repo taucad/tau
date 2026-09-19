@@ -1,10 +1,11 @@
 import { memo, useMemo } from 'react';
 import type { ComponentProps } from 'react';
-import type { ControlsConfig, StreamdownProps } from 'streamdown';
+import type { Components, ControlsConfig, StreamdownProps } from 'streamdown';
 import { cn } from '@taucad/ui/utils/cn';
 import { defaultMarkdownControls, MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { rehypeAtReferences } from '#components/markdown/rehype-at-references.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
+import { ChatStreamingBlock, ChatStreamingFadeProvider } from '#components/markdown/chat-streaming-block.js';
 
 const chatMarkdownControls: ControlsConfig = { ...defaultMarkdownControls, table: false };
 
@@ -36,6 +37,7 @@ function createChatHeader(
  * Headers are smaller than standard markdown headers since chat messages
  * are displayed in a more compact format.
  */
+// oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
 const chatHeaderComponents = {
   h1: createChatHeader('h1', 'text-lg font-bold'),
   h2: createChatHeader('h2', 'text-base font-semibold'),
@@ -43,9 +45,11 @@ const chatHeaderComponents = {
   h4: createChatHeader('h4', 'text-sm font-medium'),
   h5: createChatHeader('h5', 'text-xs font-medium'),
   h6: createChatHeader('h6', 'text-xs font-medium'),
-} as const satisfies StreamdownProps['components'];
+} as Components;
 
-type MarkdownViewerChatProps = Omit<ComponentProps<typeof MarkdownViewer>, 'controls'>;
+type MarkdownViewerChatProps = Omit<ComponentProps<typeof MarkdownViewer>, 'controls'> & {
+  readonly isStreamingFade?: boolean;
+};
 
 /**
  * A MarkdownViewer variant optimized for chat context.
@@ -56,26 +60,53 @@ export const MarkdownViewerChat = memo(function ({
   isStreaming = false,
   className,
   components,
+  isStreamingFade = false,
+  ...properties
 }: MarkdownViewerChatProps): React.JSX.Element {
-  const memoizedComponents = useMemo(
-    () => ({
-      ...chatHeaderComponents,
-      mark: AtReferenceChip,
-      ...components,
-    }),
+  const memoizedComponents = useMemo<Components>(
+    () =>
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
+      ({
+        ...chatHeaderComponents,
+        mark: AtReferenceChip,
+        ...components,
+      }) as Components,
     [components],
   );
 
+  if (!isStreamingFade) {
+    return (
+      <MarkdownViewer
+        {...properties}
+        className={className}
+        streamdownClassName='space-y-2'
+        isStreaming={isStreaming}
+        components={memoizedComponents}
+        controls={chatMarkdownControls}
+        rehypePlugins={chatRehypePlugins}
+      >
+        {children}
+      </MarkdownViewer>
+    );
+  }
+
   return (
-    <MarkdownViewer
-      className={className}
-      streamdownClassName='space-y-2'
-      isStreaming={isStreaming}
-      components={memoizedComponents}
-      controls={chatMarkdownControls}
-      rehypePlugins={chatRehypePlugins}
-    >
-      {children}
-    </MarkdownViewer>
+    <ChatStreamingFadeProvider content={children}>
+      {(parseBlocks) => (
+        <MarkdownViewer
+          {...properties}
+          className={className}
+          streamdownClassName='space-y-2'
+          isStreaming={isStreaming}
+          components={memoizedComponents}
+          controls={chatMarkdownControls}
+          rehypePlugins={chatRehypePlugins}
+          BlockComponent={ChatStreamingBlock}
+          parseMarkdownIntoBlocksFn={parseBlocks}
+        >
+          {children}
+        </MarkdownViewer>
+      )}
+    </ChatStreamingFadeProvider>
   );
 });

@@ -1,35 +1,31 @@
 /**
  * Kernel utility entry (work item E5).
  *
- * One process per renderer client, forked by `registerElectronRuntimeMain`
- * with the project root the E6 resolver validated. The utility owns the
- * executable runtime and a rooted node filesystem; main only hands it a
- * `MessagePortMain`. Nothing here trusts `TAU_PROJECT_ROOT` — main already did
- * the trusting, and refuses the fork outright when it cannot.
+ * One process per renderer client, forked by `registerElectronRuntimeMain`.
+ * The utility owns the executable runtime and consumes the rooted filesystem
+ * capability main transfers from the services utility — which is the only
+ * thing that tells it which directory it works in. Nothing here names a
+ * project: main validated the root, and a process that knows no root can be
+ * forked before anyone has asked for one and handed to whoever asks first
+ * (W-L03-4).
  */
 
-import { mkdirSync } from 'node:fs';
-
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
 
 import { createDiagnosticsLog } from '#main/diagnostics.js';
 import { kernelEngineEvent, kernelEngineRecord } from '#tau/kernel-diagnostics.js';
-import { debugRuntime, desktopOpenrscadKernel, runtime } from '#tau/desktop-runtime.definition.js';
+import { debugRuntime, runtime } from '#tau/desktop-runtime.definition.js';
+import { desktopOpenrscadKernel } from '#tau/desktop-runtime.factory.js';
 
-const projectRoot = process.env['TAU_PROJECT_ROOT'];
-if (!projectRoot) {
-  throw new Error('The Tau kernel utility requires TAU_PROJECT_ROOT; main resolves it per request.');
-}
-mkdirSync(projectRoot, { recursive: true });
-
+const ephemeral = process.env['TAU_RUNTIME_EPHEMERAL'] === '1';
 /* Serve first, diagnose second. `serveElectronRuntime` must attach its
  * `parentPort` listener synchronously during module evaluation — main posts the
  * wire port immediately after forking, and an `await` placed above this line
  * would race it. */
 serveElectronRuntime({
-  fileSystem: fromNodeFs(projectRoot),
+  ...(ephemeral ? { fileSystem: fromMemoryFs() } : {}),
   runtime: process.env['TAU_RUNTIME_DEBUG'] === '1' ? debugRuntime : runtime,
 });
 
@@ -58,7 +54,7 @@ const recordEngineIdentity = async (): Promise<void> => {
   try {
     const definition = await resolveRuntimePluginDefinition('kernel', desktopOpenrscadKernel);
     const { backend } = await import('@taulabs/openrscad-engine');
-    createDiagnosticsLog({ directory }).log(
+    createDiagnosticsLog({ directory, producer: 'kernel' }).log(
       'info',
       kernelEngineEvent,
       kernelEngineRecord({
@@ -70,7 +66,7 @@ const recordEngineIdentity = async (): Promise<void> => {
     );
   } catch (error) {
     // oxlint-disable-next-line no-console -- the diagnostics sink is what failed
-    console.error('[tau-desktop:kernel] engine diagnostics failed', error);
+    console.error('[kernel] engine diagnostics failed', error);
   }
 };
 

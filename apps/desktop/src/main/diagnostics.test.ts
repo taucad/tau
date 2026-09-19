@@ -1,13 +1,85 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDiagnosticsLog, forwardRendererDiagnostics, forwardUtilityDiagnostics } from '#main/diagnostics.js';
+import {
+  createDiagnosticsLog,
+  forwardRendererDiagnostics,
+  forwardUtilityDiagnostics,
+  kernelUtilityDiagnostics,
+} from '#main/diagnostics.js';
 
 const logDirectory = (): string => mkdtempSync(join(tmpdir(), 'tau-diagnostics-'));
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
+
 describe('createDiagnosticsLog', () => {
+  it('should format console levels like the API while keeping the file plain and detailed', () => {
+    vi.stubEnv('TAU_DEBUG', 'true');
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const info = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const log = createDiagnosticsLog({ directory: logDirectory() });
+    const hash = '050cd13ce2b252a2dcd93bdad7d42eee9719a2de31953aca8c9e4589fa65395d';
+    const detail = {
+      message: `[Kernel:worker] cache computed for ${hash}`,
+      source: 'http://localhost:3001/worker.ts',
+      line: 7,
+    };
+
+    log.log('debug', 'renderer.console', detail);
+    log.log('info', 'renderer.console', detail);
+    log.log('warn', 'renderer.console', detail);
+    log.log('error', 'renderer.console', detail);
+
+    const outputs = [debug, info, warn, error].map((spy) => String(spy.mock.calls[0]?.[0]));
+    expect(outputs).toEqual([
+      expect.stringContaining('\u001B[34mDEBUG\u001B[39m:'),
+      expect.stringContaining('\u001B[32mINFO\u001B[39m:'),
+      expect.stringContaining('\u001B[33mWARN\u001B[39m:'),
+      expect.stringContaining('\u001B[31mERROR\u001B[39m:'),
+    ]);
+    for (const output of outputs) {
+      expect(output).toMatch(/^\[desktop\] \[\d{2}:\d{2}:\d{2}\.\d{3}\]/u);
+      expect(output).toContain('[Kernel:worker] cache computed for 050cd13c…');
+      expect(output).not.toContain('[renderer.console]');
+      expect(output).not.toContain(hash);
+      expect(output).not.toContain('localhost');
+    }
+
+    const file = readFileSync(log.filePath, 'utf8');
+    expect(file).toContain(
+      `DEBUG renderer.console {"message":"[Kernel:worker] cache computed for ${hash}","source":"http://localhost:3001/worker.ts","line":7}`,
+    );
+    expect(file).not.toContain('\u001B');
+  });
+
+  it('should hide debug and collapse consecutive duplicate terminal records without dropping file records', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const info = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const log = createDiagnosticsLog({ directory: logDirectory(), producer: 'services' });
+
+    log.log('debug', 'services.starting');
+    log.log('warn', 'renderer.console', { message: 'duplicate warning' });
+    log.log('warn', 'renderer.console', { message: 'duplicate warning' });
+    log.log('warn', 'renderer.console', { message: 'duplicate warning' });
+    log.log('info', 'services.agent-host-served');
+
+    expect(debug).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
+      expect.stringContaining('duplicate warning'),
+      expect.stringContaining('↳ repeated ×2'),
+    ]);
+    expect(String(info.mock.calls[0]?.[0])).toContain('[agent-host-served]');
+    expect(readFileSync(log.filePath, 'utf8').match(/duplicate warning/gu)).toHaveLength(3);
+  });
+
   it('records level, event, and detail on one line', () => {
     const directory = logDirectory();
     const log = createDiagnosticsLog({ directory, echo: false });
@@ -49,7 +121,52 @@ describe('createDiagnosticsLog', () => {
 });
 
 describe('forwarders', () => {
-  it('forwards every renderer failure signal main can observe', () => {
+  it('logs renderer failures and recovers only from unexpected exits', () => {
+    const handlers = new Map<string, (...args: unknown[]) => void>();
+    const log = { filePath: '', log: vi.fn() };
+    const recover = vi.fn();
+    forwardRendererDiagnostics(
+      {
+        on: (event: string, listener: (...args: unknown[]) => void) => {
+          handlers.set(event, listener);
+        },
+      },
+      log,
+      recover,
+    );
+    handlers.get('did-fail-load')?.({}, -6, 'ERR_FILE_NOT_FOUND', 'app://tau/');
+    handlers.get('render-process-gone')?.({}, { reason: 'crashed' });
+    handlers.get('render-process-gone')?.({}, { reason: 'clean-exit' });
+    for (const [lineNumber, level] of ['debug', 'info', 'warning', 'error', 'unknown'].entries()) {
+      handlers.get('console-message')?.({
+        level,
+        message: `${level} message`,
+        sourceId: 'app://tau/index.js',
+        lineNumber,
+      });
+    }
+
+    expect(log.log.mock.calls.map(([, event]: readonly unknown[]) => event)).toEqual([
+      'renderer.did-fail-load',
+      'renderer.render-process-gone',
+      'renderer.render-process-gone',
+      'renderer.console',
+      'renderer.console',
+      'renderer.console',
+      'renderer.console',
+      'renderer.console',
+    ]);
+    expect(log.log.mock.calls.slice(-5)).toEqual([
+      ['debug', 'renderer.console', { message: 'debug message', source: 'app://tau/index.js', line: 0 }],
+      ['info', 'renderer.console', { message: 'info message', source: 'app://tau/index.js', line: 1 }],
+      ['warn', 'renderer.console', { message: 'warning message', source: 'app://tau/index.js', line: 2 }],
+      ['error', 'renderer.console', { message: 'error message', source: 'app://tau/index.js', line: 3 }],
+      ['info', 'renderer.console', { message: 'unknown message', source: 'app://tau/index.js', line: 4 }],
+    ]);
+    expect(recover).toHaveBeenCalledOnce();
+  });
+
+  it('should collapse a renderer console message repeated back-to-back', () => {
     const handlers = new Map<string, (...args: unknown[]) => void>();
     const log = { filePath: '', log: vi.fn() };
     forwardRendererDiagnostics(
@@ -60,14 +177,30 @@ describe('forwarders', () => {
       },
       log,
     );
-    handlers.get('did-fail-load')?.({}, -6, 'ERR_FILE_NOT_FOUND', 'app://tau/');
-    handlers.get('render-process-gone')?.({}, { reason: 'crashed' });
-    handlers.get('console-message')?.({ level: 'error', message: 'Missing TAU_API_URL' });
+    const looping = {
+      level: 'error',
+      message: 'useProjectManager must be used within a ProjectManagerProvider',
+      sourceId: 'http://localhost:3001/app/hooks/use-project-manager.tsx',
+      lineNumber: 2335,
+    };
 
-    expect(log.log.mock.calls.map(([, event]: readonly unknown[]) => event)).toEqual([
-      'renderer.did-fail-load',
-      'renderer.render-process-gone',
-      'renderer.console',
+    for (let repeat = 0; repeat < 100; repeat += 1) {
+      handlers.get('console-message')?.(looping);
+    }
+    handlers.get('console-message')?.({ ...looping, message: 'another failure' });
+
+    expect(log.log.mock.calls).toEqual([
+      [
+        'error',
+        'renderer.console',
+        {
+          message: looping.message,
+          source: looping.sourceId,
+          line: looping.lineNumber,
+        },
+      ],
+      ['error', 'renderer.console', { message: '↳ repeated ×99' }],
+      ['error', 'renderer.console', { message: 'another failure', source: looping.sourceId, line: looping.lineNumber }],
     ]);
   });
 
@@ -85,5 +218,33 @@ describe('forwarders', () => {
     );
     handlers.get('exit')?.(1);
     expect(log.log).toHaveBeenCalledWith('error', 'utility.exit', { name: 'services', code: 1 });
+  });
+
+  it('records a kernel utility fork, its stderr, and its exit', () => {
+    const log = { filePath: '', log: vi.fn() };
+    const hooks = kernelUtilityDiagnostics(log);
+
+    hooks.onUtilityFork?.({ hostId: 'host-1', entry: '/dist/main/kernel-host.js' });
+    hooks.onUtilityStderr?.({ hostId: 'host-1', chunk: 'Error: boot failed\n' });
+    hooks.onUtilityExit?.({ hostId: 'host-1', exitCode: 1, released: false, stderrTail: 'Error: boot failed\n' });
+
+    expect(log.log.mock.calls).toEqual([
+      ['info', 'kernel.fork', { hostId: 'host-1', entry: '/dist/main/kernel-host.js' }],
+      ['warn', 'kernel.stderr', { hostId: 'host-1', chunk: 'Error: boot failed' }],
+      ['error', 'kernel.exit', { hostId: 'host-1', code: 1, released: false, stderrTail: 'Error: boot failed\n' }],
+    ]);
+  });
+
+  it('treats a kill main ordered as expected, whatever the exit code', () => {
+    const log = { filePath: '', log: vi.fn() };
+
+    kernelUtilityDiagnostics(log).onUtilityExit?.({ hostId: 'host-2', exitCode: 143, released: true });
+
+    expect(log.log).toHaveBeenCalledWith('info', 'kernel.exit', {
+      hostId: 'host-2',
+      code: 143,
+      released: true,
+      stderrTail: undefined,
+    });
   });
 });

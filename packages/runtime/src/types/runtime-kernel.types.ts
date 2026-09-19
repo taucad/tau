@@ -14,7 +14,9 @@
 import { z } from 'zod';
 import type { FileExtension, LogLevel, GeometryResponse, FileStatEntry } from '@taucad/types';
 import type { FileSystemProvider, WatchEvent, WatchRequest } from '@taucad/filesystem';
-import type { ExportGeometryResult, GetParametersResult, KernelIssue } from '#types/runtime.types.js';
+import type { KernelComputeCapability } from '#types/runtime-compute.types.js';
+import type { ExportGeometryResult, GetParameterDeclarationsResult, KernelIssue } from '#types/runtime.types.js';
+import type { ParameterResolutionOptions } from '@taucad/parameters';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler-service.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
@@ -156,6 +158,8 @@ export type KernelRuntime = {
   bundler: KernelBundler;
   /** Span tracer for kernel-authored performance instrumentation */
   tracer: RuntimeSpanTracer;
+  /** Compute reuse facet for the active operation. `off` carries no operations at all. */
+  readonly compute: KernelComputeCapability;
   /** Resolve a host-compiled WASM module by its absolute asset URL. */
   getCompiledWasmModule(url: string): WebAssembly.Module | undefined;
   /** Emit a namespaced kernel event to the runtime client. */
@@ -185,6 +189,8 @@ export type RuntimeImplementationAsset = {
 export type GetParametersInput = {
   /** Canonical root-relative path of the active entry within the runtime filesystem. */
   entryPath: string;
+  /** Semantic profile inputs that participate in parameter cache identity. */
+  resolution?: ParameterResolutionOptions;
 };
 
 /** Render-route options and positive framework content capabilities. @public */
@@ -465,6 +471,13 @@ export type KernelDefinition<
   /** Render options and natively fulfilled framework content. Omit when neither is declared. */
   render?: Render;
 
+  /**
+   * Whether this kernel may serve the transient drag lane (D2). Declaring it asserts that an
+   * in-flight render can be cancelled cooperatively — without killing the process that serves it.
+   * Consumers read it from `CapabilitiesManifest.renderCapabilities[kernelId].liveEdit`.
+   */
+  liveEdit?: boolean;
+
   /** Native export formats, their options, and natively fulfilled framework content. */
   exportFormats: ExportFormats;
 
@@ -481,7 +494,11 @@ export type KernelDefinition<
     context: Context,
   ): Promise<GetDependenciesResult>;
   /** Extract user-facing parameters (and their JSON Schema) from the active file. */
-  getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
+  getParameters(
+    input: GetParametersInput,
+    runtime: KernelRuntime,
+    context: Context,
+  ): Promise<GetParameterDeclarationsResult>;
   /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
   createGeometry(
     input: CreateGeometryInput<NoInfer<CreateSchema>>,
@@ -562,6 +579,8 @@ type KernelDefinitionConfig<
     createOptionsSchema?: CreateSchema;
     /** Render options and natively fulfilled framework content. */
     render?: Render;
+    /** Whether this kernel may serve the transient drag lane; see {@link KernelDefinition.liveEdit}. */
+    liveEdit?: boolean;
     /** Native export formats and natively fulfilled framework content. */
     exportFormats: ExportFormats;
     /** Selected implementation assets. */
@@ -575,7 +594,11 @@ type KernelDefinitionConfig<
       context: Context,
     ): Promise<GetDependenciesResult>;
     /** Extract user-facing parameters (and their JSON Schema) from the active file. */
-    getParameters(input: GetParametersInput, runtime: KernelRuntime, context: Context): Promise<GetParametersResult>;
+    getParameters(
+      input: GetParametersInput,
+      runtime: KernelRuntime,
+      context: Context,
+    ): Promise<GetParameterDeclarationsResult>;
     /** Evaluate the active file and produce a native handle for mesh/export, plus optional inline display geometry. */
     createGeometry(
       input: CreateGeometryInput<CreateSchema>,
@@ -703,7 +726,20 @@ export interface KernelPluginFactory<
  *     return { resolved: [input.entryPath], unresolved: [] };
  *   },
  *   async getParameters(input, runtime, context) {
- *     return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+ *     return {
+ *       success: true,
+ *       data: {
+ *         schema: {
+ *           $schema: 'https://json-structure.org/meta/extended/v0/#',
+ *           $id: 'urn:example:parameters',
+ *           $uses: ['JSONSchemaUnits'],
+ *           name: 'Parameters',
+ *           type: 'object',
+ *         },
+ *         defaults: {},
+ *       },
+ *       issues: [],
+ *     };
  *   },
  *   async createGeometry(input, runtime, context) {
  *     const response = await fetch('/geometry', { signal: runtime.signal });

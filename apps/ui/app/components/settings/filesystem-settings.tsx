@@ -1,3 +1,4 @@
+import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
 /**
  * Filesystem settings pane.
  *
@@ -13,7 +14,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { AlertCircle, HardDrive, Plus } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
 import {
   checkHandlePermission,
@@ -274,125 +275,129 @@ export function FileSystemSettings(): React.JSX.Element {
   return (
     <div className='flex flex-col gap-6 pb-6'>
       {webAccessDirectoryPicker() ? (
-        <Card>
-          <CardHeader className='flex flex-row items-center justify-between gap-2'>
-            <CardTitle>Workspaces</CardTitle>
-            <Button size='sm' variant='outline' disabled={isAddingWorkspace} onClick={handleAddWorkspace}>
-              <Plus className='mr-1 size-3.5' />
-              Add Workspace
-            </Button>
-          </CardHeader>
-          <CardContent className='flex flex-col gap-3'>
-            <p className='text-sm text-muted-foreground'>
-              Connected workspaces are folders on your disk. Choose one from the new-project location picker when you do
-              not want to use Home.
-            </p>
-            {showWorkspaceConnection ? (
-              <div role='status' aria-live='polite' className='flex items-center gap-3 rounded-md border p-3'>
-                {workspaceConnection.phase === 'failed' ? undefined : <Loader className='size-4 shrink-0' />}
-                <div className='min-w-0'>
-                  <div className='truncate text-sm font-medium'>
-                    {pendingWorkspaceName ?? 'Choose a workspace folder'}
-                  </div>
-                  <div className='text-xs text-muted-foreground'>
-                    {connectionLabel ?? 'Browser folder picker is open'}
-                  </div>
-                </div>
-                {workspaceConnection.phase === 'failed' ? (
-                  <Button
-                    className='ml-auto'
-                    size='sm'
-                    variant='outline'
-                    onClick={() => {
-                      void handleRetryWorkspace();
-                    }}
-                  >
-                    {workspaceConnection.retry === 'pick-again' ? 'Choose folder again' : 'Try again'}
-                  </Button>
-                ) : undefined}
-              </div>
-            ) : undefined}
-            {isLoading ? (
-              <Loader className='size-4' />
-            ) : rows.length === 0 ? (
+        <SettingsItem settingId='workspaces'>
+          <SettingsSectionCard>
+            <CardHeader className='flex flex-row items-center justify-between gap-2'>
+              <CardTitle>Workspaces</CardTitle>
+              <Button size='sm' variant='outline' disabled={isAddingWorkspace} onClick={handleAddWorkspace}>
+                <Plus className='mr-1 size-3.5' />
+                Add Workspace
+              </Button>
+            </CardHeader>
+            <CardContent className='flex flex-col gap-3'>
               <p className='text-sm text-muted-foreground'>
-                No connected workspaces yet. Add one to store projects in a folder on your disk.
+                Connected workspaces are folders on your disk. Choose one from the new-project location picker when you
+                do not want to use Home.
               </p>
-            ) : (
-              <div className='flex flex-col gap-2'>
-                {rows.map((row) => {
-                  const isBusyRow = busyWorkspaceId === row.workspace.workspaceId;
-                  const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
-                  const meta = (
-                    <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-                      <span>{projectCountLabel}</span>
+              {showWorkspaceConnection ? (
+                <div role='status' aria-live='polite' className='flex items-center gap-3 rounded-md border p-3'>
+                  {workspaceConnection.phase === 'failed' ? undefined : <Loader className='size-4 shrink-0' />}
+                  <div className='min-w-0'>
+                    <div className='truncate text-sm font-medium'>
+                      {pendingWorkspaceName ?? 'Choose a workspace folder'}
                     </div>
-                  );
-                  return (
-                    <WorkspaceDirectoryPanel
-                      key={row.workspace.workspaceId}
-                      variant='row'
-                      workspaceId={row.workspace.workspaceId}
-                      workspaceName={row.workspace.name}
-                      status={row.status}
-                      isBusy={isBusyRow}
-                      onConnect={async () => {
-                        await handleConnectChange(row.workspace.workspaceId);
+                    <div className='text-xs text-muted-foreground'>
+                      {connectionLabel ?? 'Browser folder picker is open'}
+                    </div>
+                  </div>
+                  {workspaceConnection.phase === 'failed' ? (
+                    <Button
+                      className='ml-auto'
+                      size='sm'
+                      variant='outline'
+                      onClick={() => {
+                        void handleRetryWorkspace();
                       }}
-                      onGrantAccess={async () => {
-                        await handleGrantAccess(row.workspace.workspaceId);
-                      }}
-                      onDisconnect={async () => {
-                        await handleDisconnectWorkspace(row.workspace);
-                      }}
-                      meta={meta}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    >
+                      {workspaceConnection.retry === 'pick-again' ? 'Choose folder again' : 'Try again'}
+                    </Button>
+                  ) : undefined}
+                </div>
+              ) : undefined}
+              {isLoading ? (
+                <Loader className='size-4' />
+              ) : rows.length === 0 ? (
+                <p className='text-sm text-muted-foreground'>
+                  No connected workspaces yet. Add one to store projects in a folder on your disk.
+                </p>
+              ) : (
+                <div className='flex flex-col gap-2'>
+                  {rows.map((row) => {
+                    const isBusyRow = busyWorkspaceId === row.workspace.workspaceId;
+                    const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
+                    const meta = (
+                      <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+                        <span>{projectCountLabel}</span>
+                      </div>
+                    );
+                    return (
+                      <WorkspaceDirectoryPanel
+                        key={row.workspace.workspaceId}
+                        variant='row'
+                        workspaceId={row.workspace.workspaceId}
+                        workspaceName={row.workspace.name}
+                        status={row.status}
+                        isBusy={isBusyRow}
+                        onConnect={async () => {
+                          await handleConnectChange(row.workspace.workspaceId);
+                        }}
+                        onGrantAccess={async () => {
+                          await handleGrantAccess(row.workspace.workspaceId);
+                        }}
+                        onDisconnect={async () => {
+                          await handleDisconnectWorkspace(row.workspace);
+                        }}
+                        meta={meta}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </SettingsSectionCard>
+        </SettingsItem>
       ) : undefined}
 
       {storageUsage ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Browser Storage</CardTitle>
-          </CardHeader>
-          <CardContent className='flex flex-col gap-4'>
-            <div className='flex items-center gap-3'>
-              <HardDrive className='size-5 shrink-0 text-muted-foreground' />
-              <div className='flex flex-1 flex-col gap-1.5'>
-                <div className='flex items-center justify-between text-sm'>
-                  <span>{formatBytes(storageUsage.used)} used</span>
-                  <span className='text-muted-foreground'>{formatBytes(storageUsage.quota)} available</span>
-                </div>
-                <div className='h-2 w-full overflow-hidden rounded-full bg-muted'>
-                  <div
-                    className='h-full rounded-full bg-primary transition-all'
-                    style={{
-                      width: `${storageUsage.quota > 0 ? Math.min((storageUsage.used / storageUsage.quota) * 100, 100).toFixed(1) : 0}%`,
-                    }}
-                  />
+        <SettingsItem settingId='browser-storage'>
+          <SettingsSectionCard>
+            <CardHeader>
+              <CardTitle>Browser Storage</CardTitle>
+            </CardHeader>
+            <CardContent className='flex flex-col gap-4'>
+              <div className='flex items-center gap-3'>
+                <HardDrive className='size-5 shrink-0 text-muted-foreground' />
+                <div className='flex flex-1 flex-col gap-1.5'>
+                  <div className='flex items-center justify-between text-sm'>
+                    <span>{formatBytes(storageUsage.used)} used</span>
+                    <span className='text-muted-foreground'>{formatBytes(storageUsage.quota)} available</span>
+                  </div>
+                  <div className='h-2 w-full overflow-hidden rounded-full bg-muted'>
+                    <div
+                      className='h-full rounded-full bg-primary transition-all'
+                      style={{
+                        width: `${storageUsage.quota > 0 ? Math.min((storageUsage.used / storageUsage.quota) * 100, 100).toFixed(1) : 0}%`,
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-            {isStorageUnderPressure ? (
-              <div className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'>
-                <AlertCircle className='text-amber-600 size-4 shrink-0' />
-                <p className='text-sm'>
-                  Browser storage is nearly full. Free up space or move projects to a connected workspace — writes start
-                  failing once the quota is reached.
-                </p>
-              </div>
-            ) : undefined}
-            <p className='text-xs text-muted-foreground'>
-              Home uses browser-managed storage and can be cleared or evicted. Connected workspaces live on your disk
-              and are not counted here.
-            </p>
-          </CardContent>
-        </Card>
+              {isStorageUnderPressure ? (
+                <div className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'>
+                  <AlertCircle className='text-amber-600 size-4 shrink-0' />
+                  <p className='text-sm'>
+                    Browser storage is nearly full. Free up space or move projects to a connected workspace — writes
+                    start failing once the quota is reached.
+                  </p>
+                </div>
+              ) : undefined}
+              <p className='text-xs text-muted-foreground'>
+                Home uses browser-managed storage and can be cleared or evicted. Connected workspaces live on your disk
+                and are not counted here.
+              </p>
+            </CardContent>
+          </SettingsSectionCard>
+        </SettingsItem>
       ) : undefined}
     </div>
   );

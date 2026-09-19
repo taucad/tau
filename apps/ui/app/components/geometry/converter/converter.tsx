@@ -26,6 +26,7 @@ export type ExportedFile = {
 };
 
 type ConverterProperties = {
+  readonly availableFormats: readonly ConverterExportFormat[];
   readonly exportFormat: (format: ConverterExportFormat) => Promise<ExportFile[]>;
   readonly selectedFormats: ConverterExportFormat[];
   readonly shouldUseZipForMultiple: boolean;
@@ -42,6 +43,7 @@ type ConverterProperties = {
 };
 
 export function Converter({
+  availableFormats,
   exportFormat,
   selectedFormats,
   shouldUseZipForMultiple,
@@ -169,6 +171,7 @@ export function Converter({
   return (
     <div data-slot='converter' className={cn('@container/converter flex flex-col gap-6', className)}>
       <FormatSelector
+        formats={availableFormats}
         selectedFormats={selectedFormats}
         onFormatToggle={onFormatToggle}
         onClearSelection={onClearSelection}
@@ -205,7 +208,7 @@ export function Converter({
             />
             <Label
               htmlFor='save-to-project'
-              className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+              className='cursor-action rounded-sm text-sm leading-none font-normal transition-colors peer-disabled:cursor-not-allowed peer-disabled:opacity-70 hover:bg-accent'
             >
               Save exported files to project
             </Label>
@@ -223,7 +226,7 @@ export function Converter({
             />
             <Label
               htmlFor='use-zip'
-              className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+              className='cursor-action rounded-sm text-sm leading-none font-normal transition-colors peer-disabled:cursor-not-allowed peer-disabled:opacity-70 hover:bg-accent'
             >
               Download as ZIP file
             </Label>
@@ -243,7 +246,7 @@ export function Converter({
               />
               <Label
                 htmlFor='choose-location'
-                className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                className='cursor-action rounded-sm text-sm leading-none font-normal transition-colors peer-disabled:cursor-not-allowed peer-disabled:opacity-70 hover:bg-accent'
               >
                 Choose download location
               </Label>

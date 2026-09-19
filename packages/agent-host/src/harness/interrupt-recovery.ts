@@ -1,4 +1,3 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { JsonObject, JsonValue, ProviderMessage, UserProviderMessage } from '#log/event-types.js';
 
 const interruptCauses = ['USER_INTERRUPTED', 'CLIENT_DISCONNECTED', 'STREAM_ERROR'] as const;
@@ -101,7 +100,7 @@ export const createInterruptRecoveryMessage = async (input: {
     const tail = input.messages.at(-1);
     if (
       tail?.role !== 'assistant' ||
-      (tail.metadata?.['stopReason'] !== 'aborted' && tail.metadata?.['stopReason'] !== 'error')
+      (tail.metadata?.stopReason !== 'aborted' && tail.metadata?.stopReason !== 'error')
     ) {
       return undefined;
     }

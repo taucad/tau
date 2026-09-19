@@ -40,11 +40,11 @@ import type { Geometry, OnWorkerLog, LogEntry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { createChannelServer } from '@taucad/rpc';
-import type { ChannelServer, ChannelServerHandle, Port, WithTransferables } from '@taucad/rpc';
+import type { ChannelServer, ChannelServerHandle, MessagePortLike, Port, WithTransferables } from '@taucad/rpc';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
-import type { HashedGeometryResult, ExportGeometryResult } from '#types/runtime.types.js';
+import type { HashedGeometryResult, ExportGeometryResult, GetParametersResult } from '#types/runtime.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type {
   GeometryTransport,
@@ -52,12 +52,16 @@ import type {
   RuntimeHelloPayload,
   RuntimeProtocol,
   RuntimeGeometryComputedArgs,
+  TelemetryBatch,
   TelemetryEntry,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { logFlushDebounce } from '#framework/runtime-framework.constants.js';
 import { createErrorTrap } from '#framework/worker-error-trap.js';
+import { createTelemetryOrigin, telemetryEpoch } from '#framework/worker-telemetry.js';
+import type { TelemetryExporter } from '#framework/telemetry-file-sink.js';
+import { openTelemetryFileSink, telemetryDirectory, telemetryFormat } from '#framework/telemetry-file-sink.js';
 import { packageVersion } from '#utils/package-info.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type {
@@ -67,6 +71,7 @@ import type {
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
+import { createComputeStoreChannelClient } from '#transport/_internal/compute-store-channel.js';
 
 /** Stable session key for the runtime worker channel. */
 export const runtimeChannelSessionKey = 'tau.runtime/v1';
@@ -116,8 +121,30 @@ function toTransportResult(
   };
 }
 
-function normaliseIssueForWire<T extends { code?: unknown }>(issue: T): T & { code: KernelIssueCode } {
-  return isKernelIssueCode(issue.code) ? (issue as T & { code: KernelIssueCode }) : { ...issue, code: 'UNKNOWN' };
+const issueSeverities = new Set(['error', 'warning', 'info']);
+
+/**
+ * Make one issue row acceptable to the runtime protocol's `kernelIssueSchema`.
+ *
+ * A row the schema rejects is not a degraded frame — the receiving channel
+ * drops the whole notify silently, so a kernel's issues, a render's failure or
+ * an export's diagnosis vanish entirely (`libs/rpc/src/channel.ts`,
+ * `handleNotifyFrame`). `severity` is repaired for the same reason `code` is:
+ * these rows cross the boundary from arbitrary kernel and middleware code, and
+ * the wire is the last place that can still see them.
+ *
+ * @param issue - Candidate issue row from kernel, middleware or framework code.
+ * @returns The row with a protocol-valid `code` and `severity`.
+ */
+function normaliseIssueForWire<T extends { code?: unknown; severity?: unknown }>(
+  issue: T,
+): T & { code: KernelIssueCode; severity: 'error' | 'warning' | 'info' } {
+  const code = isKernelIssueCode(issue.code) ? issue.code : 'UNKNOWN';
+  const severity =
+    typeof issue.severity === 'string' && issueSeverities.has(issue.severity)
+      ? (issue.severity as 'error' | 'warning' | 'info')
+      : 'error';
+  return { ...issue, code, severity };
 }
 
 function prepareExportTransfer(
@@ -172,6 +199,10 @@ function prepareSourceSnapshotTransfer(
  */
 export type WorkerDispatcherOptions = {
   readonly inlineFileSystem?: RuntimeFileSystemBase;
+  /** Trusted host-side compute authority; takes precedence over client initialize fields. */
+  readonly computeStorePort?: MessagePortLike | Port<unknown>;
+  /** Trusted host-side mode when no durable authority is present. */
+  readonly computeBindingMode?: 'off' | 'memory';
   /**
    * Transport-supplied geometry encoder (typically
    * `bindings.geometryDelivery.publish`). When omitted the dispatcher
@@ -231,6 +262,9 @@ const inlineBinaryEncoder: BinaryEncoder = (_key, source) => {
  *   server explicitly. The dispatcher owns autonomous-event fan-out via
  *   the same handle for the lifetime of the worker.
  */
+/** Telemetry batches held while the trace sink opens; bootstrap spans matter, unbounded buffers do not. */
+const maxBufferedTelemetryBatches = 64;
+
 export function createWorkerDispatcher(
   worker: KernelWorker,
   port: Port<unknown>,
@@ -277,8 +311,48 @@ export function createWorkerDispatcher(
     logFlushTimer ??= setTimeout(flushLogs, logFlushDebounce);
   };
 
+  /* Producer identity is minted once here, where the dispatcher is wired, and
+   * rides every batch: span ids restart at `0` per tracer, so a recycled client
+   * or a second open geometry unit would otherwise re-parent its spans onto the
+   * first producer's tree in any file or pane that merges them. */
+  const telemetryOrigin = createTelemetryOrigin();
+  let telemetryFileSink: TelemetryExporter | undefined;
+  const telemetryTraceDirectory = telemetryDirectory();
+  let telemetrySinkPending = telemetryTraceDirectory !== undefined;
+  /* Spans emitted before the sink's `node:fs` import resolves are held, bounded:
+   * bootstrap spans are the ones a startup timeline most needs. */
+  const bufferedTelemetry: TelemetryBatch[] = [];
+  if (telemetryTraceDirectory !== undefined) {
+    const openedSink = openTelemetryFileSink({
+      directory: telemetryTraceDirectory,
+      fileName: `${telemetryOrigin.label}-${telemetryOrigin.instance}.jsonl`,
+      format: telemetryFormat(),
+    });
+    // async-iife: bootstrap — the dispatcher factory is synchronous and nothing downstream waits on the sink.
+    // oxlint-disable-next-line promise/prefer-await-to-then -- the sink attaches when its node:fs import resolves.
+    void openedSink.then(
+      (sink) => {
+        telemetrySinkPending = false;
+        telemetryFileSink = sink;
+        for (const batch of bufferedTelemetry.splice(0)) {
+          sink?.write(batch);
+        }
+      },
+      () => {
+        telemetrySinkPending = false;
+        bufferedTelemetry.length = 0;
+      },
+    );
+  }
+
   worker.setTelemetrySend((entries: TelemetryEntry[]) => {
-    notify('telemetry', { entries });
+    const batch: TelemetryBatch = { entries, origin: telemetryOrigin, epoch: telemetryEpoch() };
+    notify('telemetry', batch);
+    if (telemetryFileSink) {
+      telemetryFileSink.write(batch);
+    } else if (telemetrySinkPending && bufferedTelemetry.length < maxBufferedTelemetryBatches) {
+      bufferedTelemetry.push(batch);
+    }
   });
 
   let callbacksWired = false;
@@ -334,6 +408,7 @@ export function createWorkerDispatcher(
 
   let initializing = false;
   let initialized = false;
+  let computeStoreClient: ReturnType<typeof createComputeStoreChannelClient> | undefined;
   const handleInitialize: (
     args: RuntimeProtocol['calls']['initialize']['args'],
   ) => Promise<RuntimeProtocol['calls']['initialize']['result']> = async (args) => {
@@ -350,6 +425,19 @@ export function createWorkerDispatcher(
       worker.setCompiledWasmModules(memoryHandle?.compiledWasmModules ?? []);
       if (memoryHandle?.signalBuffer) {
         worker.setSignalBuffer(memoryHandle.signalBuffer);
+      }
+      const computeStorePort = dispatcherOptions?.computeStorePort ?? memoryHandle?.computeStorePort;
+      if (computeStorePort) {
+        computeStoreClient = createComputeStoreChannelClient(computeStorePort);
+        worker.setComputeBinding({ mode: 'durable', store: computeStoreClient.store });
+      } else if ((dispatcherOptions?.computeBindingMode ?? memoryHandle?.computeBindingMode) === 'off') {
+        worker.setComputeBinding({ mode: 'off' });
+      } else if (
+        dispatcherOptions?.computeBindingMode === 'memory' ||
+        memoryHandle?.computeBindingMode === 'memory' ||
+        memoryHandle?.computeBindingMode === 'durable'
+      ) {
+        worker.setComputeBinding({ mode: 'memory' });
       }
       /* Late-bind the host bindings now that we have the inbound
        * `memoryHandle`. The bindings' geometry encoder wins
@@ -378,6 +466,10 @@ export function createWorkerDispatcher(
 
       initialized = true;
       return { capabilities: worker.capabilitiesManifest };
+    } catch (error) {
+      computeStoreClient?.dispose();
+      computeStoreClient = undefined;
+      throw error;
     } finally {
       initializing = false;
       cleanupTrap();
@@ -404,6 +496,35 @@ export function createWorkerDispatcher(
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
       return await Promise.race([worker.exportModel(args, signal), trapPromise]);
+    } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
+  const handleEvaluateModel: (
+    args: RuntimeProtocol['calls']['evaluateModel']['args'],
+    signal?: AbortSignal,
+  ) => Promise<HashedGeometryResult> = async (args, signal) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([worker.evaluateModel(args, signal), trapPromise]);
+    } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
+  const handleResolveParameters: (
+    args: RuntimeProtocol['calls']['resolveParameters']['args'],
+    signal?: AbortSignal,
+  ) => Promise<GetParametersResult> = async (args, signal) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([
+        worker.getParameters(args.file, args.resolution, { signal, stage: args.stage }),
+        trapPromise,
+      ]);
     } finally {
       worker.flushTelemetry();
       cleanupTrap();
@@ -474,6 +595,18 @@ export function createWorkerDispatcher(
           };
           return envelope as unknown as CallResult;
         }
+        case 'evaluateModel': {
+          const result = await handleEvaluateModel(args as RuntimeProtocol['calls']['evaluateModel']['args'], signal);
+          const transferables: Transferable[] = [];
+          const value = toTransportResult(result, encodeGeometry, transferables);
+          return { value, transferables } as unknown as CallResult;
+        }
+        case 'resolveParameters': {
+          return (await handleResolveParameters(
+            args as RuntimeProtocol['calls']['resolveParameters']['args'],
+            signal,
+          )) as unknown as CallResult;
+        }
         case 'snapshotSource': {
           const result = await handleSourceSnapshot(args as RuntimeProtocol['calls']['snapshotSource']['args'], signal);
           const transferables: Transferable[] = [];
@@ -497,6 +630,11 @@ export function createWorkerDispatcher(
           }
           flushLogs();
           await worker.cleanup();
+          telemetryFileSink?.close();
+          telemetryFileSink = undefined;
+          telemetrySinkPending = false;
+          computeStoreClient?.dispose();
+          computeStoreClient = undefined;
           return null as unknown as CallResult;
         }
       }
@@ -579,9 +717,10 @@ export function createWorkerDispatcher(
       }
     },
 
-    async *listen() {
-      // RuntimeProtocol does not declare any `listens` events; this branch
-      // exists only to satisfy `ChannelServer<RuntimeProtocol>`.
+    // The runtime protocol declares no listens; `ChannelServer` still requires the member.
+    // eslint-disable-next-line require-yield -- an unreachable generator yields nothing.
+    async *listen(): AsyncGenerator<never> {
+      throw new Error('The kernel runtime worker protocol declares no listen streams.');
     },
   };
 
@@ -591,8 +730,17 @@ export function createWorkerDispatcher(
     protocolVersion,
   };
 
+  const deliveryPort: Port<unknown> = {
+    ...port,
+    postMessage(message, transferables) {
+      port.postMessage(message, transferables);
+      if (typeof message === 'object' && message !== null && 'k' in message && message.k === 'rs') {
+        worker.permitComputePublication();
+      }
+    },
+  };
   serverHandle = createChannelServer<RuntimeProtocol>({
-    port,
+    port: deliveryPort,
     sessionKey: runtimeChannelSessionKey,
     impl,
     hello: helloPayload,

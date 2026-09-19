@@ -61,5 +61,8 @@
   },
   "taucad": {
     "hostTarget": "node"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "catalog:"
   }
 }

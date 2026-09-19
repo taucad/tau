@@ -76,7 +76,7 @@ export function ChatMessagePlanCard({ targetFile, content, status }: ChatMessage
   }
 
   return (
-    <ChatToolCard variant='minimal' status='ready' isDefaultOpen isCookieDefaultOpen>
+    <ChatToolCard variant='minimal' status='ready' isDefaultOpen>
       <ChatToolCardHeader className='text-foreground'>
         <ChatToolCardIcon icon={FileText} />
         <ChatToolCardTitle>{title ?? 'Plan'}</ChatToolCardTitle>

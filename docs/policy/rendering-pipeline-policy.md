@@ -3,10 +3,11 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-08-22'
+updated: '2026-09-10'
 related:
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
   - docs/research/project-card-thumbnail-preview-parity.md
+  - docs/research/studio-environment-consolidation-blueprint.md
 ---
 
 # Rendering Pipeline Policy
@@ -117,14 +118,9 @@ The main CAD viewer uses an `<Environment>` component with `<Lightformer>` child
 - **Post-load envMapIntensity**: After GLTF load, all `MeshStandardMaterial` instances receive `envMapIntensity = 2.5` (PBR path only) to amplify environment reflections.
 - **Post-load roughnessOverride**: After GLTF load, all `MeshStandardMaterial` instances receive `roughness = 0.28` for a semi-matte CAD appearance consistent with professional CAD viewers.
 
-### Presets
+### Canonical Studio Environment
 
-| Preset        | Description                                                                 |
-| ------------- | --------------------------------------------------------------------------- |
-| `studio`      | Full Lightformer rig -- key (8), fill (4), rim (2), ground (0.25). Default. |
-| `neutral`     | Reduced intensity, minimal reflections.                                     |
-| `soft`        | Hemisphere + ambient only, no environment map.                              |
-| `performance` | No environment, minimal lights. Equivalent to matcap-era setup.             |
+The interactive Three.js CAD viewer has one environment implementation: the Studio Lightformer rig. It is renderer behavior rather than a user-selectable or persisted preset. The rig mounts whenever matcap is disabled and is skipped when matcap is enabled; there is no alternate environment branch.
 
 ## Color Pipeline
 

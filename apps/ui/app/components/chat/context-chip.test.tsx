@@ -112,11 +112,11 @@ describe('ContextChip', () => {
   });
 
   describe('interactive styling', () => {
-    it('should have cursor-pointer class when isInteractive is true', () => {
+    it('should show hover feedback when interactive', () => {
       const { container } = render(<ContextChip label='main.scad' chipType='file' isInteractive />);
 
       const chip = container.firstElementChild!;
-      expect(chip.className).toContain('cursor-pointer');
+      expect(chip).toHaveClass('hover:bg-purple/15');
     });
 
     it('should have cursor-default class when isInteractive is false', () => {

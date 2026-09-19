@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
-import { renderHook, act } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, renderHook, act, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
-import { createElement } from 'react';
-import type { Chat } from '@taucad/chat';
+import { createElement, useEffect, useState } from 'react';
+import type { Chat, MyUIMessage } from '@taucad/chat';
 import type { ProjectDiscoveryEntry, ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
@@ -15,6 +15,9 @@ import type { PendingProjectOperation, PendingProjectStorage } from '#types/pend
 import type { ProjectLibraryState } from '#types/project.types.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import type { ConnectedWorkspace, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
+import { sha256Bytes } from '@taucad/utils/hash';
+import { uint8ArrayToBase64 } from 'uint8array-extras';
 
 const fakeProject: ProjectManifest = projectToManifest({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -72,6 +75,22 @@ let manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
 const mockWriteFiles = vi.fn(async () => {
   phaseOrder.push('files');
 });
+/**
+ * Attachment bytes, keyed by absolute path: the Home record's draft-stage
+ * directory and each chat's own. Content-addressed, so a Map is the whole store.
+ */
+const attachmentFiles = new Map<string, Uint8Array<ArrayBuffer>>();
+const isAttachmentPath = (path: string): boolean => path.includes('/attachments/');
+const mockWriteAttachment = vi.fn(async (path: string, bytes: Uint8Array<ArrayBuffer>) => {
+  attachmentFiles.set(path, bytes);
+});
+const readAttachment = async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+  const bytes = attachmentFiles.get(path);
+  if (bytes === undefined) {
+    throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+  }
+  return bytes;
+};
 const mockWriteFile = vi.fn(async (_path: string, bytes: Uint8Array<ArrayBuffer>) => {
   phaseOrder.push('manifest');
   manifestBytes = bytes;
@@ -79,7 +98,7 @@ const mockWriteFile = vi.fn(async (_path: string, bytes: Uint8Array<ArrayBuffer>
 /** Contents of `<project>/.tau/library.json`; `undefined` means the file is absent. */
 let libraryFileContent: string | undefined;
 const libraryFilePath = `/projects/${fakeProject.id}/.tau/library.json`;
-const mockReadFile = vi.fn(async (path: string) => {
+const mockReadFile = vi.fn(async (path: string, _encoding?: 'utf8') => {
   if (path.endsWith('/.tau/library.json')) {
     if (libraryFileContent === undefined) {
       throw new Error(`ENOENT: ${path}`);
@@ -104,7 +123,10 @@ const mockCommitPendingProjectDirectory = vi.fn<FileManagerProxy['commitPendingP
 const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>(async () => ({ roots: [], entries: [] }));
 
 /** Worker change-channel double: one live subscription per event channel. */
-type WorkerChangeSubscription = { readonly interestedIn: (path: string) => boolean; readonly handler: () => void };
+type WorkerChangeSubscription = {
+  readonly interestedIn: (path: string) => boolean;
+  readonly handler: (event: { readonly path: string }) => void;
+};
 const workerChangeSubscriptions = new Map<string, WorkerChangeSubscription>();
 const subscribeWorkerChannel = (channel: string) =>
   vi.fn((subscription: WorkerChangeSubscription) => {
@@ -123,21 +145,46 @@ const mockWorkerChangeChannel = {
 const emitWorkerChange = (channel: string, path: string): void => {
   const subscription = workerChangeSubscriptions.get(channel);
   if (subscription?.interestedIn(path)) {
-    subscription.handler();
+    subscription.handler({ path });
   }
 };
+
+/**
+ * The Home workspace's composer records, keyed by absolute path (blueprint
+ * D11). A Map is enough: only deletion reads them here, and what it must never
+ * do is take a path it was not asked for.
+ */
+const composerFiles = new Map<string, string>();
+const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+const mockRmdir = vi.fn(async (path: string, options?: { recursive?: boolean }) => {
+  const contained = [...composerFiles.keys()].filter((entry) => entry.startsWith(`${path}/`));
+  if (contained.length === 0) {
+    throw notFound(path);
+  }
+  if (options?.recursive !== true) {
+    throw Object.assign(new Error(`ENOTEMPTY: ${path}`), { code: 'ENOTEMPTY' });
+  }
+  for (const entry of contained) {
+    composerFiles.delete(entry);
+  }
+});
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     workerChangeChannel: mockWorkerChangeChannel,
-    client: {
+    /* Content reaches the root that owns the path (W12); the authority-global
+     * surface below it is topology only (charter D5). */
+    files: {
       writeFiles: mockWriteFiles,
-      writeFile: mockWriteFile,
-      readFile: mockReadFile,
+      writeFile: async (path: string, bytes: Uint8Array<ArrayBuffer>) =>
+        isAttachmentPath(path) ? mockWriteAttachment(path, bytes) : mockWriteFile(path, bytes),
+      readFile: async (path: string, encoding?: 'utf8') =>
+        isAttachmentPath(path) ? readAttachment(path) : mockReadFile(path, encoding),
       stat: mockStat,
-      exists: vi.fn(async () => false),
-      rmdir: vi.fn(async () => undefined),
-      getDirectoryContents: vi.fn(async () => ({})),
+      exists: vi.fn(async (path: string) => attachmentFiles.has(path)),
+      rmdir: mockRmdir,
+    },
+    client: {
       listProjectManifests: mockListProjectManifests,
       permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
@@ -253,7 +300,7 @@ vi.mock('#constants/browser.constants.js', () => ({
         id: options?.id,
         mode: options?.mode ?? 'readwrite',
       });
-      return { backend: 'webaccess' as const, handle };
+      return { backend: 'webaccess', handle };
     },
   }),
   webAccessDirectoryPicker: () =>
@@ -312,7 +359,8 @@ const pendingPermanentDelete: Extract<PendingProjectOperation, { kind: 'permanen
 
 type PrepareProjectCreationInput = {
   readonly manifest: ProjectManifest;
-  readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>;
+  readonly attachmentSource?: string;
+  readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'>;
   readonly editorState?: unknown;
   readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
   readonly storage: PendingProjectStorage;
@@ -324,8 +372,9 @@ const mockPrepareProjectCreation = vi.fn<
   phaseOrder.push('pending');
   return pendingCreate;
 });
-const mockResumeResources = vi.fn(async () => {
+const mockResumeResources = vi.fn(async (): Promise<readonly Chat[]> => {
   phaseOrder.push('resources');
+  return [];
 });
 const mockCompletePending = vi.fn(async () => {
   phaseOrder.push('complete');
@@ -339,7 +388,7 @@ const mockSetProjectDisclosure = vi.fn(async () => {
   phaseOrder.push('disclosure-cleanup');
   return true;
 });
-const mockGenerateProjectName = vi.fn(async () => {
+const mockGenerateProjectName = vi.fn<(input: ProjectNameInput) => Promise<string>>(async (_input) => {
   phaseOrder.push('name');
   return 'Tall Birdhouse';
 });
@@ -369,18 +418,39 @@ const activityChat: Chat = {
   createdAt: 1,
   updatedAt: 2,
   recencyAt: 2,
-  hasUnreadTurn: false,
 };
 const mockTouchChatRecency = vi.fn<(chatId: string, activityAt: number) => Promise<Chat | undefined>>(
   async () => activityChat,
-);
-const mockSetChatUnreadState = vi.fn<(chatId: string, hasUnreadTurn: boolean) => Promise<Chat | undefined>>(
-  async (_chatId, hasUnreadTurn) => ({ ...activityChat, hasUnreadTurn }),
 );
 const mockPatchChat = vi.fn(async () => ({ ...activityChat, name: 'Patched' }));
 const mockTouchProjectActivity = vi.fn(async (projectId: string, activityAt?: number) => ({
   projectId,
   lastActivityAt: activityAt ?? 10,
+}));
+
+/* A chat is files, not an object-store row (W17): the chat half of the manager
+ * talks to `createChatFileStore`, so the doubles that used to sit on the worker
+ * sit on the store. */
+const mockPutChatRecord = vi.fn(async () => undefined);
+const mockInvalidateChatLog = vi.fn();
+vi.mock('#db/chat-file-storage.js', () => ({
+  createChatFileStore: () => ({
+    invalidateLog: mockInvalidateChatLog,
+    touchChatRecency: mockTouchChatRecency,
+    patchChat: mockPatchChat,
+    putChatRecord: mockPutChatRecord,
+    getChatsForResource: vi.fn(async () => []),
+    getAllChats: vi.fn(async () => []),
+    getChat: vi.fn(async () => undefined),
+    createChat: vi.fn(async () => activityChat),
+    createNavigationRepairChat: vi.fn(async () => activityChat),
+    updateChat: vi.fn(async () => undefined),
+    applyGeneratedChatName: vi.fn(async () => undefined),
+    consumeChatStartupRequest: vi.fn(async () => undefined),
+    commitCancelledDraftRestore: vi.fn(async () => undefined),
+    softDeleteChat: vi.fn(async () => undefined),
+    deleteChat: vi.fn(async () => undefined),
+  }),
 }));
 
 vi.mock('#chat-clients/use-project-name-client.js', () => ({
@@ -419,7 +489,6 @@ vi.mock('xstate', async (importOriginal) => {
           restoreProject: mockRestoreProject,
           touchProjectActivity: mockTouchProjectActivity,
           touchChatRecency: mockTouchChatRecency,
-          setChatUnreadState: mockSetChatUnreadState,
           patchChat: mockPatchChat,
           beginPermanentDeleteProject: mockBeginPermanentDeleteProject,
           deleteProjectResources: mockDeleteProjectResources,
@@ -432,9 +501,6 @@ vi.mock('xstate', async (importOriginal) => {
 
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: string) => [defaultValue, vi.fn()],
-}));
-vi.mock('#utils/chat.utils.js', () => ({
-  createMessage: (options: Record<string, unknown>) => ({ id: 'msg-1', ...options }),
 }));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
@@ -478,9 +544,18 @@ const createInspectableWrapper = () => {
   return { wrapper, queryClient };
 };
 
+/** Store bytes where the Home composer would have, and return the draft's reference to them. */
+const seedHomeAttachment = async (bytes: Uint8Array<ArrayBuffer>, mediaType: string, filename?: string) => {
+  const hash = await sha256Bytes(bytes);
+  const extension = mediaType === 'application/pdf' ? 'pdf' : 'png';
+  attachmentFiles.set(`/.tau/composers/new-project/attachments/${hash}.${extension}`, bytes);
+  return { hash, mediaType, ...(filename === undefined ? {} : { filename }) };
+};
+
 describe('useProjectManager.createProject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    attachmentFiles.clear();
     phaseOrder.length = 0;
     manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
     mockIsFileSystemAccessSupported = false;
@@ -507,6 +582,7 @@ describe('useProjectManager.createProject', () => {
       mockSyncProjectRoots,
       mockTrashProject,
       mockStat,
+      mockReadFile,
       mockWriteFile,
       mockGetHomeStorageBackend,
       mockGetProjectCreationLocation,
@@ -520,6 +596,15 @@ describe('useProjectManager.createProject', () => {
       mock.mockReset();
     }
     mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/.tau/library.json')) {
+        if (libraryFileContent === undefined) {
+          throw new Error(`ENOENT: ${path}`);
+        }
+        return libraryFileContent;
+      }
+      return manifestBytes;
+    });
     mockCommitPendingProjectDirectory.mockImplementation(async () => {
       phaseOrder.push('commit');
       return { status: 'committed' };
@@ -549,7 +634,7 @@ describe('useProjectManager.createProject', () => {
     workerChangeSubscriptions.clear();
   });
 
-  it('publishes connected-workspace projects into both same-tab query variants before resolving', async () => {
+  it('publishes connected-workspace projects into the one listing key before resolving', async () => {
     mockIsFileSystemAccessSupported = true;
     mockListProjectManifests.mockResolvedValue(liveWorkspaceDiscovery);
     mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live', name: 'Workshop', slug: 'workshop' }]);
@@ -567,13 +652,12 @@ describe('useProjectManager.createProject', () => {
       projectCount: 1,
       minted: true,
     });
-    expect(queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: false }])?.projects).toEqual([
+    expect(queryClient.getQueryData<ProjectListing>(['projects'])?.projects).toEqual([
       expect.objectContaining({
         manifest: fakeProject,
         slugs: { workspaceSlug: 'workshop', projectSlug: 'test-project' },
       }),
     ]);
-    expect(queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects).toHaveLength(1);
     expect(result.current.workspaceConnection).toMatchObject({ phase: 'ready', projectCount: 1 });
   });
 
@@ -779,6 +863,34 @@ describe('useProjectManager.createProject', () => {
 
     expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
     expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+  });
+
+  it('waits for a journaled project route before reading its manifest', async () => {
+    let resolveCommit!: () => void;
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockImplementationOnce(
+      async () =>
+        new Promise<{ status: 'committed' }>((resolve) => {
+          resolveCommit = () => {
+            resolve({ status: 'committed' });
+          };
+        }),
+    );
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/tau.json') && !phaseOrder.includes('roots')) {
+        throw new Error('ROOT_UNAVAILABLE');
+      }
+      return manifestBytes;
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const project = result.current.getProject(fakeProject.id);
+    await vi.waitFor(() => {
+      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
+    });
+    resolveCommit();
+
+    await expect(project).resolves.toEqual(fakeProject);
   });
 
   it('classifies duplicate project identities as conflicts', async () => {
@@ -1043,6 +1155,20 @@ describe('useProjectManager.createProject', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("invalidates one chat when another device's projected log segment changes", async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    renderHook(() => useProjectManager(), { wrapper });
+
+    act(() => {
+      emitWorkerChange('fileWritten', `/projects/${fakeProject.id}/.tau/chats/chat_remote/events/device-b.jsonl`);
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['chats', fakeProject.id] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['chat', 'chat_remote'] });
+    expect(mockInvalidateChatLog).toHaveBeenCalledWith('chat_remote');
   });
 
   it('cancels a pending library invalidation when the provider unmounts', async () => {
@@ -1422,6 +1548,65 @@ describe('useProjectManager.createProject', () => {
     expect(mockCompletePending).not.toHaveBeenCalled();
   });
 
+  /*
+   * P66: the route gate re-reads access whenever the manager's value moves
+   * (`project-route.tsx` deps its access effect on `projectManager`), so a
+   * recovery that settles after the first render has to move that value — by
+   * being carried in it, never by a revision counter in a dependency array the
+   * React Compiler erases.
+   */
+  it('re-reads route access when a recovery settles after the first render', async () => {
+    let failCommit!: () => void;
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockImplementationOnce(
+      async () =>
+        new Promise<{ status: 'committed' }>((_resolve, reject) => {
+          failCommit = () => {
+            reject(new Error('write failed'));
+          };
+        }),
+    );
+    const seen: Array<string | undefined> = [];
+    const published: string[][] = [];
+    function Gate(): ReactNode {
+      const projectManager = useProjectManager();
+      const [status, setStatus] = useState<string>();
+      useEffect(() => {
+        let cancelled = false;
+        const loadAccess = async (): Promise<void> => {
+          const access = await projectManager.getProjectRouteAccess(fakeProject.id);
+          if (!cancelled) {
+            setStatus(access.status);
+          }
+        };
+        // async-iife: bootstrap -- the route gate reads access exactly this way.
+        void loadAccess();
+        return () => {
+          cancelled = true;
+        };
+      }, [projectManager]);
+      seen.push(status);
+      published.push(projectManager.recoveries.map((recovery) => recovery.status));
+      return null;
+    }
+
+    await act(async () => {
+      render(createElement(createWrapper(), undefined, createElement(Gate)));
+    });
+
+    await waitFor(() => {
+      expect(seen.at(-1)).toBe('recovering');
+    });
+    expect(published.at(-1)).toEqual(['recovering']);
+    await act(async () => {
+      failCommit();
+    });
+    await waitFor(() => {
+      expect(seen.at(-1)).toBe('recovery-failed');
+    });
+    expect(published.at(-1)).toEqual(['failed']);
+  });
+
   it('propagates systemic discovery failure instead of presenting an empty library', async () => {
     mockListProjectManifests.mockRejectedValue(new Error('discovery failed'));
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -1454,9 +1639,92 @@ describe('useProjectManager.createProject', () => {
       files: pendingCreate.files,
       manifest: serializeProjectManifest(fakeProject),
     });
+    expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingCreate.providerBasePath,
+    });
     expect(phaseOrder).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete', 'preference']);
     expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
     expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
+  });
+
+  it('waits for pre-commit discovery before publishing a new project to an immediate route', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const { result } = renderHook(
+      () => {
+        const projectManager = useProjectManager();
+        const listing = useQuery({
+          queryKey: ['projects', { includeDeleted: true }],
+          queryFn: async () => projectManager.getProjectListing({ includeDeleted: true }),
+        });
+        return { projectManager, listing };
+      },
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.listing.data?.projects).toEqual([]);
+    });
+    mockListProjectManifests.mockClear();
+
+    let startCommit!: () => void;
+    const commitStarted = new Promise<void>((resolve) => {
+      startCommit = resolve;
+    });
+    let releaseCommit!: () => void;
+    const commitGate = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let committed = false;
+    mockCommitPendingProjectDirectory.mockImplementationOnce(async () => {
+      startCommit();
+      await commitGate;
+      phaseOrder.push('commit');
+      committed = true;
+      return { status: 'committed' } as const;
+    });
+    let startPreCommitDiscovery!: () => void;
+    const preCommitDiscoveryStarted = new Promise<void>((resolve) => {
+      startPreCommitDiscovery = resolve;
+    });
+    let releasePreCommitDiscovery!: () => void;
+    const preCommitDiscoveryGate = new Promise<void>((resolve) => {
+      releasePreCommitDiscovery = resolve;
+    });
+    let holdPreCommitDiscovery = false;
+    mockListProjectManifests.mockImplementation(async () => {
+      const entries = committed ? validProjectDiscovery.entries : [];
+      if (holdPreCommitDiscovery && !committed) {
+        startPreCommitDiscovery();
+        await preCommitDiscoveryGate;
+      }
+      return { roots: validProjectDiscovery.roots, entries };
+    });
+    let created: Awaited<ReturnType<typeof result.current.projectManager.createProject>> | undefined;
+    const creation = result.current.projectManager.createProject({
+      project: fakeProject,
+      files: pendingCreate.files,
+      location: { kind: 'home' },
+    });
+    await commitStarted;
+    holdPreCommitDiscovery = true;
+    const preCommitListing = result.current.projectManager.getProjectListing({ includeDeleted: true });
+    await preCommitDiscoveryStarted;
+    releaseCommit();
+    await waitFor(() => {
+      expect(committed).toBe(true);
+    });
+    releasePreCommitDiscovery();
+    await act(async () => {
+      [created] = await Promise.all([creation, preCommitListing]);
+    });
+
+    expect(created?.slugs).toEqual({ workspaceSlug: 'home', projectSlug: 'test-project' });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+    const published = queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects;
+    expect(published).toHaveLength(1);
+    expect(published?.[0]?.manifest.id).toBe(created?.id);
+    expect(published?.[0]?.slugs).toEqual({ workspaceSlug: 'home', projectSlug: 'test-project' });
   });
 
   it('resolves an omitted location from durable preference immediately before allocation', async () => {
@@ -1565,26 +1833,152 @@ describe('useProjectManager.createProject', () => {
     });
   });
 
+  // Rewritten (W6): the startup message carries stored references; naming
+  // still receives image bytes, resolved from the Home draft directory.
   it('resolves a semantic multimodal name before allocating durable project work', async () => {
-    const imageUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    const png = new Uint8Array([137, 80, 78, 71]);
+    const image = await seedHomeAttachment(png, 'image/png');
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await act(async () =>
       result.current.createProject({
         kernel: 'openscad',
-        initialMessage: { content: '', imageUrls: [imageUrl] },
+        initialMessage: { content: '', attachments: [image] },
         location: { kind: 'home' },
       }),
     );
 
-    expect(mockGenerateProjectName).toHaveBeenCalledWith({
-      projectId: expect.any(String),
+    const generatedRequest = mockGenerateProjectName.mock.calls.at(-1)?.[0];
+    expect(typeof generatedRequest?.projectId).toBe('string');
+    expect(generatedRequest).toMatchObject({
       text: '',
-      imageUrls: [imageUrl],
+      imageUrls: [`data:image/png;base64,${uint8ArrayToBase64(png)}`],
     });
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
     expect(prepared?.manifest.name).toBe('Tall Birdhouse');
     expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
+  });
+
+  describe('Home draft attachment promotion', () => {
+    const chatAttachments = `/projects/${fakeProject.id}/.tau/chats/cht_create/attachments`;
+
+    /** The worker double, but keeping the chat the caller asked for — messages included. */
+    const prepareWithChat = async (input: PrepareProjectCreationInput) => {
+      phaseOrder.push('pending');
+      const operation = { ...pendingCreate, chat: { ...pendingCreate.chat!, ...input.chat } };
+      mockResumeResources.mockResolvedValueOnce([operation.chat]);
+      return operation;
+    };
+
+    it('copies every draft attachment into the new chat before its startup record is written', async () => {
+      const image = await seedHomeAttachment(new Uint8Array([1, 2, 3]), 'image/png');
+      const pdf = await seedHomeAttachment(new Uint8Array([37, 80, 68, 70]), 'application/pdf', 'spec.pdf');
+      mockPrepareProjectCreation.mockImplementationOnce(prepareWithChat);
+      const presentAtRecordWrite: string[] = [];
+      mockPutChatRecord.mockImplementationOnce(async () => {
+        presentAtRecordWrite.push(...[...attachmentFiles.keys()].filter((path) => path.startsWith(chatAttachments)));
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'openscad',
+          initialMessage: { content: 'Build it', attachments: [image, pdf] },
+          location: { kind: 'home' },
+        }),
+      );
+
+      const startup = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat.messages[0];
+      expect(startup?.parts).toEqual([
+        { type: 'file', url: `attachments/${image.hash}.png`, mediaType: 'image/png' },
+        { type: 'file', url: `attachments/${pdf.hash}.pdf`, mediaType: 'application/pdf', filename: 'spec.pdf' },
+        { type: 'text', text: 'Build it' },
+      ]);
+      expect(JSON.stringify(startup)).not.toContain('data:');
+      expect(presentAtRecordWrite.toSorted()).toEqual(
+        [`${chatAttachments}/${image.hash}.png`, `${chatAttachments}/${pdf.hash}.pdf`].toSorted(),
+      );
+      expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+    });
+
+    it('completes the copy when an operation persisted before it is resumed', async () => {
+      const image = await seedHomeAttachment(new Uint8Array([4, 5, 6]), 'image/png');
+      const startup: MyUIMessage = {
+        id: 'msg_startup',
+        role: 'user',
+        parts: [{ type: 'file', url: `attachments/${image.hash}.png`, mediaType: 'image/png' }],
+      };
+      const persisted = {
+        ...pendingCreate,
+        chat: {
+          ...pendingCreate.chat!,
+          messages: [startup],
+        },
+      };
+      mockGetPendingProjectOperations.mockResolvedValue([persisted]);
+      mockResumeResources.mockResolvedValueOnce([persisted.chat]);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+
+      await vi.waitFor(() => {
+        expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+      });
+      expect(attachmentFiles.has(`${chatAttachments}/${image.hash}.png`)).toBe(true);
+      expect(mockPutChatRecord).toHaveBeenCalledWith(persisted.chat);
+    });
+
+    // New (W6, P39): the operation names its source, and resume copies from that directory only.
+    it('records a surface source on the operation and copies from it', async () => {
+      const bytes = new Uint8Array([10, 11]);
+      const hash = await sha256Bytes(bytes);
+      const source = '/.tau/composers/marketing/attachments';
+      attachmentFiles.set(`${source}/${hash}.png`, bytes);
+      mockPrepareProjectCreation.mockImplementationOnce(async (input) => {
+        const operation = await prepareWithChat(input);
+        return { ...operation, attachmentSource: input.attachmentSource };
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'openscad',
+          initialMessage: {
+            content: 'Build it',
+            attachments: [{ hash, mediaType: 'image/png' }],
+            attachmentSource: source,
+          },
+          location: { kind: 'home' },
+        }),
+      );
+
+      expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0]).toMatchObject({ attachmentSource: source });
+      expect(attachmentFiles.get(`${chatAttachments}/${hash}.png`)).toEqual(bytes);
+      expect(mockGenerateProjectName.mock.calls.at(-1)?.[0].imageUrls).toEqual([
+        `data:image/png;base64,${uint8ArrayToBase64(bytes)}`,
+      ]);
+    });
+
+    it('leaves the operation pending and the Home bytes intact when the copy fails', async () => {
+      const image = await seedHomeAttachment(new Uint8Array([7, 8, 9]), 'image/png');
+      const homePath = [...attachmentFiles.keys()][0]!;
+      mockPrepareProjectCreation.mockImplementationOnce(prepareWithChat);
+      mockWriteAttachment.mockRejectedValueOnce(new Error('disk full'));
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(
+        act(async () =>
+          result.current.createProject({
+            kernel: 'openscad',
+            initialMessage: { content: 'Build it', attachments: [image] },
+            location: { kind: 'home' },
+          }),
+        ),
+      ).rejects.toMatchObject({ name: 'PendingProjectRecoveryError', reason: 'local-state-error' });
+
+      expect(mockPutChatRecord).not.toHaveBeenCalled();
+      expect(mockCompletePending).not.toHaveBeenCalled();
+      expect(attachmentFiles.get(homePath)).toEqual(new Uint8Array([7, 8, 9]));
+    });
   });
 
   it.each([
@@ -1647,6 +2041,86 @@ describe('useProjectManager.createProject', () => {
     expect(mockResumeResources).not.toHaveBeenCalled();
     expect(mockCompletePending).not.toHaveBeenCalled();
     expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
+  });
+
+  /**
+   * W18 DEF-2 red pin (b): a second device must reuse the remote's project id.
+   *
+   * The id *is* the repository path on the Tau Hosted Remote, so a device
+   * opening a project it has never held cannot mint a new one — and it must not
+   * be able to mint an arbitrary string either, because the same id names a
+   * directory here and a repository there.
+   */
+  it('creates a project under an id the caller supplies', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        id: 'proj_ccccccccccccccccccccc',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id).toBe('proj_ccccccccccccccccccccc');
+  });
+
+  /* Review R4: *Open* is offered from a 30 s cache against an asynchronous
+     discovery pass, so the same row can be clicked twice. Two local projects
+     under one id is a `duplicate-id` conflict neither of them recovers from, so
+     the refusal belongs at the owner rather than in the one caller. */
+  it('refuses an id this device already holds', async () => {
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: 'proj_ccccccccccccccccccccc',
+      backend: 'opfs',
+      providerBasePath: 'already-here',
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(
+      result.current.createProject({
+        id: 'proj_ccccccccccccccccccccc',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    ).rejects.toThrow(/already on this device/iu);
+    expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+  });
+
+  /* Review R5: opening someone's project from Tau Cloud must not invent a chat
+     for them. `.tau/chats` is unversioned, so the open pull cannot take one
+     away, and chats ship on their own record refs — an empty *Initial chat*
+     minted here would be offered back to the account on the next push. */
+  it('creates without a chat when the caller asks for none', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        chat: false,
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat).toBeUndefined();
+    expect(mockPutChatRecord).not.toHaveBeenCalled();
+  });
+
+  it('refuses an id that is not a project id, before anything is allocated', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(
+      result.current.createProject({
+        id: '../escape',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    ).rejects.toThrow(/not a project id/iu);
+    expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
   });
 
   it('returns a committed project when preference persistence fails', async () => {
@@ -1839,6 +2313,60 @@ describe('useProjectManager.createProject', () => {
     });
     expect(mockSetProjectDisclosure).toHaveBeenCalledWith(fakeProject.id, undefined);
     expect(phaseOrder).toEqual(['resources-cleanup', 'disclosure-cleanup', 'locator-cleanup', 'roots', 'complete']);
+  });
+
+  it('reclaims the permanently deleted project’s composer records and leaves a sibling project untouched', async () => {
+    composerFiles.clear();
+    const seed = (projectId: string, chatId: string): void => {
+      composerFiles.set(`/.tau/composers/chats/${projectId}/${chatId}.json`, 'record');
+      composerFiles.set(`/.tau/composers/chats/${projectId}/${chatId}/attachments/${'a'.repeat(64)}.png`, 'bytes');
+    };
+    seed(fakeProject.id, 'cht_deleted');
+    seed(fakeProject.id, 'cht_deleted_too');
+    seed(unrelatedProject.id, 'cht_kept');
+    mockGetProjectLibraryState.mockResolvedValueOnce({
+      projectId: fakeProject.id,
+      lastActivityAt: 10,
+      deletedAt: 11,
+    });
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+    });
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
+
+    expect(mockRmdir).toHaveBeenCalledWith(`/.tau/composers/chats/${fakeProject.id}`, { recursive: true });
+    expect([...composerFiles.keys()]).toEqual([
+      `/.tau/composers/chats/${unrelatedProject.id}/cht_kept.json`,
+      `/.tau/composers/chats/${unrelatedProject.id}/cht_kept/attachments/${'a'.repeat(64)}.png`,
+    ]);
+  });
+
+  it('permanently deletes a project that never held a composer record', async () => {
+    composerFiles.clear();
+    mockGetProjectLibraryState.mockResolvedValueOnce({
+      projectId: fakeProject.id,
+      lastActivityAt: 10,
+      deletedAt: 11,
+    });
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+    });
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
+
+    // An absent composer directory is not a failed deletion: the operation completes.
+    expect(mockCompletePending).toHaveBeenCalledWith(pendingPermanentDelete.operationId);
   });
 
   it('journals the freshly discovered locator instead of stale persisted configuration', async () => {
@@ -2134,22 +2662,21 @@ describe('useProjectManager.createProject', () => {
     );
   });
 
-  it('sets unread state with chat invalidation only and leaves no-op recency silent', async () => {
+  /* W8: unread, message edits and the draft are this device's composer
+   * records (D3, D9); the manager no longer offers a chat-row writer for any
+   * of them, so nothing can write them back into a chat. */
+  it('offers no composer writer on the chat surface', () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createInspectableWrapper().wrapper });
+
+    for (const removed of ['setChatUnreadState', 'setMessageEdit', 'clearMessageEdit']) {
+      expect(result.current).not.toHaveProperty(removed);
+    }
+  });
+
+  it('leaves no-op recency silent', async () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
     const { result } = renderHook(() => useProjectManager(), { wrapper });
-    invalidateQueries.mockClear();
-    mockSetChatUnreadState.mockResolvedValueOnce({ ...activityChat, hasUnreadTurn: true });
-
-    await act(async () => result.current.setChatUnreadState(activityChat.id, true));
-
-    expect(mockTouchProjectActivity).not.toHaveBeenCalled();
-    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
-      ['chats', fakeProject.id],
-      ['all-chats'],
-      ['chat', activityChat.id],
-    ]);
-
     invalidateQueries.mockClear();
     mockTouchChatRecency.mockResolvedValueOnce(undefined);
     await act(async () => result.current.touchChatRecency(activityChat.id, 2));

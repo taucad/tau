@@ -9,10 +9,9 @@ import { stopRootWithRehydration } from '#lib/xstate-test.utils.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import type { PrepareFilesInput } from '#machines/cad-preview.machine.js';
-import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
-const createMockAppRuntimeClient = () => createMockRuntimeClient<typeof runtime>();
+const createMockAppRuntimeClient = () => createMockRuntimeClient();
 
 const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
   mock<ReturnType<KernelOptionsFactory>>({
@@ -84,7 +83,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -170,7 +168,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -252,7 +249,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     // InitializeModel should have been sent to cadRef (now in idle)
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: {},
       content: { includeEdges: true },
     });
 
@@ -348,7 +344,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -480,7 +475,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadRef.getSnapshot().context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });

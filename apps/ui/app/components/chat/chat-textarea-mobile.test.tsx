@@ -15,19 +15,33 @@ const jscadKernel = kernelConfigurations.find((k) => k.id === 'jscad')!;
 // guarantees a non-nullable `KernelConfiguration`. This test mirrors
 // that contract.
 const mockKernel: { current: KernelConfiguration } = { current: manifoldKernel };
+const mockCanSelectExecution = { current: false };
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: (): ChatComposerContextValue =>
     ({
       execution: { execution: { kind: 'tau', model: 'test-model' }, setActiveExecution: vi.fn() },
       session: undefined,
+      canSelectExecution: mockCanSelectExecution.current,
     }) as unknown as ChatComposerContextValue,
+}));
+
+vi.mock('#components/chat/chat-execution-selector.js', () => ({
+  formatChatAgentActivity: () => 'Ready',
+  ChatExecutionSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
+    <div data-testid='execution-selector'>{children({ label: 'Tau', activity: 'ready' })}</div>
+  ),
 }));
 
 vi.mock('#components/chat/chat-model-selector.js', () => ({
   ChatModelSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
     <div>{children({})}</div>
   ),
+}));
+
+// The chip has its own suite; the drawer only has to mount it.
+vi.mock('#components/billing/credit-estimate.js', () => ({
+  CreditBalanceChip: () => <div data-testid='credit-balance-chip' />,
 }));
 
 vi.mock('#components/chat/chat-kernel-selector.js', () => ({
@@ -48,13 +62,31 @@ vi.mock('#components/chat/chat-context-actions.js', () => ({
   ChatContextActions: () => <div data-testid='context-actions' />,
 }));
 
-vi.mock('#components/chat/chat-textarea-mobile-images.js', () => ({
-  ChatTextareaMobileImages: () => <div data-testid='mobile-images' />,
+vi.mock('#components/chat/chat-textarea-image-strip.js', () => ({
+  ChatTextareaAttachmentRail: ({
+    blockReason,
+    blockReasonId,
+  }: {
+    readonly blockReason?: string;
+    readonly blockReasonId?: string;
+  }) => <p id={blockReasonId}>{blockReason}</p>,
 }));
 
 vi.mock('#components/chat/chat-textarea-submit-button.js', () => ({
-  ChatTextareaSubmitButton: ({ isDisabled }: { readonly isDisabled: boolean }) => (
-    <button type='button' data-testid='submit' aria-label='Send message' disabled={isDisabled}>
+  ChatTextareaSubmitButton: ({
+    isDisabled,
+    describedBy,
+  }: {
+    readonly isDisabled: boolean;
+    readonly describedBy?: string;
+  }) => (
+    <button
+      type='button'
+      data-testid='submit'
+      aria-label='Send message'
+      aria-describedby={describedBy}
+      disabled={isDisabled}
+    >
       submit
     </button>
   ),
@@ -133,6 +165,7 @@ function renderMobile(options?: {
   readonly isSubmitDisabled?: boolean;
   readonly focusInput?: () => void;
   readonly showContextMenu?: boolean;
+  readonly sendBlockReason?: string;
 }) {
   return render(
     <ChatTextareaMobile
@@ -142,7 +175,11 @@ function renderMobile(options?: {
       selectedMenuIndex={0}
       isSubmitting={false}
       inputText={options?.inputText ?? ''}
-      images={[]}
+      attachments={[]}
+      attachmentDirectory='/.tau/composers/new-project/attachments'
+      sendBlockReason={options?.sendBlockReason}
+      attachmentAccept='image/png'
+      attachmentInputSupported
       selectedToolChoice='auto'
       setDraftToolChoice={noop}
       status='idle'
@@ -169,7 +206,7 @@ function renderMobile(options?: {
       handleTextareaBlur={noop}
       handlePointerDown={noop}
       focusInput={options?.focusInput ?? noop}
-      removeImage={noop}
+      removeAttachment={noop}
       setShowContextMenu={noop}
       setAtSymbolPosition={noop}
       setContextSearchQuery={noop}
@@ -184,6 +221,7 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockKernel.current = manifoldKernel;
+    mockCanSelectExecution.current = false;
   });
 
   it('renders the kernel handed back by ChatKernelSelector (no hardcoded openscad fallback)', () => {
@@ -198,6 +236,17 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
     expect(screen.queryByText('OpenSCAD')).toBeNull();
   });
 
+  it('offers the credit balance chip inside the options drawer', () => {
+    renderMobile();
+    expect(screen.getByTestId('credit-balance-chip')).toBeInTheDocument();
+  });
+
+  it('shows execution selection from capability even without a chat session', () => {
+    mockCanSelectExecution.current = true;
+    renderMobile();
+    expect(screen.getByTestId('execution-selector')).toBeInTheDocument();
+  });
+
   it('names the options trigger and renders location inside Settings', () => {
     renderMobile({ creationLocationControl: <button type='button'>Create in Home</button> });
     expect(screen.getByRole('button', { name: 'Open chat options' })).toBeInTheDocument();
@@ -207,6 +256,22 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
   it('disables the submit button for external prerequisites even with text', () => {
     renderMobile({ inputText: 'draft', isSubmitDisabled: true });
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+  });
+
+  it('should disable Send and describe it with the reason the model cannot read an attachment (S14)', () => {
+    renderMobile({ inputText: 'draft', sendBlockReason: "GPT Image can't read PDFs." });
+
+    const send = screen.getByRole('button', { name: /send/i });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription("GPT Image can't read PDFs.");
+  });
+
+  it('should leave Send enabled and undescribed when nothing blocks it', () => {
+    renderMobile({ inputText: 'draft' });
+
+    const send = screen.getByRole('button', { name: /send/i });
+    expect(send).toBeEnabled();
+    expect(send).not.toHaveAttribute('aria-describedby');
   });
 
   it('returns focus to the editor when the options drawer closes', () => {

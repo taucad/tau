@@ -13,6 +13,7 @@ import {
   asBuffer,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   defineKernel,
   extractDefaultParameters,
   finalizeRenderOutput,
@@ -26,11 +27,8 @@ import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 import { createEmptyGlb, createEmptyGltfGeometry } from '@taucad/geometry-core';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { loadNativeBackend } from '#opencascade-native-backend.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import type { NativeBinding, NativeSolid, NativeTessellation } from '#opencascade-native-backend.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import {
   opencascadeNativeExportSchemas,
   opencascadeNativeOptionsSchema,
@@ -180,7 +178,12 @@ export const opencascadeNativeKernel = defineKernel({
     }
 
     const defaultParameters = extractDefaultParameters(executeResult.value);
-    return createKernelSuccess({ defaultParameters, jsonSchema: await jsonSchemaFromJson(defaultParameters) });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(defaultParameters, await jsonSchemaFromJson(defaultParameters), {
+        id: 'urn:taucad:opencascade-native:parameters',
+        name: 'OpenCascadeNativeParameters',
+      }),
+    );
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
@@ -200,13 +203,18 @@ export const opencascadeNativeKernel = defineKernel({
     const main = isRecordObject(module) ? (module['default'] ?? module['main']) : undefined;
     if (!isCallable(main)) {
       runtime.logger.warn('createGeometry returning empty: main-function-not-found', { data: { filePath: fileName } });
-      return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+      return finalizeRenderOutput({
+        artifacts: [createEmptyGltfGeometry()],
+        nativeHandle: [],
+      });
     }
 
     try {
       // Tessellation is deferred to `meshGeometry`: a STEP-only export must
       // never pay for a display mesh.
-      return { nativeHandle: normalizeSolids(await main(toModelApi(context.binding), parameters)) };
+      return {
+        nativeHandle: normalizeSolids(await main(toModelApi(context.binding), parameters)),
+      };
     } catch (error) {
       throw new OpencascadeNativeBuildError(runtimeIssue(error, fileName));
     }
@@ -236,7 +244,12 @@ export const opencascadeNativeKernel = defineKernel({
       case 'step': {
         if (nativeHandle.length === 0) {
           return createKernelError([
-            { message: 'No geometry available for STEP export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+            {
+              message: 'No geometry available for STEP export',
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+            },
           ]);
         }
         // BRep formats never tessellate.

@@ -35,7 +35,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./agent/SKILL.md",
+    "./agent": "./agent/skills.json",
+    "./agent/*": "./agent/*",
     "./engine-connection": "./src/engine-connection.ts",
     "./package.json": "./package.json"
   },
@@ -47,7 +48,8 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./agent": "./agent/SKILL.md",
+      "./agent": "./agent/skills.json",
+      "./agent/*": "./agent/*",
       "./engine-connection": {
         "types": "./dist/engine-connection.d.mts",
         "import": "./dist/engine-connection.mjs",
@@ -67,6 +69,7 @@
     "@msgpack/msgpack": "catalog:",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kcl-wasm-lib": "catalog:",
+    "@taucad/parameters": "workspace:*",
     "deepmerge": "catalog:",
     "type-fest": "catalog:"
   },
@@ -81,5 +84,8 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
   }
 }

@@ -5,6 +5,7 @@ import { idPrefix } from '@taucad/types/constants';
 import type { MyUIMessage } from '@taucad/chat';
 import { messageRole } from '@taucad/chat/constants';
 import { ENV } from '#environment.config.js';
+import { parseErrorForPersistence } from '#utils/error.utils.js';
 
 /**
  * Error thrown by the project-name / commit-name client when the
@@ -17,10 +18,12 @@ import { ENV } from '#environment.config.js';
 export class NameGeneratorRequestError extends Error {
   public override readonly name = 'NameGeneratorRequestError';
   public readonly status: number;
+  public readonly code?: string;
 
-  public constructor(status: number, message: string) {
+  public constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -57,9 +60,11 @@ const nameGeneratorFetch: typeof globalThis.fetch = async (input, init) => {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
+    const parsed = parseErrorForPersistence(new Error(detail));
     throw new NameGeneratorRequestError(
       response.status,
-      `POST /v1/chat failed with ${response.status} ${response.statusText}: ${detail}`,
+      `POST /v1/chat failed with ${response.status} ${response.statusText}: ${parsed.message}`,
+      parsed.code,
     );
   }
 

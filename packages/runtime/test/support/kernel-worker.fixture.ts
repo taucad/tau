@@ -24,7 +24,7 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   CreateGeometryResult,
   ExportGeometryResult,
-  GetParametersResult,
+  GetParameterDeclarationsResult,
   HashedGeometryResult,
 } from '#types/runtime.types.js';
 
@@ -51,7 +51,7 @@ export const seedTestFileSystem = async (files: Record<string, string | Uint8Arr
   for (const [path, content] of Object.entries(files)) {
     const normalizedPath = assertRootedPath(path);
     const separator = normalizedPath.lastIndexOf('/');
-    const directory = separator < 0 ? '' : normalizedPath.slice(0, separator);
+    const directory = separator === -1 ? '' : normalizedPath.slice(0, separator);
     if (directory) {
       await fileSystem.mkdir(directory, { recursive: true });
     }
@@ -67,12 +67,15 @@ export const initializeWorkerForTesting = async <T extends KernelWorker>(
     readonly workerOptions?: Record<string, unknown>;
     readonly config?: unknown;
     readonly onTelemetry?: Parameters<T['setTelemetrySend']>[0];
+    /** Serve the store without its watch channel, for the kernel's watcherless freshness path. */
+    readonly watchable?: boolean;
   },
 ): Promise<T> => {
   if (options?.onTelemetry) {
     worker.setTelemetrySend(options.onTelemetry);
   }
-  const { port } = createFileSystemBridgePort(getTestFileSystem());
+  const base = getTestFileSystem();
+  const { port } = createFileSystemBridgePort(options?.watchable === false ? { ...base, watch: undefined } : base);
   await worker.initialize({
     callbacks: { onLog: options?.onLog ?? (() => undefined) },
     transferables: { fileSystemPort: port },
@@ -135,7 +138,10 @@ export const createMockFileSystem = (options?: MockFileSystemOptions): MockFileS
   const lstat = vi.fn(async (_path: string): Promise<FileStat> => {
     throw new Error('Not found');
   });
-  const readFiles = vi.fn(async (_paths: string[]): Promise<Record<string, Uint8Array<ArrayBuffer>>> => ({}));
+  const readFiles = vi.fn(
+    async (paths: string[]): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
+      Object.fromEntries(paths.map((path) => [path, new Uint8Array()])),
+  );
   const readdirContents = vi.fn(async (_path: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => ({}));
   const readdirStat = vi.fn(async (_path: string): Promise<FileStatEntry[]> => []);
   const ensureDirectory = vi.fn(async (_path: string): Promise<void> => undefined);
@@ -193,7 +199,7 @@ export const createGeometryFile = (filename: string): RuntimeFileLocator => {
   const separator = filePath.lastIndexOf('/');
   return {
     filename: filePath.slice(separator + 1),
-    path: separator < 0 ? '' : filePath.slice(0, separator),
+    path: separator === -1 ? '' : filePath.slice(0, separator),
   };
 };
 
@@ -235,6 +241,26 @@ const normalizeTestMiddleware = (
 const successGeometry = (): CreateGeometryResult => ({
   success: true,
   data: { format: 'gltf', content: new Uint8Array([1, 2, 3]) } satisfies GeometryResponse,
+  issues: [],
+});
+
+/** Native empty parameter declaration used by runtime framework fixtures. */
+export const createParameterDeclaration = (
+  defaults: Readonly<Record<string, unknown>> = {},
+  schema: Readonly<Record<string, unknown>> = {},
+): GetParameterDeclarationsResult => ({
+  success: true,
+  data: {
+    schema: {
+      $schema: 'https://json-structure.org/meta/extended/v0/#',
+      $id: 'urn:taucad:test:kernel-parameters',
+      $uses: ['JSONSchemaUnits'],
+      name: 'KernelParameters',
+      type: 'object',
+      ...schema,
+    },
+    defaults,
+  },
   issues: [],
 });
 
@@ -312,12 +338,8 @@ export class MockKernelWorker extends KernelWorker {
   protected override async onGetParameters(
     _input: GetParametersInput,
     _runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
-    return {
-      success: true,
-      data: { defaultParameters: {}, jsonSchema: { type: 'object', properties: {} } },
-      issues: [],
-    };
+  ): Promise<GetParameterDeclarationsResult> {
+    return createParameterDeclaration();
   }
 
   protected override async onCreateGeometry(

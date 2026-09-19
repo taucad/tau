@@ -8,8 +8,10 @@ import type { Auth } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { WebSocket, WebSocketServer } from 'ws';
+import type { RawData } from 'ws';
 
 import { authInstanceKey } from '#constants/auth.constant.js';
+import { asBuffer } from '#api/hosts/host-frame-relay.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 
@@ -20,6 +22,7 @@ const sessionPathPrefix = '/v1/agents/sessions/';
 export class HostsGateway implements OnModuleInit, OnModuleDestroy {
   private socketServer: WebSocketServer | undefined;
   private httpServer: HttpServer | undefined;
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
   private upgradeHandler: ((request: IncomingMessage, socket: Duplex, head: Buffer) => void) | undefined;
 
   public constructor(
@@ -31,8 +34,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
 
   public async onModuleInit(): Promise<void> {
     if (import.meta.env.DEV) {
-      this.devWebSocketService.registerPathHandler(controlPath, (socket, request) => this.handle(socket, request));
-      this.devWebSocketService.registerPrefixHandler(sessionPathPrefix, (socket, request) =>
+      this.devWebSocketService.registerPathHandler(controlPath, async (socket, request) =>
+        this.handle(socket, request),
+      );
+      this.devWebSocketService.registerPrefixHandler(sessionPathPrefix, async (socket, request) =>
         this.handle(socket, request),
       );
       await this.devWebSocketService.ensureStarted();
@@ -41,15 +46,15 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     this.socketServer = new WebSocketServer({ noServer: true });
     const fastify = this.httpAdapterHost.httpAdapter.getInstance<FastifyInstance>();
     this.httpServer = fastify.server;
+    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
     const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
-      const pathname = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`).pathname;
+      const { pathname } = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
       if (pathname !== controlPath && !pathname.startsWith(sessionPathPrefix)) {
         return;
       }
       this.socketServer?.handleUpgrade(request, socket, head, (accepted) => {
         this.socketServer?.emit('connection', accepted, request);
-        const handled = this.handle(accepted, request);
-        handled.catch(() => accepted.close(1011, 'host gateway failed'));
+        void this.closeOnHandleFailure(accepted, request);
       });
     };
     this.upgradeHandler = onUpgrade;
@@ -68,7 +73,20 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     for (const socket of this.socketServer?.clients ?? []) {
       socket.close(1001, 'service stopping');
     }
-    await new Promise<void>((resolve) => this.socketServer?.close(() => resolve()) ?? resolve());
+    /* Every client was told 1001 above; shutdown does not wait on their close
+     * handshakes. This is what the code here always did: `close(cb)` returns
+     * undefined, so the `?? resolve()` that used to follow it fired synchronously
+     * and the awaited promise was already settled — the wait never existed. */
+    this.socketServer?.close();
+  }
+
+  /** The upgrade callback is synchronous, so a route that fails admission closes its socket here. */
+  private async closeOnHandleFailure(socket: WebSocket, request: IncomingMessage): Promise<void> {
+    try {
+      await this.handle(socket, request);
+    } catch {
+      socket.close(1011, 'host gateway failed');
+    }
   }
 
   /**
@@ -91,8 +109,33 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Control frames are handled strictly in arrival order, one at a time.
+   *
+   * `handleControlMessage` reaches PostgreSQL and Redis, so it can fail for reasons
+   * the frame knows nothing about. A rejection left on this chain would reach the
+   * process-level handler and end the replica, so it ends the one connection
+   * instead: swallowing it would leave a daemon whose `ready` was dropped believing
+   * its presence write landed, while a close makes it reconnect. Every link settles,
+   * so the frames already in flight behind a failure are still handled in order
+   * rather than being dropped by a poisoned `previous`.
+   */
+  private async afterControlMessage(options: {
+    readonly previous: Promise<void>;
+    readonly socket: WebSocket;
+    readonly deviceId: string;
+    readonly raw: RawData;
+  }): Promise<void> {
+    try {
+      await options.previous;
+      await this.hostsService.handleControlMessage(options.deviceId, asBuffer(options.raw).toString('utf8'));
+    } catch {
+      options.socket.close(1011, 'control message failed');
+    }
+  }
+
   private async route(socket: WebSocket, request: IncomingMessage): Promise<void> {
-    const pathname = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`).pathname;
+    const { pathname } = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
     if (pathname === controlPath) {
       const device = await this.hostsService.authenticateDevice(request.headers.authorization);
       if (!device) {
@@ -102,7 +145,7 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       await this.hostsService.registerControl(device.id, socket);
       let messages = Promise.resolve();
       socket.on('message', (raw) => {
-        messages = messages.then(async () => this.hostsService.handleControlMessage(device.id, raw.toString()));
+        messages = this.afterControlMessage({ previous: messages, socket, deviceId: device.id, raw });
       });
       return;
     }

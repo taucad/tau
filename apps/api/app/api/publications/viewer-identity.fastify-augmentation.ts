@@ -6,5 +6,3 @@ declare module 'fastify' {
     viewerIdentity?: ResolvedViewerIdentity;
   }
 }
-
-export {};

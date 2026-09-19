@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +15,13 @@ import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration lives outside the app alias root.
+import { resolveTauCloudBuildEnabled } from './build-environment.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
+const streamdownShikiFacade = path.resolve(__dirname, 'app/lib/streamdown-shiki.ts');
 
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -68,55 +73,268 @@ export const uiSsrOptions = {
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
 
+type UiSourceAliasPluginOptions = {
+  readonly emitModuleGraph?: boolean;
+  readonly tauCloudEnabled?: boolean;
+  readonly target?: 'web' | 'desktop';
+};
+
+const cloudBoundarySpecifiers = new Set([
+  '#cloud/commercial-features.js',
+  '#cloud/environment-billing.js',
+  '#cloud/financial-purge.js',
+  '#cloud/gateway-model-transport.js',
+  '#cloud/nav-billing.js',
+  '#cloud/kernel-commerce.js',
+  '#cloud/root-billing.js',
+  '#cloud/settings-billing.js',
+  '#cloud/zoo-close-errors.js',
+  '#cloud/zoo-upgrade-banner.js',
+]);
+
+const desktopSourceOverrides = new Map([
+  ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
+  ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
+  ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
+  ['#runtime/demo-client-options.js', '#runtime/demo-client-options.desktop.js'],
+  ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
+  ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
+  ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
+]);
+
+const selfHostSourceOverrides = new Map([
+  ['#components/billing/credit-estimate.js', '#components/billing/credit-estimate.self-host.js'],
+  ['#components/chat/chat-model-selector.js', '#components/chat/chat-model-selector.self-host.js'],
+  ['#components/icons/svg-sprite-mount.js', '#components/icons/svg-sprite-mount.self-host.js'],
+  ['#hooks/use-credit-preflight.js', '#hooks/use-credit-preflight.self-host.js'],
+  ['#offline/offline-shell.js', '#offline/offline-shell.self-host.js'],
+  ['#routes/_index/billing-section.js', '#routes/_index/billing-section.self-host.js'],
+  [
+    '#routes/w.$workspace.$project/chat-details-usage.js',
+    '#routes/w.$workspace.$project/chat-details-usage.self-host.js',
+  ],
+  [
+    '#routes/w.$workspace.$project/chat-error-credits.js',
+    '#routes/w.$workspace.$project/chat-error-credits.self-host.js',
+  ],
+  [
+    '#routes/w.$workspace.$project/chat-error-provider-account.js',
+    '#routes/w.$workspace.$project/chat-error-provider-account.self-host.js',
+  ],
+  [
+    '#routes/w.$workspace.$project/chat-message-data-usage.js',
+    '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js',
+  ],
+]);
+
+const normalizeProvenancePath = (moduleId: string): string => {
+  const normalized = moduleId.replaceAll('\\', '/');
+  const workspaceRoot = `${path.resolve(__dirname, '../..').replaceAll('\\', '/')}/`;
+  return normalized.startsWith(workspaceRoot) ? normalized.slice(workspaceRoot.length) : normalized;
+};
+
 /** Shared with `desktop/vite.config.ts`, which reuses the web plugin list. */
-export const createUiSourceAliasPlugin = (): Plugin => ({
-  name: 'tau-ui-source-alias',
-  enforce: 'pre',
-  resolveId(source, importer) {
-    if (!source.startsWith('#')) {
-      return null;
-    }
-
-    const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
-    const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
-    const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
-    if (
-      resolvedImporter !== undefined &&
-      !resolvedImporter.startsWith(uiRoot) &&
-      !resolvedImporter.startsWith(designSystemRoot)
-    ) {
-      return null;
-    }
-
-    const [specifier, query] = source.split('?', 2);
-    if (specifier === undefined) {
-      return null;
-    }
-
-    const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
-      ? designSystemRoot
-      : path.resolve(__dirname, 'app');
-    const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
-    const candidatePaths = [sourcePath];
-    if (specifier.endsWith('.js')) {
-      const sourceBasePath = sourcePath.slice(0, -'.js'.length);
-      candidatePaths.push(
-        `${sourceBasePath}.ts`,
-        `${sourceBasePath}.tsx`,
-        `${sourceBasePath}.js`,
-        `${sourceBasePath}.jsx`,
-      );
-    }
-
-    for (const candidatePath of candidatePaths) {
-      if (existsSync(candidatePath)) {
-        return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = {}): Plugin => {
+  let viteRoot = __dirname;
+  let graphFileName: string | undefined;
+  let graphAssets: Array<{ fileName: string; sourcePath: string; sha256: string }> = [];
+  return {
+    name: 'tau-ui-source-alias',
+    enforce: 'pre',
+    configResolved(config) {
+      viteRoot = config.root;
+    },
+    resolveId(source, importer) {
+      if (
+        source === 'shiki' &&
+        (importer?.includes('/@streamdown/code/') === true ||
+          (importer?.includes('/streamdown/') === true && importer.includes('/code-block-')))
+      ) {
+        return streamdownShikiFacade;
       }
-    }
+      if (!source.startsWith('#')) {
+        return null;
+      }
 
-    return null;
-  },
-});
+      const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
+      const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
+      const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
+      if (
+        resolvedImporter !== undefined &&
+        !resolvedImporter.startsWith(uiRoot) &&
+        !resolvedImporter.startsWith(designSystemRoot)
+      ) {
+        return null;
+      }
+
+      const [requestedSpecifier, query] = source.split('?', 2);
+      const hostSpecifier =
+        options.target === 'desktop' && requestedSpecifier
+          ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
+          : requestedSpecifier;
+      const targetSpecifier =
+        options.tauCloudEnabled === false && hostSpecifier
+          ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
+          : hostSpecifier;
+      const specifier =
+        targetSpecifier && cloudBoundarySpecifiers.has(targetSpecifier)
+          ? targetSpecifier.replace(/\.js$/u, options.tauCloudEnabled ? '.cloud.js' : '.self-host.js')
+          : targetSpecifier;
+      if (specifier === undefined) {
+        return null;
+      }
+
+      const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
+        ? designSystemRoot
+        : path.resolve(__dirname, 'app');
+      const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
+      const candidatePaths = [sourcePath];
+      if (specifier.endsWith('.js')) {
+        const sourceBasePath = sourcePath.slice(0, -'.js'.length);
+        candidatePaths.push(
+          `${sourceBasePath}.ts`,
+          `${sourceBasePath}.tsx`,
+          `${sourceBasePath}.js`,
+          `${sourceBasePath}.jsx`,
+        );
+      }
+
+      for (const candidatePath of candidatePaths) {
+        if (existsSync(candidatePath)) {
+          return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+        }
+      }
+
+      return null;
+    },
+    generateBundle(_outputOptions, bundle) {
+      if (options.emitModuleGraph !== true || this.environment.config.consumer !== 'client') {
+        return;
+      }
+
+      const chunks = Object.values(bundle).filter((output) => output.type === 'chunk');
+      const assets = Object.values(bundle).filter((output) => output.type === 'asset');
+      const emittedFileNames = new Set(Object.keys(bundle));
+      graphAssets = assets.map((asset) => ({
+        fileName: asset.fileName,
+        sourcePath: asset.originalFileNames[0]
+          ? normalizeProvenancePath(path.resolve(viteRoot, asset.originalFileNames[0]))
+          : '',
+        sha256: createHash('sha256').update(asset.source).digest('hex'),
+      }));
+      const graphReferenceId = this.emitFile({
+        type: 'asset',
+        name: 'tau-module-graph.json',
+        source: JSON.stringify({
+          chunks: chunks.map((chunk) => {
+            const renderedModuleIds = Object.entries(chunk.modules)
+              .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
+              .map(([moduleId]) => moduleId);
+            const importedChunks = chunk.imports
+              .map((importPath) => {
+                const fromOutputRoot = path.posix.normalize(
+                  path.posix.join(path.posix.dirname(chunk.fileName), importPath),
+                );
+                return emittedFileNames.has(importPath)
+                  ? importPath
+                  : emittedFileNames.has(fromOutputRoot)
+                    ? fromOutputRoot
+                    : undefined;
+              })
+              .filter((fileName): fileName is string => fileName !== undefined);
+            const forwardingOnly = this.parse(chunk.code).body.every(
+              (statement) =>
+                statement.type === 'ImportDeclaration' ||
+                statement.type === 'ExportAllDeclaration' ||
+                (statement.type === 'ExportNamedDeclaration' && statement.declaration === null),
+            );
+            return {
+              fileName: chunk.fileName,
+              // Rolldown reports renderedLength=0 for every module in some
+              // emitted wrapper chunks. Fall back only for that otherwise
+              // provenance-empty chunk; populated chunks keep the strict
+              // rendered/facade filter and exclude tree-shaken modules.
+              moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
+                normalizeProvenancePath(moduleId),
+              ),
+              imports: importedChunks,
+              forwardingOnly,
+            };
+          }),
+          assets: graphAssets,
+        }),
+      });
+      graphFileName = this.getFileName(graphReferenceId);
+    },
+    writeBundle: {
+      order: 'post',
+      async handler(outputOptions, bundle) {
+        if (
+          options.emitModuleGraph !== true ||
+          this.environment.config.consumer !== 'client' ||
+          outputOptions.dir === undefined ||
+          graphFileName === undefined
+        ) {
+          return;
+        }
+
+        const outputRoot = path.resolve(outputOptions.dir);
+        const chunks = await Promise.all(
+          Object.values(bundle)
+            .filter((output) => output.type === 'chunk')
+            .map(async (chunk) => {
+              const chunkPath = path.resolve(outputRoot, chunk.fileName);
+              if (!existsSync(chunkPath)) {
+                return undefined;
+              }
+
+              const code = await readFile(chunkPath, 'utf8');
+              const program = this.parse(code);
+              const imports = program.body
+                .flatMap((statement) => {
+                  if (
+                    statement.type === 'ImportDeclaration' ||
+                    statement.type === 'ExportAllDeclaration' ||
+                    statement.type === 'ExportNamedDeclaration'
+                  ) {
+                    return statement.source?.value && typeof statement.source.value === 'string'
+                      ? [statement.source.value]
+                      : [];
+                  }
+                  return [];
+                })
+                .map((importPath) =>
+                  path.posix.normalize(path.posix.join(path.posix.dirname(chunk.fileName), importPath)),
+                )
+                .filter((fileName) => existsSync(path.resolve(outputRoot, fileName)));
+              const renderedModuleIds = Object.entries(chunk.modules)
+                .filter(([moduleId, rendered]) => rendered.renderedLength > 0 || moduleId === chunk.facadeModuleId)
+                .map(([moduleId]) => moduleId);
+
+              return {
+                fileName: chunk.fileName,
+                moduleIds: (renderedModuleIds.length > 0 ? renderedModuleIds : chunk.moduleIds).map((moduleId) =>
+                  normalizeProvenancePath(moduleId),
+                ),
+                imports,
+                forwardingOnly: program.body.every(
+                  (statement) =>
+                    statement.type === 'ImportDeclaration' ||
+                    statement.type === 'ExportAllDeclaration' ||
+                    (statement.type === 'ExportNamedDeclaration' && statement.declaration === null),
+                ),
+              };
+            }),
+        );
+        const assets = graphAssets.filter((asset) => existsSync(path.resolve(outputRoot, asset.fileName)));
+        await writeFile(
+          path.resolve(outputRoot, graphFileName),
+          JSON.stringify({ chunks: chunks.filter((chunk) => chunk !== undefined), assets }),
+        );
+      },
+    },
+  };
+};
 
 /**
  * Applies the native React Compiler without admitting the second JSX and Fast
@@ -152,6 +370,7 @@ export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
+  const tauCloudEnabled = isTest ? true : resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 
   return {
     root: __dirname,
@@ -162,6 +381,7 @@ export default defineConfig(({ mode }) => {
       // Evaluated once per build / dev-server start, which is exactly the
       // granularity at which a tab's app-logic vintage can diverge.
       tauBuildId: JSON.stringify(Date.now()),
+      tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
        * `"desktop"`. Left undefined under `mode === 'test'` so unit tests can
@@ -170,9 +390,18 @@ export default defineConfig(({ mode }) => {
        */
       // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
       ...(isTest ? {} : { 'import.meta.env.TAU_TARGET': '"web"' }),
+      /*
+       * Offline shell seam (B5 R3). Only this config defines it, so only the
+       * web bundle registers the service worker: `desktop/vite.config.ts` and
+       * `serve/vite.config.ts` have their own `define` blocks and their own
+       * `react-router.config.ts` without the `buildEnd` that generates the
+       * worker, and both already boot offline from an SPA index fallback.
+       */
+      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+      ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
     },
     plugins: [
-      createUiSourceAliasPlugin(),
+      createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -213,7 +442,7 @@ export default defineConfig(({ mode }) => {
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
+      plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
     },
     resolve: {
       alias: isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : [],
@@ -227,8 +456,12 @@ export default defineConfig(({ mode }) => {
       // HTTPS is intentionally a `nx serve ui --https` concern (handled by `apps/ui/server.ts`),
       // not a `nx dev ui` concern; dev is plain HTTP regardless of TTY/--host.
       allowedHosts: true,
-      // System-tier kernel skills are ?raw-imported from packages/plugins/*/agent/SKILL.md;
-      // allow the workspace root explicitly so the fs check admits them under Vite 8.
+      // `runtime-ssr-assets.vite-plugin.ts` rewrites package-owned `import.meta.resolve`
+      // assets (resvg WASM, Geist fonts, occt/rhino WASM) to `/@fs/<abs path>` URLs at
+      // serve time, and those paths live in sibling packages. Vite 8 refuses to serve
+      // them unless the workspace root is allowed. NOT the skill-read widening it was
+      // originally commented as: the skills moved to JSON modules and no longer need it,
+      // but the runtime assets always did.
       fs: { allow: [path.resolve(__dirname, '../..')] },
     },
     build: {
@@ -249,14 +482,20 @@ export default defineConfig(({ mode }) => {
         return undefined;
       },
       target: 'es2022',
+      /*
+       * The offline shell allowlist is generated from this manifest
+       * (`scripts/generate-offline-shell.ts`), so hashed filenames are never
+       * hand-maintained. It only lists public build outputs.
+       */
+      manifest: true,
     },
 
     test: {
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
-      // *.browser.test.ts files need a real browser (OPFS, Web Locks) and run
+      // *.browser.test.ts(x) files need a real browser (OPFS, Web Locks, WebGL) and run
       // under their own vitest browser configs, not the jsdom sweep.
-      exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts'],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts', '**/*.browser.test.tsx'],
       typecheck: {
         enabled: true,
         include: ['**/*.test-d.ts'],

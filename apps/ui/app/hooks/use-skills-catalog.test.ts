@@ -23,9 +23,10 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
 }));
 
-const { skillMetadataToSlashCommand, usePromptSkillsCatalog } = await import('#hooks/use-skills-catalog.js');
+const { skillMetadataToSlashCommand, usePromptSkillsCatalog, useSkillsCatalog } =
+  await import('#hooks/use-skills-catalog.js');
 const { parseSkillFrontmatter } = await import('#hooks/use-context-payload.utils.js');
-const { builtInSystemSkills } = await import('#lib/system-skills-catalog.js');
+const { systemSkillsCatalog } = await import('#lib/system-skills-catalog.js');
 
 const encoder = new TextEncoder();
 
@@ -50,9 +51,9 @@ function serveSingleSkill(name: string, description: string): void {
 
 describe('skillMetadataToSlashCommand', () => {
   it('should expose create-skill as a system slash skill item', () => {
-    const createSkill = builtInSystemSkills.find((skill) => skill.slug === 'create-skill');
+    const createSkill = systemSkillsCatalog.find((skill) => skill.slug === 'create-skill');
     if (!createSkill) {
-      throw new Error('Expected built-in create-skill to be registered');
+      throw new Error('Expected system create-skill to be registered');
     }
 
     const metadata = parseSkillFrontmatter(createSkill.skillMarkdown, 'system:skills/create-skill/SKILL.md', {
@@ -112,6 +113,46 @@ describe('usePromptSkillsCatalog', () => {
         expect.arrayContaining([expect.objectContaining({ name: 'alpha', description: 'Alpha v2' })]),
       );
     });
+  });
+
+  it.each([
+    ['prompt catalog', usePromptSkillsCatalog],
+    ['full catalog', useSkillsCatalog],
+  ])('should publish only the latest overlapping load for the %s', async (_label, useCatalog) => {
+    const first = Promise.withResolvers<ListedDirectoryEntry[]>();
+    const second = Promise.withResolvers<ListedDirectoryEntry[]>();
+    mockListDirectory.mockImplementation(async (path) => {
+      if (path !== '.agents/skills') {
+        return [];
+      }
+      return mockListDirectory.mock.calls.filter(([candidate]) => candidate === path).length === 1
+        ? first.promise
+        : second.promise;
+    });
+    mockReadFile.mockImplementation(async (path) => {
+      const name = path.includes('/alpha/') ? 'alpha' : 'beta';
+      return skillMarkdown(name, name === 'alpha' ? 'Alpha v1' : 'Beta v2');
+    });
+
+    const { result } = renderHook(() => useCatalog());
+    await waitFor(() => {
+      expect(mockListDirectory).toHaveBeenCalledWith('.agents/skills');
+    });
+    act(() => treeCallback?.());
+    await waitFor(() => {
+      expect(mockListDirectory.mock.calls.filter(([path]) => path === '.agents/skills')).toHaveLength(2);
+    });
+
+    second.resolve([skillDirectoryRow('beta')]);
+    await waitFor(() => {
+      expect(result.current.some((skill) => skill.name === 'beta')).toBe(true);
+    });
+    await act(async () => {
+      first.resolve([skillDirectoryRow('alpha')]);
+      await first.promise;
+    });
+    expect(result.current.some((skill) => skill.name === 'beta')).toBe(true);
+    expect(result.current.some((skill) => skill.name === 'alpha')).toBe(false);
   });
 
   it('should surface a newly added skill after the tree changes', async () => {

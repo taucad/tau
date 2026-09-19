@@ -14,14 +14,17 @@ const mockUseThree = vi.fn<() => MockThreeState>();
 const mockCameraSend = vi.fn();
 let mockThreeState: MockThreeState;
 const mockGetThreeState = (): MockThreeState => mockThreeState;
-const mockCameraRig = {
+const createMockCameraRig = (
+  up: readonly [number, number, number] = [0, 0, 1],
+): { actorRef: { getSnapshot: () => unknown; send: typeof mockCameraSend } } => ({
   actorRef: {
     getSnapshot: () => ({
-      context: { view: { target: [4, 5, 6], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 20 } },
+      context: { view: { target: [4, 5, 6], direction: [1, 0, 0], up, verticalSpan: 20 } },
     }),
     send: mockCameraSend,
   },
-};
+});
+let mockCameraRig = createMockCameraRig();
 
 vi.mock('@react-three/fiber', () => ({
   useThree: (selector?: (state: MockThreeState & { get: () => MockThreeState }) => unknown): unknown => {
@@ -39,6 +42,7 @@ describe('UpDirectionHandler', () => {
   beforeEach(() => {
     mockUseThree.mockReset();
     mockCameraSend.mockReset();
+    mockCameraRig = createMockCameraRig();
   });
 
   it('should preserve the actor camera up during initial scene setup', () => {
@@ -110,5 +114,38 @@ describe('UpDirectionHandler', () => {
 
     expect(traverse).toHaveBeenCalledOnce();
     expect(mockCameraSend).not.toHaveBeenCalled();
+  });
+
+  it('should apply each pane up direction locally without writing the process-global default', () => {
+    const globalUp = THREE.Object3D.DEFAULT_UP.clone();
+    const renderPane = (
+      upDirection: 'x' | 'y' | 'z',
+      viewUp: readonly [number, number, number],
+    ): { camera: THREE.Camera; child: THREE.Object3D } => {
+      const camera = new THREE.PerspectiveCamera();
+      const scene = new THREE.Scene();
+      const child = new THREE.Object3D();
+      scene.add(child);
+      mockCameraRig = createMockCameraRig(viewUp);
+      mockUseThree.mockReturnValue({
+        camera,
+        scene,
+        controls: { updateCameraUp: vi.fn() },
+        invalidate: vi.fn(),
+      });
+      render(<UpDirectionHandler upDirection={upDirection} />);
+      return { camera, child };
+    };
+
+    const paneX = renderPane('x', [0, 0, 1]);
+    expect(THREE.Object3D.DEFAULT_UP).toEqual(globalUp);
+
+    const paneZ = renderPane('z', [0, 1, 0]);
+    expect(THREE.Object3D.DEFAULT_UP).toEqual(globalUp);
+
+    expect(paneX.child.up).toEqual(new THREE.Vector3(1, 0, 0));
+    expect(paneZ.child.up).toEqual(new THREE.Vector3(0, 0, 1));
+    expect(paneX.camera.up).toEqual(new THREE.Vector3(0, 0, 1));
+    expect(paneZ.camera.up).toEqual(new THREE.Vector3(0, 1, 0));
   });
 });

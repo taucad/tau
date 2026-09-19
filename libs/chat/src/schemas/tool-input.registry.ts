@@ -16,6 +16,13 @@ import {
 import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
+import {
+  applyParameterOperationInputSchema,
+  applyParameterOperationOutputSchema,
+  getParametersInputSchema,
+  getParametersOutputSchema,
+} from '#schemas/tools/parameter.tool.schema.js';
 import { toolName } from '#constants/tool.constants.js';
 import type { ToolName } from '#types/tool.types.js';
 
@@ -41,20 +48,74 @@ export type ToolPartType = `tool-${ToolName}`;
  * @public
  */
 export const uiMessageTools = {
-  [toolName.webSearch]: { inputSchema: webSearchInputSchema, outputSchema: webSearchOutputSchema },
-  [toolName.webBrowser]: { inputSchema: webBrowserInputSchema, outputSchema: webBrowserOutputSchema },
-  [toolName.testModel]: { inputSchema: testModelInputSchema, outputSchema: testModelOutputSchema },
-  [toolName.useSkill]: { inputSchema: useSkillInputSchema, outputSchema: useSkillOutputSchema },
-  [toolName.readFile]: { inputSchema: readFileInputSchema, outputSchema: readFileOutputSchema },
-  [toolName.listDirectory]: { inputSchema: listDirectoryInputSchema, outputSchema: listDirectoryOutputSchema },
-  [toolName.createFile]: { inputSchema: createFileInputSchema, outputSchema: createFileOutputSchema },
-  [toolName.editFile]: { inputSchema: editFileInputSchema, outputSchema: editFileOutputSchema },
-  [toolName.deleteFile]: { inputSchema: deleteFileInputSchema, outputSchema: deleteFileOutputSchema },
-  [toolName.grep]: { inputSchema: grepInputSchema, outputSchema: grepOutputSchema },
-  [toolName.globSearch]: { inputSchema: globSearchInputSchema, outputSchema: globSearchOutputSchema },
-  [toolName.getKernelResult]: { inputSchema: getKernelResultInputSchema, outputSchema: getKernelResultOutputSchema },
-  [toolName.exportGeometry]: { inputSchema: exportGeometryInputSchema, outputSchema: exportGeometryOutputSchema },
-  [toolName.screenshot]: { inputSchema: screenshotInputSchema, outputSchema: screenshotOutputSchema },
+  [toolName.webSearch]: {
+    inputSchema: webSearchInputSchema,
+    outputSchema: webSearchOutputSchema,
+  },
+  [toolName.webBrowser]: {
+    inputSchema: webBrowserInputSchema,
+    outputSchema: webBrowserOutputSchema,
+  },
+  [toolName.testModel]: {
+    inputSchema: testModelInputSchema,
+    outputSchema: testModelOutputSchema,
+  },
+  [toolName.useSkill]: {
+    inputSchema: useSkillInputSchema,
+    outputSchema: useSkillOutputSchema,
+  },
+  [toolName.readFile]: {
+    inputSchema: readFileInputSchema,
+    outputSchema: readFileOutputSchema,
+  },
+  [toolName.listDirectory]: {
+    inputSchema: listDirectoryInputSchema,
+    outputSchema: listDirectoryOutputSchema,
+  },
+  [toolName.createFile]: {
+    inputSchema: createFileInputSchema,
+    outputSchema: createFileOutputSchema,
+  },
+  [toolName.editFile]: {
+    inputSchema: editFileInputSchema,
+    outputSchema: editFileOutputSchema,
+  },
+  [toolName.deleteFile]: {
+    inputSchema: deleteFileInputSchema,
+    outputSchema: deleteFileOutputSchema,
+  },
+  [toolName.grep]: {
+    inputSchema: grepInputSchema,
+    outputSchema: grepOutputSchema,
+  },
+  [toolName.globSearch]: {
+    inputSchema: globSearchInputSchema,
+    outputSchema: globSearchOutputSchema,
+  },
+  [toolName.getKernelResult]: {
+    inputSchema: getKernelResultInputSchema,
+    outputSchema: getKernelResultOutputSchema,
+  },
+  [toolName.exportGeometry]: {
+    inputSchema: exportGeometryInputSchema,
+    outputSchema: exportGeometryOutputSchema,
+  },
+  [toolName.getParameters]: {
+    inputSchema: getParametersInputSchema,
+    outputSchema: getParametersOutputSchema,
+  },
+  [toolName.applyParameterOperation]: {
+    inputSchema: applyParameterOperationInputSchema,
+    outputSchema: applyParameterOperationOutputSchema,
+  },
+  [toolName.screenshot]: {
+    inputSchema: screenshotInputSchema,
+    outputSchema: screenshotOutputSchema,
+  },
+  [toolName.revisions]: {
+    inputSchema: revisionsInputSchema,
+    outputSchema: revisionsOutputSchema,
+  },
 } as const;
 
 /** Static tool-part input schemas used by lifecycle normalization. @public */

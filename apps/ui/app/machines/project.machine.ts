@@ -1,12 +1,12 @@
 import { assign, assertEvent, setup, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom, AnyStateMachine } from 'xstate';
 import { produce } from 'immer';
-import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
+import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { PersistedRevisionState } from '#types/project.types.js';
-import type { GraphicsViewSettings } from '#constants/editor.constants.js';
+import type { GraphicsOwnedSettings, GraphicsViewSettings } from '#constants/editor.constants.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine } from '#machines/cad.machine.js';
@@ -14,14 +14,6 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
-import {
-  updateGroupValues,
-  createGroup,
-  createDefaultEntry,
-  deleteGroup,
-  renameGroup,
-  switchActiveGroup,
-} from '#utils/parameter-config.utils.js';
 
 /**
  * Project Machine Context
@@ -29,7 +21,6 @@ import {
 export type ProjectContext = {
   projectId: string;
   project: ProjectManifest | undefined;
-  revisionState: PersistedRevisionState | undefined;
   error: Error | undefined;
   isLoading: boolean;
   shouldLoadModelOnStart: boolean;
@@ -47,10 +38,6 @@ export type ProjectContext = {
   /** The main entry path from project.assets.main.entryPath. Set after project loads. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
-  /** Per-geometry unit parameter entries, keyed by entry path. */
-  parameterEntries: Map<string, FileParameterEntry>;
-  /** Geometry unit file paths whose parameter entries need writing to disk. */
-  dirtyParameterPaths: Set<string>;
 };
 
 /**
@@ -69,8 +56,6 @@ export type ProjectLoadInput = { readonly projectId: string };
 export type ProjectRetrievedEvent = {
   readonly type: 'projectRetrieved';
   readonly project: ProjectManifest;
-  readonly revisionState: PersistedRevisionState | undefined;
-  readonly parameterEntries: Map<string, FileParameterEntry>;
 };
 
 // Define the actors that the machine can invoke
@@ -86,18 +71,9 @@ const writeProjectActor = fromSafeAsync<void, { project: ProjectManifest }>(asyn
   );
 });
 
-const writeParameterFileActor = fromSafeAsync<void, { projectId: string; filePath: string; entry: FileParameterEntry }>(
-  async () => {
-    throw new Error(
-      'Not implemented. Please supply the `provide.actors.writeParameterFileActor` option to the project machine.',
-    );
-  },
-);
-
 const projectActors = {
   loadProjectActor,
   writeProjectActor,
-  writeParameterFileActor,
   graphics: graphicsMachine,
   modelInteraction: modelInteractionMachine,
   // Having the cadMachine typed results in:
@@ -121,24 +97,24 @@ export type ProjectFileActivityOperation =
   | 'deleted'
   | 'directoryDeleted';
 
+/**
+ * Whether a filesystem event is activity on the project's own content.
+ *
+ * The path registry answers it: authored bytes are content, records, caches
+ * and the control plane are not. `tau.json` is the one exception — it is
+ * authored, but it is the project's metadata, and a rename or a description
+ * edit is not work on the design.
+ *
+ * @param projectRelativePath - Path relative to the project root.
+ * @returns `true` when the path is authored project content.
+ */
 export function isProjectContentActivityPath(projectRelativePath: string): boolean {
   const normalized = normalizePath(projectRelativePath).replace(/^\/+/, '');
-  if (normalized === '' || normalized === '.') {
+  if (normalized === '' || normalized === '.' || normalized === 'tau.json') {
     return false;
   }
 
-  const firstSegment = normalized.split('/').find((segment) => segment.length > 0);
-  if (firstSegment === undefined) {
-    return false;
-  }
-
-  return (
-    normalized !== 'tau.json' &&
-    normalized !== 'thumbnail.webp' &&
-    firstSegment !== '.tau' &&
-    firstSegment !== '.cache' &&
-    firstSegment !== 'node_modules'
-  );
+  return classify(normalized).class === 'authored';
 }
 
 /**
@@ -149,23 +125,14 @@ type ProjectEventInternal =
   | { type: 'updateName'; name: string }
   | { type: 'updateDescription'; description: string }
   | { type: 'updateTags'; tags: string[] }
-  | { type: 'updateRevisionState'; revisionState: PersistedRevisionState }
-  | {
-      type: 'updateCodeParameters';
-      files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
-      parameters: Record<string, unknown>;
-    }
-  | { type: 'setParameters'; parameters: Record<string, unknown> }
-  | { type: 'setGeometryUnitParameters'; filePath: string; parameters: Record<string, unknown> }
-  | { type: 'parameterFileChanged'; filePath: string; entry: FileParameterEntry }
-  | { type: 'switchParameterGroup'; filePath: string; groupName: string }
-  | { type: 'createParameterGroup'; filePath: string; groupName: string; values?: Record<string, unknown> }
-  | { type: 'deleteParameterGroup'; filePath: string; groupName: string }
-  | { type: 'renameParameterGroup'; filePath: string; oldName: string; newName: string }
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
-  | { type: 'createGeometryUnit'; entryPath: string }
-  | { type: 'geometryUnit.exportAvailabilityChanged'; actorId: string; available: boolean }
+  | { type: 'createGeometryUnit'; entryPath: string; renderTimeout?: number }
+  | {
+      type: 'geometryUnit.exportAvailabilityChanged';
+      actorId: string;
+      available: boolean;
+    }
   | { type: 'openInViewer'; entryPath: string }
   | { type: 'destroyGeometryUnit'; entryPath: string }
   | {
@@ -181,7 +148,11 @@ type ProjectEventInternal =
   | { type: 'fileMoved'; oldPath: string; newPath: string }
   | { type: 'fileDeleted'; path: string }
   | { type: 'directoryDeleted'; path: string }
-  | { type: 'projectFileActivity'; operation: ProjectFileActivityOperation; paths: readonly string[] }
+  | {
+      type: 'projectFileActivity';
+      operation: ProjectFileActivityOperation;
+      paths: readonly string[];
+    }
   | { type: 'flushNow' };
 
 type ProjectEvent = ProjectEventInternal | ProjectRetrievedEvent;
@@ -193,7 +164,6 @@ type ProjectEmitted =
   | { type: 'error'; error: Error }
   | { type: 'projectUpdated'; project: ProjectManifest }
   | { type: 'projectActivity' }
-  | { type: 'revisionStateUpdated'; revisionState: PersistedRevisionState }
   | { type: 'viewerFileRequested'; entryPath: string };
 
 /**
@@ -247,14 +217,6 @@ export const projectMachine = setup({
         assertEvent(event, 'projectRetrieved');
         return event.project;
       },
-      parameterEntries({ event }) {
-        assertEvent(event, 'projectRetrieved');
-        return event.parameterEntries;
-      },
-      revisionState({ event }) {
-        assertEvent(event, 'projectRetrieved');
-        return event.revisionState;
-      },
       isLoading: false,
     }),
     clearProject: assign({
@@ -293,78 +255,6 @@ export const projectMachine = setup({
         draft.project!.tags = uniqueTags;
         // Don't update updatedAt for tags - they're metadata
       });
-    }),
-    updateRevisionState: assign(({ event }) => {
-      assertEvent(event, 'updateRevisionState');
-      return { revisionState: event.revisionState };
-    }),
-    updateCodeParametersInContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'updateCodeParameters');
-
-      if (!context.project) {
-        return;
-      }
-      enqueue.assign(({ context }) => {
-        const filePath = context.mainEntryPath;
-        const entry = context.parameterEntries.get(filePath) ?? createDefaultEntry();
-        const updated = updateGroupValues(entry, { groupName: entry.activeGroup, values: event.parameters });
-        const parameterEntries = new Map(context.parameterEntries);
-        parameterEntries.set(filePath, updated);
-        return { parameterEntries };
-      });
-    }),
-    setParametersInContext: assign(({ context, event }) => {
-      assertEvent(event, 'setParameters');
-      const filePath = context.mainEntryPath;
-      const entry = context.parameterEntries.get(filePath) ?? createDefaultEntry();
-      const { activeGroup } = entry;
-      const updated = updateGroupValues(entry, { groupName: activeGroup, values: event.parameters });
-      const newEntries = new Map(context.parameterEntries);
-      newEntries.set(filePath, updated);
-      return { parameterEntries: newEntries };
-    }),
-    setGeometryUnitParametersInContext: assign(({ context, event }) => {
-      assertEvent(event, 'setGeometryUnitParameters');
-      const entry = context.parameterEntries.get(event.filePath) ?? createDefaultEntry();
-      const { activeGroup } = entry;
-      const updated = updateGroupValues(entry, { groupName: activeGroup, values: event.parameters });
-      const newEntries = new Map(context.parameterEntries);
-      newEntries.set(event.filePath, updated);
-      return { parameterEntries: newEntries };
-    }),
-    handleParameterFileChanged: assign(({ context, event }) => {
-      assertEvent(event, 'parameterFileChanged');
-      const newEntries = new Map(context.parameterEntries);
-      newEntries.set(event.filePath, event.entry);
-      return { parameterEntries: newEntries };
-    }),
-    handleSwitchParameterGroup: assign(({ context, event }) => {
-      assertEvent(event, 'switchParameterGroup');
-      const entry = context.parameterEntries.get(event.filePath) ?? createDefaultEntry();
-      const newEntries = new Map(context.parameterEntries);
-      newEntries.set(event.filePath, switchActiveGroup(entry, event.groupName));
-      return { parameterEntries: newEntries };
-    }),
-    handleCreateParameterGroup: assign(({ context, event }) => {
-      assertEvent(event, 'createParameterGroup');
-      const entry = context.parameterEntries.get(event.filePath) ?? createDefaultEntry();
-      const newEntries = new Map(context.parameterEntries);
-      newEntries.set(event.filePath, createGroup(entry, { groupName: event.groupName, values: event.values ?? {} }));
-      return { parameterEntries: newEntries };
-    }),
-    handleDeleteParameterGroup: assign(({ context, event }) => {
-      assertEvent(event, 'deleteParameterGroup');
-      const entry = context.parameterEntries.get(event.filePath) ?? createDefaultEntry();
-      const newEntries = new Map(context.parameterEntries);
-      newEntries.set(event.filePath, deleteGroup(entry, event.groupName));
-      return { parameterEntries: newEntries };
-    }),
-    handleRenameParameterGroup: assign(({ context, event }) => {
-      assertEvent(event, 'renameParameterGroup');
-      const entry = context.parameterEntries.get(event.filePath) ?? createDefaultEntry();
-      const newEntries = new Map(context.parameterEntries);
-      newEntries.set(event.filePath, renameGroup(entry, { oldName: event.oldName, newName: event.newName }));
-      return { parameterEntries: newEntries };
     }),
     setMainFileInContext: assign(({ context, event }) => {
       assertEvent(event, 'setMainFile');
@@ -524,6 +414,7 @@ export const projectMachine = setup({
             fileManagerRef: context.fileManagerRef,
             kernelOptionsFactory: context.kernelOptionsFactory,
             fileSystemRoot: context.fileSystemRoot,
+            renderTimeout: event.renderTimeout,
           },
         });
 
@@ -576,7 +467,7 @@ export const projectMachine = setup({
     // These actions are invoked by `file-operation-participants.ts`
     // in response to {@link ContentChangeEvent}s, NOT by UI
     // components. They re-key every path-indexed map in the project
-    // context so the open viewers + CAD actors + parameter entries +
+    // context so the open viewers + CAD actors +
     // main entry pointer all survive a rename / delete.
     // ─────────────────────────────────────────────────────────────
     applyFileMoved: enqueueActions(({ enqueue, context, event }) => {
@@ -592,18 +483,14 @@ export const projectMachine = setup({
         newPath,
       });
 
-      enqueue.assign(({ context }) => {
-        // ParameterEntries: Map<filePath, entry>
-        const newEntries = new Map(context.parameterEntries);
-        let mutatedEntries = false;
-        for (const [key, value] of context.parameterEntries) {
-          if (matches(key)) {
-            newEntries.delete(key);
-            newEntries.set(rewrite(key), value);
-            mutatedEntries = true;
-          }
+      // A moved unit renders its new path, so its geometry and parameter manifest follow the file.
+      for (const [key, unit] of context.geometryUnits) {
+        if (matches(key)) {
+          enqueue.sendTo(unit, { type: 'setEntryPath', entryPath: rewrite(key) });
         }
+      }
 
+      enqueue.assign(({ context }) => {
         // GeometryUnits: Map<entryPath, ActorRef>
         const newUnits = new Map(context.geometryUnits);
         let mutatedUnits = false;
@@ -627,9 +514,6 @@ export const projectMachine = setup({
         }
 
         const next: Partial<ProjectContext> = {};
-        if (mutatedEntries) {
-          next.parameterEntries = newEntries;
-        }
         if (mutatedUnits) {
           next.geometryUnits = newUnits;
         }
@@ -665,7 +549,10 @@ export const projectMachine = setup({
     applyFileDeleted: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'fileDeleted');
       const { path } = event;
-      enqueue.sendTo(context.modelInteractionRef, { type: 'pruneSourceUnits', path });
+      enqueue.sendTo(context.modelInteractionRef, {
+        type: 'pruneSourceUnits',
+        path,
+      });
       const unit = context.geometryUnits.get(path);
       if (unit) {
         enqueue.stopChild(unit);
@@ -675,12 +562,9 @@ export const projectMachine = setup({
         newUnits.delete(path);
         const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
         exportableGeometryUnitPaths.delete(path);
-        const newEntries = new Map(context.parameterEntries);
-        newEntries.delete(path);
         return {
           geometryUnits: newUnits,
           exportableGeometryUnitPaths,
-          parameterEntries: newEntries,
           ...(context.mainEntryPath === path ? { mainEntryPath: '' } : {}),
         };
       });
@@ -688,7 +572,10 @@ export const projectMachine = setup({
     applyDirectoryDeleted: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'directoryDeleted');
       const { path } = event;
-      enqueue.sendTo(context.modelInteractionRef, { type: 'pruneSourceUnits', path });
+      enqueue.sendTo(context.modelInteractionRef, {
+        type: 'pruneSourceUnits',
+        path,
+      });
       const prefix = `${path}/`;
       const matches = (filePath: string): boolean => filePath === path || filePath.startsWith(prefix);
 
@@ -699,7 +586,6 @@ export const projectMachine = setup({
       }
       enqueue.assign(({ context }) => {
         const newUnits = new Map(context.geometryUnits);
-        const newEntries = new Map(context.parameterEntries);
         for (const key of context.geometryUnits.keys()) {
           if (matches(key)) {
             newUnits.delete(key);
@@ -711,15 +597,9 @@ export const projectMachine = setup({
             newExportablePaths.delete(key);
           }
         }
-        for (const key of context.parameterEntries.keys()) {
-          if (matches(key)) {
-            newEntries.delete(key);
-          }
-        }
         return {
           geometryUnits: newUnits,
           exportableGeometryUnitPaths: newExportablePaths,
-          parameterEntries: newEntries,
           ...(matches(context.mainEntryPath) ? { mainEntryPath: '' } : {}),
         };
       });
@@ -734,23 +614,29 @@ export const projectMachine = setup({
 
       const settings = event.settings ?? defaultGraphicsSettings;
 
+      /* Every graphics-owned key, spelled out: a key added to the partition fails to compile here
+       * until the spawn seeds it, which is what makes Law 1's declaration reach the actor. */
+      const graphicsSeed: { [K in keyof Required<GraphicsOwnedSettings>]: GraphicsOwnedSettings[K] } = {
+        enableSurfaces: settings.enableSurfaces,
+        enableLines: settings.enableLines,
+        enableGizmo: settings.enableGizmo,
+        enableGrid: settings.enableGrid,
+        enableAxes: settings.enableAxes,
+        enableMatcap: settings.enableMatcap,
+        enablePostProcessing: settings.enablePostProcessing,
+        upDirection: settings.upDirection,
+        pinnedMeasurements: settings.pinnedMeasurements,
+        sectionView: settings.sectionView,
+        sectionDisplay: settings.sectionDisplay,
+        graphicsBackend: settings.graphicsBackend ?? 'webgl',
+      };
+
       enqueue.assign(({ spawn, context }) => {
         const gfx = spawn('graphics', {
           id: `graphics-view-${context.projectId}-${event.viewId}`,
           input: {
-            defaultCameraFovAngle: settings.cameraFovAngle,
+            ...graphicsSeed,
             measureSnapDistance: 40,
-            enableSurfaces: settings.enableSurfaces,
-            enableLines: settings.enableLines,
-            enableGizmo: settings.enableGizmo,
-            enableGrid: settings.enableGrid,
-            enableAxes: settings.enableAxes,
-            enableMatcap: settings.enableMatcap,
-            enablePostProcessing: settings.enablePostProcessing,
-            upDirection: settings.upDirection,
-            environmentPreset: settings.environmentPreset,
-            pinnedMeasurements: settings.pinnedMeasurements,
-            graphicsBackendPreference: settings.graphicsBackend ?? 'webgl',
             modelInteractionRef: context.modelInteractionRef,
           },
         });
@@ -775,30 +661,15 @@ export const projectMachine = setup({
         return { viewGraphics: newMap };
       });
     }),
-    addDirtyParameterPath: assign(({ context, event }) => {
-      const filePath = 'filePath' in event ? (event as { filePath: string }).filePath : context.mainEntryPath;
-      const next = new Set(context.dirtyParameterPaths);
-      next.add(filePath);
-      return { dirtyParameterPaths: next };
-    }),
-    removeWrittenParameterPath: assign(({ context }) => {
-      const next = new Set(context.dirtyParameterPaths);
-      const [first] = next;
-      if (first !== undefined) {
-        next.delete(first);
-      }
-      return { dirtyParameterPaths: next };
-    }),
     emitProjectUpdated: emit(({ context }) => ({
       type: 'projectUpdated',
       project: context.project!,
     })),
-    emitRevisionStateUpdated: emit(({ event }) => {
-      assertEvent(event, 'updateRevisionState');
-      return { type: 'revisionStateUpdated', revisionState: event.revisionState };
-    }),
   },
   guards: {
+    hasPersistenceError({ context }) {
+      return context.error !== undefined;
+    },
     isNotBrowser() {
       return !isBrowser;
     },
@@ -812,12 +683,6 @@ export const projectMachine = setup({
     hasVisibleProjectFileActivity({ context, event }) {
       assertEvent(event, 'projectFileActivity');
       return Boolean(context.project && event.paths.some(isProjectContentActivityPath));
-    },
-    hasParameterEntries({ context }) {
-      return context.parameterEntries.size > 0;
-    },
-    hasRemainingDirtyPaths({ context }) {
-      return context.dirtyParameterPaths.size > 1;
     },
   },
   delays: {
@@ -848,7 +713,6 @@ export const projectMachine = setup({
     return {
       projectId,
       project: undefined,
-      revisionState: undefined,
       error: undefined,
       isLoading: true,
       shouldLoadModelOnStart,
@@ -861,8 +725,6 @@ export const projectMachine = setup({
       exportableGeometryUnitPaths,
       mainEntryPath: '',
       logRef,
-      parameterEntries: new Map(),
-      dirtyParameterPaths: new Set(),
     };
   },
   on: {
@@ -961,33 +823,6 @@ export const projectMachine = setup({
             updateTags: {
               actions: ['updateTags'],
             },
-            updateRevisionState: {
-              actions: ['updateRevisionState', 'emitRevisionStateUpdated'],
-            },
-            updateCodeParameters: {
-              actions: ['updateCodeParametersInContext'],
-            },
-            setParameters: {
-              actions: ['setParametersInContext'],
-            },
-            setGeometryUnitParameters: {
-              actions: ['setGeometryUnitParametersInContext'],
-            },
-            parameterFileChanged: {
-              actions: ['handleParameterFileChanged'],
-            },
-            switchParameterGroup: {
-              actions: ['handleSwitchParameterGroup'],
-            },
-            createParameterGroup: {
-              actions: ['handleCreateParameterGroup'],
-            },
-            deleteParameterGroup: {
-              actions: ['handleDeleteParameterGroup'],
-            },
-            renameParameterGroup: {
-              actions: ['handleRenameParameterGroup'],
-            },
             loadModel: {
               actions: 'loadModel',
             },
@@ -1029,6 +864,7 @@ export const projectMachine = setup({
           states: {
             idle: {
               on: {
+                flushNow: { guard: 'hasPersistenceError', target: 'writing' },
                 updateName: {
                   guard: 'shouldUpdateProjectName',
                   target: 'writing',
@@ -1077,7 +913,7 @@ export const projectMachine = setup({
                 },
                 onDone: {
                   target: 'idle',
-                  actions: ['emitProjectUpdated'],
+                  actions: ['clearError', 'emitProjectUpdated'],
                 },
                 onError: {
                   target: 'idle',
@@ -1097,141 +933,6 @@ export const projectMachine = setup({
                 },
                 setMainFile: {
                   target: 'pending',
-                },
-              },
-            },
-          },
-        },
-        parameterStoring: {
-          initial: 'idle',
-          states: {
-            idle: {
-              on: {
-                setParameters: { guard: 'hasParameterEntries', target: 'writing', actions: ['addDirtyParameterPath'] },
-                setGeometryUnitParameters: {
-                  guard: 'hasParameterEntries',
-                  target: 'writing',
-                  actions: ['addDirtyParameterPath'],
-                },
-                switchParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'writing',
-                  actions: ['addDirtyParameterPath'],
-                },
-                createParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'writing',
-                  actions: ['addDirtyParameterPath'],
-                },
-                deleteParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'writing',
-                  actions: ['addDirtyParameterPath'],
-                },
-                renameParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'writing',
-                  actions: ['addDirtyParameterPath'],
-                },
-              },
-            },
-            pending: {
-              after: {
-                pendingToWriting: 'writing',
-              },
-              on: {
-                setParameters: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  reenter: true,
-                  actions: ['addDirtyParameterPath'],
-                },
-                setGeometryUnitParameters: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  reenter: true,
-                  actions: ['addDirtyParameterPath'],
-                },
-                switchParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  reenter: true,
-                  actions: ['addDirtyParameterPath'],
-                },
-                createParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  reenter: true,
-                  actions: ['addDirtyParameterPath'],
-                },
-                deleteParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  reenter: true,
-                  actions: ['addDirtyParameterPath'],
-                },
-                renameParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  reenter: true,
-                  actions: ['addDirtyParameterPath'],
-                },
-              },
-            },
-            writing: {
-              invoke: {
-                src: 'writeParameterFileActor',
-                input({ context }) {
-                  const [filePath] = context.dirtyParameterPaths;
-                  return {
-                    projectId: context.projectId,
-                    filePath: filePath!,
-                    entry: context.parameterEntries.get(filePath!)!,
-                  };
-                },
-                onDone: [
-                  {
-                    guard: 'hasRemainingDirtyPaths',
-                    target: 'writing',
-                    reenter: true,
-                    actions: ['removeWrittenParameterPath'],
-                  },
-                  {
-                    target: 'idle',
-                    actions: ['removeWrittenParameterPath'],
-                  },
-                ],
-                onError: {
-                  target: 'idle',
-                  actions: ['removeWrittenParameterPath', 'setError'],
-                },
-              },
-              on: {
-                setParameters: { guard: 'hasParameterEntries', target: 'pending', actions: ['addDirtyParameterPath'] },
-                setGeometryUnitParameters: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  actions: ['addDirtyParameterPath'],
-                },
-                switchParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  actions: ['addDirtyParameterPath'],
-                },
-                createParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  actions: ['addDirtyParameterPath'],
-                },
-                deleteParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  actions: ['addDirtyParameterPath'],
-                },
-                renameParameterGroup: {
-                  guard: 'hasParameterEntries',
-                  target: 'pending',
-                  actions: ['addDirtyParameterPath'],
                 },
               },
             },

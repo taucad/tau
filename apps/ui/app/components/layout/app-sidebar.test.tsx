@@ -33,6 +33,10 @@ vi.mock('#components/layout/command-palette.js', () => ({
   Commands: () => <button type='button'>Search projects and chats</button>,
 }));
 
+vi.mock('#components/nav/project-navigation-command-items.js', () => ({
+  ProjectNavigationCommandItems: () => undefined,
+}));
+
 vi.mock('#components/nav/nav-chat.js', () => ({
   NavChat: () => null,
 }));
@@ -98,7 +102,7 @@ describe('AppSidebar', () => {
 
     expect(sidebar).toHaveAttribute('id', 'app-sidebar');
     expect(sidebar).toHaveClass('w-full', 'border-r');
-    expect(projectsButton).toHaveClass('data-[active=true]:text-sidebar-accent-foreground');
+    expect(projectsButton).toHaveClass('data-[active=true]:text-foreground');
     expect(projectsButton).not.toHaveClass('data-[active=true]:text-primary');
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
     expect(container.querySelector('[data-slot=sidebar-header]')).toHaveClass('h-9');

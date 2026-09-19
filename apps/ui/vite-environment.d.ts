@@ -2,6 +2,7 @@
 // oxlint-disable max-params -- Monaco's factory export uses a PascalCase property name
 declare const tauBuildFrontendUrl: string;
 declare const tauBuildId: number;
+declare const tauCloudBuildEnabled: boolean;
 
 interface ImportMetaEnv {
   /**

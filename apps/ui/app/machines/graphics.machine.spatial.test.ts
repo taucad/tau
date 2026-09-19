@@ -4,7 +4,7 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const createGraphicsActor = () =>
   createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-    input: { defaultCameraFovAngle: 60, graphicsBackendPreference: 'webgl' },
+    input: { graphicsBackend: 'webgl' },
   });
 
 describe('graphics machine physical scene metadata', () => {

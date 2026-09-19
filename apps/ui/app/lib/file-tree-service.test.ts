@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
-import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { parametersDirectory } from '@taucad/types';
 import type { ChangeEvent, FileEntry, FileStat, FileStatEntry } from '@taucad/types';
 import type { FileTreeNode } from '@taucad/filesystem';
@@ -18,11 +17,11 @@ function createTreeHarness(
     paths?: WorkspacePathResolver;
     visibility?: VisibilityProvider;
   },
-): { service: FileTreeService; proxy: FileSystemClient; emitWorker: (event: ChangeEvent) => void } {
+): { service: FileTreeService; proxy: ComposedViewClient; emitWorker: (event: ChangeEvent) => void } {
   const listen = vi.fn().mockReturnValue(vi.fn());
   const workspaceRoot = init?.workspaceRoot ?? '/project';
   const paths = init?.paths ?? new WorkspacePathResolver(workspaceRoot);
-  const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+  const channel = new WorkerChangeChannel({ transport: { listen } });
   const visibility = init?.visibility ?? headlessVisibilityProvider;
   const {
     workspaceRoot: _workspaceRoot,
@@ -45,10 +44,10 @@ function createTreeHarness(
   return { service, proxy: proxyInstance, emitWorker };
 }
 
-function createContentServiceForTree(proxyInstance: FileSystemClient): FileContentService {
+function createContentServiceForTree(proxyInstance: ComposedViewClient): FileContentService {
   const listen = vi.fn().mockReturnValue(vi.fn());
   const paths = new WorkspacePathResolver('/project');
-  const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+  const channel = new WorkerChangeChannel({ transport: { listen } });
   const refreshGuard = new RefreshGenerationGuard();
   return new FileContentService({
     proxy: proxyInstance,
@@ -58,14 +57,13 @@ function createContentServiceForTree(proxyInstance: FileSystemClient): FileConte
   });
 }
 
-function createMockProxy(overrides?: Partial<FileManagerProxy>): FileManagerProxy {
+function createMockProxy(overrides?: Partial<ComposedViewClient>): ComposedViewClient {
   return {
     readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFiles: vi.fn().mockResolvedValue(undefined),
     move: vi.fn().mockResolvedValue(textFileStat(0, 0)),
     unlink: vi.fn().mockResolvedValue(undefined),
-    copyDirectory: vi.fn().mockResolvedValue(undefined),
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob()),
     duplicateFile: vi.fn().mockResolvedValue(undefined),
     getDirectoryStat: vi.fn().mockResolvedValue([]),
@@ -76,7 +74,7 @@ function createMockProxy(overrides?: Partial<FileManagerProxy>): FileManagerProx
     readShallowDirectory: vi.fn().mockResolvedValue([]),
     dispose: vi.fn(),
     ...overrides,
-  } as unknown as FileManagerProxy;
+  } as unknown as ComposedViewClient;
 }
 
 function createEntry(path: string, type: 'file' | 'dir' = 'file', size = 100): FileEntry {
@@ -122,7 +120,7 @@ function textFileStatEntry(
 }
 
 describe('FileTreeService', () => {
-  let proxy: FileSystemClient;
+  let proxy: ComposedViewClient;
   let service: FileTreeService;
   let emitWorker: (event: ChangeEvent) => void;
 
@@ -706,7 +704,7 @@ describe('FileTreeService', () => {
     it('should delegate to proxy.searchFiles with the captured root', async () => {
       const mockResults: FileStatEntry[] = [textFileStatEntry('src/main.ts', 100, 1000)];
       const searchProxy = createMockProxy({
-        searchFiles: vi.fn().mockReturnValue(mockResults) as unknown as FileSystemClient['searchFiles'],
+        searchFiles: vi.fn().mockReturnValue(mockResults) as unknown as ComposedViewClient['searchFiles'],
       });
       const searchService = createTreeHarness({ proxy: searchProxy }).service;
 
@@ -719,7 +717,7 @@ describe('FileTreeService', () => {
 
     it('should forward query and options', async () => {
       const searchProxy = createMockProxy({
-        searchFiles: vi.fn().mockReturnValue([]) as unknown as FileSystemClient['searchFiles'],
+        searchFiles: vi.fn().mockReturnValue([]) as unknown as ComposedViewClient['searchFiles'],
       });
       const searchService = createTreeHarness({ proxy: searchProxy }).service;
 
@@ -735,7 +733,7 @@ describe('FileTreeService', () => {
     it('should return FileStatEntry[] from proxy', async () => {
       const expected: FileStatEntry[] = [textFileStatEntry('a.ts', 10, 100), textFileStatEntry('b.ts', 20, 200)];
       const searchProxy = createMockProxy({
-        searchFiles: vi.fn().mockReturnValue(expected) as unknown as FileSystemClient['searchFiles'],
+        searchFiles: vi.fn().mockReturnValue(expected) as unknown as ComposedViewClient['searchFiles'],
       });
       const searchService = createTreeHarness({ proxy: searchProxy }).service;
 
@@ -749,7 +747,7 @@ describe('FileTreeService', () => {
     it('should use the current root after reset without a client-side warm RPC', async () => {
       const rootedProxy = createMockProxy({
         getDirectoryStat: vi.fn().mockResolvedValue([]),
-        searchFiles: vi.fn().mockReturnValue([]) as unknown as FileSystemClient['searchFiles'],
+        searchFiles: vi.fn().mockReturnValue([]) as unknown as ComposedViewClient['searchFiles'],
       });
       const rootedService = createTreeHarness({ proxy: rootedProxy }).service;
 
@@ -773,7 +771,7 @@ describe('FileTreeService', () => {
     it('should schedule refresh instead of creating a size-only file on fileWritten when parent is loaded', async () => {
       const event: ChangeEvent = {
         type: 'fileWritten',
-        path: '/project/newfile.ts',
+        path: 'newfile.ts',
         backend: 'indexeddb',
       };
 
@@ -795,7 +793,7 @@ describe('FileTreeService', () => {
 
       const event: ChangeEvent = {
         type: 'fileWritten',
-        path: '/project/.tau/cache/params.json',
+        path: '.tau/cache/params.json',
         backend: 'indexeddb',
       };
 
@@ -820,7 +818,7 @@ describe('FileTreeService', () => {
 
       const event: ChangeEvent = {
         type: 'fileWritten',
-        path: '/project/added.ts',
+        path: 'added.ts',
         backend: 'indexeddb',
       };
       emitWorker(event);
@@ -839,7 +837,7 @@ describe('FileTreeService', () => {
 
       const event: ChangeEvent = {
         type: 'fileDeleted',
-        path: '/project/main.ts',
+        path: 'main.ts',
         backend: 'indexeddb',
       };
 
@@ -852,7 +850,7 @@ describe('FileTreeService', () => {
     it('should not call readDirectory on fileDeleted for unknown path', async () => {
       const event: ChangeEvent = {
         type: 'fileDeleted',
-        path: '/project/nonexistent.ts',
+        path: 'nonexistent.ts',
         backend: 'indexeddb',
       };
 
@@ -869,8 +867,8 @@ describe('FileTreeService', () => {
 
       const event: ChangeEvent = {
         type: 'fileRenamed',
-        oldPath: '/project/main.ts',
-        newPath: '/project/app.ts',
+        oldPath: 'main.ts',
+        newPath: 'app.ts',
         backend: 'indexeddb',
       };
 
@@ -887,8 +885,8 @@ describe('FileTreeService', () => {
 
       const event: ChangeEvent = {
         type: 'fileRenamed',
-        oldPath: '/project/main.ts',
-        newPath: '/project/lib/main.ts',
+        oldPath: 'main.ts',
+        newPath: 'lib/main.ts',
         backend: 'indexeddb',
       };
 
@@ -904,7 +902,7 @@ describe('FileTreeService', () => {
     it('should refresh on directoryChanged when directory is loaded', async () => {
       const event: ChangeEvent = {
         type: 'directoryChanged',
-        path: '/project',
+        path: '',
         backend: 'indexeddb',
       };
 
@@ -922,7 +920,7 @@ describe('FileTreeService', () => {
 
       const event: ChangeEvent = {
         type: 'directoryChanged',
-        path: '/project/.tau',
+        path: '.tau',
         backend: 'indexeddb',
       };
 
@@ -946,22 +944,6 @@ describe('FileTreeService', () => {
       await vi.advanceTimersByTimeAsync(200);
 
       expect(proxy.readDirectory).toHaveBeenCalledWith('/project');
-    });
-
-    // ── Scope filtering (unchanged behavior) ──
-
-    it('should ignore events outside rootDirectory scope', async () => {
-      const event: ChangeEvent = {
-        type: 'fileWritten',
-        path: '/other-project/file.ts',
-        backend: 'indexeddb',
-      };
-
-      emitWorker(event);
-      await vi.advanceTimersByTimeAsync(200);
-
-      expect(proxy.readDirectory).not.toHaveBeenCalled();
-      expect(service.getTreeSnapshot().size).toBe(4);
     });
   });
 });

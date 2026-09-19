@@ -1,29 +1,148 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source(none);
 
 /* Fumadocs preset: base styles, animations, layout, typography, and Tailwind source directives */
 @import 'fumadocs-ui/css/preset.css';
 
 @import 'tw-animate-css';
 @import '@taucad/ui/styles/tokens.css';
+@import 'streamdown/styles.css';
 
 /*
- * Tailwind's automatic source detection is rooted at the Vite `root`, which the
- * desktop build moves to `apps/ui/desktop` — a directory holding only
- * `root.tsx`, `routes.ts` and `entry.client.tsx`. Without this the desktop
- * bundle ships roughly half the utilities the web bundle does (measured:
- * 180 kB vs 343 kB), and the missing ones include `h-dvh`, whose absence
- * collapses the whole workbench column to `height: 0` and pins every dockview
- * group at its 100x100 minimum. Naming the app directory outright keeps both
- * builds on the same candidate set.
+ * Keep source discovery explicit. The web and desktop Vite roots differ, and
+ * an automatic scan also walks generated build output and workspace package
+ * symlinks below those roots. Naming the source owners outright gives both
+ * builds the same bounded candidate set.
  */
 @source '..';
 @source '../components/auth';
 @source '../../../../node_modules/streamdown/dist';
+@source '../../../../node_modules/@streamdown/code/dist';
+@source '../../../../node_modules/@streamdown/math/dist';
+@source '../../../../node_modules/@streamdown/mermaid/dist';
 @source '../../../../packages/ui/src';
+
+/*
+ * Vendor cursor adapters. Dockview and lazy runtime styles are unlayered, so
+ * these declarations need `!important`. All action cursors still resolve
+ * through the one shared preference token.
+ */
+@layer base {
+  .dockview-theme-tau
+    :where(
+      .dv-default-tab-action,
+      .dv-tabs-overflow-dropdown-default,
+      .dv-tab,
+      .dv-pinned-tab,
+      .dv-tab-group-chip,
+      .dv-tabs-overflow-group-header,
+      .dv-edge-peek-pin,
+      .dv-edge-peek-close,
+      .dv-default-header,
+      .dv-pane-header.dv-pane-draggable,
+      .dv-context-menu-item:not(.dv-context-menu-item--disabled),
+      .dv-context-menu-color-swatch
+    ) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  .dockview-theme-tau :where(.dv-pinned-tab, .dv-default-header, .dv-pane-header.dv-pane-draggable):hover {
+    background-color: var(--dv-icon-hover-background-color);
+  }
+
+  .dockview-theme-tau .dv-tab-group-chip:hover {
+    filter: brightness(1.08);
+  }
+
+  :where(
+    .monaco-scrollable-element > .scrollbar > .scra,
+    .mtkoverflow,
+    .monaco-select-box,
+    .monaco-list.mouse-support .monaco-list-row,
+    .monaco-select-box-dropdown-container .monaco-list-row,
+    .monaco-action-bar .action-item,
+    .monaco-component.diff-review .revertButton,
+    .monaco-dropdown > .dropdown-label,
+    .monaco-editor .diff-hidden-lines .breadcrumb-item,
+    .monaco-editor .fold-unchanged,
+    .monaco-editor .arrow-revert-change,
+    .monaco-editor .lightbulb-glyph,
+    .monaco-text-button,
+    .monaco-button-dropdown,
+    .action-widget .monaco-list-row,
+    .monaco-editor .lightBulbWidget,
+    .monaco-editor .glyph-margin-widgets .cgmr,
+    .monaco-hover .action-container,
+    .monaco-hover a:not([href]),
+    .monaco-custom-toggle,
+    .monaco-editor .find-widget .button,
+    .colorpicker-color-decoration,
+    .colorpicker-header .picked-color,
+    .colorpicker-header .original-color,
+    .colorpicker-header .close-button,
+    .colorpicker-body .insert-button,
+    .monaco-editor .peekview-title.clickable,
+    .monaco-tree-sticky-row,
+    .monaco-editor .marker-widget .filename,
+    .monaco-editor .verbosity-actions-inner .codicon,
+    .monaco-editor .hover-copy-button,
+    .monaco-editor .margin-view-overlays [class*='codicon-folding-'],
+    .monaco-editor .inline-folded,
+    .monaco-editor .suggest-widget .monaco-list-row,
+    .monaco-editor .suggest-details .codicon-close,
+    .monaco-editor .suggest-widget .readMore,
+    .monaco-editor .suggest-preview-additional-widget .button,
+    .monaco-editor .ghost-text-decoration.clickable,
+    .monaco-editor .ghost-text-decoration-preview.clickable,
+    .monaco-editor .suggest-preview-text.clickable .ghost-text,
+    .monaco-editor .sticky-line-content,
+    .monaco-editor .inlineCompletions-char-insert,
+    .monaco-menu-option,
+    .monaco-editor .goto-definition-link,
+    .monaco-editor .detected-link-active,
+    .monaco-editor .parameter-hints-widget .button,
+    .monaco-editor .rename-suggestions-button,
+    .monaco-component.multiDiffEditor .collapse-button
+  ):not(:any-link) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  :where([data-sonner-toast] [data-button], [data-sonner-toast] [data-close-button]) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  :where(
+    #profiler-toggle,
+    .builtin-tab-btn,
+    .mini-panel-content .list-item.actionable,
+    #floating-btn,
+    #maximize-btn,
+    #hide-panel-btn,
+    .list-item-row.collapsible,
+    .list-item-row.actionable,
+    .console-copy-button,
+    .param-control button,
+    .custom-checkbox,
+    .detached-reattach-btn,
+    .panel-action-btn
+  ):not(:any-link) {
+    cursor: var(--cursor-action) !important;
+  }
+
+  .param-control input[type='range']::-webkit-slider-thumb,
+  .param-control input[type='range']::-moz-range-thumb {
+    cursor: var(--cursor-action) !important;
+  }
+
+  :where(#profiler-panel, .detached-tab-content) .custom-checkbox:hover .checkmark {
+    background-color: color-mix(in srgb, var(--accent-color) 15%, transparent);
+  }
+}
 
 /* Typography is provided by fumadocs-ui/css/preset.css (forked @tailwindcss/typography with fd-* color support) */
 
 :root {
+  --chat-streaming-fade-duration: 150ms;
+  --chat-streaming-fade-easing: cubic-bezier(0.37, 0.55, 0.86, 0.88);
   --scrollbar-thumb: var(--border);
   --scrollbar-track: transparent;
   --scrollbar-thickness: 9px;
@@ -38,6 +157,28 @@
   --diagram-note: oklch(0.96 0.012 calc(var(--hue-primary) + 60deg));
   --diagram-note-border: oklch(0.78 0.04 calc(var(--hue-primary) + 60deg));
   --diagram-accent: var(--muted-foreground);
+}
+
+@keyframes chat-streaming-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+[data-chat-streaming-fade] {
+  animation: chat-streaming-fade var(--chat-streaming-fade-duration) var(--chat-streaming-fade-easing) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-streaming-fade] {
+    animation-delay: 0ms;
+    animation-duration: 0.01ms;
+    opacity: 1;
+  }
 }
 
 .dark,
@@ -261,7 +402,14 @@
 
 @layer base {
   * {
-    @apply border-border focus-visible:outline-primary;
+    @apply border-border;
+  }
+
+  /* Focus fallback for controls that do not compose a shared primitive. `:where()` keeps it at zero
+     specificity so any component class still wins. Geometry lives in @taucad/ui's `focus-outline`
+     utility; never restate it here. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    @apply focus-outline;
   }
 
   html,
@@ -342,18 +490,12 @@
  * Override --scroll-fade-size to control the fade distance.
  *
  * --scroll-fade-end controls the alpha of the mask at the fading edge.
- * Dark mode keeps the original `transparent` so content fades fully into
- * the dark background (reads as a depth shadow). Light mode uses a
- * partially-opaque value so the edge stays visibly dimmed instead of
- * washing all the way out to the surface color (the "whitened" look).
+ * A fully transparent 28px edge matches the workbench tab treatment and
+ * prevents clipped content from remaining visible at the scroll boundary.
  */
 
 :root {
-  --scroll-fade-end: oklch(0 0 0 / 0.45);
-}
-
-.dark,
-:root[class~='dark'] {
+  --scroll-fade-size: 28px;
   --scroll-fade-end: transparent;
 }
 
@@ -414,7 +556,6 @@
 }
 
 @utility scroll-shadows-x {
-  --scroll-fade-size: 14px;
   overflow: auto;
   mask-image: linear-gradient(
     to right,
@@ -428,7 +569,6 @@
 }
 
 @utility scroll-shadows-y {
-  --scroll-fade-size: 14px;
   overflow: auto;
   mask-image: linear-gradient(
     to bottom,
@@ -442,7 +582,6 @@
 }
 
 @utility scroll-shadows {
-  --scroll-fade-size: 14px;
   overflow: auto;
   mask-image:
     linear-gradient(
@@ -473,14 +612,12 @@
  * overflowing a fixed-height clipped viewport).
  */
 @utility scroll-shadow-bottom {
-  --scroll-fade-size: 14px;
   mask-image: linear-gradient(to bottom, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end));
 }
 
 /* Static inline-end fade for clipped labels such as fixed-width tabs. */
 @utility scroll-shadow-right {
-  --scroll-fade-size: 14px;
-  mask-image: linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), transparent);
+  mask-image: linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end));
 }
 
 /* END SCROLL SHADOWS */

@@ -13,7 +13,7 @@
 
 import { createSkillResolver as createAgentSkillResolver } from '@taucad/agent-tools/skills';
 import type { SkillResolver, SkillResolverDependencies } from '@taucad/agent-tools/skills';
-import { builtInSystemSkills } from '#lib/system-skills-catalog.js';
+import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 export { titleFromSkillName } from '@taucad/agent-tools/skills';
 export type { SkillResolver, SkillResolverDependencies, SkillResolverDirectoryEntry } from '@taucad/agent-tools/skills';
@@ -27,5 +27,5 @@ export type { SkillResolver, SkillResolverDependencies, SkillResolverDirectoryEn
 export function createSkillResolver(
   deps: Pick<SkillResolverDependencies, 'readFile' | 'listDirectory'>,
 ): SkillResolver {
-  return createAgentSkillResolver({ ...deps, systemSkills: builtInSystemSkills });
+  return createAgentSkillResolver({ ...deps, systemSkills: systemSkillsCatalog });
 }

@@ -1,0 +1,78 @@
+{
+  "name": "@taucad/units",
+  "version": "0.1.0-beta.1",
+  "description": "Portable checked units, quantities, parsing, and formatting",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/units"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/units#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "NOTICE"
+  ],
+  "keywords": [
+    "cad",
+    "typescript",
+    "ucum",
+    "units-of-measure"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./input": "./src/input.ts",
+    "./quantity": "./src/quantity.ts",
+    "./unit": "./src/unit.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./input": {
+        "types": "./dist/input.d.mts",
+        "import": "./dist/input.mjs",
+        "default": "./dist/input.mjs"
+      },
+      "./quantity": {
+        "types": "./dist/quantity.d.mts",
+        "import": "./dist/quantity.mjs",
+        "default": "./dist/quantity.mjs"
+      },
+      "./unit": {
+        "types": "./dist/unit.d.mts",
+        "import": "./dist/unit.mjs",
+        "default": "./dist/unit.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@lhncbc/ucum-lhc": "catalog:"
+  }
+}

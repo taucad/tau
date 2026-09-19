@@ -13,6 +13,9 @@ import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { assertRootedPath } from '@taucad/utils/path';
+import { projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import type { ParameterDeclaration } from '@taucad/parameters';
+import type { JSONSchema7 } from '@taucad/json-schema';
 
 /** @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
@@ -57,16 +60,14 @@ export function getModuleRegistry(): Map<string, Record<string, unknown>> {
   return registry;
 }
 
-/**
- */
+/** Options for one registry-backed module shim. @public */
 export type KernelModuleShimOptions = {
   moduleExpression: string;
   exports: Record<string, unknown>;
   exportPrefix?: string;
 };
 
-/**
- */
+/** Options for registering one built-in kernel module. @public */
 export type RegisterKernelModuleOptions = {
   name: string;
   exports: Record<string, unknown>;
@@ -187,6 +188,26 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
 }
 
 /**
+ * Create an admitted native declaration from a kernel producer's Draft-7 schema.
+ * @param defaults - Producer defaults in native coordinates.
+ * @param schema - Producer Draft-7/OGC schema.
+ * @param identity - Caller-owned stable schema identity and name.
+ * @returns An admitted immutable native parameter declaration.
+ * @public
+ */
+export const createKernelParameterDeclaration = (
+  defaults: Readonly<Record<string, unknown>>,
+  schema: JSONSchema7 | Readonly<Record<string, unknown>>,
+  identity: Readonly<{ id: string; name: string }>,
+): ParameterDeclaration =>
+  projectDraft7SchemaToParameterDeclaration({
+    defaults,
+    schema,
+    schemaId: identity.id,
+    schemaName: identity.name,
+  });
+
+/**
  * Validate and return the canonical project-local entry path required by the
  * JavaScript VM adapter.
  * @public
@@ -201,7 +222,12 @@ export const toVmEntryPath = (rootedPath: string): string => assertRootedPath(ro
  * @public
  */
 export function convertRawIssuesToKernelIssues(
-  issues: Array<{ message: string; severity: string; location?: unknown; code?: unknown }>,
+  issues: Array<{
+    message: string;
+    severity: string;
+    location?: unknown;
+    code?: unknown;
+  }>,
   fallbackFileName: string,
 ): KernelIssue[] {
   return issues.map((issue) => ({

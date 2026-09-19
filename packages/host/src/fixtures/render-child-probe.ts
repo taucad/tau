@@ -9,7 +9,7 @@
  * `ensureAgentRuntime`'s runtime client (`host-daemon.ts`), and the real tool
  * registry, so the answer printed on stdout is the one a model would receive.
  *
- * Usage: `node --import tsx render-child-probe.ts <workspaceRoot> <targetFile>`
+ * Usage: `tsx render-child-probe.ts <workspaceRoot> <targetFile>`
  * Prints one line: `PROBE <json>`.
  */
 
@@ -51,8 +51,7 @@ try {
   const outcome = await registry.invoke({
     toolCallId: 'render-child-probe',
     toolName: 'get_kernel_result',
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the tool's own JSON input shape.
-    input: { targetFile } as never,
+    input: { targetFile },
     signal: new AbortController().signal,
   });
 

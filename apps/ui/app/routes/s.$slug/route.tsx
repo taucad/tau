@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
 import { getActiveGroupValues, parameterEntryPath, parseProjectManifestBytes } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 import { findBuiltinExample } from '@taucad/tau-examples/builtin';
 import { sharePasswordLimits } from '@taucad/share/artifact';
+import { requireParameterRecord } from '@taucad/parameters';
 import type { ShareOpenedArtifact } from '@taucad/share/artifact';
 import { parseShareSlug, parseShareUrl } from '@taucad/share/locator';
 import { isShareError, ShareError } from '@taucad/share/provider';
@@ -23,9 +25,8 @@ import PublicationViewRoute, {
 import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
+import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { shareProviderRegistry, withBrowserShareProviderContext } from '#lib/share-providers.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
-import { parseParameterEntry } from '#utils/parameter-config.utils.js';
 
 export const handle: Handle = { enablePageWrapper: false };
 
@@ -70,6 +71,46 @@ const collectOpenedSnapshot = async (
   warnings: [],
 });
 
+/** Resolve one portable artifact without rewriting parameter record bytes. */
+export const resolvePortableArtifact = (
+  artifact: ShareOpenedArtifact,
+):
+  | Readonly<{
+      manifest: ProjectManifest;
+      parameters: Record<string, unknown>;
+      parameterDiagnostic: string | undefined;
+      files: Record<string, Readonly<{ content: Uint8Array<ArrayBuffer> }>>;
+    }>
+  | undefined => {
+  const manifestFile = artifact.files.find(({ path }) => path === 'tau.json');
+  if (!manifestFile) {
+    return undefined;
+  }
+  const parsed = parseProjectManifestBytes(manifestFile.content);
+  if (!parsed.success || !artifact.files.some(({ path }) => path === parsed.data.assets.main.entryPath)) {
+    return undefined;
+  }
+  const parameterFile = artifact.files.find(
+    ({ path }) => path === parameterEntryPath(parsed.data.assets.main.entryPath),
+  );
+  let parameters: Record<string, unknown> = {};
+  let parameterDiagnostic: string | undefined;
+  if (parameterFile) {
+    // The shared record policy: an unusable record is reported, never replaced by defaults silently.
+    try {
+      parameters = getActiveGroupValues(requireParameterRecord(parameterFile.content));
+    } catch (error) {
+      parameterDiagnostic = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return {
+    manifest: parsed.data,
+    parameters,
+    parameterDiagnostic,
+    files: Object.fromEntries(artifact.files.map((file) => [file.path, { content: file.content }])),
+  };
+};
+
 export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> => {
   const { slug } = arguments_.params;
   if (!slug) {
@@ -89,7 +130,9 @@ export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> =
         title: example.manifest.name,
         description: example.manifest.description,
         ...(example.thumbnailUrl
-          ? { thumbnail: new URL(example.thumbnailUrl, arguments_.request.url).toString() }
+          ? {
+              thumbnail: new URL(example.thumbnailUrl, arguments_.request.url).toString(),
+            }
           : {}),
       },
     } satisfies ShareRouteLoaderData;
@@ -124,7 +167,16 @@ export const meta: MetaFunction<typeof loader> = (arguments_) => {
   ];
 };
 
-const PortableShareSurface = (): React.JSX.Element => {
+/**
+ * Every share a provider resolves in the browser: `direct`, a Gist, a builtin.
+ *
+ * Exported for the desktop module of this same route
+ * (`s.$slug/desktop-route.tsx`), which serves these slugs identically — the
+ * surface never consults the server, so the SPA needs no second copy of it.
+ *
+ * @returns The password prompt, the failure panel, or the shared workbench.
+ */
+export const PortableShareSurface = (): React.JSX.Element => {
   const { slug = '' } = useParams();
   const location = useLocation();
   const [artifact, setArtifact] = useState<ShareOpenedArtifact>();
@@ -136,7 +188,9 @@ const PortableShareSurface = (): React.JSX.Element => {
   const [submittedPassword, setSubmittedPassword] = useState<string>();
   const [passwordError, setPasswordError] = useState<string>();
   const [opening, setOpening] = useState(true);
-  const [protection, setProtection] = useState<ShareProtection>({ kind: 'none' });
+  const [protection, setProtection] = useState<ShareProtection>({
+    kind: 'none',
+  });
   const [unpublished, setUnpublished] = useState(false);
 
   useEffect(() => {
@@ -176,7 +230,11 @@ const PortableShareSurface = (): React.JSX.Element => {
           const resolvedPassword = parsed.secrets['p'] ?? submittedPassword;
           setProtection(
             passwordProtected && resolvedPassword
-              ? { kind: 'password', password: resolvedPassword, includePassword: Boolean(parsed.secrets['p']) }
+              ? {
+                  kind: 'password',
+                  password: resolvedPassword,
+                  includePassword: Boolean(parsed.secrets['p']),
+                }
               : { kind: 'none' },
           );
           setSourceLabel(`${passwordProtected ? 'Password-protected ' : ''}${provider.descriptor.label}`);
@@ -216,35 +274,7 @@ const PortableShareSurface = (): React.JSX.Element => {
   const passwordBytes = new TextEncoder().encode(password.normalize('NFC')).byteLength;
   const passwordValid = passwordBytes >= sharePasswordLimits.minBytes && passwordBytes <= sharePasswordLimits.maxBytes;
 
-  const resolved = useMemo(() => {
-    if (!artifact) {
-      return undefined;
-    }
-    const manifestFile = artifact.files.find(({ path }) => path === 'tau.json');
-    if (!manifestFile) {
-      return undefined;
-    }
-    const parsed = parseProjectManifestBytes(manifestFile.content);
-    if (!parsed.success || !artifact.files.some(({ path }) => path === parsed.data.assets.main.entryPath)) {
-      return undefined;
-    }
-    const parameterFile = artifact.files.find(
-      ({ path }) => path === parameterEntryPath(parsed.data.assets.main.entryPath),
-    );
-    let parameters: Record<string, unknown> = {};
-    if (parameterFile) {
-      try {
-        parameters = getActiveGroupValues(parseParameterEntry(decodeTextFile(parameterFile.content)));
-      } catch {
-        return undefined;
-      }
-    }
-    return {
-      manifest: parsed.data,
-      parameters,
-      files: Object.fromEntries(artifact.files.map((file) => [file.path, { content: file.content }])),
-    };
-  }, [artifact]);
+  const resolved = useMemo(() => (artifact ? resolvePortableArtifact(artifact) : undefined), [artifact]);
 
   if (unpublished) {
     return (
@@ -358,7 +388,7 @@ const PortableShareSurface = (): React.JSX.Element => {
       shouldTrackView={false}
       hydratedFiles={resolved.files}
       shareUrl={sourceUrl}
-      sourceLabel={sourceLabel}
+      sourceLabel={resolved.parameterDiagnostic ?? sourceLabel}
       managementActions={
         parseShareSlug(slug).providerId === 'github-gist' ? (
           <GithubGistManagement
@@ -378,9 +408,38 @@ const PortableShareSurface = (): React.JSX.Element => {
   );
 };
 
+/**
+ * The desktop app, offered over whatever `/s/:slug` is showing (R4).
+ *
+ * Never a gate: the shared workbench is what this link is for, and the app is
+ * the second way to it. The workbench is full-bleed, so there is no column to
+ * put the card in and it sits in the bottom corner instead.
+ *
+ * `OpenInDesktop` renders nothing on the desktop build and nothing for a slug
+ * the shell's parser would refuse, so in both of those cases this is an empty
+ * box that takes no pointer events and paints nothing.
+ *
+ * Hidden at phone widths: there is no desktop app to open there, and the corner
+ * belongs to the workbench's drawer trigger.
+ *
+ * @returns The offer's corner.
+ */
+const ShareDesktopOffer = (): React.JSX.Element => (
+  <div className='pointer-events-none fixed inset-x-0 bottom-0 z-50 hidden justify-end p-4 sm:flex'>
+    <div className='pointer-events-auto'>
+      <OpenInDesktop continueLabel='View in the browser' />
+    </div>
+  </div>
+);
+
 export default function ShareRoute(): React.JSX.Element {
   const data = useLoaderData<ShareRouteLoaderData | PublicationRouteLoaderData>();
-  return 'kind' in data && data.kind === 'portable' ? <PortableShareSurface /> : <PublicationViewRoute />;
+  return (
+    <>
+      {'kind' in data && data.kind === 'portable' ? <PortableShareSurface /> : <PublicationViewRoute />}
+      <ShareDesktopOffer />
+    </>
+  );
 }
 
 export const ErrorBoundary = (): React.JSX.Element => <PublicationErrorBoundary />;

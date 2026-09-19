@@ -7,8 +7,7 @@
  * lifetime survives subtree unmount/remount cycles, eliminating the class of
  * "headless component reuse" races that plagued the prior `<ChatInstance>`
  * design (load wipes in-flight messages, persist dropped while loading,
- * draft `setChatId` lost across an async hop, draft state leaking across
- * chats, cross-chat persist mis-targeting).
+ * draft state leaking across chats, cross-chat persist mis-targeting).
  *
  * Lifetime ownership:
  * - `acquire(chatId)` / `release(chatId)` track React views only.
@@ -33,28 +32,57 @@ import type { Chat } from '@ai-sdk/react';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
 import { z } from 'zod';
-import { createActor } from 'xstate';
+import { createActor, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { ChatRequest, ChatSessionActorRef, ChatTurnGesture } from '#machines/chat-session.machine.js';
+import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
-import { draftMachine } from '#hooks/draft.machine.js';
+import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
+import {
+  createComposerRecordActor,
+  draftHydrationOf,
+  draftPersistenceFor,
+  flushRecord,
+  stopWhenWritesSettle,
+} from '#hooks/composer-record.js';
+import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import type { ComposerRecordClient } from '#db/composer-record-store.js';
+import { createChatAttachmentStore } from '#db/attachment-store.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
+import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
+import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { inspect } from '#machines/inspector.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
-import { extractMimeTypeFromDataUrl, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
+import { buildUserMessage, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
 import {
   bindDurableChatRun,
   createChatInstance,
   getBoundDurableChatRunId,
 } from '#chat-clients/_internal/shared-chat-transport.js';
-import { registerAgentHostRunReset } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import {
+  awaitSettlement,
+  getBrowserAgentHostRun,
+  getHostTurnSettlement,
+  isBrowserAgentHostPlaced,
+  registerAgentHostRunReset,
+  requestBrowserAgentHostResume,
+  subscribeHostTurnSettlements,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import { ENV } from '#environment.config.js';
+
+/** Run states a browser-placed run never leaves. */
+const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
 
 const admissionEnvelopeSchema = z.strictObject({
   version: z.literal(1),
@@ -70,6 +98,16 @@ const admissionEnvelopeSchema = z.strictObject({
  * object so `setDependencies` is one atomic swap (no torn reads if a render
  * mid-acquire updates one closure at a time).
  */
+/**
+ * Whether the person can see the page: visible and focused. A host with no
+ * document (a test, a daemon) counts as active. The one attention predicate
+ * the store and the focused-chat hook share (R3).
+ *
+ * @returns `true` when the document is visible and focused, or absent.
+ */
+export const isDocumentActive = (): boolean =>
+  typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
+
 export type ChatSessionDeps = {
   getChat: (chatId: string) => Promise<ChatEntity | undefined>;
   patchChat: <K extends keyof ChatEntity>(
@@ -78,21 +116,17 @@ export type ChatSessionDeps = {
     value: ChatEntity[K],
   ) => Promise<ChatEntity | undefined>;
   touchChatRecency: (chatId: string, requestedAt: number) => Promise<ChatEntity | undefined>;
-  setChatUnreadState: (chatId: string, hasUnreadTurn: boolean) => Promise<ChatEntity | undefined>;
   consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<ChatEntity | undefined>;
   commitCancelledDraftRestore: (
     chatId: string,
     input: CommitCancelledDraftRestoreInput,
   ) => Promise<ChatEntity | undefined>;
-  setMessageEdit: (chatId: string, messageId: string, draft: MyUIMessage) => Promise<ChatEntity | undefined>;
-  clearMessageEdit: (chatId: string, messageId: string) => Promise<ChatEntity | undefined>;
-};
-
-/** Snapshot of the latest aggregated cost for a chat (derived from `data-usage` parts). */
-export type UsageSnapshot = {
-  totalCost: number;
-  /** Wall-clock millis when the snapshot was last updated. */
-  lastUpdatedAt: number;
+  /**
+   * The worker filesystem client. It reaches the Home workspace's
+   * `/.tau/composers` records and each project's `.tau/chats` attachments from
+   * any route (D1, D13).
+   */
+  client: ComposerRecordClient;
 };
 
 export type ChatSession = {
@@ -100,69 +134,39 @@ export type ChatSession = {
   readonly chat: Chat<MyUIMessage>;
   readonly persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   readonly draftActorRef: ActorRefFrom<typeof draftMachine>;
+  /**
+   * This chat's composer record on this device (D2): draft, edits, tool choice
+   * and mode. A surface mounts `useComposerRecordToasts` on it.
+   */
+  readonly composerRecordRef: ComposerRecordRef;
+  /**
+   * This chat's state in the agent-state vocabulary (D32, S45).
+   *
+   * The store keeps the AI SDK `Chat`, its transport and its persistence; the
+   * machine is the one derivation of what the person is told — every row of
+   * the architecture's agent-state table is one of its states. The sidebar
+   * (W20) and the Agents pane read this, never the flags behind it.
+   */
+  /* Not readonly: the owner changes when a project session opens or closes. */
+  stateActorRef: ChatSessionActorRef | undefined;
 };
 
 // ---------------------------------------------------------------------------
 // Module-scoped singletons / helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Rebuilds the user message currently being edited. Resets only the
- * user-facing fields — text/image parts, `createdAt`, and `status` — and
- * spreads the original message's metadata through untouched. Per-turn
- * agent config travels via `body.agent` on the wire (composed by the
- * chat-client from `useCadAgentConfig`), never via per-message metadata.
- */
-function buildEditedMessage(original: MyUIMessage, request: Extract<ChatRequest, { kind: 'edit' }>): MyUIMessage {
-  return {
-    id: request.messageId,
-    role: 'user',
-    parts: [
-      { type: 'text', text: request.content },
-      ...(request.imageUrls?.map(
-        (url) =>
-          ({
-            type: 'file',
-            url,
-            mediaType: extractMimeTypeFromDataUrl(url),
-          }) as const,
-      ) ?? []),
-    ],
-    metadata: {
-      ...original.metadata,
-      createdAt: Date.now(),
-      status: 'pending',
-    },
-  };
-}
+const missingClient = async (): Promise<never> => {
+  throw new Error('ChatSessionStore: client not provided');
+};
 
 /**
- * Slices the message tail so a subsequent `chat.regenerate(...)` re-runs
- * the assistant turn after the retried message. Model overrides (e.g. "Try
- * with a different model") travel via `request.body.agent.execution` composed
- * by `useCadChatClient.retry`, not by mutating persisted metadata.
+ * The user message being edited, rebuilt by the one builder. It keeps the
+ * original's id and metadata and refreshes only `createdAt` and `status`; the
+ * turn's agent config travels in `body.agent`, never in message metadata.
  */
-function buildRetryMessages(
-  messages: MyUIMessage[],
-  request: Extract<ChatRequest, { kind: 'retry' }>,
-): MyUIMessage[] | undefined {
-  const messageIndex = messages.findIndex((m) => m.id === request.messageId);
-  if (messageIndex === -1) {
-    return undefined;
-  }
-  return messages.slice(0, messageIndex);
-}
-
-function aggregateUsageCost(messages: readonly MyUIMessage[]): number {
-  let total = 0;
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (part.type === 'data-usage') {
-        total += part.data.totalCost;
-      }
-    }
-  }
-  return total;
+function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { kind: 'edit' }>): MyUIMessage {
+  const built = buildUserMessage({ text: request.content, attachments: request.attachments });
+  return { ...built, id: request.messageId, metadata: { ...original.metadata, ...built.metadata } };
 }
 
 function buildDraftFromUserMessage(message: MyUIMessage): MyUIMessage {
@@ -227,6 +231,36 @@ function countPersistMilestones(message: MyUIMessage): number {
   return count;
 }
 
+/**
+ * The whole tool picture of one chat, in one pass.
+ *
+ * The `chat-session` machine takes tool state batched per transport event
+ * (F8) — one frame for a fifty-part turn, never one per delta — so this is
+ * what the store hands it.
+ *
+ * @param messages - The chat's transcript.
+ * @returns How many tool parts are running and how many wait for approval.
+ */
+function countToolParts(messages: readonly MyUIMessage[]): { inFlight: number; approvals: number; toolName?: string } {
+  let inFlight = 0;
+  let approvals = 0;
+  let toolName: string | undefined;
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (!isAnyToolPart(part)) {
+        continue;
+      }
+      if (part.state === 'approval-requested') {
+        approvals += 1;
+      } else if (part.state === 'input-streaming' || part.state === 'input-available') {
+        inFlight += 1;
+        toolName = part.type === 'dynamic-tool' ? part.toolName : part.type.replace(/^tool-/u, '');
+      }
+    }
+  }
+  return { inFlight, approvals, ...(toolName === undefined ? {} : { toolName }) };
+}
+
 function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
   return messages.some((message) =>
     message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
@@ -236,15 +270,6 @@ function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
 // ---------------------------------------------------------------------------
 // ChatSessionStore
 // ---------------------------------------------------------------------------
-
-/**
- * Composes one per-request wire body, admitting the chat's durable workspace on
- * the way. Owned by the profile-scoped chat client; called by the store only for
- * dispatches that carry no body of their own.
- *
- * @public
- */
-export type LatestAgentBodyFactory = () => Promise<Readonly<Record<string, unknown>>>;
 
 type InternalSession = ChatSession & {
   /** React/view consumers currently observing this session. */
@@ -265,29 +290,112 @@ type InternalSession = ChatSession & {
   /** Immutable wire body for the active logical run, including admission. */
   activeRunBody: Readonly<Record<string, unknown>> | undefined;
   status: ChatStatus;
-  usage: UsageSnapshot | undefined;
+  /** The project this chat belongs to; its session owns the run accounting. */
+  projectId: string | undefined;
+  /** Where this chat's next turn runs, as its turn host last said. */
+  placement: string | undefined;
   /**
-   * How the active profile-scoped chat client composes a per-request body for
-   * this chat. Published via {@link ChatSessionStore.setLatestAgentBody} from
-   * `useCadChatClient`. The `dispatchRequest` listener calls it when a request
-   * enters the persistence machine without an explicit `body` (the
-   * startup-request hydration regenerate in `loadChatActor`), so the seeded turn
-   * admits the same workspace an explicit submit would — a stored snapshot
-   * could name a workspace that a later `prepare` had already discarded.
+   * A consumed seed whose owner had not bound yet, waiting for
+   * {@link ChatSessionStore.setProjectSession}. The startup request is one-shot:
+   * dropping this gesture loses the prompt for good (V3a).
    */
-  latestAgentBody: LatestAgentBodyFactory | undefined;
-  /** Bodyless startup/continue dispatches waiting for the profile client to publish its body factory. */
-  latestAgentBodyWaiters: Set<(compose: LatestAgentBodyFactory | undefined) => void>;
+  pendingSeedGesture: ChatTurnGesture | undefined;
+  /** The chat machine's turn emits, re-subscribed whenever its actor changes. */
+  turnSubscriptions: Array<{ unsubscribe: () => void }>;
+  /** What was last handed to `stateActorRef`, so nothing is sent twice. */
+  lastState: {
+    phase?: ChatRunPhase;
+    inFlight: number;
+    approvals: number;
+    toolName?: string;
+    durable?: string;
+    lifecycle?: string;
+  };
+  /**
+   * The chat's record store and project, once its project is known. The record
+   * actor exists from the first frame; its I/O waits for this (D7).
+   */
+  composer: Promise<ComposerBinding | undefined>;
+  /** Settle {@link InternalSession.composer}; only the first call counts. */
+  bindComposer: (projectId: string | undefined) => void;
+  /** Composer work that must reach the record before its actor stops (a cancelled-draft restore). */
+  composerWork: Set<Promise<unknown>>;
   /** Cleanups for the per-chat subscriptions wired up at session creation. */
   dispose: () => void;
 };
 
+/** The run phases the store reports, the SDK's plus the person's own stop. */
+type ChatRunPhase = 'admitted' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type ChatSessionLivenessSnapshot = Readonly<{
+  projects: Readonly<Record<string, readonly string[]>>;
+  chats: Readonly<
+    Record<
+      string,
+      Readonly<{
+        projectId: string | undefined;
+        status: ChatStatus;
+        phase: ChatRunPhase | undefined;
+        machineState: unknown;
+        activeRunId: string | undefined;
+        pendingSettlement: unknown;
+      }>
+    >
+  >;
+}>;
+
+type ChatSessionLivenessDebugGlobal = typeof globalThis & {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- fixed debug bridge read by browser E2E.
+  __TAU_CHAT_SESSION_LIVENESS__?: () => ChatSessionLivenessSnapshot;
+};
+
+/** The two phases that OPEN a run; every other phase settles one. */
+const opensRun = (phase: ChatRunPhase): boolean => phase === 'admitted' || phase === 'running';
+
+const runPhaseOf = (status: ChatStatus): Exclude<ChatRunPhase, 'cancelled'> | undefined => {
+  switch (status) {
+    case 'submitted': {
+      return 'admitted';
+    }
+    case 'streaming': {
+      return 'running';
+    }
+    case 'error': {
+      return 'failed';
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
+  /**
+   * Every live project's session, keyed by project (R2).
+   *
+   * One field would mean a run that settles after the person navigates away
+   * reports to whichever project is on screen, and the project that actually
+   * ran it stays `busy` forever — never idle-closable, never a budget
+   * candidate, *Close* asking for the life of the document.
+   */
+  readonly #projectSessions = new Map<string, ProjectSessionActorRef>();
+  /** One unread record per project (D2, D9), kept for the store's lifetime. */
+  readonly #unreadRecords = new Map<string, UnreadRecord>();
+  /**
+   * A released chat's record actor, still writing. A reacquired session reads
+   * its record only after this settles, so it never reads what is about to be
+   * overwritten.
+   */
+  readonly #composerDrains = new Map<string, Promise<void>>();
+  #settlementUnsubscribe: (() => void) | undefined;
+  /** The project whose chats are being acquired right now. */
+  #focusedProjectId: string | undefined;
+  /** The chat the person has in front of them (R3); only it counts as attended. */
+  #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
   readonly #chatTopics = new Map<string, Topic<void>>();
   readonly #statusTopics = new Map<string, Topic<void>>();
-  readonly #usageTopics = new Map<string, Topic<void>>();
   #snapshot: readonly string[] = [];
   /**
    * Coalesces membership notifications onto a microtask so an `acquire`/
@@ -312,22 +420,55 @@ export class ChatSessionStore {
     async touchChatRecency() {
       throw new Error('ChatSessionStore: touchChatRecency not provided');
     },
-    async setChatUnreadState() {
-      throw new Error('ChatSessionStore: setChatUnreadState not provided');
-    },
     async consumeChatStartupRequest() {
       throw new Error('ChatSessionStore: consumeChatStartupRequest not provided');
     },
     async commitCancelledDraftRestore() {
       throw new Error('ChatSessionStore: commitCancelledDraftRestore not provided');
     },
-    async setMessageEdit() {
-      throw new Error('ChatSessionStore: setMessageEdit not provided');
-    },
-    async clearMessageEdit() {
-      throw new Error('ChatSessionStore: clearMessageEdit not provided');
+    client: {
+      readFile: missingClient,
+      writeFile: missingClient,
+      exists: missingClient,
+      readdir: missingClient,
+      unlink: missingClient,
+      rmdir: missingClient,
     },
   };
+
+  public constructor() {
+    // E2E reads the same owner that drives the sidebar. Keeping this bridge
+    // debug-only makes a liveness failure report the store's SDK/cache facts
+    // and the project actors' run sets instead of guessing from labels.
+    if (Reflect.has(globalThis, 'window') && ENV.TAU_DEBUG) {
+      (globalThis as ChatSessionLivenessDebugGlobal).__TAU_CHAT_SESSION_LIVENESS__ = () => this.getLivenessSnapshot();
+    }
+  }
+
+  /** Debug-only projection of the facts that authoritatively drive `busy`. */
+  public getLivenessSnapshot(): ChatSessionLivenessSnapshot {
+    return {
+      projects: Object.fromEntries(
+        [...this.#projectSessions].map(([projectId, ref]) => [projectId, [...ref.getSnapshot().context.runs]]),
+      ),
+      chats: Object.fromEntries(
+        [...this.#sessions].map(([chatId, session]) => {
+          const state = session.stateActorRef?.getSnapshot();
+          return [
+            chatId,
+            {
+              projectId: session.projectId,
+              status: session.status,
+              phase: session.lastState.phase,
+              machineState: state?.value,
+              activeRunId: state?.context.activeRunId,
+              pendingSettlement: state?.context.pendingSettlement,
+            },
+          ];
+        }),
+      ),
+    };
+  }
 
   /**
    * Update the closures the store invokes on behalf of every session. Safe to
@@ -338,19 +479,39 @@ export class ChatSessionStore {
     this.#deps = deps;
   }
 
+  /** Replace an idle live transcript with the chat log just projected from Git. */
+  public async refreshFromStorage(chatId: string): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session?.status !== 'ready') {
+      return;
+    }
+    const chat = await this.#deps.getChat(chatId);
+    const current = this.#sessions.get(chatId);
+    if (chat && current === session && current.status === 'ready') {
+      current.chat.messages = chat.messages;
+    }
+  }
+
   /** Record one accepted user action independently of transcript persistence. */
   public async touchChatRecency(chatId: string, requestedAt: number): Promise<ChatEntity | undefined> {
     return this.#deps.touchChatRecency(chatId, requestedAt);
   }
 
-  public acquire(chatId: string): ChatSession {
+  /**
+   * Retain one chat and bind its state actor to its owning live project.
+   *
+   * @param chatId - Chat to hydrate.
+   * @param projectId - Known owner; defaults to the focused project for existing callers.
+   * @returns The retained chat session.
+   */
+  public acquire(chatId: string, projectId = this.#focusedProjectId): ChatSession {
     const existing = this.#sessions.get(chatId);
     if (existing) {
       existing.viewRefcount += 1;
       return existing;
     }
 
-    const session = this.#createSession(chatId);
+    const session = this.#createSession(chatId, projectId);
     this.#sessions.set(chatId, session);
     this.#refreshSnapshot();
     this.#notifyMembership();
@@ -394,7 +555,7 @@ export class ChatSessionStore {
       }
       return existing;
     }
-    const session = this.#createSession(input.chatId);
+    const session = this.#createSession(input.chatId, this.#focusedProjectId);
     session.viewRefcount = 0;
     session.runHeld = true;
     session.durableRunId = input.runId;
@@ -458,6 +619,11 @@ export class ChatSessionStore {
     }
     session.durableRunId = undefined;
     session.durableRunState = undefined;
+    /* Every other writer of these two fields wakes the chat's status topic, and
+     * the settlement components read both through `useSyncExternalStore`: a
+     * silent release left them deciding from the released run's snapshot until
+     * some unrelated status change happened to arrive. */
+    this.#statusTopics.get(input.chatId)?.emit();
     this.#disposeIfUnreferenced(session);
   }
 
@@ -533,37 +699,71 @@ export class ChatSessionStore {
     return this.#addPerChatListener({ bucket: this.#statusTopics, namePrefix: 'status', chatId, listener });
   }
 
-  public getUsage(chatId: string): UsageSnapshot | undefined {
-    return this.#sessions.get(chatId)?.usage;
-  }
-
-  public subscribeUsage(chatId: string, listener: () => void): () => void {
-    return this.#addPerChatListener({ bucket: this.#usageTopics, namePrefix: 'usage', chatId, listener });
+  /**
+   * Say where this chat's next turn runs.
+   *
+   * The chat's session actor owns its agent-host binding and re-invokes it on
+   * this and on nothing else; a model or prompt change is read when the client
+   * is created, so it must not churn the registration. Published by the chat's
+   * one `ChatTurnHost`, and replayed to the machine when a project session
+   * spawns it.
+   *
+   * @param chatId - The chat whose placement moved.
+   * @param placement - The daemon host id, or the execution kind for a local one.
+   * @public
+   */
+  public setTurnPlacement(chatId: string, placement: string): void {
+    const session = this.#sessions.get(chatId);
+    if (!session || session.placement === placement) {
+      return;
+    }
+    session.placement = placement;
+    session.stateActorRef?.send({ type: 'agentConfigChanged', placement });
   }
 
   /**
-   * Publish how the active profile-scoped chat client (`useCadChatClient`
-   * today, future name/commit clients tomorrow) composes a per-request body for
-   * this chat. The `dispatchRequest` listener inside `#createSession` calls it
-   * when a request hits the persistence machine without an explicit `body`
-   * (notably the startup-request hydration regenerate — see `loadChatActor`).
+   * Ask this chat's session actor for a turn.
    *
-   * A factory, not a snapshot: composing at dispatch time is what makes the
-   * seeded first turn admit the workspace it is about to write to.
+   * Every verb goes through here, and through nothing else: the actor owns the
+   * lease, the run id and the settlement, so it is the only thing that can
+   * refuse a second turn while one is live (V1, V2). A chat with no session
+   * actor yet has no owner to ask, and the gesture is dropped rather than run
+   * unowned.
+   *
+   * @param chatId - The chat the person acted on.
+   * @param gesture - What they did.
+   * @public
    */
-  public setLatestAgentBody(chatId: string, compose: LatestAgentBodyFactory | undefined): void {
+  public async requestTurn(chatId: string, gesture: ChatTurnGesture): Promise<void> {
     const session = this.#sessions.get(chatId);
     if (!session) {
       return;
     }
-    session.latestAgentBody = compose;
-    if (!compose) {
+    /* The banner belongs to the request lifecycle, and the gesture is what
+     * clears it — the dispatch is an admission away. */
+    session.persistenceActorRef.send({ type: 'turnRequested' });
+    const owner = session.stateActorRef;
+    if (owner === undefined) {
       return;
     }
-    for (const resolve of session.latestAgentBodyWaiters) {
-      resolve(compose);
+    owner.send({ type: 'requestTurn', gesture });
+    /* S01: the composer stays busy until the turn is admitted or refused, so a
+     * send does not look finished while its checkout is still being leased.
+     * The owner says when that is; nothing here polls it. A gesture queued
+     * behind a live turn never enters `admitting`, and frees the composer at
+     * once. */
+    const admitting = (): boolean => owner.getSnapshot().matches({ run: { queued: 'admitting' } });
+    if (!admitting()) {
+      return;
     }
-    session.latestAgentBodyWaiters.clear();
+    await new Promise<void>((resolve) => {
+      const subscription = owner.subscribe(() => {
+        if (!admitting()) {
+          subscription.unsubscribe();
+          resolve();
+        }
+      });
+    });
   }
 
   /**
@@ -578,6 +778,10 @@ export class ChatSessionStore {
       throw new Error(`ChatSessionStore: cannot start a run for inactive chat ${chatId}`);
     }
 
+    const { projectId } = body;
+    if (typeof projectId === 'string' && this.#projectSessions.has(projectId)) {
+      this.#rebindSessionProject(session, projectId);
+    }
     const admittedBody = this.#withAdmission(body);
     session.runHeld = true;
     session.activeRunBody = admittedBody;
@@ -599,7 +803,456 @@ export class ChatSessionStore {
   // Internals
   // -------------------------------------------------------------------------
 
-  #createSession(chatId: string): InternalSession {
+  /**
+   * Register one live project's session, or forget it when it closes.
+   *
+   * Every live project's binding calls this — not only the focused one — so a
+   * chat machine exists for every chat of every live project (R2, R12's
+   * precondition). The store never creates a `chat-session` actor itself:
+   * they are children of their project session (I23).
+   *
+   * @param projectId - The project this session is for.
+   * @param ref - The live session, or `undefined` when it closes.
+   * @public
+   */
+  public setProjectSession(projectId: string, ref: ProjectSessionActorRef | undefined): void {
+    if (ref === undefined) {
+      this.#projectSessions.delete(projectId);
+    } else {
+      this.#projectSessions.set(projectId, ref);
+      this.#settlementUnsubscribe ??= subscribeHostTurnSettlements((event) => {
+        this.#observeHostTurnSettlement(event);
+      });
+    }
+    for (const session of this.#sessions.values()) {
+      if (session.projectId !== projectId) {
+        continue;
+      }
+      if (ref === undefined) {
+        session.stateActorRef = undefined;
+        this.#bindTurnEmits(session);
+        continue;
+      }
+      this.#bindSessionOwner(session);
+      session.lastState = { inFlight: 0, approvals: 0 };
+      this.#replayPersistedFailure(session);
+      this.#replayPersistedSettlement(session);
+      this.#syncChatState(session);
+      this.#restoreUnread(session);
+    }
+    if (this.#projectSessions.size === 0) {
+      this.#settlementUnsubscribe?.();
+      this.#settlementUnsubscribe = undefined;
+    }
+  }
+
+  /**
+   * Say which project's chats are being acquired now.
+   *
+   * A chat is acquired from inside its own project's route, so the focused
+   * project is the chat's project. Sessions created before any project was
+   * focused are adopted here rather than left without a machine.
+   *
+   * @param projectId - The focused project, or `undefined` on leaving.
+   * @public
+   */
+  public setFocusedProject(projectId: string | undefined): void {
+    this.#focusedProjectId = projectId;
+    if (projectId === undefined) {
+      return;
+    }
+    for (const session of this.#sessions.values()) {
+      session.projectId ??= projectId;
+    }
+    this.setProjectSession(projectId, this.#projectSessions.get(projectId));
+  }
+
+  /**
+   * Say which chat the person has in front of them (R3). Every sidebar row holds
+   * a view of its chat, so a view is not attention: only the focused chat, in an
+   * active document, is attended when a turn ends.
+   *
+   * @param chatId - The focused chat.
+   * @public
+   */
+  public focusChat(chatId: string): void {
+    this.#focusedChatId = chatId;
+  }
+
+  /**
+   * Stop treating a chat as focused, unless another chat has taken focus since.
+   *
+   * @param chatId - The chat that lost focus.
+   * @public
+   */
+  public blurChat(chatId: string): void {
+    if (this.#focusedChatId === chatId) {
+      this.#focusedChatId = undefined;
+    }
+  }
+
+  /** Tell a chat the person is looking at it, so `unread` clears (S45) — in its machine and its record (D9). @public */
+  public markViewed(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    session?.stateActorRef?.send({ type: 'viewed' });
+    if (session !== undefined) {
+      void this.#setUnreadWhenBound(session.composer, chatId, false);
+    }
+  }
+
+  /**
+   * Stop this chat's run, through the one dispatcher that owns it (P63).
+   *
+   * *Stop* in the sidebar and *Stop* in the composer are the same verb, so
+   * they go to the same place: the persistence machine's `stopRequest`, which
+   * aborts the request, settles the run and releases its lease. The chat's own
+   * machine only records that the person stopped it.
+   *
+   * @param chatId - The chat whose run should stop.
+   * @public
+   */
+  public stopRun(chatId: string): void {
+    this.#sessions.get(chatId)?.persistenceActorRef.send({ type: 'stopRequest' });
+  }
+
+  /**
+   * Whether this chat is unread on this device, as its project's unread record
+   * says (D9). The restore source for the chat's machine.
+   *
+   * @param chatId - A chat with a live session.
+   * @returns `true` once the record, or this store, has marked it unread.
+   * @public
+   */
+  public isUnread(chatId: string): boolean {
+    const projectId = this.#sessions.get(chatId)?.projectId;
+    return projectId !== undefined && (this.#unreadRecords.get(projectId)?.chats.has(chatId) ?? false);
+  }
+
+  /**
+   * Stop a chat's live composer record before the chat is deleted (D11).
+   *
+   * The record actor drains its in-flight write, removes the record, and ends
+   * in `removed`, so a patch that arrives later — a debounced keystroke, a
+   * restore — is dropped instead of writing the deleted record back. The chat's
+   * unread entry is cleared with it. A chat with no live session has no actor to
+   * stop; the chat store removes its record file either way.
+   *
+   * @param chatId - The chat being deleted.
+   * @public
+   */
+  public async removeChat(chatId: string): Promise<void> {
+    // A released chat's record may still be landing its last write; removing under it would bring the file back.
+    await this.#composerDrains.get(chatId);
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    await this.#setUnreadWhenBound(session.composer, chatId, false);
+    await removeRecord(session.composerRecordRef);
+  }
+
+  /**
+   * The actor that owns a project's unread record, for surfacing its write and
+   * read failures (G2).
+   *
+   * @param projectId - The project whose unread record is wanted.
+   * @returns The running record actor.
+   * @public
+   */
+  public unreadRecordRef(projectId: string): ComposerRecordRef {
+    return this.#unreadRecord(projectId).ref;
+  }
+
+  /**
+   * Hand every composer's unwritten state to its record and wait until none
+   * is on the wire (R9). Drafts flush their debounce first, so the patch they
+   * send is the one the record then writes; a record waiting out a retry is
+   * written now; a released chat's last write is waited for.
+   *
+   * @public
+   */
+  public async flushComposerRecords(): Promise<void> {
+    const sessions = [...this.#sessions.values()];
+    await Promise.all(
+      sessions.map(async (session) => {
+        session.draftActorRef.send({ type: 'flushNow' });
+        await waitFor(
+          session.draftActorRef,
+          (state) => state.matches({ inputSaving: 'idle' }) && state.matches({ editSaving: 'idle' }),
+        );
+      }),
+    );
+    await Promise.all([
+      ...sessions.map(async (session) => flushRecord(session.composerRecordRef)),
+      ...[...this.#unreadRecords.values()].map(async (unread) => flushRecord(unread.ref)),
+      ...this.#composerDrains.values(),
+    ]);
+  }
+
+  /**
+   * Stop every live composer record of a project before its records are
+   * removed (D11), so a late unread decision or keystroke cannot recreate
+   * `unread.json` or a chat record under the deleted project.
+   *
+   * @param projectId - The project being permanently deleted.
+   * @public
+   */
+  public async removeProject(projectId: string): Promise<void> {
+    // Ponytail: waits on every released chat's drain, not only this project's; drains are one write long.
+    await Promise.all(this.#composerDrains.values());
+    const sessions = [...this.#sessions.values()].filter((session) => session.projectId === projectId);
+    await Promise.all([
+      ...sessions.map(async (session) => removeRecord(session.composerRecordRef)),
+      // Kept in the map once removed: a later decision for this project reaches the terminal actor and is dropped.
+      removeRecord(this.#unreadRecord(projectId).ref),
+    ]);
+  }
+
+  /**
+   * Copy a draft's attachments into the chat's own directory before they are
+   * sent (D18). Resolves only when every blob is durable there.
+   *
+   * @param chatId - The chat about to send.
+   * @param attachments - The draft's attachments, stored beside its record.
+   * @throws When any attachment cannot be copied; nothing should be sent then.
+   * @public
+   */
+  public async promoteDraftAttachments(chatId: string, attachments: readonly AttachmentReference[]): Promise<void> {
+    if (attachments.length === 0) {
+      return;
+    }
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      throw new Error(`ChatSessionStore: cannot send attachments from inactive chat ${chatId}`);
+    }
+    const binding = await session.composer;
+    if (binding === undefined) {
+      throw new Error(`Chat ${chatId} belongs to no project, so its attachments cannot be sent.`);
+    }
+    const { record, chatAttachments } = binding;
+    const copies = await Promise.allSettled(
+      attachments.map(async (attachment) => {
+        // A blob the chat already holds is skipped, so an edit re-referencing a sent attachment moves nothing.
+        if (await chatAttachments.has(attachment)) {
+          return undefined;
+        }
+        await record.attachments.copyTo(chatAttachments, attachment);
+        return attachment;
+      }),
+    );
+    const failure = copies.find((copy) => copy.status === 'rejected');
+    if (failure !== undefined) {
+      // Nothing was sent, so nothing references what this send copied; the chat ref would otherwise carry it.
+      const copied = copies.flatMap((copy) => (copy.status === 'fulfilled' && copy.value ? [copy.value] : []));
+      await Promise.allSettled(copied.map(async (attachment) => chatAttachments.remove(attachment)));
+      throw failure.reason instanceof Error
+        ? failure.reason
+        : new Error('Attachment promotion failed.', { cause: failure.reason });
+    }
+  }
+
+  /**
+   * Unlink the draft-stage bytes nothing in the composer references any more,
+   * once a send has cleared the draft (D11, "Send").
+   *
+   * @param chatId - The chat that just sent.
+   * @public
+   */
+  public async releaseDraftAttachments(chatId: string): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    const binding = await session.composer;
+    await binding?.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
+  }
+
+  /** This project's unread record actor, created and read on first use. */
+  /**
+   * Carry out what the chat's session actor admitted.
+   *
+   * The turn is the actor's; the *request* — one AI SDK stream, its retries and
+   * its stop — stays the persistence machine's. This is the one wire between
+   * them, so a dispatch can no longer originate anywhere else.
+   *
+   * @param session - The chat whose actor was just (re)bound.
+   */
+  #bindTurnEmits(session: InternalSession): void {
+    for (const subscription of session.turnSubscriptions) {
+      subscription.unsubscribe();
+    }
+    const { stateActorRef } = session;
+    if (stateActorRef === undefined || typeof stateActorRef.on !== 'function') {
+      session.turnSubscriptions = [];
+      return;
+    }
+    session.turnSubscriptions = [
+      stateActorRef.on('startTurnRequest', ({ request }) => {
+        session.persistenceActorRef.send({ type: 'startRequest', request });
+      }),
+      stateActorRef.on('stopTurnRequest', () => {
+        session.persistenceActorRef.send({ type: 'preemptRequest' });
+      }),
+    ];
+  }
+
+  /**
+   * Give one chat its session actor, and the actor its turn wiring.
+   *
+   * Called wherever the pair can change: on acquisition, when a project session
+   * registers or unregisters, and when a durable row moves a chat to the
+   * project that actually owns it.
+   *
+   * @param session - The chat to bind.
+   */
+  #bindSessionOwner(session: InternalSession): void {
+    const owner = session.projectId === undefined ? undefined : this.#projectSessions.get(session.projectId);
+    owner?.send({ type: 'openChat', chatId: session.chatId });
+    session.stateActorRef = owner?.getSnapshot().context.chatRefs[session.chatId];
+    this.#bindTurnEmits(session);
+    /* A chat machine that has just been spawned has never been told where its
+     * turns run, so its host binding would invoke on an empty placement. */
+    if (session.placement !== undefined) {
+      session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
+    }
+    /* The homepage seed is consumed by the loader on the route's first render,
+     * which is before the effect that registers the project session. The
+     * gesture waited here rather than being dropped on an unbound owner, which
+     * burnt the one-shot request and lost the prompt (V3a). */
+    const seedGesture = session.pendingSeedGesture;
+    if (seedGesture !== undefined && session.stateActorRef !== undefined) {
+      session.pendingSeedGesture = undefined;
+      session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+    }
+    /* A run outlives the view that started it (V5). Navigating away and back
+     * gives this chat a new actor while its run is still in flight, and an
+     * actor that starts `idle` admits a second turn over the live one — which
+     * the host refuses, ending the turn on a banner the page caused itself. */
+    const live = getBrowserAgentHostRun(session.chatId);
+    if (live !== undefined && !terminalBrowserRunStates.has(live.state)) {
+      session.stateActorRef?.send({ type: 'adoptRun', runId: live.runId });
+    }
+  }
+
+  #unreadRecord(projectId: string): UnreadRecord {
+    const existing = this.#unreadRecords.get(projectId);
+    if (existing) {
+      return existing;
+    }
+    const ref = createComposerRecordActor(
+      createComposerRecordStore(this.#deps.client, composerRecordPaths.unread(projectId)),
+    );
+    const unread: UnreadRecord = { ref, chats: new Set(), clearedBeforeLoad: new Set(), loaded: false };
+    ref.on('recordLoaded', ({ record }) => {
+      unread.loaded = true;
+      for (const chatId of Object.keys(record === 'absent' ? {} : (record.unread ?? {}))) {
+        if (!unread.clearedBeforeLoad.has(chatId)) {
+          unread.chats.add(chatId);
+        }
+      }
+      unread.clearedBeforeLoad.clear();
+      for (const session of this.#sessions.values()) {
+        if (session.projectId === projectId) {
+          this.#restoreUnread(session);
+        }
+      }
+    });
+    this.#unreadRecords.set(projectId, unread);
+    ref.start();
+    return unread;
+  }
+
+  /** Tell a bound chat machine what the unread record says (D9); `read` is its default, so only unread is sent. */
+  #restoreUnread(session: InternalSession): void {
+    if (session.projectId !== undefined && this.#unreadRecords.get(session.projectId)?.chats.has(session.chatId)) {
+      session.stateActorRef?.send({ type: 'unreadRestored' });
+    }
+  }
+
+  /** Record an unread decision once the chat's project is known; a chat with no project has no record. */
+  async #setUnreadWhenBound(
+    composer: Promise<ComposerBinding | undefined>,
+    chatId: string,
+    value: boolean,
+  ): Promise<void> {
+    let binding: ComposerBinding | undefined;
+    try {
+      binding = await awaitSettlement(
+        composer,
+        'This chat never found the project its unread mark belongs to.',
+        'COMPOSER_BINDING_TIMEOUT',
+      );
+    } catch {
+      // An unread mark nobody can write is not worth a rejection at its fire-and-forget callers.
+      return;
+    }
+    if (binding !== undefined) {
+      this.#setUnread(binding.projectId, chatId, value);
+    }
+  }
+
+  /** Hand a binding over only after a released predecessor's writes have landed. */
+  async #afterComposerDrain(chatId: string, binding: ComposerBinding): Promise<ComposerBinding> {
+    await this.#composerDrains.get(chatId);
+    return binding;
+  }
+
+  /** Let a released chat's restore and in-flight write land, then stop its record actor. */
+  async #drainComposer(session: InternalSession, drained: PromiseWithResolvers<void>): Promise<void> {
+    try {
+      await Promise.allSettled(session.composerWork);
+      await stopWhenWritesSettle(session.composerRecordRef);
+    } finally {
+      drained.resolve();
+      if (this.#composerDrains.get(session.chatId) === drained.promise) {
+        this.#composerDrains.delete(session.chatId);
+      }
+    }
+  }
+
+  /** The store's unread decision, written to the one record that holds it (D9). */
+  #setUnread(projectId: string, chatId: string, value: boolean): void {
+    const unread = this.#unreadRecord(projectId);
+    if (unread.chats.has(chatId) === value && (value || unread.loaded)) {
+      return;
+    }
+    if (value) {
+      unread.chats.add(chatId);
+      unread.clearedBeforeLoad.delete(chatId);
+    } else {
+      unread.chats.delete(chatId);
+      if (!unread.loaded) {
+        unread.clearedBeforeLoad.add(chatId);
+      }
+    }
+    unread.ref.send({ type: 'patch', fields: { unread: { [chatId]: value } } });
+  }
+
+  /** The project session that owns this chat's run accounting (R2). */
+  #sessionOwner(session: InternalSession): ProjectSessionActorRef | undefined {
+    return session.projectId === undefined ? undefined : this.#projectSessions.get(session.projectId);
+  }
+
+  /** Move one hydrated chat from a provisional focused project to its durable owner. */
+  #rebindSessionProject(session: InternalSession, projectId: string): void {
+    if (session.projectId === projectId) {
+      return;
+    }
+    const previousOwner = this.#sessionOwner(session);
+    if (session.lastState.phase === 'admitted' || session.lastState.phase === 'running') {
+      previousOwner?.send({ type: 'runSettled', chatId: session.chatId });
+    }
+    previousOwner?.send({ type: 'chatClosed', chatId: session.chatId });
+    session.projectId = projectId;
+    this.#bindSessionOwner(session);
+    session.lastState = { inFlight: 0, approvals: 0 };
+    this.#replayPersistedFailure(session);
+    this.#replayPersistedSettlement(session);
+    this.#syncChatState(session);
+    this.#restoreUnread(session);
+  }
+
+  #createSession(chatId: string, projectId: string | undefined): InternalSession {
     // Defensive aliases so closures bound to the AI SDK's internal scheduler
     // always read through `this.#deps` (the latest provider snapshot).
     const depsRef = (): ChatSessionDeps => this.#deps;
@@ -608,20 +1261,57 @@ export class ChatSessionStore {
     let session: InternalSession;
     let approvalWasPending = false;
 
-    const markUnreadIfUnattended = (): void => {
-      const documentIsActive =
-        typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
-      if (session.viewRefcount > 0 && documentIsActive) {
+    // `undefined` is a chat with no project: it has nowhere to keep a composer, so its record I/O fails.
+    const composer = Promise.withResolvers<ComposerBinding | undefined>();
+    let composerBound = false;
+    const bindComposer = (owner: string | undefined): void => {
+      if (composerBound) {
         return;
       }
-      void depsRef().setChatUnreadState(chatId, true);
+      composerBound = true;
+      if (owner === undefined) {
+        composer.resolve(undefined);
+        return;
+      }
+      const { client } = depsRef();
+      this.#unreadRecord(owner);
+      const binding: ComposerBinding = {
+        projectId: owner,
+        record: createComposerRecordStore(client, composerRecordPaths.chat(owner, chatId)),
+        chatAttachments: createChatAttachmentStore(client, owner, chatId),
+      };
+      composer.resolve(this.#afterComposerDrain(chatId, binding));
+    };
+    const recordStore = deferredRecordStore(composer.promise);
+    const composerRecordRef = createComposerRecordActor(recordStore);
+
+    const markUnreadIfUnattended = (): void => {
+      if (this.#focusedChatId === chatId && isDocumentActive()) {
+        return;
+      }
+      void this.#setUnreadWhenBound(composer.promise, chatId, true);
+    };
+
+    const readChatRow = async (id: string): Promise<ChatEntity | undefined> => {
+      try {
+        return await depsRef().getChat(id);
+      } catch (error) {
+        // An unreadable row still has a composer: bind it where the chat was opened, so its writes,
+        // promotion and deletion do not wait forever on a binding nothing else will settle.
+        bindComposer(session.projectId);
+        throw error;
+      }
     };
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: fromSafeAsync(async ({ input }) => {
-            const loadedChat = await depsRef().getChat(input.chatId);
+          loadChatActor: fromSafeAsync(async ({ input, signal }) => {
+            const loadedChat = await readChatRow(input.chatId);
+            signal.throwIfAborted();
+            if (this.#sessions.get(input.chatId) !== session) {
+              return { type: 'chatRetrieved', chat: undefined };
+            }
 
             if (!loadedChat) {
               if (session.durableRunId && session.durableRunState !== 'terminal') {
@@ -632,19 +1322,41 @@ export class ChatSessionStore {
               if (session.chat.messages.length === 0) {
                 session.chat.messages = [];
               }
+              // No row to name the owner: the chat is being created in the project it was acquired from.
+              bindComposer(session.projectId);
+              session.draftActorRef.send({ type: 'initializeFromChat' });
 
               return { type: 'chatRetrieved', chat: undefined };
             }
 
-            // Defensive guard: only seed messages from the loaded chat when
-            // the live `Chat` instance has not started accumulating its own
-            // (a brand-new chat that's already in-flight). Prevents the
-            // classic "load wipes in-flight messages" race.
-            if (session.chat.messages.length === 0) {
-              session.chat.messages = loadedChat.messages;
-            }
+            /* A focus switch renders the next chat before its project binding
+             * effect runs, so acquisition can briefly inherit the prior
+             * project's focus. The durable row is the first authoritative
+             * ownership fact; correct the provisional binding before a seeded
+             * or user run can report lifecycle to the wrong project. */
+            this.#rebindSessionProject(session, loadedChat.resourceId);
+            bindComposer(loadedChat.resourceId);
 
-            let hydratedChat = loadedChat;
+            /* Splice, never replace and never skip. The live `Chat` may already
+             * hold messages this load never saw — a brand-new chat that is
+             * already in-flight, a host reattach that rebuilt from the log, a
+             * reconciled durable user row — and overwriting them is the classic
+             * "load wipes in-flight messages" race. But *skipping* the load when
+             * they are there loses the other side: a session recreated by the
+             * shell's remount starts with an empty `Chat` and reads its history
+             * asynchronously, so a submit landing inside that read dropped every
+             * earlier turn for good — nothing reads the row twice, and a
+             * browser-placed chat has no reattach to rebuild it from the log.
+             * Ids are shared with the log's own derivation (P26), so keeping the
+             * row's messages this transcript does not already name can only add
+             * history, never a second copy of it. */
+            const inFlight = session.chat.messages;
+            const inFlightIds = new Set(inFlight.map((message) => message.id));
+            session.chat.messages = [
+              ...loadedChat.messages.filter((message) => !inFlightIds.has(message.id)),
+              ...inFlight,
+            ];
+
             const lastMessage = session.chat.messages.at(-1);
             const { startupRequest } = loadedChat;
             if (startupRequest) {
@@ -652,51 +1364,105 @@ export class ChatSessionStore {
                 lastMessage?.role === 'user' &&
                 lastMessage.id === startupRequest.messageId &&
                 lastMessage.metadata?.status === 'pending';
-              const consumedChat = await depsRef().consumeChatStartupRequest(input.chatId, startupRequest.id);
-              if (consumedChat) {
-                hydratedChat = consumedChat;
-              }
+              /* Eligibility is decided *before* the consume: the seed message
+               * lives only in the chat store's in-memory hold until a host logs
+               * the turn, so a loader that reloaded in between reads
+               * `messages: []` — and consuming there burned the request and
+               * dropped the prompt with no draft restore (F4c). */
+              if (isEligibleStartupRequest) {
+                /* The consume is one-shot, so from here the session owns the
+                 * request. Home → project navigation remounts the shell under
+                 * the sidebar row that is this chat's only view; without a hold
+                 * across the await the session was disposed mid-dispatch and
+                 * its replacement found the request already gone (F3). The hold
+                 * is freed by `#scheduleRunReleaseIfTerminal` once the request
+                 * settles — including the compose failure below (F4a). */
+                session.runHeld = true;
+                /* Nothing else can give this hold back: the request was never
+                 * started, so the lifecycle release never runs. A rejected
+                 * consume — it is a filesystem patch — left the session held
+                 * forever, undisposable and undrained (R1-F2). `retainDurableRun`
+                 * may have taken its own hold during the await; it is the only
+                 * other writer and it always sets `durableRunId` with it, so
+                 * that field tells this path's hold from theirs (R1-F5). */
+                const releaseSeedHold = (): void => {
+                  if (session.durableRunId === undefined) {
+                    session.runHeld = false;
+                  }
+                  this.#disposeIfUnreferenced(session);
+                };
+                const consumedChat = await depsRef()
+                  .consumeChatStartupRequest(input.chatId, startupRequest.id)
+                  .catch((error: unknown) => {
+                    releaseSeedHold();
+                    throw error;
+                  });
+                if (consumedChat) {
+                  session.draftActorRef.send({ type: 'initializeFromChat' });
+                  session.chat.messages = consumedChat.messages;
 
-              if (isEligibleStartupRequest && consumedChat) {
-                session.draftActorRef.send({ type: 'initializeFromChat', chat: consumedChat });
-                session.chat.messages = consumedChat.messages;
+                  /* This dispatch *is* the host stream for the chat's first turn.
+                   * Marked before it is sent, because the host registration that
+                   * would otherwise reattach lands in the same tick and would open
+                   * a second stream — a second relay session on rung 2, which a
+                   * capacity-1 daemon refuses. */
+                  session.seededDispatch = true;
+                  /* Through the turn's owner, like every other gesture: the
+                   * seeded turn takes a lease and must settle it. The consumed
+                   * row's execution rides with the gesture, because the
+                   * `chatRetrieved` event that assigns it to the machine is
+                   * only returned on the next line and the route's own agent
+                   * config is a render older still — without it the chat's
+                   * `acp` agent (or its pinned Tau host/model) is rebuilt from
+                   * the cookie and the first turn silently runs somewhere
+                   * else. The admission waits for the route to publish, so
+                   * being ahead of it is not a race any more. */
+                  const seedGesture: ChatTurnGesture = {
+                    kind: 'regenerate',
+                    execution: consumedChat.activeExecution,
+                  };
+                  /* The owner is bound by the route's effect, which has not
+                   * necessarily run yet on a chat acquired during the first
+                   * render. An optional chain here dropped the seeded turn
+                   * silently: request consumed, no lease, no banner, nothing on
+                   * reload (V3a). `#bindSessionOwner` flushes it instead, so the
+                   * seed is never lost — only late. */
+                  if (session.stateActorRef === undefined) {
+                    session.pendingSeedGesture = seedGesture;
+                  } else {
+                    session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+                  }
 
-                /* This dispatch *is* the host stream for the chat's first turn.
-                 * Marked before it is sent, because the host registration that
-                 * would otherwise reattach lands in the same tick and would open
-                 * a second stream — a second relay session on rung 2, which a
-                 * capacity-1 daemon refuses. */
-                session.seededDispatch = true;
-                persistenceActorRef.send({
-                  type: 'startRequest',
-                  request: { kind: 'regenerate' },
-                });
-
-                return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
+                  return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
+                }
+                releaseSeedHold();
               }
             }
 
-            const pendingTailRestore = buildPendingTailDraftRestore(session.chat.messages);
+            /* Healing a pending tail into the composer is for a turn *this load*
+             * found abandoned in the row. A message the live `Chat` was already
+             * carrying belongs to a request in flight right now, and yanking it
+             * back into the draft cancels the turn the person just sent. */
+            const pendingTailRestore =
+              inFlight.length > 0 ? undefined : buildPendingTailDraftRestore(session.chat.messages);
+            session.draftActorRef.send({ type: 'initializeFromChat' });
             if (pendingTailRestore) {
-              const draft = buildDraftFromUserMessage(pendingTailRestore.userMessage);
+              session.chat.messages = pendingTailRestore.truncatedMessages;
+              await restoreDraft(pendingTailRestore.userMessage);
               const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
                 messages: pendingTailRestore.truncatedMessages,
-                draft,
                 clearStartupRequestId: startupRequest?.id,
               });
               const healedChat = restoredChat ?? {
-                ...hydratedChat,
+                ...loadedChat,
                 messages: pendingTailRestore.truncatedMessages,
-                draft,
                 startupRequest: undefined,
               };
-              session.chat.messages = pendingTailRestore.truncatedMessages;
-              session.draftActorRef.send({ type: 'initializeFromChat', chat: healedChat });
 
               return { type: 'chatRetrieved', chat: healedChat };
             }
 
-            session.draftActorRef.send({ type: 'initializeFromChat', chat: hydratedChat });
+            this.#replayPersistedSettlement(session);
             // Reattach to any admitted queued/running/waiting run after a
             // reload. The host transport replays the whole durable log from
             // cursor 0 — nothing persists a cursor — and drops this
@@ -708,7 +1474,7 @@ export class ChatSessionStore {
                 void session.chat.resumeStream();
               });
             }
-            return { type: 'chatRetrieved', chat: hydratedChat };
+            return { type: 'chatRetrieved', chat: loadedChat };
           }),
           persistMessagesActor: fromSafeAsync(async ({ input }) => {
             await depsRef().patchChat(input.chatId, 'messages', stampMessageCreatedAt(input.messages));
@@ -738,26 +1504,59 @@ export class ChatSessionStore {
 
     const draftActorRef = createActor(
       draftMachine.provide({
-        actors: {
-          persistDraftActor: fromSafeAsync<void, { chatId: string; draft: MyUIMessage }>(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'draft', input.draft);
-          }),
-          persistEditDraftActor: fromSafeAsync<void, { chatId: string; messageId: string; draft: MyUIMessage }>(
-            async ({ input }) => {
-              await depsRef().setMessageEdit(input.chatId, input.messageId, input.draft);
-            },
-          ),
-          clearMessageEditActor: fromSafeAsync<void, { chatId: string; messageId: string }>(async ({ input }) => {
-            await depsRef().clearMessageEdit(input.chatId, input.messageId);
-          }),
-          resizeImageActor,
-        },
+        actors: { ...draftPersistenceFor(composerRecordRef, recordStore), resizeImageActor },
       }),
-      {
-        input: { chatId },
-        inspect,
-      },
+      { input: {}, inspect },
     );
+    /**
+     * Put a cancelled turn's message back in the composer, durably.
+     *
+     * The draft shows at once. Its attachments live in the chat's directory, so
+     * each is copied back beside the record (idempotent by hash) before the
+     * record is told to reference it; bytes that are already gone stay a
+     * placeholder (D19) rather than failing the restore.
+     */
+    const restoreDraft = async (userMessage: MyUIMessage): Promise<void> => {
+      const draft = buildDraftFromUserMessage(userMessage);
+      draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
+      const work = persistRestoredDraft();
+      session.composerWork.add(work);
+      try {
+        await work;
+      } finally {
+        session.composerWork.delete(work);
+      }
+    };
+    const persistRestoredDraft = async (): Promise<void> => {
+      const binding = await awaitSettlement(
+        composer.promise,
+        'This chat never found the project its draft is saved in. Reload the page and try again.',
+        'COMPOSER_BINDING_TIMEOUT',
+      );
+      if (binding === undefined) {
+        return;
+      }
+      const restored = draftActorRef.getSnapshot().context;
+      await Promise.all(
+        restored.draftAttachments.map(async (attachment) => {
+          try {
+            await binding.chatAttachments.copyTo(binding.record.attachments, attachment);
+          } catch (error) {
+            console.warn('[ChatSessionStore] a restored attachment is not on this device', error);
+          }
+        }),
+      );
+      const current = draftActorRef.getSnapshot().context;
+      composerRecordRef.send({
+        type: 'patch',
+        fields: { draft: buildDraftMessage(current.draftText, current.draftAttachments) },
+      });
+    };
+
+    // Subscribed before the record actor starts, so its read cannot resolve unheard (D7).
+    const recordLoadedSubscription = composerRecordRef.on('recordLoaded', ({ record }) => {
+      draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
+    });
 
     const chat = createChatInstance({
       chatId,
@@ -767,6 +1566,7 @@ export class ChatSessionStore {
           session.durableRunId = durableRunId;
           session.durableRunState = 'terminal';
           this.#statusTopics.get(chatId)?.emit();
+          this.#reconcileUnsettledRun(session, { runId: durableRunId, isAbort, isError });
         }
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
         if (!isAbort && !isDisconnect) {
@@ -816,50 +1616,35 @@ export class ChatSessionStore {
     // its `chat.messages = sanitized` mutation is observable to the deferred
     // `chat.sendMessage(B)` call when it fires on the next tick.
     const dispatchSubscription = persistenceActorRef.on('dispatchRequest', ({ request }) => {
-      const availableBody = request.body ? this.startRun(chatId, request.body) : session.activeRunBody;
+      /* The turn's owner composed this body; the only bodyless dispatch left is
+       * the persistence machine's own transparent auto-retry, which is a second
+       * *request* in the turn already running and reuses its body. */
+      const requestBody = request.body ? this.startRun(chatId, request.body) : session.activeRunBody;
 
       queueMicrotask(() => {
-        // A bodyless dispatch composes its body *now*, through the chat
-        // client's own admission path. It used to reuse a body snapshot the
-        // client had published at mount, whose `execution` named a workspace
-        // that a later `prepare` had already discarded: the run then executed
-        // against a workspace id no claim on disk carried, nothing ever marked
-        // the claim admitted, and the turn could never settle.
-        const composeBody = async (): Promise<Readonly<Record<string, unknown>> | undefined> => {
-          const compose = session.latestAgentBody ?? (await this.#waitForLatestAgentBody(session));
-          if (!compose) {
-            return undefined;
-          }
-          try {
-            return await compose();
-          } catch (error) {
-            console.error('[ChatSessionStore] durable workspace admission failed for a seeded dispatch', error);
-            return undefined;
-          }
-        };
-        const dispatch = async (): Promise<void> => {
-          const composed = availableBody ?? (await composeBody());
-          if (!composed || this.#sessions.get(chatId) !== session) {
+        const dispatch = (): void => {
+          if (this.#sessions.get(chatId) !== session) {
+            // Replaced: its successor owns the chat, and the request lifecycle
+            // went with the actor this session stopped.
             return;
           }
-          const requestBody = availableBody ?? this.startRun(chatId, composed);
-
-          // The chat-client always supplies `request.body` when it dispatches
-          // a verb it originated (submit / retry / regenerateTail / stop). Two
-          // request kinds are *bodyless* by construction:
-          //
-          //   - Startup-request hydration regenerate (see `loadChatActor`),
-          //     which may fire before any client has attached a body.
-          //   - `continue` (manual Try again on a transient-network banner via
-          //     `continueChat`, and the persistence machine's transparent
-          //     auto-retry in `retrying`), which resumes the in-flight stream
-          //     and has no producer that owns the per-turn agent payload.
-          //
-          // Every wire call must still carry the Tau wire shape's top-level
-          // `agent` block (see `chatTurnRequestSchema`), so we fall back to the
-          // latest body the chat-client published via `setLatestAgentBody`. This
-          // keeps the `agent` invariant true for every transport call, not just
-          // the verbs that originated with an explicit body.
+          if (requestBody === undefined) {
+            /* A dispatch with no body used to return silently, leaving
+             * `requestLifecycle` in `invoking` forever with no banner — and,
+             * since F3, holding the session with it (F4a). End the request. */
+            persistenceActorRef.send({
+              type: 'setPersistedError',
+              error: parseErrorForPersistence(new Error('No agent configuration is available for this chat.')),
+            });
+            persistenceActorRef.send({
+              type: 'requestFinished',
+              messages: chat.messages,
+              isAbort: false,
+              isError: true,
+              isDisconnect: false,
+            });
+            return;
+          }
           switch (request.kind) {
             case 'send': {
               void chat.sendMessage(request.message, { body: requestBody });
@@ -877,30 +1662,28 @@ export class ChatSessionStore {
                 return;
               }
               const originalMessage = chat.messages[messageIndex]!;
-              chat.messages = [...chat.messages.slice(0, messageIndex), buildEditedMessage(originalMessage, request)];
+              chat.messages = [...chat.messages.slice(0, messageIndex), editedMessage(originalMessage, request)];
               void chat.regenerate({ body: requestBody });
               return;
             }
 
-            case 'retry': {
-              const next = buildRetryMessages(chat.messages, request);
-              if (!next) {
-                return;
-              }
-              chat.messages = next;
-              void chat.regenerate({ body: requestBody });
-              return;
-            }
-
-            // Resume the exact admitted run without slicing chat.messages. The
-            // transport decides whether this attaches to a browser-host log or
-            // the API's resumable stream.
+            /* Resume the exact admitted run without slicing chat.messages.
+             * Whether this turn could be resumed at all was decided by the
+             * chat's admission, which is the only owner that knows; reaching a
+             * second verdict here is how one refusal came to be answered with
+             * a replay of the same failure. */
             case 'continue': {
+              /* The one-shot request is only ever consumed by a browser-host
+               * stream. Arming it on a placement that cannot read it leaves it
+               * set for a later stream this dispatch never asked for. */
+              if (isBrowserAgentHostPlaced(chatId)) {
+                requestBrowserAgentHostResume(chatId);
+              }
               void chat.resumeStream({ body: requestBody });
             }
           }
         };
-        void dispatch();
+        dispatch();
       });
     });
 
@@ -944,14 +1727,10 @@ export class ChatSessionStore {
       'restoreCancelledDraft',
       async ({ userMessage, truncatedMessages }) => {
         resetMilestonePersistTracking();
-        const draft = buildDraftFromUserMessage(userMessage);
         chat.messages = truncatedMessages;
-        draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
         try {
-          await depsRef().commitCancelledDraftRestore(chatId, {
-            messages: truncatedMessages,
-            draft,
-          });
+          await restoreDraft(userMessage);
+          await depsRef().commitCancelledDraftRestore(chatId, { messages: truncatedMessages });
         } catch (error) {
           const persistenceError =
             error instanceof Error ? error : new Error('Failed to restore cancelled draft', { cause: error });
@@ -1018,12 +1797,7 @@ export class ChatSessionStore {
         }
       }
 
-      // Track per-turn cost aggregated across `data-usage` parts.
-      const totalCost = aggregateUsageCost(chat.messages);
-      if (totalCost !== session.usage?.totalCost) {
-        session.usage = { totalCost, lastUpdatedAt: Date.now() };
-        this.#usageTopics.get(chatId)?.emit();
-      }
+      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterStatus = chat['~registerStatusCallback'](() => {
@@ -1038,14 +1812,17 @@ export class ChatSessionStore {
         }
         this.#statusTopics.get(chatId)?.emit();
       }
+      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterError = chat['~registerErrorCallback'](() => {
+      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
 
     persistenceActorRef.start();
     draftActorRef.start();
+    composerRecordRef.start();
 
     // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
@@ -1053,8 +1830,17 @@ export class ChatSessionStore {
     session = {
       chatId,
       chat,
+      projectId,
+      /* Bound below, once the record exists: `#bindSessionOwner` is the single
+       * place a chat is opened on its project session (I23). */
+      stateActorRef: undefined,
+      lastState: { inFlight: 0, approvals: 0 },
       persistenceActorRef,
       draftActorRef,
+      composerRecordRef,
+      composer: composer.promise,
+      bindComposer,
+      composerWork: new Set(),
       viewRefcount: 1,
       runHeld: false,
       durableRunId: undefined,
@@ -1063,15 +1849,16 @@ export class ChatSessionStore {
       seededDispatch: false,
       activeRunBody: undefined,
       status: chat.status,
-      usage: undefined,
-      latestAgentBody: undefined,
-      latestAgentBodyWaiters: new Set(),
+      placement: undefined,
+      pendingSeedGesture: undefined,
+      turnSubscriptions: [],
       dispose: () => {
-        for (const resolve of session.latestAgentBodyWaiters) {
-          resolve(undefined);
+        for (const subscription of session.turnSubscriptions) {
+          subscription.unsubscribe();
         }
-        session.latestAgentBodyWaiters.clear();
+        session.turnSubscriptions = [];
         dispatchSubscription.unsubscribe();
+        recordLoadedSubscription.unsubscribe();
         stopSubscription.unsubscribe();
         finishedSubscription.unsubscribe();
         stoppedSubscription.unsubscribe();
@@ -1086,6 +1873,7 @@ export class ChatSessionStore {
     };
 
     lifecycleSubscription = persistenceActorRef.subscribe((snapshot) => {
+      this.#syncChatState(session);
       const idle = snapshot.matches({ requestLifecycle: 'idle' });
       if (!idle) {
         requestLifecycleWasActive = true;
@@ -1098,12 +1886,242 @@ export class ChatSessionStore {
       this.#scheduleRunReleaseIfTerminal(session);
     });
 
+    /* The chat's state machine is a child of the *project session*, never of
+     * this store: every project-scoped resource dies with its session (I23).
+     * Absent a live session — the home route has chats too — the store keeps
+     * its flags and nothing subscribes to a state row. */
+    this.#bindSessionOwner(session);
+
     // Kick off chat hydration only after the session record exists. The load
     // actor may dispatch a startup run, whose non-view hold must be able to
     // reference the fully initialised session.
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
+    this.#restoreUnread(session);
 
     return session;
+  }
+
+  /**
+   * Hand the chat's machine what changed, and only what changed.
+   *
+   * One place reads the store's facts; the machine owns what they mean. Token
+   * deltas never get here — the message callback fires per part, and what it
+   * sends is a batched count (F8, A38).
+   *
+   * @param session - The chat whose facts moved.
+   */
+  #syncChatState(session: InternalSession): void {
+    const { lastState, stateActorRef } = session;
+    /* Run accounting is not gated on the chat machine: the project session has
+     * to know a run started even where no `chat-session` exists yet, because
+     * `busy` is what stops a policy closing a project mid-run (I24). */
+    const tools = countToolParts(session.chat.messages);
+    if (
+      tools.inFlight !== lastState.inFlight ||
+      tools.approvals !== lastState.approvals ||
+      tools.toolName !== lastState.toolName
+    ) {
+      lastState.inFlight = tools.inFlight;
+      lastState.approvals = tools.approvals;
+      lastState.toolName = tools.toolName;
+      stateActorRef?.send({ type: 'toolParts', ...tools });
+    }
+    this.#syncRunPhase(session);
+    if (session.durableRunState !== lastState.durable) {
+      lastState.durable = session.durableRunState;
+      if (session.durableRunState !== undefined) {
+        stateActorRef?.send({ type: 'durableRunState', state: session.durableRunState });
+      }
+    }
+    const snapshot = session.persistenceActorRef.getSnapshot();
+    const lifecycle = (['invoking', 'retrying', 'stopping'] as const).find((phaseName) =>
+      snapshot.matches({ requestLifecycle: phaseName }),
+    );
+    if (lifecycle !== lastState.lifecycle) {
+      lastState.lifecycle = lifecycle;
+      if (lifecycle !== undefined) {
+        stateActorRef?.send({ type: 'requestLifecycle', phase: lifecycle });
+      }
+    }
+  }
+
+  /**
+   * Tell the chat's session actor about a terminal run its log never settled
+   * (C6, V10).
+   *
+   * The reload case: the tab that ran the turn closed before the revision root
+   * answered, so the log holds the run's terminal lifecycle and no settlement,
+   * and `finishing` would wait for an attestation nobody is going to write.
+   * The actor refuses this for a turn it admitted itself — that one settles
+   * through its own `settleTurn` — so this only ever reaches an adopted run.
+   *
+   * @param session - The chat whose run just reached a terminal state.
+   * @param outcome - The run the log named and how this page saw it end.
+   */
+  #reconcileUnsettledRun(
+    session: InternalSession,
+    outcome: Readonly<{ runId: string; isAbort: boolean; isError: boolean }>,
+  ): void {
+    if (getHostTurnSettlement(session.chatId)?.runId === outcome.runId) {
+      return;
+    }
+    session.stateActorRef?.send({
+      type: 'reconcileSettlement',
+      runId: outcome.runId,
+      outcome: outcome.isAbort ? 'cancelled' : outcome.isError ? 'failed' : 'completed',
+    });
+  }
+
+  /** Route one host-attested outcome to the chat that owns it. */
+  #observeHostTurnSettlement(event: HostTurnSettlement): void {
+    const session = this.#sessions.get(event.chatId);
+    const stateActorRef = session?.stateActorRef;
+    if (
+      session !== undefined &&
+      stateActorRef !== undefined &&
+      typeof stateActorRef.getSnapshot === 'function' &&
+      stateActorRef.getSnapshot().matches({ run: 'idle' })
+    ) {
+      this.#replayPersistedSettlement(session);
+      return;
+    }
+    switch (event.type) {
+      case 'turn.finalized': {
+        stateActorRef?.send({
+          type: 'turnFinalizedObserved',
+          runId: event.runId,
+          turnId: event.turnId,
+          ...(event.branch === undefined ? {} : { branch: event.branch }),
+        });
+        break;
+      }
+      case 'turn.failed': {
+        stateActorRef?.send({
+          type: 'turnFailedObserved',
+          runId: event.runId,
+          turnId: event.turnId,
+          reason: event.reason,
+        });
+        break;
+      }
+      case 'turn.conflicted': {
+        stateActorRef?.send({ type: 'turnConflictedObserved', runId: event.runId, turnId: event.turnId });
+        break;
+      }
+    }
+  }
+
+  /** Restore a terminal machine state from the chat log that supplied its transcript. */
+  #replayPersistedSettlement(session: InternalSession): void {
+    const event = getHostTurnSettlement(session.chatId);
+    const { stateActorRef } = session;
+    if (event === undefined || stateActorRef === undefined || !stateActorRef.getSnapshot().matches({ run: 'idle' })) {
+      return;
+    }
+    stateActorRef.send({ type: 'runLifecycle', phase: 'admitted', runId: event.runId });
+    switch (event.type) {
+      case 'turn.finalized': {
+        stateActorRef.send({
+          type: 'turnFinalizedObserved',
+          runId: event.runId,
+          turnId: event.turnId,
+          ...(event.branch === undefined ? {} : { branch: event.branch }),
+        });
+        if (event.branch !== undefined) {
+          stateActorRef.send({ type: 'turnFinalized', branch: event.branch });
+        }
+        break;
+      }
+      case 'turn.failed': {
+        stateActorRef.send({
+          type: 'turnFailedObserved',
+          runId: event.runId,
+          turnId: event.turnId,
+          reason: event.reason,
+        });
+        break;
+      }
+      case 'turn.conflicted': {
+        stateActorRef.send({ type: 'turnConflictedObserved', runId: event.runId, turnId: event.turnId });
+        break;
+      }
+    }
+    stateActorRef.send({ type: 'runLifecycle', phase: 'completed', runId: event.runId });
+  }
+
+  /**
+   * Replay a failure this chat carries from an earlier session (P59, D32).
+   *
+   * The SDK status of a rehydrated chat is `ready`, so `#syncRunPhase` never
+   * reports the failure the record still holds and the chat's machine — the one
+   * status source — would say `idle` about a run that failed. This says it once,
+   * at bind, and never over a live run. No `runSettled` goes with it: a
+   * historical failure is not a run this session admitted.
+   *
+   * @param session - The chat that just got its machine.
+   */
+  #replayPersistedFailure(session: InternalSession): void {
+    if (session.status === 'streaming' || session.status === 'submitted') {
+      return;
+    }
+    const failure = session.chat.error ?? session.persistenceActorRef.getSnapshot().context.persistedError;
+    if (failure === undefined) {
+      return;
+    }
+    session.lastState.phase = 'failed';
+    session.stateActorRef?.send({ type: 'runLifecycle', phase: 'failed', reason: failure.message });
+  }
+
+  /**
+   * Move the chat's run phase forward once, telling both owners.
+   *
+   * @param session - The chat whose run moved.
+   */
+  #syncRunPhase(session: InternalSession): void {
+    const { lastState } = session;
+    const settled = session.status === 'ready' && (lastState.phase === 'admitted' || lastState.phase === 'running');
+    /* A run the person stopped is cancelled, not completed (P63): the last
+     * lifecycle this session saw is `stopping` exactly when *Stop* or the
+     * sidebar's *Close* asked for it, and a `completed` here would move the row
+     * to `Done` and mark it unread for work nobody finished. */
+    const next = settled
+      ? lastState.lifecycle === 'stopping'
+        ? 'cancelled'
+        : 'completed'
+      : runPhaseOf(session.status);
+    if (next === undefined || next === lastState.phase) {
+      return;
+    }
+    const admission = admissionEnvelopeSchema.safeParse(session.activeRunBody?.['admission']);
+    const runId = admission.success
+      ? admission.data.idempotencyKey
+      : (getBoundDurableChatRunId(session.chatId) ?? session.durableRunId);
+    /* A reattach that found nothing to resume still drives the SDK through
+     * `submitted → ready`. OPENING a run on that left the chat's machine in
+     * `run.finishing` waiting for a settlement no run can send — the sidebar's
+     * permanent "Finishing…" (F4b). A run phase has to name a run, so a chat
+     * that reattached with no run identity opens none and stays idle. Only the
+     * opening: a settlement always reports, because the run it settles was
+     * already reported open and its identity is gone by then — `startRun`
+     * stamps an admission key the release clears before the SDK's `ready`
+     * arrives (R3-F2) — and because a reattach that refuses outright settles
+     * as `failed` about a chat that cannot stream (R1-F1). */
+    if (runId === undefined && session.reattachedHostId !== undefined && opensRun(next)) {
+      return;
+    }
+    lastState.phase = next;
+    /* The session counts runs so *Close* knows to ask (A35, I24). The run
+     * reports to the chat's OWN project, wherever the person is now. */
+    this.#sessionOwner(session)?.send({
+      type: opensRun(next) ? 'runStarted' : 'runSettled',
+      chatId: session.chatId,
+    });
+    session.stateActorRef?.send({
+      type: 'runLifecycle',
+      phase: next,
+      ...(runId === undefined ? {} : { runId }),
+      ...(next === 'failed' && session.chat.error ? { reason: session.chat.error.message } : {}),
+    });
   }
 
   #withAdmission(body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -1117,15 +2135,6 @@ export class ChatSessionStore {
         version: 1,
         idempotencyKey: generatePrefixedId(idPrefix.request),
       }),
-    });
-  }
-
-  async #waitForLatestAgentBody(session: InternalSession): Promise<LatestAgentBodyFactory | undefined> {
-    if (session.latestAgentBody) {
-      return session.latestAgentBody;
-    }
-    return new Promise((resolve) => {
-      session.latestAgentBodyWaiters.add(resolve);
     });
   }
 
@@ -1152,8 +2161,18 @@ export class ChatSessionStore {
 
     session.dispose();
     session.persistenceActorRef.stop();
+    // A debounced keystroke is handed to the record before the draft stops, and the record outlives it until written.
+    session.draftActorRef.send({ type: 'flushNow' });
     session.draftActorRef.stop();
+    // A chat released before its row loaded still belongs to the project it was opened in; its flush lands there.
+    session.bindComposer(session.projectId);
+    const drained = Promise.withResolvers<void>();
+    this.#composerDrains.set(session.chatId, drained.promise);
+    void this.#drainComposer(session, drained);
+    /* The session owns the chat machine; asking it to let go is what stops it. */
+    this.#sessionOwner(session)?.send({ type: 'chatClosed', chatId: session.chatId });
     this.#sessions.delete(session.chatId);
+    clearChatTurnServices(session.chatId);
     clearLedger(session.chatId);
     this.#disposeChatTopics(session.chatId);
     this.#refreshSnapshot();
@@ -1187,7 +2206,7 @@ export class ChatSessionStore {
   }
 
   #disposeChatTopics(chatId: string): void {
-    for (const bucket of [this.#chatTopics, this.#statusTopics, this.#usageTopics]) {
+    for (const bucket of [this.#chatTopics, this.#statusTopics]) {
       const topic = bucket.get(chatId);
       if (topic) {
         topic.dispose();

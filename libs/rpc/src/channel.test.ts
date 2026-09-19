@@ -1446,6 +1446,23 @@ describe('createChannelClient / createChannelServer', () => {
     expect(readyResolvedAt).toBeGreaterThanOrEqual(serverStartedAt);
   });
 
+  it('should reject ready when no hello arrives within the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const portClient = wrapMessagePort<unknown>(channel.port2);
+      portClient.start?.();
+      // No server on port1, so no `lh` frame is ever emitted.
+      const client = createChannelClient({ port: portClient, sessionKey: 'silent' });
+      const pendingReady = client.ready;
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await expect(pendingReady).rejects.toThrow('sent no hello');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // F10 — pre-ready calls queue and flush after hello arrives
   it('queues pre-ready calls until the server hello frame is received', async () => {
     const portServer = wrapMessagePort<unknown>(channel.port1);

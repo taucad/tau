@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { modelSupportsInput } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import type { ConfigService } from '@nestjs/config';
-import { modelList } from '#api/models/model.constants.js';
+import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
 import { ModelService } from '#api/models/model.service.js';
+import { gatewayModelRoutes } from '#api/providers/provider-gateway.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import type { Environment } from '#config/environment.config.ts';
 
@@ -21,7 +22,7 @@ const cappedModelIds = [
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
   'google-gemini-3.1-pro',
-  'google-gemini-3.7-flash',
+  'google-gemini-3.8-flash',
   'google-gemini-3.5-flash-lite',
   'google-gemini-3.5-flash',
   'together-glm-5.1',
@@ -35,12 +36,37 @@ const cappedModelIds = [
   'moonshot-kimi-k3',
 ] as const;
 
+/** Every model Tau sends a PDF to; each is on a proven Anthropic or OpenAI codec (blueprint D20, Finding 13). */
+const pdfInputModelIds = [
+  'anthropic-claude-fable-5.1',
+  'anthropic-claude-fable-5',
+  'anthropic-claude-opus-5',
+  'anthropic-claude-opus-4.8',
+  'anthropic-claude-sonnet-5',
+  'anthropic-claude-sonnet-4.6',
+  'anthropic-claude-haiku-4.5',
+  'openai-gpt-6-astra',
+  'openai-gpt-5.6-sol',
+  'openai-gpt-5.6-terra',
+  'openai-gpt-5.6-luna',
+  'openai-gpt-5.5',
+];
+
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
 
 const createModelService = () => {
   const providerService = {} satisfies Partial<ProviderService>;
   const configService = {
-    get: vi.fn().mockReturnValue(false),
+    get: vi.fn((key: string) => {
+      if (key === 'OLLAMA_ENABLED' || key === 'TAU_CLOUD_ENABLED') {
+        return false;
+      }
+      if (key === 'GOOGLE_VERTEX_AI_CREDENTIALS') {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Google service-account wire keys
+        return { client_email: 'test@example.com', private_key: 'test-key', project_id: 'test-project' };
+      }
+      return 'test-key';
+    }),
   } satisfies Pick<ConfigService<Environment>, 'get'>;
 
   return new ModelService(
@@ -68,9 +94,52 @@ describe('modelList', () => {
       expect(model.support?.modalities?.output.length, model.id).toBeGreaterThan(0);
     }
   });
+
+  it('declares PDF input on exactly the proven Anthropic and OpenAI codec models', () => {
+    const pdfModelIds = getCloudCatalogEntries()
+      .filter((model) => modelSupportsInput(model.support, 'pdf'))
+      .map((model) => model.id);
+
+    expect(pdfModelIds).toEqual(pdfInputModelIds);
+  });
+
+  it('never declares PDF input outside a proven codec, a vision model, or on Vertex AI', () => {
+    const wireByRouteId = new Map(gatewayModelRoutes().map((route) => [route.routeId, route]));
+
+    for (const model of getCloudCatalogEntries().filter((entry) => modelSupportsInput(entry.support, 'pdf'))) {
+      // Provider PDF support rasterises pages, so it is only offered on a vision-capable model.
+      expect(modelSupportsInput(model.support, 'image'), model.id).toBe(true);
+      // Vertex AI stays ungated until the live document check in the blueprint's manual row 12 passes.
+      expect(model.provider.id, model.id).not.toBe('vertexai');
+      if (isModelListEntryEnabled(model)) {
+        expect(wireByRouteId.get(model.id)?.wire, model.id).toBeOneOf([
+          'anthropic',
+          'openai-responses',
+          'openai-completions',
+        ]);
+      }
+    }
+  });
 });
 
 describe('ModelService', () => {
+  it('advertises only configured providers and keeps direct-only providers out of Cloud', async () => {
+    const configService = {
+      get: vi.fn((key: string) => {
+        if (key === 'TAU_CLOUD_ENABLED') {
+          return true;
+        }
+        return key === 'CEREBRAS_API_KEY' ? 'test-key' : false;
+      }),
+    } satisfies Pick<ConfigService<Environment>, 'get'>;
+    const service = new ModelService({} as ProviderService, configService as unknown as ConfigService<Environment>);
+
+    expect(await service.getModels()).toEqual([]);
+    configService.get.mockImplementation((key: string) => (key === 'CEREBRAS_API_KEY' ? 'test-key' : false));
+    const models = await service.getModels();
+    expect(models.every((model) => model.provider.id === 'cerebras')).toBe(true);
+  });
+
   it('returns the 200K effective context window for all capped model IDs', async () => {
     const service = createModelService();
     await service.getModels();
@@ -91,7 +160,7 @@ describe('ModelService', () => {
       provider: { id: 'anthropic', name: 'Anthropic' },
       support: {
         toolChoice: false,
-        modalities: { input: ['text', 'image'], output: ['text'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
       },
       details: {
         family: 'claude',
@@ -122,7 +191,7 @@ describe('ModelService', () => {
       provider: { id: 'anthropic', name: 'Anthropic' },
       support: {
         toolChoice: false,
-        modalities: { input: ['text', 'image'], output: ['text'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
       },
       details: {
         family: 'claude',
@@ -162,14 +231,15 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
-  it('recommends Gemini 3.7 Flash instead of the Gemini 3.5 models', async () => {
+  it('recommends Gemini 3.8 Flash instead of the Gemini 3.5 models', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
     const listedModelIds = listedModels.map((model) => model.id);
-    const newModelIds = ['google-gemini-3.7-flash', 'google-gemini-3.5-flash-lite'];
+    const newModelIds = ['google-gemini-3.8-flash', 'google-gemini-3.5-flash-lite'];
 
     expect(listedModelIds).toEqual(expect.arrayContaining([...newModelIds, 'google-gemini-3.5-flash']));
-    expect(modelList.vertexai['gemini-3.7-flash']?.recommended).toBe(true);
+    expect(modelList.vertexai['gemini-3.7-flash']).toBeUndefined();
+    expect(modelList.vertexai['gemini-3.8-flash']?.recommended).toBe(true);
     expect(modelList.vertexai['gemini-3.5-flash-lite']?.recommended).toBe(false);
     expect(modelList.vertexai['gemini-3.5-flash']?.recommended).toBe(false);
   });

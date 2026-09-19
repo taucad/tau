@@ -3,7 +3,7 @@
  *
  * Defines the typed `@taucad/rpc` {@link RuntimeProtocol} contract
  * carried by every runtime transport. Calls (`initialize`, `export`,
- * `exportModel`, `snapshotSource`, `transcode`, `cleanup`) are correlated by the channel envelope;
+ * `exportModel`, `evaluateModel`, `snapshotSource`, `transcode`, `cleanup`) are correlated by the channel envelope;
  * notifies cover the
  * autonomous client→worker commands and worker→client events.
  */
@@ -19,6 +19,7 @@ import type {
 } from '#types/runtime.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
+import type { ParameterResolutionOptions } from '@taucad/parameters';
 
 // =============================================================================
 // Two-Layer Geometry Transport Types
@@ -112,6 +113,10 @@ export type InitializeMemoryHandle = {
   signalBuffer?: SignalBufferHandle;
   geometryPoolBuffer?: GeometryPoolHandle;
   fileSystemPort?: MessagePortLike;
+  /** Private host-minted compute-store authority for this runtime lease. */
+  computeStorePort?: MessagePortLike;
+  /** Host-selected reuse mode; a supplied store port always selects durable. */
+  computeBindingMode?: 'off' | 'memory' | 'durable';
   /** Explicitly mirror runtime spans into the worker Performance Timeline. */
   devtoolsTelemetry?: boolean;
   /** Host-compiled modules available to kernel initializers by absolute URL. */
@@ -131,6 +136,21 @@ export type RuntimePreviewIdentity = {
 };
 
 /**
+ * Producer identity carried by every telemetry batch.
+ *
+ * `label` alone does not discriminate producers: one session recycles kernel
+ * clients and opens several geometry units, and `RuntimeTracer` restarts
+ * `spanId` at `0` per instance. Consumers key spans on `instance` + `spanId`.
+ * @public
+ */
+export type TelemetryOrigin = {
+  /** Process role, e.g. `worker`, `utility`, `renderer`, `main`, `node`, `cli`. */
+  label: string;
+  /** Per-producer nonce, minted once where the dispatcher is wired. */
+  instance: string;
+};
+
+/**
  * Completed telemetry span emitted by the runtime worker.
  * @public
  */
@@ -140,6 +160,32 @@ export type TelemetryEntry = {
   duration: number;
   detail?: Record<string, unknown>;
   workerTimeOrigin: number;
+};
+
+/**
+ * One flush of telemetry: the spans, who produced them, and that producer's
+ * clock anchor. `origin` and `epoch` are batch fields — they are never sent
+ * per span — and a consumer that keeps spans beyond one batch folds them in
+ * itself ({@link TelemetrySpanRecord}).
+ * @public
+ */
+export type TelemetryBatch = {
+  readonly entries: readonly TelemetryEntry[];
+  readonly origin: TelemetryOrigin;
+  /** Absolute Unix-epoch value of this realm's `performance.now()` zero, taken at flush. Milliseconds. */
+  readonly epoch: number;
+};
+
+/**
+ * One span outside its batch: the shape the JSONL sink writes, one line each,
+ * and the shape every consumer that retains spans across batches stores. The
+ * identity of a span is `origin.instance` plus its `spanId`, never `spanId`
+ * alone, and `epoch + startTime` is its absolute time.
+ * @public
+ */
+export type TelemetrySpanRecord = TelemetryEntry & {
+  readonly origin: TelemetryOrigin;
+  readonly epoch: number;
 };
 
 /**
@@ -252,10 +298,7 @@ type RuntimeGeometryComputedArgsWire = {
   readonly renderId: RenderId;
 };
 type RuntimeParametersResolvedArgsWire = {
-  readonly result: KernelResult<{
-    readonly defaultParameters: Record<string, unknown>;
-    readonly jsonSchema: unknown;
-  }>;
+  readonly result: KernelResult<unknown>;
   readonly renderId: RenderId;
 };
 type RuntimeLogArgsWire = { readonly entry: unknown };
@@ -272,7 +315,16 @@ export type RuntimeExportArgs = {
   readonly content?: RuntimeContentInput;
 };
 
-/** Direct transcoder request over caller-owned source artifacts. @public */
+/**
+ * Direct transcoder request over caller-owned source artifacts.
+ *
+ * Input buffers remain caller-owned: the runtime never transfers or detaches
+ * them. Worker-backed transports structured-clone the files when dispatching
+ * this request. Callers must not mutate file names or bytes while the call is
+ * pending.
+ *
+ * @public
+ */
 export type RuntimeTranscodeArgs = {
   readonly from: FileExtension;
   readonly to: FileExtension;
@@ -299,6 +351,22 @@ export type RuntimeExportModelArgs = {
   readonly content?: RuntimeContentInput;
 };
 
+/** Request-owned CAD evaluation without autonomous preview publication. @public */
+export type RuntimeEvaluateModelArgs = {
+  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
+  readonly file: { readonly path: string; readonly filename: string };
+  readonly parameters: Record<string, unknown>;
+  readonly options?: Record<string, unknown>;
+  readonly content?: RuntimeContentInput;
+};
+
+/** Request-scoped parameter resolution without selecting preview state. @public */
+export type RuntimeResolveParametersArgs = {
+  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
+  readonly file: { readonly path: string; readonly filename: string };
+  readonly resolution?: ParameterResolutionOptions;
+};
+
 /** Request-scoped source-closure collection without geometry evaluation. @public */
 export type RuntimeSourceSnapshotArgs = {
   readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
@@ -315,6 +383,11 @@ export type RuntimeOpenFileArgs = RuntimePreviewIdentity & {
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
+  /**
+   * Render for display only: the result reaches the geometry event but never becomes the published
+   * artifact, so exports and retained handles keep answering the last committed render (D2).
+   */
+  readonly transient?: boolean;
 };
 
 /**
@@ -462,8 +535,7 @@ export const runtimeProtocolNotifyNames = [
 ] as const;
 
 /**
- * Request/response call name inventory — exactly six calls
- * (`initialize`, `export`, `exportModel`, `snapshotSource`, `transcode`, `cleanup`). The legacy `render` call is deleted; the
+ * Request/response call name inventory — exactly eight calls. The legacy `render` call is deleted; the
  * autonomous `openFile` notify + `geometryComputed` correlation by
  * `renderId` replaces it (R18, mirrors LSP `didOpen` + diagnostics).
  * @public
@@ -472,10 +544,15 @@ export const runtimeProtocolCallNames = [
   'initialize',
   'export',
   'exportModel',
+  'evaluateModel',
+  'resolveParameters',
   'snapshotSource',
   'transcode',
   'cleanup',
 ] as const;
+
+/** Consumer-pulled, flow-controlled stream inventory; the runtime declares none. @public */
+export const runtimeProtocolListenNames = [] as const;
 
 /**
  * Typed `@taucad/rpc` protocol contract for the kernel runtime worker.
@@ -495,9 +572,6 @@ export const runtimeProtocolCallNames = [
  *   autonomous events (`parametersResolved`, `geometryComputed`,
  *   `errorEvent`, `progress`, `activeKernelChanged`, `stateChanged`,
  *   `log`, `logBatch`, `telemetry`, `capabilitiesUpdated`, `kernelEvent`).
- * - `listens`: reserved for future consumer-pulled streams (e.g. file
- *   watch, log tail). Empty in v5 because every streaming flow lands as
- *   a notify.
  *
  * Binary delivery uses {@link WithTransferables} sidecars on the
  * `export` call result and the `geometryComputed` notify args. The
@@ -527,6 +601,15 @@ export type RuntimeProtocol = {
       readonly args: RuntimeExportModelArgs;
       readonly result: ExportGeometryResult;
       readonly wireResult: RuntimeExportResultWire;
+    };
+    readonly evaluateModel: {
+      readonly args: RuntimeEvaluateModelArgs;
+      /** Physical RPC result; RuntimeWorkerClient materializes it into HashedGeometryResult. */
+      readonly result: HashedGeometryResultTransport;
+    };
+    readonly resolveParameters: {
+      readonly args: RuntimeResolveParametersArgs;
+      readonly result: GetParametersResult;
     };
     readonly snapshotSource: {
       readonly args: RuntimeSourceSnapshotArgs;
@@ -577,14 +660,12 @@ export type RuntimeProtocol = {
       readonly args: { readonly entries: readonly LogEntry[] };
       readonly wireArgs: RuntimeLogBatchArgsWire;
     };
-    readonly telemetry: {
-      readonly args: { readonly entries: readonly TelemetryEntry[] };
-    };
+    readonly telemetry: { readonly args: TelemetryBatch };
     readonly capabilitiesUpdated: {
       readonly args: { readonly capabilities: CapabilitiesManifest };
       readonly wireArgs: RuntimeCapabilitiesUpdatedArgsWire;
     };
     readonly kernelEvent: { readonly args: RuntimeKernelMessageArgs };
   };
-  readonly listens: Record<string, never>;
+  readonly listens: Record<never, never>;
 };

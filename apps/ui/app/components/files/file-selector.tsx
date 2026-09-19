@@ -268,7 +268,7 @@ function BreadcrumbNav({
 
   // Auto-scroll to show the current (last) breadcrumb when path changes
   useEffect(() => {
-    if (currentCrumbRef.current && scrollContainerRef.current) {
+    if (currentPath === crumbs.at(-1)?.path && currentCrumbRef.current && scrollContainerRef.current) {
       currentCrumbRef.current.scrollIntoView({ behavior: 'instant', inline: 'end', block: 'nearest' });
     }
   }, [currentPath]);
@@ -277,13 +277,13 @@ function BreadcrumbNav({
     <div className='flex items-center text-sm'>
       <OmniScroller
         ref={scrollContainerRef}
-        className='mx-2 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'
+        className='mx-1 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'
       >
         {/* "Files" root button - inside scrollable area */}
         <button
           type='button'
           className={cn(
-            'my-1.5 shrink-0 snap-start rounded-xs px-1 py-0.5 hover:bg-muted',
+            'my-1 shrink-0 snap-start rounded-xs px-1 py-0.5 hover:bg-muted',
             currentPath === '' && 'font-medium text-foreground',
             currentPath !== '' && 'text-muted-foreground',
           )}
@@ -297,7 +297,7 @@ function BreadcrumbNav({
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1;
           return (
-            <div key={crumb.path} className='my-1.5 flex shrink-0 snap-start items-center gap-0.5'>
+            <div key={crumb.path} className='my-1 flex shrink-0 snap-start items-center gap-0.5'>
               <ChevronRight className='size-3 text-muted-foreground' />
               <button
                 ref={isLast ? currentCrumbRef : undefined}
@@ -707,7 +707,7 @@ export function FileSelector({
         ) : selectedFile ? (
           <FileExtensionIcon filename={selectedFile} className='size-4 shrink-0' />
         ) : undefined}
-        <span className={cn('truncate', !selectedFile && 'text-muted-foreground')}>
+        <span className={cn('truncate', !selectedFile && 'font-normal text-muted-foreground')}>
           {selectedFileName ?? placeholder}
         </span>
       </div>

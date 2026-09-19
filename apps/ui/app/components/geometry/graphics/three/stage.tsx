@@ -13,6 +13,7 @@ import { useGeometryBounds } from '#components/geometry/graphics/three/use-geome
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 import { useGraphicsSelector, useRenderFrame, useRenderFrameRetarget, useSetRenderFrame } from '#hooks/use-graphics.js';
 import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
+import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 
 export type StageOptions = {
   /** Fractional outer margin applied by projected-corner fitting. */
@@ -55,8 +56,7 @@ export function Stage({
   const sectionSnapshotRef = React.useRef(createSectionViewSafeSnapshotStore());
 
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
-  const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
-  const environmentPreset = useGraphicsSelector((state) => state.context.environmentPreset);
+  const geometryKey = useGraphicsSelector(selectPresentedGeometryKey);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
   // Gate the e2e test bridge behind the debug flag so it is never mounted or
@@ -67,7 +67,10 @@ export function Stage({
   const sectionView = useSectionView();
   const renderFrame = useRenderFrame();
   const setRenderFrame = useSetRenderFrame();
-  const initializedGeometryRef = React.useRef<{ key: string | undefined; initialized: boolean }>({
+  const initializedGeometryRef = React.useRef<{
+    key: string | undefined;
+    initialized: boolean;
+  }>({
     key: undefined,
     initialized: false,
   });
@@ -94,11 +97,18 @@ export function Stage({
     setRenderFrame({
       anchorFrameId: renderFrame.anchorFrameId,
       originMeters: [geometryCenter.x, geometryCenter.y, geometryCenter.z],
-      metersPerRenderUnit: resolveMetersPerRenderUnit({ characteristicLengthMeters: geometryRadius * 2 }),
+      metersPerRenderUnit: resolveMetersPerRenderUnit({
+        characteristicLengthMeters: geometryRadius * 2,
+      }),
     });
   }, [geometryCenter, geometryKey, geometryRadius, renderFrame.anchorFrameId, setRenderFrame]);
 
-  useCameraFraming({ geometryRadius, geometryCenter, geometryBounds, stageOptions });
+  useCameraFraming({
+    geometryRadius,
+    geometryCenter,
+    geometryBounds,
+    stageOptions,
+  });
 
   return (
     <group {...properties}>
@@ -125,7 +135,6 @@ export function Stage({
       </group>
       <Lights
         enableMatcap={enableMatcap}
-        environmentPreset={environmentPreset}
         sceneRadius={geometryRadius > 0 ? geometryRadius / renderFrame.metersPerRenderUnit : 0}
         upDirection={upDirection}
       />

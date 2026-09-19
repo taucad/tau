@@ -1,10 +1,11 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import { util as zodUtility } from 'zod';
 import { createAgentSession } from '#harness/session.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import { createPortableId, transportFailureFromProviderMessages } from '#harness/session-record.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import {
+  createPortableId,
+  transportFailureDiagnosticType,
+  transportFailureFromProviderMessages,
+} from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentToolChoice,
   AgentLogEvent,
@@ -13,14 +14,16 @@ import type {
   JsonValue,
   LogEventBase,
   ProviderMessage,
+  RunFailureDetail,
   RunTrigger,
   RunLifecycleState,
   UserProviderMessage,
 } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentLiveEvent,
+  AgentLiveEventPayload,
   DurableEventLog,
+  HostRunFailure,
   HostRunSnapshot,
   InterruptApprovalPort,
   InterruptRequest,
@@ -28,20 +31,22 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { EventLogBatch } from '#log/event-log-appender.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ClientContext } from '#harness/cad-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { externalAgentStopCodes } from '#launchers/node/agent-wire.js';
 
 type SessionEvent = AgentLogEvent extends infer Event
   ? Event extends LogEventBase
     ? Omit<Event, keyof LogEventBase>
     : never
   : never;
+
+type HostSettlementEvent = Extract<
+  SessionEvent,
+  { readonly type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed' }
+>;
 
 /** One client-generated turn admitted to the portable host. @public */
 type TauAgentTurnRequestBase = {
@@ -56,11 +61,11 @@ type TauAgentTurnRequestBase = {
  *
  * Absent, the host composes a Tau admission and runs its own loop. Present, the
  * host routes the turn to the runner registered for `kind` — an ACP adapter on
- * a daemon, a Paseo daemon session in a browser tab — *before* composing any
- * Tau admission, so an external turn carries no Tau model, prompt or tool grant.
+ * a daemon, say — *before* composing any Tau admission, so an external turn
+ * carries no Tau model, prompt or tool grant.
  *
- * Extra fields are the runner's own selection state (a Paseo `connectionId`,
- * say). They ride the marker on the turn's user message and come back on resume.
+ * Extra fields are the runner's own selection state. They ride the marker on
+ * the turn's user message and come back on resume.
  *
  * @public
  */
@@ -89,7 +94,7 @@ export type ExternalAgentLogEvent = SessionEvent;
  * @public
  */
 export type ExternalAgentTurn = {
-  /** Agent id the client selected, e.g. `claude`, `codex`, or a Paseo agent. */
+  /** Agent id the client selected, e.g. `claude` or `codex`. */
   readonly agentId: string;
   /** The full selection, including any runner-specific fields. */
   readonly agent: ExternalRunKind;
@@ -97,21 +102,146 @@ export type ExternalAgentTurn = {
   readonly runId: string;
   /** The new user turn; absent when resuming one a restart left unanswered. */
   readonly message?: UserProviderMessage | undefined;
+  /**
+   * The admission the client sent, for the context an external agent can use.
+   *
+   * Nothing a Tau turn *negotiates* applies here — the agent brings its own
+   * model, tools and login (X6) — but what the client **composed** does: the
+   * CAD system prompt, the skill index and the editor snapshot are the same
+   * facts a Tau turn works from, and an external agent that never receives them
+   * is answering CAD questions with no kernel knowledge at all (V12). Absent on
+   * a resumed turn, which sends no prompt.
+   */
+  readonly config?: TauAgentAdmissionConfig | undefined;
   /** Durable state a previous attempt remembered — a session id, a cursor, a branch. */
   readonly state?: JsonObject | undefined;
   /** Every durable event recorded for this chat so far. */
   readonly history: readonly AgentLogEvent[];
+  /** Aborted by `cancel`, or by the host closing. */
+  readonly signal: AbortSignal;
+  /** Publish one non-durable text/reasoning delta before its durable envelope settles. */
+  readonly publishLive?: ((event: AgentLiveEventPayload) => Promise<void>) | undefined;
+  /**
+   * Append replaceable session state after this turn settles.
+   *
+   * Unlike {@link append}, this capability may be retained by a session-scoped
+   * external runner. The host still owns chat fencing, ordering and event
+   * identity; the runner may use it only for state that ACP reports outside a
+   * prompt, such as commands, plans and configuration.
+   */
+  readonly appendSession?: ((events: readonly ExternalAgentLogEvent[]) => Promise<void>) | undefined;
   /** Append durable events; each publishes on the host's event stream. */
   append(events: readonly ExternalAgentLogEvent[]): Promise<void>;
   /** Persist state that must survive a restart. Merges into what is there. */
   remember(state: JsonObject): Promise<void>;
-  /** Durably pause for an approval and await the decision (PH13 / OQ-X4). */
-  approve(request: {
-    readonly prompt: string;
-    readonly payload?: JsonValue | undefined;
-  }): Promise<InterruptResolution['outcome']>;
-  /** Aborted by `cancel`, or by the host closing. */
-  readonly signal: AbortSignal;
+  /**
+   * Durably pause for an approval and await the decision (PH13 / OQ-X4).
+   *
+   * The whole resolution, not just its outcome: a request that offered a list
+   * of options is answered by *one* of them, and a runner that has to
+   * re-derive the choice from `approved` substitutes its own guess for the
+   * human's decision.
+   */
+  approve(request: { readonly prompt: string; readonly payload?: JsonValue | undefined }): Promise<InterruptResolution>;
+};
+
+/**
+ * What one external turn reported beyond the messages it appended.
+ *
+ * The runner never writes `run.lifecycle` itself — the host owns it — so a turn
+ * that ended short has to be able to *say* so, or the host records the only
+ * thing it can see (the promise resolved) as `completed` (V6).
+ *
+ * @public
+ */
+export type ExternalTurnOutcome = {
+  /** Why the agent stopped, in its own protocol's vocabulary (ACP's `max_tokens`, …). */
+  readonly stopReason?: string | undefined;
+};
+
+/**
+ * Terminal lifecycle state for one external stop reason.
+ *
+ * Only `end_turn` is a completed turn. An agent that hit its output ceiling,
+ * refused, or exhausted its own request budget stopped with work outstanding,
+ * and recording that as `completed` tells every later reader — the transcript,
+ * a resume, the user — that the turn finished (V6). A reason this host has
+ * never heard of resolves to `completed`: D14 keeps an older reader able to read
+ * a newer writer, and the reason itself is recorded verbatim either way.
+ */
+const externalStopStates = new Map<string, RunLifecycleState>([
+  ['end_turn', 'completed'],
+  ['cancelled', 'cancelled'],
+  ['max_tokens', 'failed'],
+  ['refusal', 'failed'],
+  ['max_turn_requests', 'failed'],
+]);
+
+/** User-safe reason for a stop that ended the turn short. */
+const externalStopDetail = new Map<string, string>([
+  ['max_tokens', 'The agent reached its own output limit before finishing this turn.'],
+  ['refusal', 'The agent declined to answer this turn.'],
+  ['max_turn_requests', 'The agent used its whole request budget for this turn.'],
+]);
+
+/**
+ * The durable terminal record for a throw that escaped the session.
+ *
+ * A coded refusal (`GatewayModelTransportError`, an external runner's error)
+ * reaches here only when it was raised outside the model stream — the stream's
+ * own wrapper turns a refusal into an assistant diagnostic the session reads
+ * back. Record whatever code, status and structured `details` the throw carries
+ * so this record is never poorer than that one.
+ *
+ * @param error - Whatever ended the run.
+ * @returns The failure detail to persist.
+ */
+const codedFailureDetail = (error: unknown): RunFailureDetail => {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- reading optional own properties off a thrown value.
+  const fields = error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
+  const status = typeof fields?.['status'] === 'number' ? fields['status'] : undefined;
+  const details = zodUtility.isObject(fields?.['details']) ? fields['details'] : undefined;
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    ...(typeof fields?.['code'] === 'string' ? { code: fields['code'] } : {}),
+    ...(status === undefined ? {} : { status }),
+    ...(details === undefined ? {} : { details }),
+  };
+};
+
+/**
+ * The login record one thrown refusal carries, if it carries one.
+ *
+ * A runner refuses with a coded error (`EXTERNAL_AGENT_AUTH_REQUIRED`,
+ * `EXTERNAL_AGENT_MODEL_UNAVAILABLE`, …) and may hang the facts a surface needs
+ * on it — the login methods, a verification URL and code. The host is
+ * deliberately incurious about the payload's shape: it records what it was
+ * given, and the surfaces that render it own its schema (`agent-wire.ts`). The
+ * code itself, and any stop `details`, ride {@link codedFailureDetail}.
+ *
+ * @param error - Whatever the external runner threw.
+ * @returns The login record to append before the failure.
+ */
+const externalRefusalOf = (
+  error: unknown,
+): {
+  readonly login: Omit<SessionEvent & { readonly type: 'interrupt.recorded' }, 'interruptId'> | undefined;
+} => {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- reading one optional own property off a thrown value.
+  const fields = error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
+  const payload = fields?.['login'];
+  return {
+    login:
+      typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+        ? {
+            type: 'interrupt.recorded',
+            phase: 'requested',
+            reason: error instanceof Error ? error.message : 'This agent needs you to sign in.',
+            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a refusal payload is JSON by construction of its wire schema.
+            payload: payload as JsonValue,
+          }
+        : undefined,
+  };
 };
 
 /** Runs external agents of one kind. @public */
@@ -121,14 +251,58 @@ export type ExternalAgentPort = {
    *
    * Optional, because not every runner can enumerate. A daemon's ACP adapters
    * are resolved locally and known up front, so listing them buys a cheap
-   * refusal before any durable event is written. A Paseo agent lives on the
-   * user's daemon behind an E2EE relay, and the only way to "list" it is to
-   * open the session — so that port omits this and refuses inside `run`, where
-   * it genuinely knows.
+   * refusal before any durable event is written. A runner that can only find
+   * out by opening its session omits this and refuses inside `run`, where it
+   * genuinely knows.
    */
   list?(): readonly string[];
   /** Execute one turn; resolve when the agent's turn ends, throw to fail the run. */
-  run(turn: ExternalAgentTurn): Promise<void>;
+  run(turn: ExternalAgentTurn): Promise<ExternalTurnOutcome | undefined>;
+  /**
+   * End whatever this chat holds open — a live protocol session, a process.
+   *
+   * Called when leadership is relinquished, when the host closes, and before a
+   * rewound turn, whose new history the agent's own session must not carry.
+   * Optional, because a runner that keeps nothing between turns has nothing to
+   * close.
+   */
+  closeChat?(chatId: string): Promise<void>;
+};
+
+/**
+ * The chat-scoped record one external session is resumed from (VSC3).
+ *
+ * It rides the marker on the chat's most recent external user message, so it
+ * needs no event type of its own, and it is read per *agent*: switching agents
+ * inside a chat must open the new agent's own session rather than hand it a
+ * session id another vendor minted.
+ *
+ * @public
+ */
+export type ExternalSessionState = {
+  readonly agentId: string;
+  /** The vendor session a later turn resumes; absent until one has been remembered. */
+  readonly acpSessionId?: string | undefined;
+  /** Model the session was last set to. */
+  readonly model?: string | undefined;
+  /**
+   * Revision mode the session was opened in (`direct` or `candidate`).
+   *
+   * The *host's* record of how it prepared that turn, never the agent's claim:
+   * VI11 keeps the revision authority with the host, and this field is what a
+   * later turn reads back to know which tree the vendor session was rooted in.
+   */
+  readonly mode?: string | undefined;
+  /** Revision this session's working tree is based on. */
+  readonly baseRevisionId?: string | undefined;
+  /**
+   * Absolute directory the session was opened against (V19).
+   *
+   * A candidate turn runs in a checkout of its own, so a session remembered
+   * against a directory this turn does not run in cannot be resumed — the
+   * conversation would be about files the new session cannot see.
+   */
+  readonly cwd?: string | undefined;
 };
 
 /** Marker distinguishing an externally executed turn in the durable log. */
@@ -190,11 +364,50 @@ const externalTurnOf = (
   return undefined;
 };
 
+/**
+ * The session one agent last held in this chat, across every run in its log.
+ *
+ * Deliberately *not* {@link externalTurnOf}: that one answers "is the last run
+ * external and unfinished?" and stops at the run boundary, which is why every
+ * turn used to start a fresh vendor session. This one answers "what has this
+ * chat already opened with this agent?", so turn two continues turn one.
+ *
+ * @param events - The chat's durable events.
+ * @param agentId - Agent this turn selected; a different agent gets its own session.
+ * @returns The record the runner resumes from, or `undefined` for a first turn.
+ */
+const externalSessionOf = (
+  events: readonly AgentLogEvent[],
+  agentId: string,
+): (JsonObject & ExternalSessionState) | undefined => {
+  /* Reduced, not raw: `remember` records the session id by *replacing* the
+   * user message's envelope, so only the reducer's view carries it. */
+  const messages = reduceEventLog(events);
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role !== 'user') {
+      continue;
+    }
+    const marker = externalMarker(message);
+    /* The most recent marker that actually *names* a session: only the turn
+     * that opened one records it, and every later turn of the same session
+     * carries a bare marker. */
+    if (!marker || marker.agentId !== agentId || typeof marker['acpSessionId'] !== 'string') {
+      continue;
+    }
+    const { kind: _kind, runKind: _runKind, ...state } = marker;
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `agentId` is checked above and every other field is optional.
+    return state as JsonObject & ExternalSessionState;
+  }
+  return undefined;
+};
+
 /** Exact per-admission model, prompt, tool, and client context. @public */
 export type TauAgentAdmissionConfig = {
   readonly systemPrompt: string;
   readonly systemPromptBlocks?: CreateAgentSessionOptions['systemPromptBlocks'];
-  readonly model: AgentSessionModel;
+  /** Absent, the host's own default row runs the turn; a host with neither refuses it. */
+  readonly model?: AgentSessionModel | undefined;
   readonly toolChoice: AgentToolChoice;
   readonly allowedTools?: readonly string[] | undefined;
   readonly snapshot?: JsonValue | undefined;
@@ -218,7 +431,13 @@ export type TauAgentTurnRequest = TauAgentTurnRequestBase &
 export type CreateTauAgentHostOptions = {
   readonly systemPrompt: string;
   readonly systemPromptBlocks?: CreateAgentSessionOptions['systemPromptBlocks'];
-  readonly model: AgentSessionModel;
+  /**
+   * Default model row for turns whose admission names none. Optional: a host
+   * whose every client sends its own row configures no fallback, and a `start`
+   * that then names none is refused with `HOST_MODEL_UNAVAILABLE` rather than
+   * run against a made-up model.
+   */
+  readonly model?: AgentSessionModel | undefined;
   readonly modelTransport: ModelTransport;
   readonly toolRegistry: ToolRegistry;
   /** Opens the project-root `.tau/chats/<chatId>/events.jsonl` appender. */
@@ -236,10 +455,12 @@ export type CreateTauAgentHostOptions = {
   readonly safeguardThresholds?: CreateAgentSessionOptions['safeguardThresholds'];
   readonly onSafeguardOutcome?: CreateAgentSessionOptions['onSafeguardOutcome'];
   readonly allowImageBlocks?: CreateAgentSessionOptions['allowImageBlocks'];
+  /** Reads the chat attachment bytes each run materialises (D15). */
+  readonly attachments?: CreateAgentSessionOptions['attachments'];
   readonly onCompaction?: CreateAgentSessionOptions['onCompaction'];
   readonly onLiveEvent?: ((event: AgentLiveEvent) => void | Promise<void>) | undefined;
   /**
-   * External runners by run kind (`acp` on a daemon, `paseo` in a browser tab).
+   * External runners by run kind (today: `acp` on a daemon).
    *
    * One routing point for every placement: `admit` dispatches on
    * `config.agent.kind` before it composes a Tau admission, and `resume`
@@ -265,7 +486,7 @@ export type TauAgentHost = {
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
   /** Queue steering on an active run. */
   steer(input: { readonly runId: string; readonly message: string }): Promise<void>;
-  /** Cancel an active run without creating an approval request. */
+  /** Cancel an active run without creating an approval request, then wait out its settlement. */
   cancel(input: { readonly runId: string }): Promise<void>;
   /** Rebuild the current run projection from W1. */
   snapshot(chatId: string): Promise<HostRunSnapshot>;
@@ -274,13 +495,28 @@ export type TauAgentHost = {
     readonly chatId: string;
     readonly cursor: number;
     readonly limit: number;
+    /** Serialized-byte budget for the page; unbounded by bytes when absent. */
+    readonly maxBytes?: number | undefined;
   }): Promise<EventLogBatch>;
+  /** Append one revision-authority settlement through this chat's fenced writer. */
+  recordSettlement(input: {
+    readonly chatId: string;
+    readonly runId: string;
+    readonly event: HostSettlementEvent;
+  }): Promise<void>;
   /** Bind one chat to the generation token minted by its current Web Lock lease. */
   assumeLeadership(chatId: string, generation: string): void;
   /** Abort one chat and close its cached appender after leadership loss. */
   relinquish(chatId: string): Promise<void>;
   /** Stop active work and close every opened appender. */
   close(): Promise<void>;
+};
+
+/** One admitted external turn, and the detached promise that settles it. */
+type ExternalRun = {
+  readonly chatId: string;
+  readonly controller: AbortController;
+  completion?: Promise<void> | undefined;
 };
 
 type ActiveRun = {
@@ -318,15 +554,286 @@ const isInterruptPayload = (value: JsonValue | undefined): value is InterruptPay
   );
 };
 
-const lifecycleFor = (events: readonly AgentLogEvent[], runId: string): RunLifecycleState => {
+/**
+ * This run's latest durable lifecycle state, or `undefined` when it has none.
+ *
+ * A run id that appears only on a *settlement* is not a run: the page can write
+ * `turn.failed` under a run id whose admission never happened (an abandoned
+ * lease), and defaulting that to `admitted` made the host treat the phantom as
+ * live — it refused the real admission, fabricated a `completed` record for a
+ * run that never ran, and let a replayed `start` resume it instead of admitting
+ * it, losing the user's message. Every caller now handles `undefined` as
+ * "no such run".
+ *
+ * @param events - Every durable record of the chat.
+ * @param runId - The run being asked about.
+ * @returns Its latest lifecycle state, or `undefined` when it has no record.
+ */
+const lifecycleFor = (events: readonly AgentLogEvent[], runId: string): RunLifecycleState | undefined => {
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]!;
     if (event.runId === runId && event.type === 'run.lifecycle') {
       return event.state;
     }
   }
-  return 'admitted';
+  return undefined;
 };
+
+/**
+ * The chat's current run: the last one the log actually admitted.
+ *
+ * Read off the last `run.lifecycle` record rather than the log's tail, because
+ * the tail can be a settlement under a run that was never admitted. One chat
+ * runs one run at a time, so that record names both the run and its state.
+ *
+ * @param events - Every durable record of the chat.
+ * @returns The run and its state, or `undefined` when nothing was admitted.
+ */
+const currentRun = (
+  events: readonly AgentLogEvent[],
+): { readonly runId: string; readonly state: RunLifecycleState } | undefined => {
+  const lifecycle = events.findLast((event) => event.type === 'run.lifecycle');
+  return lifecycle?.type === 'run.lifecycle' ? { runId: lifecycle.runId, state: lifecycle.state } : undefined;
+};
+
+/** Settlement records may never precede their run's admission; see {@link appendExternal}. */
+const settlementTypes = new Set<AgentLogEvent['type']>(['turn.finalized', 'turn.conflicted', 'turn.failed']);
+
+/**
+ * What one chat's run is doing, as the host decides legality by.
+ *
+ * `none` is a chat with no run in memory and none in its log; `terminal` is one
+ * whose last run ended. The three in between are the host's own in-memory
+ * stages: `reserved` before a session exists, `admitted` once it does, and
+ * `running`/`paused` from the durable lifecycle.
+ *
+ * @internal
+ */
+export type HostRunState = 'none' | 'reserved' | 'admitted' | 'running' | 'paused' | 'terminal';
+
+/**
+ * What one *run* is, as far as appending to it goes.
+ *
+ * A different subject from {@link HostRunState}, which is about the **chat**:
+ * `admit`, `resume` and `cancel` are asked of whatever run the chat is on, and
+ * `settle` is asked of one named run. Mixing the two is what let the table
+ * claim `admit: ['none','terminal']` per run while the guard beneath it refused
+ * any run id with a lifecycle record at all.
+ *
+ * @internal
+ */
+export type HostRunAppendState =
+  /** No lifecycle record: nothing admitted this run. */
+  | 'unadmitted'
+  /** Admitted and not ended. */
+  | 'open'
+  /** Ended, and no settlement recorded yet. */
+  | 'terminal'
+  /** Ended and settled: exactly one settlement, which is the invariant (V10). */
+  | 'settled';
+
+/**
+ * One operation whose legality the *chat's* run decides.
+ *
+ * `cancel` is deliberately absent. It names a run id rather than a chat, and is
+ * decided from the in-memory run that id resolves to — `activeRunFor` returns
+ * nothing for a run this host is not driving, and cancelling nothing is a
+ * no-op. A row here would be data no reader consults, which is the state the
+ * whole table was in before.
+ *
+ * @internal
+ */
+export type HostRunOperation = 'admit' | 'resume';
+
+/**
+ * The one place `admit` and `resume` agree about the chat's run.
+ *
+ * These decided for themselves, from different readings of the same facts: a
+ * `lifecycleFor` that defaulted to `admitted`, a reservation map and an
+ * `activeBy*` map. Their disagreement is what let a settlement be recorded
+ * under a run that was never admitted and then made the host read that record
+ * as proof the run *was* admitted.
+ *
+ * @internal
+ */
+const chatRunOperationLegality: Readonly<Record<HostRunOperation, ReadonlySet<HostRunState>>> = {
+  admit: new Set<HostRunState>(['none', 'terminal']),
+  /* `terminal` is admissible because a run the gateway *refused* never reached
+   * the provider: its history is whole and the host continues it at the one
+   * call it could not fund. Which terminal runs those are is
+   * {@link isResumableRunFailure}'s knowledge, not the ledger's. */
+  resume: new Set<HostRunState>(['admitted', 'running', 'paused', 'terminal']),
+};
+
+/**
+ * The states a run accepts a settlement from.
+ *
+ * `unadmitted` is the refusal that matters (`SETTLEMENT_WITHOUT_RUN`): a
+ * `turn.failed` for a run with no `run.lifecycle` is a record of a lease the
+ * page abandoned, not of a turn. `settled` refuses a *second, differing*
+ * settlement; an identical one is a no-op, which is what makes at-least-once
+ * delivery from the page safe (V10).
+ *
+ * @internal
+ */
+const runSettlementLegality: ReadonlySet<HostRunAppendState> = new Set<HostRunAppendState>(['open', 'terminal']);
+
+/**
+ * Whether one chat-level operation is legal against a run in this state.
+ *
+ * @internal
+ * @param operation - The operation being attempted.
+ * @param state - The chat's current run state.
+ * @returns `true` when the ledger allows it.
+ */
+export const isHostRunOperationLegal = (operation: HostRunOperation, state: HostRunState): boolean =>
+  chatRunOperationLegality[operation].has(state);
+
+/**
+ * Whether a settlement may be appended to a run in this state.
+ *
+ * @internal
+ * @param state - The run's append state.
+ * @returns `true` when the ledger allows it.
+ */
+export const isHostSettlementLegal = (state: HostRunAppendState): boolean => runSettlementLegality.has(state);
+
+/**
+ * The state a run's durable lifecycle puts it in.
+ *
+ * @internal
+ * @param lifecycle - The run's latest lifecycle state, or `undefined` when it has none.
+ * @returns The ledger state that lifecycle implies.
+ */
+export const hostRunStateOfLifecycle = (lifecycle: RunLifecycleState | undefined): HostRunState => {
+  // ponytail: named instead of `terminalStates.has`, whose `Set#has` never narrows the union.
+  if (lifecycle === 'admitted' || lifecycle === 'running' || lifecycle === 'paused') {
+    return lifecycle;
+  }
+  return lifecycle === undefined ? 'none' : 'terminal';
+};
+
+/** What one run's records add up to. @internal */
+export type HostRunLedgerEntry = Readonly<{
+  lifecycle: RunLifecycleState | undefined;
+  /** The settlement already recorded for this run, if any. */
+  settlement: AgentLogEvent | undefined;
+  state: HostRunAppendState;
+}>;
+
+/** One chat's whole run ledger, folded from its log. @internal */
+export type HostRunLedger = Readonly<{
+  /** The run the chat is on: the last one the log admitted. */
+  chat: Readonly<{ runId: string; state: HostRunState }> | undefined;
+  runs: ReadonlyMap<string, HostRunLedgerEntry>;
+}>;
+
+/** What one run's records make it, in the append ledger's vocabulary. */
+const appendStateOf = (entry: {
+  readonly lifecycle: RunLifecycleState | undefined;
+  readonly settlement: AgentLogEvent | undefined;
+}): HostRunAppendState => {
+  if (hostRunStateOfLifecycle(entry.lifecycle) === 'none') {
+    return 'unadmitted';
+  }
+  if (entry.settlement !== undefined) {
+    return 'settled';
+  }
+  return hostRunStateOfLifecycle(entry.lifecycle) === 'terminal' ? 'terminal' : 'open';
+};
+
+/**
+ * One fold over the chat's log, consulted at the append boundary (V12).
+ *
+ * Every legality question the host asks of durable facts is answered from here,
+ * so a change to what a record means is a change to one function rather than a
+ * surprise in one of four readers.
+ *
+ * @internal
+ * @param events - Every durable record of the chat.
+ * @returns The chat's current run and the per-run append states.
+ */
+export const runLedgerOf = (events: readonly AgentLogEvent[]): HostRunLedger => {
+  const runs = new Map<string, { lifecycle: RunLifecycleState | undefined; settlement: AgentLogEvent | undefined }>();
+  let chatRunId: string | undefined;
+  for (const event of events) {
+    const entry = runs.get(event.runId) ?? { lifecycle: undefined, settlement: undefined };
+    if (event.type === 'run.lifecycle') {
+      entry.lifecycle = event.state;
+      chatRunId = event.runId;
+    } else if (settlementTypes.has(event.type)) {
+      entry.settlement ??= event;
+    }
+    runs.set(event.runId, entry);
+  }
+  const folded = new Map<string, HostRunLedgerEntry>();
+  for (const [runId, entry] of runs) {
+    folded.set(runId, { ...entry, state: appendStateOf(entry) });
+  }
+  const chatLifecycle = chatRunId === undefined ? undefined : folded.get(chatRunId)?.lifecycle;
+  return {
+    chat: chatRunId === undefined ? undefined : { runId: chatRunId, state: hostRunStateOfLifecycle(chatLifecycle) },
+    runs: folded,
+  };
+};
+
+/**
+ * The refusal one illegal ledger operation answers with.
+ *
+ * @param input - The operation, the chat and run it named, and the state it met.
+ * @returns The coded error the caller throws.
+ */
+const runOperationRefusal = (input: {
+  readonly operation: HostRunOperation;
+  readonly chatId: string;
+  readonly runId: string | undefined;
+  readonly state: HostRunState;
+}): Error =>
+  Object.assign(
+    new Error(
+      input.state === 'none'
+        ? `Chat ${input.chatId} has no run to ${input.operation}.`
+        : `Chat ${input.chatId} has a ${input.state} run; ${input.operation} is refused.`,
+    ),
+    { code: 'RUN_ADMISSION_CONFLICT' },
+  );
+
+/**
+ * The refusal an illegal settlement append answers with.
+ *
+ * @param input - The chat, the run and the append state the settlement met.
+ * @returns The coded error the writer throws.
+ */
+const settlementRefusal = (input: {
+  readonly chatId: string;
+  readonly runId: string;
+  readonly state: HostRunAppendState;
+}): Error =>
+  input.state === 'settled'
+    ? Object.assign(new Error(`Run ${input.runId} in chat ${input.chatId} is already settled differently.`), {
+        code: 'SETTLEMENT_CONFLICT',
+      })
+    : Object.assign(
+        new Error(`Run ${input.runId} was never admitted in chat ${input.chatId}; its settlement cannot be recorded.`),
+        { code: 'SETTLEMENT_WITHOUT_RUN' },
+      );
+
+/**
+ * Whether two settlement records say the same thing.
+ *
+ * At-least-once delivery from the page is what makes "every admitted run
+ * settles exactly once" reachable at all, so a repeat of the same fact has to
+ * be a no-op rather than a refusal (V10).
+ *
+ * @param stored - The settlement already in the log.
+ * @param body - The settlement being appended, without its envelope.
+ * @returns `true` when the append would add nothing.
+ */
+const isSameSettlement = (stored: AgentLogEvent, body: SessionEvent): boolean =>
+  Object.entries(body).every(
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- index read over a closed union of record shapes.
+    ([key, value]) => JSON.stringify((stored as unknown as Record<string, unknown>)[key]) === JSON.stringify(value),
+  );
 
 const internalKind = (message: ProviderMessage): string | undefined => {
   const metadata = message.metadata?.tauInternal;
@@ -375,6 +882,7 @@ const lastInterruptResolution = (events: readonly AgentLogEvent[], runId: string
   return {
     interruptId: event.interruptId,
     outcome,
+    ...(typeof payload['optionId'] === 'string' ? { optionId: payload['optionId'] } : {}),
     ...('response' in payload ? { payload: payload['response'] } : {}),
   };
 };
@@ -387,7 +895,186 @@ const pendingToolInputs = (messages: readonly ProviderMessage[]) => {
   );
 };
 
+/**
+ * The failed call's marker, rewritten as the tool-use turn it actually was.
+ *
+ * A stream that fails *after* it completed a tool call leaves the marker mid
+ * history — the tool's own rows follow it — so there is no prefix to rewind to.
+ * Left as it stands, its transport-failure diagnostic is what every later
+ * `snapshot()` reports as this chat's failure, and the re-issued call tells the
+ * model its own last turn errored. Rewriting it keeps the work that settled and
+ * drops the failure: the message the stream would have written had it simply
+ * ended after that call.
+ *
+ * @param marker - The last assistant message of the failed run.
+ * @param messages - The reduced history the resume starts from.
+ * @returns The replacement envelope, or `undefined` when no tool call settled.
+ */
+const settledMarkerEnvelope = (
+  marker: ProviderMessage,
+  messages: readonly ProviderMessage[],
+): ProviderMessage | undefined => {
+  const settled = new Set(messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])));
+  const isCall = (block: JsonValue): boolean => isJsonObject(block) && block['type'] === 'toolCall';
+  /* A call with no durable result is one the stream never finished writing. It
+   * has no `tool-input` row either, and a provider refuses an unanswered call,
+   * so it leaves with the failure. */
+  const blocks: readonly JsonValue[] = Array.isArray(marker.content) ? marker.content : [];
+  const content = blocks.filter(
+    (block) => !isCall(block) || (isJsonObject(block) && typeof block['id'] === 'string' && settled.has(block['id'])),
+  );
+  if (!content.some((block) => isCall(block))) {
+    return undefined;
+  }
+  const { errorMessage: _failed, diagnostics, ...metadata } = marker.metadata ?? {};
+  const kept = diagnostics?.filter(
+    (diagnostic) => !isJsonObject(diagnostic) || diagnostic['type'] !== transportFailureDiagnosticType,
+  );
+  return {
+    ...marker,
+    content,
+    metadata: { ...metadata, stopReason: 'toolUse', ...(kept?.length ? { diagnostics: kept } : {}) },
+  };
+};
+
+/**
+ * The record that clears a resumable failure's marker before its call is re-issued.
+ *
+ * The stream wrapper records a failed call as an assistant message carrying the
+ * transport-failure diagnostic. Left in place, pi refuses to continue from an
+ * assistant tail and the recovery reminder tells the model a network drop
+ * cancelled tools that in fact settled. The marker takes one of two shapes:
+ * nothing ran after it, and retracting it restores the exact context the failed
+ * call was built from; or a tool it had already started settled behind it, and
+ * only its envelope can change ({@link settledMarkerEnvelope}) because a rewind
+ * retains a prefix and the marker is no longer the tail.
+ *
+ * @param messages - The reduced history of the failed run.
+ * @returns The event to append, or `undefined` when there is nothing to clear.
+ */
+const failureMarkerClearance = (messages: readonly ProviderMessage[]): SessionEvent | undefined => {
+  const marker = messages.findLast((message) => message.role === 'assistant');
+  if (!marker) {
+    return undefined;
+  }
+  if (messages.at(-1) === marker) {
+    return {
+      type: 'history.rewound',
+      trigger: 'retry',
+      retainedMessageIds: messages.slice(0, -1).map((message) => message.id),
+    };
+  }
+  /* Behind the tail, only a message that is provably the failure marker may be
+   * rewritten: an ordinary assistant turn that happens to be the last one is
+   * somebody's real output. */
+  const isMarker = marker.metadata?.diagnostics?.some(
+    (diagnostic) => isJsonObject(diagnostic) && diagnostic['type'] === transportFailureDiagnosticType,
+  );
+  const replacement = isMarker ? settledMarkerEnvelope(marker, messages) : undefined;
+  return replacement === undefined
+    ? undefined
+    : { type: 'message.envelope-replaced', messageId: marker.id, replacement };
+};
+
 const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cancelled']);
+
+/**
+ * Failure codes whose run can be continued at the step it stopped on.
+ *
+ * A model call that failed — refused before it was funded, or dropped in the
+ * middle of its stream — leaves the turn's history whole, and the only thing
+ * missing is that one call. It is whole because the session settles what it
+ * started: a tool the stream dispatched mid-response (`prestartTool`) records
+ * its real result before the run is marked failed, so a resume continues from
+ * the work that happened rather than re-applying it. Re-issuing that one call
+ * is the entire recovery — no rewind of the turn, and no second charge for tool
+ * work the customer already paid for. A failure that a second attempt would
+ * only meet again (no evictable history, a lost leadership, a model the catalog
+ * does not carry) ends the run for good and is dispatched afresh.
+ *
+ * One set, read by the host's own `resume` and by the surfaces that decide
+ * whether to offer Resume at all. The non-resumable half is ruled by
+ * `tau-agent-host.test.ts`, which keys both code unions exhaustively.
+ */
+const resumableRunFailureCodes = new Set<string>([
+  'INSUFFICIENT_CREDIT',
+  'INVALID_REQUEST',
+  'MALFORMED_RESPONSE',
+  'NETWORK_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'RATE_LIMITED',
+  // A session that expired mid-turn: signing in again is the whole recovery.
+  'UNAUTHENTICATED',
+  'UPSTREAM_REJECTED',
+]);
+
+/**
+ * Whether an external agent's own stop leaves the turn continuable.
+ *
+ * An external turn stops on its provider's terms, not on a code Tau can rule:
+ * the same `EXTERNAL_AGENT_LIMIT_REACHED` is a rate limit that clears in a
+ * minute, a quota that clears at a stated hour, or a context ceiling only a new
+ * session clears. The agent says which in `failure.actions`
+ * ({@link externalAgentStopCodes}):
+ *
+ * - `retry` — the agent's own word that trying again can work.
+ * - no actions at all on a `limit` — nothing helps *now*; what clears a quota
+ *   is time, so the surface holds Resume until the reported reset and then
+ *   continues the same vendor session.
+ * - any other action (`new_session`, `login`) — that action has to happen
+ *   first, and no resume can stand in for it.
+ *
+ * @param failure - The terminal record, as the runner attached its details.
+ * @returns `true` when continuing the agent's own session is the recovery.
+ */
+const externalStopIsResumable = (failure: RunFailureDetail): boolean => {
+  if (!externalAgentStopCodes.some((code) => code === failure.code)) {
+    return false;
+  }
+  const stop = zodUtility.isObject(failure.details) ? failure.details['failure'] : undefined;
+  const actions = zodUtility.isObject(stop) ? stop['actions'] : undefined;
+  if (!Array.isArray(actions)) {
+    return false;
+  }
+  return (
+    actions.includes('retry') || (actions.length === 0 && zodUtility.isObject(stop) && stop['category'] === 'limit')
+  );
+};
+
+/**
+ * Whether a failed run's terminal record can be resumed at its blocked step.
+ *
+ * Reads the whole record, not just its code: an external agent's stop is
+ * resumable or not by the actions the agent itself reported.
+ *
+ * @param failure - `RunFailureDetail` from the run's terminal record.
+ * @returns `true` when `resume` will continue this run rather than replay it.
+ * @public
+ */
+export const isResumableRunFailure = (failure: RunFailureDetail | undefined): boolean =>
+  failure?.code !== undefined && (resumableRunFailureCodes.has(failure.code) || externalStopIsResumable(failure));
+
+/**
+ * The coded failure this run ended on, as its own lifecycle record states it.
+ *
+ * The one record every failure writes, whoever raised it: a model call leaves
+ * its diagnostic on an assistant message as well, but an external agent's stop
+ * leaves only this. A codeless failure is omitted — there is nothing for a
+ * surface or a resume to rule on.
+ *
+ * @param events - The chat's durable events.
+ * @param runId - The run to describe.
+ * @returns The terminal failure, or `undefined` unless the run failed with a code.
+ */
+const terminalFailureOf = (events: readonly AgentLogEvent[], runId: string): HostRunFailure | undefined => {
+  const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
+  const detail = last?.type === 'run.lifecycle' && last.state === 'failed' ? last.detail : undefined;
+  return detail?.code === undefined ? undefined : { ...detail, code: detail.code };
+};
+
+/* Whether this run's terminal record is a refusal {@link isResumableRunFailure} covers. */
+const refusedResumably = (events: readonly AgentLogEvent[], runId: string): boolean =>
+  isResumableRunFailure(terminalFailureOf(events, runId));
 
 /**
  * Assemble Tau's portable run lifecycle over the pi adapter and W1-W5 ports.
@@ -422,14 +1109,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
     const opened = options.openEventLog(chatId);
     logs.set(chatId, opened);
-    // A failed open must not poison the cache: the next attempt should retry,
-    // and close() must not re-raise a rejection that its caller already saw.
-    opened.catch(() => {
+    try {
+      return await opened;
+    } catch (error) {
+      // A failed open must not poison the cache: the next attempt should retry,
+      // and close() must not re-raise a rejection that its caller already saw.
       if (logs.get(chatId) === opened) {
         logs.delete(chatId);
       }
-    });
-    return opened;
+      throw error;
+    }
   };
 
   const leaderEpochFor = (chatId: string): string => {
@@ -468,11 +1157,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     close: async () => log.close(),
   });
 
+  /**
+   * What this chat's run is doing in memory, in the ledger's vocabulary.
+   *
+   * @param chatId - The chat being asked about.
+   * @returns `running` while a session is live, `reserved` while one is being
+   * composed or an external runner holds the chat, and `none` otherwise.
+   */
+  const memoryRunStateOf = (chatId: string): HostRunState => {
+    if (activeByChat.has(chatId)) {
+      return 'running';
+    }
+    return reservationsByChat.has(chatId) || externalByChat.has(chatId) ? 'reserved' : 'none';
+  };
+
   const reserve = (chatId: string, runId?: string): AdmissionReservation => {
-    if (reservationsByChat.has(chatId) || activeByChat.has(chatId)) {
-      throw Object.assign(new Error(`Chat ${chatId} already has an admitted run.`), {
-        code: 'RUN_ADMISSION_CONFLICT',
-      });
+    const state = memoryRunStateOf(chatId);
+    if (!isHostRunOperationLegal('admit', state)) {
+      throw runOperationRefusal({ operation: 'admit', chatId, runId, state });
     }
     if (runId && (reservationsByRun.has(runId) || activeByRun.has(runId))) {
       throw Object.assign(new Error(`Run ${runId} is already admitted.`), { code: 'RUN_ADMISSION_CONFLICT' });
@@ -503,6 +1205,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
   };
 
+  /**
+   * The single choke point every durable record passes through (V12).
+   *
+   * Legality is decided *here*, from one fold over the log, rather than by each
+   * of the four operations reading the same facts differently — which is how a
+   * settlement came to be written under a run nothing had admitted and then
+   * read back as proof that it had been.
+   *
+   * @param input - Chat, run, log handle, and the bodies to append.
+   */
   const append = async (input: {
     readonly chatId: string;
     readonly log: DurableEventLog;
@@ -511,9 +1223,37 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   }): Promise<void> => {
     const leaderEpoch = leaderEpochFor(input.chatId);
     const existing = await input.log.read();
+    const ledger = runLedgerOf(existing);
+    const entry = ledger.runs.get(input.runId);
+    /* A run the host is still admitting in memory counts as admitted: its first
+     * lifecycle row may not have landed yet, and a settlement is a fact about a
+     * turn that really ran. */
+    const reserved =
+      reservationsByRun.has(input.runId) || activeByRun.has(input.runId) || externalByRun.has(input.runId);
     const tail = existing.at(-1);
     let sequence = tail?.leaderEpoch === leaderEpoch ? tail.sequence + 1 : 0;
     for (const body of input.events) {
+      if (settlementTypes.has(body.type)) {
+        const state = entry?.state ?? 'unadmitted';
+        if (entry?.settlement !== undefined) {
+          /* Exactly once: an identical repeat is the delivery guarantee doing
+           * its job, a differing one is two authorities disagreeing. */
+          if (isSameSettlement(entry.settlement, body)) {
+            continue;
+          }
+          throw settlementRefusal({ chatId: input.chatId, runId: input.runId, state });
+        }
+        if (!reserved && !isHostSettlementLegal(state)) {
+          throw settlementRefusal({ chatId: input.chatId, runId: input.runId, state });
+        }
+      }
+      /* Ponytail: no guard on lifecycle records after a terminal one.
+       * Written as one and falsified by two suites: a cancelled run's own
+       * teardown re-records `cancelled`, and an interrupt resolution resumes a
+       * run the log has already ended. A terminal lifecycle is not the end of
+       * what a run may say about itself, so the rule would have been a guess.
+       * The guard that matters — and that the reproduced defect needed — is the
+       * settlement one above. */
       // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
       const outcome = await fencedLog(input.chatId, leaderEpoch, input.log).append({
         ...body,
@@ -529,6 +1269,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
   };
 
+  /**
+   * The model row the run's committed turn context recorded, if any turn got that far.
+   *
+   * @param log - The chat's durable log.
+   * @param runId - The run being resumed.
+   * @returns The committed model row, or `undefined` before the first commit.
+   */
+  const committedModelOf = async (log: DurableEventLog, runId: string): Promise<AgentSessionModel | undefined> => {
+    const events = await log.read();
+    const committed = events.findLast(
+      (event) => event.runId === runId && event.type === 'turn.history-projection-committed',
+    );
+    return committed?.type === 'turn.history-projection-committed' ? committed.context.model : undefined;
+  };
+
   const sessionFor = async (input: {
     readonly chatId: string;
     readonly runId: string;
@@ -539,13 +1294,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const clientContext =
       input.config?.clientContext ??
       (typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext);
+    /* A resume names no admission: the model it ran on is the one its first
+     * turn committed to the log, which a host with no default row must honour. */
+    const model = input.config?.model ?? options.model ?? (await committedModelOf(input.log, input.runId));
+    if (!model) {
+      throw Object.assign(new Error('This Tau host configures no model; the admission must name one.'), {
+        code: 'HOST_MODEL_UNAVAILABLE',
+      });
+    }
     return createAgentSession({
       chatId: input.chatId,
       runId: input.runId,
       leaderEpoch: input.leaderEpoch,
       systemPrompt: input.config?.systemPrompt ?? options.systemPrompt,
       systemPromptBlocks: input.config?.systemPromptBlocks ?? options.systemPromptBlocks,
-      model: input.config?.model ?? options.model,
+      model,
       modelTransport: options.modelTransport,
       toolRegistry: options.toolRegistry,
       toolChoice: input.config?.toolChoice,
@@ -560,6 +1323,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       safeguardThresholds: options.safeguardThresholds,
       onSafeguardOutcome: options.onSafeguardOutcome,
       allowImageBlocks: options.allowImageBlocks,
+      attachments: options.attachments,
       createId,
       now,
       onCompaction: options.onCompaction,
@@ -623,7 +1387,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           {
             type: 'run.lifecycle',
             state: 'failed',
-            detail: { message: error instanceof Error ? error.message : String(error) },
+            detail: codedFailureDetail(error),
           },
         ],
       });
@@ -636,9 +1400,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   const externalByChat = new Map<string, { readonly runId: string; readonly controller: AbortController }>();
-  const externalByRun = new Map<string, { readonly chatId: string; readonly controller: AbortController }>();
+  /** `completion` is assigned as soon as the turn is detached; see {@link runExternal}. */
+  const externalByRun = new Map<string, ExternalRun>();
   /** Serializes each chat's external appends; see {@link appendExternal}. */
   const externalAppends = new Map<string, Promise<void>>();
+  /**
+   * Chats whose runner may still hold a live session, by run kind.
+   *
+   * A live ACP session outlives its run (V2), so the host has to remember which
+   * runner to tell when the chat itself is done with.
+   */
+  const externalChats = new Map<string, string>();
   const detached = new Set<Promise<void>>();
 
   const appendExternalEvents = async (input: {
@@ -671,6 +1443,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const chained = (async (): Promise<void> => {
       await prior;
       try {
+        /* Legality is the append boundary's, not a second pre-check here: one
+         * fold, one place, every writer — the page's revision root, an ACP
+         * runner, the host's own session (V12). */
         await appendExternalEvents(input);
       } catch (error) {
         outcome = { error };
@@ -684,6 +1459,44 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
+   * Tell this chat's runner to end whatever it holds open for it.
+   *
+   * @param chatId - Chat being relinquished, rewound, or closed.
+   */
+  const closeExternalChat = async (chatId: string): Promise<void> => {
+    const kind = externalChats.get(chatId);
+    if (kind === undefined) {
+      return;
+    }
+    externalChats.delete(chatId);
+    await options.externalRunners?.[kind]?.closeChat?.(chatId);
+  };
+
+  /**
+   * Cancel every interrupt a run still holds open.
+   *
+   * `pause` settles on a resolution and on nothing else — it never rejects and
+   * never observes an abort — so an outstanding `session/request_permission` is
+   * settled here or never: the record is durable, and every consumer of
+   * `approval-requested` (banner, activity, unread badge, pending list) would
+   * otherwise wait on a run that is already over (5-review S1). It is also what
+   * lets a cancel reach a terminal state at all, since the runner's own turn is
+   * blocked inside `approve` until the request it asked for is answered (V8).
+   *
+   * The resolution is recorded by `approve`, the one writer of that record.
+   *
+   * @param runId - The run being ended.
+   */
+  const cancelPendingInterrupts = async (runId: string): Promise<void> => {
+    const pending = await options.interruptPort.pending({ runId });
+    /* `allSettled`: one port that refuses a resolution must not cost the run its
+     * terminal record, which is the caller this runs inside. */
+    await Promise.allSettled(
+      pending.map(async ({ interruptId }) => options.interruptPort.resume({ interruptId, outcome: 'cancelled' })),
+    );
+  };
+
+  /**
    * Execute one external turn, and answer as soon as its admission is durable.
    *
    * @param input - Chat, run, selected agent, and the user message when new.
@@ -694,6 +1507,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     readonly agent: ExternalRunKind;
     readonly message?: UserProviderMessage | undefined;
     readonly state?: JsonObject | undefined;
+    readonly config?: TauAgentAdmissionConfig | undefined;
   }): Promise<void> => {
     const port = options.externalRunners?.[input.agent.kind];
     if (!port) {
@@ -746,27 +1560,30 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     ]);
     messageId ??= externalTurnOf(await log.read())?.messageId;
     externalByChat.set(input.chatId, { runId: input.runId, controller });
-    externalByRun.set(input.runId, { chatId: input.chatId, controller });
+    externalChats.set(input.chatId, input.agent.kind);
+    const tracked: ExternalRun = { chatId: input.chatId, controller };
+    externalByRun.set(input.runId, tracked);
 
     const remember = async (state: JsonObject): Promise<void> => {
-      const events = await log.read();
-      const current = events.findLast(
-        (event): event is Extract<AgentLogEvent, { readonly type: 'message.appended' }> =>
-          event.type === 'message.appended' && event.message.id === messageId,
-      );
+      /* Reduced, not raw: a `remember` merges into what the *last* one wrote,
+       * and the last one wrote a `message.envelope-replaced`. Reading the
+       * original `message.appended` instead made every call after the first
+       * silently drop its predecessor's fields — the session id among them, so
+       * a chat whose turn also recorded its model could never be resumed. */
+      const current = reduceEventLog(await log.read()).findLast((message) => message.id === messageId);
       if (!current) {
         return;
       }
       await appendEvents([
         {
           type: 'message.envelope-replaced',
-          messageId: current.message.id,
+          messageId: current.id,
           replacement: {
-            ...current.message,
+            ...current,
             metadata: {
-              ...current.message.metadata,
+              ...current.metadata,
               tauInternal: {
-                ...externalMarker(current.message),
+                ...externalMarker(current),
                 kind: externalTurnKind,
                 runKind: input.agent.kind,
                 agentId: input.agent.id,
@@ -781,7 +1598,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const approve = async (request: {
       readonly prompt: string;
       readonly payload?: JsonValue | undefined;
-    }): Promise<InterruptResolution['outcome']> => {
+    }): Promise<InterruptResolution> => {
       const interruptId = createId();
       await appendEvents([
         {
@@ -792,6 +1609,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           payload: {
             kind: 'approval',
             prompt: request.prompt,
+            /* Attribution is durable truth (V6): the banner has to be able to
+             * name who is asking from the record itself. The live selection has
+             * already moved on by the time a restart re-renders this, and it was
+             * never the same fact — a chat can hold one agent's paused run while
+             * the composer shows another. */
+            agentId: input.agent.id,
             ...(request.payload === undefined ? {} : { context: request.payload }),
           },
         },
@@ -812,39 +1635,81 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           reason: resolution.outcome,
           payload: {
             outcome: resolution.outcome,
+            ...(resolution.optionId === undefined ? {} : { optionId: resolution.optionId }),
             ...(resolution.payload === undefined ? {} : { response: resolution.payload }),
           },
         },
         ...(resolution.outcome === 'approved' ? ([{ type: 'run.lifecycle', state: 'running' }] as const) : []),
       ]);
-      return resolution.outcome;
+      return resolution;
     };
 
     const completion = (async (): Promise<void> => {
       try {
-        await port.run({
+        const outcome = await port.run({
           agentId: input.agent.id,
           agent: input.agent,
           chatId: input.chatId,
           runId: input.runId,
           ...(input.message ? { message: input.message } : {}),
           ...(input.state ? { state: input.state } : {}),
+          ...(input.config ? { config: input.config } : {}),
           history: await log.read(),
           append: appendEvents,
+          appendSession: appendEvents,
+          publishLive: async (event) => {
+            await options.onLiveEvent?.({ ...event, chatId: input.chatId, runId: input.runId });
+          },
           remember,
           approve,
           signal: controller.signal,
         });
-        await appendEvents([{ type: 'run.lifecycle', state: controller.signal.aborted ? 'cancelled' : 'completed' }]);
-      } catch (error) {
+        const { stopReason } = outcome ?? {};
+        const state = controller.signal.aborted
+          ? 'cancelled'
+          : ((stopReason === undefined ? undefined : externalStopStates.get(stopReason)) ?? 'completed');
+        const detail = stopReason === undefined ? undefined : externalStopDetail.get(stopReason);
         await appendEvents([
+          {
+            type: 'run.lifecycle',
+            state,
+            ...(stopReason === undefined ? {} : { stopReason }),
+            ...(state === 'completed' || detail === undefined ? {} : { detail: { message: detail } }),
+          },
+        ]);
+      } catch (error) {
+        /* A refusal is a fact the user can act on, so the code the runner threw
+         * is recorded and the affordance it carried — a login's URL, code or
+         * command — is recorded *first*, as an interrupt every surface already
+         * renders (V11/VSC4). Without both, a logged-out agent reaches the user
+         * as one opaque sentence with a stderr tail (r4 §2). */
+        const refusal = externalRefusalOf(error);
+        /* Before the terminal record, so the appends `approve` issues when it
+         * wakes are already queued on this chat's chain ahead of it. */
+        await cancelPendingInterrupts(input.runId);
+        /* Settled in the same breath it is requested: nothing ever answers a
+         * login — there is no completion event and the affordance is
+         * deliberately buttonless — so an unresolved record would leave every
+         * consumer of `approval-requested` (banner, activity, unread badge)
+         * stuck on a run that is already over. The payload rides the requested
+         * record, so the surfaces still have the login to render. */
+        const loginInterruptId = createId();
+        await appendEvents([
+          ...(refusal.login
+            ? ([
+                { ...refusal.login, interruptId: loginInterruptId },
+                {
+                  type: 'interrupt.recorded',
+                  interruptId: loginInterruptId,
+                  phase: 'resolved',
+                  reason: 'cancelled',
+                  payload: { outcome: 'cancelled' },
+                },
+              ] as const)
+            : []),
           controller.signal.aborted
             ? { type: 'run.lifecycle', state: 'cancelled' }
-            : {
-                type: 'run.lifecycle',
-                state: 'failed',
-                detail: { message: error instanceof Error ? error.message : String(error) },
-              },
+            : { type: 'run.lifecycle', state: 'failed', detail: codedFailureDetail(error) },
         ]);
       } finally {
         if (externalByChat.get(input.chatId)?.runId === input.runId) {
@@ -853,6 +1718,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         externalByRun.delete(input.runId);
       }
     })();
+    tracked.completion = completion;
     detached.add(completion);
     const untrack = async (): Promise<void> => {
       try {
@@ -878,17 +1744,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const resumeExternal = async (chatId: string): Promise<boolean> => {
     const log = await logFor(chatId);
     const events = await log.read();
-    const last = events.at(-1);
+    const current = currentRun(events);
     const external = externalTurnOf(events);
-    if (!last || !external || terminalStates.has(lifecycleFor(events, last.runId))) {
+    /* A terminal run has nothing to continue — unless the agent stopped it and
+     * said a retry can help, which is the same continuation one attempt later
+     * (R9/S11). */
+    if (!current || !external || (terminalStates.has(current.state) && !refusedResumably(events, current.runId))) {
       return false;
     }
     const { agentId, kind: _kind, runKind, ...state } = external.marker;
     await runExternal({
       chatId,
-      runId: last.runId,
+      runId: current.runId,
       agent: { kind: runKind, id: agentId },
-      state,
+      /* The session this chat *reached*, not the one its admission asked for:
+       * `remember` records the vendor session id by replacing the user
+       * message's envelope, which only the reducer's view carries. Resuming
+       * from the raw marker opened a second vendor session and replayed the
+       * turn on the person's own quota. */
+      state: externalSessionOf(events, agentId) ?? state,
     });
     return true;
   };
@@ -911,6 +1785,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           reason: input.resolution.outcome,
           payload: {
             outcome: input.resolution.outcome,
+            ...(input.resolution.optionId === undefined ? {} : { optionId: input.resolution.optionId }),
             ...(input.resolution.payload === undefined ? {} : { response: input.resolution.payload }),
           },
         },
@@ -950,12 +1825,30 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       throw new Error(`Chat ${chatId} has no durable session log.`);
     }
     const messages = reduceEventLog(events);
-    const failure = transportFailureFromProviderMessages(messages);
+    /* A log with no lifecycle record at all admits no run, and the tail is the
+     * only identity there is to answer with. Every log a host writes opens with
+     * one, so this is the shape of a log written by nothing that ran. */
+    const current = currentRun(events);
+    if (current === undefined && memoryRunStateOf(chatId) === 'none') {
+      /* R2: a run with no lifecycle record is not a run. Answering `admitted`
+       * for one is the same default that made an abandoned lease's settlement
+       * look like a live turn. The only honest reading left is the instant
+       * between a rewinding admission's `history.rewound` and its `admitted`
+       * row, and the reservation above still holds that. */
+      throw Object.assign(new Error(`Chat ${chatId} has no admitted run to describe.`), { code: 'NO_RUN_ADMITTED' });
+    }
+    const runId = current?.runId ?? last.runId;
+    /* The assistant diagnostic first, because it carries the transport's own
+     * refusal fields; the lifecycle record when there is no such marker, which
+     * is every failure that never was a model call — an external agent's stop
+     * writes no assistant message at all. Without the fallback a surface read
+     * no failure for those runs and could only rewind the turn (F1). */
+    const failure = transportFailureFromProviderMessages(messages) ?? terminalFailureOf(events, runId);
     return {
       chatId,
-      runId: last.runId,
-      turnId: latestTurnId(messages, last.runId),
-      state: lifecycleFor(events, last.runId),
+      runId,
+      turnId: latestTurnId(messages, runId),
+      state: current?.state ?? 'admitted',
       messages,
       ...(failure ? { failure } : {}),
     };
@@ -969,12 +1862,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       try {
         const log = await logFor(request.chatId);
         const events = await log.read();
-        const latest = events.at(-1);
-        if (latest && !terminalStates.has(lifecycleFor(events, latest.runId))) {
+        const ledger = runLedgerOf(events);
+        if (ledger.chat !== undefined && !isHostRunOperationLegal('admit', ledger.chat.state)) {
           throw new Error(`Chat ${request.chatId} has a non-terminal run; resume it before admitting another turn.`);
         }
-        if (events.some((event) => event.runId === request.runId)) {
-          throw new Error(`Run ${request.runId} has already been admitted.`);
+        /* A *lifecycle* record is what makes this run id taken. Refusing on any
+         * record at all refused every turn whose id a settlement had already
+         * been written under, which is how one abandoned lease made a chat
+         * single-turn for the rest of its life. */
+        if (lifecycleFor(events, request.runId) !== undefined) {
+          throw Object.assign(new Error(`Run ${request.runId} has already been admitted.`), {
+            code: 'RUN_ADMISSION_CONFLICT',
+          });
         }
         // An empty log has nothing to rewind, so a rewinding trigger *is* a
         // first turn and runs as one. Refusing it instead — an empty retain
@@ -983,9 +1882,26 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         // with `HISTORY_PREFIX_INVALID` and the chat had no way out.
         if (request.trigger !== 'submit' && events.length > 0) {
           const messages = reduceEventLog(events);
+          /* The rewind point is the turn the caller names, and the prefix it
+           * keeps is this log's own.
+           *
+           * A caller's transcript ids are not these: one run is one assistant
+           * message on a page and any number of provider messages here, so a
+           * caller can only ever name the *user* message its turn belongs to —
+           * that id it minted and this log stored verbatim. Matching its
+           * `retainedMessageIds` against this projection refused every rewind
+           * whose retained prefix contained an assistant message, which is
+           * every turn after the first (F2).
+           *
+           * ponytail: `retainedMessageIds` stays on the start input for the
+           * caller that rewinds to a turn this log has never seen — the branch
+           * below. The cleanup is to drop it from the waist entirely and make
+           * the rewound turn the only thing a rewinding trigger carries. */
+          const rewindTo = messages.findIndex((message) => message.id === request.message.id);
           if (
-            request.retainedMessageIds.length >= messages.length ||
-            request.retainedMessageIds.some((id, index) => messages[index]?.id !== id)
+            rewindTo === -1 &&
+            (request.retainedMessageIds.length >= messages.length ||
+              request.retainedMessageIds.some((id, index) => messages[index]?.id !== id))
           ) {
             throw Object.assign(new Error('Retry/edit/regenerate must retain an unchanged strict history prefix.'), {
               code: 'HISTORY_PREFIX_INVALID',
@@ -999,7 +1915,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               {
                 type: 'history.rewound',
                 trigger: request.trigger,
-                retainedMessageIds: request.retainedMessageIds,
+                retainedMessageIds:
+                  rewindTo === -1
+                    ? request.retainedMessageIds
+                    : messages.slice(0, rewindTo).map((message) => message.id),
               },
             ],
           });
@@ -1012,11 +1931,26 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           releaseReservation(reservation);
           reservation.resolveReady(undefined);
           reservation.resolveAdmitted(undefined);
+          /* The chat's own session (VSC3), read on every trigger. A rewind keeps
+           * the selection and drops the session: the vendor thread holds a turn
+           * Tau has just retracted, so it is closed and a new one is opened. */
+          const remembered = externalSessionOf(events, external.id);
+          let state = remembered;
+          if (request.trigger !== 'submit') {
+            await closeExternalChat(request.chatId);
+            if (remembered) {
+              const { acpSessionId: _retired, ...carried } = remembered;
+              state = carried;
+            }
+          }
           await runExternal({
             chatId: request.chatId,
             runId: request.runId,
             agent: external,
             message: request.message,
+            ...(state ? { state } : {}),
+            /* Defined by construction: `external` was read off it. */
+            config: request.config,
           });
           return reduceEventLog(await log.read());
         }
@@ -1044,14 +1978,30 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       try {
         const log = await logFor(chatId);
         let events = await log.read();
-        const last = events.at(-1);
-        if (!last) {
+        if (events.length === 0) {
           throw new Error(`Chat ${chatId} has no durable session log.`);
         }
-        const { runId } = last;
-        const state = lifecycleFor(events, runId);
-        if (terminalStates.has(state)) {
+        const ledger = runLedgerOf(events);
+        if (ledger.chat === undefined || !isHostRunOperationLegal('resume', ledger.chat.state)) {
+          /* The ledger's `resume` row is every state but `none`, and `none` is
+           * exactly a chat whose log admitted no run. Nothing to continue: the
+           * caller gets the history as it stands rather than a fabricated
+           * lifecycle for a run that never ran. */
           return reduceEventLog(events);
+        }
+        const { runId, state } = { runId: ledger.chat.runId, state: lifecycleFor(events, ledger.chat.runId)! };
+        if (terminalStates.has(state)) {
+          if (!refusedResumably(events, runId)) {
+            return reduceEventLog(events);
+          }
+          /* An external stop clears nothing: its trailing assistant message is
+           * the agent's own work, and the vendor session still holds the turn
+           * this resume continues. */
+          const cleared = externalTurnOf(events) ? undefined : failureMarkerClearance(reduceEventLog(events));
+          if (cleared) {
+            await append({ chatId, log, runId, events: [cleared] });
+            events = await log.read();
+          }
         }
         if (externalTurnOf(events)) {
           /* An external run has no `AgentSession` to continue — its runner
@@ -1188,7 +2138,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     resolveInterrupt: async ({ runId, ...resolution }) => {
       const pending = await options.interruptPort.pending({ runId });
       if (!pending.some((request) => request.interruptId === resolution.interruptId)) {
-        throw new Error(`Interrupt ${resolution.interruptId} does not belong to run ${runId}.`);
+        throw new Error(
+          `Interrupt ${resolution.interruptId} is not pending on run ${runId}: it was already resolved, cancelled with the run, or never issued.`,
+        );
       }
       await options.interruptPort.resume(resolution);
     },
@@ -1214,6 +2166,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const external = externalByRun.get(runId);
       if (external) {
         external.controller.abort();
+        /* An outstanding approval outlives the abort: the runner's turn is
+         * suspended inside `approve`, and a protocol that asked the *client* for
+         * a decision cannot finish until the client gives one. Cancelling it is
+         * that answer — without it the wait below never returns (V8). */
+        await cancelPendingInterrupts(runId);
+        /* D12 keeps the four meanings apart: requesting cancellation is not
+         * observing settlement. A caller that reads the snapshot next must see
+         * the runner's terminal `cancelled`, exactly as the Tau branch below
+         * waits out its session. Detaching a client never comes through here. */
+        await external.completion;
         return;
       }
       const active = await activeRunFor(runId);
@@ -1221,12 +2183,20 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         return;
       }
       active.session.abort();
+      /* No drain here, unlike the external branch: a Tau run is ended by
+       * `interrupt` *before* its durable pause begins, so an active Tau run never
+       * holds a pending interrupt — a paused chat is answered by
+       * `resolveInterrupt`, not by cancel (6-review F2, falsified). */
       await (active.completion ?? active.session.agent.waitForIdle());
     },
     snapshot,
-    readEvents: async ({ chatId, cursor, limit }) => {
+    readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
       const log = await logFor(chatId);
-      return log.readBatch({ cursor, limit });
+      return log.readBatch({ cursor, limit, maxBytes });
+    },
+    recordSettlement: async ({ chatId, runId, event }) => {
+      assertOpen();
+      await appendExternal({ chatId, runId, log: await logFor(chatId), events: [event] });
     },
     assumeLeadership: (chatId, generation) => {
       assertOpen();
@@ -1245,6 +2215,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (active?.completion) {
         await Promise.allSettled([active.completion]);
       }
+      /* An external run is aborted exactly as a Tau run is: giving up leadership
+       * of a chat cannot leave an agent still writing into its tree. */
+      const external = externalByChat.get(chatId);
+      if (external) {
+        external.controller.abort();
+        await Promise.allSettled([externalByRun.get(external.runId)?.completion]);
+      }
+      await closeExternalChat(chatId);
       const log = logs.get(chatId);
       logs.delete(chatId);
       if (log) {
@@ -1268,6 +2246,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         controller.abort();
       }
       await Promise.allSettled(detached);
+      await Promise.allSettled([...externalChats.keys()].map(async (chatId) => closeExternalChat(chatId)));
       for (const run of active) {
         run.session.abort();
       }

@@ -20,6 +20,42 @@ export const httpHeader = {
   // (allowlisted and validated in apps/api/app/api/llm/llm-gateway.headers.ts).
   anthropicVersion: 'anthropic-version',
   anthropicBeta: 'anthropic-beta',
+  /**
+   * The credential for a THIRD-PARTY git remote reached through
+   * `POST /v1/git/proxy` — never the Tau session, which travels in
+   * `authorization` on the same request and is never forwarded (I8).
+   */
+  // The key mirrors the value by the constants contract, so it keeps the
+  // `x-tau-` prefix of `x-tau-attempt-id` rather than RFC 6648's advice.
+  xTauProxyAuthorization: 'x-tau-proxy-authorization',
+  /**
+   * Git's own protocol-version request header (`version=2`), which
+   * `isomorphic-git` sends on every smart-HTTP request the browser leg makes.
+   *
+   * It is not CORS-safelisted, so without it in the allow-list Chromium answers
+   * the preflight `204` and then silently drops the request that follows — the
+   * browser leg of Tau Cloud cannot make one call (W18 DEF-5).
+   */
+  gitProtocol: 'git-protocol',
+  /**
+   * Best-effort attribution for a gateway relay: which project and which chat
+   * the turn belongs to, so its receipt can be filtered by them on `/usage`.
+   * Both are opaque owner-scoped ids, optional on every request, dropped rather
+   * than refused when malformed (`readHint` in
+   * `apps/api/app/api/llm/llm-gateway.headers.ts`).
+   *
+   * Like `git-protocol` above, their value here is that CORS derives its
+   * allow-list from this record: omit them and the browser answers the preflight
+   * `204` and drops every gateway call, with nothing in the API log to see.
+   */
+  xTauProjectId: 'x-tau-project-id',
+  xTauChatId: 'x-tau-chat-id',
+  /**
+   * What kind of turn the caller is relaying, so a compaction is not filed as
+   * agent spend. Only the kinds a client may safely assert are honoured; see
+   * `clientAssertableActivity` in `llm-gateway.headers.ts`.
+   */
+  xTauActivity: 'x-tau-activity',
 } as const;
 
 /**

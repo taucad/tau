@@ -1,0 +1,10 @@
+data: {"choices":[{"delta":{"content":"<think>\n**Refining Mechanical Parameters**\n\nI'm currently focused on integrating the latest revisions to the bracket fillet radius, housing interference checks, cast face draft angles, and wall thickness. These adjustments are being carefully considered for their impact on the overall design integrity.\n\n","extra_content":{"google":{"thought":true}},"role":"assistant"},"index":0,"logprobs":null}],"created":1789794463,"id":"nxiuat_NEPuj0ckPwJS4uQQ","model":"google/gemini-3.7-flash","object":"chat.completion.chunk","system_fingerprint":""}
+
+[{
+  "error": {
+    "code": 429,
+    "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+    "status": "RESOURCE_EXHAUSTED"
+  }
+}
+]

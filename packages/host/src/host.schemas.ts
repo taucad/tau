@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+
 export const pairingResponseSchema = z.object({
   deviceCode: z.string().min(16),
   userCode: z.string().min(4),
@@ -53,11 +55,12 @@ export type HostCapabilities = {
   readonly agent?: {
     readonly workspaceRoot: string;
     /**
-     * External ACP agents this daemon can start (W4-ACP): only those whose
-     * pinned adapter resolved *and* whose CLI answered `--version`. Absent
-     * means Tau's own runs only.
+     * External ACP agents this daemon knows about (W4-ACP): one canonical
+     * descriptor each, carrying the probed model list — and, for an agent whose
+     * adapter or CLI failed, the refusal code instead. Absent means Tau's own
+     * runs only.
      */
-    readonly externalAgents?: readonly string[];
+    readonly externalAgents?: readonly ExternalAgentDescriptor[];
   };
 };
 

@@ -145,15 +145,6 @@ describe('agentConfigSchema', () => {
       );
     });
 
-    it('should parse Paseo execution without requiring a Tau model', () => {
-      expect(
-        cadAgentConfigSchema.parse({
-          ...validCadAgent,
-          execution: { kind: 'paseo', connectionId: 'conn_local', agentId: 'agent_claude' },
-        }).execution,
-      ).toEqual({ kind: 'paseo', connectionId: 'conn_local', agentId: 'agent_claude' });
-    });
-
     it('should parse an external ACP execution and require the host that spawns it', () => {
       expect(
         cadAgentConfigSchema.parse({
@@ -165,25 +156,18 @@ describe('agentConfigSchema', () => {
       // local process, so a turn naming no host has nowhere to run.
       expect(cadAgentExecutionSchema.safeParse({ kind: 'acp', agentId: 'codex' }).success).toBe(false);
       expect(cadAgentExecutionSchema.safeParse({ kind: 'acp', hostId: 'origin' }).success).toBe(false);
-      // A Tau model is not part of an external execution.
+      // The adapter's own model id may ride along; nothing Tau-specific may.
       expect(
-        cadAgentExecutionSchema.safeParse({
+        cadAgentExecutionSchema.parse({
           kind: 'acp',
           hostId: 'origin',
           agentId: 'codex',
-          model: 'openai/gpt-5.5',
-        }).success,
-      ).toBe(false);
-    });
-
-    it('should reject mixed Tau and Paseo fields', () => {
+          model: 'gpt-5.3-codex-spark',
+        }),
+      ).toEqual({ kind: 'acp', hostId: 'origin', agentId: 'codex', model: 'gpt-5.3-codex-spark' });
       expect(
-        cadAgentExecutionSchema.safeParse({
-          kind: 'paseo',
-          connectionId: 'conn_local',
-          agentId: 'agent_claude',
-          model: 'openai/gpt-5.5',
-        }).success,
+        cadAgentExecutionSchema.safeParse({ kind: 'acp', hostId: 'origin', agentId: 'codex', provider: 'openai' })
+          .success,
       ).toBe(false);
     });
   });

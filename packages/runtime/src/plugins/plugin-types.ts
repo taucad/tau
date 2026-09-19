@@ -24,6 +24,12 @@ declare const __transcodeFrom: unique symbol;
 declare const __transcoderId: unique symbol;
 declare const __transcodeContent: unique symbol;
 declare const __transcodePinnedSourceOptions: unique symbol;
+declare const __transcodeEdge: unique symbol;
+
+/** Correlated source/options carrier used inside a transcoder's phantom edge map. @public */
+export type TranscoderEdgeType<From extends string, Options> = {
+  readonly [__transcodeEdge]: { readonly from: From; readonly options: Options };
+};
 
 /**
  * Permissions declared by a runtime plugin for store and host review.
@@ -145,8 +151,9 @@ export type BundlerPlugin<Id extends string = string> = RuntimePluginDeclaration
 /**
  * Registration object for a transcoder plugin. Returned by `defineTranscoder(...)` factories.
  *
- * The `EdgeMap` phantom type parameter carries compile-time type information
- * about per-target-format option schemas from statically declared edges.
+ * The `EdgeMap` phantom type parameter carries each real `from` → `to` edge
+ * together with its option schema, preserving edge correlation when one
+ * plugin declares multiple source and target formats.
  * The `From` phantom carries the source format that this transcoder converts from,
  * enabling `MergeExportMap` to merge kernel source-format options into transcoded targets.
  * The `Id` phantom carries the transcoder's literal identifier so consumers can derive
@@ -439,11 +446,59 @@ export type CollectTranscodeMap<Transcoders extends readonly AnyTranscoderPlugin
   ? Record<never, never>
   : CollectTranscodeMapInner<Transcoders>;
 
+type TranscoderEdgeOptionsOf<Edge> = Edge extends TranscoderEdgeType<string, infer Options> ? Options : Edge;
+
 type CollectTranscodeMapInner<Transcoders extends readonly AnyTranscoderPlugin[]> = {
-  [K in keyof UnionToIntersection<TranscoderEdgeMapOf<Transcoders[number]>>]: UnionToIntersection<
-    TranscoderEdgeMapOf<Transcoders[number]>
-  >[K];
+  [K in keyof UnionToIntersection<TranscoderEdgeMapOf<Transcoders[number]>>]: TranscoderEdgeOptionsOf<
+    UnionToIntersection<TranscoderEdgeMapOf<Transcoders[number]>>[K]
+  >;
 };
+
+type TranscodeRouteOfValue<To, Value, FallbackFrom> =
+  Value extends TranscoderEdgeType<infer From, infer Options>
+    ? { readonly from: From; readonly to: To; readonly options: Options }
+    : { readonly from: FallbackFrom; readonly to: To; readonly options: Value };
+
+type IsAny<Value> = 0 extends 1 & Value ? true : false;
+
+type TranscodeRoutesOf<Transcoder extends AnyTranscoderPlugin> =
+  IsAny<ExtractEdgeMap<Transcoder>> extends true
+    ? { readonly from: FileExtension; readonly to: FileExtension; readonly options: Record<string, unknown> }
+    : keyof ExtractEdgeMap<Transcoder> extends never
+      ? string extends ExtractFrom<Transcoder>
+        ? { readonly from: FileExtension; readonly to: FileExtension; readonly options: Record<string, unknown> }
+        : never
+      : {
+          [To in keyof ExtractEdgeMap<Transcoder>]: TranscodeRouteOfValue<
+            To,
+            ExtractEdgeMap<Transcoder>[To],
+            ExtractFrom<Transcoder>
+          >;
+        }[keyof ExtractEdgeMap<Transcoder>];
+
+type ExcludeRegisteredTranscodeRoutes<Routes, Registered> = Routes extends {
+  readonly from: infer From;
+  readonly to: infer To;
+}
+  ? Extract<Registered, { readonly from: From; readonly to: To }> extends never
+    ? Routes
+    : never
+  : never;
+
+type CollectTupleTranscodeRoutes<
+  Transcoders extends readonly AnyTranscoderPlugin[],
+  Registered = never,
+> = Transcoders extends readonly [infer First extends AnyTranscoderPlugin, ...infer Rest extends AnyTranscoderPlugin[]]
+  ?
+      | ExcludeRegisteredTranscodeRoutes<TranscodeRoutesOf<First>, Registered>
+      | CollectTupleTranscodeRoutes<Rest, Registered | TranscodeRoutesOf<First>>
+  : never;
+
+/** Collect the first registered route for every source-target pair in a transcoder tuple. @public */
+export type CollectTranscodeRoutes<Transcoders extends readonly AnyTranscoderPlugin[]> =
+  number extends Transcoders['length']
+    ? TranscodeRoutesOf<Transcoders[number]>
+    : CollectTupleTranscodeRoutes<Transcoders>;
 
 /** Extract the `EdgeMap` phantom from a `TranscoderPlugin`. */
 type ExtractEdgeMap<T extends AnyTranscoderPlugin> = TranscoderEdgeMapOf<T>;
@@ -472,10 +527,17 @@ type PinnedSourceOptionKeys<
 
 type OmitPinnedSourceOptions<Source, Keys extends PropertyKey> = Source extends unknown ? Omit<Source, Keys> : never;
 
+type MergedTranscoderEdge<FormatMap extends Record<string, unknown>, T extends AnyTranscoderPlugin, Target, Edge> =
+  Edge extends TranscoderEdgeType<infer From, infer Options>
+    ? From extends keyof FormatMap
+      ? OmitPinnedSourceOptions<FormatMap[From], PinnedSourceOptionKeys<T, Target>> & Options
+      : Options
+    : ExtractFrom<T> extends keyof FormatMap
+      ? OmitPinnedSourceOptions<FormatMap[ExtractFrom<T>], PinnedSourceOptionKeys<T, Target>> & Edge
+      : Edge;
+
 type MergedEdgesForTranscoder<FormatMap extends Record<string, unknown>, T extends AnyTranscoderPlugin> = {
-  [Target in keyof ExtractEdgeMap<T>]: ExtractFrom<T> extends keyof FormatMap
-    ? OmitPinnedSourceOptions<FormatMap[ExtractFrom<T>], PinnedSourceOptionKeys<T, Target>> & ExtractEdgeMap<T>[Target]
-    : ExtractEdgeMap<T>[Target];
+  [Target in keyof ExtractEdgeMap<T>]: MergedTranscoderEdge<FormatMap, T, Target, ExtractEdgeMap<T>[Target]>;
 };
 
 /**

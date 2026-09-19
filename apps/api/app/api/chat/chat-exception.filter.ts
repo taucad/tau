@@ -18,6 +18,7 @@ import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
 import { httpHeader } from '#constants/http-header.constant.js';
 import { normalizeError } from '#api/chat/utils/error-normalizer.js';
 import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
+import { fundedRetryAfterSeconds } from '#filters/http-exception.filter.js';
 
 @Catch()
 export class ChatExceptionFilter implements ExceptionFilter {
@@ -34,6 +35,7 @@ export class ChatExceptionFilter implements ExceptionFilter {
 
     let statusCode: number;
     let chatError: ChatError;
+    let retryAfter: number | undefined;
 
     if (exception instanceof ZodValidationException || exception instanceof ZodSerializationException) {
       const zodError = exception.getZodError();
@@ -62,13 +64,24 @@ export class ChatExceptionFilter implements ExceptionFilter {
 
       let message: string;
       let code: string | undefined;
+      let details: Record<string, unknown> | undefined;
 
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
         code = this.getErrorCode(exception);
       } else if (typeof exceptionResponse === 'object') {
         const responseObject = exceptionResponse as Record<string, unknown>;
-        const responseMessage = responseObject['message'];
+        const nestedError =
+          responseObject['type'] === 'error' &&
+          typeof responseObject['error'] === 'object' &&
+          responseObject['error'] !== null
+            ? (responseObject['error'] as Record<string, unknown>)
+            : undefined;
+        const nestedDetails = nestedError?.['details'];
+        if (typeof nestedDetails === 'object' && nestedDetails !== null && !Array.isArray(nestedDetails)) {
+          details = nestedDetails as Record<string, unknown>;
+        }
+        const responseMessage = nestedError?.['message'] ?? responseObject['message'];
         if (typeof responseMessage === 'string') {
           message = responseMessage;
         } else if (Array.isArray(responseMessage)) {
@@ -78,19 +91,30 @@ export class ChatExceptionFilter implements ExceptionFilter {
           message = exception.message;
         }
 
-        code = typeof responseObject['code'] === 'string' ? responseObject['code'] : this.getErrorCode(exception);
+        code =
+          typeof nestedError?.['type'] === 'string'
+            ? nestedError['type']
+            : typeof responseObject['code'] === 'string'
+              ? responseObject['code']
+              : this.getErrorCode(exception);
       } else {
         message = exception.message || 'An error occurred';
         code = this.getErrorCode(exception);
       }
 
+      // Same bounded estimate the model gateway sends, so both surfaces tell the client when to retry.
+      retryAfter = fundedRetryAfterSeconds.get(code);
+      if (retryAfter !== undefined) {
+        details = { ...details, retryAfterSeconds: retryAfter };
+      }
       chatError = {
-        category,
-        title: errorCategoryTitles[category],
+        category: code === 'INSUFFICIENT_CREDIT' ? errorCategory.credits : category,
+        title: errorCategoryTitles[code === 'INSUFFICIENT_CREDIT' ? errorCategory.credits : category],
         message,
         code,
         httpStatus: statusCode,
         requestId,
+        ...(details === undefined ? {} : { details }),
       };
     } else if (isCompactionPipelineError(exception)) {
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -133,9 +157,19 @@ export class ChatExceptionFilter implements ExceptionFilter {
       this.logger.warn(`Chat client error: ${chatError.message}`);
     }
 
+    if (response.raw.headersSent || response.raw.destroyed) {
+      if (!response.raw.writableEnded) {
+        response.raw.destroy();
+      }
+      return;
+    }
+
     // Set request ID in response header
     if (requestId) {
       void response.header(httpHeader.requestId, requestId);
+    }
+    if (retryAfter !== undefined) {
+      void response.header('retry-after', String(retryAfter));
     }
 
     // Return ChatError format as JSON

@@ -135,7 +135,10 @@ export function OverwriteConfirmDialog({
                 setRememberChoice(checked === true);
               }}
             />
-            <Label htmlFor='overwrite-remember' className='cursor-pointer text-sm'>
+            <Label
+              htmlFor='overwrite-remember'
+              className='cursor-action rounded-sm px-1 py-0.5 text-sm transition-colors hover:bg-accent'
+            >
               Do not ask again for this session
             </Label>
           </div>

@@ -95,32 +95,6 @@ describe('geometryCache', () => {
     expect(cached).toMatchObject({ success: true, data: undefined, serializedNativeHandle: { id: 7 } });
   });
 
-  it('executes demanded scene output even when the terminal build is cached, without disabling atomic reuse', async () => {
-    const runtime = createMockRuntime();
-    const liveRuntime = { ...runtime, progressiveSceneRequested: true };
-    const input = createMockInput();
-    const handler = vi.fn(async () => reusableBuild());
-
-    await middleware.wrapCreateGeometry!(input, handler, runtime);
-    await middleware.wrapCreateGeometry!(input, handler, liveRuntime);
-    await middleware.wrapCreateGeometry!(input, handler, liveRuntime);
-    await middleware.wrapCreateGeometry!(input, handler, runtime);
-
-    expect(handler).toHaveBeenCalledTimes(3);
-  });
-
-  it('never masks a live execution failure with an older cached terminal success', async () => {
-    const runtime = createMockRuntime();
-    await middleware.wrapCreateGeometry!(createMockInput(), async () => reusableBuild(), runtime);
-    const failure = createErrorResult();
-    const result = await middleware.wrapCreateGeometry!(createMockInput(), async () => failure, {
-      ...runtime,
-      progressiveSceneRequested: true,
-    });
-
-    expect(result).toBe(failure);
-  });
-
   it.each([
     ['failed', createErrorResult()],
     ['live WebRTC', liveBuild],
@@ -193,6 +167,20 @@ describe('geometryCache', () => {
     await middleware.wrapExportGeometry!({ format: 'step', options: {} }, handler, runtime);
 
     expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('calls the handler directly and never evaluates when the compute capability is off', async () => {
+    const runtime = { ...createMockRuntime(), compute: { status: 'off' } } as const;
+    const built = reusableBuild();
+    const handler = vi.fn(async () => built);
+
+    const first = await middleware.wrapCreateGeometry!(createMockInput(), handler, runtime);
+    const second = await middleware.wrapCreateGeometry!(createMockInput(), handler, runtime);
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(first).toBe(built);
+    expect(second).toBe(built);
+    expect(runtime.tracer.startSpan).not.toHaveBeenCalled();
   });
 
   it('misses when the dependency identity changes', async () => {

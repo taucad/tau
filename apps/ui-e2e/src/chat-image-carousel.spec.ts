@@ -43,12 +43,12 @@ describe('chat image carousel', () => {
   });
 
   test('should translate vertical wheel input in the overflowing composer rail and release it at the end', async () => {
-    const rail = selectors.getByCss('[aria-label="Attached images"]');
+    const rail = selectors.getByCss('[aria-label="Attachments"]');
     await target.expectVisible(rail);
 
     const state = await target.evaluateLocator(rail, async (element) => {
       if (!(element instanceof HTMLElement)) {
-        throw new TypeError('Attached images rail was not an HTML element.');
+        throw new TypeError('Attachments rail was not an HTML element.');
       }
 
       element.scrollLeft = 0;

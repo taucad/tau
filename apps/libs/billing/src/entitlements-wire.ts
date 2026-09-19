@@ -3,8 +3,7 @@ import { billingTiers } from '#billing-tier.js';
 import type { Entitlements } from '#entitlements.js';
 
 /**
- * Wire form of {@link Entitlements} for `GET /v1/billing/entitlements` and the
- * server-side Redis cache. JSON cannot carry `Infinity` (it serialises to
+ * Wire form of {@link Entitlements} for `GET /v1/billing/entitlements` response. JSON cannot carry `Infinity` (it serialises to
  * `null` silently) or `Date`, so unlimited quotas are `null` on the wire and
  * timestamps are ISO strings; {@link parseEntitlements} restores the runtime
  * shape losslessly.
@@ -13,7 +12,6 @@ import type { Entitlements } from '#entitlements.js';
 export const wireEntitlementsSchema = z.object({
   tier: z.enum(billingTiers),
   status: z.enum(['active', 'past_due', 'canceled', 'none']),
-  aiEnabled: z.boolean(),
   canUseProKernels: z.boolean(),
   canCreatePrivateShares: z.boolean(),
   canSyncFiles: z.boolean(),
@@ -33,7 +31,10 @@ export const wireEntitlementsSchema = z.object({
   geospecEvidenceRetentionDays: z.number(),
   trainingConsent: z.boolean(),
   currentPeriodEnd: z.iso.datetime().nullable(),
+  paidThrough: z.iso.datetime().nullable(),
+  graceEndsAt: z.iso.datetime().nullable(),
   cancelAtPeriodEnd: z.boolean(),
+  paymentCollectionAvailable: z.boolean(),
 });
 
 /**
@@ -62,6 +63,8 @@ export const serializeEntitlements = (entitlements: Entitlements): WireEntitleme
     conversionApiMonthlyLimit: toWireLimit(entitlements.conversionApiMonthlyLimit),
     geospecValidationMonthlyLimit: toWireLimit(entitlements.geospecValidationMonthlyLimit),
     currentPeriodEnd: entitlements.currentPeriodEnd?.toISOString() ?? null,
+    paidThrough: entitlements.paidThrough?.toISOString() ?? null,
+    graceEndsAt: entitlements.graceEndsAt?.toISOString() ?? null,
     paymentMethod: entitlements.paymentMethod ?? null,
   };
 };
@@ -83,6 +86,8 @@ export const parseEntitlements = (wire: unknown): Entitlements => {
     conversionApiMonthlyLimit: fromWireLimit(parsed.conversionApiMonthlyLimit),
     geospecValidationMonthlyLimit: fromWireLimit(parsed.geospecValidationMonthlyLimit),
     currentPeriodEnd: parsed.currentPeriodEnd === null ? undefined : new Date(parsed.currentPeriodEnd),
+    paidThrough: parsed.paidThrough === null ? undefined : new Date(parsed.paidThrough),
+    graceEndsAt: parsed.graceEndsAt === null ? undefined : new Date(parsed.graceEndsAt),
     paymentMethod: parsed.paymentMethod ?? undefined,
   };
 };

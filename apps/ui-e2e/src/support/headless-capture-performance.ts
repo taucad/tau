@@ -1,4 +1,12 @@
+/* eslint-disable @nx/enforce-module-boundaries -- the measurement contract has one owner, shared by both harnesses. */
 import { z } from 'zod';
+/* oxlint-disable no-restricted-imports -- one owner for the measurement contract both harnesses answer to. */
+import {
+  maximumBudgetCoefficientOfVariation,
+  readContention,
+} from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
+import type { MeasurementTags } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
+/* oxlint-enable no-restricted-imports -- measurement-owner import scope ends here. */
 
 /* oxlint-disable tau-lint/no-time-unit-suffix -- The durable benchmark artifact names its millisecond unit explicitly. */
 
@@ -27,6 +35,35 @@ const provenanceSchema = z.object({
   nanorasterTarballSha256: recordedSha256Schema,
 });
 
+/**
+ * The conditions a capture run was measured under (charter D14). The shape is
+ * owned by `apps/runtime-e2e/src/benchmarks/measurement-tags.ts` so both
+ * harnesses answer the budget question the same way; this is its durable view.
+ */
+export const measurementTagsSchema: z.ZodType<MeasurementTags> = z.object({
+  build: z.enum(['development', 'production']),
+  wasmVariant: z.string().min(1),
+  adapter: z.object({
+    api: z.enum(['none', 'webgl', 'webgpu']),
+    angle: z.enum(['default', 'metal', 'none', 'swiftshader']),
+    name: z.string(),
+    implementation: z.enum(['ambiguous', 'hardware', 'software']),
+  }),
+  kernelProcess: z.object({
+    kind: z.enum(['in-process', 'native', 'utility', 'worker']),
+    role: z.string().min(1),
+    pid: z.number().int().positive().optional(),
+  }),
+  crossOriginIsolated: z.boolean(),
+  contention: z.object({
+    tag: z.enum(['contended', 'quiet']),
+    source: z.enum(['load-average', 'operator']),
+    loadAverage1m: z.number().nonnegative(),
+    cpuCount: z.number().int().positive(),
+  }),
+  runtimeTraceJsonl: z.string().min(1).optional(),
+});
+
 const summarySchema = z.object({
   count: z.number().int().positive(),
   minimum: z.number().nonnegative(),
@@ -37,6 +74,8 @@ const summarySchema = z.object({
   mean: z.number().nonnegative(),
   standardDeviation: z.number().nonnegative(),
   coefficientOfVariation: z.number().nonnegative(),
+  /** False when the samples are too spread to mean anything: the scenario is refused, not averaged. */
+  varianceAccepted: z.boolean(),
 });
 
 export const benchmarkArtifactSchema = z.object({
@@ -45,6 +84,11 @@ export const benchmarkArtifactSchema = z.object({
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   provenance: provenanceSchema.optional(),
+  /**
+   * Absent on a run recorded before S0. Such a run is attribution evidence and
+   * never a budget — `budgetVerdict` refuses it.
+   */
+  measurement: measurementTagsSchema.optional(),
   environment: z.object({
     browser: z.string().min(1),
     launchArguments: z.array(z.string()),
@@ -124,6 +168,7 @@ export const summarizeSamples = (samples: readonly BenchmarkSample[]): Benchmark
     mean,
     standardDeviation,
     coefficientOfVariation: mean === 0 ? 0 : standardDeviation / mean,
+    varianceAccepted: mean === 0 ? true : standardDeviation / mean <= maximumBudgetCoefficientOfVariation,
   };
 };
 
@@ -141,7 +186,45 @@ export const compareMilliseconds = (baseline: number, candidate: number): Benchm
   result: candidate <= baseline ? 'improvement' : 'regression',
 });
 
+/**
+ * Assemble the conditions this capture run was measured under (charter D14, I13).
+ *
+ * The browser cannot read a load average, so the runner states it: a run that did not record one
+ * records no tags at all, and `budgetVerdict` refuses it. An invented reading would bind a budget
+ * to a number nobody took.
+ *
+ * @param environment - The `import.meta.env` the spec was built with.
+ * @param observed - What the page itself reported: its adapter, isolation, and CPU count.
+ * @returns The tags, or `undefined` when the run recorded no load average.
+ */
+export const readBenchmarkMeasurement = (
+  environment: Readonly<Record<string, string | undefined>>,
+  observed: {
+    readonly adapter: MeasurementTags['adapter'];
+    readonly crossOriginIsolated: boolean;
+    readonly cpuCount: number;
+  },
+): MeasurementTags | undefined => {
+  const loadAverage1m = Number(environment['VITE_TAU_MEASUREMENT_LOAD_1M']);
+  if (!Number.isFinite(loadAverage1m)) {
+    return undefined;
+  }
+  return {
+    build: environment['VITE_TAU_MEASUREMENT_BUILD'] === 'development' ? 'development' : 'production',
+    wasmVariant: environment['VITE_TAU_MEASUREMENT_WASM_VARIANT'] ?? 'none',
+    adapter: observed.adapter,
+    kernelProcess: { kind: 'worker', role: 'headless capture renderer' },
+    crossOriginIsolated: observed.crossOriginIsolated,
+    contention: readContention({
+      loadAverage1m,
+      cpuCount: observed.cpuCount,
+      operatorTag: environment['VITE_TAU_MEASUREMENT_CONTENTION'],
+    }),
+  };
+};
+
 export const adapterCohort = (adapter: BenchmarkArtifact['environment']['adapter']): string =>
   `${adapter.backend}:${adapter.deviceType}:${adapter.name}`;
 
 /* oxlint-enable tau-lint/no-time-unit-suffix -- Durable artifact field scope ends here. */
+/* eslint-enable @nx/enforce-module-boundaries -- cross-harness measurement owner scope ends here. */

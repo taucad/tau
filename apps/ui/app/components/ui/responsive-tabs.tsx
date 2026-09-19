@@ -53,6 +53,9 @@ export function ResponsiveTabs({
   // visually drags the entire dialog content. Targeting only this ref gives an
   // unambiguous, scoped scroll.
   useEffect(() => {
+    if (activeTab.length === 0) {
+      return;
+    }
     const list = tabsListRef.current;
     if (!list) {
       return;

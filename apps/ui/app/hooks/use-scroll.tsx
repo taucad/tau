@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 
 export type ScrollToProperties = {
   behavior?: ScrollBehavior;
@@ -12,7 +12,6 @@ export type ScrollToProperties = {
  * @param root0 - The scroll properties.
  * @param root0.behavior - The behavior of the scroll.
  * @param root0.reference - The reference element to scroll to.
- * @param dependencies - The dependencies of the scroll. Useful when elements are rendered asynchronously to ensure the `isScrolledTo` state is updated when the element is in view.
  *
  * @example
  * ```tsx
@@ -20,7 +19,6 @@ export type ScrollToProperties = {
  *     {
  *       reference: chatEndReference,
  *     },
- *     [hasContent],
  *   );
  *
  *   // Handler to scroll to the end of the chat.
@@ -37,10 +35,10 @@ export type ScrollToProperties = {
  * @returns The scroll to properties, `{ isScrolledTo: boolean, scrollTo: () => void }`.
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- infer type for hooks
-export function useScroll({ behavior, reference }: ScrollToProperties, dependencies: readonly unknown[] = []) {
+export function useScroll({ behavior, reference }: ScrollToProperties) {
   const [isScrolledTo, setIsScrolledTo] = useState(false);
 
-  const scrollTo = useCallback(() => {
+  const scrollTo = (): void => {
     if (reference.current) {
       // Find the scrollable parent container by traversing up and checking the
       // computed styles for overflow
@@ -64,7 +62,7 @@ export function useScroll({ behavior, reference }: ScrollToProperties, dependenc
         });
       }
     }
-  }, [reference, behavior]);
+  };
 
   useEffect(() => {
     const currentReference = reference.current;
@@ -84,8 +82,7 @@ export function useScroll({ behavior, reference }: ScrollToProperties, dependenc
         observer.unobserve(currentReference);
       }
     };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- we are accepting that dependencies are not fully known.
-  }, [reference, ...dependencies]);
+  }, [reference]);
 
   return {
     isScrolledTo,

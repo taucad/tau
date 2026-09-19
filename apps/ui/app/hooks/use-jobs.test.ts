@@ -1,7 +1,20 @@
+import { renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { fetchDurableJobPage, fetchJobArtifact, pollJobStream, requestJobCancellation } from '#hooks/use-jobs.js';
+import {
+  fetchDurableJobPage,
+  fetchJobArtifact,
+  pollJobStream,
+  requestJobCancellation,
+  useJobs,
+} from '#hooks/use-jobs.js';
 import { createJobProjection } from '#lib/jobs-projection.js';
 import type { DurableJobRead, JobArtifact, JobProjection, JobSnapshot } from '#lib/jobs-projection.js';
+
+const mocks = vi.hoisted(() => ({ projectId: 'project-1' }));
+
+// eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror environment.config's exported contract.
+vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.example' } }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: mocks.projectId }) }));
 
 const digest = `sha256:${'a'.repeat(64)}`;
 const timestamp = '2026-08-28T00:00:00.000Z';
@@ -57,6 +70,34 @@ const terminalPage = (): DurableJobRead => ({
 });
 
 describe('jobs HTTP transport', () => {
+  it('should restart project polling when the project changes', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([]));
+    const mounted = renderHook(() => useJobs());
+    try {
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      });
+
+      mocks.projectId = 'project-2';
+      mounted.rerender();
+
+      await waitFor(() => {
+        expect(fetcher).toHaveBeenCalledTimes(2);
+      });
+      expect(
+        fetcher.mock.calls.map(([request]) =>
+          new URL(typeof request === 'string' || request instanceof URL ? request : request.url).searchParams.get(
+            'projectId',
+          ),
+        ),
+      ).toEqual(['project-1', 'project-2']);
+    } finally {
+      mounted.unmount();
+      fetcher.mockRestore();
+      mocks.projectId = 'project-1';
+    }
+  });
+
   it('requests cursor replay with authenticated long polling', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

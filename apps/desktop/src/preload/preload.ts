@@ -25,7 +25,10 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
-  nativeCodeTrustChannels,
+  agentHostSessionChannels,
+  externalAgentsChannel,
+  quitChannels,
+  computeControlChannels,
   readBootstrap,
   servicesPortRelayTag,
 } from '#shared/desktop-bootstrap.js';
@@ -40,6 +43,16 @@ import type {
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 const bootstrap = readBootstrap(process.argv);
+
+let pendingQuitAsk = false;
+let quitAskHandler: (() => void) | undefined;
+ipcRenderer.on(quitChannels.ask, () => {
+  if (quitAskHandler === undefined) {
+    pendingQuitAsk = true;
+    return;
+  }
+  quitAskHandler();
+});
 
 exposeElectronRuntime();
 relayElectronPorts(servicesPortRelayTag);
@@ -71,20 +84,48 @@ contextBridge.exposeInMainWorld('tau', {
   requestServicesPort: (requestId: string, concern: string, context?: Readonly<Record<string, string>>): void => {
     ipcRenderer.send(servicesPortRelayTag, { requestId, concern, context });
   },
+  agentHost: {
+    retain: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
+      await ipcRenderer.invoke(agentHostSessionChannels.retain, { workspaceRoot, projectId, attachmentId });
+    },
+    release: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
+      await ipcRenderer.invoke(agentHostSessionChannels.release, { workspaceRoot, projectId, attachmentId });
+    },
+  },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
-  nativeCode: {
-    isTrusted: async (projectRoot: string): Promise<boolean> =>
-      (await ipcRenderer.invoke(nativeCodeTrustChannels.status, projectRoot)) as boolean,
-    grant: async (projectRoot: string): Promise<boolean> =>
-      (await ipcRenderer.invoke(nativeCodeTrustChannels.grant, projectRoot)) as boolean,
-    revoke: async (projectRoot: string): Promise<void> => {
-      await ipcRenderer.invoke(nativeCodeTrustChannels.revoke, projectRoot);
-    },
+  /* A call, not a value (D17): main answers when ACP discovery settles, which no
+   * longer blocks this window's creation. */
+  externalAgents: async (): Promise<unknown> => ipcRenderer.invoke(externalAgentsChannel),
+  compute: {
+    inspect: async (projectRoot: string) =>
+      (await ipcRenderer.invoke(computeControlChannels.inspect, projectRoot)) as unknown,
+    clear: async (projectRoot: string) =>
+      (await ipcRenderer.invoke(computeControlChannels.clear, projectRoot)) as unknown,
+    collect: async (projectRoot: string, input: { budget: number; cursor?: string }) =>
+      (await ipcRenderer.invoke(computeControlChannels.collect, projectRoot, input)) as unknown,
   },
   appIcon: {
     setTheme: (theme: AppIconTheme): void => {
       ipcRenderer.send(appIconThemeChannel, theme);
+    },
+  },
+  quit: {
+    isReady: (): boolean => quitAskHandler !== undefined,
+    onAsk: (handler: () => void): (() => void) => {
+      quitAskHandler = handler;
+      if (pendingQuitAsk) {
+        pendingQuitAsk = false;
+        handler();
+      }
+      return () => {
+        if (quitAskHandler === handler) {
+          quitAskHandler = undefined;
+        }
+      };
+    },
+    reportQuiesced: (forced: boolean): void => {
+      ipcRenderer.send(quitChannels.quiesced, forced);
     },
   },
   dialog: {

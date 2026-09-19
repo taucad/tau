@@ -33,6 +33,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./camera": "./src/camera.ts",
+    "./resources": "./src/resources.ts",
     "./spatial": "./src/spatial.ts",
     "./package.json": "./package.json"
   },
@@ -48,6 +49,11 @@
         "types": "./dist/camera.d.mts",
         "import": "./dist/camera.mjs",
         "default": "./dist/camera.mjs"
+      },
+      "./resources": {
+        "types": "./dist/resources.d.mts",
+        "import": "./dist/resources.mjs",
+        "default": "./dist/resources.mjs"
       },
       "./spatial": {
         "types": "./dist/spatial.d.mts",

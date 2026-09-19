@@ -57,6 +57,22 @@ describe('finalizeExportArtifactSet', () => {
     expect(issue?.type).toBe('runtime');
   });
 
+  it('reports every invalid artifact instead of truncating at the first issue', () => {
+    const duplicate = file('../model.gltf');
+    const missingMime = file('texture.png');
+    Reflect.set(missingMime, 'mimeType', '');
+
+    const result = finalizeExportArtifactSet(success([duplicate, duplicate, missingMime]));
+
+    expect(result.success).toBe(false);
+    expect(result.issues.map(({ message }) => message)).toEqual([
+      expect.stringContaining('file 0 has an unsafe relative path'),
+      expect.stringContaining('file 1 has an unsafe relative path'),
+      expect.stringContaining('file 1 duplicates an earlier path'),
+      expect.stringContaining('file 2 has no MIME type'),
+    ]);
+  });
+
   it('should preserve an existing failure result', () => {
     const result: ExportGeometryResult = {
       success: false,

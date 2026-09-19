@@ -1,6 +1,9 @@
 import { assign, assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
+import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
+import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
 import {
@@ -24,6 +27,8 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
+import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
@@ -38,6 +43,46 @@ const fileCacheMaxTotalBytes = 128 * 1024 * 1024;
 const fileCacheMaxSingleFileBytes = 1024 * 1024;
 
 const filePoolBytes = 50 * 1024 * 1024;
+
+const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) => {
+  const openComputeStorePort = (projectId: string): MessagePort => {
+    if (!admittedProjectId || projectId !== admittedProjectId) {
+      throw new Error('Compute store project authority does not match the active project.');
+    }
+    const channel = new MessageChannel();
+    worker.postMessage({ type: 'computeStoreConnect', projectId, port: channel.port1 }, [channel.port1]);
+    return channel.port2;
+  };
+  const openComputeBinding = (projectId: string) => {
+    const connection = connectComputeStoreChannel(openComputeStorePort(projectId));
+    return { compute: { mode: 'durable', store: connection.store } as const, dispose: connection.dispose };
+  };
+  const computeControl = <Name extends keyof ComputeStoreControl>(
+    projectId: string,
+    action: Name,
+    input: Parameters<ComputeStoreControl[Name]>[0],
+  ): ReturnType<ComputeStoreControl[Name]> => {
+    if (!admittedProjectId || projectId !== admittedProjectId) {
+      throw new Error('Compute control project authority does not match the active project.');
+    }
+    const channel = new MessageChannel();
+    worker.postMessage({ type: 'computeStoreControl', projectId, action, ...input, port: channel.port1 }, [
+      channel.port1,
+    ]);
+    return new Promise<Awaited<ReturnType<ComputeStoreControl[Name]>>>((resolve, reject) => {
+      channel.port2.addEventListener('message', ({ data }: MessageEvent<{ result?: unknown; error?: string }>) => {
+        channel.port2.close();
+        if (data.error) {
+          reject(new Error(data.error));
+        } else {
+          resolve(data.result as Awaited<ReturnType<ComputeStoreControl[Name]>>);
+        }
+      });
+      channel.port2.start();
+    }) as ReturnType<ComputeStoreControl[Name]>;
+  };
+  return { openComputeBinding, openComputeStorePort, computeControl };
+};
 
 /**
  * Why webaccess can't be initialized when the FM machine enters the
@@ -54,14 +99,35 @@ const filePoolBytes = 50 * 1024 * 1024;
  */
 export type WorkspaceUnavailableReason = 'missing' | 'disconnected' | 'permission';
 
+/**
+ * Which surface a rooted bridge connection asks for. Required, never defaulted
+ * (gate G-B finding G6).
+ *
+ * A UI-originated connection names the consumer whose composed view it reads —
+ * `'user'` or `'agent'` — and gets that consumer's mask and overlays. Trusted
+ * composition names `'working-copy'`: the host's own capture, apply and language
+ * planes must read the checkout itself and never the overlays above it
+ * (architecture V6). Since W5 that raw surface also carries the mutating
+ * porcelain, so the choice is a write decision as well as a read one — which is
+ * why it is spelled at every call site instead of falling out of an omitted
+ * argument.
+ */
+export type RootedBridgeConsumer = ComposedViewConsumer | 'working-copy';
+
 type FileManagerContext = {
   worker: Worker | undefined;
   proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
   bridgeDispose?: () => void;
-  openFileSystemBridge?: (root: string) => FileSystemBridgeConnection;
+  openFileSystemBridge?: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
+  openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
+  openComputeStorePort?: (projectId: string) => MessagePort;
+  computeControl?: ReturnType<typeof computeOpeners>['computeControl'];
   filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
+  /** The one composed client the file services and the Files pane both use. */
+  viewClient: ComposedViewClient | undefined;
+  disposeComposedView?: () => void;
   workerChangeChannel: WorkerChangeChannel | undefined;
   error: Error | undefined;
   rootDirectory: string;
@@ -106,7 +172,10 @@ type WorkerConnectedEvent = {
   worker: Worker;
   proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
   bridgeDispose: () => void;
-  openFileSystemBridge: (root: string) => FileSystemBridgeConnection;
+  openFileSystemBridge: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
+  openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
+  openComputeStorePort: (projectId: string) => MessagePort;
+  computeControl: ReturnType<typeof computeOpeners>['computeControl'];
   filePoolBuffer: SharedArrayBuffer | undefined;
 };
 
@@ -123,7 +192,10 @@ type WorkerInitializedEvent = {
   initialEntries: FileEntry[];
   contentService: FileContentService;
   treeService: FileTreeService;
+  viewClient: ComposedViewClient;
   workerChangeChannel: WorkerChangeChannel;
+  /** Releases the user's composed-view connection this init opened. */
+  disposeComposedView: () => void;
 };
 
 /**
@@ -147,6 +219,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     context.contentService?.dispose();
     context.treeService?.dispose();
     context.workerChangeChannel?.dispose();
+    context.disposeComposedView?.();
 
     const { createFileSystemBridge, createFileSystemBridgeProxy, openFileSystemBridge, waitForWorkerReady } =
       await import('@taucad/fs-bridge');
@@ -275,10 +348,37 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     const bridge = createFileSystemBridge(worker);
     const { dispose: bridgeDispose } = bridge;
     const proxy = createFileSystemBridgeProxy(bridge);
-    await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
-    const openBridge = (root: string): FileSystemBridgeConnection => openFileSystemBridge(worker, { root });
+    // Project roots are worker-global and every mutation re-syncs them (`syncProjectRoots`), so a
+    // nested mount inherits the root mount's configuration instead of rebuilding it (W21).
+    if (!context.sharedWorker) {
+      await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
+    }
+    const previewPrefix = '/previews/';
+    if (context.backendType === 'memory' && context.rootDirectory.startsWith(previewPrefix)) {
+      await proxy.mount(context.rootDirectory, {
+        backend: 'memory',
+        storageRootKey: `memory:preview:${context.rootDirectory.slice(previewPrefix.length)}`,
+        class: 'authored',
+      });
+    }
+    /* `'working-copy'` is the absence of a consumer on the wire: the bridge hands
+     * back the checkout's raw rooted filesystem when no consumer is named. */
+    const openBridge = (root: string, consumer: RootedBridgeConsumer): FileSystemBridgeConnection =>
+      openFileSystemBridge(worker, { root, ...(consumer === 'working-copy' ? {} : { consumer }) });
+    worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
+    const { openComputeBinding, openComputeStorePort, computeControl } = computeOpeners(worker, context.projectId);
 
-    return { type: 'workerConnected', worker, proxy, bridgeDispose, openFileSystemBridge: openBridge, filePoolBuffer };
+    return {
+      type: 'workerConnected',
+      worker,
+      proxy,
+      bridgeDispose,
+      openFileSystemBridge: openBridge,
+      openComputeBinding,
+      openComputeStorePort,
+      computeControl,
+      filePoolBuffer,
+    };
   },
 );
 
@@ -387,14 +487,33 @@ const initializeServicesActor = fromSafeAsync<
 
   const paths = new WorkspacePathResolver(context.rootDirectory);
   const refreshGuard = new RefreshGenerationGuard();
-  const workerChangeChannel = new WorkerChangeChannel({
-    transport: { listen: proxy.listen! },
-    paths,
-  });
   const visibilityProvider = createDomVisibilityProvider();
 
+  /*
+   * One composition, read by both consumers (charter D1). The user's view is a
+   * rooted bridge connection the file-manager worker composes; the agent's is
+   * the same function over its own rooted provider.
+   *
+   * One connection, and it carries the changes too (charter D12): reads, writes,
+   * porcelain, watch and `fileChanged` all ride this port, because the authority
+   * suppresses a port's own events by port identity. Split them and the UI hears
+   * its own writes back as somebody else's. Only the topology calls — mount,
+   * project roots, discovery — stay on the workspace surface, which owns no
+   * content.
+   */
+  const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
+  const viewProxy = createFileSystemBridgeProxy(viewConnection);
+  const disposeComposedView = (): void => {
+    safeDispose(() => {
+      viewProxy.dispose();
+    });
+  };
+  const workerChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
+  const client = createComposedViewClient({ workspace: proxy, view: viewProxy, paths });
+
   const contentService = new FileContentService({
-    proxy,
+    proxy: client,
     paths,
     channel: workerChangeChannel,
     refreshGuard,
@@ -407,7 +526,7 @@ const initializeServicesActor = fromSafeAsync<
   });
 
   const treeService = new FileTreeService({
-    proxy,
+    proxy: client,
     paths,
     channel: workerChangeChannel,
     visibility: visibilityProvider,
@@ -442,7 +561,9 @@ const initializeServicesActor = fromSafeAsync<
     initialEntries,
     contentService,
     treeService,
+    viewClient: client,
     workerChangeChannel,
+    disposeComposedView,
   };
 });
 
@@ -523,12 +644,14 @@ export const fileManagerMachine = setup({
       context.contentService?.dispose();
       context.treeService?.dispose();
       context.workerChangeChannel?.dispose();
+      context.disposeComposedView?.();
     },
 
     destroyWorkerAndServices: assign(({ context }) => {
       context.contentService?.dispose();
       context.treeService?.dispose();
       context.workerChangeChannel?.dispose();
+      context.disposeComposedView?.();
       safeDispose(() => context.proxy?.dispose());
       safeDispose(context.bridgeDispose);
 
@@ -540,10 +663,15 @@ export const fileManagerMachine = setup({
         proxy: undefined,
         bridgeDispose: undefined,
         openFileSystemBridge: undefined,
+        openComputeBinding: undefined,
+        openComputeStorePort: undefined,
+        computeControl: undefined,
         worker: context.sharedWorker ? context.worker : undefined,
         contentService: undefined,
         treeService: undefined,
+        viewClient: undefined,
         workerChangeChannel: undefined,
+        disposeComposedView: undefined,
       };
     }),
 
@@ -555,6 +683,19 @@ export const fileManagerMachine = setup({
       projectId({ event }) {
         assertEvent(event, 'setRoot');
         return event.projectId;
+      },
+      openComputeBinding({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
+        assertEvent(event, 'setRoot');
+        context.worker?.postMessage({ type: 'computeStoreAdmission', projectId: event.projectId });
+        return context.worker ? computeOpeners(context.worker, event.projectId).openComputeBinding : undefined;
+      },
+      openComputeStorePort({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
+        assertEvent(event, 'setRoot');
+        return context.worker ? computeOpeners(context.worker, event.projectId).openComputeStorePort : undefined;
+      },
+      computeControl({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
+        assertEvent(event, 'setRoot');
+        return context.worker ? computeOpeners(context.worker, event.projectId).computeControl : undefined;
       },
       error: undefined,
       // Workspace identity is a per-init *output* of `initializeServicesActor`;
@@ -583,6 +724,18 @@ export const fileManagerMachine = setup({
         assertEvent(event, 'workerConnected');
         return event.openFileSystemBridge;
       },
+      openComputeBinding({ event }: { event: FileManagerEvent }) {
+        assertEvent(event, 'workerConnected');
+        return event.openComputeBinding;
+      },
+      openComputeStorePort({ event }: { event: FileManagerEvent }) {
+        assertEvent(event, 'workerConnected');
+        return event.openComputeStorePort;
+      },
+      computeControl({ event }: { event: FileManagerEvent }) {
+        assertEvent(event, 'workerConnected');
+        return event.computeControl;
+      },
       filePoolBuffer({ event }) {
         assertEvent(event, 'workerConnected');
         return event.filePoolBuffer;
@@ -607,9 +760,17 @@ export const fileManagerMachine = setup({
         assertEvent(event, 'workerInitialized');
         return event.contentService;
       },
+      disposeComposedView({ event }) {
+        assertEvent(event, 'workerInitialized');
+        return event.disposeComposedView;
+      },
       treeService({ event }) {
         assertEvent(event, 'workerInitialized');
         return event.treeService;
+      },
+      viewClient({ event }) {
+        assertEvent(event, 'workerInitialized');
+        return event.viewClient;
       },
       workerChangeChannel({ event }) {
         assertEvent(event, 'workerInitialized');
@@ -646,7 +807,9 @@ export const fileManagerMachine = setup({
         treeService?.startPolling();
         return;
       }
-      if (treeService === undefined) {
+      // Only the root mount observes other workspaces; a nested project mount polls its own
+      // tree only when that project is itself webaccess, handled above (W21).
+      if (treeService === undefined || context.sharedWorker) {
         return;
       }
       // async-iife: bootstrap — the root file manager also observes granted webaccess
@@ -692,11 +855,15 @@ export const fileManagerMachine = setup({
     worker: undefined,
     proxy: undefined,
     openFileSystemBridge: undefined,
+    openComputeBinding: undefined,
+    openComputeStorePort: undefined,
+    computeControl: undefined,
     // Seed with the parent's SAB when nested so the connect actor's gate
     // observes a non-undefined buffer and skips re-allocation.
     filePoolBuffer: input.sharedFilePoolBuffer,
     contentService: undefined,
     treeService: undefined,
+    viewClient: undefined,
     workerChangeChannel: undefined,
     error: undefined,
     rootDirectory: input.rootDirectory,

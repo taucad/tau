@@ -9,6 +9,13 @@
     "test": {
       "executor": "nx:noop"
     },
+    "test:harness": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.unit.config.ts"
+      }
+    },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
@@ -16,8 +23,38 @@
         "command": "tsgo -p apps/desktop-e2e/tsconfig.json --noEmit"
       }
     },
-    "test:e2e:desktop": {
+    "test:e2e": {
       "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Deterministic desktop chat tier (D19). Named test:e2e so `nx affected -t test:e2e` selects it, and built unpackaged so the Electron shell can run under xvfb on the CI e2e runner. Infrastructure bring-up is `scripts/ensure-services.sh`, shared with every other tier here: it publishes the bootstrap billing policy only on a database that has none, because that publish pins `--expected-head-revision 0` and dies on any database whose head has moved (C65/P70)."
+      },
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-chat-attachments.spec.ts src/desktop-share-link-copy.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
+        }
+      }
+    },
+    "test:e2e:packaged": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Packaged-app specs (macOS arm64 only: they launch package-out/Tau-darwin-arm64). Kept off `test:e2e` so the Ubuntu e2e runner is not asked for a package it cannot build. `TAU_E2E_DESKTOP_EXECUTABLE` is assigned on the vitest command rather than in `env` because the Assimp spec requires an absolute path and Nx strips a leading `{workspaceRoot}/` from option values."
+      },
       "dependsOn": [
         {
           "projects": ["desktop"],
@@ -32,9 +69,8 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts"
+          "./scripts/ensure-services.sh",
+          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014"
@@ -57,13 +93,77 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-live.spec.ts"
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-live.spec.ts src/desktop-chat-live-pdf.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014",
           "TAU_E2E_LIVE_LLM": "true"
+        }
+      }
+    },
+    "test:e2e:desktop:acp": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "External-agent tier (W4-ACP): the desktop's ACP rows, and one real turn through the operator's own Codex login. Kept off test:e2e because it spends their quota and needs the Codex CLI; the spec skips when the adapter or the CLI is absent."
+      },
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-acp.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
+        }
+      }
+    },
+    "test:e2e:desktop:completed-artifact": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/desktop-e2e/scripts/run-completed-artifact.mts"
+      }
+    },
+    "test:e2e:two-client": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "W18 two-client tier: chromium.launch() beside electron.launch() in one node-side vitest process, a real UI server on :3014 (apps/ui/server.ts, started by the spec), the dedicated API on :4014, and a git http-backend fixture in mktemp. Kept off test:e2e because it needs the built web UI as well as the desktop shell, and six of its cases are red pins on product defects. No dependsOn api:build: that chain reaches runtime:build, which is red on Node 24 for a tsdown config-loader bug, and global-setup.ts builds apps/api itself. The web UI is built by the first command rather than a dependsOn, because it must be the cloud variant (TAU_CLOUD_ENABLED=true is a build-time input of ui:build) and a dependency task inherits only the caller's environment: a self-host build hands every account canSyncFiles and renders no plan gate, so the entitlement and Upgrade rows could never be observed."
+      },
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        },
+        {
+          "projects": ["ui"],
+          "target": "build:desktop"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "TAU_CLOUD_ENABLED=true pnpm --dir ../.. exec nx run ui:build",
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/two-client.spec.ts src/sync-refusals.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
         }
       }
     }

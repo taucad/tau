@@ -7,6 +7,7 @@ updated: '2026-08-28'
 related:
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/filesystem-policy.md
+  - docs/policy/revisions-policy.md
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-api-policy.md
   - docs/policy/storage-policy.md
@@ -46,6 +47,8 @@ The governing invariant is:
 ### 1. A valid manifest establishes project existence
 
 A directory containing a valid `tau.json` on a configured storage root **is** a project. Discovery scans `/projects/*/tau.json`; no object-store row may create a project, suppress discovery of an active project, or substitute for a missing manifest.
+
+A pending linked-remote bootstrap is a quarantined provisional directory, not a project. Its protected operation marker proves only recovery ownership and never substitutes for `tau.json`. Discovery admits it only after the reviewed Git tree and setup revision verify and manifest-last publication completes. A local import remains a valid project when its later remote push is pending or refused.
 
 After discovery, the UI may left-join `ProjectLibraryState` by validated logical project ID to sort the library, hide a soft-deleted project, or initialize revision state. This overlay affects local presentation and lifecycle only. A stale row without a discovered manifest is not a project.
 
@@ -171,6 +174,8 @@ If Tau later promotes a lossless on-disk chat archive to authority, the archive 
 In-app manifest writes are serialized by the project manager/project machine boundary. Creation, duplication, import, legacy object-store conversion, and live metadata changes all use the same strict v1 serializer. Components and feature workers request changes through that owner and never write `tau.json` directly.
 
 External writers edit the manifest itself. The app converges by watching, re-parsing, and replacing only the manifest slice of the composed project view; local library state remains untouched. Machine-origin write guards and coalescing prevent write/watch loops.
+
+When importing a Git history, validate an existing manifest at the pinned source commit before reserving identity. Adopt its id only when no local project owns it. If the same id is already local, open the existing project only after its stable remote repository identity matches; otherwise require an explicit new-id manifest change on a new branch. Missing or invalid manifests remain unchanged in the imported parent and may be created or replaced only in the user's reviewed setup revision.
 
 The thumbnail owner writes bytes to the path declared by the target asset. Parameter owners write only canonical sidecars. Neither generated write counts as project activity.
 

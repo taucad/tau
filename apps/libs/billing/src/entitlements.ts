@@ -1,7 +1,7 @@
 import type { BillingTier } from '#billing-tier.js';
 
 /**
- * Subscription lifecycle status mirrored from Stripe / Better Auth.
+ * First-party subscription lifecycle display status.
  * @public
  */
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'none';
@@ -15,12 +15,6 @@ export type SubscriptionStatus = 'active' | 'past_due' | 'canceled' | 'none';
 export type Entitlements = {
   readonly tier: BillingTier;
   readonly status: SubscriptionStatus;
-  /**
-   * Whether AI features are available at this tier. Always true for paid tiers;
-   * for Free it reflects the AD19 operational kill switch (`FREE_TIER_AI_ENABLED`) —
-   * the server projection zeroes it without a deploy.
-   */
-  readonly aiEnabled: boolean;
   readonly canUseProKernels: boolean;
   readonly canCreatePrivateShares: boolean;
   readonly canSyncFiles: boolean;
@@ -28,19 +22,9 @@ export type Entitlements = {
   readonly canConnectEnterpriseGit: boolean;
   readonly apiCadGatewayMonthlyLimit: number;
   readonly conversionApiMonthlyLimit: number;
-  /**
-   * Whether the user has any Stripe payment method on file. Canonical home of the
-   * flag the top-up flow A/B branch reads (the `INSUFFICIENT_CREDITS` payload may
-   * carry a convenience copy, but this projection wins).
-   */
+  /** Advisory saved-card availability; preparing a payment freezes the actual method. */
   readonly hasPaymentMethod: boolean;
-  /**
-   * The default saved card the top-up fast path will charge (brand + last4),
-   * or `undefined` when none is on file (serialised as `null` on the wire, like
-   * `currentPeriodEnd`). Resolved by the same shared default-card resolver the
-   * charge path uses, so the card shown always equals the card charged.
-   * Surfaced for the mini-checkout payment-method row.
-   */
+  /** Advisory brand and last4; only the owned payment quote identifies the card to charge. */
   readonly paymentMethod: { readonly brand: string; readonly last4: string } | undefined;
   // GeoSpec verification family (vision-policy commercial core, AD13). Populated
   // per tier from day one so BillingSettings can render them as Coming Soon;
@@ -58,11 +42,14 @@ export type Entitlements = {
    */
   readonly trainingConsent: boolean;
   readonly currentPeriodEnd: Date | undefined;
+  readonly paidThrough: Date | undefined;
+  readonly graceEndsAt: Date | undefined;
   readonly cancelAtPeriodEnd: boolean;
+  /** Whether this deployment can take a payment now; purchase controls stay disabled while it is false. */
+  readonly paymentCollectionAvailable: boolean;
 };
 
 const freeEntitlements = {
-  aiEnabled: true,
   canUseProKernels: false,
   canCreatePrivateShares: false,
   canSyncFiles: false,
@@ -82,7 +69,6 @@ const freeEntitlements = {
 } as const;
 
 const proEntitlements = {
-  aiEnabled: true,
   canUseProKernels: true,
   canCreatePrivateShares: true,
   canSyncFiles: true,
@@ -124,7 +110,10 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         status: 'none',
         ...freeEntitlements,
         currentPeriodEnd: undefined,
+        paidThrough: undefined,
+        graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
+        paymentCollectionAvailable: false,
       };
     }
 
@@ -134,7 +123,10 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         status: 'active',
         ...proEntitlements,
         currentPeriodEnd: undefined,
+        paidThrough: undefined,
+        graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
+        paymentCollectionAvailable: false,
       };
     }
 
@@ -153,7 +145,10 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         canCreateGeoSpecEvidenceReports: true,
         geospecEvidenceRetentionDays: 365,
         currentPeriodEnd: undefined,
+        paidThrough: undefined,
+        graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
+        paymentCollectionAvailable: false,
       };
     }
   }

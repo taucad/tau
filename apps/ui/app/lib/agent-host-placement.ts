@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import { packageVersion } from '@taucad/runtime/metadata';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
-import type { AgentChannelClient } from '@taucad/agent-host';
-import type { TauAgentHostId } from '@taucad/chat';
+import type { CadAgentExecution, TauAgentHostId } from '@taucad/chat';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+import type { AgentChannelClient, ExternalAgentDescriptor } from '@taucad/agent-host';
 import { createRemoteHostSession, listRemoteHosts, RemoteHostApiError } from '#lib/remote-host-client.js';
 import { desktopBridge, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 
 /**
  * The transport ladder for a daemon-placed Tau turn (`agent-host-transports-and-offline.md`, F4).
@@ -32,6 +34,41 @@ import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
  */
 export type AgentHostPlacementRung = 'in-process' | 1 | 2 | 5;
 
+/** The implicit local Tau-agent placement for this build target. @internal */
+export const localAgentHostId = (): TauAgentHostId | undefined => (isDesktopTarget ? 'desktop' : undefined);
+
+/**
+ * The daemon one execution is placed on, or `undefined` for this page's own
+ * worker.
+ *
+ * An external agent is *always* daemon-placed (`acpAgentExecutionSchema`
+ * requires a `hostId`); a Tau turn falls back to this build's local launcher.
+ *
+ * @param execution - The turn's execution.
+ * @returns The host id, or `undefined` for the browser worker.
+ * @public
+ */
+export const daemonPlacementOf = (execution: CadAgentExecution): TauAgentHostId | undefined =>
+  execution.kind === 'tau' ? (execution.hostId ?? localAgentHostId()) : execution.hostId;
+
+/** Descriptors by agent id, as of the last discovery pass. */
+const discoveredAgents = new Map<string, ExternalAgentDescriptor>();
+
+/**
+ * The product name one external agent goes by (V14).
+ *
+ * The descriptor's `displayName` is the single source — the per-file name maps
+ * that used to spell "Claude Code" and "Codex" in the selector *and* the
+ * approval banner are gone — so a surface that has no placement in hand reads
+ * it here rather than keeping a third copy.
+ *
+ * @param agentId - Registry id the execution names.
+ * @returns The product name, falling back to the id for an agent no host has described yet.
+ * @public
+ */
+export const externalAgentDisplayName = (agentId: string): string =>
+  discoveredAgents.get(agentId)?.displayName ?? agentId;
+
 /** Every way a placement can fail, as a code the banner can key copy off. @public */
 export type AgentHostPlacementErrorCode =
   | 'ORIGIN_NOT_HOSTED'
@@ -42,7 +79,9 @@ export type AgentHostPlacementErrorCode =
   | 'HOST_UNREACHABLE'
   | 'RUNG5_NO_ADMISSION'
   /** Launcher 2: main never posted a port, which is how it refuses an ungranted root. */
-  | 'DESKTOP_ROOT_NOT_GRANTED';
+  | 'DESKTOP_ROOT_NOT_GRANTED'
+  /** The desktop build has no browser agent worker to construct; nothing to grant or retry. */
+  | 'BROWSER_HOST_UNAVAILABLE';
 
 /** A placement that could not be established, carrying which rung gave up. @public */
 export class AgentHostPlacementError extends Error {
@@ -71,8 +110,8 @@ export const tauHostDescriptorSchema = z.strictObject({
   agent: z.literal(true),
   label: z.string().min(1),
   workspaceRoot: z.string().min(1),
-  /** External ACP agents this daemon can start (W4-ACP); absent = Tau runs only. */
-  externalAgents: z.array(z.string().min(1)).optional(),
+  /** External ACP agents this daemon knows about (W4-ACP); absent = Tau runs only. */
+  externalAgents: z.array(externalAgentDescriptorSchema).max(16).optional(),
 });
 
 /** @public */
@@ -91,10 +130,11 @@ export type AgentHostPlacementTarget = {
   readonly workspaceRoot: string;
   readonly online: boolean;
   /**
-   * External ACP agents this host can start (W4-ACP). Each becomes its own row
-   * in the selector; absent or empty means Tau's own runs only.
+   * External ACP agents this host knows about (W4-ACP). Each becomes its own
+   * row in the selector — a refused one as a row that says why it cannot run —
+   * and absent or empty means Tau's own runs only.
    */
-  readonly externalAgents?: readonly string[] | undefined;
+  readonly externalAgents?: readonly ExternalAgentDescriptor[] | undefined;
   /**
    * Set when this host is a cloud host (launcher 3) and names the project it was
    * provisioned for. A cloud host is a paired device in every other respect —
@@ -223,6 +263,36 @@ export const discoverOriginAgentHost = async (
   return parsed.success ? parsed.data : undefined;
 };
 
+let directoryOutage: string | undefined;
+
+/**
+ * The host directory's own refusal, once `GET /v1/agents` has failed.
+ *
+ * Discovery still must not throw — rung 1 and launcher 2 are placeable without
+ * the directory — but swallowing its message left a *persisted* rung-2
+ * selection with no availability at all, so its dispatch waited out the whole
+ * probe timeout and then refused naming nothing.
+ *
+ * @returns The refusal, or `undefined` while the directory is answering.
+ * @internal
+ */
+export const hostDirectoryOutage = (): string | undefined => directoryOutage;
+
+let discoveryIncomplete = false;
+
+/**
+ * Whether the last listing lost a source and is missing rows it should carry.
+ *
+ * A failed external-agent call used to be indistinguishable from a computer
+ * that simply has no Claude Code or Codex installed, and discovery runs once
+ * per project — so one transient IPC failure hid them until the project
+ * changed. Callers re-run discovery while this is true.
+ *
+ * @returns Whether the listing is worth retrying.
+ * @internal
+ */
+export const hostPlacementsIncomplete = (): boolean => discoveryIncomplete;
+
 /**
  * Every placement target this page can see, rung 1 first.
  *
@@ -239,17 +309,47 @@ export const listAgentHostPlacements = async (
     readonly listHosts?: typeof listRemoteHosts | undefined;
     /** Desktop-build override, for tests. */
     readonly desktop?: boolean | undefined;
+    /** Desktop-bridge override, for tests. */
+    readonly bridge?: typeof desktopBridge | undefined;
   } = {},
 ): Promise<readonly AgentHostPlacementTarget[]> => {
-  const [origin, paired] = await Promise.all([
+  directoryOutage = undefined;
+  discoveryIncomplete = false;
+  const bridge = (options.bridge ?? desktopBridge)();
+  const [origin, paired, desktopAgents] = await Promise.all([
     (options.discoverOrigin ?? discoverOriginAgentHost)(),
-    (options.listHosts ?? listRemoteHosts)().catch(() => []),
+    (options.listHosts ?? listRemoteHosts)().catch((error: unknown) => {
+      directoryOutage = error instanceof Error ? error.message : 'Tau could not reach your paired computers.';
+      return [];
+    }),
+    /* Asked for beside the other two rather than read off the launch bootstrap:
+     * main answers when its CLI and model probes settle, and the window no
+     * longer waits on them (D17). */
+    bridge?.externalAgents().catch((error: unknown) => {
+      /* Keep the row, mark the listing incomplete: an empty answer here reads
+       * as "nothing is installed", which is the wrong story to tell. */
+      discoveryIncomplete = true;
+      console.error('[agentHostPlacement] external agent listing failed', error);
+      return [];
+    }) ?? [],
   ]);
   /* Launcher 2 first: on the desktop build the in-process host is always there
-   * — no discovery, no network — so it is the placement a user reaches for. */
+   * — no discovery, no network — so it is the placement a user reaches for. The
+   * external agents are the one thing it *cannot* assume: main resolved and
+   * CLI-probed them at startup, so they arrive on the bridge exactly as the
+   * daemon's arrive on its descriptor. */
   const desktopTarget: readonly AgentHostPlacementTarget[] =
     (options.desktop ?? isDesktopTarget)
-      ? [{ hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true }]
+      ? [
+          {
+            hostId: 'desktop',
+            rung: 'in-process',
+            label: 'This computer',
+            workspaceRoot: '',
+            online: true,
+            ...(desktopAgents.length > 0 ? { externalAgents: desktopAgents } : {}),
+          },
+        ]
       : [];
   const originTarget: readonly AgentHostPlacementTarget[] = origin
     ? [
@@ -279,7 +379,14 @@ export const listAgentHostPlacements = async (
           ]
         : [],
   );
-  return [...desktopTarget, ...originTarget, ...pairedTargets];
+  const targets = [...desktopTarget, ...originTarget, ...pairedTargets];
+  discoveredAgents.clear();
+  for (const target of targets) {
+    for (const agent of target.externalAgents ?? []) {
+      discoveredAgents.set(agent.id, agent);
+    }
+  }
+  return targets;
 };
 
 /**
@@ -354,8 +461,10 @@ type OpenAgentHostChannelOptions = {
   readonly openTimeout?: number | undefined;
   /** Absolute node root for a `desktop` placement; required for that host only. */
   readonly workspaceRoot?: string | undefined;
+  /** Canonical manifest project id for a `desktop` placement. */
+  readonly projectId?: string | undefined;
   /** Bridge override, for tests. */
-  readonly bridge?: (() => Pick<DesktopBridge, 'agentHost'> | undefined) | undefined;
+  readonly bridge?: (() => { readonly agentHost: Pick<DesktopBridge['agentHost'], 'connect'> } | undefined) | undefined;
 };
 
 /**
@@ -368,7 +477,8 @@ type OpenAgentHostChannelOptions = {
 const desktopAgentPort = async (options: OpenAgentHostChannelOptions): Promise<MessagePort> => {
   const bridge = (options.bridge ?? desktopBridge)();
   const workspaceRoot = options.workspaceRoot ?? '';
-  if (!bridge || workspaceRoot === '') {
+  const projectId = options.projectId ?? '';
+  if (!bridge || workspaceRoot === '' || projectId === '') {
     throw new AgentHostPlacementError(
       'DESKTOP_ROOT_NOT_GRANTED',
       'in-process',
@@ -385,7 +495,7 @@ const desktopAgentPort = async (options: OpenAgentHostChannelOptions): Promise<M
       `Tau has no permission to work in ${workspaceRoot}. Reopen the folder from the desktop app and try again.`,
     );
   };
-  return Promise.race([bridge.agentHost.connect(workspaceRoot), refusal()]);
+  return Promise.race([bridge.agentHost.connect(workspaceRoot, projectId, getComputeReuseMode()), refusal()]);
 };
 
 /**

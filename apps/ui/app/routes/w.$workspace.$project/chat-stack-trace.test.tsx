@@ -132,10 +132,6 @@ vi.mock('@taucad/ui/components/button', () => ({
   ),
 }));
 
-vi.mock('#utils/chat.utils.js', () => ({
-  createMessage: (options: Record<string, unknown>) => ({ id: 'msg-fix', ...options }),
-}));
-
 vi.mock('#utils/filesystem.utils.js', () => ({
   decodeTextFile: (_bytes: Uint8Array<ArrayBuffer>) => 'cube(10);',
 }));
@@ -310,7 +306,7 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
       messages: [userMessage],
       agent: mockAgent,
       admission: { version: 1, idempotencyKey: 'request_0000000001' },
-      execution: { workspaceId: 'workspace_test', baseRevisionId: 'rev_test', hostId: 'host_test' },
+      execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     };
 
     const parsed = chatTurnRequestSchema.parse(wireBody);

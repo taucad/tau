@@ -8,8 +8,9 @@ describe('detectEdges', () => {
 
     const result = detectEdges(positions, indices);
 
+    // A de-indexed soup: four segments, two vertices each, and no index buffer to pay for.
     expect(result.positions).toHaveLength(4 * 2 * 3);
-    expect(result.indices).toEqual(Uint32Array.from({ length: 8 }, (_, index) => index));
+    expect(result).not.toHaveProperty('indices');
   });
 
   it('keeps a sharp shared edge', () => {

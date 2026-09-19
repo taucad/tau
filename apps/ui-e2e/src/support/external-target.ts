@@ -1,16 +1,22 @@
 /* oxlint-disable max-params, tau-lint/no-bare-time-identifier, typescript/consistent-type-definitions, typescript/no-restricted-types, typescript/promise-function-async, unicorn/no-await-expression-member, unicorn/prefer-ternary -- This thin pass-through adapter mirrors stable Vitest selector and external browser evidence fields without inventing replacement shapes or redundant async frames. */
 import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
-import { locators, server } from 'vitest/browser';
+import { locators, server as vitestServer } from 'vitest/browser';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 
 export type TargetSurface = 'primary' | 'secondary';
 export type TargetSelector = Locator | string;
-export type TargetViewport = { readonly height: number; readonly width: number };
+export type TargetViewport = {
+  readonly height: number;
+  readonly width: number;
+};
 export type TargetClickOptions = {
   readonly button?: 'left' | 'middle' | 'right';
+  /** `2` for a double-click; passed straight to Playwright's `locator.click`. */
+  readonly clickCount?: number;
   readonly force?: boolean;
   readonly position?: { readonly x: number; readonly y: number };
+  readonly touch?: boolean;
   readonly timeout?: number;
 };
 export type TargetMouseOptions = { readonly steps?: number };
@@ -28,7 +34,12 @@ export type TargetCookie = {
 export type TargetReadOptions = { readonly attributes?: readonly string[] };
 export type TargetState = {
   readonly attributes: Readonly<Record<string, string | null>>;
-  readonly boundingBox?: { readonly height: number; readonly width: number; readonly x: number; readonly y: number };
+  readonly boundingBox?: {
+    readonly height: number;
+    readonly width: number;
+    readonly x: number;
+    readonly y: number;
+  };
   readonly className: string;
   readonly count: number;
   readonly focused: boolean;
@@ -36,75 +47,42 @@ export type TargetState = {
   readonly value?: string;
   readonly visible: boolean;
 };
+export type TargetWorker = Readonly<{ identity: string; url: string }>;
 export type TargetDiagnostics = {
-  readonly consoleMessages: ReadonlyArray<{ readonly text: string; readonly type: string }>;
+  readonly consoleMessages: ReadonlyArray<{
+    readonly text: string;
+    readonly type: string;
+  }>;
   readonly pageErrors: readonly string[];
   readonly screenshot?: string;
   readonly tracePath?: string;
   readonly url: string;
 };
-export type TargetDownload = { readonly base64: string; readonly suggestedFilename: string };
-/** What {@link startPaseoFakeDaemon} is scripted with. @public */
-export type FakePaseoDaemonScript = {
-  readonly agents?: ReadonlyArray<{
-    readonly id: string;
-    readonly title: string;
-    readonly provider: string;
-    readonly model: string;
-  }>;
-  readonly turn?: { readonly items: readonly unknown[] };
-};
-
-/** Where the page dials the fake daemon, and the identity it pins. @public */
-export type FakePaseoDaemonHandle = {
-  readonly endpoint: string;
-  readonly serverId: string;
-  readonly daemonPublicKeyB64: string;
-};
-
-export type TargetPaseoConnection = {
-  readonly id: string;
-  readonly label: string;
-  readonly serverId: string;
-  readonly relayEndpoint: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-};
-export type TargetPaseoAgent = {
-  readonly id: string;
-  readonly label: string;
-  readonly provider: string;
-  readonly status: string;
-};
-export type TargetPaseoProvider = {
-  readonly provider: string;
-  readonly label: string;
-  readonly status: string;
-  readonly enabled: boolean;
-  readonly modelCount: number;
-};
-export type TargetPaseoRestFixture = {
-  readonly pairedConnection: TargetPaseoConnection;
-  /**
-   * The pairing material `POST /:id/offer` releases.
-   *
-   * The page opens the real E2EE session against whatever this names, so
-   * the fake daemon supplies it — nothing about the SDK path is stubbed.
-   */
-  readonly offer: {
-    readonly serverId: string;
-    readonly daemonPublicKeyB64: string;
-    readonly relayEndpoint: string;
-  };
+export type TargetDownload = {
+  readonly base64: string;
+  readonly suggestedFilename: string;
 };
 export type TargetTauTestAccount = {
+  readonly creditAtoms?: string;
   readonly email: string;
   readonly name: string;
   readonly password: string;
 };
+export type TargetTauBillingOperation = {
+  readonly customerState: string;
+  readonly executionStatus: string | null;
+  readonly meteringStatus: string | null;
+  readonly operationId: string;
+  readonly outputTokens: string | null;
+  readonly reasoningTokens: string | null;
+  readonly terminalRevision: string | null;
+};
 export type TargetWebGpuProfile = 'disabled' | 'hardware' | 'software';
 /** The AV-4 daemon fixture: an origin to navigate to, and a directory to read. */
-export type TargetTauServeFixture = { readonly origin: string; readonly workspace: string };
+export type TargetTauServeFixture = {
+  readonly origin: string;
+  readonly workspace: string;
+};
 export type TargetWebGpuQualificationReport = Readonly<{
   profile: TargetWebGpuProfile;
   secureContext: boolean;
@@ -137,6 +115,7 @@ export type TargetWebGpuQualificationReport = Readonly<{
 declare module 'vitest' {
   export interface ProvidedContext {
     webGpuProfile: TargetWebGpuProfile;
+    acpLiveEnabled: boolean;
   }
 }
 
@@ -144,74 +123,83 @@ declare module 'vitest/browser' {
   interface LocatorSelectors {
     getByCss(selector: string): Locator;
   }
-
-  interface BrowserCommands {
-    uiAuthenticateTauTestUser(account: TargetTauTestAccount): Promise<void>;
-    uiAddCookies(cookies: readonly TargetCookie[]): Promise<void>;
-    uiAddInitScript(source: string, argument?: unknown): Promise<void>;
-    uiCaptureTargetDiagnostics(): Promise<TargetDiagnostics>;
-    uiChooseTargetFile(
-      triggerSelector: string,
-      file: { readonly base64: string; readonly mimeType: string; readonly name: string },
-    ): Promise<void>;
-    uiClickTarget(selector: string, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
-    uiCloseSecondaryTarget(): Promise<void>;
-    uiCloseTarget(): Promise<void>;
-    uiCookies(): Promise<TargetCookie[]>;
-    uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
-    uiDownloadTarget(triggerSelector: string): Promise<TargetDownload>;
-    uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
-    uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
-    uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
-    uiEvaluateTarget(source: string, argument?: unknown, surface?: TargetSurface): Promise<unknown>;
-    uiEvaluateTargetLocator(
-      selector: string,
-      source: string,
-      argument?: unknown,
-      surface?: TargetSurface,
-    ): Promise<unknown>;
-    uiFillTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
-    uiFocusTarget(selector: string, surface?: TargetSurface): Promise<void>;
-    uiGrantPermissions(permissions: readonly string[]): Promise<void>;
-    uiHoverTarget(selector: string, surface?: TargetSurface): Promise<void>;
-    uiInstallPaseoRestFixture(fixture: TargetPaseoRestFixture): Promise<void>;
-    uiStartPaseoFakeDaemon(options: FakePaseoDaemonScript): Promise<FakePaseoDaemonHandle>;
-    uiStopPaseoFakeDaemon(): Promise<readonly string[]>;
-    uiInstallAgentHostGatewayFixture(script?: readonly GatewayScriptTurn[]): Promise<void>;
-    uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
-    uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
-    uiMouseDown(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
-    uiMouseMove(x: number, y: number, options?: TargetMouseOptions, surface?: TargetSurface): Promise<void>;
-    uiMouseUp(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
-    uiNavigateTarget(path: string, surface?: TargetSurface): Promise<Readonly<Record<string, string>>>;
-    uiOpenSecondaryTarget(path: string): Promise<void>;
-    uiOpenTarget(): Promise<void>;
-    uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
-    uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;
-    uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
-    uiReadAgentHostApiRequests(): Promise<string[]>;
-    uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
-    uiReleaseAgentHostGatewayFixture(): Promise<void>;
-    uiSetAgentHostGatewayFailure(failure?: { readonly status: number; readonly message: string }): Promise<void>;
-    uiReadTargetEvents(): Promise<{
-      readonly consoleMessages: ReadonlyArray<{ readonly text: string; readonly type: string }>;
-      readonly pageErrors: readonly string[];
-    }>;
-    uiReloadTarget(surface?: TargetSurface): Promise<void>;
-    uiScreenshotTarget(selector?: string, artifactName?: string, surface?: TargetSurface): Promise<string>;
-    uiSampleCameraDuringClick(selector: string, frameCount: number): Promise<unknown[]>;
-    uiScrollTarget(selector: string, surface?: TargetSurface): Promise<void>;
-    uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
-    uiStartHostFixture(): Promise<string>;
-    uiStartTauServeFixture(options?: { readonly externalAgents?: boolean }): Promise<TargetTauServeFixture>;
-    uiStopTauServeFixture(): Promise<void>;
-    uiReleaseTauServeGateway(): Promise<void>;
-    uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
-    uiListTauServeChats(): Promise<readonly string[]>;
-    uiTypeTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
-    uiWaitForTarget(source: string, argument?: unknown, timeout?: number, surface?: TargetSurface): Promise<void>;
-  }
 }
+
+export type UiBrowserCommands = {
+  uiAuthenticateTauTestUser(account: TargetTauTestAccount): Promise<void>;
+  uiAddCookies(cookies: readonly TargetCookie[]): Promise<void>;
+  uiAddContextInitScript(source: string, argument?: unknown): Promise<void>;
+  uiAddInitScript(source: string, argument?: unknown): Promise<void>;
+  uiCaptureTargetDiagnostics(): Promise<TargetDiagnostics>;
+  uiChooseTargetFile(
+    triggerSelector: string,
+    file: {
+      readonly base64: string;
+      readonly mimeType: string;
+      readonly name: string;
+    },
+  ): Promise<void>;
+  uiClickTarget(selector: string, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
+  uiCloseSecondaryTarget(): Promise<void>;
+  uiCloseTarget(): Promise<void>;
+  uiCookies(): Promise<TargetCookie[]>;
+  uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
+  uiDownloadTarget(triggerSelector: string): Promise<TargetDownload>;
+  uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
+  uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
+  uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
+  uiEmulateReducedMotion(reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface): Promise<void>;
+  uiEvaluateTarget(source: string, argument?: unknown, surface?: TargetSurface): Promise<unknown>;
+  uiEvaluateTargetLocator(
+    selector: string,
+    source: string,
+    argument?: unknown,
+    surface?: TargetSurface,
+  ): Promise<unknown>;
+  uiFillTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
+  uiFocusTarget(selector: string, surface?: TargetSurface): Promise<void>;
+  uiGrantPermissions(permissions: readonly string[]): Promise<void>;
+  uiHoverTarget(selector: string, surface?: TargetSurface): Promise<void>;
+  uiInstallAgentHostGatewayFixture(script?: readonly GatewayScriptTurn[]): Promise<void>;
+  uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
+  uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
+  uiMouseDown(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
+  uiMouseMove(x: number, y: number, options?: TargetMouseOptions, surface?: TargetSurface): Promise<void>;
+  uiMouseUp(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
+  uiNavigateTarget(path: string, surface?: TargetSurface): Promise<Readonly<Record<string, string>>>;
+  uiOpenSecondaryTarget(path: string): Promise<void>;
+  uiOpenTarget(): Promise<void>;
+  uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
+  uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;
+  uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
+  uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
+  uiReadAgentHostApiRequests(): Promise<string[]>;
+  uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
+  uiReleaseAgentHostGatewayFixture(): Promise<void>;
+  uiSetAgentHostGatewayFailure(failure?: { readonly status: number; readonly message: string }): Promise<void>;
+  uiReadTargetEvents(): Promise<{
+    readonly consoleMessages: ReadonlyArray<{
+      readonly text: string;
+      readonly type: string;
+    }>;
+    readonly pageErrors: readonly string[];
+  }>;
+  uiReloadTarget(surface?: TargetSurface): Promise<void>;
+  uiScreenshotTarget(selector?: string | null, artifactName?: string, surface?: TargetSurface): Promise<string>;
+  uiSampleCameraDuringClick(selector: string, frameCount: number): Promise<unknown[]>;
+  uiScrollTarget(selector: string, surface?: TargetSurface): Promise<void>;
+  uiSetTargetOffline(offline: boolean): Promise<void>;
+  uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
+  uiStartHostFixture(): Promise<string>;
+  uiStartTauServeFixture(options?: { readonly externalAgents?: boolean | 'codex' }): Promise<TargetTauServeFixture>;
+  uiStopTauServeFixture(): Promise<void>;
+  uiReleaseTauServeGateway(): Promise<void>;
+  uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
+  uiListTauServeChats(): Promise<readonly string[]>;
+  uiTargetWorkers(urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]>;
+  uiTypeTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
+  uiWaitForTarget(source: string, argument?: unknown, timeout?: number, surface?: TargetSurface): Promise<void>;
+};
 
 locators.extend({
   getByCss(selector: string) {
@@ -219,7 +207,9 @@ locators.extend({
   },
 });
 
+const server = vitestServer as typeof vitestServer & { readonly commands: UiBrowserCommands };
 const selectorFor = (selector: TargetSelector): string => (typeof selector === 'string' ? selector : selector.selector);
+export const { commands } = server;
 
 export const navigate = (path: string, surface?: TargetSurface): Promise<Readonly<Record<string, string>>> =>
   server.commands.uiNavigateTarget(path, surface);
@@ -234,6 +224,10 @@ export const emulateContrast = (contrast: 'more' | 'no-preference', surface?: Ta
   server.commands.uiEmulateContrast(contrast, surface);
 export const emulateForcedColors = (forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void> =>
   server.commands.uiEmulateForcedColors(forcedColors, surface);
+export const emulateReducedMotion = (
+  reducedMotion: 'no-preference' | 'reduce',
+  surface?: TargetSurface,
+): Promise<void> => server.commands.uiEmulateReducedMotion(reducedMotion, surface);
 export const click = (selector: TargetSelector, options?: TargetClickOptions, surface?: TargetSurface): Promise<void> =>
   server.commands.uiClickTarget(selectorFor(selector), options ?? {}, surface);
 export const fill = (selector: TargetSelector, value: string, surface?: TargetSurface): Promise<void> =>
@@ -302,7 +296,14 @@ export const waitFor = <Argument>(
   callback: (argument: Argument) => unknown,
   argument?: Argument,
   options?: { readonly surface?: TargetSurface; readonly timeout?: number },
-): Promise<void> => server.commands.uiWaitForTarget(callback.toString(), argument, options?.timeout, options?.surface);
+): Promise<void> =>
+  server.commands.uiWaitForTarget(
+    callback.toString(),
+    // The command transport drops `undefined` positions, so a later option needs a `null` placeholder.
+    argument ?? (options?.timeout === undefined && !options?.surface ? undefined : null),
+    options?.timeout,
+    options?.surface,
+  );
 export const keyboardPress = (key: string, surface?: TargetSurface): Promise<void> =>
   server.commands.uiKeyboardPress(key, surface);
 export const mouseMove = (x: number, y: number, options?: TargetMouseOptions, surface?: TargetSurface): Promise<void> =>
@@ -327,7 +328,8 @@ export const screenshot = (
   surface?: TargetSurface,
 ): Promise<string> =>
   server.commands.uiScreenshotTarget(
-    selector && selectorFor(selector),
+    // The command transport drops `undefined` positions, so a page screenshot with a name sends `null`.
+    selector ? selectorFor(selector) : artifactName === undefined && surface === undefined ? undefined : null,
     artifactName ?? (surface ? '' : undefined),
     surface,
   );
@@ -335,13 +337,22 @@ export const sampleCameraDuringClick = <Camera>(selector: TargetSelector, frameC
   server.commands.uiSampleCameraDuringClick(selectorFor(selector), frameCount) as Promise<Camera[]>;
 export const openSecondary = (path: string): Promise<void> => server.commands.uiOpenSecondaryTarget(path);
 export const closeSecondary = (): Promise<void> => server.commands.uiCloseSecondaryTarget();
+/** The dedicated workers the page is running, by stable instance identity and script URL (V21). */
+export const workers = (urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]> =>
+  server.commands.uiTargetWorkers(urlSubstring, surface);
 export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies();
 export const addCookies = (values: readonly TargetCookie[]): Promise<void> => server.commands.uiAddCookies(values);
 export const authenticateTauTestUser = (account: TargetTauTestAccount): Promise<void> =>
   server.commands.uiAuthenticateTauTestUser(account);
+export const readTauVertexOperations = (email: string): Promise<TargetTauBillingOperation[]> =>
+  server.commands.uiReadTauVertexOperations(email);
 export const chooseFile = (
   trigger: TargetSelector,
-  file: { readonly base64: string; readonly mimeType: string; readonly name: string },
+  file: {
+    readonly base64: string;
+    readonly mimeType: string;
+    readonly name: string;
+  },
 ): Promise<void> => server.commands.uiChooseTargetFile(selectorFor(trigger), file);
 export const events = (): Promise<Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors'>> =>
   server.commands.uiReadTargetEvents();
@@ -361,7 +372,9 @@ export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promis
       evaluate(() =>
         (
           globalThis as typeof globalThis & {
-            __TAU_SECTION_VIEW_TEST__?: { getGraphicsBackend(): 'webgl' | 'webgpu' };
+            __TAU_SECTION_VIEW_TEST__?: {
+              getGraphicsBackend(): 'webgl' | 'webgpu';
+            };
           }
         ).__TAU_SECTION_VIEW_TEST__?.getGraphicsBackend(),
       ),
@@ -376,7 +389,9 @@ export const expectGeometryFramed = async (): Promise<void> => {
           evaluate(() => {
             const bridges = (
               globalThis as typeof globalThis & {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{ isGeometryFramed(): boolean }>;
+                __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{
+                  isGeometryFramed(): boolean;
+                }>;
               }
             ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
             return Boolean(bridges && bridges.length > 0 && bridges.every((bridge) => bridge.isGeometryFramed()));
@@ -414,22 +429,13 @@ export const startHostFixture = (): Promise<string> => server.commands.uiStartHo
 
 /** AV-4 (rung 1): a real `tau serve` daemon serving the real serve-mode SPA. */
 export const startTauServeFixture = (
-  options: { readonly externalAgents?: boolean } = {},
+  options: { readonly externalAgents?: boolean | 'codex' } = {},
 ): Promise<TargetTauServeFixture> => server.commands.uiStartTauServeFixture(options);
 export const stopTauServeFixture = (): Promise<void> => server.commands.uiStopTauServeFixture();
 export const releaseTauServeGateway = (): Promise<void> => server.commands.uiReleaseTauServeGateway();
 export const readTauServeFile = (relativePath: string): Promise<string | undefined> =>
   server.commands.uiReadTauServeFile(relativePath);
 export const listTauServeChats = (): Promise<readonly string[]> => server.commands.uiListTauServeChats();
-export const installPaseoRestFixture = (fixture: TargetPaseoRestFixture): Promise<void> =>
-  server.commands.uiInstallPaseoRestFixture(fixture);
-
-/** Start the fake Paseo daemon the page opens its real E2EE session against. */
-export const startPaseoFakeDaemon = (options: FakePaseoDaemonScript): Promise<FakePaseoDaemonHandle> =>
-  server.commands.uiStartPaseoFakeDaemon(options);
-
-/** Stop it, and report every session message it received. */
-export const stopPaseoFakeDaemon = (): Promise<readonly string[]> => server.commands.uiStopPaseoFakeDaemon();
 /** Installs the Anthropic-wire gateway fixture; omit `script` for the default browser-host script. */
 export const installAgentHostGatewayFixture = (script?: readonly GatewayScriptTurn[]): Promise<void> =>
   server.commands.uiInstallAgentHostGatewayFixture(script);
@@ -448,14 +454,22 @@ export const expectVisible = async (
   timeout = 10_000,
   surface?: TargetSurface,
 ): Promise<void> => {
-  await expect.poll(async () => (await read(selector, undefined, surface)).visible, { timeout }).toBe(true);
+  await expect
+    .poll(async () => (await read(selector, undefined, surface)).visible, {
+      timeout,
+    })
+    .toBe(true);
 };
 export const expectHidden = async (
   selector: TargetSelector,
   timeout = 10_000,
   surface?: TargetSurface,
 ): Promise<void> => {
-  await expect.poll(async () => (await read(selector, undefined, surface)).visible, { timeout }).toBe(false);
+  await expect
+    .poll(async () => (await read(selector, undefined, surface)).visible, {
+      timeout,
+    })
+    .toBe(false);
 };
 export const expectCount = async (
   selector: TargetSelector,
@@ -463,14 +477,20 @@ export const expectCount = async (
   timeout = 10_000,
   surface?: TargetSurface,
 ): Promise<void> => {
-  await expect.poll(async () => (await read(selector, undefined, surface)).count, { timeout }).toBe(count);
+  await expect
+    .poll(async () => (await read(selector, undefined, surface)).count, {
+      timeout,
+    })
+    .toBe(count);
 };
 export const expectText = async (
   selector: TargetSelector,
   expected: string | RegExp,
   timeout = 10_000,
 ): Promise<void> => {
-  const assertion = expect.poll(async () => (await read(selector)).text, { timeout });
+  const assertion = expect.poll(async () => (await read(selector)).text, {
+    timeout,
+  });
   if (typeof expected === 'string') {
     await assertion.toBe(expected);
   } else {
@@ -490,7 +510,9 @@ export const expectAttribute = async (
   expected: string | RegExp,
   timeout = 10_000,
 ): Promise<void> => {
-  const assertion = expect.poll(async () => getAttribute(selector, name), { timeout });
+  const assertion = expect.poll(async () => getAttribute(selector, name), {
+    timeout,
+  });
   if (typeof expected === 'string') {
     await assertion.toBe(expected);
   } else {

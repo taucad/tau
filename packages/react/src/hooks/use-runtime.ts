@@ -28,6 +28,7 @@ import type {
   RuntimeTranscoders,
 } from '@taucad/runtime/worker';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import type { ParameterManifest } from '@taucad/parameters';
 
 type RuntimeTransportPlugin = TransportPlugin<
   RuntimeProtocol,
@@ -253,6 +254,8 @@ export type UseRuntimeResult<
 > = {
   /** Rendered geometry from the latest successful render. */
   readonly geometry: Geometry | undefined;
+  /** Whether retained geometry is absent, current for this request, or retained from the last successful request. */
+  readonly geometryStatus: 'empty' | 'current' | 'stale';
   /** Current status of the render lifecycle. */
   readonly status: RenderStatus;
   /** Error from the most recent render attempt, if any. */
@@ -267,6 +270,8 @@ export type UseRuntimeResult<
   readonly resetParameters: () => void;
   /** JSON Schema describing the model's parameters. */
   readonly jsonSchema: JSONSchema7 | undefined;
+  /** Complete admitted parameter manifest for units, provenance, constraints, and identity. */
+  readonly parameterManifest: ParameterManifest | undefined;
   /** Export the latest settled geometry, or request-scope render the hook source when preview rendering has not settled. */
   readonly exportGeometry: UseRuntimeExportGeometry<Runtime, Transport>;
   /** Capabilities manifest from the runtime worker, available after initialization. */
@@ -470,7 +475,9 @@ export function useRuntime<
   const Runtime extends AnyRuntimeDefinition | undefined = undefined,
   const Transport extends RuntimeTransportPlugin = RuntimeTransportPlugin,
 >(
-  options: UseRuntimeOptions<Runtime, Transport, Files> & { readonly source: RuntimeSource<Files> },
+  options: UseRuntimeOptions<Runtime, Transport, Files> & {
+    readonly source: RuntimeSource<Files>;
+  },
 ): UseRuntimeResult<Runtime, Transport>;
 export function useRuntime<
   const Runtime extends AnyRuntimeDefinition | undefined = undefined,
@@ -495,7 +502,9 @@ export function useRuntime<
     initialParameters,
     onParametersChange,
     ...renderInputWithLegacyParameters
-  } = options as UseRuntimeOptions<Runtime, Transport, Files> & { readonly parameters?: unknown };
+  } = options as UseRuntimeOptions<Runtime, Transport, Files> & {
+    readonly parameters?: unknown;
+  };
   const { parameters: legacyParameters, ...renderInput } = renderInputWithLegacyParameters;
   const hasLegacyParameters = legacyParameters !== undefined;
   const runtimeRenderInput = renderInput as Omit<
@@ -505,16 +514,21 @@ export function useRuntime<
   const renderRequestKey = stableStringify(runtimeRenderInput);
 
   const [geometry, setGeometry] = useState<Geometry | undefined>();
+  const [settledGeometryRequestKey, setSettledGeometryRequestKey] = useState<string | undefined>();
   const [status, setStatus] = useState<RenderStatus>('idle');
   const [error, setError] = useState<Error | undefined>();
-  const [defaultParameters, setDefaultParameters] = useState<RuntimeParameterRecord>(emptyParameters);
+  const [parameterManifest, setParameterManifest] = useState<ParameterManifest | undefined>();
   const [parameterEdits, setParameterEdits] = useState<RuntimeParameterRecord>(() =>
     cloneParameterRecord(initialParameters),
   );
-  const [jsonSchema, setJsonSchema] = useState<JSONSchema7 | undefined>();
+  const defaultParameters = cloneParameterRecord(parameterManifest?.defaults);
+  const jsonSchema =
+    parameterManifest?.legacyProjection.status === 'usable' ? parameterManifest.legacyProjection.schema : undefined;
   const parameters = mergeParameterRecords(defaultParameters, parameterEdits);
   const parameterRequestKey = stableStringify(parameters);
   const commandRequestKey = `${renderRequestKey}:${parameterRequestKey}`;
+  const geometryStatus =
+    geometry === undefined ? 'empty' : settledGeometryRequestKey === commandRequestKey ? 'current' : 'stale';
 
   const [capabilities, setCapabilities] = useState<UseRuntimeCapabilities<Runtime, Transport> | undefined>();
   const [clientGeneration, setClientGeneration] = useState(0);
@@ -557,6 +571,9 @@ export function useRuntime<
     let cancelled = false;
     let cleanupClient: (() => void) | undefined;
     clientRef.current = undefined;
+    setGeometry(undefined);
+    setSettledGeometryRequestKey(undefined);
+    setParameterManifest(undefined);
     settledCommandRequestKeyRef.current = undefined;
     activeRenderRequestKeyRef.current = undefined;
 
@@ -569,7 +586,7 @@ export function useRuntime<
           return;
         }
 
-        const client = createRuntimeClient(resolvedClientOptions);
+        const client = createRuntimeClient<Runtime, Transport>(resolvedClientOptions);
         const exportClient = client as {
           export: (format: FileExtension, options?: RuntimeClientExportGeometryInput) => Promise<ExportResult>;
         };
@@ -578,6 +595,9 @@ export function useRuntime<
             input: RuntimeRenderInput<readonly KernelPlugin[], readonly MiddlewarePlugin[]>,
           ) => Promise<RenderOutcome>;
           updateParameters: (parameters: RuntimeParameterRecord) => Promise<RenderOutcome>;
+        };
+        const capabilitiesClient = client as {
+          on(event: 'capabilities', handler: (manifest: CapabilitiesManifest) => void): () => void;
         };
 
         const unsubscribers: Array<() => void> = [];
@@ -613,13 +633,12 @@ export function useRuntime<
               return;
             }
             if (result.success) {
-              const nextDefaults = cloneParameterRecord(result.data.defaultParameters);
-              setDefaultParameters(nextDefaults);
+              const nextDefaults = cloneParameterRecord(result.data.defaults);
+              setParameterManifest(result.data);
               setParameterEdits((current) => pruneParameterOverrides(current, nextDefaults));
-              setJsonSchema(result.data.jsonSchema);
             }
           }),
-          client.on('capabilities', (manifest) => {
+          capabilitiesClient.on('capabilities', (manifest) => {
             if (cancelled) {
               return;
             }
@@ -631,12 +650,13 @@ export function useRuntime<
             }
             if (result.success) {
               settledCommandRequestKeyRef.current = commandRequestKeyRef.current;
+              setSettledGeometryRequestKey(commandRequestKeyRef.current);
               setGeometry(result.data);
               setError(undefined);
             } else {
               const firstIssue = result.issues[0];
               settledCommandRequestKeyRef.current = undefined;
-              setGeometry(undefined);
+              setSettledGeometryRequestKey(undefined);
               setError(new Error(firstIssue?.message ?? 'Render failed'));
             }
           }),
@@ -646,7 +666,7 @@ export function useRuntime<
             }
             const firstIssue = issues[0];
             settledCommandRequestKeyRef.current = undefined;
-            setGeometry(undefined);
+            setSettledGeometryRequestKey(undefined);
             setError(new Error(firstIssue?.message ?? 'Render failed'));
           }),
         );
@@ -713,6 +733,7 @@ export function useRuntime<
           activeRenderRequestKeyRef.current = undefined;
         }
         settledCommandRequestKeyRef.current = undefined;
+        setSettledGeometryRequestKey(undefined);
         setError(error instanceof Error ? error : new Error(String(error)));
         setStatus('error');
       }
@@ -724,7 +745,13 @@ export function useRuntime<
     if (!client) {
       return {
         success: false,
-        issues: [{ message: 'Runtime client not initialized', code: 'RUNTIME', severity: 'error' }],
+        issues: [
+          {
+            message: 'Runtime client not initialized',
+            code: 'RUNTIME',
+            severity: 'error',
+          },
+        ],
       };
     }
     const hasSettledCurrentRender = settledCommandRequestKeyRef.current === commandRequestKeyRef.current;
@@ -733,7 +760,13 @@ export function useRuntime<
       if (sourceError) {
         return {
           success: false,
-          issues: [{ message: sourceError.message, code: 'RUNTIME', severity: 'error' }],
+          issues: [
+            {
+              message: sourceError.message,
+              code: 'RUNTIME',
+              severity: 'error',
+            },
+          ],
         };
       }
     }
@@ -749,6 +782,7 @@ export function useRuntime<
 
   return {
     geometry,
+    geometryStatus,
     status,
     error,
     defaultParameters,
@@ -756,6 +790,7 @@ export function useRuntime<
     setParameters,
     resetParameters,
     jsonSchema,
+    parameterManifest,
     exportGeometry,
     capabilities,
   };

@@ -1,8 +1,8 @@
 {
   "alphaTest": 0.001,
   "blendColor": 0,
-  "blending": 2,
   "color": 16777215,
+  "depthTest": false,
   "depthWrite": false,
   "inputNodes": {
     "colorNode": "<nodeRef>",
@@ -230,7 +230,7 @@
       "nodeType": "float",
       "precision": null,
       "type": "ConstNode",
-      "value": 0.3,
+      "value": 0.42,
       "valueType": "float"
     },
     {
@@ -522,34 +522,6 @@
     },
     {
       "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "*",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "*",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
         "aNode": "<nodeRef>",
         "bNode": "<nodeRef>",
         "cNode": "<nodeRef>"
@@ -608,60 +580,6 @@
       "precision": null,
       "type": "ConstNode",
       "value": 1,
-      "valueType": "float"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "-",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "nodeType": "float",
-      "precision": null,
-      "type": "ConstNode",
-      "value": 3,
-      "valueType": "float"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "*",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "nodeType": "float",
-      "precision": null,
-      "type": "ConstNode",
-      "value": 2,
       "valueType": "float"
     },
     {
@@ -681,34 +599,6 @@
     },
     {
       "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "*",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "*",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
         "aNode": "<nodeRef>",
         "bNode": "<nodeRef>",
         "cNode": "<nodeRef>"
@@ -787,60 +677,6 @@
       "precision": null,
       "type": "ConstNode",
       "value": 1,
-      "valueType": "float"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "-",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "nodeType": "float",
-      "precision": null,
-      "type": "ConstNode",
-      "value": 3,
-      "valueType": "float"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "inputNodes": {
-        "aNode": "<nodeRef>",
-        "bNode": "<nodeRef>"
-      },
-      "op": "*",
-      "type": "OperatorNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "nodeType": "float",
-      "precision": null,
-      "type": "ConstNode",
-      "value": 2,
       "valueType": "float"
     },
     {

@@ -12,6 +12,10 @@
  * `@taucad/runtime/electron/renderer`, whose same-window guard is the tree's
  * one relay-acceptance predicate.
  */
+import type { ComputeStoreControl } from '@taucad/runtime/types';
+import { z } from 'zod';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 import { isDesktopTarget as isDesktopBuildTarget } from '#lib/build-target.js';
 
 /**
@@ -23,8 +27,15 @@ type DesktopShell = {
   readonly relayTag: string;
   readonly nodeFs: { readonly homeRoot: string };
   readonly runtimeKernelIds?: readonly string[];
-  readonly nativeCode?: DesktopBridge['nativeCode'];
+  readonly externalAgents?: () => Promise<unknown>;
+  readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
+  /** The quit hold's renderer half (D31, P49). */
+  readonly quit?: {
+    isReady(): boolean;
+    onAsk(handler: () => void): () => void;
+    reportQuiesced(forced: boolean): void;
+  };
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
   readonly quickLook: {
@@ -38,6 +49,10 @@ type DesktopShell = {
   };
   /** Ask main to broker a port for one concern; answered by a relayed message. */
   requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
+  readonly agentHost: {
+    retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+    release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+  };
 };
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
@@ -51,16 +66,34 @@ export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
 };
 
 /**
+ * Listen for main's quit ask (D31, P49).
+ *
+ * Returns a no-op unsubscribe on the browser build, so the caller has one
+ * shape and no host branch.
+ *
+ * @param handler - Run every live session's closing.
+ * @returns The unsubscribe.
+ * @public
+ */
+export const onDesktopQuitRequested = (handler: () => void): (() => void) => {
+  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  return shell?.quit?.onAsk(handler) ?? ((): void => undefined);
+};
+
+/** Tell main every session has closed, or that the person cut it short. @public */
+export const reportDesktopQuiesced = (forced: boolean): void => {
+  if (!isDesktopBuildTarget()) {
+    return;
+  }
+  (globalThis as { tau?: DesktopShell }).tau?.quit?.reportQuiesced(forced);
+};
+
+/**
  * The desktop seam, as `apps/ui` consumes it.
  * @public
  */
 export type DesktopBridge = {
   readonly runtimeKernelIds: readonly string[];
-  readonly nativeCode: {
-    isTrusted(projectRoot: string): Promise<boolean>;
-    grant(projectRoot: string): Promise<boolean>;
-    revoke(projectRoot: string): Promise<void>;
-  };
   readonly nodeFs: {
     /**
      * Absolute host directory backing the node Home workspace
@@ -87,7 +120,19 @@ export type DesktopBridge = {
      * over a WebSocket. Main refuses a root the user never granted, and the
      * promise then never settles rather than resolving onto a port to nowhere.
      */
-    connect(workspaceRoot: string): Promise<MessagePort>;
+    connect(workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
+    /** Keep launcher 2 alive for one project session in this renderer. */
+    retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+    /** Release that hold and await launcher shutdown when it was the last one. */
+    release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+  };
+  readonly compute: {
+    inspect(projectRoot: string): ReturnType<ComputeStoreControl['inspect']>;
+    clear(projectRoot: string): ReturnType<ComputeStoreControl['clear']>;
+    collect(
+      projectRoot: string,
+      input: Omit<Parameters<ComputeStoreControl['collect']>[0], 'signal'>,
+    ): ReturnType<ComputeStoreControl['collect']>;
   };
   readonly dialog: {
     /**
@@ -99,9 +144,17 @@ export type DesktopBridge = {
   };
   readonly openFiles: {
     /** Consume paths delivered by macOS Open With as bounded file payloads. */
-    consume(): Promise<readonly { readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }[]>;
+    consume(): Promise<ReadonlyArray<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }>>;
   };
   readonly quickLook: DesktopShell['quickLook'];
+  /**
+   * External ACP agents launcher 2 knows about (W4-ACP), as the one canonical
+   * descriptor (VSC1), which the execution selector draws one row each from.
+   * Main CLI-probes and model-probes them; asked for rather than read off the
+   * launch bootstrap, because that made the window wait on a 5 s vendor probe
+   * (D17). Empty means Tau's own runs only.
+   */
+  externalAgents(): Promise<readonly ExternalAgentDescriptor[]>;
 };
 
 /**
@@ -151,17 +204,35 @@ export const desktopBridge = (): DesktopBridge | undefined => {
 
   built ??= {
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
-    nativeCode: shell.nativeCode ?? {
-      isTrusted: async () => false,
-      grant: async () => false,
-      revoke: async () => undefined,
-    },
+    /* Parsed, not trusted: the names and model ids main put here came out of a
+     * vendor adapter's own config options, and this page renders them. */
+    externalAgents: async () =>
+      z
+        .array(externalAgentDescriptorSchema)
+        .max(16)
+        .safeParse(await (shell.externalAgents?.() ?? [])).data ?? [],
     nodeFs: {
       homeRoot: shell.nodeFs.homeRoot,
       connect: async () => connectServices('nodeFs'),
     },
     agentHost: {
-      connect: async (workspaceRoot: string) => connectServices('agentHost', { workspaceRoot }),
+      connect: async (workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable') =>
+        connectServices('agentHost', { workspaceRoot, projectId, computeMode }),
+      retain: async (workspaceRoot, projectId, attachmentId) =>
+        shell.agentHost.retain(workspaceRoot, projectId, attachmentId),
+      release: async (workspaceRoot, projectId, attachmentId) =>
+        shell.agentHost.release(workspaceRoot, projectId, attachmentId),
+    },
+    compute: shell.compute ?? {
+      inspect: async () => {
+        throw new Error('Native compute controls are unavailable.');
+      },
+      clear: async () => {
+        throw new Error('Native compute controls are unavailable.');
+      },
+      collect: async () => {
+        throw new Error('Native compute controls are unavailable.');
+      },
     },
     dialog: shell.dialog,
     openFiles: shell.openFiles,

@@ -18,7 +18,7 @@
 import { z } from 'zod';
 import { runtimeCapabilityKinds } from '#plugins/plugin-types.js';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
-import { exportFidelityValues, fileExtensions } from '@taucad/types/constants';
+import { cadLengthUnits, exportFidelityValues, fileExtensions } from '@taucad/types/constants';
 import type { FileExtension, MimeType } from '@taucad/types';
 import type { MessagePortLike, WireProtocolSchemas } from '@taucad/rpc';
 import { isMessagePortLike } from '#transport/_internal/wire-transferables.js';
@@ -26,6 +26,10 @@ import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-mod
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 import { assertRootedPath } from '@taucad/utils/path';
+import { validateArtifactPaths } from '#types/export-artifact-validation.js';
+import type { ContentDigest } from '@taucad/cache-core';
+import { isParameterManifestShape } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 
 // ---------- Primitives ----------
 
@@ -35,6 +39,7 @@ const fileExtensionSchema = z.enum(
   // literal union (no runtime change).
   fileExtensions as unknown as readonly [FileExtension, ...FileExtension[]],
 );
+const lengthSymbolSchema = z.enum(cadLengthUnits);
 
 const rootedPathSchema = z.string().superRefine((value, context) => {
   try {
@@ -72,23 +77,6 @@ const kernelIssueSchema = z
   })
   .catchall(z.unknown());
 
-const kernelResultSchema = z.union([
-  z
-    .object({
-      success: z.literal(true),
-      data: z.unknown(),
-      issues: z.array(kernelIssueSchema),
-      serializedNativeHandle: z.unknown().optional(),
-    })
-    .catchall(z.unknown()),
-  z
-    .object({
-      success: z.literal(false),
-      issues: z.array(kernelIssueSchema),
-    })
-    .catchall(z.unknown()),
-]);
-
 const binaryContentDeliverySchema = z.discriminatedUnion('delivery', [
   z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strict(),
   z.object({ delivery: z.literal('pooled'), key: z.string() }).strict(),
@@ -115,6 +103,22 @@ const directExportFileSchema = z
   })
   .catchall(z.unknown());
 
+const directExportFilesSchema = z
+  .array(directExportFileSchema)
+  .min(1)
+  .superRefine((files, context) => {
+    for (const issue of validateArtifactPaths(files)) {
+      context.addIssue({
+        code: 'custom',
+        path: [issue.index, 'name'],
+        message:
+          issue.reason === 'duplicate-path'
+            ? 'Artifact path duplicates an earlier input.'
+            : 'Expected a safe relative artifact path.',
+      });
+    }
+  });
+
 const exportGeometryResultSchema = z.discriminatedUnion('success', [
   z
     .object({
@@ -137,10 +141,7 @@ export const getParametersResultSchema = z.union([
   z
     .object({
       success: z.literal(true),
-      data: z.object({
-        defaultParameters: z.record(z.string(), z.unknown()),
-        jsonSchema: z.unknown(),
-      }),
+      data: z.custom<ParameterManifest>(isParameterManifestShape, 'Expected a parameter manifest wire shape'),
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
     })
@@ -153,11 +154,47 @@ export const getParametersResultSchema = z.union([
     .catchall(z.unknown()),
 ]);
 
-const hashedGeometryResultTransportSchema = kernelResultSchema;
-
+const renderIdSchema = z.uuid();
+const isSha256Digest = (value: unknown): value is `sha256:${string}` =>
+  typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
+const contentDigestSchema = z.custom<ContentDigest>(isSha256Digest, 'Expected a lowercase SHA-256 digest');
+const geometryTransportSchema = z.discriminatedUnion('format', [
+  z.object({ format: z.literal('gltf'), content: binaryContentDeliverySchema, hash: z.string() }).strict(),
+  z
+    .object({
+      format: z.literal('svg'),
+      content: z.string(),
+      name: z.string().optional(),
+      units: z.object({ length: lengthSymbolSchema }).strict().optional(),
+      hash: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      format: z.literal('webrtc'),
+      stream: z.union([z.instanceof(ReadableStream), z.instanceof(EventTarget)]),
+      hash: z.string(),
+    })
+    .strict(),
+]);
+const hashedGeometryResultTransportSchema = z.discriminatedUnion('success', [
+  z
+    .object({
+      success: z.literal(true),
+      data: geometryTransportSchema,
+      issues: z.array(kernelIssueSchema),
+      serializedNativeHandle: z.unknown().optional(),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      success: z.literal(false),
+      issues: z.array(kernelIssueSchema),
+    })
+    .catchall(z.unknown()),
+]);
 const renderPhaseSchema = z.string();
 const workerStateSchema = z.enum(['idle', 'buffering', 'rendering', 'error']);
-const renderIdSchema = z.uuid();
 const abortGenerationSchema = z.number().int().min(0).max(4_294_967_295);
 const previewCommandIdentityShape = {
   renderId: renderIdSchema,
@@ -251,6 +288,7 @@ const renderCapabilitySchema = z
       })
       .catchall(z.unknown()),
     content: contentCapabilitySchema.optional(),
+    liveEdit: z.boolean().optional(),
   })
   .catchall(z.unknown());
 
@@ -288,6 +326,8 @@ export const runtimeInitializeMemoryHandleSchema = z
     signalBuffer: sharedArrayBufferSchema.optional(),
     geometryPoolBuffer: sharedArrayBufferSchema.optional(),
     fileSystemPort: messagePortSchema.optional(),
+    computeStorePort: messagePortSchema.optional(),
+    computeBindingMode: z.enum(['off', 'memory', 'durable']).optional(),
     devtoolsTelemetry: z.boolean().optional(),
     compiledWasmModules: z
       .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).strict())
@@ -337,6 +377,16 @@ export const runtimeExportModelArgsSchema = z
   })
   .catchall(z.unknown());
 
+export const runtimeEvaluateModelArgsSchema = z
+  .object({
+    stage: stageSchema.optional(),
+    file: geometryFileSchema.strict(),
+    parameters: z.record(z.string(), z.unknown()),
+    options: z.record(z.string(), z.unknown()).optional(),
+    content: runtimeContentSchema.optional(),
+  })
+  .strict();
+
 export const runtimeSourceSnapshotArgsSchema = z
   .object({
     stage: stageSchema.optional(),
@@ -384,7 +434,7 @@ export const runtimeTranscodeArgsSchema = z
   .object({
     from: fileExtensionSchema,
     to: fileExtensionSchema,
-    files: z.array(directExportFileSchema).min(1),
+    files: directExportFilesSchema,
     options: z.record(z.string(), z.unknown()),
   })
   .strict();
@@ -398,8 +448,26 @@ export const runtimeOpenFileArgsSchema = z
     parameters: z.record(z.string(), z.unknown()),
     options: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
+    transient: z.boolean().optional(),
   })
   .catchall(z.unknown());
+
+export const runtimeResolveParametersArgsSchema = z
+  .object({
+    stage: stageSchema.optional(),
+    file: geometryFileSchema.strict(),
+    resolution: z
+      .object({
+        mode: z.enum(['default', 'declared-only']).optional(),
+        profile: z.literal('tau-json-structure-units-03-v1').optional(),
+        inferenceLanguage: z.string().optional(),
+        projectBindingDigest: contentDigestSchema.optional(),
+        sourceUnitDigest: contentDigestSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
 export const runtimeStageAndRenderArgsSchema = z
   .object({
@@ -525,9 +593,18 @@ export const runtimeLogBatchArgsSchema = z
   })
   .catchall(z.unknown());
 
+const telemetryOriginSchema = z
+  .object({
+    label: z.string(),
+    instance: z.string(),
+  })
+  .catchall(z.unknown());
+
 export const runtimeTelemetryArgsSchema = z
   .object({
     entries: z.array(telemetryEntrySchema),
+    origin: telemetryOriginSchema,
+    epoch: z.number(),
   })
   .catchall(z.unknown());
 
@@ -568,6 +645,8 @@ export const runtimeProtocolSchemas = {
     initialize: { args: runtimeInitializeArgsSchema, result: runtimeInitializeResultSchema },
     export: { args: runtimeExportArgsSchema, result: runtimeExportResultSchema },
     exportModel: { args: runtimeExportModelArgsSchema, result: runtimeExportResultSchema },
+    evaluateModel: { args: runtimeEvaluateModelArgsSchema, result: hashedGeometryResultTransportSchema },
+    resolveParameters: { args: runtimeResolveParametersArgsSchema, result: getParametersResultSchema },
     snapshotSource: { args: runtimeSourceSnapshotArgsSchema, result: runtimeSourceSnapshotResultSchema },
     transcode: { args: runtimeTranscodeArgsSchema, result: runtimeExportResultSchema },
     cleanup: { args: runtimeCleanupArgsSchema, result: runtimeCleanupResultSchema },

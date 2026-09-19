@@ -21,8 +21,14 @@ describe('handleGlobSearch', () => {
   it('should return matching files with metadata entries', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readdir.mockResolvedValue([
-      textEntry('index.ts', 100, { modifiedAt: '2026-01-15T10:00:00.000Z', lineCount: 10 }),
-      textEntry('utils.ts', 200, { modifiedAt: '2026-02-20T14:00:00.000Z', lineCount: 20 }),
+      textEntry('index.ts', 100, {
+        modifiedAt: '2026-01-15T10:00:00.000Z',
+        lineCount: 10,
+      }),
+      textEntry('utils.ts', 200, {
+        modifiedAt: '2026-02-20T14:00:00.000Z',
+        lineCount: 20,
+      }),
       textEntry('readme.md', 50, { lineCount: 3 }),
     ]);
 
@@ -71,7 +77,12 @@ describe('handleGlobSearch', () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readdir
       .mockResolvedValueOnce([{ name: 'src', type: 'dir', size: 0 }, textEntry('package.json', 300, { lineCount: 15 })])
-      .mockResolvedValueOnce([textEntry('app.ts', 150, { modifiedAt: '2026-03-01T00:00:00.000Z', lineCount: 7 })]);
+      .mockResolvedValueOnce([
+        textEntry('app.ts', 150, {
+          modifiedAt: '2026-03-01T00:00:00.000Z',
+          lineCount: 7,
+        }),
+      ]);
 
     const result = await handleGlobSearch({ pattern: '**/*.ts' }, fileSystem);
 
@@ -112,12 +123,45 @@ describe('handleGlobSearch', () => {
     });
   });
 
+  it('should omit explicit-only system resources from root globbing but include scoped skill globbing', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockImplementation(async (path) => {
+      if (path === '') {
+        return [
+          {
+            name: '.agents',
+            type: 'dir',
+            size: 0,
+            traverseOnImplicitSearch: false,
+          },
+          textEntry('README.md', 10),
+        ];
+      }
+      if (path === '.agents/skills/cad-demo') {
+        return [textEntry('api-index.md', 20), textEntry('api-functions.md', 30)];
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    const unscoped = await handleGlobSearch({ pattern: '**/*.md', path: '' }, fileSystem);
+    expect(unscoped.success && unscoped.files).toEqual(['README.md']);
+
+    const scoped = await handleGlobSearch({ pattern: 'api-*.md', path: '.agents/skills/cad-demo' }, fileSystem);
+    expect(scoped.success && scoped.files).toEqual([
+      '.agents/skills/cad-demo/api-index.md',
+      '.agents/skills/cad-demo/api-functions.md',
+    ]);
+  });
+
   it.each(['.', './', '/'] as const)('should reject noncanonical root alias %j', async (path) => {
     const fileSystem = mock<RpcFileSystem>();
 
     const result = await handleGlobSearch({ pattern: '**/*.ts', path }, fileSystem);
 
-    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: rpcClientErrorCode.validationError,
+    });
     expect(fileSystem.readdir).not.toHaveBeenCalled();
   });
 
@@ -126,7 +170,10 @@ describe('handleGlobSearch', () => {
 
     const result = await handleGlobSearch({ pattern: '*.ts', path: '../secret' }, fileSystem);
 
-    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: rpcClientErrorCode.validationError,
+    });
     expect(fileSystem.readdir).not.toHaveBeenCalled();
   });
 
@@ -138,7 +185,10 @@ describe('handleGlobSearch', () => {
 
     const result = await handleGlobSearch({ pattern: '*.ts' }, fileSystem);
 
-    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.fileNotFound });
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: rpcClientErrorCode.fileNotFound,
+    });
   });
 
   it('should return IO_ERROR on readdir failure', async () => {
@@ -147,6 +197,9 @@ describe('handleGlobSearch', () => {
 
     const result = await handleGlobSearch({ pattern: '*.ts' }, fileSystem);
 
-    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.ioError });
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: rpcClientErrorCode.ioError,
+    });
   });
 });

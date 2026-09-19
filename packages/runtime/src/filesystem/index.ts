@@ -14,6 +14,7 @@ export { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 
 export {
   createFileSystemBridge,
+  createFileSystemBridgePort,
   createFileSystemBridgeProxy,
   exposeFileSystem,
   openFileSystemBridge,

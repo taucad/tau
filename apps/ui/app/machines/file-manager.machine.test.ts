@@ -404,6 +404,7 @@ describe('fileManagerMachine', () => {
     const actor = createActor(fileManagerMachine, {
       input: {
         rootDirectory: '/projects/project-a',
+        projectId: 'project-a',
         shouldInitializeOnStart: true,
       },
     });
@@ -445,6 +446,7 @@ describe('fileManagerMachine', () => {
     const actor = createActor(fileManagerMachine, {
       input: {
         rootDirectory: '/projects/project-a',
+        projectId: 'project-a',
         shouldInitializeOnStart: true,
       },
     });
@@ -454,9 +456,17 @@ describe('fileManagerMachine', () => {
       expect(actor.getSnapshot().value).toBe('ready');
     });
 
-    actor.getSnapshot().context.openFileSystemBridge?.('/projects/project-a');
+    actor.getSnapshot().context.openFileSystemBridge?.('/projects/project-a', 'working-copy');
+    expect(() => actor.getSnapshot().context.openComputeStorePort?.('workspace-candidate')).toThrow(/authority/);
+    actor.getSnapshot().context.openComputeStorePort?.('project-a');
 
     expect(mockOpenFileSystemBridge).toHaveBeenCalledWith(expect.anything(), { root: '/projects/project-a' });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
+    expect(workerTestState.instances[0]?.postMessage).toHaveBeenCalledWith(
+      // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
+      expect.objectContaining({ type: 'computeStoreConnect', projectId: 'project-a' }),
+      [expect.any(MessagePort)],
+    );
     actor.stop();
   });
 
@@ -566,6 +576,35 @@ describe('fileManagerMachine', () => {
 
       expect(mockWaitForWorkerReady).not.toHaveBeenCalled();
       expect(mockCreateFileSystemBridge).toHaveBeenCalledOnce();
+      actor.stop();
+    });
+
+    it('should not reconfigure the project roots the root mount already installed', async () => {
+      const sharedWorker = {
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        postMessage: vi.fn(),
+      } as unknown as Worker;
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/shared-proj',
+          shouldInitializeOnStart: true,
+          projectId: 'shared-proj',
+          sharedWorker,
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      // The roots are worker-global and every mutation re-syncs them, so a nested mount
+      // re-running the whole configuration is pure startup cost.
+      expect(mockConfigureProjectRoots).not.toHaveBeenCalled();
+      expect(mockGetProjectRootConfigs).not.toHaveBeenCalled();
       actor.stop();
     });
 

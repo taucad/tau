@@ -11,7 +11,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
-import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
+import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 const validMain = [
@@ -70,7 +70,11 @@ const createFixture = async (partSource: string) => {
     storageRootKey: 'memory:kernel-entry-failure',
   });
   const mountTable = new MountTable();
-  mountTable.mount('/', provider, { backend: 'memory', storageRootKey: 'memory:kernel-entry-failure' });
+  mountTable.mount('/', provider, {
+    class: 'authored',
+    backend: 'memory',
+    storageRootKey: 'memory:kernel-entry-failure',
+  });
   const eventBus = new ChangeEventBus();
   const fileService = new WorkspaceFileService({
     providerRegistry,

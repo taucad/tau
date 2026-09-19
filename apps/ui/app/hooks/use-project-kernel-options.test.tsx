@@ -16,13 +16,15 @@ const mocks = vi.hoisted(() => {
       placement = value;
     },
     revision: 0,
+    computeMode: 'durable',
+    computeRevision: 0,
     localFactory,
     remoteFactory,
     localKernelOptions: vi.fn(),
   };
 });
 
-vi.mock('#constants/desktop-kernel-options.js', () => ({
+vi.mock('#constants/local-kernel-options.js', () => ({
   localKernelOptions: mocks.localKernelOptions,
 }));
 
@@ -35,12 +37,18 @@ vi.mock('#lib/remote-compute-placement.js', () => ({
   useRemoteComputeSelectionRevision: () => mocks.revision,
 }));
 
+vi.mock('#lib/compute-reuse-preference.js', () => ({
+  useComputeReuseMode: () => mocks.computeMode,
+  useComputeReuseRevision: () => mocks.computeRevision,
+}));
+
 const { useProjectKernelOptions } = await import('#hooks/use-project-kernel-options.js');
 
 describe('useProjectKernelOptions', () => {
   beforeEach(() => {
     mocks.placement = { state: 'local' };
     mocks.revision = 0;
+    mocks.computeRevision = 0;
     mocks.localKernelOptions.mockReset();
     mocks.localKernelOptions.mockReturnValue(mocks.localFactory);
   });
@@ -50,10 +58,10 @@ describe('useProjectKernelOptions', () => {
       useProjectKernelOptions({ projectId: 'project-python', nativeKernelId: 'build123d' }),
     );
 
-    expect(mocks.localKernelOptions).toHaveBeenCalledWith('project-python', 'build123d');
+    expect(mocks.localKernelOptions).toHaveBeenCalledWith('project-python', 'build123d', 'durable');
     expect(result.current).toEqual({
       kernelOptionsFactory: mocks.localFactory,
-      key: 'local:0',
+      key: 'local:0:0',
       isLocal: true,
     });
   });
@@ -78,11 +86,11 @@ describe('useProjectKernelOptions', () => {
 
   it('changes the selection key when the explicit selection revision changes', () => {
     const { result, rerender } = renderHook(() => useProjectKernelOptions({ projectId: 'project-local' }));
-    expect(result.current.key).toBe('local:0');
+    expect(result.current.key).toBe('local:0:0');
 
     mocks.revision = 1;
     rerender();
 
-    expect(result.current.key).toBe('local:1');
+    expect(result.current.key).toBe('local:0:1');
   });
 });

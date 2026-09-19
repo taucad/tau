@@ -21,6 +21,7 @@ import {
 } from '@taucad/ui/components/drawer';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { cn } from '@taucad/ui/utils/cn';
+import { menuGroupHeadingClass } from '@taucad/ui/components/menu.variants';
 import { Loader } from '#components/ui/loader.js';
 
 type GroupedItems<T> = {
@@ -116,6 +117,7 @@ export function ComboBoxResponsive<T>({
   const open = isControlled ? isOpenProperty : uncontrolledOpen;
   const isMobile = useIsMobile();
   const selectionMadeReference = React.useRef(false);
+  const pointerDismissedReference = React.useRef(false);
 
   const setOpen = React.useCallback(
     (next: boolean) => {
@@ -141,14 +143,16 @@ export function ComboBoxResponsive<T>({
   };
 
   const handleOpenChange = (isOpen: boolean) => {
-    // If closing without making a selection, trigger onClose
-    if (!isOpen && !selectionMadeReference.current && open) {
+    // Pointer dismissal owns the next focus target. Refocusing the composer here
+    // races a sibling picker opening from the same click and closes it again.
+    if (!isOpen && !selectionMadeReference.current && !pointerDismissedReference.current && open) {
       onClose?.();
     }
 
     // Reset the selection flag when opening
     if (isOpen) {
       selectionMadeReference.current = false;
+      pointerDismissedReference.current = false;
     }
 
     setOpen(isOpen);
@@ -206,6 +210,10 @@ export function ComboBoxResponsive<T>({
         {...properties}
         {...popoverProperties}
         className={cn('w-[200px] overflow-hidden p-0', className, popoverProperties?.className)}
+        onPointerDownOutside={(event) => {
+          popoverProperties?.onPointerDownOutside?.(event);
+          pointerDismissedReference.current = !event.defaultPrevented;
+        }}
       >
         <>
           <ItemList
@@ -269,6 +277,8 @@ function ItemList<T>({
   readonly onLoadMore?: () => void;
 }) {
   const [search, setSearch] = React.useState('');
+  const lastSearchLoad = React.useRef('');
+  const nonEmptyGroups = React.useMemo(() => groupedItems.filter((group) => group.items.length > 0), [groupedItems]);
 
   type FlatItem =
     | { type: 'item'; item: T; groupName: string; value: string; keywords: readonly string[] }
@@ -276,7 +286,7 @@ function ItemList<T>({
 
   // Flatten all items from all groups for virtualization, including group headers
   const flattenedItems = React.useMemo((): FlatItem[] => {
-    return groupedItems.flatMap((group) => [
+    return nonEmptyGroups.flatMap((group) => [
       { type: 'header', groupName: group.name } as const,
       ...group.items.map(
         (item) =>
@@ -289,7 +299,7 @@ function ItemList<T>({
           }) as const,
       ),
     ]);
-  }, [groupedItems, getKeywords, getValue]);
+  }, [nonEmptyGroups, getKeywords, getValue]);
 
   // Filter items based on search
   const filteredItems = React.useMemo((): FlatItem[] => {
@@ -322,6 +332,25 @@ function ItemList<T>({
     );
   }, [flattenedItems, search, withVirtualization]);
 
+  React.useEffect(() => {
+    const key = `${search}\0${String(flattenedItems.length)}`;
+    if (
+      withVirtualization &&
+      search !== '' &&
+      filteredItems.length === 0 &&
+      onLoadMore !== undefined &&
+      !isLoadingMore &&
+      lastSearchLoad.current !== key
+    ) {
+      lastSearchLoad.current = key;
+      const searchLoadTimeout = globalThis.setTimeout(onLoadMore, 150);
+      return () => {
+        globalThis.clearTimeout(searchLoadTimeout);
+      };
+    }
+    return undefined;
+  }, [filteredItems.length, flattenedItems.length, isLoadingMore, onLoadMore, search, withVirtualization]);
+
   // Render individual item or group header
   const renderItem = React.useCallback(
     (index: number) => {
@@ -333,7 +362,7 @@ function ItemList<T>({
       // Render group header
       if (itemData.type === 'header') {
         return (
-          <div key={`header-${itemData.groupName}`} className='px-2 py-1.5 text-xs font-medium text-muted-foreground'>
+          <div key={`header-${itemData.groupName}`} className={menuGroupHeadingClass}>
             {itemData.groupName}
           </div>
         );
@@ -368,7 +397,7 @@ function ItemList<T>({
         ) : null}
         <CommandList>
           {filteredItems.length === 0 ? (
-            <CommandEmpty>{emptyListMessage}</CommandEmpty>
+            <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
           ) : (
             <Virtuoso
               style={{ height: `${virtualizationHeight}px` }}
@@ -401,8 +430,8 @@ function ItemList<T>({
     <Command>
       {isSearchEnabled ? <CommandInput placeholder={searchPlaceHolder} /> : null}
       <CommandList>
-        <CommandEmpty>{emptyListMessage}</CommandEmpty>
-        {groupedItems.map((group) => (
+        <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
+        {nonEmptyGroups.map((group) => (
           <CommandGroup key={group.name} heading={group.name}>
             {group.items.map((item) => {
               const value = getValue(item);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   jobDefinitionSchema,
+  jobMaxAttemptsCeiling,
   submitJobSchema,
   workerActionPublishSchema,
   workerActionReadSchema,
@@ -40,6 +41,13 @@ describe('job DTO schemas', () => {
     invalid.requirements.push({ key: 'memory', condition: 'at-least', value: 16 });
     expect(jobDefinitionSchema.safeParse(invalid).success).toBe(false);
     expect(jobDefinitionSchema.safeParse({ ...definition(), options: { invalid: Number.NaN } }).success).toBe(false);
+  });
+
+  it('bounds caller-declared attempts at the R10 supplier ceiling', () => {
+    expect(jobDefinitionSchema.safeParse({ ...definition(), maxAttempts: jobMaxAttemptsCeiling }).success).toBe(true);
+    expect(jobDefinitionSchema.safeParse({ ...definition(), maxAttempts: jobMaxAttemptsCeiling + 1 }).success).toBe(
+      false,
+    );
   });
 
   it('accepts strict versioned action records and rejects malformed dependencies', () => {

@@ -95,6 +95,57 @@ describe('MetricsService', () => {
       expect(() => service.genAiContextBudgetTokens.record(1234)).not.toThrow();
       expect(() => service.genAiContextCompactionDecisions.add(1)).not.toThrow();
     });
+
+    it('should create content-free funded-operation metrics', () => {
+      expect(() =>
+        service.billingFundedOperationRecoveries.add(1, {
+          'deployment.environment': 'staging',
+          'tau.billing.capacity_pool': 'primary',
+          'tau.billing.recovery.outcome': 'attempted',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        service.billingFundedOperationDenials.add(1, {
+          'deployment.environment': 'staging',
+          'tau.billing.capacity_pool': 'primary',
+          'tau.billing.denial.reason': 'recovery_failed',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        service.billingFundedOperationTerminals.add(1, {
+          'deployment.environment': 'staging',
+          'tau.billing.capacity_pool': 'helper',
+          'tau.billing.terminal.kind': 'final_usage',
+          'tau.billing.terminal.incomplete_reason': 'max_output_tokens',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        service.billingFundedOperationCurrent.record(1, {
+          'deployment.environment': 'staging',
+          'tau.billing.capacity_pool': 'primary',
+          'tau.billing.pending.state': 'pending',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        service.billingFundedOperationOldestDueAge.record(0, {
+          'deployment.environment': 'staging',
+          'tau.billing.capacity_pool': 'primary',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        service.billingFundedOperationRecoveryBatchDuration.record(0.1, {
+          'deployment.environment': 'staging',
+          'tau.billing.capacity_pool': 'primary',
+          'tau.billing.recovery.batch.outcome': 'succeeded',
+        }),
+      ).not.toThrow();
+      expect(() =>
+        service.billingFundedOperationRecoveryProviderExecutions.record(0, {
+          'deployment.environment': 'staging',
+          'tau.billing.capacity_pool': 'primary',
+        }),
+      ).not.toThrow();
+    });
   });
 
   describe('Infrastructure metrics', () => {

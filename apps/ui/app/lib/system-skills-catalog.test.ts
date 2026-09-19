@@ -3,7 +3,7 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import { parseSkillFrontmatter } from '#hooks/use-context-payload.utils.js';
 import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
-import { builtInSystemSkills } from '#lib/system-skills-catalog.js';
+import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 const progressiveDisclosureSkillNames = [
   'create-model',
@@ -18,12 +18,12 @@ const progressiveDisclosureSkillNames = [
   'geospec-authoring',
 ] as const;
 
-describe('builtInSystemSkills', () => {
+describe('systemSkillsCatalog', () => {
   it('should include a valid create-skill system skill', () => {
-    const createSkill = builtInSystemSkills.find((skill) => skill.slug === 'create-skill');
+    const createSkill = systemSkillsCatalog.find((skill) => skill.slug === 'create-skill');
 
     if (!createSkill) {
-      throw new Error('Expected built-in create-skill to be registered');
+      throw new Error('Expected system create-skill to be registered');
     }
 
     expect(createSkill.skillMarkdown).toContain('name: create-skill');
@@ -60,7 +60,7 @@ describe('builtInSystemSkills', () => {
 
     const results = await Promise.all(
       progressiveDisclosureSkillNames.map(async (skillName) => ({
-        catalogEntry: builtInSystemSkills.find((skill) => skill.slug === skillName),
+        catalogEntry: systemSkillsCatalog.find((skill) => skill.slug === skillName),
         resolved: await resolver.resolveSkill(skillName),
       })),
     );
@@ -68,14 +68,18 @@ describe('builtInSystemSkills', () => {
     for (const { catalogEntry, resolved } of results) {
       expect(catalogEntry).toEqual(expect.objectContaining({ priority: 60, source: 'system' }));
       expect(resolved).toEqual(
-        expect.objectContaining({ success: true, skillName: catalogEntry?.slug, source: 'system' }),
+        expect.objectContaining({
+          success: true,
+          skillName: catalogEntry?.slug,
+          source: 'system',
+        }),
       );
     }
   });
 
   it('keeps configured kernels, cad-* catalog slugs, and create-model rows set-equal', () => {
     const configured = kernelConfigurations.map(({ id }) => id).toSorted();
-    const catalog = builtInSystemSkills
+    const catalog = systemSkillsCatalog
       .flatMap(({ slug }) => (slug.startsWith('cad-') ? [slug.slice('cad-'.length)] : []))
       .toSorted();
     const createModelRows = [...createModelSkillMarkdown.matchAll(/^\| `cad-([^`]+)` \|/gmu)]
@@ -88,7 +92,30 @@ describe('builtInSystemSkills', () => {
   });
 
   it('preserves JSCAD multi-shape output as one flat array of named geometries', () => {
-    const jscad = builtInSystemSkills.find(({ slug }) => slug === 'cad-jscad');
+    const jscad = systemSkillsCatalog.find(({ slug }) => slug === 'cad-jscad');
     expect(jscad?.skillMarkdown).toContain('one flat array of named geometries');
+  });
+
+  it.each([
+    ['cad-openscad', 10],
+    ['geospec-authoring', 5],
+  ] as const)('returns actionable paths and every supporting file for %s', async (slug, supportingCount) => {
+    const resolver = createSkillResolver({
+      readFile: async () => {
+        throw new Error('package resources stay lazy during activation');
+      },
+      listDirectory: async () => [],
+    });
+
+    const resolved = await resolver.resolveSkill(slug);
+    expect(resolved.success).toBe(true);
+    if (!resolved.success) {
+      throw new Error(`Expected ${slug} to resolve`);
+    }
+    expect(resolved.resourceUri).toBe(`system:skills/${slug}/SKILL.md`);
+    expect(resolved.skillPath).toBe(`.agents/skills/${slug}/SKILL.md`);
+    expect(resolved.baseDirectory).toBe(`.agents/skills/${slug}`);
+    expect(resolved.fingerprint).toMatch(/^[\da-f]{64}$/u);
+    expect(resolved.supportingFiles).toHaveLength(supportingCount);
   });
 });

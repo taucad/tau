@@ -1,0 +1,24 @@
+import { fileURLToPath } from 'node:url';
+import { tauRuntime } from '@taucad/runtime/vite';
+import { defineConfig } from 'vite';
+
+/**
+ * Builds the browser fixture with the same plugin set `apps/ui` uses, so this
+ * suite fails on exactly the bundling regressions the app would hit — most
+ * importantly a Node-only module reachable from `@taucad/openrscad`, which
+ * must resolve the engine's `browser` condition and never its N-API loader.
+ */
+export default defineConfig({
+  root: fileURLToPath(new URL('fixture', import.meta.url)),
+  plugins: [...tauRuntime()],
+  worker: { format: 'es' },
+  build: {
+    outDir: fileURLToPath(new URL('dist-fixture', import.meta.url)),
+    emptyOutDir: true,
+    target: 'esnext',
+  },
+  preview: {
+    port: 4331,
+    strictPort: true,
+  },
+});

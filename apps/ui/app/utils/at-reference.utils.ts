@@ -42,21 +42,25 @@ export function parseAtReferences(text: string): AtReferenceSegment[] {
   return segments;
 }
 
-const transcriptPathRegex = /^\.tau\/transcripts\/([^/]+)\.jsonl$/;
+/* The chat's own session log, which is where a chat actually is (W17). The
+ * `.tau/transcripts/<id>.jsonl` this used to spell was written by nothing and
+ * read from disk by nothing: an @-mention of a chat named a file that did not
+ * exist, so pasting one into the composer produced a chip pointing at ENOENT. */
+const chatLogPathRegex = /^\.tau\/chats\/([^/]+)\/events\.jsonl$/;
 
 /**
- * Check if a path matches the `.tau/transcripts/{id}.jsonl` pattern.
+ * Check if a path matches the `.tau/chats/{id}/events.jsonl` pattern.
  */
-export function isTranscriptPath(path: string): boolean {
-  return transcriptPathRegex.test(path);
+export function isChatLogPath(path: string): boolean {
+  return chatLogPathRegex.test(path);
 }
 
 /**
- * Extract the chat ID from a transcript path.
- * Returns `undefined` if the path doesn't match the transcript pattern.
+ * Extract the chat ID from a chat log path.
+ * Returns `undefined` if the path doesn't match the chat log pattern.
  */
-export function extractChatIdFromTranscriptPath(path: string): string | undefined {
-  const match = transcriptPathRegex.exec(path);
+export function extractChatIdFromChatLogPath(path: string): string | undefined {
+  const match = chatLogPathRegex.exec(path);
   return match?.[1];
 }
 
@@ -69,7 +73,7 @@ export type ResolvedAtReference =
  * Resolve an `@path` reference against the file tree and chats.
  * Returns resolved metadata for rendering, or `null` if the path is invalid.
  *
- * - Transcript paths (`.tau/transcripts/{id}.jsonl`) are resolved as chats via O(1) Map lookup
+ * - Chat log paths (`.tau/chats/{id}/events.jsonl`) are resolved as chats via O(1) Map lookup
  * - All other paths are resolved against the file tree via O(1) Map lookup
  */
 export function resolveAtReference(
@@ -77,8 +81,8 @@ export function resolveAtReference(
   fileTree: Map<string, FileEntry>,
   chatsById: Map<string, Chat>,
 ): ResolvedAtReference | undefined {
-  if (isTranscriptPath(path)) {
-    const chatId = extractChatIdFromTranscriptPath(path);
+  if (isChatLogPath(path)) {
+    const chatId = extractChatIdFromChatLogPath(path);
     if (!chatId) {
       return undefined;
     }

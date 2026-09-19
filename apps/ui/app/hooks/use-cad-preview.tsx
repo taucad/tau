@@ -5,6 +5,7 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Geometry } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import type { ParameterManifest } from '@taucad/parameters';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
@@ -13,7 +14,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { joinPath } from '@taucad/utils/path';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
+import { ephemeralKernelOptions } from '#constants/ephemeral-kernel-options.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 
@@ -33,6 +34,9 @@ export type CadPreviewContextValue = {
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly defaultParameters: Record<string, unknown>;
   readonly jsonSchema: JSONSchema7 | undefined;
+  readonly parameterManifest: ParameterManifest | undefined;
+  /** Values this preview last sent to the kernel; a change is a viewer interaction. */
+  readonly parameters: Record<string, unknown>;
   readonly setParameters: (parameters: Record<string, unknown>) => void;
 };
 
@@ -152,7 +156,7 @@ export function CadPreviewProvider(props: CadPreviewProviderProps): React.JSX.El
     return <CadPreviewPipeline {...props} kernelOptionsFactory={props.kernelOptionsFactory} />;
   }
   if (props.files !== undefined) {
-    return <CadPreviewPipeline {...props} kernelOptionsFactory={defaultKernelOptions} />;
+    return <CadPreviewPipeline {...props} kernelOptionsFactory={ephemeralKernelOptions} />;
   }
   return <PersistentCadPreviewProvider {...props} />;
 }
@@ -168,7 +172,7 @@ function CadPreviewPipeline({
 }: CadPreviewPipelineProps): React.JSX.Element {
   'use no memo';
 
-  const { fileManagerRef, client, workspace } = useFileManager();
+  const { fileManagerRef, files: rootedFiles, workspace } = useFileManager();
   const previewInstance = useId().replaceAll(':', '');
   const previewPrefix = joinPath('/previews', previewInstance);
   const fileSystemRoot = files === undefined ? joinPath('/projects', projectId) : previewPrefix;
@@ -194,7 +198,6 @@ function CadPreviewPipeline({
 
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
-      defaultCameraFovAngle: defaultGraphicsSettings.cameraFovAngle,
       measureSnapDistance: 40,
       enableSurfaces: defaultGraphicsSettings.enableSurfaces,
       enableLines: defaultGraphicsSettings.enableLines,
@@ -204,8 +207,7 @@ function CadPreviewPipeline({
       enableMatcap: defaultGraphicsSettings.enableMatcap,
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
-      environmentPreset: defaultGraphicsSettings.environmentPreset,
-      graphicsBackendPreference: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
+      graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     },
   });
 
@@ -240,10 +242,12 @@ function CadPreviewPipeline({
             await workspace.mount(previewPrefix, {
               backend: 'memory',
               storageRootKey: `memory:preview:${previewInstance}`,
+              // Regenerated from the shared bundle on every mount.
+              class: 'derived',
             });
             mountedPrefixRef.current = previewPrefix;
             signal.throwIfAborted();
-            await client.writeFiles(projectFiles);
+            await rootedFiles.writeFiles(projectFiles);
           }
         }),
         /* oxlint-enable react/refs -- End XState ActorRef boundary. */
@@ -295,12 +299,15 @@ function CadPreviewPipeline({
     return 'idle';
   });
   const failureIssues = useSelector(cadRef, selectCadFailureIssues);
-  const defaultParameters = useSelector(cadRef, (s) => s.context.defaultParameters);
-  const jsonSchema = useSelector(cadRef, (s) => s.context.jsonSchema);
+  const parameterManifest = useSelector(cadRef, (s) => s.context.parameterManifest);
+  const defaultParameters = parameterManifest?.defaults ?? {};
+  const jsonSchema =
+    parameterManifest?.legacyProjection.status === 'usable' ? parameterManifest.legacyProjection.schema : undefined;
   const cadUnits = useSelector(cadRef, (s) => s.context.units);
 
   // Initialization error from the preview machine
   const initError = useSelector(previewRef, (s) => s.context.initError);
+  const previewParameters = useSelector(previewRef, (s) => s.context.parameters);
 
   const status = useMemo(
     () =>
@@ -352,9 +359,22 @@ function CadPreviewPipeline({
       graphicsRef,
       defaultParameters,
       jsonSchema,
+      parameterManifest,
+      parameters: previewParameters,
       setParameters,
     }),
-    [geometry, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters],
+    [
+      geometry,
+      status,
+      error,
+      cadRef,
+      graphicsRef,
+      defaultParameters,
+      jsonSchema,
+      parameterManifest,
+      previewParameters,
+      setParameters,
+    ],
   );
 
   return <CadPreviewContext.Provider value={value}>{children}</CadPreviewContext.Provider>;

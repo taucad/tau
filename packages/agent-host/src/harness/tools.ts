@@ -6,9 +6,7 @@ import type {
 } from '@earendil-works/pi-agent-core';
 import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { HostToolInvocation, HostToolResult, ToolRegistry } from '#waist/ports.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { JsonValue } from '#log/event-types.js';
 
 const bracketArrayAlias = /^(files|include|exclude)\[(0|[1-9][0-9]*)\]$/u;
@@ -23,6 +21,41 @@ const pathFields = new Map<string, string>([
   ['list_directory', 'path'],
   ['grep', 'path'],
   ['glob_search', 'path'],
+]);
+
+/**
+ * What each Tau tool does, in ACP's `ToolKind` vocabulary.
+ *
+ * N11: a Tau-dispatched call records the same `call` facts an external agent's
+ * does, so one client projection renders both. ACP's enum is the whole
+ * taxonomy — there is no `list`, `render` or `export` — so `list_directory` is
+ * a `read` (which is also what Codex maps its own `listFiles` to) and the two
+ * calls with no honest fit are `other`. A Tau tool never reaches the generic
+ * card anyway; its bespoke renderer is chosen by name.
+ *
+ * The literal lives here, beside {@link pathFields}, because this package is
+ * published and `@taucad/chat` — where the tool *names* are declared — is not.
+ *
+ * @public
+ */
+export const tauToolKinds = new Map<string, string>([
+  ['read_file', 'read'],
+  ['list_directory', 'read'],
+  ['grep', 'search'],
+  ['glob_search', 'search'],
+  ['web_search', 'fetch'],
+  ['web_browser', 'fetch'],
+  ['create_file', 'edit'],
+  ['edit_file', 'edit'],
+  ['delete_file', 'delete'],
+  ['get_kernel_result', 'execute'],
+  ['get_parameters', 'read'],
+  ['apply_parameter_operation', 'edit'],
+  ['test_model', 'execute'],
+  ['export_geometry', 'execute'],
+  ['screenshot', 'other'],
+  ['revisions', 'read'],
+  ['use_skill', 'other'],
 ]);
 
 const normalizeBracketArrays = (input: Record<string, unknown>): Record<string, unknown> => {
@@ -179,6 +212,16 @@ export const toPiToolContent = (content: JsonValue): Array<TextContent | ImageCo
 /** Original host result retained behind pi's model-visible tool content. @public */
 export type HostToolExecutionDetails = HostToolResult & { readonly substituted: boolean };
 
+type HostAgentTool = Omit<AgentTool, 'execute'> & {
+  // eslint-disable-next-line max-params -- Pi's AgentTool contract supplies these four invocation values.
+  readonly execute: (
+    toolCallId: string,
+    input: unknown,
+    signal?: AbortSignal,
+    onUpdate?: (partial: AgentToolResult<HostToolExecutionDetails>) => void,
+  ) => Promise<AgentToolResult<HostToolExecutionDetails>>;
+};
+
 /** Optional eager/cache result source checked before the real tool registry. @public */
 export type ToolResultSubstituter = (
   invocation: HostToolInvocation,
@@ -187,22 +230,36 @@ export type ToolResultSubstituter = (
 type CreateAgentToolsOptions = {
   readonly registry: ToolRegistry;
   readonly substitute?: ToolResultSubstituter | undefined;
+  /** The run every dispatch from these tools belongs to (V19). */
+  readonly runId: string;
 };
 
 /** Wrap the waist tool registry as pi `AgentTool`s, including T4 result substitution. @public */
-export const createAgentTools = (options: CreateAgentToolsOptions): AgentTool[] =>
+export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentTool[] =>
   options.registry.list().map((definition) => ({
     name: definition.name,
     label: definition.name,
     description: definition.description,
     parameters: definition.inputSchema,
     prepareArguments: (input) => normalizeToolInput(definition.name, input),
-    execute: async (toolCallId, input, signal): Promise<AgentToolResult<HostToolExecutionDetails>> => {
+    // eslint-disable-next-line max-params -- Pi's AgentTool contract supplies these four invocation values.
+    execute: async (toolCallId, input, signal, onUpdate): Promise<AgentToolResult<HostToolExecutionDetails>> => {
       const invocation: HostToolInvocation = {
         toolCallId,
         toolName: definition.name,
         input: input as JsonValue,
         signal: signal ?? new AbortController().signal,
+        runId: options.runId,
+        ...(onUpdate === undefined
+          ? {}
+          : {
+              onUpdate: (partial: HostToolResult) => {
+                onUpdate({
+                  content: toPiToolContent(partial.content),
+                  details: { ...partial, substituted: false },
+                });
+              },
+            }),
       };
       const substituted = await options.substitute?.(invocation);
       const result = substituted ?? (await options.registry.invoke(invocation));

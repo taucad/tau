@@ -7,6 +7,7 @@ import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockvi
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { WorkbenchToggle } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
+import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { useProject } from '#hooks/use-project.js';
@@ -19,6 +20,20 @@ import { panelMinSizeChat, panelMinSizeViewer, panelMinSizeWorkbench } from '#co
 import { cn } from '@taucad/ui/utils/cn';
 
 export const compactWorkspaceWidth = 1120;
+
+/**
+ * Reserve the titlebar-controls width in front of the top-left group's tab
+ * bar only: a group inside any non-first `.dv-view` sits below or right of
+ * another one. A `::before` flex item rather than padding so the tab bar's
+ * bottom border, which the children draw, continues under the controls.
+ */
+const topLeftTabBarInset = [
+  "[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:content-['']",
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:w-(--titlebar-controls-width)',
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:shrink-0',
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:border-b',
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:border-b-border',
+].join(' ');
 
 export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const { editorRef } = useProject();
@@ -70,12 +85,16 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
             <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
           </div>
         ) : null}
-        <ChatInterfaceSessionGate fallback={<div className='size-full' />}>
+        {/* Until the editor state has loaded and the focused chat exists, the
+            lanes stand in at their default widths rather than a blank page. */}
+        <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
           {isClient && isEditorReady ? (
             <Allotment
               separator={false}
               proportionalLayout={false}
-              className='size-full [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
+              /* The lanes land rather than snap in: the skeleton they replace holds the same
+                 background, so a short fade reads as the workspace resolving (soft land). */
+              className='size-full animate-in duration-200 fade-in-50 [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] motion-reduce:animate-none [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
               onDragEnd={persistWidths}
             >
               <Allotment.Pane
@@ -103,7 +122,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                 <div
                   className={cn(
                     '@container/viewer relative size-full overflow-hidden',
-                    !sidebarOpen && !chatVisible && '[&_.dv-tabs-and-actions-container]:pl-(--titlebar-controls-width)',
+                    !sidebarOpen && !chatVisible && topLeftTabBarInset,
                   )}
                 >
                   <ViewerDockview />
@@ -121,7 +140,9 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                 <WorkbenchDockview />
               </Allotment.Pane>
             </Allotment>
-          ) : null}
+          ) : (
+            <WorkspaceSkeleton />
+          )}
         </ChatInterfaceSessionGate>
       </div>
     </ChatContextInsertionProvider>

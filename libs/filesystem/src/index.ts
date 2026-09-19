@@ -1,24 +1,41 @@
 export type {
   DirectoryEntry,
+  ExternalChangeFact,
   ProviderCapabilities,
+  FileMode,
   FileStat,
   FileStatEntry,
   FileSystemProvider,
   FileReadStreamOptions,
+  PathAgentAccess,
+  PathClass,
+  PathClassification,
+  PathPolicy,
+  PathWatchPlane,
   ChangeEvent,
+  MkdirOptions,
+  WorkspaceMutationContext,
   FileTreeNode,
   TreeEntry,
   WatchRequest,
   WatchEvent,
 } from '#types.js';
+export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
-export { pendingProjectCommitInputSchema, WorkspaceFileService } from '#workspace-file-service.js';
+export { WorkspaceFileService } from '#workspace-file-service.js';
+export { pendingProjectCommitInputSchema } from '#project-directories.js';
 export type {
-  BundledTypePackageReplacement,
-  MkdirOptions,
-  RootedFileSystem,
-  WorkspaceMutationContext,
-} from '#workspace-file-service.js';
+  ProjectDiscoveryEntry,
+  ProjectDiscoveryResult,
+  ProjectRootDiscoveryStatus,
+  ResolvedDiscoveryRoot,
+} from '#project-directories.js';
+/* `ProjectDirectories`, `MutationPipeline`, `RootedViews` and `TreeIndex` are the composition root's
+ * own collaborators (D14): a consumer reaches them through
+ * `WorkspaceFileService`, never by constructing one, so only the shapes they
+ * hand back are exported. */
+export type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
+export type { RootedFileSystem, RootedPorcelain } from '#rooted-views.js';
 
 export { ProviderRegistry } from '#provider-registry.js';
 export type { ProviderRegistryOptions } from '#provider-registry.js';
@@ -26,11 +43,18 @@ export type { ProviderRegistryOptions } from '#provider-registry.js';
 export { resolveStorageRootKey } from '#storage-root-key.js';
 export type { StorageRootIdentity } from '#storage-root-key.js';
 
+export {
+  admitCapacityWrite,
+  defaultRevisionReserveBytes,
+  measureCapacityDomain,
+  revisionReserveFloorBytes,
+} from '#capacity-domain.js';
+export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityRequest } from '#capacity-domain.js';
+
 export { BoundedFileCache } from '#bounded-file-cache.js';
 export { ResourceQueue } from '#resource-queue.js';
+export type { ResourceQueueClaim } from '#resource-queue.js';
 export { ChangeEventBus } from '#change-event-bus.js';
-export { InMemoryFileTree } from '#in-memory-file-tree.js';
-export type { TreeNode } from '#in-memory-file-tree.js';
 export { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
 export type { CoalescerOptions } from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';
@@ -56,19 +80,24 @@ export type {
   MountEntry,
   MountMetadata,
   MountResolution,
+  CheckoutRootConfig,
   ProjectRootConfig,
   ProjectRootConfiguration,
-  ProjectDiscoveryEntry,
-  ProjectDiscoveryResult,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
   PermanentDeleteProjectDirectoryInput,
   PermanentDeleteProjectDirectoryResult,
   ProjectLocator,
-  ProjectRootDiscoveryStatus,
   StorageRootConfig,
   WorkspaceScope,
 } from '#mount-table.js';
+/* `MountEntry.kind` is a `RouteKind`, so the type ships with it. `parseRoute`
+ * ships because a client outside L1 needs it: the rooted content client picks
+ * the root that owns an absolute path, and this stays the only grammar that
+ * answers which one that is (D10). The route *builders* remain module-private —
+ * nothing outside L1 spells a route it did not read. */
+export type { RouteKind, ParsedRoute } from '#project-routes.js';
+export { parseRoute } from '#project-routes.js';
 
 export {
   MissingWorkspaceHandleError,
@@ -80,48 +109,10 @@ export {
 export { UnboundProjectRouteError } from '#workspace-file-service.js';
 export type { WorkspaceMutationErrorCode } from '#workspace-errors.js';
 
-export { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
-export type { RevisionId, RevisionTreeEntry } from '#revision-tree.js';
-export { mergeRevisionTrees } from '#revision-merge.js';
-export type {
-  AddAddConflict,
-  BinaryConflict,
-  ModifyDeleteConflict,
-  RevisionTreeConflict,
-  RevisionTreeMergeResult,
-  TextConflict,
-} from '#revision-merge.js';
-export { RevisionAuthority, revisionBranchName } from '#revision-authority.js';
-export type {
-  BranchHeadUpdateResult,
-  CreateRevisionInput,
-  Revision,
-  RevisionAuthorityOptions,
-  RevisionBranchName,
-  RevisionProvenance,
-  RevisionSummary,
-  StaleBranchHeadConflict,
-  UpdateBranchHeadInput,
-} from '#revision-authority.js';
-export { createBrowserRevisionPersistence } from '#revision-persistence.js';
-export type {
-  BrowserRevisionPersistenceOptions,
-  PersistedRevisionBranchHead,
-  RevisionPersistenceEntry,
-  RevisionPersistencePort,
-  RevisionPersistenceReceipt,
-  RevisionPersistenceSnapshot,
-} from '#revision-persistence.js';
-export {
-  captureRevisionTree,
-  MaterializedWorkspaceAuthority,
-  MaterializedWorkspaceError,
-} from '#materialized-workspace.js';
-export type {
-  MaterializedWorkspace,
-  MaterializedWorkspaceErrorCode,
-  MaterializedWorkspaceIdentity,
-  MaterializedWorkspaceMetrics,
-} from '#materialized-workspace.js';
-export { materializedWorkspaceId } from '#workspace-identity.js';
-export type { MaterializedWorkspaceId } from '#workspace-identity.js';
+/* No revision symbol is exported here, and none is imported either (D9/W8):
+ * revision trees, identity, metadata, the three-way merge and the capture walk
+ * are `@taucad/revisions/algorithms`. The frozen S6 boundary — nothing
+ * reachable from this library's export map can initialize a revision authority
+ * (RC8 work 10) — therefore holds by construction. What stays here is the
+ * filesystem's own: `FileMode` (a provider reports and sets it) and
+ * `ResourceQueue` (serializing writes per resource is not a revision concern). */

@@ -12,8 +12,11 @@ import { ProviderService } from '#api/providers/provider.service.js';
 import type { Model, ModelProviderKind, ModelSupport } from '#api/models/model.schema.js';
 import { isModelListEntryEnabled, modelList, modelListEntryToModel } from '#api/models/model.constants.js';
 import { Span } from '#telemetry/tracer.service.js';
-import type { ProviderDiagnosticsContext, ProviderDiagnosticsLogger } from '#api/chat/utils/provider-diagnostics.js';
-import { createProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
+import {
+  isFundedGatewayProviderId,
+  isGatewayProviderConfigured,
+  isGatewayProviderId,
+} from '#api/providers/provider-gateway.js';
 
 export type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
@@ -30,7 +33,7 @@ export class ModelService implements OnModuleInit {
   @Span()
   public buildModel(
     modelId: string,
-    options: { providerDiagnosticsContext?: ProviderDiagnosticsContext } = {},
+    options: { maximumOutputTokens?: number } = {},
   ): { model: BaseChatModel; support?: ModelSupport } {
     const modelConfig = this.models.find((model) => model.id === modelId);
 
@@ -47,27 +50,13 @@ export class ModelService implements OnModuleInit {
         ...modelConfig.configuration,
         configuration: provider.configuration,
       },
-      {
-        diagnosticsContext: options.providerDiagnosticsContext,
-      },
+      { maximumOutputTokens: options.maximumOutputTokens },
     );
 
     return {
       model: modelClass,
       support: modelConfig.support,
     };
-  }
-
-  public createProviderDiagnosticsContext(options: {
-    chatId: string;
-    modelId: string;
-    providerId: ProviderId;
-    logger: ProviderDiagnosticsLogger;
-  }): ProviderDiagnosticsContext {
-    return createProviderDiagnosticsContext({
-      ...options,
-      verbose: this.configService.get('TAU_PROVIDER_DIAGNOSTICS_VERBOSE', { infer: true }) ?? false,
-    });
   }
 
   public async onModuleInit(): Promise<void> {
@@ -77,8 +66,16 @@ export class ModelService implements OnModuleInit {
 
   public async getModels(): Promise<Model[]> {
     const ollamaEnabled = this.configService.get('OLLAMA_ENABLED', { infer: true });
+    const tauCloudEnabled = this.configService.get('TAU_CLOUD_ENABLED', { infer: true });
     const ollamaModels = ollamaEnabled ? await this.getOllamaModels() : [];
-    const cloudEntries = Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
+    const cloudEntries = Object.values(modelList)
+      .flatMap((modelsBySlug) => Object.values(modelsBySlug))
+      .filter(
+        (entry) =>
+          isGatewayProviderId(entry.provider.id) &&
+          (!tauCloudEnabled || isFundedGatewayProviderId(entry.provider.id)) &&
+          isGatewayProviderConfigured(this.configService, entry.provider.id),
+      );
     const cloudModels = cloudEntries.map((entry) => modelListEntryToModel(entry));
     this.models = [...cloudModels, ...ollamaModels];
     const listedCloud = cloudEntries

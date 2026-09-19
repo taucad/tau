@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
 import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';
+import { getEnvironment } from '#config/environment.config.js';
 
 // Mock DatabaseService for tests that don't need database access
 const mockDatabaseService = {
@@ -27,6 +28,8 @@ const mockRedisService = {
     subscribe: async () => 1,
     unsubscribe: async () => 1,
     quit: async () => 'OK',
+    // Never connected, so the service tears it down with `disconnect()` rather than `quit()`.
+    disconnect: () => undefined,
   },
   async onModuleInit() {
     // No-op
@@ -43,7 +46,7 @@ describe('TestApiController (e2e)', () => {
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      imports: [AppModule.forRoot(getEnvironment())],
     })
       .overrideProvider(DatabaseService)
       .useValue(mockDatabaseService)

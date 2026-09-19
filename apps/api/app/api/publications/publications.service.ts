@@ -1,10 +1,12 @@
 import { Readable } from 'node:stream';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   GoneException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -13,20 +15,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PublicationOwnerSnapshot } from '@taucad/types';
-import {
-  idPrefix,
-  isPublicationSystemArtifact,
-  publicationMaxUserFiles,
-  publicationApiCode,
-  publishForbiddenPathPrefixes,
-  isPublishableTauPath,
-} from '@taucad/types/constants';
+import { idPrefix, publicationApiCode } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Environment } from '#config/environment.config.js';
-import { detectKernelIdsFromRelativePaths, resolveRuntimePin } from '#api/publications/publication-runtime.utils.js';
 import type {
   PublicationViewResponse,
-  PublishManifest,
+  PublishRequest,
   PublishResponse,
   PublicationWireRow,
   PublicationAccessGrant,
@@ -36,48 +30,43 @@ import type {
   StoredPublicationManifest,
 } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
+import {
+  leaseGitRunner,
+  materializePublication,
+  materializePublishedTags,
+  releaseManifestBlobs,
+} from '#api/publications/publication-materializer.js';
+import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { hydrateLease } from '#api/git/store/lease.js';
+import type { RepositoryLease } from '#api/git/store/lease.js';
+import { decodeManifest } from '#api/git/store/manifest.js';
+import { repositoryLocator } from '#api/git/store/locator.js';
+import type { RepositoryStore } from '#api/git/store/port.js';
+import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
 import { DatabaseService } from '#database/database.service.js';
 import { EmailService } from '#email/email.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { RedisService } from '#redis/redis.service.js';
 import * as schema from '#database/schema.js';
-import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
 import type { StorageTier } from '#storage/object-storage.service.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
+import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
+import { blobKeyFromSha256Hex } from '#storage/sha256.utils.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { buildPublicationViewUrl } from '#email/email-link-builder.js';
 
-const maxBytesPerFile = 25 * 1024 * 1024;
-export const maxTotalBytes = 50 * 1024 * 1024;
+/** The shared placeholder card image every publication starts with. */
+const defaultOgImageKey = 'defaults/og.png';
 type ProjectShareCurrentPublication = NonNullable<ProjectShareEnvelope['currentPublication']>;
 type ProjectShareProject = ProjectShareEnvelope['project'];
 
 const normalizeRelativePath = (relativePathValue: string): string =>
   relativePathValue.replaceAll('\\', '/').replace(/^\.\/+/, '');
-
-const assertAllowedRelativePath = (relativePathValue: string): void => {
-  const normalized = normalizeRelativePath(relativePathValue);
-  if (!normalized || normalized.startsWith('/') || normalized.includes('..')) {
-    throw new BadRequestException({ code: publicationApiCode.INVALID_PATH, message: 'Invalid relative path' });
-  }
-
-  const isTauPath = normalized === '.tau' || normalized.startsWith('.tau/');
-  const tauForbidden = isTauPath && !isPublishableTauPath(normalized);
-  const prefixForbidden = publishForbiddenPathPrefixes.some(
-    (prefix) => normalized === prefix || normalized.startsWith(prefix) || normalized.includes(`/${prefix}`),
-  );
-
-  if (tauForbidden || prefixForbidden) {
-    throw new BadRequestException({
-      code: publicationApiCode.FORBIDDEN_PATH,
-      message: `Path not allowed: ${relativePathValue}`,
-    });
-  }
-};
 
 const manifestCacheMaxEntries = 256;
 
@@ -85,9 +74,6 @@ const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
   bytes.byteLength >= 12 &&
   new TextDecoder().decode(bytes.subarray(0, 4)) === 'RIFF' &&
   new TextDecoder().decode(bytes.subarray(8, 12)) === 'WEBP';
-
-const publicationContentType = (path: string): string =>
-  path === 'thumbnail.webp' ? 'image/webp' : 'application/octet-stream';
 
 /**
  * Split a namespace-qualified storage key (`defaults/thumb.webp`,
@@ -108,7 +94,13 @@ const splitNamespaceKey = (storedKey: string): { namespace: StorageNamespace; ke
 export class PublicationsService {
   private readonly logger = new Logger(this.constructor.name);
 
-  /** Write-once manifests keyed by publication id — see {@link loadStoredManifest}. */
+  /**
+   * Write-once manifests keyed by their storage key — see {@link loadStoredManifest}.
+   *
+   * Keyed by the key rather than by the publication because a re-publish points
+   * the same publication at a *new* manifest object (W8): keying by id would
+   * serve the superseded keyring until the process restarted.
+   */
   private readonly manifestCache = new Map<string, StoredPublicationManifest>();
 
   public constructor(
@@ -119,7 +111,15 @@ export class PublicationsService {
     private readonly publicationRateLimiter: PublicationRateLimiterService,
     private readonly metrics: MetricsService,
     private readonly emailService: EmailService,
-    private readonly billingService: BillingService,
+    @Inject(commercialEntitlementsKey) private readonly entitlementsService: CommercialEntitlementsService,
+    /*
+     * The repository store, not the git service: publishing and repairing a
+     * publication both need a lease of their own, and nothing about them needs
+     * the smart-HTTP route that also hydrates one (charter D9). It arrives as
+     * the port under `GitModule`'s token, never as the S3 adapter, because no
+     * code above the adapter names a provider (D25, NI14).
+     */
+    @Inject(repositoryStoreKey) private readonly repositoryStore: RepositoryStore,
   ) {}
 
   /**
@@ -128,29 +128,23 @@ export class PublicationsService {
    * still republish content to a project whose current publication is ALREADY
    * private; only newly-private visibility requires the entitlement.
    */
-  private async assertPrivateVisibilityAllowed(args: { ownerId: string; projectId?: string }): Promise<void> {
-    const entitlements = await this.billingService.getEntitlements(args.ownerId);
-    if (entitlements.canCreatePrivateShares) {
-      return;
-    }
-
-    if (args.projectId !== undefined) {
-      const [existing] = await this.databaseService.database
-        .select({ visibility: schema.publication.visibility })
-        .from(schema.project)
-        .innerJoin(schema.publication, eq(schema.project.currentPublicationId, schema.publication.id))
-        .where(and(eq(schema.project.id, args.projectId), eq(schema.project.ownerId, args.ownerId)))
-        .limit(1);
-      if (existing?.visibility === 'private') {
-        // Content-only update to a grandfathered private publication.
-        return;
-      }
-    }
-
-    throw new ForbiddenException({
-      code: publicationApiCode.ENTITLEMENT_REQUIRED,
-      message: 'Private publications require the Pro plan',
-    });
+  /** What the materializer needs, which this service already holds. */
+  private get materializer(): MaterializerDependencies {
+    return {
+      databaseService: this.databaseService,
+      storage: this.storage,
+      /* This service's children are bounded by the requests that start them —
+         one publish, one repair — rather than by the smart-HTTP route's own
+         ceiling, which is no longer reachable from here (review R8). */
+      git: leaseGitRunner,
+      /* The LFS endpoint's own resolver, so a publication reads an object from
+         wherever that endpoint serves it: the tenant key, or the pre-D24 one
+         for a project the relocation has not reached (W4b). */
+      resolveLfsObject: async (object) => {
+        const held = await resolveLfsObjectLocation(this.storage, object);
+        return held?.location;
+      },
+    };
   }
 
   /**
@@ -179,263 +173,127 @@ export class PublicationsService {
     return snapshot;
   }
 
-  public async publishFromUpload(args: {
-    ownerId: string;
-    manifest: PublishManifest;
-    files: Map<string, Uint8Array<ArrayBuffer>>;
-  }): Promise<PublishResponse> {
-    const { ownerId, manifest, files } = args;
-    const sharedEmails = manifest.visibility === 'private' ? (manifest.sharedEmails ?? []) : [];
+  /**
+   * Record or re-point one publication on the synced graph (S32, D11, A21).
+   *
+   * Nothing is uploaded here: by the time this is called the client has pushed
+   * the history set — the branch and the named version, LFS objects included —
+   * to this project's repository on the Tau Hosted Remote, so the bytes are
+   * already on the volume and in R2. What this does is create or re-point the
+   * row and materialize the tagged tree into the same sha256-keyed blob store
+   * the viewer has always read, which is why the CDN and private-proxy paths
+   * are untouched.
+   *
+   * Re-publishing the same name re-points the row it already has: the share URL
+   * is stable, the reference counts move from the old manifest to the new one,
+   * and the tag history is the publication history.
+   *
+   * @param args - The owner and the pointer they are publishing.
+   * @returns The publication id and its links.
+   */
+  public async publishFromRevision(args: { ownerId: string; request: PublishRequest }): Promise<PublishResponse> {
+    const { ownerId, request } = args;
+    const sharedEmails = request.visibility === 'private' ? (request.sharedEmails ?? []) : [];
 
-    if (!files.has(manifest.entryPath)) {
-      throw new BadRequestException({
-        code: publicationApiCode.MISSING_ENTRY_PATH,
-        message: `Upload is missing entry path ${manifest.entryPath}`,
+    if (request.visibility === 'private') {
+      await this.assertPrivateVisibilityAllowed({ ownerId, projectId: request.projectId });
+    }
+
+    /* The other route that reaches `ensureRepository`, checked in the same pass
+       as N5. Publishing a named version presupposes the push that created it,
+       and a push needs this entitlement — so this refuses nobody who could
+       otherwise have succeeded, and it stops an un-entitled caller creating a
+       bare repository on the volume for a tag that can never exist (review C11). */
+    const publishEntitlements = await this.entitlementsService.getEntitlements(ownerId);
+    if (!publishEntitlements.canSyncFiles) {
+      throw new ForbiddenException({
+        code: 'GIT_SYNC_NOT_ENTITLED',
+        message: 'Syncing files to Tau Cloud is a paid plan feature.',
       });
-    }
-
-    const userFileCount = [...files.keys()].filter(
-      (path) => !isPublicationSystemArtifact(normalizeRelativePath(path)),
-    ).length;
-    if (userFileCount > publicationMaxUserFiles) {
-      throw new BadRequestException({
-        code: publicationApiCode.TOO_MANY_FILES,
-        message: `Maximum ${publicationMaxUserFiles} files exceeded`,
-      });
-    }
-
-    let totalBytes = 0;
-    for (const [path, buf] of files) {
-      assertAllowedRelativePath(path);
-      if (normalizeRelativePath(path) === 'thumbnail.webp' && !isWebp(buf)) {
-        throw new BadRequestException({
-          code: publicationApiCode.INVALID_THUMBNAIL_WEBP,
-          message: 'thumbnail.webp is not a valid WebP file',
-        });
-      }
-      if (buf.byteLength > maxBytesPerFile) {
-        throw new BadRequestException({
-          code: publicationApiCode.FILE_TOO_LARGE,
-          message: `File exceeds ${maxBytesPerFile} bytes`,
-        });
-      }
-
-      totalBytes += buf.byteLength;
-    }
-
-    if (totalBytes > maxTotalBytes) {
-      throw new BadRequestException({
-        code: publicationApiCode.PAYLOAD_TOO_LARGE,
-        message: 'Total upload exceeds limit',
-      });
-    }
-
-    if (manifest.visibility === 'public' && (manifest.sharedEmails?.length ?? 0) > 0) {
-      throw new BadRequestException({
-        code: publicationApiCode.FORBIDDEN,
-        message: 'Shared emails can only be used with private publications',
-      });
-    }
-
-    if (manifest.visibility === 'private') {
-      await this.assertPrivateVisibilityAllowed({ ownerId, projectId: manifest.projectId });
     }
 
     const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
-
-    const publicationId = generatePrefixedId(idPrefix.publication);
-    const runtimePin = resolveRuntimePin();
-    const kernels = detectKernelIdsFromRelativePaths([...files.keys()]);
-
-    const manifestKey = `publications/${publicationId}/manifest.json`;
-    const ogImageKey = 'defaults/og.png';
-
     const ownerSnapshot = await this.loadOwnerSnapshot(ownerId);
-
     const db = this.databaseService.database;
 
-    // Private publications' bytes go to the fail-closed bucket and are only
-    // reachable through the authenticated file proxy; public stays on the CDN.
-    const blobTier: StorageTier = manifest.visibility === 'private' ? 'private' : 'public';
-    const uploads = [...files.entries()].map(([path, buf]) => ({
-      path: normalizeRelativePath(path),
-      buf,
-      sha: sha256HexFromBytes(new Uint8Array(buf)),
-      contentType: publicationContentType(normalizeRelativePath(path)),
-    }));
-
-    // Point `thumbnailKey` at the uploaded `thumbnail.{webp,png,jpeg}` blob when
-    // present, else the default placeholder. Stored namespace-qualified
-    // (`blobs/<key>` | `defaults/<key>`) and resolved via `publicUrlForStoredKey`.
-    const thumbnailUpload = uploads.find((upload) => upload.path === 'thumbnail.webp');
-    const thumbnailKey = thumbnailUpload ? `blobs/${blobKeyFromSha256Hex(thumbnailUpload.sha)}` : 'defaults/thumb.webp';
-
-    await Promise.all(
-      uploads.map(async ({ buf, sha, contentType }) => {
-        const key = blobKeyFromSha256Hex(sha);
-        const stored = await this.storage.putBlob({
-          namespace: 'blobs',
-          key,
-          body: buf,
-          contentType,
-          ifNoneMatch: '*',
-          cacheControl: blobTier === 'private' ? 'private, no-cache' : 'public, max-age=31536000, immutable',
-          tier: blobTier,
-        });
-        if (stored.alreadyExisted && contentType === 'image/webp') {
-          const existing = await this.storage.headBlob({ namespace: 'blobs', key, tier: blobTier });
-          if (existing?.contentType !== contentType) {
-            await this.storage.putBlob({
-              namespace: 'blobs',
-              key,
-              body: buf,
-              contentType,
-              cacheControl: blobTier === 'private' ? 'private, no-cache' : 'public, max-age=31536000, immutable',
-              tier: blobTier,
-            });
-          }
-        }
-      }),
-    );
-
-    // Per-(path) reference counts, aggregated per sha so the transaction below
-    // issues one upsert per distinct blob.
-    const refIncrements = new Map<string, { sizeBytes: number; count: number }>();
-    for (const { buf, sha } of uploads) {
-      const existing = refIncrements.get(sha);
-      if (existing) {
-        existing.count += 1;
-      } else {
-        refIncrements.set(sha, { sizeBytes: buf.byteLength, count: 1 });
-      }
+    const existingRows = await db
+      .select()
+      .from(schema.project)
+      .where(eq(schema.project.id, request.projectId))
+      .limit(1);
+    const existingProject = existingRows[0];
+    if (existingProject !== undefined && existingProject.ownerId !== ownerId) {
+      throw new ForbiddenException({
+        code: publicationApiCode.PROJECT_FORBIDDEN,
+        message: 'Project is owned by another user',
+      });
     }
 
-    const manifestDocument = {
-      version: 1,
-      projectId: manifest.projectId,
-      entryPath: manifest.entryPath,
-      files: Object.fromEntries(
-        [...uploads].sort((a, b) => a.path.localeCompare(b.path)).map(({ path, sha }) => [path, `sha256:${sha}`]),
-      ),
-      kernels,
-      runtime: `@taucad/runtime@${runtimePin}`,
-      parameters: manifest.parameters ?? {},
-      createdAt: new Date().toISOString(),
-    };
+    /* The lease is the repository: it is hydrated from the manifest, read, and
+       disposed here (D9). It stays open across the transaction below because
+       that is where the tagged tree is read and the blobs are written — the
+       reference counts must be taken before any of it (D10). */
+    const published = await this.withLease({ projectId: request.projectId, ownerId }, async (lease) =>
+      db.transaction(async (tx) => {
+        /* One writer of this project's publications at a time, the same lock a
+           read-side repair takes: the row this reads decides which manifest is
+           released below, and two writers reading it before either commits
+           would release that manifest twice (review F2). */
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${request.projectId}, 0))`);
 
-    // Manifests are the publication's keyring (path → sha map) at a key
-    // derivable from the share URL, so they NEVER go to the anonymous origin —
-    // every manifest lives in the private bucket regardless of visibility.
-    const manifestBytes = new TextEncoder().encode(JSON.stringify(manifestDocument));
-    await this.storage.putBlob({
-      namespace: 'derivatives',
-      key: manifestKey,
-      body: manifestBytes,
-      contentType: 'application/json',
-      ifNoneMatch: '*',
-      cacheControl: 'private, no-cache',
-      tier: 'private',
-    });
+        const [currentRow] = await tx
+          .select()
+          .from(schema.publication)
+          .where(and(eq(schema.publication.projectId, request.projectId), eq(schema.publication.tag, request.tag)))
+          .limit(1);
+        const publicationId = currentRow?.id ?? generatePrefixedId(idPrefix.publication);
 
-    await db.transaction(async (tx) => {
-      const existing = await tx.select().from(schema.project).where(eq(schema.project.id, manifest.projectId)).limit(1);
-
-      type ProjectRow = typeof schema.project.$inferSelect;
-      const existingProject = existing[0] as ProjectRow | undefined;
-      if (existingProject !== undefined && existingProject.ownerId !== ownerId) {
-        throw new ForbiddenException({
-          code: publicationApiCode.PROJECT_FORBIDDEN,
-          message: 'Project is owned by another user',
-        });
-      }
-
-      /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Drizzle `onConflictDoUpdate.target` column refs */
-      await tx
-        .insert(schema.project)
-        .values({
-          id: manifest.projectId,
-          ownerId,
-          name: manifest.projectName,
-          description: manifest.description,
-          origin: 'local-mirror',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: schema.project.id,
-          set: {
-            name: manifest.projectName,
-            description: manifest.description,
-            updatedAt: new Date(),
+        const version = await materializePublication(
+          this.materializer,
+          {
+            publicationId,
+            projectId: request.projectId,
+            ownerId,
+            directory: lease.directory,
+            tag: request.tag,
+            visibility: request.visibility,
+            entryPath: request.entryPath,
           },
-        });
-      /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+          tx,
+        );
 
-      // Inside the transaction so a failed publish never leaks refcounts
-      // (uploaded S3 objects are content-addressed and harmless orphans).
-      await Promise.all(
-        [...refIncrements].map(async ([sha256Hex, { sizeBytes, count }]) =>
-          tx
-            .insert(schema.blobRef)
-            .values({ sha256: sha256Hex, sizeBytes: BigInt(sizeBytes), refcount: count })
-            .onConflictDoUpdate({
-              target: schema.blobRef.sha256,
-              set: { refcount: sql`${schema.blobRef.refcount} + ${count}` },
-            }),
-        ),
-      );
-
-      await tx.insert(schema.publication).values({
-        id: publicationId,
-        projectId: manifest.projectId,
-        ownerId,
-        visibility: manifest.visibility,
-        manifestKey,
-        ogImageKey,
-        thumbnailKey,
-        runtimePin,
-        kernels,
-        entryPath: manifest.entryPath,
-        title: manifest.title,
-        description: manifest.description,
-        ownerSnapshot,
-        createdAt: new Date(),
-      });
-
-      await tx
-        .update(schema.project)
-        .set({ currentPublicationId: publicationId, updatedAt: new Date() })
-        .where(eq(schema.project.id, manifest.projectId));
-
-      if (sharedEmails.length > 0) {
-        await tx
-          .insert(schema.publicationAccess)
-          .values(
-            sharedEmails.map((recipientEmail) => ({
-              id: generatePrefixedId(idPrefix.publicationAccess),
-              publicationId,
-              ownerId,
-              recipientEmail,
-              status: 'active',
-              createdAt: new Date(),
-              revokedAt: null,
-            })),
-          )
-          .onConflictDoUpdate({
-            target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
-            set: { status: 'active', revokedAt: null },
+        /* The row records the revision the server resolved, never the client's
+           claim, and a mismatch is a refusal rather than a silent disagreement
+           between the row and the bytes a viewer is served (review R6). The
+           throw rolls the counts above back with it. */
+        if (version.revisionId !== request.revisionId) {
+          throw new ConflictException({
+            code: publicationApiCode.REVISION_MOVED,
+            message: `${request.tag} now points at a different revision. Publish again to pick it up.`,
           });
-      }
-    });
+        }
+
+        await this.writePublicationRows({ tx, ownerId, request, publicationId, sharedEmails, ownerSnapshot, version });
+        return { version, publicationId, superseded: currentRow?.manifestKey };
+      }),
+    );
+    const { version: materialized, publicationId } = published;
+
+    /* The superseded manifest's counts go back only once the row points at the
+     * new one, so a failure above never drops a live reference. The row it came
+     * from was read under the lock, so no second writer released it too. */
+    if (published.superseded !== undefined && published.superseded !== materialized.manifestKey) {
+      await releaseManifestBlobs(this.materializer, published.superseded);
+    }
 
     const viewUrl = buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId });
-    if (manifest.notifyRecipients === true && sharedEmails.length > 0) {
+    if (request.notifyRecipients === true && sharedEmails.length > 0) {
       await this.sendPublicationInviteNotifications({
         ownerId,
         trigger: 'publish',
         recipientEmails: sharedEmails,
         ownerName: ownerSnapshot?.name ?? 'A Tau user',
-        publicationTitle: manifest.title,
+        publicationTitle: request.title,
         url: viewUrl,
       });
     }
@@ -445,8 +303,8 @@ export class PublicationsService {
       urls: {
         view: viewUrl,
         share: viewUrl,
-        og: this.storage.publicUrl(splitNamespaceKey(ogImageKey)),
-        thumbnail: this.storage.publicUrl(splitNamespaceKey(thumbnailKey)),
+        og: this.storage.publicUrl(splitNamespaceKey(defaultOgImageKey)),
+        thumbnail: this.storage.publicUrl(splitNamespaceKey(materialized.thumbnailKey)),
       },
     };
   }
@@ -469,7 +327,7 @@ export class PublicationsService {
       thumbnail: this.storage.publicUrl(splitNamespaceKey(thumbnailKey ?? 'defaults/thumb.webp')),
     };
 
-    const manifest = await this.loadStoredManifest(publication.id, manifestKey);
+    const manifest = await this.loadStoredManifest(manifestKey);
     const files: Record<string, string> = {};
 
     for (const [relativePath, shaRef] of Object.entries(manifest.files)) {
@@ -489,6 +347,8 @@ export class PublicationsService {
     const publicationDto: PublicationWireRow = {
       id: publication.id,
       projectId: publication.projectId,
+      tag: publication.tag,
+      revisionId: publication.revisionId,
       ownerId: publication.ownerId,
       parentPublicationId: publication.parentPublicationId,
       visibility: publication.visibility as PublicationWireRow['visibility'],
@@ -535,7 +395,7 @@ export class PublicationsService {
     await this.authorizePublicationViewer(publication, args.viewerUserId);
 
     const path = normalizeRelativePath(args.path);
-    const manifest = await this.loadStoredManifest(publication.id, publication.manifestKey);
+    const manifest = await this.loadStoredManifest(publication.manifestKey);
     const shaRef = manifest.files[path];
     if (shaRef === undefined) {
       throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'File not found in publication' });
@@ -696,6 +556,7 @@ export class PublicationsService {
       project: projectSummary,
       currentPublication: {
         id: publication.id,
+        tag: publication.tag,
         title: publication.title,
         description: publication.description,
         visibility: publication.visibility as ProjectShareCurrentPublication['visibility'],
@@ -866,7 +727,240 @@ export class PublicationsService {
     }
   }
 
+  private async assertPrivateVisibilityAllowed(args: { ownerId: string; projectId?: string }): Promise<void> {
+    const entitlements = await this.entitlementsService.getEntitlements(args.ownerId);
+    if (entitlements.canCreatePrivateShares) {
+      return;
+    }
+
+    if (args.projectId !== undefined) {
+      const [existing] = await this.databaseService.database
+        .select({ visibility: schema.publication.visibility })
+        .from(schema.project)
+        .innerJoin(schema.publication, eq(schema.project.currentPublicationId, schema.publication.id))
+        .where(and(eq(schema.project.id, args.projectId), eq(schema.project.ownerId, args.ownerId)))
+        .limit(1);
+      if (existing?.visibility === 'private') {
+        // Content-only update to a grandfathered private publication.
+        return;
+      }
+    }
+
+    throw new ForbiddenException({
+      code: publicationApiCode.ENTITLEMENT_REQUIRED,
+      message: 'Private publications require the Pro plan',
+    });
+  }
+
+  /**
+   * One lease over this project's repository, disposed however the body ends.
+   *
+   * The publish path and the derived-state repair both read a tagged tree, and
+   * a tagged tree only exists inside a lease: the manifest and the packs it
+   * names are the repository, and this directory is a disposable copy of them
+   * (charter D9, NI1).
+   *
+   * @param args - Whose repository, and which project.
+   * @param body - What to do with the lease.
+   * @returns Whatever the body returned.
+   */
+  private async withLease<T>(
+    args: { readonly projectId: string; readonly ownerId: string },
+    body: (lease: RepositoryLease) => Promise<T>,
+  ): Promise<T> {
+    const lease = await hydrateLease({
+      store: this.repositoryStore,
+      locator: repositoryLocator({ ownerId: args.ownerId, projectId: args.projectId }),
+    });
+    try {
+      return await body(lease);
+    } finally {
+      await lease.dispose();
+    }
+  }
+
+  /**
+   * Re-materialize this project's publications when they are behind the push.
+   *
+   * D19: materialization is derived state, and derived state is repaired by
+   * whoever notices it is stale. A worker killed between committing a manifest
+   * and materializing what it published leaves `derived_generation` behind
+   * `generation`; the next request that reads one of those publications — this
+   * one — re-derives from a lease and then serves. A failure changes nothing,
+   * so the next observation retries: no queue, no sweep.
+   *
+   * Two reads stand between the mismatch and a lease, because the lease is the
+   * expensive part: the marker, and then the manifest's own tag, which says
+   * whether this publication is one of the stale ones. The marker is **not**
+   * advanced here. `GitRepositoryService` owns it, because its repair also
+   * rebuilds accounting and the LFS reachability marks; a publication read that
+   * claimed the marker would leave both of those behind forever.
+   *
+   * @param publication - The publication being read.
+   * @returns Whether anything was re-materialized, so the caller re-reads.
+   */
+  private async rederivePublications(
+    publication: Readonly<{ projectId: string; ownerId: string; tag: string; revisionId: string }>,
+  ): Promise<boolean> {
+    /* W4a hand-off: `generation` and `derived_generation` are W3's columns on
+       `project_git`, landed in lane a's 0043 migration. */
+    const [derived] = await this.databaseService.database
+      .select({
+        generation: schema.projectGit.generation,
+        derivedGeneration: schema.projectGit.derivedGeneration,
+      })
+      .from(schema.projectGit)
+      .where(eq(schema.projectGit.projectId, publication.projectId))
+      .limit(1);
+    if (derived === undefined || derived.derivedGeneration >= derived.generation) {
+      return false;
+    }
+
+    try {
+      const read = await this.repositoryStore.readManifest(
+        repositoryLocator({ ownerId: publication.ownerId, projectId: publication.projectId }),
+      );
+      if (read === undefined) {
+        return false;
+      }
+      const tags = Object.entries(decodeManifest(read.manifest).refs).filter(([ref]) => ref.startsWith('refs/tags/'));
+      const own = tags.find(([ref]) => ref === `refs/tags/${publication.tag}`)?.[1];
+      /* The marker can be behind for work that is not this publication's — the
+         accounting, an LFS mark — so a row already at the manifest's commit is
+         served without hydrating anything. */
+      if (own !== undefined && (own.peeled ?? own.oid) === publication.revisionId) {
+        return false;
+      }
+
+      return await this.withLease(publication, async (lease) => {
+        /* Every tag the manifest holds, not just the ones a push moved: after a
+           crash nobody knows which ones were done, and a tag whose publication
+           already records that oid is skipped without reading a byte. */
+        const materialized = await materializePublishedTags(this.materializer, {
+          projectId: publication.projectId,
+          ownerId: publication.ownerId,
+          directory: lease.directory,
+          tags: tags.map(([ref, value]) => ({ ref, oid: value.oid })),
+        });
+        return materialized.length > 0;
+      });
+    } catch (error) {
+      /* The read still serves what the row points at; nothing moved, and the
+         next observation retries. */
+      this.logger.warn({ err: error, projectId: publication.projectId }, 'Publications could not be re-derived');
+      return false;
+    }
+  }
+
+  /**
+   * The rows one publish writes, inside the transaction that took its counts.
+   *
+   * Extracted only so the publish path reads as what it is: one lease, one
+   * transaction, and the same row writes it always made.
+   *
+   * @param args - The open transaction, the request, and the version written.
+   */
+  private async writePublicationRows(args: {
+    tx: Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
+    ownerId: string;
+    request: PublishRequest;
+    publicationId: string;
+    sharedEmails: readonly string[];
+    /* oxlint-disable-next-line typescript/no-restricted-types -- `loadOwnerSnapshot` answers `null`, as the nullable column does */
+    ownerSnapshot: PublicationOwnerSnapshot | null;
+    version: MaterializedPublication;
+  }): Promise<void> {
+    const { tx, ownerId, request, publicationId, sharedEmails, ownerSnapshot, version } = args;
+    /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Drizzle `onConflictDoUpdate.target` column refs */
+    await tx
+      .insert(schema.project)
+      .values({
+        id: request.projectId,
+        ownerId,
+        name: request.projectName,
+        description: request.description,
+        origin: 'local-mirror',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: schema.project.id,
+        set: { name: request.projectName, description: request.description, updatedAt: new Date() },
+      });
+
+    await tx
+      .insert(schema.publication)
+      .values({
+        id: publicationId,
+        projectId: request.projectId,
+        ownerId,
+        tag: request.tag,
+        revisionId: version.revisionId,
+        visibility: request.visibility,
+        manifestKey: version.manifestKey,
+        ogImageKey: defaultOgImageKey,
+        thumbnailKey: version.thumbnailKey,
+        runtimePin: version.runtimePin,
+        kernels: [...version.kernels],
+        entryPath: request.entryPath,
+        title: request.title,
+        description: request.description,
+        ownerSnapshot,
+        createdAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [schema.publication.projectId, schema.publication.tag],
+        set: {
+          revisionId: version.revisionId,
+          visibility: request.visibility,
+          manifestKey: version.manifestKey,
+          thumbnailKey: version.thumbnailKey,
+          runtimePin: version.runtimePin,
+          kernels: [...version.kernels],
+          entryPath: request.entryPath,
+          title: request.title,
+          description: request.description,
+          unpublishedAt: null,
+        },
+      });
+    /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+
+    await tx
+      .update(schema.project)
+      .set({ currentPublicationId: publicationId, updatedAt: new Date() })
+      .where(eq(schema.project.id, request.projectId));
+
+    if (sharedEmails.length > 0) {
+      await tx
+        .insert(schema.publicationAccess)
+        .values(
+          sharedEmails.map((recipientEmail) => ({
+            id: generatePrefixedId(idPrefix.publicationAccess),
+            publicationId,
+            ownerId,
+            recipientEmail,
+            status: 'active',
+            createdAt: new Date(),
+            revokedAt: null,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
+          set: { status: 'active', revokedAt: null },
+        });
+    }
+  }
+
   private async loadPublicationOrThrow(publicationId: string): Promise<typeof schema.publication.$inferSelect> {
+    const publication = await this.selectPublicationOrThrow(publicationId);
+    /* Every read of a publication routes through here, which is where D19 puts
+       the repair: a row behind the manifest is re-derived and then re-read, so
+       what this returns is never a version the push already superseded. */
+    return (await this.rederivePublications(publication)) ? this.selectPublicationOrThrow(publicationId) : publication;
+  }
+
+  /** One publication row, refused when it is absent or withdrawn. */
+  private async selectPublicationOrThrow(publicationId: string): Promise<typeof schema.publication.$inferSelect> {
     const rows = await this.databaseService.database
       .select()
       .from(schema.publication)
@@ -937,8 +1031,8 @@ export class PublicationsService {
    * bounded in-memory cache needs no invalidation. Reads prefer the private
    * tier (the manifest home) with a defensive public-bucket fallback.
    */
-  private async loadStoredManifest(publicationId: string, manifestKey: string): Promise<StoredPublicationManifest> {
-    const cached = this.manifestCache.get(publicationId);
+  private async loadStoredManifest(manifestKey: string): Promise<StoredPublicationManifest> {
+    const cached = this.manifestCache.get(manifestKey);
     if (cached) {
       return cached;
     }
@@ -967,7 +1061,7 @@ export class PublicationsService {
       }
     }
 
-    this.manifestCache.set(publicationId, manifestResult.data);
+    this.manifestCache.set(manifestKey, manifestResult.data);
     return manifestResult.data;
   }
 
@@ -988,7 +1082,7 @@ export class PublicationsService {
     publication: { readonly id: string; readonly manifestKey: string },
     targetVisibility: PublicationVisibilityUpdate['visibility'],
   ): Promise<void> {
-    const manifest = await this.loadStoredManifest(publication.id, publication.manifestKey);
+    const manifest = await this.loadStoredManifest(publication.manifestKey);
     const targetTier: StorageTier = targetVisibility === 'private' ? 'private' : 'public';
 
     await Promise.all(
@@ -1016,30 +1110,10 @@ export class PublicationsService {
       }),
     );
 
-    // Ensure the private-tier manifest copy exists before deleting the public
-    // object, so a crash between the two never loses the manifest. Raw-byte
-    // copy — re-serializing the parsed manifest would drop unknown fields.
-    const manifestInPrivate = await this.storage.headBlob({
-      namespace: 'derivatives',
-      key: publication.manifestKey,
-      tier: 'private',
-    });
-    if (!manifestInPrivate) {
-      const legacyManifest = await this.storage.getBlob({ namespace: 'derivatives', key: publication.manifestKey });
-      const rawBytes = await this.readStreamToBuffer(legacyManifest.body);
-      await this.storage.putBlob({
-        namespace: 'derivatives',
-        key: publication.manifestKey,
-        body: rawBytes,
-        contentType: 'application/json',
-        ifNoneMatch: '*',
-        cacheControl: 'private, no-cache',
-        tier: 'private',
-      });
-    }
-
-    // Idempotent: S3 DeleteObject succeeds for absent keys.
-    await this.storage.deleteBlob({ namespace: 'derivatives', key: publication.manifestKey });
+    /* The manifest is written to the private tier by the materializer whatever
+       the visibility, so there is no public-origin copy to rescue or delete.
+       The upload-era rows that had one are gone with migration 0035 (I15,
+       review R9). */
   }
 
   private async getBlobPreferPrivate(args: {

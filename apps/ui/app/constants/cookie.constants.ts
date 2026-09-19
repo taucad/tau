@@ -1,4 +1,5 @@
 import type { ConstantRecord } from '@taucad/types';
+import { metaConfig } from '#constants/meta.constants.js';
 
 /**
  * Cookie names.
@@ -15,6 +16,8 @@ export const cookieName = {
   colorHue: 'color-hue',
   // Whether code editors show parameter-name inlay hints.
   codeInlayHints: 'code-inlay-hints',
+  // Whether actions use pointer cursors instead of the platform default.
+  pointerCursors: 'pointer-cursors',
 
   /* Layout */
   // Whether the sidebar is open.
@@ -51,15 +54,15 @@ export const cookieName = {
   // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- ctx is conventional for context
   chatCtxOpen: 'chat-ctx-open',
 
-  /* Chat Tool Sections - collapse state (true = open, false = collapsed) */
-  // Whether code preview section is open in file operations.
-  chatToolCodePreview: 'chat-tool-code-preview',
+  /* Chat Tools */
   // Whether GeoSpec testing tools are enabled.
   chatTestingEnabled: 'chat-testing-enabled',
 
   /* Projects */
   // The last selected project view mode.
   projectViewMode: 'project-view-mode',
+  // The last selected project list page size.
+  projectPageSize: 'project-page-size',
 
   /* Graphics */
   // Whether the section view status is open.
@@ -80,11 +83,10 @@ export const cookieName = {
   /* Docs */
   // Whether the docs sidebar is open.
   docsOpSidebar: 'docs-op-sidebar',
-
-  /* Privacy */
-  // The user's cookie consent choice.
-  cookieConsent: 'cookie-consent',
 } as const;
+
+/** Web-only consent cookie, intentionally outside the ordinary preference API. */
+export const consentCookieName = `${metaConfig.cookiePrefix}cookie-consent`;
 
 /**
  * Union of all cookie names.

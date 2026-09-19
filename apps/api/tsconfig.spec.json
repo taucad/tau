@@ -13,8 +13,12 @@
   },
   "include": [
     "vite.config.ts",
+    "vite.billing-command.config.ts",
+    "vite.maintenance-command.config.ts",
+    "vitest.billing.config.ts",
     "vitest.setup.ts",
     "vitest.integration.config.ts",
+    "vitest.live.config.ts",
     "drizzle.config.ts",
     "scripts/**/*.mts",
     "app/**/*.test.ts",

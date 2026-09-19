@@ -4,6 +4,42 @@ type EngineeringDisciplineConfig = {
   description: string;
 };
 
+/**
+ * Existing CAD coordinate-unit spellings, independent of parameter-unit admission.
+ * These label geometry coordinates; conversion uses the portable units provider.
+ * @public
+ */
+export const cadLengthUnits = [
+  'Qm',
+  'Rm',
+  'Ym',
+  'Zm',
+  'Em',
+  'Pm',
+  'Tm',
+  'Gm',
+  'Mm',
+  'km',
+  'hm',
+  'dam',
+  'm',
+  'dm',
+  'cm',
+  'mm',
+  'μm',
+  'nm',
+  'pm',
+  'fm',
+  'am',
+  'zm',
+  'ym',
+  'rm',
+  'qm',
+  'in',
+  'ft',
+  'yd',
+] as const;
+
 /** @public */
 export const engineeringDisciplines = {
   mechanical: {

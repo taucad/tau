@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { AdditiveBlending } from 'three';
+import { AdditiveBlending, NormalBlending } from 'three';
 import { PointsNodeMaterial } from 'three/webgpu';
 import type { Node } from 'three/webgpu';
 import {
@@ -31,6 +31,7 @@ const defaultMorphOptions: Required<Omit<MorphingPointsMaterialOptions, 'targetC
   pointSize: 2,
   explosionStrength: 2,
   opacity: 1,
+  additive: false,
 };
 
 export type MorphingPointsNodeUniformHandles = {
@@ -55,7 +56,7 @@ export function createMorphingPointsNodeMaterial(options?: MorphingPointsMateria
   readonly material: PointsNodeMaterial;
   readonly handles: MorphingPointsNodeUniformHandles;
 } {
-  const { color, pointSize, explosionStrength, opacity } = { ...defaultMorphOptions, ...options };
+  const { color, pointSize, explosionStrength, opacity, additive } = { ...defaultMorphOptions, ...options };
   const targetColorInput = options?.targetColor ?? color;
 
   const uProgress = uniform(0, 'float');
@@ -91,10 +92,11 @@ export function createMorphingPointsNodeMaterial(options?: MorphingPointsMateria
   const material = new PointsNodeMaterial({
     transparent: true,
     depthWrite: false,
+    depthTest: false,
     sizeAttenuation: true,
   });
 
-  material.blending = AdditiveBlending;
+  material.blending = additive ? AdditiveBlending : NormalBlending;
 
   material.positionNode = (() => {
     const sourcePosition = vec3(aSourcePosition);
@@ -121,12 +123,12 @@ export function createMorphingPointsNodeMaterial(options?: MorphingPointsMateria
       compositeNoise(add(mul(aRandomOffset, float(20)), mul(uTime, float(0.6)), float(2))),
     );
     const noiseTerm = mul(mul(noiseVec, transitionIntensity), float(0.5));
+    // Progress arrives already eased (morph-animation.ts); linear halves keep velocity continuous.
     const firstHalfT = clamp(mul(uProgress, float(2)), float(0), float(1));
     const secondHalfT = clamp(mul(sub(uProgress, float(0.5)), float(2)), float(0), float(1));
-    const ease = (value: typeof firstHalfT) => mul(mul(value, value), sub(float(3), mul(float(2), value)));
     const trajectory = uProgress
       .lessThan(float(0.5))
-      .select(mix(sourcePosition, midExploded, ease(firstHalfT)), mix(midExploded, targetPosition, ease(secondHalfT)));
+      .select(mix(sourcePosition, midExploded, firstHalfT), mix(midExploded, targetPosition, secondHalfT));
     const morphed = add(trajectory, noiseTerm);
 
     // Pointer interaction applied after the morph so points rest on the
@@ -161,7 +163,7 @@ export function createMorphingPointsNodeMaterial(options?: MorphingPointsMateria
   const brightness = add(float(0.9), mul(aRandomOffset, float(0.2)));
   material.colorNode = mul(mix(uSourceRgb, uTargetRgb, mul(uProgress, uHasTargetColor)), brightness);
   const pointDistance = length(sub(uv(), vec2(0.5, 0.5)));
-  material.opacityNode = mul(sub(float(1), smoothstep(float(0.3), float(0.5), pointDistance)), uOpacity);
+  material.opacityNode = mul(sub(float(1), smoothstep(float(0.42), float(0.5), pointDistance)), uOpacity);
   material.alphaTest = 0.001;
 
   return {

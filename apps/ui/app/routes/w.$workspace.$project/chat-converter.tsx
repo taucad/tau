@@ -1,11 +1,15 @@
 import { XIcon, Download, Info, Check, ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
+import { useCallback, memo, useState, useMemo, useEffect, useRef, useId } from 'react';
 import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import { getActiveGroupValues } from '@taucad/types';
 import type { ExportFile, FileExtension } from '@taucad/types';
+import { compileParameterManifest, projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
+import { quantityKinds } from '@taucad/units/quantity';
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -42,20 +46,23 @@ import {
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
-import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
+import type { ParameterCommit, RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
+import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
 import {
+  getDiscriminatedUnionInfo,
   mergeFormDefaults,
   normalizeRjsfFormData,
+  resetRjsfField,
   rjsfDefaultFormStateBehavior,
   rjsfIdPrefix,
   rjsfIdSeparator,
 } from '#components/geometry/parameters/rjsf-utils.js';
-import { deleteValueAtPath, extractModifiedProperties } from '#utils/object.utils.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { downloadBlob } from '@taucad/utils/file';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { isJsonSchemaValid, rjsfValidator } from '#lib/rjsf-validator.js';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
 
 const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;
 
@@ -97,7 +104,169 @@ type ResolvedSchema = {
   defaults: Record<string, unknown>;
 };
 
+type ConfigurationParameterSession = Readonly<{
+  entryPath: string;
+  manifest: ParameterManifest;
+  commit: ParameterCommit;
+}>;
+
+type ConfigurationParameterOwner = Readonly<{
+  parameterService: ParameterSetService;
+}>;
+
+const configurationFieldSemantics: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  width: { 'x-tau-unit': '1', 'x-tau-space': 'linear', 'x-tau-symbol': 'px' },
+  height: { 'x-tau-unit': '1', 'x-tau-space': 'linear', 'x-tau-symbol': 'px' },
+  lineWidth: { 'x-tau-unit': '1', 'x-tau-space': 'linear', 'x-tau-symbol': 'px' },
+  verticalFieldOfView: {
+    'x-tau-unit': 'deg',
+    'x-tau-quantity-kind': quantityKinds.planeAngle,
+    'x-tau-space': 'linear',
+  },
+  zoom: {
+    'x-tau-unit': '1',
+    'x-tau-quantity-kind': quantityKinds.dimensionlessRatio,
+    'x-tau-space': 'linear',
+  },
+  quality: {
+    'x-tau-unit': '1',
+    'x-tau-quantity-kind': quantityKinds.dimensionlessRatio,
+    'x-tau-space': 'linear',
+  },
+  margin: {
+    'x-tau-unit': '1',
+    'x-tau-quantity-kind': quantityKinds.dimensionlessRatio,
+    'x-tau-space': 'linear',
+  },
+};
+
+const withConfigurationFieldSemantics = (schema: JSONSchema7): JSONSchema7 => {
+  const copy = structuredClone(schema) as Record<string, unknown>;
+  const pending = [copy];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    const { properties } = current;
+    if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
+      for (const [name, value] of Object.entries(properties)) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          continue;
+        }
+        const child = value as Record<string, unknown>;
+        Object.assign(child, configurationFieldSemantics[name]);
+        pending.push(child);
+      }
+    }
+    for (const keyword of ['items', 'additionalProperties', 'if', 'then', 'else'] as const) {
+      const child = current[keyword];
+      if (child && typeof child === 'object' && !Array.isArray(child)) {
+        pending.push(child as Record<string, unknown>);
+      }
+    }
+    for (const keyword of ['allOf', 'anyOf', 'oneOf'] as const) {
+      const children = current[keyword];
+      if (Array.isArray(children)) {
+        pending.push(
+          ...children.filter((child): child is Record<string, unknown> => Boolean(child && typeof child === 'object')),
+        );
+      }
+    }
+  }
+  return copy;
+};
+
+const safePathSegment = (value: string): string => value.replaceAll(/[^a-z0-9._-]/giu, '_');
+
+export async function compileExportConfigurationManifest(
+  provider: string,
+  configuration: string,
+  resolved: ResolvedSchema,
+): Promise<Readonly<{ entryPath: string; manifest: ParameterManifest }>> {
+  const bytes = new TextEncoder().encode(JSON.stringify(resolved));
+  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+  const scopeBytes = new TextEncoder().encode(`${provider}\u0000${configuration}`);
+  const scopeHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', scopeBytes))]
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+  // SAFETY: Web Crypto produced the 32-byte lowercase SHA-256 payload above.
+  const revision = `sha256:${hash}` as ParameterManifest['identity']['dependency'];
+  const manifest = await compileParameterManifest({
+    declaration: projectDraft7SchemaToParameterDeclaration({
+      schema: withConfigurationFieldSemantics(resolved.schema),
+      defaults: resolved.defaults,
+      schemaId: `urn:taucad:configuration:${encodeURIComponent(provider)}:${encodeURIComponent(configuration)}`,
+      schemaName: 'ProviderConfiguration',
+    }),
+    scope: { kind: 'provider', provider, configuration },
+    source: {
+      id: `${provider}:${configuration}`,
+      version: revision,
+      revision,
+      capability: 'json-structure',
+    },
+    dependency: revision,
+    middleware: revision,
+  });
+  return {
+    entryPath: `provider-configuration/${safePathSegment(provider)}-${scopeHash.slice(0, 8)}/${safePathSegment(configuration)}-${scopeHash.slice(8, 16)}`,
+    manifest,
+  };
+}
+
+async function resolveExportConfigurationValues(
+  input: Readonly<{
+    parameterService: ParameterSetService;
+    provider: string;
+    configuration: string;
+    resolved: ResolvedSchema;
+    legacyValues: Record<string, unknown>;
+    signal?: AbortSignal;
+  }>,
+): Promise<
+  Readonly<{
+    entryPath: string;
+    manifest: ParameterManifest;
+    target: ReturnType<ParameterSetService['target']>;
+    values: Record<string, unknown>;
+  }>
+> {
+  const { parameterService, provider, configuration, resolved, legacyValues, signal } = input;
+  signal?.throwIfAborted();
+  const compiled = await compileExportConfigurationManifest(provider, configuration, resolved);
+  const admittedLegacyValues = sanitizeFormDelta(resolved.schema, legacyValues);
+  signal?.throwIfAborted();
+  const target = parameterService.target(compiled.entryPath, 'provider-configuration');
+  const existing = await parameterService.readSettled(compiled.entryPath);
+  signal?.throwIfAborted();
+  let snapshot = await parameterService.resolveTarget(target, compiled.manifest);
+  signal?.throwIfAborted();
+  if (existing === undefined && Object.keys(admittedLegacyValues).length > 0) {
+    try {
+      await parameterService.replaceTargetValues(target, compiled.manifest, {
+        values: admittedLegacyValues,
+        expected: snapshot.identity,
+      });
+      snapshot =
+        parameterService.snapshot(compiled.entryPath) ??
+        (await parameterService.resolveTarget(target, compiled.manifest));
+    } catch (error) {
+      if (typeof error !== 'object' || error === null || Reflect.get(error, 'code') !== 'STALE_MANIFEST') {
+        throw error;
+      }
+      snapshot = await parameterService.resolveTarget(target, compiled.manifest);
+    }
+  }
+  const entry = parameterService.snapshot(compiled.entryPath)?.entry ?? snapshot.entry;
+  return {
+    ...compiled,
+    target,
+    values: { ...getActiveGroupValues(entry) },
+  };
+}
+
 type ResolvedFormatSettings = {
+  provider: string;
   content?: ResolvedSchema;
   exportOptions?: ResolvedSchema;
 };
@@ -108,24 +277,6 @@ function isRecordObject(value: unknown): value is Record<string, unknown> {
 
 function schemaObject(schema: JSONSchema7 | boolean | undefined): JSONSchema7 | undefined {
   return schema && typeof schema === 'object' ? schema : undefined;
-}
-
-function modeForSchema(schema: JSONSchema7): string | undefined {
-  const mode = schemaObject(schema.properties?.['mode']);
-  if (!mode) {
-    return undefined;
-  }
-  if (typeof mode.const === 'string') {
-    return mode.const;
-  }
-  return mode.enum?.length === 1 && typeof mode.enum[0] === 'string' ? mode.enum[0] : undefined;
-}
-
-function unionBranches(schema: JSONSchema7): JSONSchema7[] {
-  return [...(schema.anyOf ?? schema.oneOf ?? [])].flatMap((branch) => {
-    const object = schemaObject(branch);
-    return object ? [object] : [];
-  });
 }
 
 function schemaDefaults(schema: JSONSchema7): Record<string, unknown> {
@@ -145,38 +296,36 @@ export function resolveActiveSchema(
   input: Record<string, unknown>,
   defaults: Record<string, unknown> = {},
 ): { schema: JSONSchema7; defaults: Record<string, unknown> } {
-  const branches = unionBranches(schema);
-  if (branches.length === 0) {
+  const union = getDiscriminatedUnionInfo(schema);
+  if (!union) {
     return { schema, defaults };
   }
 
-  const branchModes = branches.map((branch) => modeForSchema(branch));
-  if (branchModes.some((mode) => mode === undefined) || new Set(branchModes).size !== branches.length) {
+  const requestedValue = Object.hasOwn(input, union.discriminator)
+    ? input[union.discriminator]
+    : Object.hasOwn(defaults, union.discriminator)
+      ? defaults[union.discriminator]
+      : union.values[0];
+  const branchIndex = union.values.findIndex((value) => Object.is(value, requestedValue));
+  if (branchIndex === -1) {
     return { schema, defaults };
   }
-  const modes = branchModes as string[];
-  const requestedMode =
-    typeof input['mode'] === 'string'
-      ? input['mode']
-      : typeof defaults['mode'] === 'string'
-        ? defaults['mode']
-        : modes[0];
-  const branch = branches.find((candidate) => modeForSchema(candidate) === requestedMode) ?? branches[0]!;
+  const selectedValue = union.values[branchIndex]!;
+  const branch = union.branches[branchIndex]!;
   const { anyOf: _anyOf, oneOf: _oneOf, properties: rootProperties, required: rootRequired, ...root } = schema;
-  const modeSchema = schemaObject(branch.properties?.['mode']);
+  const discriminatorSchema = schemaObject(branch.properties?.[union.discriminator]);
   const properties = {
     ...rootProperties,
     ...branch.properties,
-    mode: {
-      ...modeSchema,
-      title: 'Mode',
-      enum: modes,
-      default: requestedMode,
+    [union.discriminator]: {
+      ...discriminatorSchema,
+      enum: [...union.values],
+      default: selectedValue,
     },
   } satisfies JSONSchema7['properties'];
-  const required = [...new Set([...(rootRequired ?? []), ...(branch.required ?? []), 'mode'])];
+  const required = [...new Set([...(rootRequired ?? []), ...(branch.required ?? []), union.discriminator])];
   const activeSchema: JSONSchema7 = { ...root, ...branch, properties, required };
-  const activeDefaults = { ...defaults, ...schemaDefaults(branch), mode: requestedMode };
+  const activeDefaults = { ...defaults, ...schemaDefaults(branch), [union.discriminator]: selectedValue };
   return { schema: activeSchema, defaults: sanitizeFormDelta(activeSchema, activeDefaults) };
 }
 
@@ -208,7 +357,14 @@ function resolveFormatSettings(
   if (!exportOptions && !content) {
     return undefined;
   }
-  return { content, exportOptions };
+  return {
+    provider:
+      route.transcoderId === undefined
+        ? String(route.kernelId)
+        : `${String(route.kernelId)}+${String(route.transcoderId)}`,
+    content,
+    exportOptions,
+  };
 }
 
 function sanitizeFormDelta(schema: JSONSchema7, input: Record<string, unknown>): Record<string, unknown> {
@@ -228,6 +384,15 @@ function sanitizeFormDelta(schema: JSONSchema7, input: Record<string, unknown>):
       }
       return isJsonSchemaValid(propertySchema, value, activeSchema);
     }),
+  );
+}
+
+function extractModifiedTopLevel(
+  formData: Record<string, unknown>,
+  defaults: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(formData).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(defaults[key])),
   );
 }
 
@@ -472,27 +637,18 @@ async function downloadExports(
 }
 
 // Shared static fields for export form context (no search; nested groups start collapsed)
-const exportFormContextBase: Pick<
-  RJSFContext,
-  'searchTerm' | 'allExpanded' | 'shouldShowField' | 'units' | 'displayDescriptors'
-> = {
+const exportFormContextBase: Pick<RJSFContext, 'searchTerm' | 'allExpanded' | 'shouldShowField' | 'units'> = {
   searchTerm: '',
   allExpanded: false,
   shouldShowField: () => true,
-  units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
-  displayDescriptors: {
-    width: { descriptor: 'count', unit: 'px' },
-    height: { descriptor: 'count', unit: 'px' },
-    lineWidth: { descriptor: 'count', unit: 'px' },
-    verticalFieldOfView: { descriptor: 'angle', unit: 'deg' },
-    zoom: { descriptor: 'unitless', unit: '' },
-    quality: { descriptor: 'count', unit: '' },
-    margin: { descriptor: 'count', unit: '' },
-  } as const,
+  units: { length: { displaySymbol: 'mm' } },
 };
 
 export function ExportSchemaForm({
   idPrefix,
+  provider = 'runtime',
+  configuration = idPrefix,
+  parameterOwner,
   label,
   shouldShowLabel,
   className,
@@ -501,6 +657,9 @@ export function ExportSchemaForm({
   onChange,
 }: {
   readonly idPrefix: string;
+  readonly provider?: string;
+  readonly configuration?: string;
+  readonly parameterOwner: ConfigurationParameterOwner;
   readonly label: string;
   readonly shouldShowLabel: boolean;
   readonly className?: string;
@@ -508,50 +667,186 @@ export function ExportSchemaForm({
   readonly value: Record<string, unknown>;
   readonly onChange: (value: Record<string, unknown>) => void;
 }): ReactElement {
-  const formData = useMemo(() => mergeFormDefaults(resolved.defaults, value), [resolved.defaults, value]);
+  'use no memo';
+
+  const parameterEditorInstance = useId();
+  const { parameterService } = parameterOwner;
+  const legacyValueRef = useRef(value);
+  useEffect(() => {
+    legacyValueRef.current = value;
+  }, [value]);
+  const [parameterSession, setParameterSession] = useState<ConfigurationParameterSession>();
+  const parameterActor = parameterSession ? parameterService.actor(parameterSession.entryPath) : undefined;
+  const parameterEntry = useSelector(parameterActor, (state) => state?.context.current?.entry);
+  const parameterSnapshot = parameterSession ? parameterService.snapshot(parameterSession.entryPath) : undefined;
+  const authoritativeValue = getActiveGroupValues(parameterEntry);
+  const effectiveValue = parameterSession && parameterSnapshot ? authoritativeValue : value;
+  const formData = useMemo(
+    () => mergeFormDefaults(resolved.schema, resolved.defaults, effectiveValue),
+    [effectiveValue, resolved.defaults, resolved.schema],
+  );
   const activeResolved = useMemo(
     () => resolveActiveSchema(resolved.schema, formData, resolved.defaults),
     [resolved.defaults, resolved.schema, formData],
   );
   const activeFormData = useMemo(
-    () => sanitizeFormDelta(activeResolved.schema, mergeFormDefaults(activeResolved.defaults, value)),
-    [activeResolved, value],
+    () =>
+      sanitizeFormDelta(
+        activeResolved.schema,
+        mergeFormDefaults(activeResolved.schema, activeResolved.defaults, effectiveValue),
+      ),
+    [activeResolved, effectiveValue],
+  );
+  const currentFormDataRef = useRef(activeFormData);
+  useEffect(() => {
+    currentFormDataRef.current = activeFormData;
+  }, [activeFormData]);
+
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Changing configuration invalidates the prior authority target immediately.
+    setParameterSession(undefined);
+    const controller = new AbortController();
+    const prepare = async (): Promise<void> => {
+      try {
+        const compiled = await resolveExportConfigurationValues({
+          parameterService,
+          provider,
+          configuration,
+          resolved,
+          legacyValues: legacyValueRef.current,
+          signal: controller.signal,
+        });
+        setParameterSession({
+          ...compiled,
+          commit: {
+            target: compiled.target,
+            group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+            editorInstance: parameterEditorInstance,
+            draft: (pointer) =>
+              parameterService.draft({
+                target: compiled.target,
+                group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                pointer,
+                editorInstance: parameterEditorInstance,
+              }),
+            setDraft: (pointer, draft) => {
+              parameterService.setDraft(
+                {
+                  target: compiled.target,
+                  group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                  pointer,
+                  editorInstance: parameterEditorInstance,
+                },
+                draft,
+              );
+            },
+            subscribeDrafts: parameterService.subscribeDrafts,
+            commit: async (field) =>
+              parameterService.commitValue(compiled.target, compiled.manifest, {
+                group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                ...field,
+              }),
+            setValue: async (field) =>
+              parameterService.submitValue(compiled.target, compiled.manifest, {
+                group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                ...field,
+              }),
+          },
+        });
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          toast.error(error instanceof Error ? error.message : 'Failed to prepare checked export settings.');
+        }
+      }
+    };
+    // async-iife: bootstrap — the project service owns settlement beyond this form's view lifetime.
+    void prepare();
+    return () => {
+      controller.abort();
+    };
+  }, [configuration, parameterEditorInstance, parameterService, provider, resolved]);
+
+  useEffect(() => {
+    if (parameterSession && parameterSnapshot && JSON.stringify(authoritativeValue) !== JSON.stringify(value)) {
+      onChange({ ...authoritativeValue });
+    }
+  }, [authoritativeValue, onChange, parameterSession, parameterSnapshot, value]);
+
+  const persistValues = useCallback(
+    (next: Record<string, unknown>) => {
+      if (!parameterSession || !parameterSnapshot) {
+        return;
+      }
+      const persist = async (): Promise<void> => {
+        try {
+          await parameterService.replaceTargetValues(parameterSession.commit.target, parameterSession.manifest, {
+            values: next,
+          });
+          onChange({ ...next });
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Failed to update export settings.');
+        }
+      };
+      // async-iife: bootstrap — the project service retains and drains this accepted operation.
+      void persist();
+    },
+    [onChange, parameterService, parameterSession, parameterSnapshot],
   );
 
   const handleChange = useCallback(
     (event: IChangeEvent<Record<string, unknown>>) => {
       const normalized = normalizeRjsfFormData(resolved.schema, event.formData ?? {}) as Record<string, unknown>;
       const nextResolved = resolveActiveSchema(resolved.schema, normalized, resolved.defaults);
-      const newData = fillMissingBatchViewIds(nextResolved.schema, normalized);
+      const complete = mergeFormDefaults(nextResolved.schema, nextResolved.defaults, normalized);
+      const newData = fillMissingBatchViewIds(nextResolved.schema, complete);
       const sanitized = sanitizeFormDelta(nextResolved.schema, newData);
+      currentFormDataRef.current = sanitized;
       const delta = Object.fromEntries(
-        Object.entries(extractModifiedProperties(sanitized, nextResolved.defaults)).filter(
+        Object.entries(extractModifiedTopLevel(sanitized, nextResolved.defaults)).filter(
           ([key, entry]) => !Array.isArray(entry) || entry.length > 0 || Object.hasOwn(nextResolved.defaults, key),
         ),
       );
       const { mode } = sanitized;
-      onChange(typeof mode === 'string' && mode !== resolved.defaults['mode'] ? { ...delta, mode } : delta);
+      persistValues(typeof mode === 'string' && mode !== resolved.defaults['mode'] ? { ...delta, mode } : delta);
     },
-    [resolved.defaults, resolved.schema, onChange],
+    [persistValues, resolved.defaults, resolved.schema],
   );
 
-  const resetSingleParameter = useCallback(
-    (fieldPath: string[]) => {
-      onChange(deleteValueAtPath(value, fieldPath));
+  const resetSingleParameter = useCallback<RJSFContext['resetSingleParameter']>(
+    (input) => {
+      const reset = resetRjsfField({ ...input, formData: currentFormDataRef.current });
+      if (reset !== undefined) {
+        currentFormDataRef.current = reset;
+        persistValues(extractModifiedTopLevel(reset, activeResolved.defaults));
+      }
     },
-    [value, onChange],
+    [activeResolved.defaults, persistValues],
   );
 
-  const formContext = useMemo<RJSFContext>(
-    () => ({
-      ...exportFormContextBase,
-      idPrefix,
-      rootPresentation: 'embedded',
-      defaultParameters: activeResolved.defaults,
-      resetSingleParameter,
-    }),
-    [activeResolved.defaults, idPrefix, resetSingleParameter],
-  );
+  if (!parameterSession || !parameterSnapshot) {
+    return (
+      <section aria-label={label} className={className}>
+        {shouldShowLabel ? (
+          <h4 className='px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground'>{label}</h4>
+        ) : null}
+        <p className='px-2.5 py-2 text-xs text-muted-foreground'>Loading checked settings…</p>
+      </section>
+    );
+  }
+
+  const formContext: RJSFContext = {
+    ...exportFormContextBase,
+    idPrefix,
+    rootPresentation: 'embedded',
+    defaultParameters: activeResolved.defaults,
+    resetSingleParameter,
+    parameterManifest: parameterSession.manifest,
+    parameterGroup: parameterEntry?.groups[parameterEntry.activeGroup],
+    parameterEdit: {
+      kind: 'authoritative',
+      commit: { ...parameterSession.commit, group: parameterSnapshot.entry.activeGroup },
+    },
+  };
 
   return (
     <section aria-label={label} className={className}>
@@ -561,6 +856,7 @@ export function ExportSchemaForm({
         formData={activeFormData}
         validator={rjsfValidator}
         widgets={widgets}
+        fields={rjsfFields}
         templates={rjsfTemplates}
         idPrefix={idPrefix}
         idSeparator={rjsfIdSeparator}
@@ -575,6 +871,7 @@ export function ExportSchemaForm({
 }
 
 function ExportFormatSettings({
+  provider,
   format,
   resolved,
   formatContent,
@@ -582,6 +879,7 @@ function ExportFormatSettings({
   onContentChange,
   onOptionsChange,
 }: {
+  readonly provider: string;
   readonly format: FileExtension;
   readonly resolved: ResolvedFormatSettings;
   readonly formatContent: RuntimeContentInput;
@@ -589,16 +887,13 @@ function ExportFormatSettings({
   readonly onContentChange: (format: FileExtension, content: RuntimeContentInput) => void;
   readonly onOptionsChange: (format: FileExtension, options: Record<string, unknown>) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(true);
+  const { parameterService } = useProject();
+  const parameterOwner = useMemo(() => ({ parameterService }), [parameterService]);
   const hasDualSchemas = Boolean(resolved.content && resolved.exportOptions);
   const isModified = Object.keys(formatContent).length > 0 || Object.keys(formatOptions).length > 0;
 
   return (
-    <Collapsible
-      open={isOpen}
-      className='overflow-hidden rounded-lg border border-border bg-background'
-      onOpenChange={setIsOpen}
-    >
+    <Collapsible defaultOpen className='overflow-hidden rounded-lg border border-border bg-background'>
       <CollapsibleTrigger className='group/collapsible flex h-8 w-full items-center justify-between rounded-lg px-2 text-left transition-colors duration-150 hover:bg-accent data-[state=open]:rounded-b-none data-[state=open]:bg-accent motion-reduce:transition-none'>
         <h3 className='flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground'>
           <FileExtensionIcon filename={`file.${format}`} className='size-3.5 shrink-0' />
@@ -621,6 +916,9 @@ function ExportFormatSettings({
         {resolved.content ? (
           <ExportSchemaForm
             idPrefix={`${rjsfIdPrefix}-${format}-content`}
+            provider={provider}
+            configuration={`export/${format}/content`}
+            parameterOwner={parameterOwner}
             label='Content'
             shouldShowLabel={hasDualSchemas}
             resolved={resolved.content}
@@ -633,6 +931,9 @@ function ExportFormatSettings({
         {resolved.exportOptions ? (
           <ExportSchemaForm
             idPrefix={`${rjsfIdPrefix}-${format}-options`}
+            provider={provider}
+            configuration={`export/${format}/options`}
+            parameterOwner={parameterOwner}
             label='Format'
             shouldShowLabel={hasDualSchemas}
             className={cn(hasDualSchemas && 'border-t border-border/70')}
@@ -666,11 +967,14 @@ function ExportSettings({
   readonly onOptionsChange: (format: FileExtension, options: Record<string, unknown>) => void;
 }) {
   const formatsWithSchemas = useMemo(() => {
-    const result: Array<{ format: FileExtension; resolved: ResolvedFormatSettings }> = [];
+    const result: Array<{ format: FileExtension; provider: string; resolved: ResolvedFormatSettings }> = [];
+    if (activeKernelId === undefined) {
+      return result;
+    }
     for (const format of selectedFormats) {
       const resolved = resolveFormatSettings(format, client, activeKernelId);
       if (resolved) {
-        result.push({ format, resolved });
+        result.push({ format, provider: resolved.provider, resolved });
       }
     }
     return result;
@@ -682,9 +986,10 @@ function ExportSettings({
 
   return (
     <div className='mt-3 flex flex-col gap-2'>
-      {formatsWithSchemas.map(({ format, resolved }) => (
+      {formatsWithSchemas.map(({ format, provider, resolved }) => (
         <ExportFormatSettings
           key={format}
+          provider={provider}
           format={format}
           resolved={resolved}
           formatContent={formatContent[format] ?? {}}
@@ -788,7 +1093,7 @@ function useExportPreferences(fileManager: ReturnType<typeof useFileManager>) {
 export const ConverterPanelBody = function ({
   downloadOnly = false,
 }: { readonly downloadOnly?: boolean } = {}): ReactElement {
-  const { geometryUnits, mainEntryPath, projectRef } = useProject();
+  const { geometryUnits, mainEntryPath, parameterService, projectRef } = useProject();
   const fileManager = useFileManager();
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'model';
 
@@ -821,7 +1126,7 @@ export const ConverterPanelBody = function ({
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
 
   const availableFormats = useMemo(
-    () => deriveAvailableFormats(kernelClient, activeKernelId),
+    () => (capabilities === undefined ? [] : deriveAvailableFormats(kernelClient, activeKernelId)),
     // Capabilities is included so format list refreshes whenever the manifest mutates
     [kernelClient, activeKernelId, capabilities],
   );
@@ -872,7 +1177,7 @@ export const ConverterPanelBody = function ({
   );
 
   useEffect(() => {
-    if (!kernelClient || !activeKernelId) {
+    if (!kernelClient || !activeKernelId || capabilities === undefined) {
       return;
     }
 
@@ -955,9 +1260,41 @@ export const ConverterPanelBody = function ({
             continue;
           }
 
-          const options = sanitizeFormDelta(route.exportOptions.schema, formatOptions[format] ?? {});
-          const content = route.content
-            ? runtimeContentFromRecord(sanitizeFormDelta(route.content.schema, { ...formatContent[format] }))
+          const provider =
+            route.transcoderId === undefined
+              ? String(route.kernelId)
+              : `${String(route.kernelId)}+${String(route.transcoderId)}`;
+          const optionsResolved =
+            Object.keys(route.exportOptions.schema).length === 0
+              ? undefined
+              : await resolveExportConfigurationValues({
+                  parameterService,
+                  provider,
+                  configuration: `export/${format}/options`,
+                  resolved: {
+                    schema: route.exportOptions.schema,
+                    defaults: isRecordObject(route.exportOptions.defaults) ? route.exportOptions.defaults : {},
+                  },
+                  legacyValues: sanitizeFormDelta(route.exportOptions.schema, formatOptions[format] ?? {}),
+                });
+          const contentResolved = route.content
+            ? await resolveExportConfigurationValues({
+                parameterService,
+                provider,
+                configuration: `export/${format}/content`,
+                resolved: {
+                  schema: route.content.schema,
+                  defaults: isRecordObject(route.content.defaults) ? route.content.defaults : {},
+                },
+                legacyValues: sanitizeFormDelta(route.content.schema, { ...formatContent[format] }),
+              })
+            : undefined;
+          const options = sanitizeFormDelta(
+            route.exportOptions.schema,
+            optionsResolved?.values ?? formatOptions[format] ?? {},
+          );
+          const content = contentResolved
+            ? runtimeContentFromRecord(sanitizeFormDelta(route.content!.schema, contentResolved.values))
             : undefined;
           const result = await exportWithRuntimeValidatedInput(kernelClient, route, {
             ...(content && Object.keys(content).length > 0 ? { content } : {}),
@@ -1016,6 +1353,7 @@ export const ConverterPanelBody = function ({
     zipMultiple,
     fileManager,
     hasDestination,
+    parameterService,
   ]);
 
   return (
@@ -1073,7 +1411,7 @@ export const ConverterPanelBody = function ({
                       />
                       <Label
                         htmlFor='download-to-disk'
-                        className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                        className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
                       >
                         Download to disk
                       </Label>
@@ -1088,7 +1426,7 @@ export const ConverterPanelBody = function ({
                         />
                         <Label
                           htmlFor='save-to-project'
-                          className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                          className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
                         >
                           Save to project
                         </Label>
@@ -1100,7 +1438,7 @@ export const ConverterPanelBody = function ({
                         <Checkbox id='zip-multiple' checked={zipMultiple} onCheckedChange={handleZipToggle} />
                         <Label
                           htmlFor='zip-multiple'
-                          className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                          className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
                         >
                           Zip multiple exports
                         </Label>

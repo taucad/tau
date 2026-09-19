@@ -1,16 +1,19 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createReadStream, unwatchFile, watchFile } from 'node:fs';
-import type { Stats } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
+import { launchInNativeSandbox } from '#native-sandbox.js';
+
 const maxProtocolLineBytes = 1_048_576;
 const maxStderrBytes = 65_536;
+/** Verified runtime payloads by fingerprint, shared by every session in this process (D24). */
+const verifiedRuntimePayloads = new Map<string, Promise<void>>();
 const maxQueueDepth = 16;
 const terminationGraceMilliseconds = 500;
 
@@ -48,16 +51,30 @@ export type NativeProcessRequest<Result, Event = never> = {
   readonly signal: AbortSignal;
   /** Optional request-scoped unsolicited event channel; terminal responses remain unchanged. */
   readonly events?: NativeProcessEventSubscription<Event>;
+  /**
+   * Out-of-band method that asks the worker to stop at its own safe boundary.
+   *
+   * When set, an abort sends this notification instead of recycling the process, so
+   * native work completed so far stays resident. The request timeout remains the
+   * kill fallback for a worker that does not observe it.
+   */
+  readonly cancelMethod?: string;
 };
 
-/** Configuration for one supervised native child process. @public */
+/** Configuration for one supervised, sandboxed native child process. @public */
 export type NativeProcessSessionOptions<Issue> = {
   readonly executablePath: string;
   readonly executableSha256: string;
   readonly arguments: readonly string[];
+  /**
+   * Read-only root of the bundled runtime.
+   *
+   * The executable and every resource must live inside it; it is the only host path,
+   * besides the workspace mirror, that the sandbox re-allows for reading.
+   */
+  readonly runtimePath: string;
   readonly workspacePath: string;
   readonly artifactPath: string;
-  readonly trustFile: string;
   readonly resources: readonly NativeProcessResource[];
   readonly protocolVersion: number;
   readonly parseReady: (value: unknown) => void;
@@ -95,7 +112,7 @@ type NativeProtocolEventFrame = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-const isEventFrameCandidate = (value: unknown): boolean =>
+const isEventFrameCandidate = (value: unknown): value is Record<string, unknown> =>
   isRecord(value) && (value['type'] === 'event' || 'sequence' in value || 'event' in value);
 
 const isPromiseLike = (value: unknown): boolean =>
@@ -103,10 +120,7 @@ const isPromiseLike = (value: unknown): boolean =>
   value !== null &&
   typeof Reflect.get(value, 'then') === 'function';
 
-const parseEventFrame = (value: unknown, protocolVersion: number): NativeProtocolEventFrame => {
-  if (!isRecord(value)) {
-    throw new Error('event frame must be an object');
-  }
+const parseEventFrame = (value: Record<string, unknown>, protocolVersion: number): NativeProtocolEventFrame => {
   const { protocolVersion: receivedProtocolVersion, type, requestId, sequence, event } = value;
   if (
     receivedProtocolVersion !== protocolVersion ||
@@ -154,17 +168,32 @@ const isDescendant = (parent: string, candidate: string): boolean => {
   return child.length > 0 && !child.startsWith(`..${sep}`) && child !== '..' && !isAbsolute(child);
 };
 
-/** Produce the deliberately minimal environment inherited by a native child. @public */
+/**
+ * Produce the deliberately minimal environment inherited by a native child.
+ *
+ * The private artifact directory doubles as the worker's home and temporary storage, so
+ * runtime caches land inside the one writable root instead of the user's real home.
+ *
+ * @public
+ * @param artifactPath - The worker's private writable directory.
+ * @returns The complete child environment.
+ */
 export const processEnvironment = (artifactPath: string): NodeJS.ProcessEnv => {
   const environment: NodeJS.ProcessEnv = {};
   environment['LANG'] = 'C.UTF-8';
   environment['LC_ALL'] = 'C.UTF-8';
+  environment['HOME'] = artifactPath;
   environment['TMPDIR'] = artifactPath;
   environment['TEMP'] = artifactPath;
   environment['TMP'] = artifactPath;
-  if (process.platform === 'win32' && process.env['SystemRoot']) {
-    environment['SystemRoot'] = process.env['SystemRoot'];
+  if (process.platform === 'win32') {
+    if (process.env['SystemRoot']) {
+      environment['SystemRoot'] = process.env['SystemRoot'];
+    }
+    return environment;
   }
+  // The sandbox wrapper resolves its own `env` and shell through this fixed system path.
+  environment['PATH'] = '/usr/bin:/bin';
   return environment;
 };
 
@@ -236,7 +265,6 @@ export class NativeProcessSession<Issue> {
   private queue = Promise.resolve();
   private queueDepth = 0;
   private requestSequence = 0;
-  private verified: Promise<void> | undefined;
   private termination: Promise<void> | undefined;
   private closed = false;
   // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids parameter properties.
@@ -244,26 +272,6 @@ export class NativeProcessSession<Issue> {
 
   public constructor(options: NativeProcessSessionOptions<Issue>) {
     this.options = options;
-    watchFile(options.trustFile, { interval: 250, persistent: false }, this.onTrustChanged);
-  }
-
-  /** Assert that the host-owned physical project trust marker remains valid. */
-  public async assertTrusted(): Promise<void> {
-    let marker: unknown;
-    try {
-      const trustRecord = await readFile(this.options.trustFile, 'utf8');
-      marker = JSON.parse(trustRecord);
-    } catch {
-      throw new Error('This project is not trusted to run native code. Grant native-code trust in the desktop app.');
-    }
-    if (
-      typeof marker !== 'object' ||
-      marker === null ||
-      Reflect.get(marker, 'version') !== 1 ||
-      Reflect.get(marker, 'trusted') !== true
-    ) {
-      throw new Error('The native-code trust record is invalid. Revoke and grant trust again.');
-    }
   }
 
   /** Queue one operation in the session's serialized request lane. */
@@ -280,8 +288,6 @@ export class NativeProcessSession<Issue> {
       if (this.closed) {
         throw new Error(`${this.options.sessionName} session is closed.`);
       }
-      request.signal.throwIfAborted();
-      await this.assertTrusted();
       request.signal.throwIfAborted();
       const abortStart = (): void => {
         this.requestTermination(abortReason(request.signal));
@@ -352,7 +358,6 @@ export class NativeProcessSession<Issue> {
       return;
     }
     this.closed = true;
-    unwatchFile(this.options.trustFile, this.onTrustChanged);
     await this.termination;
     const { child } = this;
     if (!child) {
@@ -373,19 +378,27 @@ export class NativeProcessSession<Issue> {
     await terminateProcessTree(child);
   }
 
-  private readonly onTrustChanged = (current: Stats): void => {
-    if (current.nlink === 0) {
-      this.requestTermination(new Error('Native-code trust was revoked.'));
-    }
-  };
-
   private requestTermination(error: Error): void {
     this.termination = this.recycle(error);
   }
 
   private async verifyResources(): Promise<void> {
-    this.verified ??= this.verifyResourceDigests();
-    await this.verified;
+    /* D24: the runtime root ships inside the signed bundle, so its digests are a property of the
+     * installed payload rather than of a session. Sweeping per session charged every opened project
+     * a fresh 167 MiB hash of bytes another session had already verified in this process. */
+    const fingerprint = createHash('sha256')
+      .update(
+        [
+          this.options.runtimePath,
+          this.options.executablePath,
+          this.options.executableSha256,
+          ...this.options.resources.map(({ path, sha256 }) => `${path}\u0000${sha256}`),
+        ].join('\u0000'),
+      )
+      .digest('hex');
+    const verified = verifiedRuntimePayloads.get(fingerprint) ?? this.verifyResourceDigests();
+    verifiedRuntimePayloads.set(fingerprint, verified);
+    await verified;
   }
 
   private async verifyResourceDigests(): Promise<void> {
@@ -393,6 +406,10 @@ export class NativeProcessSession<Issue> {
       { path: this.options.executablePath, sha256: this.options.executableSha256, label: this.options.executableName },
       ...this.options.resources,
     ];
+    const escaped = resources.find(({ path }) => !isDescendant(this.options.runtimePath, path));
+    if (escaped) {
+      throw new Error(`${escaped.label} is outside the native runtime root.`);
+    }
     const verifiedResources = await Promise.all(
       resources.map(async (resource) => ({ ...resource, actual: await fileSha256(resource.path) })),
     );
@@ -408,6 +425,15 @@ export class NativeProcessSession<Issue> {
       return;
     }
     await this.verifyResources();
+    // Fail closed: when the sandbox cannot wrap the worker, nothing is spawned.
+    const [command, ...commandArguments] = await launchInNativeSandbox({
+      executablePath: this.options.executablePath,
+      arguments: this.options.arguments,
+      readablePaths: [this.options.runtimePath, this.options.workspacePath],
+      writablePath: this.options.artifactPath,
+      workingDirectory: this.options.workspacePath,
+      commandId: `${this.options.sessionName}#${String(this.generation + 1)}`,
+    });
     this.generation += 1;
     this.stdout = '';
     this.stderr = '';
@@ -416,7 +442,7 @@ export class NativeProcessSession<Issue> {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
-    const child = spawn(this.options.executablePath, [...this.options.arguments], {
+    const child = spawn(command!, commandArguments, {
       cwd: this.options.workspacePath,
       detached: process.platform !== 'win32',
       env: processEnvironment(this.options.artifactPath),
@@ -460,6 +486,14 @@ export class NativeProcessSession<Issue> {
       }, this.options.requestTimeout);
       requestTimer.unref();
       const abort = (): void => {
+        if (request.cancelMethod !== undefined && child.stdin.writable) {
+          // Cooperative stop: the worker answers this request itself and keeps its resident prefix.
+          child.stdin.write(
+            `${JSON.stringify({ protocolVersion: this.options.protocolVersion, method: request.cancelMethod, requestId })}\n`,
+            'utf8',
+          );
+          return;
+        }
         this.requestTermination(abortReason(request.signal));
       };
       request.signal.addEventListener('abort', abort, { once: true });

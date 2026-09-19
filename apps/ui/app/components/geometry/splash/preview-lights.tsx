@@ -1,4 +1,4 @@
-import { Environment } from '@react-three/drei';
+import { Environment, Lightformer } from '@react-three/drei';
 
 type PreviewLightsProperties = {
   /**
@@ -6,22 +6,11 @@ type PreviewLightsProperties = {
    * @default '#14b8a6' (primary/teal)
    */
   readonly accentColor?: string;
-  /**
-   * Environment preset for reflections.
-   * @default 'city'
-   */
-  readonly environmentPreset?:
-    | 'apartment'
-    | 'city'
-    | 'dawn'
-    | 'forest'
-    | 'lobby'
-    | 'night'
-    | 'park'
-    | 'studio'
-    | 'sunset'
-    | 'warehouse';
 };
+
+const environmentResolution = 256;
+const environmentKeyIntensity = 3;
+const environmentFillIntensity = 1;
 
 /**
  * Premium lighting setup for preview/showcase scenarios.
@@ -37,7 +26,6 @@ type PreviewLightsProperties = {
 export function PreviewLights({
   // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js light color
   accentColor = '#14b8a6',
-  environmentPreset = 'city',
 }: PreviewLightsProperties): React.JSX.Element {
   return (
     <>
@@ -56,8 +44,23 @@ export function PreviewLights({
       {/* Accent light with primary color */}
       <pointLight color={accentColor} intensity={0.4} position={[0, 0, 3]} />
 
-      {/* Environment map for realistic reflections on metallic surfaces */}
-      <Environment preset={environmentPreset} />
+      {/* Procedural environment keeps reflections available without a network-fetched HDR preset. */}
+      <Environment resolution={environmentResolution}>
+        <Lightformer
+          form='rect'
+          intensity={environmentKeyIntensity}
+          position={[8, 10, 10]}
+          rotation={[Math.PI / 4, -Math.PI / 4, 0]}
+          scale={[16, 16, 1]}
+        />
+        <Lightformer
+          form='rect'
+          intensity={environmentFillIntensity}
+          position={[-8, -4, 8]}
+          rotation={[-Math.PI / 6, Math.PI / 3, 0]}
+          scale={[12, 12, 1]}
+        />
+      </Environment>
     </>
   );
 }

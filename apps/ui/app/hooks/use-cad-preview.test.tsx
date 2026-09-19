@@ -38,7 +38,7 @@ vi.mock('xstate', async (importOriginal) => {
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     fileManagerRef: { id: 'fmRef' },
-    client: { writeFiles: mockClientWriteFiles },
+    files: { writeFiles: mockClientWriteFiles },
     workspace: {
       mount: mockMount,
       unmount: mockUnmount,
@@ -154,6 +154,8 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
     expect(mockMount).toHaveBeenCalledWith(previewPrefix, {
       backend: 'memory',
       storageRootKey: `memory:preview:${previewInstance}`,
+      // RC6: regenerated from the shared bundle, never authored here.
+      class: 'derived',
     });
     const writtenFiles = mockClientWriteFiles.mock.calls[0]?.[0];
     expect(writtenFiles && Object.keys(writtenFiles)).toEqual([`${previewPrefix}/main.scad`]);
@@ -185,7 +187,7 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
     expect(mockUnmount).not.toHaveBeenCalled();
   });
 
-  it('requests native-code trust placement for a persistent Python project', () => {
+  it('places a persistent Python project on its native kernel', () => {
     const result = render(
       <CadPreviewProvider projectId='proj_python' mainFile='main.py'>
         <div data-testid='child' />
@@ -211,7 +213,7 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
     result.unmount();
   });
 
-  it('still unmounts the preview-owned prefix when client.writeFiles rejects', async () => {
+  it('still unmounts the preview-owned prefix when files.writeFiles rejects', async () => {
     mockClientWriteFiles.mockRejectedValueOnce(new Error('write failed'));
 
     const result = render(

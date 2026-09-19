@@ -55,6 +55,8 @@ type ChatTextareaSubmitButtonProperties = {
   readonly status: string;
   readonly isSubmitting: boolean;
   readonly isDisabled: boolean;
+  /** The id of the text saying why Send is disabled, when there is one (S14). */
+  readonly describedBy?: string;
   readonly formattedCancelKeyCombination: string;
   readonly onSubmit: () => void;
   readonly onCancel: () => void;
@@ -68,6 +70,7 @@ export const ChatTextareaSubmitButton = memo(function ({
   status,
   isSubmitting,
   isDisabled,
+  describedBy,
   formattedCancelKeyCombination,
   onSubmit,
   onCancel,
@@ -86,6 +89,8 @@ export const ChatTextareaSubmitButton = memo(function ({
           size='icon'
           className={cn(chatComposerActionButtonClassName, 'size-7')}
           disabled={isDisabled || isSubmitting}
+          // Only when set: an explicit `undefined` would replace the tooltip's own description.
+          {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
           onClick={onSubmit}
         >
           {isSubmitting ? <Loader className='size-4' /> : <ArrowUp className='size-5' />}

@@ -1,64 +1,42 @@
-import { assign, assertEvent, setup, enqueueActions, waitFor, fromCallback } from 'xstate';
+import { assign, assertEvent, setup, enqueueActions, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { CodeIssue, Geometry, LogLevel, LogOrigin } from '@taucad/types';
 import type {
   GetParametersResult,
   HashedGeometryResult,
   KernelIssue,
-  ProgressiveSceneCapability,
-  ProgressiveSceneUpdate,
-  ResolvedSceneSnapshot,
   RenderPhase,
-  SceneAssetReference,
-  TauSceneManifest,
-  TauSceneNode,
-  TelemetryEntry,
+  TelemetryBatch,
+  TelemetrySpanRecord,
   WorkerState,
 } from '@taucad/runtime';
+import type { ParameterManifest } from '@taucad/parameters';
 import { isRenderTimeoutError } from '@taucad/runtime/client';
 import { isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
-import type { JSONSchema7 } from '@taucad/json-schema';
-import type { LengthSymbol } from '@taucad/units';
+import type { LengthSymbol } from '#constants/length-units.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
-import { workspaceMutationErrorCopy } from '#filesystem/workspace-errors.js';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import type {
   AppCapabilitiesManifest,
   AppRuntimeClient,
   LazyKernelOptionsFactory,
 } from '#types/runtime-client.alias.js';
-import {
-  appendSceneTimelineUpdate,
-  clearSceneTimeline,
-  createSceneTimeline,
-  rehydrateSceneTimelineEntry,
-  selectSceneTimelineSequence,
-  settleSceneTimeline,
-} from '#machines/scene-timeline.js';
-import {
-  applyProgressiveSceneUpdate,
-  createProgressiveSceneProjection,
-} from '#machines/progressive-scene-projection.js';
-
 export type LatestGeometryOutcome = 'success' | 'failure' | undefined;
-type SceneDigest = Extract<ProgressiveSceneUpdate, { readonly type: 'reset' }>['sceneDigest'];
-type SceneTimeline = ReturnType<typeof createSceneTimeline>;
-type SceneTimelineEntry = SceneTimeline['entries'][number];
-type SceneTimelineIssue = NonNullable<SceneTimeline['issue']>;
 
 type CadTag = 'cad-loading' | 'cad-runtime-error';
 
 export type CadContext = {
   entryPath: string | undefined;
   screenshot: string | undefined;
-  parameters: Record<string, unknown>;
+  /** What the next render carries beyond the entry, cleared by any other render trigger. */
+  parameterRender: ParameterRender | undefined;
   units: { length: LengthSymbol };
-  defaultParameters: Record<string, unknown>;
   /** Outcome of the latest selected runtime geometry event. */
   latestGeometryOutcome: LatestGeometryOutcome;
   /** Last successful artifact retained for display across later render failures. */
@@ -71,9 +49,9 @@ export type CadContext = {
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileSystemRoot: string;
-  jsonSchema?: JSONSchema7;
+  parameterManifest?: ParameterManifest;
   renderPhase: RenderPhase | undefined;
-  telemetryEntries: TelemetryEntry[];
+  telemetryEntries: TelemetrySpanRecord[];
   renderTimeout: number;
   kernelClient?: AppRuntimeClient;
   capabilities?: AppCapabilitiesManifest;
@@ -81,8 +59,8 @@ export type CadContext = {
   eventCleanups: Array<() => void>;
   /**
    * Monotonically increasing render identifier. Bumped whenever the UI
-   * issues a render-triggering event (`setEntryPath`, `setParameters`,
-   * `initializeModel`). Consumed by `awaitFreshRender` to detect when a
+   * issues a render-triggering event (`setEntryPath`, `initializeModel`).
+   * Consumed by `awaitFreshRender` to detect when a
    * settled geometry result corresponds to a request issued at-or-after a
    * given baseline.
    */
@@ -93,8 +71,8 @@ export type CadContext = {
    * `lastRequestedRenderId`.
    */
   lastSettledRenderId: number;
-  /** Bounded, render-scoped progressive scene history. Terminal geometry remains authoritative. */
-  sceneTimeline: SceneTimeline;
+  /** Last availability sent to the parent; the send is suppressed while it is unchanged. */
+  notifiedExportAvailability?: boolean;
 };
 
 type KernelConnectedEvent = {
@@ -107,83 +85,44 @@ type FileSystemBindingChangedEvent = {
   type: 'filesystemBindingChanged';
 };
 
-type SceneSnapshotReaderEvent =
-  | {
-      type: 'readSceneSnapshot';
-      client: AppRuntimeClient;
-      renderId: string;
-      sequence: number;
-      revision: number;
-      sceneDigest: SceneDigest;
-      bookmarkId: string;
-    }
-  | {
-      type: 'sceneSnapshotLoaded';
-      renderId: string;
-      sequence: number;
-      revision: number;
-      sceneDigest: SceneDigest;
-      snapshot: ResolvedSceneSnapshot;
-    }
-  | { type: 'sceneSnapshotFailed'; renderId: string; sequence: number; message: string };
-
-type PortableSceneFile = {
-  readonly bytes: Uint8Array<ArrayBuffer>;
-  readonly extension: 'glb' | 'svg';
-};
-type PortableSceneStage =
-  | PortableSceneFile
-  | {
-      readonly manifest: TauSceneManifest;
-      readonly assets: ReadonlyMap<string, PortableSceneFile>;
-    };
-type SceneStageSource = PortableSceneStage | { readonly bookmarkId: string; readonly client: AppRuntimeClient };
-
-type SceneStageWriterEvent =
-  | {
-      readonly type: 'writeSceneStage';
-      readonly renderId: string;
-      readonly fileManagerRef: NonNullable<CadContext['fileManagerRef']>;
-      readonly sequence: number;
-      readonly entryPath: string;
-      readonly label?: string;
-      readonly stage: SceneStageSource;
-    }
-  | { readonly type: 'sceneStageSaved'; readonly renderId: string; readonly sequence: number; readonly path: string }
-  | {
-      readonly type: 'sceneStageSaveFailed';
-      readonly renderId: string;
-      readonly sequence: number;
-      readonly message: string;
-    };
-
 type CadEvent =
-  | { type: 'initializeModel'; entryPath: string; parameters?: Record<string, unknown> }
+  | { type: 'initializeModel'; entryPath: string }
   | { type: 'setEntryPath'; entryPath: string }
-  | { type: 'setParameters'; parameters: Record<string, unknown> }
+  | { type: 'commitParameters'; stage: Record<string, Uint8Array<ArrayBuffer>> }
+  | { type: 'scrubParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
   | { type: 'geometryFailed'; issues: KernelIssue[] }
-  | { type: 'parametersParsed'; defaultParameters: Record<string, unknown>; jsonSchema: JSONSchema7 }
+  | { type: 'parametersParsed'; manifest: ParameterManifest }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
   | { type: 'kernelProgress'; phase: RenderPhase }
-  | { type: 'kernelTelemetry'; entries: TelemetryEntry[] }
-  | { type: 'kernelLog'; level: LogLevel; message: string; origin?: LogOrigin; data?: unknown }
+  | { type: 'kernelTelemetry'; batch: TelemetryBatch }
+  | {
+      type: 'kernelLog';
+      level: LogLevel;
+      message: string;
+      origin?: LogOrigin;
+      data?: unknown;
+    }
   | { type: 'stateChanged'; state: WorkerState; detail?: string }
   | { type: 'setRenderTimeout'; renderTimeout: number }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
-  | { type: 'sceneUpdate'; update: ProgressiveSceneUpdate }
-  | { type: 'selectSceneSequence'; sequence: number }
-  | { type: 'followLiveScene' }
-  | { type: 'saveSelectedSceneStage' }
-  | { type: 'progressiveSceneCancelled' }
-  | Extract<SceneSnapshotReaderEvent, { type: 'sceneSnapshotLoaded' | 'sceneSnapshotFailed' }>
-  | Extract<SceneStageWriterEvent, { type: 'sceneStageSaved' | 'sceneStageSaveFailed' }>
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
 type CadEmitted = { type: 'geometryEvaluated'; geometry: Geometry };
+
+const consoleLogData = (data: unknown): string => {
+  if (data === undefined) {
+    return '';
+  }
+  try {
+    return ` ${JSON.stringify(data)}`;
+  } catch {
+    return ' [data is not serialisable]';
+  }
+};
 
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
@@ -192,6 +131,16 @@ type CadInput = {
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileSystemRoot: string;
+  /** Milliseconds. Create-only seed from the entry's durable record; the actor owns it afterwards. */
+  renderTimeout?: number;
+};
+
+/** Release the runtime resources held by one CAD unit. */
+export const disposeCadRuntime = (context: Pick<CadContext, 'eventCleanups' | 'kernelClient'>): void => {
+  for (const cleanup of context.eventCleanups) {
+    safeDispose(cleanup);
+  }
+  safeDispose(() => context.kernelClient?.terminate());
 };
 
 type ConnectKernelInput = {
@@ -204,265 +153,15 @@ type ConnectKernelInput = {
 type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
-  parameters: Record<string, unknown>;
+  parameterRender: ParameterRender | undefined;
+  /** Whether no newer UI render was requested since this one. */
+  isLatestRequest: () => boolean;
 };
 
-const sceneSnapshotReaderActor = fromCallback<SceneSnapshotReaderEvent>(({ sendBack, receive }) => {
-  let controller: AbortController | undefined;
-  let inFlight: Promise<void> | undefined;
-  const readSnapshot = async (
-    event: Extract<SceneSnapshotReaderEvent, { type: 'readSceneSnapshot' }>,
-    signal: AbortSignal,
-  ): Promise<void> => {
-    try {
-      const result = await event.client.readSceneSnapshot({ bookmarkId: event.bookmarkId, signal });
-      if (signal.aborted) {
-        return;
-      }
-      if (result.type === 'missing') {
-        sendBack({
-          type: 'sceneSnapshotFailed',
-          renderId: event.renderId,
-          sequence: event.sequence,
-          message: 'The retained scene snapshot is no longer available',
-        });
-        return;
-      }
-      sendBack({
-        type: 'sceneSnapshotLoaded',
-        renderId: event.renderId,
-        sequence: event.sequence,
-        revision: event.revision,
-        sceneDigest: event.sceneDigest,
-        snapshot: result.snapshot,
-      });
-    } catch (error) {
-      if (signal.aborted) {
-        return;
-      }
-      sendBack({
-        type: 'sceneSnapshotFailed',
-        renderId: event.renderId,
-        sequence: event.sequence,
-        message: error instanceof Error ? error.message : 'Failed to restore the retained scene snapshot',
-      });
-    }
-  };
-  receive((event) => {
-    if (event.type !== 'readSceneSnapshot') {
-      return;
-    }
-    controller?.abort();
-    controller = new AbortController();
-    const { signal } = controller;
-    inFlight = readSnapshot(event, signal);
-  });
-  return () => {
-    if (inFlight) {
-      controller?.abort();
-    }
-    inFlight = undefined;
-  };
-});
-
-const identitySceneTransform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
-
-type PortableSceneRoot = TauSceneNode & { readonly geometry: SceneAssetReference };
-
-const isPortableSceneRoot = (root: TauSceneNode | undefined, manifest: TauSceneManifest): root is PortableSceneRoot =>
-  root?.geometry !== undefined &&
-  root.parentId === undefined &&
-  root.childIds.length === 0 &&
-  root.visible &&
-  manifest.rootNodeIds.length === 1 &&
-  Object.keys(manifest.nodes).length === 1 &&
-  Object.keys(manifest.presentation).length === 0 &&
-  root.name === undefined &&
-  root.transform.every((value, index) => value === identitySceneTransform[index]);
-
-const selectedPortableSceneStage = (
-  timeline: SceneTimeline,
-  client?: AppRuntimeClient,
-): SceneStageSource | undefined => {
-  let projection = createProgressiveSceneProjection();
-  for (const entry of timeline.entries) {
-    if (entry.sequence > (timeline.selectedSequence ?? -1)) {
-      break;
-    }
-    if (entry.update) {
-      projection = applyProgressiveSceneUpdate(projection, entry.update, { maxFrames: 1, maxBytes: 0 });
-    }
-  }
-  const selected = projection.frames.find((frame) => frame.sequence === timeline.selectedSequence);
-  if (!selected || projection.status !== 'ready') {
-    const entry = timeline.entries.find((candidate) => candidate.sequence === timeline.selectedSequence);
-    return entry?.bookmark?.retained && client ? { bookmarkId: entry.bookmark.id, client } : undefined;
-  }
-  return portableSceneStage(selected.snapshot);
-};
-
-const portableSceneStage = ({ manifest, assets }: ResolvedSceneSnapshot): PortableSceneStage | undefined => {
-  const files = new Map<string, PortableSceneFile>();
-  for (const node of Object.values(manifest.nodes)) {
-    if (!node.geometry) {
-      continue;
-    }
-    const reference = node.geometry;
-    const asset = assets.find((candidate) => candidate.contentDigest === reference.contentDigest);
-    if (!asset || asset.mediaType !== reference.mediaType || asset.byteLength !== reference.byteLength) {
-      return;
-    }
-    let file: PortableSceneFile;
-    if (asset.mediaType === 'model/gltf-binary' && asset.geometry.format === 'gltf') {
-      file = { bytes: asset.geometry.content, extension: 'glb' };
-    } else if (asset.mediaType === 'image/svg+xml' && asset.geometry.format === 'svg') {
-      file = { bytes: new TextEncoder().encode(asset.geometry.content), extension: 'svg' };
-    } else {
-      return;
-    }
-    if (file.bytes.byteLength !== asset.byteLength) {
-      return;
-    }
-    files.set(asset.contentDigest, file);
-  }
-  const root = manifest.nodes[manifest.rootNodeIds[0] ?? ''];
-  if (isPortableSceneRoot(root, manifest)) {
-    return files.get(root.geometry.contentDigest);
-  }
-  return { manifest, assets: files };
-};
-
-const sceneStageSlug = (value: string): string =>
-  value
-    .normalize('NFKD')
-    .replaceAll(/[\u0300-\u036F]/gu, '')
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, '-')
-    .replaceAll(/^-+|-+$/gu, '')
-    .slice(0, 64);
-
-const sceneStageBasePath = (event: Extract<SceneStageWriterEvent, { type: 'writeSceneStage' }>): string => {
-  const sourceFilename = event.entryPath.split('/').at(-1) ?? event.entryPath;
-  const extensionIndex = sourceFilename.lastIndexOf('.');
-  const sourceStem = extensionIndex > 0 ? sourceFilename.slice(0, extensionIndex) : sourceFilename;
-  const sourceName = sceneStageSlug(sourceStem) || 'model';
-  const stageName = sceneStageSlug(event.label ?? '') || `stage-${String(event.sequence + 1)}`;
-  return `stages/${sourceName}-${stageName}`;
-};
-
-const errorMessage = (error: unknown, fallback: string): string => {
-  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
-    return error.message;
-  }
-  return error instanceof Error ? error.message : fallback;
-};
-
-const sceneStageWriterActor = fromCallback<SceneStageWriterEvent>(({ sendBack, receive }) => {
-  let isActive = true;
-  let isWriting = false;
-
-  const writeStage = async (event: Extract<SceneStageWriterEvent, { type: 'writeSceneStage' }>): Promise<void> => {
-    try {
-      const fileManagerSnapshot = event.fileManagerRef.getSnapshot();
-      if (!fileManagerSnapshot.matches('ready') || !fileManagerSnapshot.context.contentService) {
-        throw new Error('The project filesystem is not ready');
-      }
-      const { contentService } = fileManagerSnapshot.context;
-      let stage: PortableSceneStage | undefined;
-      if ('bookmarkId' in event.stage) {
-        const result = await event.stage.client.readSceneSnapshot({ bookmarkId: event.stage.bookmarkId });
-        if (result.type === 'found') {
-          stage = portableSceneStage(result.snapshot);
-        }
-      } else {
-        stage = event.stage;
-      }
-      if (!stage) {
-        throw new Error('The retained scene snapshot is no longer available as a complete scene reference');
-      }
-      const resolvedStage = stage;
-      const basePath = sceneStageBasePath(event);
-      const findAvailablePath = async (collisionIndex: number): Promise<string | undefined> => {
-        if (!isActive) {
-          return;
-        }
-        const suffix = collisionIndex === 1 ? '' : `-${String(collisionIndex)}`;
-        const path = `${basePath}${suffix}`;
-        const preflight = await contentService.canCreate(path, 'directory');
-        if (preflight === true) {
-          return path;
-        }
-        if (preflight.code !== 'NAME_EXISTS') {
-          throw new Error(
-            workspaceMutationErrorCopy[preflight.code]({ path: preflight.path, target: preflight.target }),
-          );
-        }
-        return findAvailablePath(collisionIndex + 1);
-      };
-      const path = await findAvailablePath(1);
-      if (!path) {
-        return;
-      }
-      await contentService.createDirectory('stages', { recursive: true });
-      await contentService.createDirectory(path);
-      if ('manifest' in resolvedStage) {
-        await Promise.all(
-          [...resolvedStage.assets].map(async ([digest, file]) =>
-            contentService.write(`${path}/${encodeURIComponent(digest)}.${file.extension}`, file.bytes, 'user'),
-          ),
-        );
-        // The manifest is the commit marker: a failed asset write never publishes a complete stage reference.
-        await contentService.write(
-          `${path}/scene.json`,
-          new TextEncoder().encode(JSON.stringify(resolvedStage.manifest)),
-          'user',
-        );
-      } else {
-        await contentService.write(`${path}/model.${resolvedStage.extension}`, resolvedStage.bytes, 'user');
-      }
-      if (isActive) {
-        sendBack({
-          type: 'sceneStageSaved',
-          renderId: event.renderId,
-          sequence: event.sequence,
-          path: 'manifest' in resolvedStage ? `${path}/scene.json` : `${path}/model.${resolvedStage.extension}`,
-        });
-      }
-    } catch (error) {
-      if (isActive) {
-        sendBack({
-          type: 'sceneStageSaveFailed',
-          renderId: event.renderId,
-          sequence: event.sequence,
-          message: errorMessage(error, 'Failed to save the selected preview stage'),
-        });
-      }
-    } finally {
-      isWriting = false;
-    }
-  };
-
-  receive((event) => {
-    if (event.type !== 'writeSceneStage') {
-      return;
-    }
-    if (isWriting) {
-      sendBack({
-        type: 'sceneStageSaveFailed',
-        renderId: event.renderId,
-        sequence: event.sequence,
-        message: 'Another preview stage is still being saved. Try again when it finishes.',
-      });
-      return;
-    }
-    isWriting = true;
-    void writeStage(event);
-  });
-
-  return () => {
-    isActive = false;
-  };
-});
+/** What one render carries for parameters: committed sidecar bytes (D1) or a drag sample (D2). */
+type ParameterRender =
+  | Readonly<{ kind: 'commit'; stage: Record<string, Uint8Array<ArrayBuffer>> }>
+  | Readonly<{ kind: 'scrub'; parameters: Record<string, unknown> }>;
 
 const fallbackCadFailureIssues: readonly KernelIssue[] = Object.freeze([
   Object.freeze({
@@ -495,6 +194,15 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   if (!fileManagerRef) {
     throw new Error('File manager not initialized');
   }
+
+  // None of the kernel module graph depends on the filesystem, so load it while we wait for it.
+  const modules = Promise.all([
+    import('@taucad/runtime/client'),
+    import('@taucad/runtime/filesystem'),
+    lazyKernelOptionsFactory(),
+  ]);
+  // oxlint-disable-next-line promise/prefer-await-to-then -- an abort can skip the await below, and an unhandled rejection would take the page with it
+  modules.catch(() => undefined);
 
   const snapshot = await waitFor(fileManagerRef, (state) => state.matches('ready'), { signal });
 
@@ -543,14 +251,19 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.throwIfAborted();
 
-  const [{ createRuntimeClient }, { fromFileSystemBridge }] = await Promise.all([
-    import('@taucad/runtime/client'),
-    import('@taucad/runtime/filesystem'),
-  ]);
+  const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions] = await modules;
 
-  const resolveKernelOptions = await lazyKernelOptionsFactory();
+  const computeConnection =
+    getComputeReuseMode() === 'durable' && snapshot.context.projectId
+      ? snapshot.context.openComputeBinding?.(snapshot.context.projectId)
+      : undefined;
+  if (computeConnection) {
+    cleanups.push(computeConnection.dispose);
+  }
   const kernelOptions = resolveKernelOptions({
-    fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot)),
+    /* The kernel runs the checkout itself, never a consumer's composed view (G6). */
+    fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot, 'working-copy')),
+    compute: computeConnection?.compute,
   });
   client = createRuntimeClient(kernelOptions);
 
@@ -566,9 +279,6 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
         machineRef.send({ type: 'geometryFailed', issues: result.issues });
       }
     }),
-    client.on('sceneUpdate', (update: ProgressiveSceneUpdate) => {
-      machineRef.send({ type: 'sceneUpdate', update });
-    }),
     client.on('state', (state: WorkerState) => {
       machineRef.send({ type: 'stateChanged', state });
     }),
@@ -579,8 +289,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
       if (parametersResult.success) {
         machineRef.send({
           type: 'parametersParsed',
-          defaultParameters: parametersResult.data.defaultParameters,
-          jsonSchema: parametersResult.data.jsonSchema,
+          manifest: parametersResult.data,
         });
       }
     }),
@@ -593,8 +302,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
         data: entry.data,
       });
     }),
-    client.on('telemetry', (entries: TelemetryEntry[]) => {
-      machineRef.send({ type: 'kernelTelemetry', entries });
+    client.on('telemetry', (batch: TelemetryBatch) => {
+      machineRef.send({ type: 'kernelTelemetry', batch });
     }),
     client.on('error', (issues: KernelIssue[]) => {
       machineRef.send({ type: 'kernelIssue', errors: issues });
@@ -644,12 +353,53 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     throw new Error('No model file is selected');
   }
 
-  await input.client.render({
+  /* Stored values are never a second copy in this machine: a committed edit carries the sidecar
+   * bytes the authority just wrote (D1) and the runtime resolves the values from them, and a drag
+   * sample carries values that are on no disk at all and are never persisted (D2). */
+  const request = {
     source: { path: input.entryPath },
-    parameters: input.parameters,
     content: { includeEdges: true },
-  });
+    ...(input.parameterRender?.kind === 'commit' ? { stage: input.parameterRender.stage } : {}),
+    ...(input.parameterRender?.kind === 'scrub'
+      ? { parameters: input.parameterRender.parameters, transient: true }
+      : {}),
+  } as const;
+  const outcome = await input.client.render(request);
+  // Runtime state events usually stop this actor before the render settles, so ask the machine
+  // whether this is still the latest request. If so, the runtime's watched rerender won, and it
+  // drops a concurrent open of another file (a rename races the watcher reporting the old path
+  // gone). Re-assert this unit's file once.
+  // ponytail: one retry; loop only if a render can keep losing to repeated external edits.
+  // A superseded drag sample is simply stale; only a committed render re-asserts itself.
+  if (outcome.superseded && input.parameterRender?.kind !== 'scrub' && input.isLatestRequest()) {
+    await input.client.render(request);
+  }
 });
+
+/** Traces retained for the telemetry pane. A root span closes its trace, so the cut is trace-aligned. */
+const maxTelemetryTraces = 20;
+/** Entry ceiling so one pathological trace cannot grow the retained window without bound. */
+const maxTelemetryEntries = 2000;
+
+/**
+ * Bound retained telemetry to the most recent traces. `RuntimeTracer` omits
+ * `parentSpanId` on a root span and ends a parent after its children, so
+ * counting roots backwards finds the boundary between whole traces.
+ */
+const boundTelemetryEntries = (entries: TelemetrySpanRecord[]): TelemetrySpanRecord[] => {
+  const windowed = entries.length > maxTelemetryEntries ? entries.slice(-maxTelemetryEntries) : entries;
+  let traces = 0;
+  for (let index = windowed.length - 1; index >= 0; index--) {
+    if (windowed[index]?.detail?.['parentSpanId'] !== undefined) {
+      continue;
+    }
+    traces++;
+    if (traces > maxTelemetryTraces) {
+      return windowed.slice(index + 1);
+    }
+  }
+  return windowed;
+};
 
 const hasExportAvailability = (context: CadContext): boolean =>
   context.latestGeometryOutcome === 'success' &&
@@ -682,21 +432,23 @@ export const cadMachine = setup({
   actors: {
     connectKernelActor,
     renderModelActor,
-    sceneSnapshotReaderActor,
-    sceneStageWriterActor,
   },
   actions: {
     sendKernelLogs: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'kernelLog');
       const logMethod = event.level === 'error' ? console.error : event.level === 'warn' ? console.warn : console.debug;
       const origin = typeof event.origin === 'string' ? event.origin : 'worker';
-      logMethod(`[Kernel:${origin}]`, event.message, event.data ?? '');
+      logMethod(`[Kernel:${origin}] ${event.message}${consoleLogData(event.data)}`);
       if (context.logActorRef) {
         const storedOrigin = context.entryPath ? { ...event.origin, file: context.entryPath } : event.origin;
         enqueue.sendTo(context.logActorRef, {
           type: 'addLog',
           message: event.message,
-          options: { level: event.level, origin: storedOrigin, data: event.data },
+          options: {
+            level: event.level,
+            origin: storedOrigin,
+            data: event.data,
+          },
         });
       }
     }),
@@ -705,10 +457,18 @@ export const cadMachine = setup({
         return;
       }
 
+      // The parent's handler is a no-op when nothing changed, but a handled
+      // event still mints a new snapshot for all of its subscribers.
+      const available = hasExportAvailability(context);
+      if (available === context.notifiedExportAvailability) {
+        return;
+      }
+
+      enqueue.assign({ notifiedExportAvailability: available });
       enqueue.sendTo(context.parentRef, {
         type: 'geometryUnit.exportAvailabilityChanged',
         actorId: self.id,
-        available: hasExportAvailability(context),
+        available,
       });
     }),
     trackProgress: assign({
@@ -720,7 +480,12 @@ export const cadMachine = setup({
     storeTelemetry: assign({
       telemetryEntries({ context, event }) {
         assertEvent(event, 'kernelTelemetry');
-        return [...context.telemetryEntries, ...event.entries];
+        /* The producer and its clock anchor are batch fields on the wire, and this store outlives the
+         * batch: fold them into each span so a recycled client's `spanId` 0 cannot parent under the
+         * previous client's (I5). This is the same record the JSONL sink writes. */
+        const { origin, epoch } = event.batch;
+        const arrived = event.batch.entries.map((entry) => ({ ...entry, origin, epoch }));
+        return boundTelemetryEntries([...context.telemetryEntries, ...arrived]);
       },
     }),
     setEntryPath: assign({
@@ -728,6 +493,8 @@ export const cadMachine = setup({
         assertEvent(event, 'setEntryPath');
         return event.entryPath;
       },
+      // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
+      parameterRender: () => undefined,
       latestGeometryOutcome: () => undefined,
       codeIssues: () => [],
       kernelIssues({ context, event }) {
@@ -737,10 +504,15 @@ export const cadMachine = setup({
         return newErrorsMap;
       },
     }),
-    setParameters: assign({
-      parameters({ event }) {
-        assertEvent(event, 'setParameters');
-        return event.parameters;
+    /* Persistence has already landed these bytes; carrying them makes the runtime observe the
+     * revision it is about to be told about, so the sidecar's watch event renders nothing. */
+    setParameterRender: assign({
+      parameterRender({ event }) {
+        if (event.type === 'commitParameters') {
+          return { kind: 'commit', stage: event.stage } as const;
+        }
+        assertEvent(event, 'scrubParameters');
+        return { kind: 'scrub', parameters: event.parameters } as const;
       },
       latestGeometryOutcome: () => undefined,
     }),
@@ -762,13 +534,11 @@ export const cadMachine = setup({
           }
           return newIssues;
         },
-        sceneTimeline: settleSceneTimeline(context.sceneTimeline, 'complete'),
       });
       enqueue.emit({ type: 'geometryEvaluated', geometry: event.geometry });
     }),
     setGeometryFailure: assign({
       latestGeometryOutcome: () => 'failure',
-      sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'failed'),
       kernelIssues({ context, event }) {
         assertEvent(event, 'geometryFailed');
         const currentEntryPath = context.entryPath;
@@ -798,24 +568,20 @@ export const cadMachine = setup({
         return event.errors;
       },
     }),
-    setDefaultParameters: assign({
-      defaultParameters({ event }) {
+    setParameterManifest: assign({
+      parameterManifest({ event }) {
         assertEvent(event, 'parametersParsed');
-        return event.defaultParameters;
-      },
-      jsonSchema({ event }) {
-        assertEvent(event, 'parametersParsed');
-        return event.jsonSchema;
+        return event.manifest;
       },
     }),
     initializeModel: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'initializeModel');
       enqueue.assign({
         entryPath: event.entryPath,
-        parameters: event.parameters ?? {},
         codeIssues: [],
         latestGeometryOutcome: undefined,
-        jsonSchema: undefined,
+        parameterManifest: undefined,
+        parameterRender: undefined,
       });
     }),
     storeKernelConnection: enqueueActions(({ enqueue, context, event }) => {
@@ -834,144 +600,6 @@ export const cadMachine = setup({
     bumpRequestedRenderId: assign({
       lastRequestedRenderId({ context }) {
         return context.lastRequestedRenderId + 1;
-      },
-      sceneTimeline: ({ context }) => clearSceneTimeline(context.sceneTimeline),
-    }),
-    appendSceneUpdate: assign({
-      sceneTimeline({ context, event }) {
-        assertEvent(event, 'sceneUpdate');
-        return appendSceneTimelineUpdate(context.sceneTimeline, event.update);
-      },
-    }),
-    selectSceneSequence: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'selectSceneSequence');
-      const entry = context.sceneTimeline.entries.find((candidate) => candidate.sequence === event.sequence);
-      enqueue.assign({
-        sceneTimeline: selectSceneTimelineSequence(context.sceneTimeline, event.sequence),
-      });
-      if (!entry?.update && entry?.bookmark && entry.availability !== 'rehydrating' && context.kernelClient) {
-        enqueue.sendTo('sceneSnapshotReaderActor', {
-          type: 'readSceneSnapshot',
-          client: context.kernelClient,
-          renderId: entry.renderId,
-          sequence: entry.sequence,
-          revision: entry.revision,
-          sceneDigest: entry.sceneDigest,
-          bookmarkId: entry.bookmark.id,
-        });
-      }
-    }),
-    followLiveScene: assign({
-      sceneTimeline: ({ context }) => selectSceneTimelineSequence(context.sceneTimeline, 'live'),
-    }),
-    saveSelectedSceneStage: enqueueActions(({ enqueue, context }) => {
-      const { sceneTimeline, fileManagerRef, entryPath } = context;
-      if (sceneTimeline.artifactSave.status === 'saving') {
-        return;
-      }
-      const selected = sceneTimeline.entries.find((entry) => entry.sequence === sceneTimeline.selectedSequence);
-      if (!selected) {
-        return;
-      }
-      const stage = selectedPortableSceneStage(sceneTimeline, context.kernelClient);
-      if (!stage || !fileManagerRef || !entryPath) {
-        enqueue.assign({
-          sceneTimeline: {
-            ...sceneTimeline,
-            artifactSave: {
-              status: 'failed',
-              sequence: selected.sequence,
-              message: stage
-                ? 'The project filesystem is not ready'
-                : 'The selected preview stage is not available as a complete scene reference',
-            },
-          },
-        });
-        return;
-      }
-      enqueue.assign({
-        sceneTimeline: {
-          ...sceneTimeline,
-          artifactSave: { status: 'saving', sequence: selected.sequence },
-        },
-      });
-      enqueue.sendTo('sceneStageWriterActor', {
-        type: 'writeSceneStage',
-        renderId: selected.renderId,
-        fileManagerRef,
-        sequence: selected.sequence,
-        entryPath,
-        label: selected.label,
-        stage,
-      });
-    }),
-    storeSceneStageSaved: assign({
-      sceneTimeline({ context, event }) {
-        assertEvent(event, 'sceneStageSaved');
-        const save = context.sceneTimeline.artifactSave;
-        if (
-          save.status !== 'saving' ||
-          save.sequence !== event.sequence ||
-          context.sceneTimeline.renderId !== event.renderId
-        ) {
-          return context.sceneTimeline;
-        }
-        return {
-          ...context.sceneTimeline,
-          artifactSave: { status: 'saved', sequence: event.sequence, path: event.path },
-        };
-      },
-    }),
-    storeSceneStageSaveFailure: assign({
-      sceneTimeline({ context, event }) {
-        assertEvent(event, 'sceneStageSaveFailed');
-        const save = context.sceneTimeline.artifactSave;
-        if (
-          save.status !== 'saving' ||
-          save.sequence !== event.sequence ||
-          context.sceneTimeline.renderId !== event.renderId
-        ) {
-          return context.sceneTimeline;
-        }
-        return {
-          ...context.sceneTimeline,
-          artifactSave: { status: 'failed', sequence: event.sequence, message: event.message },
-        };
-      },
-    }),
-    failSceneTimeline: assign({
-      sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'failed'),
-    }),
-    cancelSceneTimeline: assign({
-      sceneTimeline: ({ context }) => settleSceneTimeline(context.sceneTimeline, 'cancelled'),
-    }),
-    storeRehydratedSceneSnapshot: assign({
-      sceneTimeline({ context, event }) {
-        assertEvent(event, 'sceneSnapshotLoaded');
-        return rehydrateSceneTimelineEntry(context.sceneTimeline, {
-          renderId: event.renderId,
-          sequence: event.sequence,
-          revision: event.revision,
-          sceneDigest: event.sceneDigest,
-          snapshot: event.snapshot,
-        });
-      },
-    }),
-    storeSceneSnapshotFailure: assign({
-      sceneTimeline({ context, event }) {
-        assertEvent(event, 'sceneSnapshotFailed');
-        if (context.sceneTimeline.renderId !== event.renderId) {
-          return context.sceneTimeline;
-        }
-        const issue: SceneTimelineIssue = { type: 'snapshot-read-failed', message: event.message };
-        const entries = context.sceneTimeline.entries.map((entry): SceneTimelineEntry => {
-          return entry.sequence === event.sequence ? { ...entry, availability: 'unavailable' } : entry;
-        });
-        return {
-          ...context.sceneTimeline,
-          issue,
-          entries,
-        };
       },
     }),
     setSettledRenderId: assign({
@@ -994,10 +622,7 @@ export const cadMachine = setup({
       },
     }),
     destroyKernel: assign(({ context }) => {
-      for (const cleanup of context.eventCleanups) {
-        safeDispose(cleanup);
-      }
-      safeDispose(() => context.kernelClient?.terminate());
+      disposeCadRuntime(context);
       return {
         eventCleanups: [],
         kernelClient: undefined,
@@ -1014,8 +639,7 @@ export const cadMachine = setup({
     entryPath: undefined,
     screenshot: undefined,
     units: { length: 'mm' },
-    parameters: {},
-    defaultParameters: {},
+    parameterRender: undefined,
     latestGeometryOutcome: undefined,
     geometry: undefined,
     kernelIssues: new Map(),
@@ -1026,28 +650,17 @@ export const cadMachine = setup({
     fileManagerRef: input.fileManagerRef,
     kernelOptionsFactory: input.kernelOptionsFactory,
     fileSystemRoot: input.fileSystemRoot,
-    jsonSchema: undefined,
+    parameterManifest: undefined,
     renderPhase: undefined,
     telemetryEntries: [],
-    renderTimeout: defaultRenderTimeout,
+    renderTimeout: input.renderTimeout ?? defaultRenderTimeout,
     kernelClient: undefined,
     capabilities: undefined,
     activeKernelId: undefined,
     eventCleanups: [],
     lastRequestedRenderId: 0,
     lastSettledRenderId: 0,
-    sceneTimeline: createSceneTimeline(),
   }),
-  invoke: [
-    {
-      id: 'sceneSnapshotReaderActor',
-      src: 'sceneSnapshotReaderActor',
-    },
-    {
-      id: 'sceneStageWriterActor',
-      src: 'sceneStageWriterActor',
-    },
-  ],
   exit: ['destroyKernel'],
   on: {
     filesystemBindingChanged: {
@@ -1057,33 +670,6 @@ export const cadMachine = setup({
     },
     setRenderTimeout: {
       actions: ['applyRenderTimeout'],
-    },
-    sceneUpdate: {
-      actions: ['appendSceneUpdate'],
-    },
-    selectSceneSequence: {
-      actions: ['selectSceneSequence'],
-    },
-    followLiveScene: {
-      actions: ['followLiveScene'],
-    },
-    saveSelectedSceneStage: {
-      actions: ['saveSelectedSceneStage'],
-    },
-    sceneStageSaved: {
-      actions: ['storeSceneStageSaved'],
-    },
-    sceneStageSaveFailed: {
-      actions: ['storeSceneStageSaveFailure'],
-    },
-    sceneSnapshotLoaded: {
-      actions: ['storeRehydratedSceneSnapshot'],
-    },
-    sceneSnapshotFailed: {
-      actions: ['storeSceneSnapshotFailure'],
-    },
-    progressiveSceneCancelled: {
-      actions: ['cancelSceneTimeline'],
     },
   },
   initial: 'connecting',
@@ -1113,7 +699,12 @@ export const cadMachine = setup({
               kernelIssues({ context }) {
                 const newMap = new Map(context.kernelIssues);
                 newMap.set('__connection__', [
-                  { message: errorMessage, code: 'RUNTIME', type: 'runtime', severity: 'error' },
+                  {
+                    message: errorMessage,
+                    code: 'RUNTIME',
+                    type: 'runtime',
+                    severity: 'error',
+                  },
                 ]);
                 return newMap;
               },
@@ -1133,14 +724,21 @@ export const cadMachine = setup({
             actions: ['storeKernelConnection', 'notifyExportAvailability'],
           },
         ],
-        initializeModel: { actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability'] },
-        setEntryPath: { actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'] },
-        setParameters: { actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'] },
+        initializeModel: {
+          actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability'],
+        },
+        setEntryPath: {
+          actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
+        },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
-        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
+        capabilitiesUpdated: {
+          actions: ['setCapabilities', 'notifyExportAvailability'],
+        },
+        activeKernelChanged: {
+          actions: ['setActiveKernelId', 'notifyExportAvailability'],
+        },
       },
     },
 
@@ -1154,22 +752,41 @@ export const cadMachine = setup({
           target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
+        commitParameters: {
+          target: '#cad.rendering.submitting',
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
+        },
+        scrubParameters: {
+          target: '#cad.rendering.submitting',
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
-        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        geometryComputed: {
+          actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        geometryFailed: {
+          actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
-        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
+        capabilitiesUpdated: {
+          actions: ['setCapabilities', 'notifyExportAvailability'],
+        },
+        activeKernelChanged: {
+          actions: ['setActiveKernelId', 'notifyExportAvailability'],
+        },
         stateChanged: [
-          { guard: ({ event }) => event.state === 'buffering', target: 'buffering' },
-          { guard: ({ event }) => event.state === 'rendering', target: 'rendering' },
+          {
+            guard: ({ event }) => event.state === 'buffering',
+            target: 'buffering',
+          },
+          {
+            guard: ({ event }) => event.state === 'rendering',
+            target: 'rendering',
+          },
           { guard: ({ event }) => event.state === 'error', target: 'error' },
         ],
       },
@@ -1186,21 +803,37 @@ export const cadMachine = setup({
           target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
+        commitParameters: {
+          target: '#cad.rendering.submitting',
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
+        },
+        scrubParameters: {
+          target: '#cad.rendering.submitting',
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
-        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        geometryComputed: {
+          actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        geometryFailed: {
+          actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
-        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
+        capabilitiesUpdated: {
+          actions: ['setCapabilities', 'notifyExportAvailability'],
+        },
+        activeKernelChanged: {
+          actions: ['setActiveKernelId', 'notifyExportAvailability'],
+        },
         stateChanged: [
-          { guard: ({ event }) => event.state === 'rendering', target: 'rendering' },
+          {
+            guard: ({ event }) => event.state === 'rendering',
+            target: 'rendering',
+          },
           { guard: ({ event }) => event.state === 'idle', target: 'idle' },
           { guard: ({ event }) => event.state === 'error', target: 'error' },
         ],
@@ -1209,17 +842,17 @@ export const cadMachine = setup({
 
     rendering: {
       tags: 'cad-loading',
-      entry: assign({ sceneTimeline: ({ context }) => clearSceneTimeline(context.sceneTimeline) }),
       initial: 'active',
       exit: assign({ renderPhase: () => undefined }),
       states: {
         submitting: {
           invoke: {
             src: 'renderModelActor',
-            input: ({ context }) => ({
+            input: ({ context, self }) => ({
               client: context.kernelClient,
               entryPath: context.entryPath,
-              parameters: context.parameters,
+              parameterRender: context.parameterRender,
+              isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: {
               target: '#cad.idle',
@@ -1243,7 +876,12 @@ export const cadMachine = setup({
                       : 'RUNTIME';
                   const newMap = new Map(context.kernelIssues);
                   newMap.set(entryPath, [
-                    { message: errorMessage, code: errorCode, type: 'runtime', severity: 'error' },
+                    {
+                      message: errorMessage,
+                      code: errorCode,
+                      type: 'runtime',
+                      severity: 'error',
+                    },
                   ]);
                   return newMap;
                 },
@@ -1252,10 +890,22 @@ export const cadMachine = setup({
           },
           on: {
             stateChanged: [
-              { guard: ({ event }) => event.state === 'buffering', target: '#cad.buffering' },
-              { guard: ({ event }) => event.state === 'rendering', target: '#cad.rendering.active' },
-              { guard: ({ event }) => event.state === 'idle', target: '#cad.idle' },
-              { guard: ({ event }) => event.state === 'error', target: '#cad.error' },
+              {
+                guard: ({ event }) => event.state === 'buffering',
+                target: '#cad.buffering',
+              },
+              {
+                guard: ({ event }) => event.state === 'rendering',
+                target: '#cad.rendering.active',
+              },
+              {
+                guard: ({ event }) => event.state === 'idle',
+                target: '#cad.idle',
+              },
+              {
+                guard: ({ event }) => event.state === 'error',
+                target: '#cad.error',
+              },
             ],
           },
         },
@@ -1272,21 +922,39 @@ export const cadMachine = setup({
           reenter: true,
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
+        commitParameters: {
+          target: '#cad.rendering.submitting',
+          reenter: true,
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
+        },
+        scrubParameters: {
+          target: '#cad.rendering.submitting',
+          reenter: true,
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
-        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        geometryComputed: {
+          actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        geometryFailed: {
+          actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
-        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
+        capabilitiesUpdated: {
+          actions: ['setCapabilities', 'notifyExportAvailability'],
+        },
+        activeKernelChanged: {
+          actions: ['setActiveKernelId', 'notifyExportAvailability'],
+        },
         stateChanged: [
-          { guard: ({ event }) => event.state === 'buffering', target: 'buffering' },
+          {
+            guard: ({ event }) => event.state === 'buffering',
+            target: 'buffering',
+          },
           { guard: ({ event }) => event.state === 'idle', target: 'idle' },
           { guard: ({ event }) => event.state === 'error', target: 'error' },
         ],
@@ -1295,7 +963,6 @@ export const cadMachine = setup({
 
     error: {
       tags: 'cad-runtime-error',
-      entry: 'failSceneTimeline',
       on: {
         initializeModel: {
           target: 'connecting',
@@ -1305,23 +972,34 @@ export const cadMachine = setup({
           target: 'connecting',
           actions: ['destroyKernel', 'bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
-        },
         setCodeIssues: { actions: 'setCodeIssues' },
-        geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
-        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        geometryComputed: {
+          actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        geometryFailed: {
+          actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
+        },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
-        capabilitiesUpdated: { actions: ['setCapabilities', 'notifyExportAvailability'] },
-        activeKernelChanged: { actions: ['setActiveKernelId', 'notifyExportAvailability'] },
+        capabilitiesUpdated: {
+          actions: ['setCapabilities', 'notifyExportAvailability'],
+        },
+        activeKernelChanged: {
+          actions: ['setActiveKernelId', 'notifyExportAvailability'],
+        },
         stateChanged: [
-          { guard: ({ event }) => event.state === 'buffering', target: 'buffering' },
+          {
+            guard: ({ event }) => event.state === 'buffering',
+            target: 'buffering',
+          },
           { guard: ({ event }) => event.state === 'idle', target: 'idle' },
-          { guard: ({ event }) => event.state === 'rendering', target: 'rendering' },
+          {
+            guard: ({ event }) => event.state === 'rendering',
+            target: 'rendering',
+          },
         ],
       },
     },
@@ -1341,28 +1019,29 @@ export const selectCadFailureIssues = (snapshot: CadSnapshot): readonly KernelIs
   return selectIssuesByPrecedence(snapshot.context, ['__connection__', snapshot.context.entryPath, '__render__']);
 };
 
-export const selectSceneTimeline = (snapshot: CadSnapshot): SceneTimeline => snapshot.context.sceneTimeline;
-export const selectSceneTimelineEntries = (snapshot: CadSnapshot): SceneTimeline['entries'] =>
-  selectSceneTimeline(snapshot).entries;
-export const selectSceneTimelineSelection = (snapshot: CadSnapshot): number | undefined =>
-  selectSceneTimeline(snapshot).selectedSequence;
-export const selectSceneTimelineFollowLive = (snapshot: CadSnapshot): boolean =>
-  selectSceneTimeline(snapshot).followLive;
-export const selectSceneTimelineStreamState = (snapshot: CadSnapshot): SceneTimeline['streamState'] =>
-  selectSceneTimeline(snapshot).streamState;
-export const selectSceneTimelineArtifactSave = (snapshot: CadSnapshot): SceneTimeline['artifactSave'] =>
-  selectSceneTimeline(snapshot).artifactSave;
-export const selectCanSaveSelectedSceneStage = (snapshot: CadSnapshot): boolean =>
-  snapshot.context.sceneTimeline.artifactSave.status !== 'saving' &&
-  Boolean(snapshot.context.entryPath) &&
-  Boolean(snapshot.context.fileManagerRef) &&
-  Boolean(selectedPortableSceneStage(snapshot.context.sceneTimeline, snapshot.context.kernelClient));
-
-export const selectProgressiveSceneCapability = (snapshot: CadSnapshot): ProgressiveSceneCapability | undefined => {
-  const { activeKernelId, capabilities } = snapshot.context;
-  if (!activeKernelId || !capabilities) {
+/** The phase a viewer shows while the CAD actor is busy, or `undefined` when it is not. */
+export const selectCadLoadingPhase = (snapshot: CadSnapshot): 'buffering' | 'connecting' | 'rendering' | undefined => {
+  if (!snapshot.hasTag('cad-loading')) {
     return undefined;
   }
-  return Object.entries(capabilities.renderCapabilities).find(([kernelId]) => kernelId === activeKernelId)?.[1]
-    .progressiveScene;
+  for (const phase of ['connecting', 'buffering', 'rendering'] as const) {
+    if (snapshot.matches(phase)) {
+      return phase;
+    }
+  }
+  return undefined;
 };
+
+/** Select one entry's kernel issues. A factory because the entry path is the caller's, not the machine's. */
+export const selectCadEntryIssues =
+  (entryPath: string) =>
+  (snapshot: CadSnapshot): readonly KernelIssue[] | undefined =>
+    snapshot.context.kernelIssues.get(entryPath);
+
+export const selectCadRenderTimeout = (snapshot: CadSnapshot): number => snapshot.context.renderTimeout;
+
+export const selectCadGeometry = (snapshot: CadSnapshot): Geometry | undefined => snapshot.context.geometry;
+export const selectCadUnits = (snapshot: CadSnapshot): CadContext['units'] => snapshot.context.units;
+export const selectCadKernelClient = (snapshot: CadSnapshot): AppRuntimeClient | undefined =>
+  snapshot.context.kernelClient;
+export const selectIsCadLoading = (snapshot: CadSnapshot): boolean => snapshot.hasTag('cad-loading');

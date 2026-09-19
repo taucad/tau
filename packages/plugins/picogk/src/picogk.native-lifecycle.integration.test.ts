@@ -1,6 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync, readFileSync, rmSync, unwatchFile, watchFile, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { assertSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
@@ -20,15 +19,7 @@ it('should release native listeners on default client shutdown and preserve sibl
     workerSha256: string;
     resourceFiles: Array<{ path: string; sha256: string; label: string }>;
   };
-  const trustRoot = mkdtempSync(join(tmpdir(), 'tau-native-lifecycle-'));
-  const trustFile = join(trustRoot, 'trust.json');
-  writeFileSync(trustFile, '{"version":1,"trusted":true}\n');
-  const trustListener = (): void => {
-    // Keep the shared watcher observable after both native sessions release it.
-  };
-  const watcher = watchFile(trustFile, { interval: 250, persistent: false }, trustListener);
   const signals = ['exit', 'SIGINT', 'SIGTERM'] as const;
-  const baseline = signals.map((signal) => process.listenerCount(signal));
   const runtime = defineRuntime({
     plugins: [
       picogk({
@@ -40,7 +31,6 @@ it('should release native listeners on default client shutdown and preserve sibl
               ...resource,
               path: join(targetRoot, path),
             })),
-            trustFile,
             requestTimeout: 120_000,
           },
         },
@@ -51,6 +41,13 @@ it('should release native listeners on default client shutdown and preserve sibl
     'main.cs':
       'using System.Numerics; using PicoGK; Library.Go(1f, () => { Library.oViewer().Add(Utils.mshCreateCube(new Vector3(2, 4, 6))); });',
   };
+  // The sandbox runtime registers its own process-wide cleanup listeners once, on first launch;
+  // they outlive every session, so the baseline is taken after a warm-up session has released.
+  const warmUp = createTestRuntimeClient({ runtime, files });
+  const warmed = await warmUp.render({ source: { path: 'main.cs' } });
+  expect(warmed.superseded).toBe(false);
+  await warmUp.shutdown();
+  const baseline = signals.map((signal) => process.listenerCount(signal));
   const first = createTestRuntimeClient({ runtime, files });
   const second = createTestRuntimeClient({ runtime, files });
   try {
@@ -63,10 +60,8 @@ it('should release native listeners on default client shutdown and preserve sibl
       }
     }
     expect(signals.map((signal) => process.listenerCount(signal))).toEqual(baseline.map((count) => count + 2));
-    expect(watcher.listenerCount('change')).toBe(3);
     await first.shutdown();
     expect(signals.map((signal) => process.listenerCount(signal))).toEqual(baseline.map((count) => count + 1));
-    expect(watcher.listenerCount('change')).toBe(2);
     const sibling = await second.render({ source: { path: 'main.cs' } });
     expect(sibling.superseded).toBe(false);
     if (!sibling.superseded) {
@@ -74,10 +69,7 @@ it('should release native listeners on default client shutdown and preserve sibl
     }
     await second.shutdown();
     expect(signals.map((signal) => process.listenerCount(signal))).toEqual(baseline);
-    expect(watcher.listenerCount('change')).toBe(1);
   } finally {
     await Promise.all([first.shutdown(), second.shutdown()]);
-    unwatchFile(trustFile, trustListener);
-    rmSync(trustRoot, { recursive: true, force: true });
   }
 }, 120_000);

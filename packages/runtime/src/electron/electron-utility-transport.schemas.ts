@@ -9,6 +9,7 @@
 
 import type { RuntimeFileSystem } from '#filesystem/index.js';
 import type { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
+import type { MessagePortMainLike } from '@taucad/rpc';
 import { z } from 'zod';
 
 /**
@@ -33,8 +34,26 @@ export const electronUtilityClientOptionsSchema = z.object({
 /** Renderer-side validated options inferred from schema. @public */
 export type ElectronUtilityTransportOptions = z.input<typeof electronUtilityClientOptionsSchema>;
 
+/** Emitter-shaped port options for a main-brokered utility-to-utility client. @public */
+export const electronUtilityMainClientOptionsSchema = z.object({
+  port: z.custom<MessagePortMainLike>(
+    (value) =>
+      value !== null &&
+      typeof value === 'object' &&
+      typeof (value as { postMessage?: unknown }).postMessage === 'function' &&
+      typeof (value as { on?: unknown }).on === 'function',
+    { message: 'port must be an emitter-shaped MessagePortMain' },
+  ),
+  release: z
+    .custom<(reason: 'requested' | 'render-timeout') => void>((value) => typeof value === 'function', {
+      message: 'release must be a function',
+    })
+    .optional(),
+});
+
 /** Utility-process options owned by the standalone host factory. @public */
 export type ElectronUtilityHostOptions = {
-  readonly fileSystem: RuntimeFileSystem;
+  /** Static filesystem for callers that do not transfer one in the boot frame. */
+  readonly fileSystem?: RuntimeFileSystem;
   readonly worker: KernelRuntimeWorker;
 };

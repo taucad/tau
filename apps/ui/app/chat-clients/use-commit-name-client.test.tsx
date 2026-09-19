@@ -88,4 +88,26 @@ describe('useCommitNameClient', () => {
       expect((error as NameGeneratorRequestError).status).toBe(429);
     }
   });
+
+  it('should retain the helper funded-limit code', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          category: 'rate_limit',
+          title: 'Rate Limit Exceeded',
+          message: 'The naming helper is at its funded-operation failsafe.',
+          code: 'FUNDED_HELPER_LIMIT',
+          httpStatus: 429,
+        }),
+        { status: 429, statusText: 'Too Many Requests' },
+      ),
+    );
+    const { result } = renderHook(() => useCommitNameClient());
+
+    await expect(act(async () => result.current.generate('Summarise this diff', 'proj_test'))).rejects.toMatchObject({
+      name: 'NameGeneratorRequestError',
+      status: 429,
+      code: 'FUNDED_HELPER_LIMIT',
+    });
+  });
 });

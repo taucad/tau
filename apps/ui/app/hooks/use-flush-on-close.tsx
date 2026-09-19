@@ -5,9 +5,27 @@ import type { ReactNode } from 'react';
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Which half of A38's two-phase unload is running.
+ *
+ * `hidden` is the real close in a browser: the document is still alive, so a
+ * callback can send, await and see an answer. `pagehide` is best-effort — the
+ * document is going away and nothing asynchronous will finish — so a callback
+ * that has one last thing to say says it there and expects no reply.
+ *
+ * @public
+ */
+export type FlushPhase = 'hidden' | 'pagehide';
+
+/** Producer flushes settle before session close preparation begins. */
+export type FlushStage = 'producer' | 'session';
+
+type FlushCallback = (phase: FlushPhase) => void | Promise<void>;
+
 type FlushRegistration = {
   id: symbol;
-  callbackRef: React.RefObject<() => void>;
+  stage: FlushStage;
+  callbackRef: React.RefObject<FlushCallback>;
 };
 
 type UnloadContextValue = {
@@ -28,10 +46,11 @@ const UnloadContext = createContext<UnloadContextValue | undefined>(undefined);
 /**
  * Global unload service provider.
  *
- * Attaches a single set of window-level listeners for `beforeunload` and
- * `visibilitychange` events. When either fires, all registered flush
- * callbacks are invoked synchronously. Must be placed near the root of
- * the React tree.
+ * Attaches one set of document-level listeners for A38's two-phase unload:
+ * `visibilitychange: hidden`, which is the real close and the phase that can
+ * still do work, and `pagehide`, which is best-effort. `beforeunload` is gone:
+ * `pagehide` fires wherever it did, fires for the back/forward cache too, and
+ * does not make the browser consider showing a leave-site prompt.
  *
  * Individual services register their flush callbacks via {@link useFlushOnClose}.
  */
@@ -53,23 +72,42 @@ export function UnloadProvider({ children }: { readonly children: ReactNode }): 
   }, []);
 
   useEffect(() => {
-    const flush = (): void => {
-      for (const reg of registryRef.current) {
-        reg.callbackRef.current();
+    const flushStage = async (registrations: readonly FlushRegistration[], stage: FlushStage): Promise<void> => {
+      await Promise.allSettled(
+        registrations
+          .filter((registration) => registration.stage === stage)
+          .map(async (registration) => registration.callbackRef.current('hidden')),
+      );
+    };
+    const flushHidden = async (): Promise<void> => {
+      const registrations = [...registryRef.current];
+      await flushStage(registrations, 'producer');
+      await flushStage(registrations, 'session');
+    };
+    const flushPageHide = (): void => {
+      for (const registration of registryRef.current) {
+        if (registration.stage === 'session') {
+          /* Synchronous by contract: pagehide can only emit data prepared by
+           * hidden and cannot wait for a fresh producer flush. */
+          void registration.callbackRef.current('pagehide');
+        }
       }
     };
 
     const handleVisibilityChange = (): void => {
       if (document.visibilityState === 'hidden') {
-        flush();
+        void flushHidden();
       }
     };
+    const handlePageHide = (): void => {
+      flushPageHide();
+    };
 
-    globalThis.addEventListener('beforeunload', flush);
+    globalThis.addEventListener('pagehide', handlePageHide);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      globalThis.removeEventListener('beforeunload', flush);
+      globalThis.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
@@ -97,20 +135,25 @@ function useUnloadContext(): UnloadContextValue {
 }
 
 /**
- * Register a callback to be called when the page is about to unload or
- * becomes hidden. Useful for flushing debounced state to prevent data loss.
+ * Register a callback for both phases of the unload (A38).
+ *
+ * Producer callbacks run first and may await their persistence acknowledgements
+ * during `hidden`; session callbacks run only after all producers settle.
+ * `pagehide` invokes session callbacks synchronously and skips producers, so it
+ * can send prepared data but cannot start another persistence flush.
  *
  * The callback is stored via ref -- it never causes re-registration when
  * the closure changes. Registration is effect-based and StrictMode-safe.
  *
  * @example
  * ```tsx
- * useFlushOnClose(() => {
+ * useFlushOnClose(async () => {
  *   actorRef.send({ type: 'flushNow' });
- * });
+ *   await waitUntilIdle(actorRef);
+ * }, { stage: 'producer' });
  * ```
  */
-export function useFlushOnClose(callback: () => void): void {
+export function useFlushOnClose(callback: FlushCallback, options: Readonly<{ stage: FlushStage }>): void {
   const { register, unregister } = useUnloadContext();
 
   // Stable callback ref -- updated every render, read in handler
@@ -124,6 +167,7 @@ export function useFlushOnClose(callback: () => void): void {
     const id = Symbol('flush-on-close');
     const registration: FlushRegistration = {
       id,
+      stage: options.stage,
       callbackRef,
     };
 
@@ -132,5 +176,5 @@ export function useFlushOnClose(callback: () => void): void {
     return () => {
       unregister(id);
     };
-  }, [register, unregister]);
+  }, [options.stage, register, unregister]);
 }

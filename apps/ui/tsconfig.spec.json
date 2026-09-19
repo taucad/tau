@@ -1,6 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "jsx": "react-jsx",
     "module": "ESNext",
@@ -31,6 +33,10 @@
     "app/**/*.tsx",
     "app/**/*.js",
     "app/**/*.jsx",
+    "build-environment.ts",
+    "build-environment.test.ts",
+    "desktop/**/*.ts",
+    "serve/**/*.ts",
     "tests/**/*.spec.ts",
     "tests/**/*.test.ts",
     "tests/**/*.spec.tsx",

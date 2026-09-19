@@ -106,6 +106,20 @@ describe('WorkspacePathResolver', () => {
   });
 });
 
+/*
+ * The Home file manager `root-layout.tsx` mounts on every route. Its root is `/`,
+ * where the prefix used to be built as `'//'` and matched nothing (gate G-D, H1).
+ */
+describe('WorkspacePathResolver at the Home root', () => {
+  it('should resolve every absolute path under root "/"', () => {
+    const paths = new WorkspacePathResolver('/');
+    expect(paths.rootPrefix).toBe('/');
+    expect(paths.toRelativePath('/a/b')).toBe('a/b');
+    expect(paths.toRelativePath('/')).toBe('');
+    expect(paths.toRelativePath('/node_modules/x')).toBe('node_modules/x');
+  });
+});
+
 describe('WorkspacePathResolver global node_modules', () => {
   it('maps global /node_modules absolute paths via toRelativePath', () => {
     const paths = new WorkspacePathResolver('/projects/xyz');

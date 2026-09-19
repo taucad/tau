@@ -1,35 +1,43 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Bot, ChevronDown, Paperclip, Wrench, AtSign } from 'lucide-react';
-import type { Chat, ToolSelection } from '@taucad/chat';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import { Bot, Brain, Paperclip, Wrench, AtSign, SlidersHorizontal } from 'lucide-react';
+import type { AcpSessionData, Chat, ToolSelection } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatModelSelector, openModelSelectorKeyCombination } from '#components/chat/chat-model-selector.js';
-import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
+import { ChatAgentModelSelector, useChatAgentModel } from '#components/chat/chat-agent-model-selector.js';
+import { ChatBranchPicker } from '#components/chat/chat-branch-picker.js';
+import {
+  ChatExecutionSelector,
+  formatChatAgentActivity,
+  useChatAgentSelection,
+} from '#components/chat/chat-execution-selector.js';
+import { CreditBalanceChip } from '#components/billing/credit-estimate.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
-import { ChatRevisionSelector } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatAgentSelector, toggleModeKeyCombination } from '#components/chat/chat-mode-selector.js';
 import { Button } from '@taucad/ui/components/button';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
-import { ChatTextareaDesktopImages } from '#components/chat/chat-textarea-desktop-images.js';
+import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
-import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useSelector } from '@xstate/react';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useDraftActions } from '#hooks/use-chat.js';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useFeature } from '#flags/use-feature.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
-import { useChatEditor, buildEditorContentJson } from '#components/chat/tiptap/use-chat-editor.js';
-import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
+import { buildEditorContentJson, extractContent, useChatEditor } from '#components/chat/tiptap/use-chat-editor.js';
+import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
 import { buildPastedContent } from '#utils/at-reference.utils.js';
@@ -37,7 +45,7 @@ import { skillMetadataToSlashCommand, useSkillsCatalog } from '#hooks/use-skills
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
-  image: 'Add image(s)',
+  image: 'Add files',
   viewer: 'Add screenshot',
   reference: 'Add reference',
 };
@@ -54,7 +62,11 @@ type ChatTextareaDesktopProperties = {
   readonly dragKind: ChatTextareaDragKind | undefined;
   readonly isSubmitting: boolean;
   readonly inputText: string;
-  readonly images: string[];
+  readonly attachments: readonly DraftAttachment[];
+  readonly attachmentDirectory: AttachmentDirectories;
+  readonly sendBlockReason: string | undefined;
+  readonly attachmentAccept: string;
+  readonly attachmentInputSupported: boolean;
   readonly selectedToolChoice: ToolSelection;
   readonly status: string;
   readonly selectedModel: ResolvedModel;
@@ -66,6 +78,8 @@ type ChatTextareaDesktopProperties = {
   readonly chats: Chat[];
   readonly actionItems?: ContextSuggestionItem[];
   readonly setDraftText: (text: string) => void;
+  readonly acpAgentId?: string;
+  readonly acpSessionData?: AcpSessionData;
 
   // Refs
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
@@ -87,12 +101,30 @@ type ChatTextareaDesktopProperties = {
   readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  readonly handleAddImage: (image: string, options?: DraftImageOptions) => void;
+  readonly handleAddImage: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
   readonly onEscapePressed?: () => void;
   readonly handleTextareaBlur: () => void;
-  readonly removeImage: (index: number) => void;
+  readonly removeAttachment: (index: number) => void;
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
+};
+
+/** Map one ACP command to the existing slash menu without changing its native invocation. @public */
+export const acpCommandToSlashCommand = (
+  command: AcpSessionData['commands'][number],
+  agentId: string,
+): SlashCommandItem => {
+  const invocation = command.name.startsWith('$') || command.name.startsWith('/') ? command.name : `/${command.name}`;
+  return {
+    id: invocation,
+    label: invocation,
+    title: command.name,
+    description: command.description,
+    ...(command.input === null || command.input === undefined ? {} : { fullDescription: command.input.hint }),
+    group: 'Commands',
+    source: agentId,
+    commandText: `${invocation} `,
+  };
 };
 
 /**
@@ -119,11 +151,14 @@ export const ChatTextareaDesktop = memo(function ({
   dragKind,
   isSubmitting,
   inputText,
-  images,
+  attachments,
+  attachmentDirectory,
+  sendBlockReason,
+  attachmentAccept,
+  attachmentInputSupported,
   selectedToolChoice,
   status,
   selectedModel,
-  imageInputSupported,
   formattedCancelKeyCombination,
 
   // Context data
@@ -131,6 +166,8 @@ export const ChatTextareaDesktop = memo(function ({
   chats,
   actionItems,
   setDraftText,
+  acpAgentId,
+  acpSessionData,
 
   // Refs
   fileInputReference,
@@ -152,15 +189,23 @@ export const ChatTextareaDesktop = memo(function ({
   onScreenshotAction,
   onEscapePressed,
   handleTextareaBlur,
-  removeImage,
+  removeAttachment,
   setDraftToolChoice,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const skillsCatalog = useSkillsCatalog();
+
+  const commands = acpSessionData?.commands;
   const slashCommandItems = useMemo(
-    () => skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata)),
-    [skillsCatalog],
+    () =>
+      acpAgentId === undefined
+        ? skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata))
+        : (commands ?? []).map((command) => acpCommandToSlashCommand(command, acpAgentId)),
+    [acpAgentId, commands, skillsCatalog],
   );
-  const knownSkillIds = useMemo(() => new Set(slashCommandItems.map((s) => s.id)), [slashCommandItems]);
+  const knownSkillIds = useMemo(
+    () => new Set(slashCommandItems.filter((item) => item.group !== 'Commands').map((item) => item.id)),
+    [slashCommandItems],
+  );
 
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
@@ -198,13 +243,16 @@ export const ChatTextareaDesktop = memo(function ({
     if (!editor) {
       return;
     }
-    if (inputText === '' && !editor.isEmpty) {
+    const currentText = extractContent(editor).text;
+    if (inputText === currentText) {
+      return;
+    }
+    if (inputText === '') {
       editor.commands.clearContent(false);
-    } else if (inputText !== '' && editor.isEmpty) {
+    } else {
       const lazyTree: Map<string, FileEntry> = treeService?.getTreeSnapshot() ?? new Map<string, FileEntry>();
       const segments = buildPastedContent(inputText, { fileTree: lazyTree, chats, knownSkills: knownSkillIds });
-      const json = buildEditorContentJson(segments);
-      editor.commands.setContent(json ?? inputText, { emitUpdate: false });
+      editor.commands.setContent(buildEditorContentJson(segments), { emitUpdate: false });
     }
   }, [inputText, editor, treeService, chats, knownSkillIds]);
 
@@ -296,7 +344,9 @@ export const ChatTextareaDesktop = memo(function ({
     }
   }, []);
 
-  const isDisabled = isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0);
+  const isDisabled =
+    isSubmitDisabled || sendBlockReason !== undefined || (inputText.trim().length === 0 && attachments.length === 0);
+  const blockReasonId = useId();
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -313,7 +363,7 @@ export const ChatTextareaDesktop = memo(function ({
           'relative flex size-full flex-col rounded-2xl border bg-background',
           'cursor-text overflow-hidden',
           'shadow-md',
-          'has-[.tiptap:focus-visible]:ring-2 has-[.tiptap:focus-visible]:ring-ring',
+          'has-[.tiptap:focus-visible]:focus-outline',
           className,
         )}
         onBlur={handleTextareaBlur}
@@ -321,8 +371,15 @@ export const ChatTextareaDesktop = memo(function ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {/* Images */}
-        <ChatTextareaDesktopImages images={images} onRemoveImage={removeImage} />
+        {/* Attachments */}
+        <ChatTextareaAttachmentRail
+          attachments={attachments}
+          directory={attachmentDirectory}
+          blockReason={sendBlockReason}
+          blockReasonId={blockReasonId}
+          size='desktop'
+          onRemove={removeAttachment}
+        />
 
         {/* Editor */}
         <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-auto')} onClick={handleEditorAreaClick}>
@@ -354,8 +411,11 @@ export const ChatTextareaDesktop = memo(function ({
           focusEditor={focusEditor}
           setDraftToolChoice={setDraftToolChoice}
           fileInputReference={fileInputReference}
+          attachmentAccept={attachmentAccept}
           handleFileChange={handleFileChange}
           creationLocationControl={creationLocationControl}
+          acpSessionData={acpSessionData}
+          status={status}
         />
 
         {/* Bottom-right controls */}
@@ -363,10 +423,11 @@ export const ChatTextareaDesktop = memo(function ({
           enableContextActions={enableContextActions}
           handleAtButtonClick={handleAtButtonClick}
           handleFileSelect={handleFileSelect}
-          imageInputSupported={imageInputSupported}
+          attachmentInputSupported={attachmentInputSupported}
           status={status}
           isSubmitting={isSubmitting}
           isDisabled={isDisabled}
+          describedBy={sendBlockReason === undefined ? undefined : blockReasonId}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
           handleSubmit={handleSubmit}
           handleCancelClick={handleCancelClick}
@@ -394,8 +455,11 @@ export const ChatTextareaLeftControls = memo(function ({
   focusEditor,
   setDraftToolChoice,
   fileInputReference,
+  attachmentAccept,
   handleFileChange,
   creationLocationControl,
+  acpSessionData,
+  status,
 }: {
   readonly selectedModel: ResolvedModel;
   readonly enableKernelSelector: boolean;
@@ -404,8 +468,11 @@ export const ChatTextareaLeftControls = memo(function ({
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly fileInputReference: React.RefObject<HTMLInputElement | null>;
+  readonly attachmentAccept: string;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly creationLocationControl?: React.ReactNode;
+  readonly acpSessionData?: AcpSessionData;
+  readonly status: string;
 }): React.JSX.Element {
   // Chat-scoped resolver — falls back to cookie kernel when no chat-local
   // selection exists. Display label follows the chat's active kernel so
@@ -414,13 +481,17 @@ export const ChatTextareaLeftControls = memo(function ({
     kernel: { kernel: selectedKernel },
     execution: { execution },
     agentActivity,
-    session,
+    canSelectExecution,
   } = useChatComposer();
+  const { isOffered: isAgentSelectorOffered, label: selectedAgentLabel } = useChatAgentSelection();
+  const { selectedModel: selectedAgentModel } = useChatAgentModel();
 
   return (
     <div className='absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground'>
       <ChatTextareaModeControl />
-      {session ? (
+      {/* S23: present at one branch, because it is where the second is made. */}
+      <ChatBranchPicker />
+      {canSelectExecution && isAgentSelectorOffered ? (
         <Tooltip>
           <ChatExecutionSelector
             data-chat-textarea-focustrap
@@ -435,25 +506,18 @@ export const ChatTextareaLeftControls = memo(function ({
                   size='sm'
                   aria-label={`Select agent: ${label}`}
                   aria-description={`Agent status: ${formatChatAgentActivity(activity)}`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground'
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7'
                 >
-                  <span
-                    className={cn(
-                      'size-1.5 rounded-full bg-muted-foreground',
-                      activity === 'working' && 'animate-pulse bg-sky-500',
-                      activity === 'approval-required' && 'bg-amber-500',
-                      activity === 'stopping' && 'animate-pulse bg-orange-500',
-                    )}
-                    aria-hidden='true'
-                  />
                   <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{label}</span>
                   <Bot className='size-4 @[22rem]:hidden' aria-hidden='true' />
-                  <ChevronDown className='size-4' aria-hidden='true' />
                 </Button>
               </TooltipTrigger>
             )}
           </ChatExecutionSelector>
-          <TooltipContent>Select agent · {formatChatAgentActivity(agentActivity)}</TooltipContent>
+          {/* The dot is gone, so readiness reads out of the tooltip (Q12.5). */}
+          <TooltipContent>
+            Select agent ({selectedAgentLabel}) · {formatChatAgentActivity(agentActivity)}
+          </TooltipContent>
         </Tooltip>
       ) : null}
       {/* Model selector */}
@@ -470,16 +534,10 @@ export const ChatTextareaLeftControls = memo(function ({
                 <Button
                   variant='outline'
                   size='sm'
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
                   <span className='hidden truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
-                  <span className='relative flex size-4 items-center justify-center'>
-                    <ChevronDown className='absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100' />
-                    <SvgIcon
-                      id={selectedModel.family}
-                      className='absolute scale-100 grayscale transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0'
-                    />
-                  </span>
+                  <SvgIcon id={selectedModel.family} className='size-4 shrink-0 grayscale' />
                 </Button>
               </TooltipTrigger>
             )}
@@ -491,35 +549,51 @@ export const ChatTextareaLeftControls = memo(function ({
             </span>
           </TooltipContent>
         </Tooltip>
-      ) : null}
-      {creationLocationControl}
-      {/* Revision selector */}
-      {execution.kind === 'tau' ? (
+      ) : (
+        /* The ACP sibling: same slot, the agent's own model namespace (V5).
+         * It renders nothing when the host advertised no models. */
         <Tooltip>
-          <ChatRevisionSelector
+          <ChatAgentModelSelector
             data-chat-textarea-focustrap
             popoverProperties={{ align: 'start' }}
             onSelect={focusEditor}
             onClose={focusEditor}
           >
-            {({ currentConfig }) => (
+            {({ selectedModel }) => (
               <TooltipTrigger asChild>
                 <Button
-                  data-slot='chat-revision-selector'
                   variant='outline'
                   size='sm'
-                  aria-label={`Work in: ${currentConfig.label}`}
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                  /* Collapsed to an icon below the breakpoint like every other
+                   * trigger in the row, so the name has to come from here. */
+                  aria-label={`Select model (${selectedModel.name})`}
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
-                  <span className='hidden truncate text-xs @[22rem]:block'>{currentConfig.label}</span>
-                  <currentConfig.icon className='size-4' aria-hidden='true' />
+                  <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
+                  {/* ponytail: the agent's model namespace carries no family, so
+                   * there is no brand sprite to collapse to — one generic glyph,
+                   * not an agentId-to-icon table. */}
+                  <Brain className='size-4 shrink-0' aria-hidden='true' />
                 </Button>
               </TooltipTrigger>
             )}
-          </ChatRevisionSelector>
-          <TooltipContent>Select where this chat writes</TooltipContent>
+          </ChatAgentModelSelector>
+          <TooltipContent>Select model ({selectedAgentModel.name})</TooltipContent>
         </Tooltip>
+      )}
+      {execution.kind === 'acp' ? (
+        <ChatAgentConfigControls
+          key={JSON.stringify([execution.hostId, execution.agentId])}
+          sessionData={acpSessionData}
+          status={status}
+        />
       ) : null}
+      {creationLocationControl}
+      {/* Available and reserved credits (P5/P6). Tau execution only — an
+       * external agent's turns are not funded by this balance. Kept after the
+       * creation-location control so that control stays adjacent to the model
+       * selector, as its own test pins. */}
+      {execution.kind === 'tau' ? <CreditBalanceChip /> : null}
       {/* Kernel selector */}
       {enableKernelSelector ? (
         <Tooltip>
@@ -534,18 +608,13 @@ export const ChatTextareaLeftControls = memo(function ({
                 <Button
                   variant='outline'
                   size='sm'
-                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                  aria-label={`Select kernel (${selectedKernel.name})`}
+                  className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
                 >
                   <span className='hidden items-center gap-1.5 truncate text-xs @[22rem]:inline-flex'>
                     {selectedKernel.name}
                   </span>
-                  <span className='relative flex size-4 items-center justify-center'>
-                    <ChevronDown className='absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100' />
-                    <SvgIcon
-                      id={selectedKernel.id}
-                      className='absolute scale-100 grayscale transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0'
-                    />
-                  </span>
+                  <SvgIcon id={selectedKernel.id} className='size-4 shrink-0 grayscale' />
                 </Button>
               </TooltipTrigger>
             )}
@@ -605,13 +674,147 @@ export const ChatTextareaLeftControls = memo(function ({
         ref={fileInputReference}
         multiple
         type='file'
-        accept='image/*'
+        accept={attachmentAccept}
         className='hidden'
         onChange={handleFileChange}
       />
     </div>
   );
 });
+
+function ChatAgentConfigControls({
+  sessionData,
+  status,
+}: {
+  readonly sessionData?: AcpSessionData;
+  readonly status: string;
+}): React.JSX.Element | undefined {
+  const {
+    execution: { execution, setActiveExecution },
+  } = useChatComposer();
+  const confirmed = JSON.stringify(sessionData?.configOptions.map((option) => [option.id, option.currentValue]) ?? []);
+  const [pending, setPending] = useState<{
+    readonly confirmed: string;
+    readonly values: Readonly<Record<string, string | boolean>>;
+    readonly submitted: Readonly<Record<string, string | boolean>>;
+  }>({ confirmed, values: {}, submitted: {} });
+  const previousStatus = useRef(status);
+  const previousSession = useRef<AcpSessionData | undefined>(undefined);
+  useEffect(() => {
+    const started = previousStatus.current === 'ready' && status !== 'ready';
+    const settled = previousStatus.current !== 'ready' && status === 'ready';
+    const sessionUpdated = previousSession.current !== sessionData;
+    const sessionReplaced =
+      previousSession.current?.sessionId !== undefined && previousSession.current.sessionId !== sessionData?.sessionId;
+    previousStatus.current = status;
+    previousSession.current = sessionData;
+    if (started && !sessionReplaced) {
+      setPending((current) => ({ ...current, submitted: current.values }));
+      return;
+    }
+    if ((!settled && !sessionUpdated) || execution.kind !== 'acp') {
+      return;
+    }
+    const retained = Object.fromEntries(
+      Object.entries(pending.values).filter(
+        ([id, value]) =>
+          !sessionReplaced && (!settled || !Object.hasOwn(pending.submitted, id) || pending.submitted[id] !== value),
+      ),
+    );
+    setPending({ confirmed, values: retained, submitted: settled || sessionReplaced ? {} : pending.submitted });
+    if (sessionData?.agentId === execution.agentId) {
+      const actual = Object.fromEntries(
+        sessionData.configOptions.flatMap((option) =>
+          option.category !== 'model' &&
+          (typeof option.currentValue === 'string' || typeof option.currentValue === 'boolean')
+            ? [[option.id, option.currentValue]]
+            : [],
+        ),
+      );
+      const { config: _config, ...selection } = execution;
+      const config = { ...actual, ...retained };
+      setActiveExecution({ ...selection, ...(Object.keys(config).length === 0 ? {} : { config }) });
+    }
+  }, [confirmed, execution, pending, sessionData, setActiveExecution, status]);
+  const pendingValues = pending.confirmed === confirmed ? pending.values : {};
+  if (execution.kind !== 'acp') {
+    return undefined;
+  }
+  const options = sessionData?.configOptions.filter((option) => option.category !== 'model') ?? [];
+  if (options.length === 0) {
+    return undefined;
+  }
+  const select = (id: string, value: string | boolean): void => {
+    setPending((current) => ({
+      ...current,
+      confirmed,
+      values: { ...(current.confirmed === confirmed ? current.values : {}), [id]: value },
+    }));
+    setActiveExecution({ ...execution, config: { ...execution.config, [id]: value } });
+  };
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          aria-label='Agent settings'
+          className='h-7 w-7 rounded-full text-muted-foreground hover:text-foreground'
+        >
+          <SlidersHorizontal className='size-4' aria-hidden='true' />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align='start' className='w-72 space-y-3 p-3'>
+        <h3 className='text-sm font-medium'>Agent settings</h3>
+        {options.map((option) => {
+          const current = pendingValues[option.id] ?? option.currentValue;
+          return option.type === 'select' ? (
+            <label key={option.id} className='flex flex-col gap-1 text-xs'>
+              <span>{option.name}</span>
+              <select
+                aria-label={option.name}
+                className='h-8 rounded-md border bg-background px-2'
+                value={String(current)}
+                onChange={(event) => {
+                  select(option.id, event.currentTarget.value);
+                }}
+              >
+                {option.options.map((entry) =>
+                  'options' in entry ? (
+                    <optgroup key={entry.group} label={entry.name}>
+                      {entry.options.map((value) => (
+                        <option key={value.value} value={value.value}>
+                          {value.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : (
+                    <option key={entry.value} value={entry.value}>
+                      {entry.name}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+          ) : (
+            <label key={option.id} className='flex items-center justify-between gap-3 text-xs'>
+              <span>{option.name}</span>
+              <input
+                type='checkbox'
+                aria-label={option.name}
+                checked={Boolean(current)}
+                onChange={(event) => {
+                  select(option.id, event.currentTarget.checked);
+                }}
+              />
+            </label>
+          );
+        })}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Memo'd right control bar containing @-mention, upload, and submit buttons.
@@ -621,10 +824,11 @@ const ChatTextareaRightControls = memo(function ({
   enableContextActions,
   handleAtButtonClick,
   handleFileSelect,
-  imageInputSupported,
+  attachmentInputSupported,
   status,
   isSubmitting,
   isDisabled,
+  describedBy,
   formattedCancelKeyCombination,
   handleSubmit,
   handleCancelClick,
@@ -632,10 +836,11 @@ const ChatTextareaRightControls = memo(function ({
   readonly enableContextActions: boolean;
   readonly handleAtButtonClick: () => void;
   readonly handleFileSelect: () => void;
-  readonly imageInputSupported: boolean;
+  readonly attachmentInputSupported: boolean;
   readonly status: string;
   readonly isSubmitting: boolean;
   readonly isDisabled: boolean;
+  readonly describedBy: string | undefined;
   readonly formattedCancelKeyCombination: string;
   readonly handleSubmit: () => Promise<void>;
   readonly handleCancelClick: () => void;
@@ -669,19 +874,20 @@ const ChatTextareaRightControls = memo(function ({
           <Button
             variant='outline'
             size='icon'
-            aria-disabled={!imageInputSupported}
+            aria-disabled={!attachmentInputSupported}
+            aria-label='Add image or PDF'
             className={cn(
               'size-6 rounded-full text-muted-foreground hover:text-foreground',
-              !imageInputSupported && 'opacity-50',
+              !attachmentInputSupported && 'opacity-50',
             )}
-            title='Add image'
+            title='Add image or PDF'
             onClick={handleFileSelect}
           >
             <Paperclip className='size-3.5' />
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>{imageInputSupported ? 'Upload an image' : 'Selected model cannot read images'}</p>
+          <p>{attachmentInputSupported ? 'Upload an image or PDF' : 'Selected model cannot read images or PDFs'}</p>
         </TooltipContent>
       </Tooltip>
 
@@ -690,6 +896,7 @@ const ChatTextareaRightControls = memo(function ({
         status={status}
         isSubmitting={isSubmitting}
         isDisabled={isDisabled}
+        describedBy={describedBy}
         formattedCancelKeyCombination={formattedCancelKeyCombination}
         onSubmit={handleSubmit}
         onCancel={handleCancelClick}
@@ -721,8 +928,9 @@ function ChatTextareaModeControl(): React.JSX.Element | undefined {
             <Button
               variant='outline'
               size='sm'
+              aria-label={`Select mode (${currentConfig.label})`}
               className={cn(
-                'h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2',
+                'h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2',
                 currentConfig.activeClass,
               )}
             >

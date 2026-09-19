@@ -1,116 +1,135 @@
-/* eslint-disable @typescript-eslint/naming-convention -- mock preserves the third-party WebSocket API surface. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { once } from 'node:events';
+import { describe, expect, it, vi } from 'vitest';
+import { WebSocket, WebSocketServer } from 'ws';
+import type { RawData } from 'ws';
 import type { ConfigService } from '@nestjs/config';
-import type { WebSocket as WsWebSocket } from 'ws';
-import type { Environment } from '#config/environment.config.js';
-import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
 import { KernelsService } from '#api/kernels/kernels.service.js';
+import type { Environment } from '#config/environment.config.js';
 
-const { MockWebSocket, sockets } = vi.hoisted(() => {
-  class HoistedMockWebSocket {
-    public static get CONNECTING(): number {
-      return 0;
-    }
-
-    public static get OPEN(): number {
-      return 1;
-    }
-
-    public static get CLOSED(): number {
-      return 3;
-    }
-
-    public readonly send = vi.fn();
-    public readonly close = vi.fn(() => {
-      this.readyState = HoistedMockWebSocket.CLOSED;
-    });
-    public readyState = HoistedMockWebSocket.OPEN;
-    public binaryType = '';
-    readonly #listeners = new Map<string, Array<(event: { data?: unknown; code?: number; reason?: string }) => void>>();
-
-    public constructor(_url?: unknown) {
-      instances.push(this);
-    }
-
-    public addEventListener(
-      event: string,
-      listener: (event: { data?: unknown; code?: number; reason?: string }) => void,
-    ): void {
-      const listeners = this.#listeners.get(event) ?? [];
-      listeners.push(listener);
-      this.#listeners.set(event, listeners);
-    }
-
-    public emit(event: string, payload: { data?: unknown; code?: number; reason?: string } = {}): void {
-      for (const listener of this.#listeners.get(event) ?? []) {
-        listener(payload);
-      }
-    }
-  }
-
-  const instances: HoistedMockWebSocket[] = [];
-  return { MockWebSocket: HoistedMockWebSocket, sockets: instances };
-});
-
-vi.mock('ws', () => ({ WebSocket: MockWebSocket }));
-
-const createService = () => {
-  const debit = vi.fn().mockResolvedValue({ balanceMicro: 100n });
-  const config = {
-    get: vi.fn((key: keyof Environment) => {
-      if (key === 'ZOO_API_KEY') {
-        return 'zoo-key';
-      }
-      if (key === 'ZOO_WEBSOCKET_URL') {
-        return 'wss://api.zoo.dev';
-      }
-      if (key === 'ZOO_ENGINE_RATE_MICRO_PER_MINUTE') {
-        return '1';
-      }
-      return undefined;
-    }),
-  } as unknown as ConfigService<Environment, true>;
-  const ledger = { debit } as unknown as CreditLedgerService;
-  const metrics = {
-    billingCreditCommitted: { add: vi.fn() },
-    billingCommitFailures: { add: vi.fn() },
-  } as unknown as MetricsService;
-  return { debit, service: new KernelsService(config, ledger, metrics) };
+const config = (values: Partial<Environment> = {}): ConfigService<Environment, true> => {
+  const configured = { get: (key: keyof Environment) => values[key] } satisfies Pick<
+    ConfigService<Environment, true>,
+    'get'
+  >;
+  return configured as ConfigService<Environment, true>;
 };
 
-describe('KernelsService Zoo wire validation', () => {
-  beforeEach(() => {
-    sockets.length = 0;
+const frameText = (data: RawData): string => {
+  if (Array.isArray(data)) {
+    return Buffer.concat(data).toString();
+  }
+  return data instanceof ArrayBuffer ? new TextDecoder().decode(data) : data.toString();
+};
+
+describe('KernelsService hosted billing gate', () => {
+  it('should close with service-unavailable before creating an upstream Zoo socket', () => {
+    const close = vi.fn();
+    const clientSocket = { close } as unknown as WebSocket;
+
+    new KernelsService(config(), 'cloud').createZooProxy(clientSocket, new URLSearchParams(), 'user-1');
+
+    expect(close).toHaveBeenCalledWith(1013, 'ZOO_SUPPLIER_LIMIT_UNQUALIFIED');
   });
 
-  it('does not authenticate from an incomplete modeling-session response', () => {
-    const { debit, service } = createService();
-    const client = new MockWebSocket();
-    service.createZooProxy(client as unknown as WsWebSocket, new URLSearchParams(), 'user_1');
-    const upstream = sockets.at(-1)!;
-    upstream.emit('open');
+  it('should require the self-host operator to configure its own Zoo key', () => {
+    const close = vi.fn();
+    const clientSocket = { close } as unknown as WebSocket;
 
-    upstream.emit('message', {
-      data: JSON.stringify({ success: true, resp: { type: 'modeling_session_data' } }),
-    });
-    client.emit('close');
+    new KernelsService(
+      config({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+        ZOO_WEBSOCKET_URL: 'wss://api.zoo.dev',
+      }),
+      'self-host',
+    ).createZooProxy(clientSocket, new URLSearchParams(), 'user-1');
 
-    expect(debit).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith(1013, 'ZOO_API_KEY_NOT_CONFIGURED');
   });
 
-  it('forwards an incomplete client headers frame instead of treating it as authentication', () => {
-    const { service } = createService();
-    const client = new MockWebSocket();
-    service.createZooProxy(client as unknown as WsWebSocket, new URLSearchParams(), 'user_1');
-    const upstream = sockets.at(-1)!;
-    upstream.emit('open');
-    upstream.send.mockClear();
-    const malformed = JSON.stringify({ type: 'headers' });
+  it('should keep the operator key server-side and preserve client frame types', async () => {
+    const upstreamServer = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    const proxyServer = new WebSocketServer({ host: '127.0.0.1', port: 0 });
 
-    client.emit('message', { data: malformed });
-    client.emit('close');
+    try {
+      await Promise.all([once(upstreamServer, 'listening'), once(proxyServer, 'listening')]);
+      const upstreamAddress = upstreamServer.address();
+      const proxyAddress = proxyServer.address();
+      if (
+        upstreamAddress === null ||
+        typeof upstreamAddress === 'string' ||
+        proxyAddress === null ||
+        typeof proxyAddress === 'string'
+      ) {
+        throw new TypeError('Expected TCP websocket test servers');
+      }
 
-    expect(upstream.send).toHaveBeenCalledWith(malformed);
+      const frames: Array<{ readonly data: string; readonly isBinary: boolean }> = [];
+      let resolveAuthorization: (() => void) | undefined;
+      let resolveFrames: (() => void) | undefined;
+      const authorizationReceived = new Promise<void>((resolve) => {
+        resolveAuthorization = resolve;
+      });
+      const framesReceived = new Promise<void>((resolve) => {
+        resolveFrames = resolve;
+      });
+      upstreamServer.once('connection', (socket) => {
+        socket.on('message', (data, isBinary) => {
+          frames.push({ data: frameText(data), isBinary });
+          if (frames.length === 1) {
+            resolveAuthorization?.();
+          }
+          if (frames.length === 3) {
+            resolveFrames?.();
+          }
+        });
+      });
+
+      const service = new KernelsService(
+        config({
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+          ZOO_API_KEY: 'operator-secret',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+          ZOO_WEBSOCKET_URL: `ws://127.0.0.1:${String(upstreamAddress.port)}`,
+        }),
+        'self-host',
+      );
+      proxyServer.once('connection', (socket) => {
+        service.createZooProxy(socket, new URLSearchParams('video_res_width=256'), 'user-1');
+      });
+
+      const client = new WebSocket(`ws://127.0.0.1:${String(proxyAddress.port)}`);
+      await once(client, 'open');
+      await authorizationReceived;
+      client.send(JSON.stringify({ type: 'headers', headers: { authorization: 'Bearer client-secret' } }));
+      client.send(JSON.stringify({ type: 'modeling_cmd_req' }));
+      client.send(Uint8Array.of(1, 2, 3));
+      await framesReceived;
+
+      expect(frames).toEqual([
+        {
+          data: JSON.stringify({ type: 'headers', headers: { authorization: 'Bearer operator-secret' } }),
+          isBinary: false,
+        },
+        { data: JSON.stringify({ type: 'modeling_cmd_req' }), isBinary: false },
+        { data: String.fromCodePoint(1, 2, 3), isBinary: true },
+      ]);
+      client.terminate();
+    } finally {
+      for (const socket of [...proxyServer.clients, ...upstreamServer.clients]) {
+        socket.terminate();
+      }
+      await Promise.all([
+        new Promise<void>((resolve) => {
+          proxyServer.close(() => {
+            resolve();
+          });
+        }),
+        new Promise<void>((resolve) => {
+          upstreamServer.close(() => {
+            resolve();
+          });
+        }),
+      ]);
+    }
   });
 });

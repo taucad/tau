@@ -19,8 +19,8 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment names and Electron privilege keys are not camelCase */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 import type { ElectronRuntimeForkResolver } from '@taucad/runtime/electron/main';
 
@@ -32,6 +32,8 @@ export type ProjectRootRegistry = {
   roots(): readonly string[];
   /** Whether `directory` is an admitted root or lives inside one. */
   isTrusted(directory: string): boolean;
+  /** Canonical spelling of a trusted directory, or undefined when untrusted. */
+  canonical(directory: string): string | undefined;
 };
 
 /** Options for {@link createProjectRootRegistry}. */
@@ -41,6 +43,36 @@ export type ProjectRootRegistryOptions = {
    * Omitted, the registry lives only for this session.
    */
   readonly storePath?: string;
+};
+
+/**
+ * Physical spelling of a path, resolving every symlink it can.
+ *
+ * Shared with the services host, which must admit a root under the same name
+ * main registers it by: main names a project by its realpath
+ * (`services-broker.ts`), while the grant holds the spelling the person picked,
+ * and under `$TMPDIR` on macOS those differ.
+ *
+ * @param directory - Absolute or relative path to canonicalise.
+ * @returns The realpath of the deepest existing ancestor plus the rest.
+ */
+export const canonicalPath = (directory: string): string => {
+  const resolved = resolve(directory);
+  const suffix: string[] = [];
+  let ancestor = resolved;
+  while (ancestor !== dirname(ancestor)) {
+    try {
+      return join(realpathSync.native(ancestor), ...suffix.reverse());
+    } catch {
+      suffix.push(basename(ancestor));
+      ancestor = dirname(ancestor);
+    }
+  }
+  try {
+    return join(realpathSync.native(ancestor), ...suffix.reverse());
+  } catch {
+    return resolved;
+  }
 };
 
 /**
@@ -96,11 +128,26 @@ export const createProjectRootRegistry = (options: ProjectRootRegistryOptions = 
       if (!isAbsolute(directory)) {
         return false;
       }
-      const candidate = resolve(directory);
+      const candidate = canonicalPath(directory);
       /* Descendants are admitted because projects live *inside* a granted root
        * (`userData/home/<project>`, `<picked>/<project>`); the `sep` suffix
        * keeps `…/home-evil` from matching `…/home`. */
-      return [...admitted].some((root) => candidate === root || candidate.startsWith(root + sep));
+      return [...admitted].some((root) => {
+        const canonicalRoot = canonicalPath(root);
+        return candidate === canonicalRoot || candidate.startsWith(canonicalRoot + sep);
+      });
+    },
+    canonical(directory) {
+      if (!isAbsolute(directory)) {
+        return undefined;
+      }
+      const candidate = canonicalPath(directory);
+      return [...admitted].some((root) => {
+        const canonicalRoot = canonicalPath(root);
+        return candidate === canonicalRoot || candidate.startsWith(canonicalRoot + sep);
+      })
+        ? candidate
+        : undefined;
     },
   };
 };
@@ -157,7 +204,7 @@ export const sanitizeServicesContext = (payload: unknown): Record<string, string
 };
 
 /** Environment names {@link createKernelForkResolver} may set. */
-export const kernelForkEnvAllowlist = ['TAU_PROJECT_ROOT', 'TAU_RUNTIME_DEBUG', 'TAU_NATIVE_CODE_TRUST_FILE'] as const;
+export const kernelForkEnvAllowlist = ['TAU_PROJECT_ROOT', 'TAU_RUNTIME_DEBUG', 'TAU_RUNTIME_EPHEMERAL'] as const;
 
 /** Options for {@link createKernelForkResolver}. */
 export type KernelForkResolverOptions = {
@@ -165,8 +212,8 @@ export type KernelForkResolverOptions = {
   readonly registry: ProjectRootRegistry;
   /** Root used when the renderer names none. */
   readonly defaultRoot: string;
-  /** Main-owned marker path for this project's native-code trust state. */
-  readonly nativeTrustMarkerPath?: (projectRoot: string) => string;
+  /** Additional ephemeral root attested by another main-owned broker. */
+  readonly isTrustedRoot?: (directory: string) => boolean;
 };
 
 /**
@@ -182,17 +229,38 @@ export type KernelForkResolverOptions = {
  */
 export const createKernelForkResolver = (options: KernelForkResolverOptions): ElectronRuntimeForkResolver => {
   return (context) => {
+    const { definition, purpose } = context;
+    if (purpose !== undefined && purpose !== 'ephemeral') {
+      throw new Error(`Desktop shell refused unknown runtime purpose: ${purpose}`);
+    }
+    if (definition !== undefined && definition !== 'default' && definition !== 'debug') {
+      throw new Error(`Desktop shell refused unknown runtime definition: ${definition}`);
+    }
+    if (purpose === 'ephemeral') {
+      if (context['projectRoot'] !== undefined || context['root'] !== undefined) {
+        throw new Error('Desktop shell refused a rooted ephemeral runtime.');
+      }
+      return {
+        env: {
+          TAU_RUNTIME_EPHEMERAL: '1',
+          ...(definition === 'debug' ? { TAU_RUNTIME_DEBUG: '1' } : {}),
+        },
+      };
+    }
     const requested = context['projectRoot'];
-    if (requested !== undefined && !options.registry.isTrusted(requested)) {
+    if (
+      requested !== undefined &&
+      (!isAbsolute(requested) || (!options.registry.isTrusted(requested) && !options.isTrustedRoot?.(requested)))
+    ) {
       throw new Error(`Desktop shell refused an untrusted project root: ${requested}`);
     }
-    const projectRoot = requested === undefined ? resolve(options.defaultRoot) : resolve(requested);
+    const projectRoot =
+      requested === undefined
+        ? resolve(options.defaultRoot)
+        : (options.registry.canonical(requested) ?? resolve(requested));
     return {
       env: {
         TAU_PROJECT_ROOT: projectRoot,
-        ...(options.nativeTrustMarkerPath
-          ? { TAU_NATIVE_CODE_TRUST_FILE: options.nativeTrustMarkerPath(projectRoot) }
-          : {}),
         /* One kernel bundle, two definitions: the debug recipe keeps kernel
          * source mapping, so it is selected by environment rather than by a
          * second `utilityEntry` that would duplicate the whole chunk.
@@ -203,7 +271,7 @@ export const createKernelForkResolver = (options: KernelForkResolverOptions): El
          * anything here. This arm and `debugRuntime` are the shell's half of
          * the E6 contract and cost one branch; removing them would mean
          * rebuilding both when the renderer gains the toggle. */
-        ...(context['definition'] === 'debug' ? { TAU_RUNTIME_DEBUG: '1' } : {}),
+        ...(definition === 'debug' ? { TAU_RUNTIME_DEBUG: '1' } : {}),
       },
     };
   };

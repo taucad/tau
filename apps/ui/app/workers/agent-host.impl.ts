@@ -1,31 +1,29 @@
 import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
-import type { FileSystemBridgeConnection, FileSystemBridgeProxy } from '@taucad/fs-bridge';
-import { rpcClientErrorCode } from '@taucad/chat';
-import type { CaptureImagesRpcInput, CaptureImagesRpcResult } from '@taucad/chat';
-import { applyClientTextMutation, createExactReplacementPlan, toRpcError } from '@taucad/chat/rpc';
-import type {
-  RpcDirectoryEntry,
-  RpcFileStat,
-  RpcFileSystem,
-  RpcGraphicsClient,
-  RpcGraphicsExportGeometryResult,
-  RpcImageClient,
-  RpcRuntimeClient,
-} from '@taucad/chat/rpc';
-import { createChatToolRegistry } from '@taucad/agent-tools/registry';
-import { buildCaptureExportOptions, canonicalCaptureViews, captureFilesToDataUrls } from '@taucad/agent-tools/capture';
+import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
+import { toRpcError } from '@taucad/chat/rpc';
+import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
+import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
-import type { HashedGeometryResult } from '@taucad/runtime';
+import { admitParameterManifest } from '@taucad/parameters';
+import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
+import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import type { ParameterAuthority } from '@taucad/parameters/authority';
+import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { fromFsLike } from '@taucad/runtime/filesystem';
+import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import type { FsLike } from '@taucad/runtime/filesystem';
-import type { ExportFile, FileStat } from '@taucad/types';
-import type { LengthSymbol } from '@taucad/units';
-import { getErrno } from '@taucad/utils/error';
+import { parameterEntryPath } from '@taucad/types';
+import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
-import { createGatewayModelTransport, createTauAgentHost } from '@taucad/agent-host';
+import { createTauAgentHost } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
   AgentLogEvent,
@@ -37,15 +35,13 @@ import type {
   StorageDurabilityClass,
   TauAgentHost,
 } from '@taucad/agent-host';
-import { createOpfsEventLog, createProviderEventLog } from '@taucad/agent-host/browser';
-import { createPaseoClientCache } from '#lib/paseo/paseo-client.js';
-import { createPaseoRunnerPort } from '#lib/paseo/paseo-runner.js';
+import { createOpfsEventLog, createProviderAttachmentReader, createProviderEventLog } from '@taucad/agent-host/browser';
+import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { SkillResolver } from '#lib/skill-resolver.js';
-import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
-import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
-import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
+import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
+import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import type {
   AgentHostWorkerAttachResponse,
@@ -74,13 +70,18 @@ import {
   recoverAttachedRun,
 } from '#workers/agent-host-leader.js';
 import type { AgentHostLockRequest, ChatLeaderLease } from '#workers/agent-host-leader.js';
+import { replayedStartOutcome } from '#workers/agent-host-replay.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
+import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
+
+type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
 type ProjectFileSystemBridge = Pick<
   FileSystemBridgeProxy,
   | 'readFile'
   | 'writeFile'
+  | 'writeFileChecked'
   | 'appendFile'
   | 'readdir'
   | 'stat'
@@ -90,6 +91,7 @@ type ProjectFileSystemBridge = Pick<
   | 'rmdir'
   | 'rename'
   | 'exists'
+  | 'watchReady'
   | 'hello'
   | 'dispose'
 >;
@@ -103,7 +105,6 @@ type LeaderBroadcast =
       readonly type: 'command';
       readonly senderId: string;
       readonly targetGeneration?: string | undefined;
-      readonly replay: boolean;
       readonly command: AgentHostWorkerCommand;
     }
   | {
@@ -182,16 +183,15 @@ type WorkerSession = {
   /** Backend of the project's own storage — the only authority for log placement. */
   readonly storageBackend: string;
   readonly host: TauAgentHost;
-  readonly paseoClients: { readonly close: () => Promise<void> };
   readonly runtimeClient: AppRuntimeClient;
+  readonly parameterActors: ReadonlyMap<string, Promise<ParameterActor>>;
   readonly imageService: HeadlessImageService;
   readonly geoSpecClient: GeoSpecWorkerRpcClient;
+  readonly computeDispose?: (() => void) | undefined;
   readonly providerBasePath: string;
   readonly projectId: string;
   readonly workspaceId: string;
 };
-
-type SettledGeometry = Extract<HashedGeometryResult, { readonly success: true }>['data'];
 
 /** OPFS sync access handles exist in workers and never on the main thread. */
 const supportsOpfsSyncAccess = async (): Promise<boolean> => {
@@ -203,7 +203,9 @@ const supportsOpfsSyncAccess = async (): Promise<boolean> => {
     return false;
   }
   try {
-    const fileHandle = (await root.getFileHandle(probeName, { create: true })) as FileSystemFileHandle & {
+    const fileHandle = (await root.getFileHandle(probeName, {
+      create: true,
+    })) as FileSystemFileHandle & {
       createSyncAccessHandle?: () => Promise<{ close: () => void }>;
     };
     try {
@@ -242,10 +244,11 @@ const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectF
   return proxy;
 };
 
-const createRelayedFileSystemBridge = (
-  proxy: ProjectFileSystemBridge,
-  createPort: (handlers: FileSystemProvider) => FileSystemBridgeConnection,
-): (() => FileSystemBridgeConnection) => {
+/**
+ * The workspace bridge as a `FileSystemProvider`: the one rooted provider this
+ * worker hands to the GeoSpec bridge port and to the shared tool filesystem.
+ */
+const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -259,7 +262,7 @@ const createRelayedFileSystemBridge = (
     return encoding === 'utf8' ? proxy.readFile(path, encoding) : proxy.readFile(path);
   }
 
-  const provider: FileSystemProvider = {
+  return {
     id: 'agent-host-workspace-relay',
     capabilities: payload.capabilities,
     readFile,
@@ -275,11 +278,11 @@ const createRelayedFileSystemBridge = (
     lstat: proxy.lstat.bind(proxy),
     dispose: () => undefined,
   };
-  return () => createPort(provider);
 };
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder('utf-8', { fatal: true });
+/** Read every event of one chat in a single batch; the log slices to its own length. */
+const wholeLogLimit = Number.MAX_SAFE_INTEGER;
+
 const channels = new Map<string, BroadcastChannel>();
 const leadership = new Map<string, LeadershipState>();
 const leadershipAttempts = new Map<string, Promise<boolean>>();
@@ -362,7 +365,6 @@ const leaderBroadcastSchema = z.union([
     type: z.literal('command'),
     senderId: z.string().min(1),
     targetGeneration: z.string().optional(),
-    replay: z.boolean(),
     command: agentHostWorkerCommandSchema,
   }),
   z.strictObject({
@@ -483,342 +485,17 @@ const createRuntimeFsLike = (proxy: ProjectFileSystemBridge): FsLike => {
   };
 };
 
-const abortError = (signal: AbortSignal): Error =>
-  signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
-
-const assertNotAborted = (signal?: AbortSignal): void => {
-  if (signal?.aborted) {
-    throw abortError(signal);
-  }
-};
-
-const createRpcFileSystem = (options: {
-  readonly proxy: ProjectFileSystemBridge;
-  readonly mutations: ResourceQueue;
-  readonly signal?: AbortSignal | undefined;
-}): RpcFileSystem => {
-  const { proxy, mutations, signal } = options;
-  const bytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
-    const value = await proxy.readFile(assertRootedPath(path));
-    return new Uint8Array(value);
-  };
-  const stat = async (path: string): Promise<RpcFileStat> => {
-    const value = await proxy.stat(assertRootedPath(path));
-    const date = new Date(value.mtimeMs).toISOString();
-    if (value.type === 'dir') {
-      return { size: value.size, isDirectory: true, createdAt: date, modifiedAt: date };
-    }
-    return value.contentKind === 'text'
-      ? {
-          size: value.size,
-          isDirectory: false,
-          createdAt: date,
-          modifiedAt: date,
-          contentKind: 'text',
-          lineCount: value.lineCount,
-        }
-      : {
-          size: value.size,
-          isDirectory: false,
-          createdAt: date,
-          modifiedAt: date,
-          contentKind: 'binary',
-        };
-  };
-  const writeIfUnchanged = async (
-    path: string,
-    expected: Uint8Array<ArrayBuffer>,
-    replacement: Uint8Array<ArrayBuffer>,
-  ) =>
-    mutations.queueFor(path, async () => {
-      const currentBytes = await bytes(path);
-      const unchanged =
-        currentBytes.byteLength === expected.byteLength &&
-        currentBytes.every((byte, index) => byte === expected[index]);
-      if (!unchanged) {
-        return { status: 'conflict', currentBytes } as const;
-      }
-      assertNotAborted(signal);
-      await proxy.writeFile(path, new Uint8Array(replacement));
-      return { status: 'committed', committedBytes: await bytes(path) } as const;
-    });
-  const directoryEntry = async (parent: string, name: string): Promise<RpcDirectoryEntry> => {
-    const value = await proxy.stat(assertRootedPath(parent ? `${parent}/${name}` : name));
-    const modifiedAt = value.mtimeMs > 0 ? new Date(value.mtimeMs).toISOString() : undefined;
-    if (value.type === 'dir') {
-      return { name, type: 'dir', size: value.size, ...(modifiedAt ? { modifiedAt } : {}) };
-    }
-    return {
-      name,
-      type: 'file',
-      size: value.size,
-      ...(value.contentKind === 'text'
-        ? { contentKind: 'text', lineCount: value.lineCount }
-        : { contentKind: 'binary' }),
-      ...(modifiedAt ? { modifiedAt } : {}),
-    };
-  };
-
-  return {
-    async readFile(path) {
-      return textDecoder.decode(await bytes(path));
-    },
-    async writeFile(path, content) {
-      await mutations.queueFor(path, async () => {
-        assertNotAborted(signal);
-        await proxy.writeFile(assertRootedPath(path), textEncoder.encode(content));
-      });
-    },
-    async writeBinaryFile(path, data) {
-      await mutations.queueFor(path, async () => {
-        assertNotAborted(signal);
-        await proxy.writeFile(assertRootedPath(path), new Uint8Array(data));
-      });
-    },
-    async deleteFile(path) {
-      await mutations.queueFor(path, async () => {
-        const target = assertRootedPath(path);
-        const value = await proxy.stat(target);
-        assertNotAborted(signal);
-        await (value.type === 'dir' ? proxy.rmdir(target, { recursive: true }) : proxy.unlink(target));
-      });
-    },
-    async readdir(path) {
-      const parent = assertRootedPath(path);
-      const names = await proxy.readdir(parent);
-      return Promise.all(names.map(async (name) => directoryEntry(parent, name)));
-    },
-    async exists(path) {
-      return proxy.exists(assertRootedPath(path));
-    },
-    async appendFile(path, content) {
-      await mutations.queueFor(path, async () => {
-        let existing = '';
-        try {
-          existing = textDecoder.decode(await bytes(path));
-        } catch (error) {
-          if (getErrno(error) !== 'ENOENT') {
-            throw error;
-          }
-        }
-        assertNotAborted(signal);
-        await proxy.writeFile(assertRootedPath(path), textEncoder.encode(existing + content));
-      });
-    },
-    // oxlint-disable-next-line max-params -- RpcFileSystem owns this four-argument compatibility signature.
-    async editFile(path, oldString, newString, replaceAll) {
-      const result = await applyClientTextMutation({
-        targetFile: path,
-        fileSystem: { stat, readFileBytes: bytes, writeFileIfUnchanged: writeIfUnchanged },
-        plan: createExactReplacementPlan({ oldString, newString, replaceAll }),
-      });
-      if (!result.ok) {
-        throw Object.assign(new Error(result.message), { code: result.errorCode });
-      }
-      return {
-        occurrences: result.occurrences,
-        ...(result.staleRecovered ? { staleRecovered: true } : {}),
-        diffStats: result.diffStats,
-      };
-    },
-    stat,
-  };
-};
-
-const failureMessage = (result: HashedGeometryResult): string =>
-  result.success ? 'Unknown render failure' : result.issues.map((issue) => issue.message).join('; ') || 'Render failed';
-
-const requireCaptureFiles = (
-  files: Awaited<ReturnType<HeadlessImageService['export']>>,
-  options: { readonly count: number; readonly mimeType: 'image/png' | 'image/webp' },
-): ExportFile[] => {
-  if (
-    !files ||
-    files.length !== options.count ||
-    files.some((file) => file.mimeType !== options.mimeType || file.bytes.length === 0)
-  ) {
-    throw new Error(`Image capture expected ${options.count} non-empty ${options.mimeType} artifact(s)`);
-  }
-  return files;
-};
-
 const createRuntimeRpcClients = (options: {
   readonly runtimeClient: AppRuntimeClient;
   readonly imageService: HeadlessImageService;
-  readonly lengthSymbol: LengthSymbol;
 }) => {
   const { runtimeClient } = options;
-  let connected: Promise<void> | undefined;
-  const connect = async (): Promise<void> => {
-    connected ??= runtimeClient.connect();
-    await connected;
-  };
-  /*
-   * One runtime-client transaction at a time. The client tracks exactly one
-   * pending render (`runtime-client-core.ts`, "Tracks only the latest public
-   * preview Promise"): a second render supersedes the first, whose retry then
-   * supersedes the second, and the two loops spin against each other forever.
-   * pi runs a turn's tool calls in parallel (`executeToolCallsParallel`), so any
-   * turn holding two render-driven tools — the recorded transcript's
-   * `screenshot` × 2 is the first one Tau has scripted — livelocks the run with
-   * no error and no progress. Serializing also keeps an export bound to the
-   * render it was issued for, instead of to whichever render landed last.
-   */
-  const runtime = new ResourceQueue();
-  const withRuntime = async <T>(operation: () => Promise<T>): Promise<T> =>
-    runtime.queueFor('runtime-client', async () => {
-      await connect();
-      return operation();
-    });
-  const renderNow = async (targetFile: string) => {
-    let result = await runtimeClient.render({
-      source: { path: assertRootedPath(targetFile) },
-      parameters: {},
-      content: { includeEdges: true },
-    });
-    while (result.superseded) {
-      // oxlint-disable-next-line no-await-in-loop -- a superseded render must retry against the newest file generation.
-      result = await runtimeClient.render({
-        source: { path: assertRootedPath(targetFile) },
-        parameters: {},
-        content: { includeEdges: true },
-      });
-    }
-    return result.geometry;
-  };
-  const render = async (targetFile: string) => withRuntime(async () => renderNow(targetFile));
-  const kernelClient: RpcRuntimeClient = {
-    async getKernelResult(targetFile) {
-      try {
-        const result = await render(targetFile);
-        return result.success
-          ? { success: true, status: 'ready', kernelIssues: result.issues }
-          : { success: true, status: 'error', kernelIssues: result.issues };
-      } catch (error) {
-        return toRpcError(error);
-      }
-    },
-  };
-  const graphics: RpcGraphicsClient = {
-    async exportGeometry({ targetFile, format }) {
-      try {
-        // Render and export are one transaction: the export reads whatever the
-        // client rendered last, so a sibling tool's render must not land between.
-        return await withRuntime(async (): Promise<RpcGraphicsExportGeometryResult> => {
-          const rendered = await renderNow(targetFile);
-          if (!rendered.success) {
-            return { success: false, errorCode: rpcClientErrorCode.unknown, message: failureMessage(rendered) };
-          }
-          const route = bestRouteForActiveKernel(runtimeClient, format, runtimeClient.activeKernelId);
-          if (!route) {
-            return {
-              success: false,
-              errorCode: rpcClientErrorCode.unknown,
-              message: `Export format ${format} is not available for ${targetFile}`,
-            };
-          }
-          const result = await exportWithRuntimeValidatedInput(runtimeClient, route);
-          return result.success
-            ? { success: true, files: result.data }
-            : {
-                success: false,
-                errorCode: rpcClientErrorCode.unknown,
-                message: result.issues.map((issue) => issue.message).join('; ') || 'Geometry export failed',
-              };
-        });
-      } catch (error) {
-        return toRpcError(error);
-      }
-    },
-  };
-
-  const captureGeometry = async (
-    geometry: SettledGeometry,
-    input: CaptureImagesRpcInput,
-  ): Promise<CaptureImagesRpcResult> => {
-    if (geometry.format === 'webrtc') {
-      return {
-        success: false,
-        errorCode: rpcClientErrorCode.unknown,
-        message: 'Live WebRTC geometry cannot be captured headlessly',
-      };
-    }
-    const size = 1600;
-    if (geometry.format === 'svg') {
-      if (input.mode === 'multi_angle') {
-        return {
-          success: false,
-          errorCode: rpcClientErrorCode.unknown,
-          message: 'Planar SVG drawings have one canonical view',
-        };
-      }
-      const files = requireCaptureFiles(
-        await options.imageService.export({
-          kind: 'capture',
-          identity: `agent-host:${input.targetFile}:${geometry.hash}:drawing`,
-          sourceFormat: 'svg',
-          sourcePath: input.targetFile,
-          content: geometry.content,
-          format: 'png',
-          exportOptions: {
-            width: size,
-            height: size,
-            margin: 0.1,
-            background: '#242424',
-            axes: true,
-            scaleBar: true,
-            lengthSymbol: options.lengthSymbol,
-          },
-        }),
-        { count: 1, mimeType: 'image/png' },
-      );
-      return { success: true, images: [{ view: 'drawing', dataUrl: captureFilesToDataUrls(files)[0]! }] };
-    }
-
-    const exportOptions: Extract<
-      HeadlessImageJob,
-      { readonly sourceFormat: 'glb'; readonly format: 'webp' }
-    >['exportOptions'] = buildCaptureExportOptions({
-      mode: input.mode,
-      size,
-      ...(input.includeEdges === undefined ? {} : { includeEdges: input.includeEdges }),
-    });
-    const files = requireCaptureFiles(
-      await options.imageService.export({
-        kind: 'capture',
-        identity: `agent-host:${input.targetFile}:${geometry.hash}:${input.mode}`,
-        sourceFormat: 'glb',
-        sourcePath: input.targetFile,
-        geometryHash: geometry.hash,
-        content: geometry.content,
-        format: 'webp',
-        exportOptions,
-      }),
-      { count: input.mode === 'multi_angle' ? canonicalCaptureViews.length : 1, mimeType: 'image/webp' },
-    );
-    const dataUrls = captureFilesToDataUrls(files);
-    const images: Extract<CaptureImagesRpcResult, { readonly success: true }>['images'] =
-      input.mode === 'multi_angle'
-        ? canonicalCaptureViews.map((view, index) => ({ view: view.id, dataUrl: dataUrls[index]! }))
-        : [{ view: 'isometric', dataUrl: dataUrls[0]! }];
-    return { success: true, images };
-  };
-
-  const images: RpcImageClient = {
-    async captureImages(input) {
-      try {
-        const result = await render(input.targetFile);
-        if (!result.success) {
-          return { success: false, errorCode: rpcClientErrorCode.unknown, message: failureMessage(result) };
-        }
-        return await captureGeometry(result.data, input);
-      } catch (error) {
-        return toRpcError(error);
-      }
-    },
-  };
-
-  return { kernelClient, graphics, images };
+  const runtime: RuntimeAgentClient = runtimeClient;
+  return createRuntimeAgentClients({
+    runtime,
+    exportImage: async (job) => options.imageService.export(job),
+    mapRuntimeError: (error) => toRpcError(error),
+  });
 };
 
 const broadcastBinding = (active: WorkerSession, chatId: string) =>
@@ -837,7 +514,11 @@ const publishEvent = async (active: WorkerSession, chatId: string, event: AgentL
   if (!state) {
     return;
   }
-  const { endCursor } = await active.host.readEvents({ chatId, cursor: Number.MAX_SAFE_INTEGER, limit: 1 });
+  const { endCursor } = await active.host.readEvents({
+    chatId,
+    cursor: Number.MAX_SAFE_INTEGER,
+    limit: 1,
+  });
   channelFor(chatId).postMessage({
     ...broadcastBinding(active, chatId),
     type: 'cursor',
@@ -883,10 +564,20 @@ const openProjectEventLog = async (active: WorkerSession, chatId: string): Promi
               requireStoragePathSegment(active.providerBasePath, 'providerBasePath'),
               { create: false },
             );
-            const tau = await project.getDirectoryHandle('.tau', { create: true });
-            const chats = await tau.getDirectoryHandle('chats', { create: true });
-            const chat = await chats.getDirectoryHandle(chatPath, { create: true });
-            return await createOpfsEventLog({ fileHandle: await chat.getFileHandle('events.jsonl', { create: true }) });
+            const tau = await project.getDirectoryHandle('.tau', {
+              create: true,
+            });
+            const chats = await tau.getDirectoryHandle('chats', {
+              create: true,
+            });
+            const chat = await chats.getDirectoryHandle(chatPath, {
+              create: true,
+            });
+            return await createOpfsEventLog({
+              fileHandle: await chat.getFileHandle('events.jsonl', {
+                create: true,
+              }),
+            });
           } catch (error) {
             throw Object.assign(new Error(`Project event storage for ${chatId} is not writable.`), {
               code: 'STORAGE_NOT_WRITABLE',
@@ -942,7 +633,12 @@ const acknowledgeRun = async (
   chatId: string,
   completion: Promise<unknown>,
 ): Promise<HostRunSnapshot> => {
-  const admitted = await active.host.waitForAdmission(chatId);
+  /* A refused admission is an answer, not a race to lose: `waitForAdmission`
+   * asks the *chat* what is running, so a command the host refused — because
+   * the chat's previous run has not ended — used to be answered with that
+   * previous run's snapshot, and the caller reported a run-id mismatch while
+   * the real reason was swallowed with the rejected promise. */
+  const admitted = await Promise.race([active.host.waitForAdmission(chatId), completion.then(() => undefined)]);
   if (!admitted) {
     await completion;
     return active.host.snapshot(chatId);
@@ -958,7 +654,6 @@ const acknowledgeRun = async (
 
 const executeCommand = async (
   command: AgentHostWorkerCommand,
-  replay = false,
   takeover = false,
 ): Promise<AgentHostWorkerResultResponse | AgentHostWorkerTailResponse | AgentHostWorkerAttachResponse> => {
   const active = session;
@@ -1030,11 +725,22 @@ const executeCommand = async (
         snapshot.state !== 'cancelled',
     };
   }
-  if (replay && command.type === 'start') {
+  if (command.type === 'start') {
     try {
-      const prior = await active.host.snapshot(command.chatId);
-      if (prior.runId === command.runId) {
-        if (prior.state !== 'completed' && prior.state !== 'failed' && prior.state !== 'cancelled') {
+      /* The whole log, because the fact that decides this is a record anywhere
+       * in it — the run's committed turn — not the state of its tail.
+       *
+       * V9: the run id *is* the admission idempotency key, so every `start` is
+       * checked, not only a replayed one. A duplicate dispatch under a key the
+       * log already carries is the same turn arriving twice — it attaches or
+       * answers as settled — and only the worker's own log can tell it apart
+       * from a new turn. ponytail: one whole-log read per start; the ceiling is
+       * the log's size, and the upgrade path is the host's own run ledger
+       * (`runLedgerOf`) exposed as a cached read. */
+      const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
+      const outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
+      if (outcome !== 'admit') {
+        if (outcome === 'resume') {
           await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId));
         }
         return {
@@ -1050,6 +756,14 @@ const executeCommand = async (
   }
   switch (command.type) {
     case 'start': {
+      if (command.agent) {
+        /* An external agent is a *daemon* placement (W4-ACP): this worker
+         * registers no external runner, so running the turn on Tau instead
+         * would silently answer with a model and tools the user did not pick. */
+        throw Object.assign(new Error(`This browser host runs no ${command.agent.kind} agents.`), {
+          code: 'EXTERNAL_AGENT_UNAVAILABLE',
+        });
+      }
       const config = command.config
         ? {
             systemPrompt: command.config.systemPrompt,
@@ -1062,6 +776,11 @@ const executeCommand = async (
             ...(command.config.contextMessages ? { contextMessages: command.config.contextMessages } : {}),
           }
         : undefined;
+      /* `mode` and `baseRevisionId` are deliberately dropped: on this
+       * placement the *page* owns the revision — `ChatWorkspaceAuthorityProvider`
+       * prepares the turn's workspace in the selected mode and finalizes it —
+       * so the worker would be recording a second, competing one. They ride the
+       * command only because one client object is sent to both transports. */
       const base = {
         chatId: command.chatId,
         runId: command.runId,
@@ -1071,7 +790,11 @@ const executeCommand = async (
       const completion = active.host.admit(
         command.trigger === 'submit'
           ? { ...base, trigger: 'submit' }
-          : { ...base, trigger: command.trigger, retainedMessageIds: command.retainedMessageIds },
+          : {
+              ...base,
+              trigger: command.trigger,
+              retainedMessageIds: command.retainedMessageIds,
+            },
       );
       return {
         type: 'result',
@@ -1088,8 +811,19 @@ const executeCommand = async (
         snapshot: await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId)),
       };
     }
+    case 'record-settlement': {
+      await active.host.recordSettlement({
+        chatId: command.chatId,
+        runId: command.event.runId,
+        event: command.event,
+      });
+      break;
+    }
     case 'steer': {
-      await active.host.steer({ runId: command.runId, message: command.message });
+      await active.host.steer({
+        runId: command.runId,
+        message: command.message,
+      });
       break;
     }
     case 'cancel': {
@@ -1102,16 +836,20 @@ const executeCommand = async (
     }
   }
   const snapshot: HostRunSnapshot = await active.host.snapshot(command.chatId);
-  return { type: 'result', requestId: command.requestId, operation: command.type, snapshot };
+  return {
+    type: 'result',
+    requestId: command.requestId,
+    operation: command.type,
+    snapshot,
+  };
 };
 
 const postForwardedResponse = async (options: {
   readonly channel: BroadcastChannel;
   readonly senderId: string;
   readonly command: AgentHostWorkerCommand;
-  readonly replay: boolean;
 }): Promise<void> => {
-  const { channel, senderId, command, replay } = options;
+  const { channel, senderId, command } = options;
   const active = session;
   const state = leadership.get(command.chatId);
   if (!active || !state) {
@@ -1119,7 +857,7 @@ const postForwardedResponse = async (options: {
   }
   let response: ForwardedResponse;
   try {
-    response = await executeCommand(command, replay);
+    response = await executeCommand(command);
   } catch (error) {
     response = errorResponse(command.requestId, error);
   }
@@ -1144,7 +882,11 @@ const sendTailBatch = async (options: {
   if (!active || !state) {
     return;
   }
-  const batch = await active.host.readEvents({ chatId, cursor, limit: agentHostTailBatchLimit });
+  const batch = await active.host.readEvents({
+    chatId,
+    cursor,
+    limit: agentHostTailBatchLimit,
+  });
   channel.postMessage({
     ...broadcastBinding(active, chatId),
     type: 'tail',
@@ -1298,7 +1040,13 @@ function channelFor(chatId: string): BroadcastChannel {
     if (message.type === 'tail-request' || message.type === 'tail-ack') {
       if (message.targetGeneration === state.lease.generation) {
         trackTask(
-          async () => sendTailBatch({ channel, targetId: message.senderId, chatId, cursor: message.cursor }),
+          async () =>
+            sendTailBatch({
+              channel,
+              targetId: message.senderId,
+              chatId,
+              cursor: message.cursor,
+            }),
           () => undefined,
         );
       }
@@ -1316,7 +1064,6 @@ function channelFor(chatId: string): BroadcastChannel {
             channel,
             senderId: commandMessage.senderId,
             command: commandMessage.command,
-            replay: commandMessage.replay,
           }),
         (error) => {
           channel.postMessage({
@@ -1411,7 +1158,6 @@ const ensureLeadership = async (chatId: string): Promise<boolean> => {
 const waitForForwardedResponse = async (
   active: WorkerSession,
   command: AgentHostWorkerCommand,
-  replay: boolean,
 ): Promise<ForwardedResponse | undefined> => {
   const pending = Promise.withResolvers<ForwardedResponse>();
   forwarded.set(command.requestId, pending);
@@ -1420,7 +1166,6 @@ const waitForForwardedResponse = async (
     type: 'command',
     senderId: active.tabId,
     targetGeneration: leaderGenerations.get(command.chatId),
-    replay,
     command,
   } satisfies LeaderBroadcast);
   const deadline = new Promise<undefined>((resolve) => {
@@ -1436,9 +1181,11 @@ const waitForForwardedResponse = async (
 const forwardCommand = async (command: AgentHostWorkerCommand): Promise<ForwardedResponse> => {
   const active = session;
   if (!active) {
-    throw Object.assign(new Error('Agent host worker is not initialized.'), { code: 'SESSION_NOT_INITIALIZED' });
+    throw Object.assign(new Error('Agent host worker is not initialized.'), {
+      code: 'SESSION_NOT_INITIALIZED',
+    });
   }
-  const first = await waitForForwardedResponse(active, command, false);
+  const first = await waitForForwardedResponse(active, command);
   if (first) {
     if (first.type === 'tail' || first.type === 'attach') {
       followerCursors.set(command.chatId, first.batch.nextCursor);
@@ -1446,16 +1193,19 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
     return first.type === 'attach'
       ? {
           ...first,
-          leadership: { role: 'follower', generation: first.leadership.generation },
+          leadership: {
+            role: 'follower',
+            generation: first.leadership.generation,
+          },
           takeover: false,
         }
       : first;
   }
   leaderGenerations.delete(command.chatId);
   if (await ensureLeadership(command.chatId)) {
-    return executeCommand(command, true, command.type === 'attach');
+    return executeCommand(command, command.type === 'attach');
   }
-  const replay = await waitForForwardedResponse(active, command, true);
+  const replay = await waitForForwardedResponse(active, command);
   if (!replay) {
     throw Object.assign(new Error(`No chat leader answered command ${command.requestId} before its deadline.`), {
       code: 'LEADER_RESPONSE_TIMEOUT',
@@ -1467,7 +1217,10 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
   return replay.type === 'attach'
     ? {
         ...replay,
-        leadership: { role: 'follower', generation: replay.leadership.generation },
+        leadership: {
+          role: 'follower',
+          generation: replay.leadership.generation,
+        },
         takeover: false,
       }
     : replay;
@@ -1493,7 +1246,11 @@ const replayRecoveredBatch = async (options: {
     }
     if (leadership.has(chatId)) {
       // oxlint-disable-next-line no-await-in-loop -- Durable cursor windows must be replayed in order.
-      batch = await active.host.readEvents({ chatId, cursor: batch.nextCursor, limit: agentHostTailBatchLimit });
+      batch = await active.host.readEvents({
+        chatId,
+        cursor: batch.nextCursor,
+        limit: agentHostTailBatchLimit,
+      });
       continue;
     }
     if (followerGeneration) {
@@ -1526,7 +1283,7 @@ const recoverFollower = async (chatId: string): Promise<void> => {
     sessionId: active.sessionId,
   };
   const becameLeader = await ensureLeadership(chatId);
-  const response = becameLeader ? await executeCommand(command, true, true) : await forwardCommand(command);
+  const response = becameLeader ? await executeCommand(command, true) : await forwardCommand(command);
   if (response.type === 'error') {
     throw Object.assign(new Error(response.message), { code: response.code });
   }
@@ -1537,7 +1294,12 @@ const recoverFollower = async (chatId: string): Promise<void> => {
   if (followerGeneration) {
     observeFollowerLeader(chatId, followerGeneration);
   }
-  await replayRecoveredBatch({ active, chatId, initial: response.batch, followerGeneration });
+  await replayRecoveredBatch({
+    active,
+    chatId,
+    initial: response.batch,
+    followerGeneration,
+  });
 };
 
 function scheduleFollowerRecovery(chatId: string): void {
@@ -1577,6 +1339,17 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     throw Object.assign(new Error('Project and workspace authority are required.'), { code: 'AUTHORITY_INVALID' });
   }
   const runtimeConfig = uiRuntimeConfigSchema.parse(request.runtimeConfig);
+  if ((request.computeMode === 'durable') !== Boolean(request.computeStorePort)) {
+    throw Object.assign(new Error('Durable compute mode and its private store port must be supplied together.'), {
+      code: 'COMPUTE_AUTHORITY_INVALID',
+    });
+  }
+  const computeConnection = request.computeStorePort ? connectComputeStoreChannel(request.computeStorePort) : undefined;
+  const compute = computeConnection
+    ? ({ mode: 'durable', store: computeConnection.store } as const)
+    : request.computeMode === 'off'
+      ? ({ mode: 'off' } as const)
+      : ({ mode: 'memory' } as const);
   const [fileSystem, projectRoot] = await Promise.all([
     createProjectFileSystemProxy(request.fileSystemPort),
     createProjectFileSystemProxy(request.projectRootPort),
@@ -1616,6 +1389,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     createDefaultKernelOptions({
       fileSystem: fromFsLike(createRuntimeFsLike(fileSystem)),
       runtimeConfig,
+      compute,
     }),
   );
   // Lazy: the headless-image graph eagerly resolves the resvg wasm URL at
@@ -1624,19 +1398,188 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
   const headlessImageModule = await import('#services/headless-image.service.js');
   const imageService = new headlessImageModule.HeadlessImageService();
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
   const geoSpecClient = createGeoSpecWorkerRpcClient({
-    openFileSystemBridge: createRelayedFileSystemBridge(fileSystem, createFileSystemBridgePort),
+    openFileSystemBridge: () => createFileSystemBridgePort(workspaceProvider),
     runtimeConfig,
   });
   const runtimeRpc = createRuntimeRpcClients({
     runtimeClient,
     imageService,
-    lengthSymbol: request.lengthSymbol,
   });
+  const parameterActors = new Map<string, Promise<ParameterActor>>();
+  /*
+   * A manifest arriving over the runtime transport is admitted once, at this boundary, and cached by
+   * its revision: re-reading a sidecar carries no new semantic evidence to re-validate.
+   * ponytail: one entry per live revision, cleared when a new one arrives.
+   */
+  const admittedManifests = new Map<string, Promise<ParameterManifest>>();
+  const admitManifestOnce = async (manifest: ParameterManifest): Promise<ParameterManifest> => {
+    const held = admittedManifests.get(manifest.revision);
+    if (held !== undefined) {
+      return held;
+    }
+    const admitted = admitParameterManifest(manifest);
+    admittedManifests.clear();
+    admittedManifests.set(manifest.revision, admitted);
+    return admitted;
+  };
+  const parameterActorFor = async (targetFile: string): Promise<ParameterActor> => {
+    const existing = parameterActors.get(targetFile);
+    if (existing) {
+      return existing;
+    }
+    const pending = (async (): Promise<ParameterActor> => {
+      const sidecar = parameterEntryPath(targetFile);
+      const target = {
+        authority: `browser:${request.authority.workspaceId}:${request.authority.projectId}`,
+        root: request.authority.projectId,
+        entry: targetFile,
+      } as const;
+      let observer: Readonly<{ changed(): void; failed(error: unknown): void }> | undefined;
+      const handleWatch = (event: Readonly<{ type: string }>): void => {
+        if (event.type === 'reset') {
+          observer?.failed(Object.assign(new Error('Parameter watch reset.'), { code: 'WATCH_RESET' }));
+        } else {
+          observer?.changed();
+        }
+      };
+      let prearmed: ReturnType<ProjectFileSystemBridge['watchReady']> | undefined = projectRoot.watchReady(
+        { paths: [sidecar] },
+        handleWatch,
+      );
+      await prearmed.ready;
+      const manifest = async (
+        _target: ParameterSetTarget,
+        signal: AbortSignal,
+        resolution?: ParameterResolutionOptions,
+      ): Promise<ParameterManifest> => {
+        const result = await runtimeClient.resolveParameters({
+          source: { path: targetFile },
+          ...(resolution === undefined ? {} : { resolution }),
+          signal,
+        });
+        if (!result.success) {
+          throw Object.assign(
+            new Error(result.issues.map(({ message }) => message).join('; ') || 'Parameter resolution failed.'),
+            { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
+          );
+        }
+        return admitManifestOnce(result.data);
+      };
+      const authority: ParameterAuthority = {
+        path: () => sidecar,
+        read: async (_target, signal) => {
+          signal.throwIfAborted();
+          return (await projectRoot.exists(sidecar)) ? projectRoot.readFile(sidecar) : null;
+        },
+        writeChecked: async ({ signal, ...write }) => {
+          signal?.throwIfAborted();
+          return projectRoot.writeFileChecked(write);
+        },
+      };
+      const observe = (changed: () => void, failed: (error: unknown) => void): (() => void) => {
+        observer = { changed, failed };
+        let active = true;
+        let watch = prearmed;
+        prearmed = undefined;
+        if (!watch) {
+          watch = projectRoot.watchReady({ paths: [sidecar] }, handleWatch);
+          const activeWatch = watch;
+          const reportReady = async (): Promise<void> => {
+            try {
+              await activeWatch.ready;
+            } catch (error) {
+              if (active) {
+                failed(error);
+              }
+            }
+          };
+          // async-iife: report a late watch-open failure to the authority observer.
+          void reportReady();
+        }
+        const activeWatch = watch;
+        const reportClosed = async (): Promise<void> => {
+          await activeWatch.closed;
+          if (active) {
+            failed(Object.assign(new Error('Parameter watch closed.'), { code: 'WATCH_CLOSED' }));
+          }
+        };
+        // async-iife: a live authority treats an unexpected watch close as failure.
+        void reportClosed();
+        return () => {
+          active = false;
+          observer = undefined;
+          activeWatch.unsubscribe();
+        };
+      };
+      const actor = createActor(
+        parameterSetMachine.provide({
+          actors: {
+            /* An agent edits the source between reads, so every load re-resolves; the manifest is
+             * admitted only once per revision, and the sidecar bytes decide what changed. */
+            loadParameterSet: fromPromise(async ({ input, signal }) =>
+              loadParameterSnapshot({
+                target,
+                authority,
+                manifest,
+                ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+                signal,
+              }),
+            ),
+            commitParameterSet: fromPromise(async ({ input: change, signal }) =>
+              commitParameterChange({ change, authority, signal }),
+            ),
+            observeParameterSet: fromCallback(({ sendBack }) =>
+              observe(
+                () => {
+                  sendBack({ type: 'watch.changed' });
+                },
+                (error) => {
+                  sendBack({
+                    type: 'watch.error',
+                    message: error instanceof Error ? error.message : 'Observation failed.',
+                  });
+                },
+              ),
+            ),
+          },
+        }),
+        { input: { target } },
+      );
+      actor.start();
+      return actor;
+    })();
+    parameterActors.set(targetFile, pending);
+    try {
+      return await pending;
+    } catch (error) {
+      if (parameterActors.get(targetFile) === pending) {
+        parameterActors.delete(targetFile);
+      }
+      throw error;
+    }
+  };
+  const parameters = createRuntimeParameterAgentClient({
+    mapRuntimeError: (error) => toRpcError(error),
+    parameterActorFor,
+  });
+  /* One function composes every view on every host (charter D1): the bundles,
+   * the registry mask and provenance are all inside it, so this worker only
+   * adapts the RPC shape over it. */
+  const agentView = composeView(
+    { filesystem: workspaceProvider },
+    { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
+  );
+  const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user', policy: tauPathPolicy });
   const toolRegistry = createChatToolRegistry({
-    fileSystemFor: (signal) => createRpcFileSystem({ proxy: fileSystem, mutations: fileSystemMutations, signal }),
+    fileSystemFor: (signal) =>
+      createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
+    recordFileSystemFor: (signal) =>
+      createProviderRpcFileSystem({ provider: recordView, mutations: fileSystemMutations, signal }),
     skillResolver,
     ...runtimeRpc,
+    parameters,
     geospec: geoSpecClient,
     testingEnabled: request.testingEnabled ?? false,
   });
@@ -1653,54 +1596,34 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
       };
     }
   >();
-  const paseoClients = createPaseoClientCache({ apiBaseUrl: request.gatewayBaseUrl });
   const host = createTauAgentHost({
     systemPrompt: request.systemPrompt,
     systemPromptBlocks: request.systemPromptBlocks,
     model: request.model,
-    modelTransport: createGatewayModelTransport({ baseUrl: request.gatewayBaseUrl, model: request.model }),
+    modelTransport: createConfiguredGatewayModelTransport({
+      baseUrl: request.gatewayBaseUrl,
+      /* The project every receipt from this worker attributes to. It is the
+       * same id `GET /v1/projects` lists, so the usage page can name it; the
+       * worker refuses to initialize without one (above). */
+      projectId: request.authority.projectId,
+      model: request.model,
+    }),
     toolRegistry,
-    /* SP-10: a Paseo turn is an external run of *this* host — the page holds the
-     * E2EE session and the API is out of the data path. Registered on the same
-     * seam the daemon registers its ACP adapters on, so admission, the durable
-     * log, resume and the approval inbox stay where they are. */
-    externalRunners: {
-      paseo: createPaseoRunnerPort({
-        clientFor: paseoClients.clientFor,
-        createId: randomUuid,
-        /* The page minted this at admission against a paired daemon: the
-         * signing secret never leaves that daemon, so the browser cannot make
-         * one itself. Absent means the agent runs without Tau tools, which the
-         * selector row already told the user. */
-        mcpServersFor: (turn) => {
-          const url = turn.agent['mcpUrl'];
-          const headers = turn.agent['mcpHeaders'];
-          if (typeof url !== 'string' || headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
-            return undefined;
-          }
-          return {
-            tau: {
-              type: 'http',
-              url,
-              headers: Object.fromEntries(
-                Object.entries(headers).flatMap(([key, value]) => (typeof value === 'string' ? [[key, value]] : [])),
-              ),
-              alwaysLoad: true,
-            },
-          };
-        },
-      }),
-    },
     openEventLog: async (chatId) => {
       if (!activeReference.current) {
         throw new Error('Agent host worker initialization is incomplete.');
       }
       return openProjectEventLog(activeReference.current, chatId);
     },
+    // Chat attachments live beside the log in the project's own `.tau/chats`.
+    attachments: createProviderAttachmentReader(projectRoot),
     interruptPort: {
       pause: async (interrupt) => {
         const settled = Promise.withResolvers<InterruptResolution>();
-        interruptWaiters.set(interrupt.interruptId, { request: interrupt, settled });
+        interruptWaiters.set(interrupt.interruptId, {
+          request: interrupt,
+          settled,
+        });
         return settled.promise;
       },
       pending: async ({ runId }) =>
@@ -1748,10 +1671,11 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     durability,
     storageBackend,
     host,
-    paseoClients,
     runtimeClient,
+    parameterActors,
     imageService,
     geoSpecClient,
+    computeDispose: computeConnection?.dispose,
     providerBasePath: request.projectStorage.providerBasePath,
     projectId: request.authority.projectId,
     workspaceId: request.authority.workspaceId,
@@ -1775,14 +1699,39 @@ const close = async (): Promise<void> => {
   followerRetryIds.clear();
   const active = session;
   session = undefined;
-  try {
-    await active?.host.close();
-  } finally {
-    await Promise.allSettled(active ? [active.geoSpecClient.close(), active.paseoClients.close()] : []);
-    active?.imageService.dispose();
-    active?.runtimeClient.terminate();
-    active?.fileSystem.dispose();
-    active?.projectRoot.dispose();
+  const failures: unknown[] = [];
+  if (active) {
+    try {
+      await active.host.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    const parameterResults = await Promise.allSettled(
+      [...active.parameterActors.entries()].map(async ([targetFile, pending]) => {
+        const client = await pending;
+        client.send({ type: 'close' });
+        const state = await waitFor(client, (state) => state.status === 'done' || state.matches({ open: 'uncertain' }));
+        if (state.status !== 'done') {
+          throw new Error(`Parameter write for ${targetFile} remains uncertain.`);
+        }
+      }),
+    );
+    for (const result of parameterResults) {
+      if (result.status === 'rejected') {
+        failures.push(result.reason as unknown);
+      }
+    }
+    const geospecResult = await Promise.allSettled([active.geoSpecClient.close()]);
+    for (const result of geospecResult) {
+      if (result.status === 'rejected') {
+        failures.push(result.reason as unknown);
+      }
+    }
+    active.imageService.dispose();
+    active.runtimeClient.terminate();
+    active.computeDispose?.();
+    active.fileSystem.dispose();
+    active.projectRoot.dispose();
     const states = [...leadership.values()];
     for (const state of states) {
       globalThis.clearInterval(state.heartbeatId);
@@ -1806,6 +1755,15 @@ const close = async (): Promise<void> => {
     followerCursors.clear();
     tailInFlight.clear();
     leaderGenerations.clear();
+  }
+  /* The flag guards a *re-entrant* close, not the worker's whole lifetime.
+   * Leaving it latched made `close` permanently a no-op, so the next
+   * `initialize` kept the released session and refused the new one with
+   * SESSION_CONFLICT — invisible in a real worker, which terminates after
+   * closing, and fatal to anything that reuses the module. */
+  closing = false;
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Browser agent host could not release every session resource.');
   }
 };
 
@@ -1834,11 +1792,15 @@ export const handleAgentHostWorkerRequest = async (
       code: 'SESSION_NOT_INITIALIZED',
     });
   }
-  const command: AgentHostWorkerCommand = { ...request, requestId: randomUuid(), sessionId };
+  const command: AgentHostWorkerCommand = {
+    ...request,
+    requestId: randomUuid(),
+    sessionId,
+  };
   const alreadyLeader = leadership.has(request.chatId);
   const isLeader = await ensureLeadership(request.chatId);
   const response = isLeader
-    ? await executeCommand(command, false, request.type === 'attach' && !alreadyLeader)
+    ? await executeCommand(command, request.type === 'attach' && !alreadyLeader)
     : await forwardCommand(command);
   if (response.type === 'error') {
     throw Object.assign(new Error(response.message), { code: response.code });

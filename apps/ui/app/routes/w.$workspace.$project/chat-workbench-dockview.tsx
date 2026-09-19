@@ -1,6 +1,5 @@
 import { createContext, Fragment, memo, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
 import type { ComponentProps, ReactNode } from 'react';
-import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
 import {
   Activity,
@@ -43,7 +42,6 @@ import {
 } from '@taucad/types/constants';
 import type { CodeEditor } from '#components/code/code-editor.client.js';
 import { FileSelector } from '#components/files/file-selector.js';
-import { Loader } from '#components/ui/loader.js';
 import { useProject } from '#hooks/use-project.js';
 import { Dockview } from '#components/panes/dockview.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
@@ -60,7 +58,12 @@ import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-ed
 import { ChatEditorErrorPlaceholder } from '#routes/w.$workspace.$project/chat-editor-error-placeholder.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileTreeEntry } from '#hooks/use-file-tree.js';
+import type { FileProvenance } from '@taucad/types';
 import { useMonacoServices } from '#hooks/use-monaco-model-service.js';
+import { useConfiguredMonaco } from '#hooks/use-monaco-configuration.js';
+import type { MonacoModelService } from '#lib/monaco-model-service.js';
+import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
@@ -86,8 +89,9 @@ import type {
   WorkbenchPanelId,
   WorkbenchUtilityPanelId,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
+import { useRevisions } from '#hooks/use-revisions.js';
 import type { OpenFile } from '#types/editor.types.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -611,7 +615,24 @@ export function WorkbenchPlaceholderPanel(
           openPlaceholderFile?.(path, profile === 'shared' || readOnly, placeholder);
         }}
       >
-        <PanelEmptyState icon={FolderOpen} title='Open file' description='Select a file from the workspace tree' />
+        <PanelEmptyState
+          icon={FolderOpen}
+          title='Open file'
+          description={
+            <>
+              Select a file from the{' '}
+              <Button
+                variant='link'
+                className='h-auto p-0 text-sm text-foreground'
+                onClick={() => {
+                  properties.api.updateParameters({ filesOpen: true });
+                }}
+              >
+                workspace tree
+              </Button>
+            </>
+          }
+        />
       </FileWorkbenchPane>
     );
   }
@@ -1083,6 +1104,18 @@ function FileWorkbenchPane({
  * file path so a rename does not unmount the editor — it just shifts
  * the live `filePath` lookup to the new path in `openFiles`.
  */
+/**
+ * Whether this pane may not be edited.
+ *
+ * The dispatch that opened the pane is a hint; the composed view's own answer is
+ * the rule, so a file reached through the breadcrumb selector or a restored
+ * layout is as read-only as one opened from a chat link. The user's access is
+ * `source`, never `agentAccess` (ruling P10).
+ */
+function isPaneReadOnly(fromDispatch: boolean | undefined, provenance: FileProvenance | undefined): boolean {
+  return (fromDispatch ?? false) || (provenance !== undefined && provenance.source !== 'project');
+}
+
 export const FileEditor = memo(function ({
   paneId,
   filePath: filePathFromParams,
@@ -1098,7 +1131,7 @@ export const FileEditor = memo(function ({
   readonly panelApi: IDockviewPanelProps['api'];
   readonly containerApi?: DockviewApi;
 }): ReactNode {
-  const monaco = useMonaco();
+  const monaco = useConfiguredMonaco();
   const { editorRef, geometryUnits, mainEntryPath } = useProject();
   const cadActor = geometryUnits.get(mainEntryPath);
   const fileManager = useFileManager();
@@ -1113,7 +1146,7 @@ export const FileEditor = memo(function ({
   // place and this selector picks the fresh path.
   const liveEntry = openFiles.find((file) => file.paneId === paneId);
   const filePath = liveEntry?.path ?? filePathFromParams;
-  const readOnly = readOnlyFromParams ?? liveEntry?.readOnly ?? false;
+  const readOnly = isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
   const paneParameters = parameters ?? { filePath: filePathFromParams, readOnly: readOnlyFromParams };
 
   // Kernel diagnostics
@@ -1199,28 +1232,39 @@ export const FileEditor = memo(function ({
     [readOnly, contentService, paneId, editorRef, modelService],
   );
 
-  // Acquire/release ref-counted editor model hold
+  // Acquire/release ref-counted editor model hold. The code pane mounts its
+  // editor only once the model is bound (`hasSyncedModel`) or the hold has
+  // settled: an editor that mounts first creates the model from its
+  // `defaultValue`, and the workspace file system then adopts it without
+  // subscribing it to file changes.
+  const [settledHold, setSettledHold] = useState<{ readonly service: MonacoModelService; readonly path: string }>();
   useEffect(() => {
     if (!modelService || !filePath) {
       return;
     }
 
-    void modelService.acquireModel(filePath);
+    let isCurrent = true;
+    const settle = (): void => {
+      if (isCurrent) {
+        setSettledHold({ service: modelService, path: filePath });
+      }
+    };
+    void modelService.acquireModel(filePath).then(settle, settle);
     return () => {
+      isCurrent = false;
       modelService.releaseModel(filePath);
     };
   }, [modelService, filePath]);
+  const isEditorReady =
+    modelService !== undefined &&
+    (modelService.hasSyncedModel(filePath) || (settledHold?.service === modelService && settledHold.path === filePath));
 
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
   switch (result.kind) {
     case 'loading': {
-      body = (
-        <div className='flex h-full items-center justify-center'>
-          <Loader className='size-8 stroke-1 text-muted-foreground' />
-        </div>
-      );
+      body = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
       break;
     }
     case 'too-large': {
@@ -1285,7 +1329,9 @@ export const FileEditor = memo(function ({
         viewId: paneState.viewId,
         resource: { outcome: result, readAll: handleReadAll },
         textEditor:
-          result.kind === 'text' ? { language, onChange: handleCodeChange, onValidate: handleValidate } : undefined,
+          result.kind === 'text'
+            ? { language, isReady: isEditorReady, onChange: handleCodeChange, onValidate: handleValidate }
+            : undefined,
         binaryFallback: result.kind === 'binary' ? { onForceOpen: handleForceOpenBinary } : undefined,
       };
       break;
@@ -1342,13 +1388,7 @@ export const FileEditor = memo(function ({
   );
 
   if (result.kind === 'binary' || result.kind === 'text') {
-    return (
-      <RoutedFileViewer
-        viewer={resolvedViewer as ResolvedFileViewer}
-        request={viewerRequest as Omit<FileViewerRenderRequest, 'renderPane'>}
-        renderPane={renderPane}
-      />
-    );
+    return <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />;
   }
 
   return renderPane({ body });
@@ -1405,7 +1445,7 @@ function FilePaneFilesSidecar({
         aria-valuemax={maximumFilesWidth}
         aria-valuenow={Math.round(width)}
         tabIndex={0}
-        className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:focus-outline'
         onPointerDown={(event) => {
           drag.current = { x: event.clientX, width, currentWidth: width };
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -1492,8 +1532,9 @@ export const WorkbenchDockview = memo(function ({
   const { connectWorkbench, setWorkbenchOpen } = useProjectWorkspace();
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
-  const { canReturnToLatest, headRevision, isDirty } = useVisibleRevisions();
-  const monaco = useMonaco();
+  const { canReturnToLatest, headRevisionId, isDirty, revisions } = useRevisions();
+  const headRevisionNumber = revisions.find((revision) => revision.revisionId === headRevisionId)?.n;
+  const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
   const pendingUserFilePathRef = useRef<string | undefined>(undefined);
@@ -1759,7 +1800,10 @@ export const WorkbenchDockview = memo(function ({
       if (!revisionsPanel) {
         return;
       }
-      const marker = headRevision ? `R${headRevision.n}${isDirty ? '*' : ''}` : 'Baseline';
+      const marker =
+        headRevisionNumber === undefined
+          ? 'No revisions yet'
+          : `Rev ${String(headRevisionNumber)}${isDirty ? ' · Modified' : ''}`;
       revisionsPanel.api.setTitle(canReturnToLatest ? `Revisions · ${marker}` : 'Revisions');
     };
 
@@ -1768,7 +1812,7 @@ export const WorkbenchDockview = memo(function ({
     return () => {
       disposable.dispose();
     };
-  }, [api, canReturnToLatest, headRevision, isDirty]);
+  }, [api, canReturnToLatest, headRevisionNumber, isDirty]);
 
   useEffect(() => {
     if (!api) {

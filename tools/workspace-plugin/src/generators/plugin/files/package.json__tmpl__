@@ -44,10 +44,12 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "@taucad/runtime": "^0.1.0-beta.0"
+    "@taucad/runtime": "^0.1.0-beta.0"<% if (usesZod) { %>,
+    "zod": "^4.0.0"<% } %>
   },
   "devDependencies": {
-    "@taucad/runtime": "workspace:*"
+    "@taucad/runtime": "workspace:*"<% if (usesZod) { %>,
+    "zod": "catalog:"<% } %>
   },
   "taucad": {
     "hostTarget": "<%= hostTarget %>"

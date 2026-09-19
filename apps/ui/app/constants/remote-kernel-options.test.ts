@@ -1,4 +1,9 @@
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import type { RuntimeClient } from '@taucad/runtime';
+import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+import type * as WebSocketTransport from '@taucad/runtime/transport/websocket';
+import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
+import { createRuntimeWorker, defineRuntime } from '@taucad/runtime/worker';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { remoteKernelOptions } from '#constants/remote-kernel-options.js';
@@ -13,11 +18,13 @@ import {
 
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
-  webSocketTransport: vi.fn((options: unknown) => ({ id: 'web-socket', options })),
 }));
 
 vi.mock('@taucad/runtime/metadata', () => ({ packageVersion: '1.2.3' }));
-vi.mock('@taucad/runtime/transport/websocket', () => ({ webSocketTransport: mocks.webSocketTransport }));
+vi.mock('@taucad/runtime/transport/websocket', async (importOriginal) => {
+  const original = await importOriginal<typeof WebSocketTransport>();
+  return { ...original, webSocketTransport: vi.fn(original.webSocketTransport) };
+});
 vi.mock('#lib/remote-host-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof RemoteHostClient>()),
   createRemoteHostSession: mocks.createSession,
@@ -51,13 +58,54 @@ describe('remoteKernelOptions', () => {
     optionsFactory({ fileSystem });
 
     expect(mocks.createSession).toHaveBeenCalledWith('device-1', '1.2.3');
-    expect(mocks.webSocketTransport).toHaveBeenCalledWith(
+    expect(webSocketTransport).toHaveBeenCalledWith(
       expect.objectContaining({
         url: 'wss://api.example/v1/agents/sessions/session-1/browser',
         fileSystem,
       }),
     );
     expect(getRemoteComputePlacement()).toEqual({ state: 'connecting', deviceId: 'device-1' });
+  });
+
+  it('connects to an already-configured static host without sending browser boot configuration', async () => {
+    const { createRuntimeClient } = await import('@taucad/runtime');
+    const host = webSocketHost({
+      worker: () => createRuntimeWorker({ runtime: defineRuntime({}) }),
+    });
+    let client: RuntimeClient | undefined;
+    try {
+      await host.ready;
+      mocks.createSession.mockResolvedValue({
+        id: 'session-local',
+        runtimeVersion: '1.2.3',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        url: `ws://127.0.0.1:${host.address().port}`,
+      });
+      selectRemoteComputeDevice('device-local');
+      const factory = await remoteKernelOptions();
+      const incompatible = createRuntimeClient({
+        transport: webSocketTransport({
+          url: `ws://127.0.0.1:${host.address().port}`,
+          fileSystem: fromMemoryFs(),
+        }),
+        // @ts-expect-error -- Exercise rejection of an invalid boot bag at the actual wire boundary.
+        config: { browserWorkerUrl: 'https://browser.invalid/worker.mjs' },
+      });
+      try {
+        await expect(incompatible.connect()).rejects.toThrow(/configuration|config|initializ/iu);
+      } finally {
+        await incompatible.shutdown();
+      }
+      client = createRuntimeClient(factory({ fileSystem: fromMemoryFs() }));
+
+      await client.connect();
+
+      expect(client.capabilities?.registrations).toEqual([]);
+      expect(getRemoteComputePlacement()).toEqual({ state: 'remote', deviceId: 'device-local' });
+    } finally {
+      await client?.shutdown();
+      await host.close();
+    }
   });
 
   it('surfaces an offline device without choosing local execution', async () => {
@@ -72,3 +120,4 @@ describe('remoteKernelOptions', () => {
     });
   });
 });
+// @vitest-environment node

@@ -119,7 +119,41 @@ export type {
   TranscoderDefinition,
   TranscoderPluginFactory,
 } from '#types/runtime-transcoder.types.js';
+export type { TranscoderEdgeType } from '#plugins/plugin-types.js';
 export * from '#types/runtime-protocol.types.js';
 export type * from '#types/bridge.types.js';
 export { coordinateSystemSchema, gltfExportConventionSchema, unitSchema } from '#types/export-option-schemas.js';
 export type { CoordinateSystemOptions, UnitOptions } from '#types/export-option-schemas.js';
+
+export type {
+  BuildReuse,
+  ComputeAnnouncement,
+  ComputeAnnounceResult,
+  ComputeBinding,
+  ComputeGeneration,
+  ComputeGetInput,
+  ComputeGetResult,
+  ComputePinInput,
+  ComputePinResult,
+  ComputePutInput,
+  ComputePutResult,
+  ComputeReleaseInput,
+  ComputeRetention,
+  ComputeReuseScope,
+  ComputeScopeReceipt,
+  ComputeScopeSettlement,
+  ComputeStore,
+  ComputeStoreControl,
+  ComputeStoreEngine,
+  ComputeStoreEntry,
+  ComputeStoreReport,
+  ComputeStoreSession,
+  ComputeWarmInput,
+  ComputeWarmResult,
+  CloseComputeScopeInput,
+  KernelComputeCapability,
+  OpenComputeScopeInput,
+  ResidentCacheBinding,
+  ResidentCacheStats,
+  ResidentExportEntry,
+} from '#types/runtime-compute.types.js';

@@ -1,0 +1,7 @@
+ALTER TABLE "billing"."credit_transaction" ADD COLUMN "stripe_account_id" text;--> statement-breakpoint
+ALTER TABLE "billing"."credit_transaction" ADD COLUMN "livemode" boolean;--> statement-breakpoint
+ALTER TABLE "billing"."credit_transaction" ADD COLUMN "payment_intent_id" text;--> statement-breakpoint
+ALTER TABLE "billing"."credit_transaction" ADD COLUMN "charge_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "credit_transaction_payment_intent" ON "billing"."credit_transaction" USING btree ("stripe_account_id","livemode","payment_intent_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "credit_transaction_charge" ON "billing"."credit_transaction" USING btree ("stripe_account_id","livemode","charge_id");--> statement-breakpoint
+ALTER TABLE "billing"."credit_transaction" ADD CONSTRAINT "credit_transaction_collected_source" CHECK (num_nonnulls("billing"."credit_transaction"."stripe_account_id", "billing"."credit_transaction"."livemode", "billing"."credit_transaction"."payment_intent_id", "billing"."credit_transaction"."charge_id") = 0 OR ("billing"."credit_transaction"."kind" IN ('purchase_grant', 'period_grant') AND num_nonnulls("billing"."credit_transaction"."stripe_account_id", "billing"."credit_transaction"."livemode", "billing"."credit_transaction"."payment_intent_id", "billing"."credit_transaction"."charge_id") = 4));

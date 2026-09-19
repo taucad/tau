@@ -20,7 +20,7 @@ import type {
   CreateGeometryResult,
   MeshGeometryResult,
   ExportGeometryResult,
-  GetParametersResult,
+  GetParameterDeclarationsResult,
   KernelIssue,
 } from '#types/runtime.types.js';
 import type {
@@ -119,8 +119,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.runtime = options.runtime;
   }
 
-  /**
-   */
+  /** Initializes the configured runtime and its kernel registrations. */
   public override async initialize(input: {
     callbacks: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['callbacks'];
     transferables: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['transferables'];
@@ -170,6 +169,25 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     await Promise.resolve();
   }
 
+  protected override async onCleanup(): Promise<void> {
+    for (const kernel of this.loadedKernels.values()) {
+      if (!kernel.initialized) {
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- release each initialized owner independently in load order.
+        await kernel.definition.cleanup?.(kernel.ctx);
+      } catch (error) {
+        this.logger.warn('Kernel cleanup failed', { data: { kernelId: kernel.entry.id, error: String(error) } });
+      }
+    }
+    this.loadedKernels.clear();
+    this.activeKernelId = undefined;
+    this.selectionCache.clear();
+    this.selectionErrors.clear();
+    this.cachedDetectionDeps = undefined;
+  }
+
   protected override async onGetDependencies(
     input: GetDependenciesInput,
     runtime: KernelRuntime,
@@ -200,7 +218,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   protected override async onGetParameters(
     input: GetParametersInput,
     runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
+  ): Promise<GetParameterDeclarationsResult> {
     const owner = await this.createRequestOperationOwner(input, 'request', runtime);
     return this.onGetParametersForOwner(owner, input, runtime);
   }
@@ -209,7 +227,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     owner: OperationOwner,
     input: GetParametersInput,
     runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
+  ): Promise<GetParameterDeclarationsResult> {
     const selectionError = this.selectionErrors.get(input.entryPath);
     if (selectionError) {
       return createKernelError([this.createKernelBindingIssue(selectionError)]);
@@ -217,15 +235,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
-      runtime.logger.warn(
-        `getParameters returning empty: ${describeUnhandledExtension(input.entryPath, this.kernelPlugins)}`,
-        { data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] } },
-      );
-      return {
-        success: true,
-        data: { defaultParameters: {}, jsonSchema: {} },
-        issues: [],
-      };
+      runtime.logger.warn(`getParameters failed: ${describeUnhandledExtension(input.entryPath, this.kernelPlugins)}`, {
+        data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] },
+      });
+      return createKernelError([
+        {
+          message: describeUnhandledExtension(input.entryPath, this.kernelPlugins),
+          code: 'KERNEL_CAPABILITY_MISSING',
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
     }
 
     return kernel.definition.getParameters(input, this.forKernel(kernel, runtime), kernel.ctx);
@@ -271,21 +291,27 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
       this.captureNativeHandle(output.nativeHandle, owner);
 
-      if (kernel.definition.serializeNativeHandle) {
-        const serializedNativeHandle = kernel.definition.serializeNativeHandle(
-          { nativeHandle: output.nativeHandle },
-          kernelRuntime,
-          kernel.ctx,
-        );
-        if (serializedNativeHandle === undefined || serializedNativeHandle === null) {
-          throw new Error('Kernel native-handle snapshot serializer returned null or undefined.');
-        }
-
+      const { serializeNativeHandle } = kernel.definition;
+      if (serializeNativeHandle) {
+        const { nativeHandle } = output;
         return {
           success: true,
           data: output.geometry,
           issues: output.issues ?? [],
-          serializedNativeHandle,
+          /* D12: the snapshot is an export artifact that no display render reads, and serialising a
+           * Replicad or OpenCascade shape is not cheap — so it is produced where someone asks for
+           * it. The liveness check is load-bearing, not defensive: this thunk outlives the handle,
+           * and serialising a disposed kernel shape is a crash. */
+          serializeNativeHandleSnapshot: () => {
+            if (!this.isNativeHandleLive(nativeHandle)) {
+              return undefined;
+            }
+            const serialized = serializeNativeHandle({ nativeHandle }, kernelRuntime, kernel.ctx);
+            if (serialized === undefined || serialized === null) {
+              throw new Error('Kernel native-handle snapshot serializer returned null or undefined.');
+            }
+            return serialized;
+          },
         };
       }
 
@@ -478,12 +504,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     runtime: KernelRuntime,
   ): Promise<RuntimeKernelBinding | undefined> {
     const span = runtime.tracer.startSpan('kernel.select', { file: input.entryPath });
+    let selected: { kernelId: string; method: SelectionMethod } | undefined;
     try {
       const selection = await this.selectKernel(input.entryPath, runtime);
       if (!selection) {
         return undefined;
       }
 
+      /* The selected kernel is on the span because nothing else in a trace says which kernel ran:
+       * a desktop host with a resident native engine logs that engine's identity at fork, whatever
+       * the render then selects. */
+      selected = { kernelId: selection.kernel.entry.id, method: selection.method };
       return {
         kernelId: selection.kernel.entry.id,
         kernelVersion: selection.kernel.definition.version,
@@ -494,7 +525,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       this.selectionErrors.set(input.entryPath, error);
       return undefined;
     } finally {
-      span.end();
+      span.end(selected);
     }
   }
 
@@ -626,6 +657,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ),
     );
     this.kernelRenderContentMap.set(config.id, definition.render?.content ?? []);
+    this.kernelLiveEditMap.set(config.id, definition.liveEdit === true);
     this.kernelInitOptionsMap.set(config.id, validatedOptions);
     this.kernelImplementationAssetsMap.set(config.id, implementationAssets);
     if (definition.render?.optionsSchema) {

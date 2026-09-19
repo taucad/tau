@@ -36,7 +36,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./agent/SKILL.md",
+    "./agent": "./agent/skills.json",
+    "./agent/*": "./agent/*",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -47,7 +48,8 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./agent": "./agent/SKILL.md",
+      "./agent": "./agent/skills.json",
+      "./agent/*": "./agent/*",
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -61,16 +63,22 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@taucad/agent-tools": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "zod": "catalog:"
   },
   "dependencies": {
     "@taucad/cache-core": "workspace:*",
-    "@taucad/native-process-core": "workspace:*"
+    "@taucad/native-process-core": "workspace:*",
+    "@taucad/parameters": "workspace:*"
   },
   "taucad": {
     "hostTarget": "node"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
   }
 }

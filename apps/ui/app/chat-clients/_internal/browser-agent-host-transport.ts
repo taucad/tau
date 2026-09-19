@@ -2,12 +2,14 @@ import { readUIMessageStream } from 'ai';
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
+import { isAttachmentUrl } from '#utils/attachment.utils.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   agentHostAdmissionConfigSchema,
   agentHostExternalAgentSchema,
+  agentHostExternalContextSchema,
   agentHostTailBatchLimit,
 } from '#workers/agent-host.contract.js';
 import {
@@ -15,7 +17,11 @@ import {
   projectAgentHostLiveEvent,
   projectAgentHostUserMessage,
   projectAgentHostUserTurn,
+  projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
+import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
+import { Topic } from '@taucad/events';
+import { isResumableRunFailure } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 
 type AgentLogEvent = Parameters<Parameters<AgentHostClient['subscribe']>[0]>[1];
@@ -27,12 +33,16 @@ type JsonValue = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['
 type BrowserRunState = HostRunSnapshot['state'];
 type HostStartInput = Parameters<AgentHostClient['start']>[0];
 
+export type HostTurnSettlement = TurnConflictedEvent | TurnFailedEvent | TurnFinalizedEvent;
+
 export type BrowserAgentHostRun = Readonly<{
   runId: string;
   state: BrowserRunState;
   eventCount: number;
   turnId?: string;
   userMessage?: MyUIMessage;
+  /** The typed refusal a failed run ended on, when the host recorded one. */
+  failure?: HostRunSnapshot['failure'];
 }>;
 
 export type BrowserAgentHostRegistration = Readonly<{
@@ -48,8 +58,227 @@ const browserRuns = new Map<string, BrowserAgentHostRun>();
 const boundRunIds = new Map<string, string>();
 const activeClients = new Map<string, { readonly client: AgentHostClient; readonly runId: string }>();
 const clientSettlements = new Map<string, Promise<void>>();
+/** Chats whose next reattach may drive the host's own resume. @see requestBrowserAgentHostResume */
+const requestedResumes = new Set<string>();
+
+/**
+ * How long one stream waits on a settlement before it gives up. Milliseconds.
+ *
+ * The same bound the rooted-bridge opener takes, and for the same reason: a
+ * chat's streams serialise through {@link clientSettlements}, so an unbounded
+ * wait on one of them was a wedge nobody could see — the submit behind it never
+ * reached the host, wrote nothing to the log, and left the composer on
+ * "Planning next moves…" for as long as the page stayed open.
+ */
+const settlementTimeout = 30_000;
+
+/**
+ * Await a promise only a peer can settle, or throw once the bound expires.
+ *
+ * Also the composer's bound, where the peer is the chat row that names the
+ * project a draft is saved in rather than a prior stream.
+ * @see deferredRecordStore
+ *
+ * @param settling - The settlement to wait out.
+ * @param reason - What the user is told when it never lands.
+ * @param code - The {@link AgentHostWorkerError} code to carry; defaults to this file's.
+ * @returns What `settling` resolved with.
+ */
+export const awaitSettlement = async <Value>(
+  settling: Promise<Value>,
+  reason: string,
+  code = 'BROWSER_HOST_SETTLEMENT_TIMEOUT',
+): Promise<Value> => {
+  const settlementExpiry = Promise.withResolvers<never>();
+  const timer = globalThis.setTimeout(() => {
+    settlementExpiry.reject(new AgentHostWorkerError(code, reason));
+  }, settlementTimeout);
+  try {
+    return await Promise.race([settling, settlementExpiry.promise]);
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+};
+
+/**
+ * Turns a *host* settled, by turn id (S9, A4).
+ *
+ * A turn the browser placed settles in the file-manager worker's revision root
+ * and its settlement rides that port; a turn a daemon or desktop utility placed
+ * settles on the host, which owns the files (VI11), and reaches this tab as one
+ * durable `turn.finalized` record in the chat's log. Both are the **same
+ * schema**, so this is where every durable one passes through, live and on
+ * replay, and `useRevisions` reads one map.
+ */
+const finalizedTurns = new Map<string, TurnFinalizedEvent>();
+/**
+ * Host-settled turns one tab keeps.
+ *
+ * The cards on screen are what a reader needs; a tab left open for days would
+ * otherwise retain every settlement it ever saw, including other projects'
+ * (they are filtered at read). FIFO by arrival, like the host's own
+ * `settledRunHistory`.
+ */
+const finalizedTurnLimit = 256;
+
+/**
+ * How long a stream's writer stays open for the settlement of the run it
+ * admitted, once the stream itself has ended.
+ *
+ * The settlement is produced by the chat's session actor in the same beat the
+ * request lifecycle ends, so this is a failure bound and not a wait anybody
+ * sees: what it prevents is one unsettled turn holding this chat's next stream
+ * behind `clientSettlements` forever.
+ */
+const settlementWriterGrace = 15_000;
+let finalizedTurnSnapshot: readonly TurnFinalizedEvent[] = [];
+const finalizedTurnTopic = new Topic<void>({ name: 'host-finalized-turns' });
+const hostTurnSettlementTopic = new Topic<HostTurnSettlement>({ name: 'host-turn-settlements' });
+const latestSettlementByChat = new Map<string, HostTurnSettlement>();
+
+/** Every host-attested turn settlement this tab has seen. @see finalizedTurns */
+export const getHostFinalizedTurns = (): readonly TurnFinalizedEvent[] => finalizedTurnSnapshot;
+
+/** Wake a reader when a host settles another turn. @see finalizedTurns */
+export const subscribeHostFinalizedTurns = (listener: () => void): (() => void) =>
+  finalizedTurnTopic.subscribe(listener);
+
+/** Observe every host-attested turn outcome, including durable replay. */
+export const subscribeHostTurnSettlements = (listener: (event: HostTurnSettlement) => void): (() => void) =>
+  hostTurnSettlementTopic.subscribe(listener);
+
+/** The last durable outcome already replayed for one chat. */
+export const getHostTurnSettlement = (chatId: string): HostTurnSettlement | undefined =>
+  latestSettlementByChat.get(chatId);
+
+/**
+ * Record one host-attested settlement, wherever it came from.
+ *
+ * @param event - The settlement, already in the one schema.
+ */
+export const recordHostTurnSettlement = (event: HostTurnSettlement): void => {
+  latestSettlementByChat.delete(event.chatId);
+  latestSettlementByChat.set(event.chatId, event);
+  for (const oldest of latestSettlementByChat.keys()) {
+    if (latestSettlementByChat.size <= finalizedTurnLimit) {
+      break;
+    }
+    latestSettlementByChat.delete(oldest);
+  }
+  if (event.type === 'turn.finalized' && finalizedTurns.get(event.turnId)?.revisionId !== event.revisionId) {
+    finalizedTurns.set(event.turnId, event);
+    for (const oldest of finalizedTurns.keys()) {
+      if (finalizedTurns.size <= finalizedTurnLimit) {
+        break;
+      }
+      finalizedTurns.delete(oldest);
+    }
+    finalizedTurnSnapshot = [...finalizedTurns.values()];
+    finalizedTurnTopic.emit();
+  }
+  hostTurnSettlementTopic.emit(event);
+};
+
+/** Record the finalized member used by revision cards. */
+export const recordHostFinalizedTurn = (event: TurnFinalizedEvent): void => {
+  recordHostTurnSettlement(event);
+};
+
+/** Persist a browser revision root's settlement through the active chat-log writer. */
+export const persistBrowserTurnSettlement = async (event: HostTurnSettlement): Promise<boolean> => {
+  const active = activeClients.get(event.chatId);
+  if (active?.client.recordSettlement === undefined) {
+    return false;
+  }
+  await active.client.recordSettlement(event);
+  return true;
+};
+
+/**
+ * Resolve when the chat's current run has ended, as the host reports it.
+ *
+ * Asked only after the host has refused an admission because a run is live:
+ * the snapshot answers a run that ended in the meantime, and the subscription
+ * answers the one that ends next. Nothing polls, and no state of another owner
+ * is read twice.
+ *
+ * @param client - This chat's host client.
+ * @param chatId - The chat whose live run must end.
+ */
+const liveRunEnded = async (client: AgentHostClient, chatId: string): Promise<void> => {
+  const ended = Promise.withResolvers<void>();
+  const unsubscribe = client.subscribe((eventChatId, event) => {
+    if (eventChatId === chatId && event.type === 'run.lifecycle' && terminal(event.state)) {
+      ended.resolve();
+    }
+  });
+  try {
+    const current = await client.attach({ chatId, cursor: 0, limit: 1 });
+    if (current.snapshot === undefined || terminal(current.snapshot.state)) {
+      return;
+    }
+    await ended.promise;
+  } finally {
+    unsubscribe();
+  }
+};
+
+const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): void => {
+  if (!('leaderEpoch' in event)) {
+    return;
+  }
+  const settlement = projectTurnSettlement(event);
+  if (settlement !== undefined) {
+    recordHostTurnSettlement(settlement);
+  }
+};
 
 export const getBrowserAgentHostRun = (chatId: string): BrowserAgentHostRun | undefined => browserRuns.get(chatId);
+
+/**
+ * Whether this chat's turns are placed on a browser-hosted agent at all.
+ *
+ * Distinguishes "no run to reattach to" from "this placement never registers
+ * one", which the two answers below cannot tell apart on their own.
+ */
+export const isBrowserAgentHostPlaced = (chatId: string): boolean => registrations.has(chatId);
+
+/**
+ * Whether a reattach could still pick this chat's run back up.
+ *
+ * A reattach replays the log and stops where the run stopped, so a chat whose
+ * run entry settlement has already retired is unrecoverable by resuming — the
+ * turn has to be dispatched afresh instead. A terminal run is the same, with
+ * one exception: a run the gateway *refused* (no credit) never reached the
+ * provider, so its history is whole and the host can continue it at the one
+ * call it could not fund. Regenerating that instead would rewind the turn and
+ * pay a second time for tool work the customer already paid for.
+ */
+export const isBrowserAgentHostRunResumable = (chatId: string): boolean => {
+  const run = browserRuns.get(chatId);
+  return run !== undefined && (!terminal(run.state) || refusedResumably(chatId));
+};
+
+/** Whether the run this chat ended on stopped on a refusal a resume can continue. */
+const refusedResumably = (chatId: string): boolean => {
+  const run = browserRuns.get(chatId);
+  return run?.state === 'failed' && isResumableRunFailure(run.failure);
+};
+
+/**
+ * Let the next reattach of this chat drive the host's own resume.
+ *
+ * Reattaching is otherwise a read: reload discovery and the host-registration
+ * effect both call `resumeStream` on their own, and a page refresh must never
+ * spend the credit the user has just topped up without being asked. So the
+ * *dispatch* says the continuation was asked for, and the transport still only
+ * acts on it when the run actually stopped on a refusal it can retry.
+ *
+ * One-shot, consumed by the stream the caller is about to open.
+ */
+export const requestBrowserAgentHostResume = (chatId: string): void => {
+  requestedResumes.add(chatId);
+};
 
 const setBrowserAgentHostRun = (chatId: string, run: BrowserAgentHostRun): void => {
   browserRuns.set(chatId, run);
@@ -124,7 +353,8 @@ export const registerAgentHostRunReset = (
 
 /** Replay one run's durable events into the message the live path built. */
 const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
-  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event)]);
+  const streamedBlocks = new Map();
+  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
   if (chunks.length === 0) {
     return undefined;
   }
@@ -177,6 +407,26 @@ const rebuildTranscript = async (
   };
 };
 
+/**
+ * The transcript one chat's log implies, for a chat opened from its files.
+ *
+ * The same derivation the reattach path runs, with no stream to splice into:
+ * `.tau/chats/<id>` is the whole of a chat (D25/A39), so `chat.json` carries no
+ * `messages` and the transcript is rebuilt from the merged segments on open
+ * (P26). One reducer, one home — this is {@link rebuildTranscript} applied to an
+ * empty transcript, not a second projection of the same events.
+ *
+ * @param events - Every record of the chat, already merged across devices.
+ * @returns The messages the log implies, oldest first.
+ */
+export const deriveChatTranscript = async (events: readonly AgentLogEvent[]): Promise<readonly MyUIMessage[]> => {
+  for (const event of events) {
+    recordDurableTurnSettlement(event);
+  }
+  const rebuild = await rebuildTranscript(events, '');
+  return rebuild([]);
+};
+
 const registrationFor = async (chatId: string): Promise<BrowserAgentHostRegistration> => {
   const current = registrations.get(chatId);
   if (current) {
@@ -210,20 +460,36 @@ const registrationFor = async (chatId: string): Promise<BrowserAgentHostRegistra
 const browserHostAdmissionSchema = z.union([
   z.strictObject({ trigger: z.literal('submit'), config: agentHostAdmissionConfigSchema }),
   z.strictObject({
-    trigger: z.enum(['retry', 'edit', 'regenerate']),
+    trigger: z.enum(['edit', 'regenerate']),
     retainedMessageIds: z.array(z.string()),
     config: agentHostAdmissionConfigSchema,
   }),
-  z.strictObject({ trigger: z.literal('submit'), agent: agentHostExternalAgentSchema }),
   z.strictObject({
-    trigger: z.enum(['retry', 'edit', 'regenerate']),
+    trigger: z.literal('submit'),
+    agent: agentHostExternalAgentSchema,
+    context: agentHostExternalContextSchema.optional(),
+  }),
+  z.strictObject({
+    trigger: z.enum(['edit', 'regenerate']),
     retainedMessageIds: z.array(z.string()),
     agent: agentHostExternalAgentSchema,
+    context: agentHostExternalContextSchema.optional(),
   }),
 ]);
 const browserAdmissionBodySchema = z.object({
   admission: z.strictObject({ version: z.literal(1), idempotencyKey: z.string().min(1) }),
   browserHost: browserHostAdmissionSchema,
+  /* The turn's placement, as `createRunBody` composed it. Only the two revision
+   * fields are read here: the host that runs the turn is the one that records
+   * it, so the mode has to travel with the admission rather than stay in the
+   * page (V19, G-REV-MODE). Loose, because the rest of the target is the
+   * client's own bookkeeping. */
+  execution: z
+    .object({
+      mode: z.enum(['direct', 'candidate']).optional(),
+      baseRevisionId: z.string().min(1).optional(),
+    })
+    .optional(),
 });
 
 const admissionIssue = (error: z.ZodError): string => {
@@ -260,11 +526,32 @@ const userMessage = <Message extends UIMessage>(messages: readonly Message[]): U
       content.push({ type: 'text', text: part.text });
       continue;
     }
-    if (part.type === 'file' && part.url.startsWith('data:')) {
-      const match = /^data:([^;,]+);base64,(.*)$/u.exec(part.url);
-      if (match) {
-        content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
+    if (part.type === 'file') {
+      /* A content-addressed attachment: the bytes are already durable beside
+       * the log, so the row references them rather than re-inlining base64 on
+       * every retry, edit and reattach. A `FileUIPart` has no size field, so a
+       * composer that knows it rides it on `providerMetadata.common`. */
+      if (isAttachmentUrl(part.url)) {
+        const byteLength = part.providerMetadata?.['common']?.['byteLength'];
+        content.push({
+          type: 'file-ref',
+          path: part.url,
+          mimeType: part.mediaType,
+          /* Optional (P29): a freshly composed draft has the `Attachment` and
+           * its size, a draft hydrated from a record has only the file part.
+           * Omitted beats fabricated — nothing reads it, and a row must never
+           * lie about its size. */
+          ...(typeof byteLength === 'number' && Number.isInteger(byteLength) && byteLength >= 0 ? { byteLength } : {}),
+          ...(part.filename === undefined ? {} : { filename: part.filename }),
+        });
+        continue;
       }
+      // The legacy arm (D14): a caller that still hands over inline base64. Only an image is an image block (G8).
+      const match = /^data:(image\/[^;,]+);base64,(.*)$/u.exec(part.url);
+      if (!match) {
+        throw new TypeError(`Browser agent host cannot record file part URL "${part.url}".`);
+      }
+      content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
     }
   }
   const first = content[0];
@@ -326,6 +613,9 @@ const createHostStream = <Message extends UIMessage>(input: {
     announceRun = undefined;
     once?.(resolved, events);
   };
+  /* Consumed the moment the stream is created, so a later reattach this caller
+   * did not ask for never inherits it. @see requestBrowserAgentHostResume */
+  const driveResume = requestedResumes.delete(input.chatId);
   const priorSettlement = clientSettlements.get(input.chatId);
   const settlement = Promise.withResolvers<void>();
   clientSettlements.set(input.chatId, settlement.promise);
@@ -344,6 +634,7 @@ const createHostStream = <Message extends UIMessage>(input: {
   const run = async (): Promise<void> => {
     let unsubscribe: (() => void) | undefined;
     let unsubscribeLive: (() => void) | undefined;
+    let unsubscribeSettlement: (() => void) | undefined;
     let { runId } = input;
     let closed = false;
     let cursor = 0;
@@ -351,20 +642,47 @@ const createHostStream = <Message extends UIMessage>(input: {
     let state: BrowserRunState = 'admitted';
     let turnId: string | undefined;
     let durableUserMessage: MyUIMessage | undefined;
+    let failure: HostRunSnapshot['failure'];
+    let externalToolRun = input.admission !== undefined && 'agent' in input.admission;
     let projection = Promise.resolve();
     const seen = new Set<string>();
-    const streamedBlocks = new Set<string>();
+    const streamedBlocks = new Map();
+    let attaching: Array<AgentLogEvent | AgentLiveEvent> | undefined = [];
     const terminalEvent = Promise.withResolvers<void>();
+    const turnSettlement = Promise.withResolvers<void>();
+    /* This stream admitted the run, so its turn *will* be settled by the chat's
+     * session actor — and the writer that settlement needs is this stream's
+     * client. Held past the readable stream on every exit, a stop and a refusal
+     * included, which is what makes "exactly one settlement per admitted run"
+     * hold rather than depend on the root answering first (V10, F6). */
+    const holdWriterForSettlement = input.admission !== undefined;
+    /* Set once the completed path has spent its loud bound on the settlement,
+     * so the quiet grace below is only ever the stop's and the refusal's. */
+    let lateSettlementAwaited = false;
+    let isRunPublished = false;
     const publishRun = (): void => {
       if (runId === undefined) {
         return;
       }
+      /* Project settlement clears this chat's run record the moment it
+       * finalizes the turn, while this stream is still subscribed waiting out
+       * that very settlement. Its replay used to re-publish the record, and
+       * every later reader saw a completed run the page had already retired —
+       * which is what made reload discovery compare the *next* turn's claim
+       * against a zombie and abandon its lease. A stream never resurrects a
+       * record it has already published; a fresh stream for the same run (a
+       * refused turn the user funds and continues) starts clean and may. */
+      if (isRunPublished && !browserRuns.has(input.chatId)) {
+        return;
+      }
+      isRunPublished = true;
       setBrowserAgentHostRun(input.chatId, {
         runId,
         state,
         eventCount,
         ...(turnId === undefined ? {} : { turnId }),
         ...(durableUserMessage === undefined ? {} : { userMessage: durableUserMessage }),
+        ...(failure === undefined ? {} : { failure }),
       });
     };
     const enqueueChunks = async (chunks: readonly UIMessageChunk[]): Promise<void> => {
@@ -381,8 +699,22 @@ const createHostStream = <Message extends UIMessage>(input: {
         return;
       }
       if (!('leaderEpoch' in event)) {
+        /* ACP also publishes tool updates as durable rows carrying ToolKind and
+         * Tau MCP presentation. A metadata-poor live copy arriving first would
+         * permanently type the AI SDK part as `tool-${title}`. */
+        if (externalToolRun && event.type.startsWith('tool-') && event.type !== 'tool-output-update') {
+          return;
+        }
         await enqueueChunks(projectAgentHostLiveEvent(event, streamedBlocks));
         return;
+      }
+      if (
+        event.type === 'message.appended' &&
+        event.message.role === 'user' &&
+        isRecord(event.message.metadata?.tauInternal) &&
+        event.message.metadata.tauInternal['kind'] === 'external-agent'
+      ) {
+        externalToolRun = true;
       }
       const key = `${event.leaderEpoch}:${String(event.sequence)}`;
       if (seen.has(key)) {
@@ -405,6 +737,10 @@ const createHostStream = <Message extends UIMessage>(input: {
     const enqueueAfter = async (previous: Promise<void>, event: AgentLogEvent | AgentLiveEvent): Promise<void> => {
       await previous;
       await enqueueEvent(event);
+      /* Reattach replays the whole chat log. Publish every earlier turn's
+       * settlement too, but only after its preceding lifecycle projection has
+       * crossed the stream backpressure boundary. */
+      recordDurableTurnSettlement(event);
     };
     const reportProjectionFailure = async (operation: Promise<void>): Promise<void> => {
       try {
@@ -420,6 +756,13 @@ const createHostStream = <Message extends UIMessage>(input: {
     const queueEvent = (event: AgentLogEvent | AgentLiveEvent): void => {
       projection = enqueueAfter(projection, event);
       void reportProjectionFailure(projection);
+    };
+    const queueSubscribedEvent = (event: AgentLogEvent | AgentLiveEvent): void => {
+      if (attaching === undefined) {
+        queueEvent(event);
+      } else {
+        attaching.push(event);
+      }
     };
     /**
      * Page the log to its end, writing nothing.
@@ -449,6 +792,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
       state = snapshot.state;
       turnId = snapshot.turnId;
+      failure = snapshot.failure;
       const snapshotUser =
         snapshot.messages.find(
           (message): message is UserProviderMessage => message.role === 'user' && message.id === snapshot.turnId,
@@ -463,11 +807,17 @@ const createHostStream = <Message extends UIMessage>(input: {
       return true;
     };
     const replay = async (hostClient: AgentHostClient): Promise<boolean> => {
+      attaching ??= [];
       const batch = await hostClient.attach({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
       // The log's own snapshot names the run this chat ends on — the only source
       // for a reattach whose in-memory binding a reload dropped. The host answers
       // one for every non-empty log (and takes a non-terminal run over first).
       runId ??= batch.snapshot?.runId;
+      if (runId !== undefined) {
+        /* Lifecycle observers need the resolved run identity before replay can
+         * publish its first host-attested settlement. */
+        boundRunIds.set(input.chatId, runId);
+      }
       const events = await collectLog(hostClient, batch);
       // Handed over before the first chunk is written, and only now that the
       // host has actually answered for this chat's log.
@@ -476,10 +826,23 @@ const createHostStream = <Message extends UIMessage>(input: {
         queueEvent(event);
       }
       await projection;
-      return reconcileSnapshot(batch.snapshot);
+      const reconciled = reconcileSnapshot(batch.snapshot);
+      // Snapshot first; coordinate-aware blocks and durable IDs discard overlap.
+      const received = attaching;
+      attaching = undefined;
+      for (const event of received) {
+        queueEvent(event);
+      }
+      await projection;
+      return reconciled;
     };
     try {
-      await priorSettlement;
+      if (priorSettlement) {
+        await awaitSettlement(
+          priorSettlement,
+          'The previous message on this chat never finished. Reload the page and try again.',
+        );
+      }
       const registration = await registrationFor(input.chatId);
       const bindRun = async (bound: string): Promise<void> => {
         await registration.markRunId(bound);
@@ -497,12 +860,22 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
       unsubscribe = client.subscribe((chatId, event) => {
         if (chatId === input.chatId) {
-          queueEvent(event);
+          queueSubscribedEvent(event);
         }
       });
       unsubscribeLive = client.subscribeLive?.((chatId, event) => {
         if (chatId === input.chatId) {
-          queueEvent(event);
+          queueSubscribedEvent(event);
+        }
+      });
+      /* Browser turns settle on the project's revision root, while daemon
+       * turns settle in the host log. Both publish through this one topic.
+       * Subscribe before replay/admission so a lifecycle-completed stream
+       * cannot retire its host lease in the gap before the matching settlement
+       * reaches the chat machine. */
+      unsubscribeSettlement = subscribeHostTurnSettlements((event) => {
+        if (event.chatId === input.chatId && event.runId === runId) {
+          turnSettlement.resolve();
         }
       });
       cancelRun = () => {
@@ -511,6 +884,11 @@ const createHostStream = <Message extends UIMessage>(input: {
         }
       };
       await replay(client);
+      /* A terminal snapshot found on initial attach has no later frame to
+       * retain a client for. Every run this stream is actively observing or
+       * driving can still publish its P71 settlement after lifecycle
+       * completion, so its subscription must outlive the readable stream. */
+      const awaitLateSettlement = !terminal(state) || holdWriterForSettlement || driveResume;
       if (input.runId === undefined && runId !== undefined) {
         await bindRun(runId);
       }
@@ -527,16 +905,47 @@ const createHostStream = <Message extends UIMessage>(input: {
         turnId = admittedMessage.id;
         durableUserMessage = projectAgentHostUserMessage(admittedMessage);
         publishRun();
-        const operation = client.start({
-          chatId: input.chatId,
-          runId,
-          message: admittedMessage,
-          ...input.admission,
-        } as HostStartInput);
+        const startOnce = async (hostClient: AgentHostClient): Promise<HostRunSnapshot> =>
+          hostClient.start({
+            chatId: input.chatId,
+            runId,
+            message: admittedMessage,
+            ...input.admission,
+          } as HostStartInput);
+        /**
+         * Admit once the chat's previous run has ended.
+         *
+         * This page can come back to a chat mid-turn: the previous document
+         * unloaded with the run still going, its workspace claim went with it,
+         * and nothing here ever attached to it — so the page believes the chat
+         * is idle and the host, which knows better, refuses the admission. The
+         * refusal is the fact; waiting it out and admitting once is what the
+         * person asked for, and it is bounded by the run itself ending.
+         */
+        const recoverFromLiveRun = async (error: unknown): Promise<HostRunSnapshot> => {
+          if (
+            !(error instanceof AgentHostWorkerError) ||
+            error.code !== 'RUN_ADMISSION_CONFLICT' ||
+            cancelled ||
+            !/has a \w+ run/u.test(error.message)
+          ) {
+            throw error;
+          }
+          await liveRunEnded(client!, input.chatId);
+          return startOnce(client!);
+        };
+        /* The command itself is issued before this frame yields — the recovery
+         * is a rejection handler, never a wrapper that defers the start. */
+        const operation = startOnce(client);
         if (cancelled) {
           cancelRun();
         }
-        const snapshot = await operation;
+        let snapshot: HostRunSnapshot;
+        try {
+          snapshot = await operation;
+        } catch (error) {
+          snapshot = await recoverFromLiveRun(error);
+        }
         await projection;
         if (terminal(snapshot.state) && !terminal(state)) {
           await replay(client);
@@ -546,15 +955,48 @@ const createHostStream = <Message extends UIMessage>(input: {
         } else {
           reconcileSnapshot(snapshot);
         }
+      } else if (driveResume && refusedResumably(input.chatId)) {
+        // The turn the gateway refused, continued at the call it could not
+        // fund. The host owns that continuation — it reattaches the session
+        // from its own durable log — so the tool results already paid for are
+        // replayed rather than run again, and its events arrive on the
+        // subscription this stream is already writing.
+        const operation = client.resume(input.chatId);
+        if (cancelled) {
+          cancelRun();
+        }
+        const snapshot = await operation;
+        await projection;
+        reconcileSnapshot(snapshot);
       }
       if (!terminal(state) && !cancelled) {
         await terminalEvent.promise;
         await projection;
       }
       closed = true;
-      await writer.close();
+      /* R7: the consumer cancels the readable side the moment it reads the
+       * error chunk this stream already wrote, which errors the writable side,
+       * and closing an errored writable throws. That throw used to reach the
+       * settled-stream log, which then reported a failure the card already
+       * carried ("Cannot close a ERRORED writable stream"). The stream ends
+       * here either way; only a writer that really closed has a consumer left
+       * to hold open for the settlement below. */
+      const writerClosed = await writer.close().then(
+        () => true,
+        () => false,
+      );
+      if (writerClosed && awaitLateSettlement && !cancelled) {
+        lateSettlementAwaited = true;
+        await awaitSettlement(turnSettlement.promise, `This turn never settled on chat ${input.chatId}.`);
+        await projection;
+      }
     } catch (error) {
-      if (!closed) {
+      if (closed) {
+        /* Past the writer there is nobody left to refuse to — this stream's
+         * chunks are already on screen. Said out loud anyway, because the wait
+         * that lands here is the one that used to hold the next turn. */
+        console.error('[browserAgentHost] stream failed after it settled', input.chatId, error);
+      } else {
         closed = true;
         await (cancelled ? writer.close() : writer.abort(error)).catch(() => undefined);
       }
@@ -563,8 +1005,25 @@ const createHostStream = <Message extends UIMessage>(input: {
       // that would not open — resolved no run, and rebuilds nothing.
       announce(undefined);
       input.abortSignal?.removeEventListener('abort', cancel);
+      if (holdWriterForSettlement && !lateSettlementAwaited && client !== undefined && runId !== undefined) {
+        /* The completed path waited above, loudly and bounded; this is the
+         * stopped and refused turn, whose settlement the page produces after
+         * the stream is gone.
+         * ponytail: a wall-clock bound, because a settlement that never comes
+         * would hold the chat's next stream behind `clientSettlements`. The
+         * upgrade path is the chat session actor telling the transport its turn
+         * ended without one, which is a fact only it holds. */
+        await Promise.race([
+          turnSettlement.promise,
+          new Promise<void>((resolve) => {
+            globalThis.setTimeout(resolve, settlementWriterGrace);
+          }),
+        ]);
+        await projection;
+      }
       unsubscribe?.();
       unsubscribeLive?.();
+      unsubscribeSettlement?.();
       if (activeClients.get(input.chatId)?.client === client) {
         activeClients.delete(input.chatId);
       }
@@ -608,6 +1067,8 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly interruptId: string;
   readonly approved: boolean;
   readonly reason?: string | undefined;
+  /** The exact option the human chose, when the request offered a list. */
+  readonly optionId?: string | undefined;
 }): Promise<void> => {
   const active = activeClients.get(input.chatId);
   if (!active || active.runId !== input.runId) {
@@ -616,6 +1077,7 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   await active.client.resolveInterrupt(input.chatId, input.runId, {
     interruptId: input.interruptId,
     outcome: input.approved ? 'approved' : 'denied',
+    ...(input.optionId ? { optionId: input.optionId } : {}),
     ...(input.reason ? { payload: { reason: input.reason } } : {}),
   });
 };
@@ -623,10 +1085,9 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
 /**
  * Routes one AI SDK chat pipeline into the browser agent host.
  *
- * There is no longer an "or": since W4-PASEO every CAD execution kind is
- * host-placed — `tau` and `paseo` on this worker, `acp` on a daemon — so the
- * API transport this class used to wrap has no turn left to carry and was
- * deleted with it. An admission that cannot be parsed is a refusal naming the
+ * There is no longer an "or": every CAD execution kind is host-placed — `tau`
+ * on this worker, `acp` on a daemon — so the API transport this class used to
+ * wrap has no turn left to carry and was deleted with it. An admission that cannot be parsed is a refusal naming the
  * real reason, never a delegation that replaces it with someone else's.
  */
 export class BrowserPlacementChatTransport<Message extends UIMessage> implements ChatTransport<Message> {
@@ -653,7 +1114,13 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
       chatId: options.chatId,
       messages: options.messages,
       runId: admission.admission.idempotencyKey,
-      admission: hostAdmission(admission.browserHost, options.trigger),
+      admission: {
+        ...hostAdmission(admission.browserHost, options.trigger),
+        ...(admission.execution?.mode === undefined ? {} : { mode: admission.execution.mode }),
+        ...(admission.execution?.baseRevisionId === undefined
+          ? {}
+          : { baseRevisionId: admission.execution.baseRevisionId }),
+      },
       abortSignal: options.abortSignal,
     });
   }

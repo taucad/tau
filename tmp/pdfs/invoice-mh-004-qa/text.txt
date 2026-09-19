@@ -1,0 +1,135 @@
+             RF, 26 Merfield Street, 1072 Auckland
+
+
+Mangawhai Hills Limited
+Patrick Fontein
+19/67 Sarsfield Street
+Auckland
+Auckland 1011
+
+
+
+
+Invoice                              Reference                                  Due                       Invoice Date
+MH-004                               MH-140926-01                               14/10/2026                14/09/2026
+
+
+
+Mangawhai Hills professional services completed after MH-003, from 1 to 14 September 2026.
+No GST charged. Richard Fontein is not registered for GST.
+
+Quantity           Description                                                               Unit price                   Price
+
+
+01:00 h            Lot 45 Source Audit & Build Blueprint                                       150.00                    150.00
+01/09/2026         Reviewed the current G.J. Gardner preliminary drawings, DP624706
+                   title/cadastral evidence, DRB status, terrain controls and verified Lot
+                   25 implementation. Produced the source-traceable Lot 45 build
+                   blueprint covering an independent lot model, shared assets, a
+                   combined explorer, provisional-evidence boundaries, ten-camera
+                   QA and cross-machine execution handoff.
+
+00:15 h            Double Blender Environment Validation                                       150.00                     37.50
+01/09/2026         Updated the project version control for Blender 5.2.1 LTS and Tika
+                   4.0.0 on Double, then completed doctor, factory-clean smoke export
+                   and hash-based environment validation so the Lot 45 work could
+                   run reproducibly on the second machine.
+
+02:30 h            Lot 45 Digital Twin & Combined Explorer                                     150.00                    375.00
+02/09/2026         Built the independent Lot 45 Blender module from its own
+                   architectural and cadastral traces, including openings, roof graph,
+                   hardscape, interiors, provisional garage and native planting. Linked
+                   it beside the protected Lot 25 module, published the combined
+                   explorer and GLB, retained all Lot 25 hashes, and passed the
+                   20-check completion audit, ten-camera review and Khronos
+                   validation.
+
+01:00 h            Lot 45 Visual-Parity Refinement                                             150.00                    150.00
+02/09/2026         Rebuilt the preliminary Lot 45 presentation to the accepted Lot 25
+                   neutral-viewer standard: 1,115 source-tagged objects, furnished
+                   interiors, profiled cladding and roofing, complete joinery, hardscape
+                   and 150 native-plant instances. Closed 22 checks and independent
+                   critic findings while retaining the stated CI046/DXF, garage and
+                   finish limitations.
+
+
+
+
+RF                                                   Mail: richard@fontein.co                    Bank A/C: 06-0185-0142610-00
+Richard Fontein                                      Phone: +64 22 626 9523
+26 Merfield Street, Auckland 1072
+                                                  Invoice MH-004 | Page 1
+Invoice MH-004 - continued                                                                                     Mangawhai Hills Limited
+
+
+
+Quantity           Description                                                                   Unit price                      Price
+
+
+00:45 h            Lot 45 Buyer-Facing Render Tests                                                   150.00                   112.50
+03/09/2026         Produced 1920x1080 east-alfresco and driveway Blender
+                   references followed by controlled ImageGen beauty passes. Testing
+                   caught and corrected an invented transom and sill error, preserved
+                   the source garage/openings, and documented the render-only
+                   driveway visibility treatment and preliminary status.
+
+00:45 h            Reusable Roof Solver Audit & Blueprint                                             150.00                   112.50
+10/09/2026         Traced the disjointed Lot 45 roof geometry and weak validation
+                   path, measuring 24.07 m2 of uncovered footprint and unresolved
+                   overlaps. Produced the remediation blueprint for a compositional
+                   per-wall roof intent/solver, source-preservation rules, coverage and
+                   junction checks, unit tests and Lot 25 shadow validation.
+
+01:45 h            Reusable Roof Solver Implementation                                                150.00                   262.50
+11/09/2026         Implemented the independent roof request, solver and validation
+                   path with per-wall slope controls, coverage, junction, pitch, fall and
+                   valley checks. Corrected the Lot 45 continuous valleys, verified both
+                   lots with headless plan/oblique renders and golden-hour driveway
+                   tests, and recorded a 20-test close-out without changing the
+                   accepted Lot 25 baseline.
+
+01:15 h            Lot 25 Post-Invoice Model Corrections                                              150.00                   187.50
+11/09/2026         Created isolated, reversible Lot 25 variants to remove curtain
+                   artefacts, expose the interior, correct the garage roof tail and
+                   recessed gable, extend the driveway continuously to the road,
+                   remove the obsolete gutter and wall seam, and merge the lower
+                   wall/gable surface. Headless render checks and 23 regressions
+                   pass.
+
+01:30 h            Operator-First Lot Workflow System                                                 150.00                   225.00
+11/09/2026         Audited 26 project skills and designed then implemented four
+                   non-technical commands: /capture-render, /modify-lot, /create-lot
+                   and /help. Added fresh-context Cycles-to-ImageGen processing,
+                   fidelity gates, legacy forwarding, reproducible MPFR control and
+                   validation across 30 skills, roof regressions, Blender smoke checks
+                   and capture-contract tests.
+
+00:45 h            High-Quality Capture Pipeline                                                      150.00                   112.50
+11/09/2026         Transferred the stronger Lot 25 lighting, materials, cameras and
+                   scene presentation into the current design workflow. Set the default
+                   to 1600x1000, 256-sample golden-hour Cycles rendering, added a
+                   1200x750 32-sample dry mode, retained fresh-context
+                   enhancement and verified the final driveway capture for
+                   architectural fidelity.
+
+00:30 h            Persistent Skill Learning & Help                                                   150.00                    75.00
+14/09/2026         Created and validated the project-scoped /update-skills workflow so
+                   a non-technical operator can select numbered, reusable session
+                   lessons for future create-lot, capture-render or modify-lot behaviour.
+                   Updated /help to explain the permanent opt-in learning flow while
+                   excluding one-lot and unverified decisions.
+
+
+                                                                               Total        12:00 h                 NZD 1,800.00
+
+Payment of NZD 1,800.00 is due by 14/10/2026 by direct credit to RF bank account 06-0185-0142610-00. Please use MH-004
+as the payment reference.
+
+
+
+
+RF                                                  Mail: richard@fontein.co                           Bank A/C: 06-0185-0142610-00
+Richard Fontein                                     Phone: +64 22 626 9523
+26 Merfield Street, Auckland 1072
+                                                  Invoice MH-004 | Page 2
+

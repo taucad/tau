@@ -1,15 +1,19 @@
 /**
  * Chat composer context — unified contract
  *
- * `<ChatComposerProvider>` and `<ActiveChatProvider chatId>` both populate
+ * Composer-only, Home, and active-chat providers all populate
  * the SAME `ChatComposerContextValue` shape. Consumers read one
  * `useChatComposer()` hook and never branch on which provider is in scope —
  * the runtime branch collapses to the two provider constructors.
  *
- * - **`<ChatComposerProvider>`** — composer-only (marketing CTA, library
- *   empty state). Cookie-only model/kernel; `status: 'ready'`; `stop` is a
- *   no-op; `contextUsage` and `session` are `undefined`. Owns a throwaway
- *   draft actor with no-op persistence.
+ * - **`<ChatComposerProvider surface>`** — composer-only (marketing CTA,
+ *   library empty state). Cookie-only model/kernel; `status: 'ready'`; `stop`
+ *   is a no-op; `contextUsage` and `session` are `undefined`. Its draft keeps
+ *   no record, but stores attachments in the surface's own directory.
+ *
+ * - **`<HomeNewProjectComposerProvider>`** — the durable Home pre-project
+ *   composer, bound to its composer record. Interactive from the first frame;
+ *   the record hydrates whatever the user has not touched.
  *
  * - **`<ActiveChatProvider chatId>`** — session-backed (project route).
  *   Chat-row-preferred model/kernel with cookie fallback and dual-write on
@@ -27,8 +31,9 @@
  */
 
 import { useActorRef, useSelector } from '@xstate/react';
-import { createContext, useCallback, useContext, useMemo } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Chat } from '@ai-sdk/react';
+import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
@@ -47,6 +52,22 @@ import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import {
+  draftHydrationOf,
+  draftPersistenceFor,
+  flushRecord,
+  storeAttachmentActorFor,
+  useComposerRecord,
+} from '#hooks/composer-record.js';
+import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
+import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import { createAttachmentStore } from '#db/attachment-store.js';
+import type { AttachmentStore } from '#db/attachment-store.js';
+import { attachmentUrl } from '#utils/attachment.utils.js';
+import type { ChatMode } from '@taucad/chat/constants';
+import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 
 type ChatInstance = Chat<MyUIMessage>;
 
@@ -151,6 +172,16 @@ export type ChatComposerContextValue = {
    * composer surface should leave this untouched.
    */
   session: ActiveChatSessionContextValue | undefined;
+  /** Whether this surface offers execution placement selection. */
+  canSelectExecution: boolean;
+  /**
+   * The directory a project created from this draft copies its attachments
+   * from. `undefined` means the Home composer's, as it does on a pending
+   * project operation.
+   */
+  attachmentSource: string | undefined;
+  /** Consume the current draft at its persistence owner. */
+  consumeDraft: () => Promise<void>;
 };
 
 const ChatComposerContext = createContext<ChatComposerContextValue | undefined>(undefined);
@@ -160,20 +191,43 @@ const ActiveChatSessionContext = createContext<ActiveChatSessionContextValue | u
 // Composer-only draft actor wiring
 // ---------------------------------------------------------------------------
 
-const noopPersistDraftActor = fromSafeAsync<void, { chatId: string; draft: MyUIMessage }>(async () => undefined);
-const noopPersistEditDraftActor = fromSafeAsync<void, { chatId: string; messageId: string; draft: MyUIMessage }>(
+const noopPersistDraftActor = fromSafeAsync<void, { draft: MyUIMessage }>(async () => undefined);
+const noopPersistEditDraftActor = fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async () => undefined);
+const noopPersistSelectionActor = fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(
   async () => undefined,
 );
-const noopClearMessageEditActor = fromSafeAsync<void, { chatId: string; messageId: string }>(async () => undefined);
+const noopClearMessageEditActor = fromSafeAsync<void, { messageId: string }>(async () => undefined);
 
-const composerDraftMachine = draftMachine.provide({
-  actors: {
-    persistDraftActor: noopPersistDraftActor,
-    persistEditDraftActor: noopPersistEditDraftActor,
-    clearMessageEditActor: noopClearMessageEditActor,
-    resizeImageActor,
-  },
-});
+/** A pre-project composer that keeps no record; each owns its draft-stage attachment directory. */
+export type ComposerSurface = Parameters<typeof composerRecordPaths.surfaceAttachments>[0];
+
+/**
+ * The composer-only draft keeps no record, but its attachments still need
+ * bytes on disk: a project created from it promotes them from this surface's
+ * own directory.
+ */
+function useSurfaceAttachments(surface: ComposerSurface): { directory: string; attachments: AttachmentStore } {
+  const { files } = useFileManager();
+  return useMemo(() => {
+    const directory = composerRecordPaths.surfaceAttachments(surface);
+    return { directory, attachments: createAttachmentStore(files, directory) };
+  }, [files, surface]);
+}
+
+function useComposerDraftMachine(attachments: AttachmentStore) {
+  return useMemo(() => {
+    return draftMachine.provide({
+      actors: {
+        persistDraftActor: noopPersistDraftActor,
+        persistEditDraftActor: noopPersistEditDraftActor,
+        persistSelectionActor: noopPersistSelectionActor,
+        clearMessageEditActor: noopClearMessageEditActor,
+        storeAttachmentActor: storeAttachmentActorFor(attachments),
+        resizeImageActor,
+      },
+    });
+  }, [attachments]);
+}
 
 // Stable no-op so the `stop` callback identity does not change across
 // composer-provider renders — consumers can safely include it in dep
@@ -189,17 +243,23 @@ const noopStop = (): void => undefined;
  * model/kernel resolvers, a throwaway draft actor, and no-session sentinel
  * values for `status`/`stop`/`contextUsage`/`session`.
  */
-export function ChatComposerProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-  const draftActorRef = useActorRef(composerDraftMachine, {
-    input: { chatId: undefined },
-    inspect,
-  });
+export function ChatComposerProvider({
+  children,
+  surface,
+}: {
+  readonly children: React.ReactNode;
+  readonly surface: ComposerSurface;
+}): React.JSX.Element {
+  const { directory, attachments } = useSurfaceAttachments(surface);
+  const draftActorRef = useActorRef(useComposerDraftMachine(attachments), { input: {}, inspect });
 
   useDraftImageErrorToast(draftActorRef);
 
   const model = useCookieModel();
   const execution = useCookieExecution(model);
   const kernel = useCookieKernel();
+  const owner = useMemo(() => ({ attachments }), [attachments]);
+  const consumeDraft = useConsumeDraft(draftActorRef, owner);
 
   const value = useMemo<ChatComposerContextValue>(
     () => ({
@@ -212,10 +272,93 @@ export function ChatComposerProvider({ children }: { readonly children: React.Re
       stop: noopStop,
       contextUsage: undefined,
       session: undefined,
+      canSelectExecution: false,
+      attachmentSource: directory,
+      consumeDraft,
     }),
-    [draftActorRef, model, execution, kernel],
+    [draftActorRef, model, execution, kernel, directory, consumeDraft],
   );
 
+  return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
+}
+
+/**
+ * Home-workspace provider for the durable pre-project composer.
+ *
+ * The composer is interactive from the first frame: the record is read by its
+ * own machine, and `recordLoaded` hydrates whatever the user has not touched
+ * yet (D7). There is no loading state to render.
+ */
+export function HomeNewProjectComposerProvider({
+  children,
+}: {
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  const { files } = useFileManager();
+  const store = useMemo(() => createComposerRecordStore(files, composerRecordPaths.newProject), [files]);
+  /* Declared before both actors: effect cleanups run in declaration order, so the debounced keystroke
+   * reaches the record while the draft and the record are still running (R9). */
+  const flushDraftOnUnmount = useRef<() => void>(undefined);
+  useEffect(
+    () => () => {
+      flushDraftOnUnmount.current?.();
+    },
+    [],
+  );
+  const recordRef = useComposerRecord(store);
+  useComposerRecordToasts(recordRef);
+  const homeDraftMachine = useMemo(
+    () => draftMachine.provide({ actors: { ...draftPersistenceFor(recordRef, store), resizeImageActor } }),
+    [recordRef, store],
+  );
+  const draftActorRef = useActorRef(homeDraftMachine, { input: {}, inspect });
+  useDraftImageErrorToast(draftActorRef);
+  useEffect(() => {
+    flushDraftOnUnmount.current = () => {
+      draftActorRef.send({ type: 'flushNow' });
+    };
+  }, [draftActorRef]);
+  useFlushOnClose(
+    async () => {
+      draftActorRef.send({ type: 'flushNow' });
+      await waitFor(draftActorRef, (state) => state.matches({ inputSaving: 'idle' }));
+      await flushRecord(recordRef);
+    },
+    { stage: 'producer' },
+  );
+
+  useEffect(() => {
+    // R2: Home keeps the selectors it renders (tool choice, mode) as a chat record does.
+    const subscription = recordRef.on('recordLoaded', ({ record }) => {
+      draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [draftActorRef, recordRef]);
+
+  const execution = useHomeExecution(recordRef);
+  const model = useExecutionModel(execution);
+  const kernel = useCookieKernel();
+  const owner = useMemo(() => ({ recordRef, attachments: store.attachments }), [recordRef, store]);
+  const consumeDraft = useConsumeDraft(draftActorRef, owner);
+  const value = useMemo<ChatComposerContextValue>(
+    () => ({
+      draftActorRef,
+      model,
+      execution,
+      kernel,
+      status: 'ready',
+      agentActivity: 'ready',
+      stop: noopStop,
+      contextUsage: undefined,
+      session: undefined,
+      canSelectExecution: true,
+      attachmentSource: undefined,
+      consumeDraft,
+    }),
+    [consumeDraft, draftActorRef, execution, kernel, model],
+  );
   return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
 }
 
@@ -240,14 +383,16 @@ export function ActiveChatProvider({
   // need their own try/catch around the resize step. See
   // `useDraftImageErrorToast` JSDoc.
   useDraftImageErrorToast(session.draftActorRef);
+  useComposerRecordToasts(session.composerRecordRef);
 
   const execution = useSessionExecution(session);
-  const model = useSessionModel(execution);
+  const model = useExecutionModel(execution);
   const kernel = useSessionKernel(session);
   const status = useSessionStatus(chatId);
   const agentActivity = useSessionAgentActivity(session, chatId, status);
   const stop = useSessionStop(session);
   const contextUsage = useSessionContextUsage(chatId);
+  const consumeDraft = useConsumeDraft(session.draftActorRef);
 
   const sessionValue = useMemo<ActiveChatSessionContextValue>(
     () => ({
@@ -270,8 +415,22 @@ export function ActiveChatProvider({
       stop,
       contextUsage,
       session: sessionValue,
+      canSelectExecution: true,
+      attachmentSource: undefined,
+      consumeDraft,
     }),
-    [session.draftActorRef, model, execution, kernel, status, agentActivity, stop, contextUsage, sessionValue],
+    [
+      session.draftActorRef,
+      model,
+      execution,
+      kernel,
+      status,
+      agentActivity,
+      stop,
+      contextUsage,
+      sessionValue,
+      consumeDraft,
+    ],
   );
 
   return (
@@ -341,23 +500,9 @@ function useCookieModel(): ActiveChatModel {
 }
 
 /**
- * Cookie-only execution resolver — always this browser's own host at the cookie
- * model, which is also what `<NewProjectChatComposer>` seeds a new chat with on
- * these surfaces.
- *
- * That is exact rather than lossy *only* because both textareas gate the agent
- * chip on `session` (`chat-textarea-desktop.tsx`, `chat-textarea-mobile.tsx`):
- * under this provider there is no control that can select a placement, so
- * `setActiveExecution` has no reachable caller and rebuilding the execution from
- * the model discards nothing. The home hero is session-backed
- * (`<ActiveChatProvider chatId='chat_homepage_main'>`) and keeps its chip's
- * choice in the chat row, which is the placement the composer carries across.
- *
- * ponytail: un-gate the chip here and this hook has to hold the selection in
- * state instead — a `hostId`, or an `acp`/`paseo` choice, would otherwise
- * evaporate between the click and the submit. Recorded as residue in
- * `docs/research/agent-host-transports-and-offline.md`
- * (§ Addendum: FIX-SEEDED-PLACEMENT).
+ * Cookie-only execution resolver for ephemeral composer surfaces. Those
+ * surfaces do not offer execution selection, so the cookie model and browser
+ * host are the complete contract.
  */
 function useCookieExecution(model: ActiveChatModel): ActiveChatExecution {
   const execution = useMemo<CadAgentExecution>(() => ({ kind: 'tau', model: model.modelId }), [model.modelId]);
@@ -405,7 +550,7 @@ function useCookieKernel(): ActiveChatKernel {
  * deleted) but is provider-internal: external consumers read
  * `useChatComposer().model` instead.
  */
-function useSessionModel(activeExecution: ActiveChatExecution): ActiveChatModel {
+function useExecutionModel(activeExecution: ActiveChatExecution): ActiveChatModel {
   const { selectedModelId, selectedModel, resolveModel } = useModels();
   const modelId = activeExecution.execution.kind === 'tau' ? activeExecution.execution.model : selectedModelId;
   const model = useMemo<ResolvedModel>(
@@ -419,6 +564,58 @@ function useSessionModel(activeExecution: ActiveChatExecution): ActiveChatModel 
     [activeExecution],
   );
   return useMemo<ActiveChatModel>(() => ({ modelId, model, setActiveModel }), [modelId, model, setActiveModel]);
+}
+
+/**
+ * Home execution: the user's choice this mount, else the record's as read,
+ * else the cookie model. A late read never replaces a choice already made.
+ */
+function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
+  const { selectedModelId, setSelectedModelId } = useModels();
+  const stored = useSelector(recordRef, (snapshot) => snapshot.context.record?.execution);
+  const [chosen, setChosen] = useState<CadAgentExecution>();
+  const execution = useMemo<CadAgentExecution>(
+    () => chosen ?? stored ?? { kind: 'tau', model: selectedModelId },
+    [chosen, stored, selectedModelId],
+  );
+  const setActiveExecution = useCallback(
+    (next: CadAgentExecution) => {
+      setChosen(next);
+      if (next.kind === 'tau') {
+        setSelectedModelId(next.model);
+      }
+      recordRef.send({ type: 'patch', fields: { execution: next } });
+    },
+    [recordRef, setSelectedModelId],
+  );
+  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
+}
+
+function useConsumeDraft(
+  draftActorRef: ActorRefFrom<typeof draftMachine>,
+  owner?: { readonly attachments: AttachmentStore; readonly recordRef?: ComposerRecordRef },
+): () => Promise<void> {
+  return useCallback(async () => {
+    draftActorRef.send({ type: 'clearDraft' });
+    await waitFor(draftActorRef, (snapshot) => snapshot.matches({ inputSaving: 'idle' }));
+    if (!owner) {
+      return;
+    }
+    // The hand-off above only queued the patch; wait for the write itself so
+    // the navigation that follows cannot strand it. A failed write keeps
+    // retrying and is reported by the record's toasts.
+    if (owner.recordRef) {
+      await waitFor(owner.recordRef, (snapshot) => !snapshot.matches({ writes: 'persisting' }));
+    }
+    // Project creation has already copied the draft's bytes into the new chat;
+    // keep only what the draft references now.
+    try {
+      await owner.attachments.retainOnly(draftActorRef.getSnapshot().context.draftAttachments.map(attachmentUrl));
+    } catch (error) {
+      // Ponytail: orphaned draft-stage bytes are reclaimed by the next consume.
+      console.warn('Failed to release draft attachments:', error);
+    }
+  }, [draftActorRef, owner]);
 }
 
 function useSessionExecution(session: ChatSession): ActiveChatExecution {

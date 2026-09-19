@@ -15,6 +15,7 @@ import {
   rjsfIdSeparator,
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
+import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
@@ -49,7 +50,13 @@ const formContext: RJSFContext = {
   allExpanded: true,
   resetSingleParameter: vi.fn(),
   shouldShowField: () => true,
-  units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
+  units: { length: { displaySymbol: 'mm' } },
+  parameterManifest: {
+    bindings: {},
+    bindingDeclarations: {},
+    provenance: {},
+  } as unknown as RJSFContext['parameterManifest'],
+  parameterEdit: { kind: 'transient' },
 };
 
 const inputJsonSchema = (schema: unknown): RJSFSchema => {
@@ -97,6 +104,7 @@ describe('RJSF form-state policy', () => {
           formData={{}}
           validator={validator}
           templates={templates}
+          fields={rjsfFields}
           widgets={widgets}
           uiSchema={uiSchema}
           idPrefix={rjsfIdPrefix}

@@ -56,12 +56,51 @@ describe('Electron preload bridge', () => {
     exposeElectronRuntime();
     const port = { id: 'renderer-port' };
 
-    ipcListeners.get('taucad:connect-runtime:port')?.({ ports: [port] }, { hostId: 'host-1' });
+    ipcListeners.get('taucad:connect-runtime:port')?.({ ports: [port] }, { hostId: 'host-1', requestId: 'request-1' });
     ipcListeners.get('taucad:connect-runtime:host-exit')?.({ ports: [] }, { hostId: 'host-1', exitCode: 7 });
 
     expect(postMessage.mock.calls).toEqual([
-      [{ taucadRelay: 'taucad:connect-runtime:port', hostId: 'host-1' }, '/', [port]],
+      [{ taucadRelay: 'taucad:connect-runtime:port', hostId: 'host-1', requestId: 'request-1' }, '/', [port]],
       [{ taucadRelay: 'taucad:connect-runtime:host-exit', hostId: 'host-1', exitCode: 7 }, '/'],
+    ]);
+  });
+
+  it('forwards a fork context with the runtime port request', async () => {
+    vi.stubGlobal('process', { env: {} });
+    const { ipcRenderer } = await import('electron');
+    const { exposeElectronRuntime } = await import('#electron/preload.js');
+    const send = vi.mocked(ipcRenderer.send);
+    send.mockClear();
+
+    const bridge = exposeElectronRuntime();
+    bridge.requestRuntimePort('request-1', { definition: 'debug', projectRoot: '/projects/a' });
+    bridge.requestRuntimePort('request-2');
+
+    expect(send.mock.calls).toEqual([
+      [
+        'taucad:connect-runtime',
+        { context: { definition: 'debug', projectRoot: '/projects/a' }, requestId: 'request-1' },
+      ],
+      ['taucad:connect-runtime', { context: undefined, requestId: 'request-2' }],
+    ]);
+  });
+
+  it('relays an arbitrary tag with its payload, and omits an empty transfer list', async () => {
+    /* The shell's own service ports ride the same helper: any tag, any flat
+     * payload, ports only when the main process sent some. */
+    vi.stubGlobal('process', { env: {} });
+    const postMessage = vi.fn();
+    vi.stubGlobal('window', { postMessage });
+    const { relayElectronPorts } = await import('#electron/preload.js');
+    relayElectronPorts('tau:services-port');
+    const port = { id: 'services-leg' };
+
+    ipcListeners.get('tau:services-port')?.({ ports: [port] }, { requestId: 'req-1' });
+    ipcListeners.get('tau:services-port')?.({ ports: [] }, { requestId: 'req-2' });
+
+    expect(postMessage.mock.calls).toEqual([
+      [{ taucadRelay: 'tau:services-port', requestId: 'req-1' }, '/', [port]],
+      [{ taucadRelay: 'tau:services-port', requestId: 'req-2' }, '/'],
     ]);
   });
 

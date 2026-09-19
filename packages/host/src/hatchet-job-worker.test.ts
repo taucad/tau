@@ -293,7 +293,8 @@ describe('createSolverHatchetJobWorkerFactory', () => {
         'solver.openfoam.version': '2506',
         'solver.calculix.version': '2.23',
         'provider.tau.openfoam.container.id': 'tau.openfoam.container',
-        'provider.tau.openfoam.container.version': '1.0.0',
+        /* `openFoamProviderVersion`, packages/jobs-solvers/src/openfoam-stage-cache.ts:22. */
+        'provider.tau.openfoam.container.version': '1.1.0',
         'provider.tau.calculix.container.id': 'tau.calculix.container',
         'provider.tau.calculix.container.version': '1.0.0',
         [hatchetOwnerAffinityLabel]: `sha256:${'a'.repeat(64)}`,

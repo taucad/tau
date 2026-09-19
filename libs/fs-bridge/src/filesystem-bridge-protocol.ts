@@ -7,6 +7,8 @@ import type {
   ProjectRootConfig,
   ProjectRootDiscoveryStatus,
   RootedFileSystem,
+  RootedPorcelain,
+  MountConfig,
   StorageRootConfig,
   WatchEvent,
   WatchRequest,
@@ -15,7 +17,16 @@ import type {
   WorkspaceScope,
 } from '@taucad/filesystem';
 import { pendingProjectCommitInputSchema } from '@taucad/filesystem';
-import type { ChangeEvent, FileStat, FileStatEntry, ProjectManifestParseIssue } from '@taucad/types';
+import type { ComposedView } from '@taucad/filesystem/composed-view';
+import type {
+  ChangeEvent,
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileProvenance,
+  FileStat,
+  FileStatEntry,
+  ProjectManifestParseIssue,
+} from '@taucad/types';
 import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import { filesystemBackends } from '@taucad/types/constants';
 import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
@@ -74,6 +85,7 @@ export type FileSystemBridgeHello =
 type WorkspaceBridgeMethodName =
   | 'readFile'
   | 'writeFile'
+  | 'writeFileChecked'
   | 'appendFile'
   | 'writeFiles'
   | 'mkdir'
@@ -89,10 +101,6 @@ type WorkspaceBridgeMethodName =
   | 'unlink'
   | 'rmdir'
   | 'exists'
-  | 'getDirectoryStat'
-  | 'getDirectoryContents'
-  | 'duplicateFile'
-  | 'copyDirectory'
   | 'getZippedDirectory'
   | 'mount'
   | 'unmount'
@@ -104,25 +112,107 @@ type WorkspaceBridgeMethodName =
   | 'readShallowDirectory'
   | 'disposeStorageRoot'
   | 'readDirectory'
-  | 'searchFiles'
   | 'pollExternalChanges';
 
 /** Workspace-wide bridge calls, with signatures derived from the authority service. @public */
 export type FileSystemBridgeWorkspaceService = Pick<WorkspaceFileService, WorkspaceBridgeMethodName>;
 
-/** Rooted/runtime bridge calls, with signatures derived from the captured filesystem service. @public */
-export type FileSystemBridgeRuntimeService = FileSystemProvider & Partial<Pick<RootedFileSystem, 'watch'>>;
+/** Rooted/runtime bridge calls, including watch registration that may cross an asynchronous authority boundary. @public */
+export type FileSystemBridgeRuntimeService = FileSystemProvider & {
+  watch?: (request: WatchRequest, handler: (event: WatchEvent) => void) => (() => void) | Promise<() => void>;
+  /*
+   * Read content operations are the composition site's to serve (charter D2):
+   * a host that hands over a bare provider has no composed view to inherit a
+   * mask from, so it offers neither.
+   */
+  archive?: (path: string, options?: ArchiveOptions) => Promise<Blob>;
+  contents?: (path: string, options?: ArchiveOptions) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+  /*
+   * Search and recursive stat are the root's index, masked by the view above it
+   * (charter D3): a bare provider has no index and offers neither.
+   */
+  search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
+  statTree?: (path: string) => Promise<FileStatEntry[]>;
+  /*
+   * The mutating porcelain is the rooted surface's too (charter D4): one batch
+   * in the mutation pipeline, mask-checked by the composed view above it. A
+   * host that hands over a bare provider serves none of it, so every row is
+   * optional — and `copyTree`'s entry filter is the *view's* own, never a
+   * caller's, because a predicate does not cross a wire.
+   */
+} & Partial<RootedPorcelain>;
+
+/**
+ * Caller-owned filter on a read content operation.
+ *
+ * The view's mask is inherited, never re-declared. `versionedOnly` is the
+ * whole-project export's own choice: the registry's `versioned` rows are the
+ * bytes that are the project, so records, caches and generated output stay out
+ * of an archive a person shares.
+ *
+ * @public
+ */
+export type ArchiveOptions = { readonly versionedOnly?: boolean };
+
+/**
+ * Caller-owned cap and shape of a rooted search.
+ *
+ * The mask is not here: the view applies its own policy before the index is
+ * asked, so `maxResults` counts only rows the consumer may see.
+ *
+ * @public
+ */
+export type SearchOptions = { readonly maxResults?: number; readonly includeDirectories?: boolean };
 
 type FileSystemBridgeReadFile = {
   (path: string, options: 'utf8' | { readonly encoding: 'utf8'; readonly scope?: WorkspaceScope }): Promise<string>;
   (path: string, options?: { readonly scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
 };
 
-/** Complete callable surface supported by a filesystem bridge proxy. @public */
-export type FileSystemBridgeService = Omit<FileSystemBridgeWorkspaceService, 'readFile'> &
-  Pick<RootedFileSystem, 'rename'> & {
-    readFile: FileSystemBridgeReadFile;
+/**
+ * What an **unrooted** (workspace) connection answers: the authority's own
+ * surface, with the two overloaded calls re-declared for the wire.
+ *
+ * @public
+ */
+export type FileSystemBridgeUnrootedCalls = Omit<FileSystemBridgeWorkspaceService, 'readFile' | 'writeFileChecked'> & {
+  readFile: FileSystemBridgeReadFile;
+  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+};
+
+/**
+ * What only a **rooted** connection answers (gate G-A F9, G-B G5).
+ *
+ * `provenance` and `readdirWithStats` are the composed view's own and need a
+ * consumer; `rename` is the rooted spelling of a move; the read content
+ * operations, the index queries and the mutating porcelain are the rooted
+ * surface's (charter D2, D3, D4). An unrooted connection serves none of them, so
+ * they are not on {@link FileSystemBridgeUnrootedCalls} — before W12(d) every
+ * proxy type promised them and the workspace half could not deliver.
+ *
+ * @public
+ */
+export type FileSystemBridgeRootedCalls = Pick<RootedFileSystem, 'rename'> &
+  Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
+    archive(path: string, options?: ArchiveOptions): Promise<Blob>;
+    contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+    search(query: string, options?: SearchOptions): Promise<FileStatEntry[]>;
+    statTree(path: string): Promise<FileStatEntry[]>;
+    copyTree(source: string, target: string): Promise<void>;
+    duplicate(source: string, target: string): Promise<void>;
   };
+
+/**
+ * Every call the wire carries, rooted and unrooted alike.
+ *
+ * This is the *schema* set — one validator row per call name — not a promise
+ * that any one connection serves all of it. A caller takes the half its
+ * connection has: `FileSystemBridgeWorkspaceProxy` or
+ * `FileSystemBridgeRootedProxy` in `filesystem-bridge.ts`.
+ *
+ * @public
+ */
+export type FileSystemBridgeService = FileSystemBridgeUnrootedCalls & FileSystemBridgeRootedCalls;
 
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
 type FileSystemBridgeCallArgs<Name extends FileSystemBridgeCallName> = Name extends 'readFile'
@@ -200,6 +290,30 @@ const fileStatEntrySchema: z.ZodType<FileStatEntry> = z.custom<FileStatEntry>((v
 const fileStatEntriesSchema: z.ZodType<FileStatEntry[]> = z.custom<FileStatEntry[]>(
   (value) => Array.isArray(value) && value.every((entry) => fileStatEntrySchema.safeParse(entry).success),
 );
+
+const fileProvenanceSchema: z.ZodType<FileProvenance> = z.looseObject({
+  source: z.enum(['project', 'dependencies', 'system-skills']),
+  versioned: z.boolean(),
+  agentAccess: z.enum(['read-write', 'read-only']),
+  identity: z.string().optional(),
+  overrides: z.string().optional(),
+});
+
+const composedDirectoryRowSchema: z.ZodType<{ name: string } & FileStat> = z.custom<{ name: string } & FileStat>(
+  (value) => {
+    const record = plainRecordSchema.safeParse(value);
+    return (
+      record.success &&
+      stringSchema.safeParse(record.data['name']).success &&
+      fileStatSchema.safeParse(value).success &&
+      (record.data['provenance'] === undefined || fileProvenanceSchema.safeParse(record.data['provenance']).success)
+    );
+  },
+);
+
+const composedDirectoryRowsSchema: z.ZodType<Array<{ name: string } & FileStat>> = z.custom<
+  Array<{ name: string } & FileStat>
+>((value) => Array.isArray(value) && value.every((row) => composedDirectoryRowSchema.safeParse(row).success));
 
 const mutationErrorCodeValues = [
   'NAME_EXISTS',
@@ -285,12 +399,24 @@ const projectLocatorSchema: z.ZodType<ProjectLocator> = z.discriminatedUnion('ba
     path: z.string(),
   }),
 ]);
-const workspaceScopeSchema: z.ZodType<WorkspaceScope> = z.discriminatedUnion('backend', [
+const workspaceScopeVariants = [
   z.looseObject({ backend: z.literal('webaccess'), directoryHandle: directoryHandleSchema, workspaceId: z.string() }),
   z.looseObject({ backend: z.literal('indexeddb') }),
   z.looseObject({ backend: z.literal('opfs') }),
   z.looseObject({ backend: z.literal('memory'), storageRootKey: z.string() }),
   z.looseObject({ backend: z.literal('node'), path: z.string() }),
+] as const;
+const workspaceScopeSchema: z.ZodType<WorkspaceScope> = z.discriminatedUnion('backend', workspaceScopeVariants);
+/* A mount config is a scope plus its registration-time classification (RC6 /
+ * S5 work 2). Same variants, one extra required field, so the wire cannot carry
+ * an unclassified mount across the bridge either. */
+const mountPathClassSchema = z.enum(['authored', 'derived', 'authority-metadata']);
+const mountConfigSchema: z.ZodType<MountConfig> = z.discriminatedUnion('backend', [
+  workspaceScopeVariants[0].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[1].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[2].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[3].extend({ class: mountPathClassSchema }),
+  workspaceScopeVariants[4].extend({ class: mountPathClassSchema }),
 ]);
 
 const manifestIssueSchema = z.discriminatedUnion('code', [
@@ -433,6 +559,8 @@ const voidResult: z.ZodType<void> = z.union([z.undefined(), z.null()]).transform
 const booleanResult = z.boolean();
 const recursiveOptionsSchema = z.looseObject({ recursive: z.boolean().optional() });
 const scopedOptionsSchema = z.looseObject({ scope: workspaceScopeSchema.optional() });
+/** The rooted read content operations take the caller's own export filter. */
+const archiveOptionsSchema = z.looseObject({ versionedOnly: z.boolean().optional() });
 
 const helloVersionProbeSchema = z.looseObject({ v: z.unknown().optional() });
 const fileSystemBridgeHelloValidator: z.ZodType<FileSystemBridgeHello> = z.preprocess(
@@ -472,6 +600,18 @@ const readFileOptionsSchema = z.union([
   z.looseObject({ encoding: z.literal('utf8').optional(), scope: workspaceScopeSchema.optional() }),
 ]);
 const writePayloadSchema = z.union([z.string(), bytesSchema]);
+const checkedWriteInputSchema: z.ZodType<Omit<CheckedFileWrite, 'signal'>> = z.object({
+  path: z.string(),
+  data: writePayloadSchema,
+  preconditions: z.array(z.object({ path: z.string(), expected: writePayloadSchema.nullable() })),
+});
+const checkedWriteResultSchema: z.ZodType<CheckedFileWriteResult> = z.discriminatedUnion('status', [
+  z.object({ status: z.enum(['applied', 'unchanged']), content: bytesSchema }),
+  z.object({
+    status: z.literal('conflict'),
+    conflicts: z.array(z.object({ path: z.string(), actual: bytesSchema.nullable() })),
+  }),
+]);
 const moveEditSchema = z.looseObject({ source: z.string(), target: z.string() });
 const bulkMoveResultSchema = z.looseObject({
   moved: z.array(z.looseObject({ edit: moveEditSchema, stat: fileStatSchema })),
@@ -509,6 +649,7 @@ const callSchemas = {
     result: z.union([z.string(), bytesSchema]),
   },
   writeFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
+  writeFileChecked: { args: z.tuple([checkedWriteInputSchema]), result: checkedWriteResultSchema },
   appendFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
   writeFiles: {
     args: z.tuple([z.record(z.string(), z.looseObject({ content: writePayloadSchema }))]),
@@ -527,12 +668,12 @@ const callSchemas = {
   unlink: { args: oneStringArgument, result: voidResult },
   rmdir: { args: z.tuple([z.string(), recursiveOptionsSchema.optional()]), result: voidResult },
   exists: { args: oneStringArgument, result: booleanResult },
-  getDirectoryStat: { args: oneStringArgument, result: fileStatEntriesSchema },
-  getDirectoryContents: { args: oneStringArgument, result: directoryContentsSchema },
-  duplicateFile: { args: twoStringArgs, result: voidResult },
-  copyDirectory: { args: twoStringArgs, result: voidResult },
-  getZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema.optional()]), result: z.instanceof(Blob) },
-  mount: { args: z.tuple([z.string(), workspaceScopeSchema]), result: voidResult },
+  /* Scope-only: a routed path is archived on its rooted view (`archive`), never here. */
+  getZippedDirectory: {
+    args: z.tuple([z.string(), z.looseObject({ scope: workspaceScopeSchema })]),
+    result: z.instanceof(Blob),
+  },
+  mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
   listProjectManifests: { args: noArgs, result: projectDiscoveryResultSchema },
@@ -548,15 +689,22 @@ const callSchemas = {
   readShallowDirectory: { args: z.tuple([z.string(), scopedOptionsSchema.optional()]), result: fileTreeNodesSchema },
   disposeStorageRoot: { args: oneStringArgument, result: voidResult },
   readDirectory: { args: oneStringArgument, result: fileTreeNodesSchema },
-  searchFiles: {
-    args: z.tuple([z.string(), z.string(), searchOptionsSchema.optional()]),
-    result: fileStatEntriesSchema,
-  },
   pollExternalChanges: {
     args: z.union([z.tuple([]), z.tuple([z.string().optional()])]),
     result: booleanResult,
   },
   rename: { args: twoStringArgs, result: voidResult },
+  readdirWithStats: { args: oneStringArgument, result: composedDirectoryRowsSchema },
+  provenance: { args: oneStringArgument, result: fileProvenanceSchema },
+  archive: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: z.instanceof(Blob) },
+  contents: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: directoryContentsSchema },
+  search: {
+    args: z.tuple([z.string(), searchOptionsSchema.optional()]),
+    result: fileStatEntriesSchema,
+  },
+  statTree: { args: oneStringArgument, result: fileStatEntriesSchema },
+  copyTree: { args: twoStringArgs, result: voidResult },
+  duplicate: { args: twoStringArgs, result: voidResult },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

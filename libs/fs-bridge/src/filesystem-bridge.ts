@@ -12,8 +12,11 @@ import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { MessagePortLike } from '@taucad/rpc';
 import type { ChangeEvent } from '@taucad/types';
+import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import type {
   FileStat,
+  CheckedFileWrite,
+  CheckedFileWriteResult,
   MkdirOptions,
   ProviderCapabilities,
   WatchEvent,
@@ -36,6 +39,7 @@ import type {
   FileSystemBridgeHello,
   FileSystemBridgeRuntimeService,
   FileSystemBridgeService,
+  FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
 
@@ -76,12 +80,12 @@ declare const fileSystemBridgePortBrand: unique symbol;
 export type FileSystemBridgePort = MessagePort & { readonly [fileSystemBridgePortBrand]: true };
 
 /**
- * Typed filesystem bridge proxy preserving class/interface-shaped service surfaces.
+ * Lifecycle and transport members every bridge proxy carries, rooted or not.
  *
  * @public
  */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- proxy target types may be class/interface services without string index signatures.
-export type FileSystemBridgeProxy = FileSystemBridgeService & {
+export type FileSystemBridgeProxyTransport = {
   readonly ready: Promise<void>;
   readonly hello: { readonly payload: FileSystemBridgeHello };
   dispose(): void;
@@ -93,11 +97,112 @@ export type FileSystemBridgeProxy = FileSystemBridgeService & {
   ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
 };
 
+/**
+ * A proxy over an **unrooted** connection: the authority's own surface.
+ *
+ * Split from the rooted half at W12(d) (gate G-A F9, G-B G5): the workspace
+ * connection used to promise `search`, `statTree`, `copyTree`, `duplicate`,
+ * `archive`, `contents`, `provenance` and `readdirWithStats`, none of which the
+ * authority serves. A caller that annotates its variable with this type can no
+ * longer take one by accident.
+ *
+ * @public
+ */
+export type FileSystemBridgeWorkspaceProxy = FileSystemBridgeUnrootedCalls & FileSystemBridgeProxyTransport;
+
+/**
+ * A proxy over a **rooted** connection: content, the root's index and the
+ * mutating porcelain, all in the root's own namespace.
+ *
+ * @public
+ */
+export type FileSystemBridgeRootedProxy = FileSystemBridgeService & FileSystemBridgeProxyTransport;
+
+/**
+ * Typed filesystem bridge proxy preserving class/interface-shaped service surfaces.
+ *
+ * The union of both halves, because one factory builds either and the
+ * connection's root is not in its type. Annotate the variable with
+ * {@link FileSystemBridgeWorkspaceProxy} or {@link FileSystemBridgeRootedProxy}
+ * to hold only what that connection serves.
+ *
+ * @public
+ */
+export type FileSystemBridgeProxy = FileSystemBridgeRootedProxy;
+
 const isFileSystemBridgeConnection = (
   bridge: FileSystemBridge | FileSystemBridgeConnection,
 ): bridge is FileSystemBridgeConnection => !('onMessage' in bridge.port);
 /** Milliseconds. */
 const defaultUiCoalescingWindow = 500;
+
+/**
+ * Milliseconds. A pending-project commit outlives the bridge's 30 s default
+ * because it is the one call whose work scales with the project: it waits for
+ * a cross-tab lock, recursively removes a half-written target, then writes
+ * every file and the manifest one at a time before reading the manifest back.
+ * On the slowest backend (Web Access, tens of milliseconds a file) five
+ * minutes covers thousands of files — far past anything Tau creates, imports
+ * or duplicates — so a real commit cannot reach it, while a peer that dies
+ * mid-call now fails project creation instead of wedging it for the session.
+ */
+const pendingProjectCommitTimeout = 300_000;
+
+/** One authority path in a scoped port's own namespace, or `undefined` when it is outside that root. */
+const relativeToRoot = (root: string, path: string): string | undefined => {
+  if (root === '/') {
+    return path === '/' ? '' : path.startsWith('/') ? path.slice(1) : undefined;
+  }
+  if (path === root) {
+    return '';
+  }
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : undefined;
+};
+
+/**
+ * One change event as a scoped port sees it, or `undefined` when nothing in it
+ * touches that port's root.
+ *
+ * A move with one end outside the root is not a move to that port: it is a
+ * disappearance or an arrival, exactly as a rooted view's own watch reports it
+ * (`WorkspaceFileService.createRootedFileSystem`).
+ */
+const scopeEventToRoot = (event: ChangeEvent, root: string): ChangeEvent | undefined => {
+  if (event.type === 'backendChanged') {
+    return event;
+  }
+  if ('path' in event) {
+    const path = relativeToRoot(root, event.path);
+    return path === undefined ? undefined : { ...event, path };
+  }
+  const directory = event.type === 'directoryRenamed' || event.type === 'directoryCopied';
+  const [fromPath, toPath] =
+    'oldPath' in event ? ([event.oldPath, event.newPath] as const) : ([event.sourcePath, event.targetPath] as const);
+  const from = relativeToRoot(root, fromPath);
+  const to = relativeToRoot(root, toPath);
+  if (from !== undefined && to !== undefined) {
+    return 'oldPath' in event
+      ? { ...event, oldPath: from, newPath: to }
+      : { ...event, sourcePath: from, targetPath: to };
+  }
+  if (to !== undefined) {
+    return directory
+      ? {
+          type: 'directoryCreated',
+          path: to,
+          backend: event.backend,
+          ...(event.target ? { target: event.target } : {}),
+        }
+      : { type: 'fileWritten', path: to, backend: event.backend, ...(event.target ? { target: event.target } : {}) };
+  }
+  if (from !== undefined && 'oldPath' in event) {
+    return directory
+      ? { type: 'directoryDeleted', path: from, backend: event.backend }
+      : { type: 'fileDeleted', path: from, backend: event.backend };
+  }
+  /* A copy whose target left the root changed nothing inside it. */
+  return undefined;
+};
 
 const asFileSystemBridgePort = (port: MessagePort): FileSystemBridgePort => port as FileSystemBridgePort;
 
@@ -138,6 +243,19 @@ const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
 };
 
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
+  if (method === 'writeFileChecked' && args[0] !== null && typeof args[0] === 'object') {
+    const input = args[0] as CheckedFileWrite;
+    return [
+      {
+        path: input.path,
+        data: cloneWritePayloadForTransfer(input.data),
+        preconditions: input.preconditions.map((precondition) => ({
+          path: precondition.path,
+          expected: precondition.expected === null ? null : cloneWritePayloadForTransfer(precondition.expected),
+        })),
+      },
+    ];
+  }
   if ((method === 'writeFile' || method === 'appendFile') && args.length >= 2) {
     return [args[0], cloneWritePayloadForTransfer(args[1]), ...args.slice(2)];
   }
@@ -177,6 +295,7 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
  */
 type MutationMethodName =
   | 'writeFile'
+  | 'writeFileChecked'
   | 'appendFile'
   | 'writeFiles'
   | 'mkdir'
@@ -184,8 +303,6 @@ type MutationMethodName =
   | 'bulkMove'
   | 'unlink'
   | 'rmdir'
-  | 'duplicateFile'
-  | 'copyDirectory'
   | 'commitPendingProjectDirectory';
 
 /**
@@ -208,10 +325,9 @@ type MutationOverrideMap = {
 };
 
 type WriteFileParameters = Parameters<MutatingMethods['writeFile']>;
+type WriteFileCheckedParameters = Parameters<MutatingMethods['writeFileChecked']>;
 type AppendFileParameters = Parameters<MutatingMethods['appendFile']>;
 type WriteFilesParameters = Parameters<MutatingMethods['writeFiles']>;
-type DuplicateFileParameters = Parameters<MutatingMethods['duplicateFile']>;
-type CopyDirectoryParameters = Parameters<MutatingMethods['copyDirectory']>;
 type CommitPendingProjectDirectoryParameters = Parameters<MutatingMethods['commitPendingProjectDirectory']>;
 type BulkMoveEdit = Readonly<{ source: string; target: string }>;
 type BulkMoveResult = {
@@ -232,6 +348,68 @@ type PreflightOverrideMap = {
   [K in PreflightMethodName]: PreflightMethods[K];
 };
 const workspaceMutationErrorMarker = '__workspaceMutationError__';
+type CheckedWriteApplicationState = 'known-not-applied' | 'potentially-applied';
+
+const checkedWriteApplicationState = (value: unknown): CheckedWriteApplicationState | undefined => {
+  const state = (value as { applicationState?: unknown } | undefined)?.applicationState;
+  return state === 'known-not-applied' || state === 'potentially-applied' ? state : undefined;
+};
+
+const preserveCheckedWriteApplicationState = (error: unknown): Error => {
+  const applicationState = checkedWriteApplicationState(error);
+  const result = error instanceof Error ? error : new Error(String(error));
+  if (applicationState === undefined) {
+    return result;
+  }
+  const candidateMetadata = (result as { metadata?: unknown }).metadata;
+  const metadata =
+    candidateMetadata !== null && typeof candidateMetadata === 'object' && !Array.isArray(candidateMetadata)
+      ? candidateMetadata
+      : {};
+  return Object.assign(result, { metadata: { ...metadata, applicationState } });
+};
+
+const restoreCheckedWriteApplicationState = (error: unknown): void => {
+  const metadata = (error as { metadata?: unknown } | undefined)?.metadata;
+  if (metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    const applicationState = checkedWriteApplicationState(metadata);
+    if (applicationState !== undefined) {
+      Object.assign(error as Record<string, unknown>, { applicationState });
+    }
+  }
+};
+
+const withCheckedWriteApplicationState = (error: unknown, applicationState: CheckedWriteApplicationState): Error => {
+  const result = error instanceof Error ? error : new Error(String(error));
+  const candidateMetadata = (result as { metadata?: unknown }).metadata;
+  const metadata =
+    candidateMetadata !== null && typeof candidateMetadata === 'object' && !Array.isArray(candidateMetadata)
+      ? candidateMetadata
+      : {};
+  return Object.assign(result, {
+    applicationState,
+    metadata: { ...metadata, applicationState },
+  });
+};
+
+const checkedWritePreDeliveryError = (args: unknown[]): Error | undefined => {
+  const validation = fileSystemBridgeSchemas.calls.writeFileChecked.args.safeParse(args);
+  if (validation.success) {
+    return undefined;
+  }
+  return withCheckedWriteApplicationState(
+    new TypeError(`Invalid writeFileChecked arguments: ${validation.error.message}`),
+    'known-not-applied',
+  );
+};
+
+const classifyCheckedWriteFailure = (error: unknown): Error => {
+  restoreCheckedWriteApplicationState(error);
+  if (checkedWriteApplicationState(error) !== undefined) {
+    return error as Error;
+  }
+  return withCheckedWriteApplicationState(error, 'potentially-applied');
+};
 
 const serializeWorkspaceMutationError = (error: WorkspaceMutationError): WorkspaceMutationError => {
   const serialized: SerializedWorkspaceMutationError = {
@@ -247,6 +425,37 @@ const serializeWorkspaceMutationError = (error: WorkspaceMutationError): Workspa
 
 const serializeMutationResult = (result: true | WorkspaceMutationError): true | WorkspaceMutationError =>
   isWorkspaceMutationError(result) ? serializeWorkspaceMutationError(result) : result;
+
+/**
+ * Wire-shape the porcelain results a rooted connection now answers with.
+ *
+ * {@link bindMutationContextForPort} does this for the workspace port, but a
+ * rooted port must not have a mutation context appended to its calls: the
+ * origin is baked into the view when it is captured. Only the serialization is
+ * shared, so only the serialization is applied here.
+ *
+ * @param handlers - The rooted handler object the host composed.
+ * @returns The same handlers, with any preflight or bulk-move result serialized.
+ */
+const serializeRootedResults = (handlers: StringKeyedObject): StringKeyedObject => {
+  const served = handlers as Record<string, unknown>;
+  const overrides: Record<string, unknown> = {};
+  for (const name of ['canMove', 'canRename', 'canCreate', 'canDelete']) {
+    const preflight = served[name];
+    if (typeof preflight === 'function') {
+      overrides[name] = async (...args: readonly unknown[]): Promise<true | WorkspaceMutationError> =>
+        serializeMutationResult(
+          await (preflight as (...callArgs: readonly unknown[]) => Promise<true | WorkspaceMutationError>)(...args),
+        );
+    }
+  }
+  if (typeof served['bulkMove'] === 'function') {
+    const bulkMove = served['bulkMove'] as (...callArgs: readonly unknown[]) => Promise<BulkMoveResult>;
+    overrides['bulkMove'] = async (...args: readonly unknown[]): Promise<BulkMoveResult> =>
+      serializeBulkMoveResult(await bulkMove(...args));
+  }
+  return Object.keys(overrides).length === 0 ? handlers : { ...handlers, ...overrides };
+};
 
 const serializeBulkMoveResult = (result: BulkMoveResult): BulkMoveResult => ({
   moved: result.moved,
@@ -299,6 +508,13 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
   const overrides: MutationOverrideMap = {
     writeFile: async (path: WriteFileParameters[0], data: WriteFileParameters[1]): Promise<void> =>
       mutatingService.writeFile(path, data, context),
+    writeFileChecked: async (input: WriteFileCheckedParameters[0]): Promise<CheckedFileWriteResult> => {
+      try {
+        return await mutatingService.writeFileChecked(input, context);
+      } catch (error) {
+        throw preserveCheckedWriteApplicationState(error);
+      }
+    },
     appendFile: async (path: AppendFileParameters[0], data: AppendFileParameters[1]): Promise<void> =>
       mutatingService.appendFile(path, data, context),
     writeFiles: async (files: WriteFilesParameters[0]): Promise<void> => mutatingService.writeFiles(files, context),
@@ -309,14 +525,6 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
     unlink: async (path: string): Promise<void> => mutatingService.unlink(path, context),
     rmdir: async (path: string, options?: { recursive?: boolean }): Promise<void> =>
       mutatingService.rmdir(path, options, context),
-    duplicateFile: async (
-      sourcePath: DuplicateFileParameters[0],
-      destinationPath: DuplicateFileParameters[1],
-    ): Promise<void> => mutatingService.duplicateFile(sourcePath, destinationPath, context),
-    copyDirectory: async (
-      sourcePath: CopyDirectoryParameters[0],
-      destinationPath: CopyDirectoryParameters[1],
-    ): Promise<void> => mutatingService.copyDirectory(sourcePath, destinationPath, context),
     commitPendingProjectDirectory: async (input: CommitPendingProjectDirectoryParameters[0]) =>
       mutatingService.commitPendingProjectDirectory(input, context),
   };
@@ -409,6 +617,12 @@ export type FileSystemBridgeOptions = {
    * forwarded to runtime calls.
    */
   root?: string;
+  /**
+   * Compose the root as this consumer's view instead of handing back the raw
+   * working copy. Omit it for the host's own capture, apply and language
+   * planes, which read the checkout itself.
+   */
+  consumer?: ComposedViewConsumer;
   /** Coalescing window for UI-bound fileChanged events (default: 500). Milliseconds. */
   uiCoalescingWindow?: number;
   /**
@@ -445,6 +659,12 @@ export type ExposeFileSystemHandle = {
 export type RootedFileSystemHandlerFactory = (
   root: string,
   context: WorkspaceMutationContext,
+  /**
+   * Which composed view the connection asked for, or `undefined` for the
+   * checkout's raw working copy — the host's own capture and apply plane,
+   * which must not see composed overlays (architecture V6).
+   */
+  consumer: ComposedViewConsumer | undefined,
 ) => FileSystemBridgeRuntimeService | undefined;
 
 type FileSystemBridgeConnectEnvelope = {
@@ -452,6 +672,7 @@ type FileSystemBridgeConnectEnvelope = {
   readonly type: string;
   readonly port: MessagePort;
   readonly root?: unknown;
+  readonly consumer?: unknown;
 };
 
 const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<FileSystemBridgeConnectEnvelope> =>
@@ -460,6 +681,7 @@ const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<F
     type: z.literal(messageType),
     port: z.instanceof(MessagePort),
     root: z.unknown().optional(),
+    consumer: z.unknown().optional(),
   });
 
 const fileSystemBridgePeerEnvelopeSchema = (messageType: string) =>
@@ -499,7 +721,11 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
  * @public
  */
 type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
-  handlerForRoot?: (root: string, context: WorkspaceMutationContext) => StringKeyedObject | undefined;
+  handlerForRoot?: (
+    root: string,
+    context: WorkspaceMutationContext,
+    consumer: ComposedViewConsumer | undefined,
+  ) => StringKeyedObject | undefined;
   changeEventBus?: BridgeChangeEventBus;
   /* Inline `Pick`, no named alias.
    * ponytail: one more port-like type declaration is exactly the failure mode
@@ -517,20 +743,32 @@ function exposeFileSystemHandlers(
   const activePorts = new Set<MessagePort>();
   const serverHandles = new Map<MessagePort, BridgeServerHandle>();
   const portIds = new Map<MessagePort, string>();
-  const scopedPorts = new Set<MessagePort>();
+  /** Every scoped port and the authority root it is confined to. */
+  const scopedPorts = new Map<MessagePort, string>();
 
+  /*
+   * Events ride the view (architecture L4, A11). A scoped port is one consumer
+   * of one checkout, so it receives exactly the events whose authority path
+   * lies inside its root, spelled in its own root-relative namespace — and
+   * never its own writes, which it already knows about.
+   */
   const deliverToHandles = (events: ChangeEvent[]): void => {
     for (const event of events) {
       const originClientId = getEventOrigin(event);
       for (const [recipientPort, handle] of serverHandles) {
-        if (scopedPorts.has(recipientPort)) {
-          continue;
-        }
         const recipientPortId = portIds.get(recipientPort);
         if (originClientId !== undefined && recipientPortId !== undefined && originClientId === recipientPortId) {
           continue;
         }
-        handle.emit('fileChanged', event);
+        const root = scopedPorts.get(recipientPort);
+        if (root === undefined) {
+          handle.emit('fileChanged', event);
+          continue;
+        }
+        const scoped = scopeEventToRoot(event, root);
+        if (scoped !== undefined) {
+          handle.emit('fileChanged', scoped);
+        }
       }
     }
   };
@@ -609,6 +847,10 @@ function exposeFileSystemHandlers(
 
     const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
     const requestedRoot = typeof parsedEnvelope.data.root === 'string' ? parsedEnvelope.data.root : undefined;
+    const requestedConsumer =
+      parsedEnvelope.data.consumer === 'agent' || parsedEnvelope.data.consumer === 'user'
+        ? parsedEnvelope.data.consumer
+        : undefined;
     const mutationContext = { originClientId: portId };
     let portHandlers: StringKeyedObject;
     let handlersAvailable = true;
@@ -616,12 +858,15 @@ function exposeFileSystemHandlers(
     if (requestedRoot === undefined) {
       portHandlers = bindMutationContextForPort(handlers, mutationContext);
     } else {
-      scopedPorts.add(port);
+      scopedPorts.set(port, requestedRoot);
       try {
-        const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext);
+        const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext, requestedConsumer);
         handlersAvailable = rootedHandlers !== undefined;
         unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
-        portHandlers = rootedHandlers ?? createUnavailableHandlers(unavailableError!);
+        portHandlers =
+          rootedHandlers === undefined
+            ? createUnavailableHandlers(unavailableError!)
+            : serializeRootedResults(rootedHandlers);
       } catch (error) {
         handlersAvailable = false;
         unavailableError =
@@ -801,10 +1046,13 @@ export function openFileSystemBridge(
 ): FileSystemBridgeConnection {
   const messageType = options?.messageType ?? filesystemBridgeConnectMessageType;
   const channel = new MessageChannel();
-  const envelope =
-    options?.root === undefined
-      ? { v: fileSystemBridgeProtocolVersion, type: messageType, port: channel.port1 }
-      : { v: fileSystemBridgeProtocolVersion, type: messageType, port: channel.port1, root: options.root };
+  const envelope = {
+    v: fileSystemBridgeProtocolVersion,
+    type: messageType,
+    port: channel.port1,
+    ...(options?.root === undefined ? {} : { root: options.root }),
+    ...(options?.consumer === undefined ? {} : { consumer: options.consumer }),
+  };
   worker.postMessage(envelope, [channel.port1]);
   const rawPort = asFileSystemBridgePort(channel.port2);
   return {
@@ -817,6 +1065,30 @@ export function openFileSystemBridge(
   };
 }
 
+const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService) => ({
+  hello: createFileSystemBridgeHello({
+    state: 'ready',
+    capabilities: handlers.capabilities,
+    watchable: typeof handlers.watch === 'function',
+  }),
+  protocolSchemas: fileSystemBridgeSchemas,
+});
+
+/**
+ * Serve a runtime filesystem over an already-established RPC port.
+ *
+ * @param handlers - Rooted filesystem authority exposed to the peer.
+ * @param port - Existing RPC port, including a wrapped transferred channel.
+ * @returns Server handle whose disposal closes the bridge lifecycle.
+ * @public
+ */
+export function serveFileSystemBridgePort(
+  handlers: FileSystemBridgeRuntimeService,
+  port: Port<unknown>,
+): BridgeServerHandle {
+  return createBridgeServer(handlers, port, runtimeFileSystemBridgeOptions(handlers));
+}
+
 /**
  * Create a validated filesystem bridge port for an in-isolate runtime filesystem.
  * The hello and every wire validator are installed here, so callers cannot
@@ -825,14 +1097,7 @@ export function openFileSystemBridge(
  * @public
  */
 export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
-  const bridge = createBridgePort(handlers, {
-    hello: createFileSystemBridgeHello({
-      state: 'ready',
-      capabilities: handlers.capabilities,
-      watchable: typeof handlers.watch === 'function',
-    }),
-    protocolSchemas: fileSystemBridgeSchemas,
-  });
+  const bridge = createBridgePort(handlers, runtimeFileSystemBridgeOptions(handlers));
   return {
     port: asFileSystemBridgePort(bridge.port),
     dispose: bridge.dispose,
@@ -892,7 +1157,8 @@ export function createFileSystemBridgeProxy(
     FileSystemBridgeHello
   >(resolvedBridge.port, {
     prepareCallArgs: cloneWriteArgsForTransfer,
-    resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
+    resolveCallTimeout: (method) =>
+      method === 'commitPendingProjectDirectory' ? pendingProjectCommitTimeout : undefined,
     protocolSchemas: fileSystemBridgeSchemas,
   });
   let isDisposed = false;
@@ -931,10 +1197,31 @@ export function createFileSystemBridgeProxy(
       if (property === 'then' || property === 'toJSON' || typeof property === 'symbol') {
         return undefined;
       }
-      if (isDisposed) {
+      if (isDisposed && property !== 'writeFileChecked') {
         throw new Error(`Filesystem bridge proxy has been disposed — cannot call '${property}'`);
       }
-      return async (...args: unknown[]) => call(property, args);
+      return async (...args: unknown[]) => {
+        if (property === 'writeFileChecked') {
+          const preDeliveryError = checkedWritePreDeliveryError(args);
+          if (preDeliveryError !== undefined) {
+            throw preDeliveryError;
+          }
+          if (isDisposed) {
+            throw withCheckedWriteApplicationState(
+              new Error(`Filesystem bridge proxy has been disposed — cannot call '${property}'`),
+              'known-not-applied',
+            );
+          }
+        }
+        try {
+          return await call(property, args);
+        } catch (error) {
+          if (property === 'writeFileChecked') {
+            throw classifyCheckedWriteFailure(error);
+          }
+          throw error;
+        }
+      };
     },
   });
 }

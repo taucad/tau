@@ -49,6 +49,7 @@
       "types": "./native/opencascade/dist/init.d.ts",
       "default": "./native/opencascade/dist/init.js"
     },
+    "./native/opencascade/single/wasm": "./native/opencascade/dist/geospec_opencascade_single.wasm",
     "./native/opencascade/single/wasm-url": "./src/native/opencascade-wasm.ts",
     "./package.json": "./package.json"
   },
@@ -75,6 +76,7 @@
         "import": "./dist/native/opencascade/init.js",
         "default": "./dist/native/opencascade/init.js"
       },
+      "./native/opencascade/single/wasm": "./dist/native/opencascade/geospec_opencascade_single.wasm",
       "./native/opencascade/single/wasm-url": {
         "types": "./dist/native/opencascade-wasm.d.mts",
         "import": "./dist/native/opencascade-wasm.mjs",

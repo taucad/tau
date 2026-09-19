@@ -83,10 +83,10 @@ export type MorphingPointsProperties = {
    */
   readonly targetProgress: number;
   /**
-   * Animation speed for progress interpolation.
-   * @default 2
+   * Time for progress to travel the full 0→1 range, in milliseconds.
+   * @default 1400
    */
-  readonly animationSpeed?: number;
+  readonly duration?: number;
   /**
    * Source color for particles.
    * @default '#14b8a6'
@@ -107,6 +107,11 @@ export type MorphingPointsProperties = {
    * @default 2
    */
   readonly explosionStrength?: number;
+  /**
+   * Additive (luminous) blending instead of opaque grains.
+   * @default false
+   */
+  readonly isAdditive?: boolean;
   /**
    * Static rotation to apply to the points group (for coordinate system correction).
    */
@@ -177,12 +182,13 @@ export function MorphingPoints({
   sourcePoints,
   targetPoints,
   targetProgress,
-  animationSpeed = 2,
+  duration = 1400,
   // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js point color
   sourceColor = '#14b8a6',
   targetColor,
   pointSize = 3,
   explosionStrength = 2,
+  isAdditive = false,
   rotation,
   initialRotationY = 0,
   enableAutoRotate = false,
@@ -214,26 +220,14 @@ export function MorphingPoints({
 
   // Create the morphing points material — GLSL ShaderMaterial or TSL PointsNodeMaterial.
   const { material, nodeHandles } = useMemo(() => {
+    const options = { color: sourceColor, targetColor, pointSize, explosionStrength, additive: isAdditive };
     if (backend === 'webgpu') {
-      const built = createMorphingPointsNodeMaterial({
-        color: sourceColor,
-        targetColor,
-        pointSize,
-        explosionStrength,
-      });
+      const built = createMorphingPointsNodeMaterial(options);
       return { material: built.material, nodeHandles: built.handles };
     }
 
-    return {
-      material: createMorphingPointsMaterial({
-        color: sourceColor,
-        targetColor,
-        pointSize,
-        explosionStrength,
-      }),
-      nodeHandles: undefined,
-    };
-  }, [backend, explosionStrength, pointSize, sourceColor, targetColor]);
+    return { material: createMorphingPointsMaterial(options), nodeHandles: undefined };
+  }, [backend, explosionStrength, isAdditive, pointSize, sourceColor, targetColor]);
 
   // Reset hasReachedTarget when target changes
   useEffect(() => {
@@ -284,7 +278,7 @@ export function MorphingPoints({
       },
       targetProgress,
       delta,
-      animationSpeed,
+      duration,
       onComplete() {
         onMorphComplete?.(currentRotationYaxisRef.current);
       },

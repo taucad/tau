@@ -1,4 +1,12 @@
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ListFilter, Settings2 } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Download,
+  ListFilter,
+  Settings2,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Virtuoso } from 'react-virtuoso';
@@ -45,6 +53,7 @@ import {
   getVisibleAttributes,
 } from '#routes/w.$workspace.$project/chat-kernel-utils.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 type ExplorerProperties = {
   readonly spanTree: SpanNode[];
@@ -254,7 +263,7 @@ function SpanDetails({
 
       {(spanId ?? parentSpanId) ? (
         <details className='mt-2 text-muted-foreground'>
-          <summary className='cursor-pointer rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring'>
+          <summary className='rounded-sm transition-colors outline-none hover:bg-accent/50 hover:text-foreground focus-visible:focus-outline'>
             Technical IDs
           </summary>
           <dl className='mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono'>
@@ -319,7 +328,7 @@ function TreeRow({
           data-telemetry-span-id={id}
           className={cn(
             'group relative grid min-h-7 cursor-default grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center rounded-lg px-1.5 py-0 text-xs outline-none transition-colors data-[state=open]:rounded-b-none',
-            'hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring',
+            'hover:bg-sidebar-accent focus-within:bg-sidebar-accent focus-visible:focus-outline',
             isSelected && 'bg-primary/10',
           )}
           onFocus={() => {
@@ -360,7 +369,10 @@ function TreeRow({
               {hasChildren ? (
                 <button
                   type='button'
-                  className='flex size-4 items-center justify-center rounded-sm outline-none hover:bg-muted-foreground/10 focus-visible:ring-2 focus-visible:ring-ring'
+                  className={nestedActionVariants({
+                    className:
+                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline',
+                  })}
                   aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} children for ${node.entry.name}`}
                   aria-expanded={!isCollapsed}
                   onClick={(event) => {
@@ -500,7 +512,7 @@ function TimelineRow({
           data-telemetry-span-row
           data-telemetry-span-id={id}
           className={cn(
-            'grid min-h-8 grid-cols-[minmax(8rem,42%)_1fr] items-center rounded-lg px-1.5 py-0 text-xs outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:rounded-b-none',
+            'grid min-h-8 grid-cols-[minmax(8rem,42%)_1fr] items-center rounded-lg px-1.5 py-0 text-xs outline-none transition-colors hover:bg-sidebar-accent focus-within:bg-sidebar-accent focus-visible:focus-outline data-[state=open]:rounded-b-none',
             isSelected && 'bg-primary/10',
           )}
           onFocus={() => {
@@ -515,7 +527,10 @@ function TimelineRow({
               {hasChildren ? (
                 <button
                   type='button'
-                  className='flex size-4 items-center justify-center rounded-sm outline-none hover:bg-muted-foreground/10 focus-visible:ring-2 focus-visible:ring-ring'
+                  className={nestedActionVariants({
+                    className:
+                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline',
+                  })}
                   aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} children for ${node.entry.name}`}
                   aria-expanded={!isCollapsed}
                   onClick={(event) => {
@@ -627,6 +642,7 @@ export function TraceToolbar({
   onDisplaySettingsChange,
   onFiltersChange,
   onToggleCollapseAll,
+  onExport,
 }: {
   readonly viewMode: ViewMode;
   readonly displaySettings: DisplaySettings;
@@ -636,6 +652,7 @@ export function TraceToolbar({
   readonly onDisplaySettingsChange: (settings: DisplaySettings) => void;
   readonly onFiltersChange: (filters: FilterCondition[]) => void;
   readonly onToggleCollapseAll: () => void;
+  readonly onExport: () => void;
 }): React.JSX.Element {
   const activeFilterCount = filters.filter(({ value }) => value !== '').length;
 
@@ -722,6 +739,10 @@ export function TraceToolbar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <PaneButton tooltip='Export trace' aria-label='Export trace' onClick={onExport}>
+          <Download className='size-3.5' />
+        </PaneButton>
 
         <PaneButton
           tooltip={isAllCollapsed ? 'Expand all spans' : 'Collapse all spans'}

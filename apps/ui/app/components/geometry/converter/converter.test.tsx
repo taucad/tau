@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import type * as FileUtilsModule from '@taucad/utils/file';
 import type { ConverterExportFormat } from '#routes/convert/converter-runtime.definition.js';
+import { isConfiguredConverterFormat } from '#components/geometry/converter/converter-utils.js';
 
 /* oxlint-disable react-js/boolean-prop-naming -- mocks the controlled Checkbox prop API. */
 
@@ -10,6 +11,11 @@ const { exportFormat, downloadBlob } = vi.hoisted(() => ({
   exportFormat: vi.fn(),
   downloadBlob: vi.fn(),
 }));
+
+it('excludes runtime-only formats without converter metadata', () => {
+  expect(isConfiguredConverterFormat('glb')).toBe(true);
+  expect(isConfiguredConverterFormat('assjson')).toBe(false);
+});
 
 vi.mock('@taucad/utils/file', async (importOriginal) => ({
   ...(await importOriginal<typeof FileUtilsModule>()),
@@ -59,6 +65,7 @@ const { Converter } = await import('#components/geometry/converter/converter.js'
 const renderConverter = (format: ConverterExportFormat, onExport = vi.fn()) => {
   render(
     <Converter
+      availableFormats={[format]}
       exportFormat={exportFormat}
       selectedFormats={[format]}
       shouldUseZipForMultiple={false}

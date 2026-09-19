@@ -14,9 +14,10 @@ const desktopLayout = {
   workbenchWidth: 420,
   compactAuxiliary: 'chat' as 'chat' | 'workbench',
 };
+const editorState = { isReady: true };
 const snapshot = {
   context: { panelState: { desktopLayout } },
-  matches: () => true,
+  matches: () => editorState.isReady,
 };
 
 vi.mock('@xstate/react', () => ({
@@ -35,6 +36,7 @@ vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
 vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   ChatInterfaceSessionGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  ChatPaneSkeleton: () => <div data-testid='chat-skeleton' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
   ViewerDockview: () => <div data-testid='viewer-lane' />,
@@ -88,6 +90,7 @@ const resizeObserver: ResizeObserver = {
 };
 
 const { ChatInterfaceDesktop, compactWorkspaceWidth } = await import('./chat-interface-desktop.js');
+const { revealDelayMilliseconds } = await import('./workspace-skeleton.js');
 
 const renderDesktop = () =>
   render(
@@ -117,6 +120,7 @@ describe('ChatInterfaceDesktop', () => {
     desktopLayout.chatOpen = true;
     desktopLayout.workbenchOpen = true;
     desktopLayout.compactAuxiliary = 'chat';
+    editorState.isReady = true;
     sidebar.open = true;
     vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
@@ -140,6 +144,47 @@ describe('ChatInterfaceDesktop', () => {
     expect(screen.getByTestId('workbench-lane').closest('[data-pane]')).toHaveAttribute('data-visible', 'true');
     expect(screen.getByTestId('viewer-lane')).toBe(viewer);
     expect(document.querySelectorAll('[data-pane]')).toHaveLength(3);
+  });
+
+  /* The editor state loads from storage before the lanes can take their
+   * persisted widths; the lanes stand in at their defaults, never a blank. */
+  it('shows the workspace skeleton instead of a blank while the editor state loads', async () => {
+    editorState.isReady = false;
+    /* Inside the load's first blink, where the lanes still ease in. */
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    renderDesktop();
+
+    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
+    expect(skeleton).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('chat-skeleton')).toBeInTheDocument();
+    expect(screen.queryByTestId('allotment')).not.toBeInTheDocument();
+    /* The workbench lane drops at the compact width through the skeleton's own container query,
+     * which jsdom does not evaluate: the class is the assertion, the width is checked in a browser. */
+    const workbenchLane = skeleton.querySelector('.border-l');
+    expect(workbenchLane).toHaveClass('@min-[1120px]:flex');
+    expect(compactWorkspaceWidth).toBe(1120);
+    /* The frame paints at once; its lanes wait out a blink, so a warm load never flashes them. */
+    expect(skeleton).toHaveClass('bg-background');
+    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).toHaveClass(
+      'animate-in',
+      'fade-in',
+      'fill-mode-both',
+      '[animation-delay:300ms]',
+      'motion-reduce:animate-none',
+    );
+    clock.mockRestore();
+  });
+
+  /* Opening a project hands the skeleton from gate to gate. The blink belongs to the load, not to
+   * each mount, or the lanes would fade in again at every handover and spend the wait invisible. */
+  it('spends the blink once per load, so a later gate shows the lanes at once', async () => {
+    editorState.isReady = false;
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(revealDelayMilliseconds);
+    renderDesktop();
+
+    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
+    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).not.toHaveClass('animate-in');
+    clock.mockRestore();
   });
 
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {

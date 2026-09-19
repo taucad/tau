@@ -1,6 +1,7 @@
 import type { PluginFactory, PluginInstance } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+import type { PicogkKernelOptions } from '@taucad/picogk';
 
 /** A plugin factory whose default invocation is valid for `--plugin`. @public */
 export type DefaultInvocablePluginFactory = {
@@ -12,6 +13,7 @@ export type DefaultInvocablePluginFactory = {
 export type CliRuntimeOptions = {
   readonly explicitFactories?: readonly DefaultInvocablePluginFactory[];
   readonly configuredPlugins?: readonly PluginInstance[];
+  readonly picogk?: PicogkKernelOptions;
 };
 
 /**
@@ -37,8 +39,17 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/brep'),
     import('@taucad/rhino'),
   ]);
-  const [{ assimp }, { image }] = await Promise.all([import('@taucad/assimp'), import('@taucad/image')]);
-  const builtIns = [...modules.map(({ plugin }) => plugin()), assimp({ preset: 'all' }), image()];
+  const [{ assimp }, { image }, picogkModule] = await Promise.all([
+    import('@taucad/assimp'),
+    import('@taucad/image'),
+    options.picogk ? import('@taucad/picogk') : undefined,
+  ]);
+  const builtIns = [
+    ...modules.map(({ plugin }) => plugin()),
+    ...(picogkModule && options.picogk ? [picogkModule.picogk({ kernels: { default: options.picogk } })] : []),
+    assimp({ preset: 'all' }),
+    image(),
+  ];
   const builtInNames = new Set(builtIns.map(({ meta }) => meta.name));
   const plugins: PluginInstance[] = [...builtIns];
   const indexByName = new Map(plugins.map(({ meta }, index) => [meta.name, index]));

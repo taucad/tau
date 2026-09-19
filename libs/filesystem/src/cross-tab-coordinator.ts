@@ -9,6 +9,7 @@
 
 import { z } from 'zod';
 import { assertRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
+import { projectRoute } from '#project-routes.js';
 
 const lockPrefix = 'tau-fs-write:';
 const channelName = 'tau-fs-changes';
@@ -44,6 +45,44 @@ export type PhysicalAuthority = Readonly<z.infer<typeof physicalAuthoritySchema>
 export type ChangeNotification = Readonly<
   Omit<z.infer<typeof changeNotificationSchema>, 'authority'> & { authority: PhysicalAuthority }
 >;
+
+/**
+ * Acquire the existing ordered mutation locks without owning a notification channel.
+ *
+ * @param paths - Logical and physical resource tokens.
+ * @param operation - Body executed under all selected locks.
+ * @returns The operation result, or its rejection.
+ * @internal
+ */
+export const withCrossTabLocks = async <T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> => {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    return operation();
+  }
+  const sortedPaths = [...new Set(paths)].sort();
+  const acquire = async (index: number): Promise<T> => {
+    const path = sortedPaths[index];
+    if (path === undefined) {
+      return operation();
+    }
+    return navigator.locks.request(`${lockPrefix}${path}`, { mode: 'exclusive' }, async () => acquire(index + 1));
+  };
+  return acquire(0);
+};
+
+/** Acquire browser authority locks, refusing when the platform cannot provide exclusion. @internal */
+export const withRequiredCrossTabLocks = async <T>(
+  paths: readonly string[],
+  operation: () => Promise<T>,
+): Promise<T> => {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    throw Object.assign(new Error('Checked filesystem writes require navigator.locks or a provider authority.'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED',
+      applicationState: 'known-not-applied',
+      metadata: { applicationState: 'known-not-applied' },
+    });
+  }
+  return withCrossTabLocks(paths, operation);
+};
 
 /**
  * Coordinates filesystem writes across browser tabs.
@@ -93,19 +132,12 @@ export class CrossTabCoordinator {
    * @returns The operation result.
    */
   public async withLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
-    if (typeof navigator === 'undefined' || !('locks' in navigator)) {
-      return operation();
-    }
+    return withCrossTabLocks(paths, operation);
+  }
 
-    const sortedPaths = [...new Set(paths)].sort();
-    const acquire = async (index: number): Promise<T> => {
-      const path = sortedPaths[index];
-      if (path === undefined) {
-        return operation();
-      }
-      return navigator.locks.request(`${lockPrefix}${path}`, { mode: 'exclusive' }, async () => acquire(index + 1));
-    };
-    return acquire(0);
+  /** Execute under required cross-tab exclusion, failing closed when unavailable. */
+  public async withRequiredLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
+    return withRequiredCrossTabLocks(paths, operation);
   }
 
   /**
@@ -141,7 +173,7 @@ export class CrossTabCoordinator {
   public notifyProjectUnavailable(projectId: string, authority: PhysicalAuthority): void {
     this._postChangeNotification({
       type: 'project-unavailable',
-      path: `/projects/${projectId}`,
+      path: projectRoute(projectId),
       authority,
     });
   }

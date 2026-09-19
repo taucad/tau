@@ -24,7 +24,7 @@ export const kernelEngineEvent = 'kernel.engine';
 export type KernelEngineRecord = {
   /** Capability id — `openrscad`, whichever payload bound. */
   readonly kernelId: string;
-  /** Resolved kernel version, e.g. `0.11.0-beta.3` — the engine release, which
+  /** Resolved kernel version, e.g. `0.11.0-beta.4` — the engine release, which
    *  is the same string for both backends. */
   readonly version: string;
   /** The payload `@taulabs/openrscad-engine` bound in the utility process. */

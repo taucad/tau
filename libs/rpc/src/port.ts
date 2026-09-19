@@ -16,6 +16,16 @@ import { Topic } from '@taucad/events';
  * @public
  */
 export type Port<T> = {
+  /**
+   * Optional: resolves once the wire underneath is actually carrying frames.
+   * Present only on a port wrapped around a transport that connects — a dialled
+   * socket — and absent on one that is live the moment it exists.
+   *
+   * A channel bound to a port that implements this starts its hello deadline
+   * here rather than at construction, so the peer's deadline is not also spent
+   * on DNS, TCP, TLS and the upgrade.
+   */
+  opened?: Promise<void>;
   postMessage(data: T, transfer?: readonly Transferable[]): void;
   /**
    * Register an inbound message handler. Returns an unsubscribe that is safe to call multiple times.
@@ -64,18 +74,62 @@ export type MessagePortLike = {
 };
 
 /**
+ * Structural probe for an Electron-transferable port. `MessagePortMain` is not
+ * exposed as a constructor to renderer or utility code, so membership is
+ * decided on shape — `postMessage` plus `start`, which no `ArrayBuffer` or
+ * typed array has.
+ */
+const isTransferablePort = (entry: unknown): boolean =>
+  entry !== null &&
+  typeof entry === 'object' &&
+  typeof (entry as { postMessage?: unknown }).postMessage === 'function' &&
+  typeof (entry as { start?: unknown }).start === 'function';
+
+/**
+ * Reduce a transfer list to what a copy-only wire can carry: ports, nothing else.
+ *
+ * Both ends of Electron's utility wire are copy-only, and neither degrades on
+ * its own. Main and utility (`MessagePortMain`) throw
+ * `Port at index N is not a valid port`; the renderer (a DOM `MessagePort`
+ * relayed out of main) is worse — it *accepts* the list, detaches the caller's
+ * buffer and drops the frame with no error at all (measured, L03 F-L03-3).
+ *
+ * Refusing instead of filtering is not an option: producers hand transfer lists
+ * to a transport-agnostic port on purpose (`bridge-internal.ts`'s
+ * `wrapAsTransferables` puts every `ArrayBuffer` of every file read on the
+ * list, and the runtime channel hoists `WithTransferables` the same way), and
+ * they cannot see which wire they are on. A throw here refuses every project
+ * open on the desktop filesystem wire — observed, L10 F-L10-9. Copying is what
+ * the transport already promises through `geometryDelivery: 'copy'`; this
+ * makes the promise true instead of leaving one end to lose the frame.
+ *
+ * @param transfer - The caller's transfer list.
+ * @returns Only the entries this wire can transfer; the rest ride as copies.
+ */
+const portsOnlyTransfer = (transfer: readonly Transferable[]): readonly Transferable[] =>
+  transfer.filter((entry) => isTransferablePort(entry));
+
+/**
  * Adapts a standard WHATWG `MessagePort` (or compatible Node `worker_threads` port) to {@link Port}.
  *
  * @param port - The port to wrap (typically from `new MessageChannel()` or `messageChannel.port2`).
- * @param options - `label` is only used for `close` error messages.
+ * @param options - `label` names the port in error messages; `copyOnly` marks a
+ *   wire whose far end cannot receive transferred objects — a DOM `MessagePort`
+ *   relayed out of Electron main is the case that exists, and without it that
+ *   port detaches the caller's buffer and loses the frame
+ *   ({@link portsOnlyTransfer}). Leave it off for a wire that really transfers,
+ *   such as the browser worker pool.
  * @returns A {@link Port} bound to the given `MessagePort`.
  * @public
  */
-export const wrapMessagePort = <T>(port: MessagePortLike, options?: { label?: string }): Port<T> => {
+export const wrapMessagePort = <T>(
+  port: MessagePortLike,
+  options?: { label?: string; copyOnly?: boolean },
+): Port<T> => {
   const label = options?.label ?? 'MessagePort';
   return {
     postMessage(data: T, transfer?: readonly Transferable[]): void {
-      port.postMessage(data, transfer);
+      port.postMessage(data, options?.copyOnly && transfer !== undefined ? portsOnlyTransfer(transfer) : transfer);
     },
     onMessage(handler: (data: T) => void): () => void {
       const listener = (event: { data: T }): void => {
@@ -137,25 +191,13 @@ export type MessagePortMainLike = {
 };
 
 /**
- * Structural probe for an Electron-transferable port. `MessagePortMain` is not
- * exposed as a constructor to renderer or utility code, so membership is
- * decided on shape — `postMessage` plus `start`, which no `ArrayBuffer` or
- * typed array has.
- */
-const isTransferablePort = (entry: unknown): boolean =>
-  entry !== null &&
-  typeof entry === 'object' &&
-  typeof (entry as { postMessage?: unknown }).postMessage === 'function' &&
-  typeof (entry as { start?: unknown }).start === 'function';
-
-/**
  * Adapts an `EventEmitter`-shaped {@link MessagePortMainLike} to {@link Port}.
  *
  * Four behaviours Electron's `MessagePortMain` makes mandatory, all measured:
  * - its transfer list is `MessagePortMain[]` and nothing else — an
  *   `ArrayBuffer` in it throws `Port at index N is not a valid port`, so
- *   non-port entries are dropped and the value is still posted. This wire
- *   copies by construction;
+ *   non-port entries are dropped from the list ({@link portsOnlyTransfer}) and
+ *   the value is still posted, whole. This wire copies by construction;
  * - `postMessage` after the far end disentangles is a no-op, so the channel's
  *   own bye frame cannot throw through a dead port;
  * - inbound payloads arrive as `{ data }` on Electron and bare on
@@ -193,7 +235,7 @@ export const wrapMessagePortMain = <T>(port: MessagePortMainLike, options?: { la
       if (closed) {
         return;
       }
-      const ports = transfer?.filter((entry) => isTransferablePort(entry));
+      const ports = transfer === undefined ? undefined : portsOnlyTransfer(transfer);
       if (ports && ports.length > 0) {
         port.postMessage(data, ports);
       } else {
@@ -332,11 +374,24 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
     messages.emit(data);
   };
 
+  /* A dialled socket is wrapped before it connects, so everything a channel
+   * would otherwise start on construction — its hello deadline above all —
+   * would be spent on DNS, TCP, TLS and the upgrade. A socket that is already
+   * open, or already gone, reports no wait at all. */
+  let reportOpen: (() => void) | undefined;
+  const opened =
+    closed || socket.readyState === webSocketOpen
+      ? undefined
+      : new Promise<void>((resolve) => {
+          reportOpen = resolve;
+        });
+
   const onSocketOpen = (): void => {
     for (const frame of outbound) {
       socket.send(frame);
     }
     outbound.length = 0;
+    reportOpen?.();
   };
 
   /** Fire the death handlers at most once, however the wire died. */
@@ -413,6 +468,7 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
       }
       return deaths.subscribe(handler);
     },
+    ...(opened === undefined ? {} : { opened }),
     close(): void {
       closeSocket();
     },

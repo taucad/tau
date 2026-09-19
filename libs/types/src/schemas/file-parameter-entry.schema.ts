@@ -1,48 +1,157 @@
 import { z } from 'zod';
 import { projectRelativePathSchema } from '#schemas/project-manifest.schema.js';
+import type { JSONValue } from '#types/json-value.types.js';
+
+type JsonContainer = Record<PropertyKey, unknown> | unknown[];
+type JsonVisit = Readonly<{ kind: 'enter'; value: unknown }> | Readonly<{ kind: 'leave'; value: JsonContainer }>;
+
+const isJsonContainer = (value: unknown): value is JsonContainer => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return true;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const isJsonObject = (value: unknown): value is Record<string, JSONValue> => {
+  if (!isJsonContainer(value) || Array.isArray(value)) {
+    return false;
+  }
+  const ancestors = new Set<JsonContainer>();
+  const pending: JsonVisit[] = [{ kind: 'enter', value }];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (current.kind === 'leave') {
+      ancestors.delete(current.value);
+      continue;
+    }
+    if (current.value === null || typeof current.value === 'string' || typeof current.value === 'boolean') {
+      continue;
+    }
+    if (typeof current.value === 'number') {
+      if (!Number.isFinite(current.value)) {
+        return false;
+      }
+      continue;
+    }
+    if (!isJsonContainer(current.value)) {
+      return false;
+    }
+    if (ancestors.has(current.value)) {
+      return false;
+    }
+    ancestors.add(current.value);
+    pending.push({ kind: 'leave', value: current.value });
+    const keys = Reflect.ownKeys(current.value);
+    if (
+      Array.isArray(current.value) &&
+      keys.some((key) => key !== 'length' && (typeof key !== 'string' || !/^(?:0|[1-9]\d*)$/u.test(key)))
+    ) {
+      return false;
+    }
+    for (const key of keys) {
+      if (key === 'length' && Array.isArray(current.value)) {
+        continue;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(current.value, key);
+      if (typeof key !== 'string' || descriptor?.enumerable !== true || !('value' in descriptor)) {
+        return false;
+      }
+      const descriptorValue: unknown = descriptor.value;
+      pending.push({ kind: 'enter', value: descriptorValue });
+    }
+    if (Array.isArray(current.value)) {
+      for (let index = 0; index < current.value.length; index += 1) {
+        if (!Object.hasOwn(current.value, index)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+};
+
+const jsonObjectSchema = z
+  .custom<Record<string, JSONValue>>(isJsonObject, 'Expected a JSON object')
+  .transform((value) => structuredClone(value));
 
 /** Canonical project-relative directory for per-geometry-unit parameter files. @public */
 export const parametersDirectory = '.tau/parameters';
 
 const parameterGroupNameSchema = z.string().min(1);
 
+const unitTokenSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0);
+/** RFC 6901 instance pointer keying one field's user-authored claim. */
+const pointerKeySchema = z.string().startsWith('/');
+
 const parameterGroupSchema = z
   .object({
-    values: z.record(z.string(), z.json()),
+    values: jsonObjectSchema,
+    /** Display and input unit the person chose for a field; its presence is the "project" provenance. */
+    units: z.record(pointerKeySchema, unitTokenSchema).optional(),
+    /** Unit a source-unit-capable producer must convert the stored value back from. */
+    sourceUnits: z.record(pointerKeySchema, unitTokenSchema).optional(),
   })
   .strict();
 
-/** Strict runtime schema for a persisted parameter sidecar entry. @public */
+const refineParameterEntry = (
+  entry: {
+    activeGroup: string;
+    groups: Record<string, z.infer<typeof parameterGroupSchema>>;
+  },
+  context: z.RefinementCtx,
+): void => {
+  if (Object.keys(entry.groups).length === 0) {
+    context.addIssue({
+      code: 'custom',
+      path: ['groups'],
+      message: 'Expected at least one parameter group',
+    });
+  }
+
+  if (!Object.hasOwn(entry.groups, entry.activeGroup)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['activeGroup'],
+      message: 'Active parameter group does not exist',
+    });
+  }
+
+  for (const [name, group] of Object.entries(entry.groups)) {
+    for (const pointer of Object.keys(group.sourceUnits ?? {})) {
+      if (group.units?.[pointer] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['groups', name, 'sourceUnits', pointer],
+          message: 'A source unit requires the chosen unit for the same pointer',
+        });
+      }
+    }
+  }
+};
+
+/**
+ * Exact schema for a stored parameter record. The record is unversioned by design: it carries only
+ * what a person or agent authors, and this strict schema refuses anything else. Manifest-derived
+ * facts (kind, space, constraints, provenance, parameter identity) and write-protocol evidence
+ * (revisions, receipts) are never stored. @public
+ */
 export const fileParameterEntrySchema = z
   .object({
     activeGroup: parameterGroupNameSchema,
-    order: z.array(parameterGroupNameSchema).optional(),
     groups: z.record(parameterGroupNameSchema, parameterGroupSchema),
   })
   .strict()
-  .superRefine((entry, context) => {
-    if (Object.keys(entry.groups).length === 0) {
-      context.addIssue({ code: 'custom', path: ['groups'], message: 'Expected at least one parameter group' });
-    }
-
-    if (!Object.hasOwn(entry.groups, entry.activeGroup)) {
-      context.addIssue({ code: 'custom', path: ['activeGroup'], message: 'Active parameter group does not exist' });
-    }
-
-    const orderedGroups = new Set<string>();
-    for (const [index, groupName] of (entry.order ?? []).entries()) {
-      if (orderedGroups.has(groupName)) {
-        context.addIssue({ code: 'custom', path: ['order', index], message: 'Parameter group order must be unique' });
-      }
-      if (!Object.hasOwn(entry.groups, groupName)) {
-        context.addIssue({ code: 'custom', path: ['order', index], message: 'Ordered parameter group does not exist' });
-      }
-      orderedGroups.add(groupName);
-    }
-  });
+  .superRefine(refineParameterEntry);
 
 /** Validated parameter configuration stored for one geometry entry. @public */
-export type FileParameterEntry = z.infer<typeof fileParameterEntrySchema>;
+export type FileParameterEntry = z.output<typeof fileParameterEntrySchema>;
 
 /** One named collection of JSON-compatible parameter overrides. @public */
 export type ParameterGroup = FileParameterEntry['groups'][string];

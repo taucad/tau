@@ -25,21 +25,19 @@ export type {
   InlineRuntimeSource,
   RuntimeExportOptions,
   RuntimeRenderInput,
+  RuntimeEvaluateInput,
   RuntimeSource,
   RuntimeSourceContent,
   RuntimeSourceFiles,
   RuntimeSourceSnapshotAdditionalPath,
-  RuntimeSourceSnapshotData,
-  RuntimeSourceSnapshotFile,
-  RuntimeSourceSnapshotFileRole,
   RuntimeSourceSnapshotInput,
-  RuntimeSourceSnapshotResult,
   ExportResult,
   RenderOutcome,
   RenderStatus,
   RuntimeLifecycleState,
   RuntimeConnectionCause,
   RuntimeTerminatedCause,
+  RuntimeTerminatedDetail,
 } from '#client/runtime-client.js';
 
 // Plugin types

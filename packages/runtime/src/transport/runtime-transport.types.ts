@@ -104,7 +104,27 @@ export type RuntimeTransportTimeoutRecovery =
 export type RuntimeTransportCloseResult =
   | { readonly cause: 'requested' }
   | { readonly cause: 'render-timeout' }
-  | { readonly cause: 'host-exit'; readonly exitCode?: number }
+  | {
+      readonly cause: 'host-exit';
+      /**
+       * Exit code the supervisor observed. Absent only when the host gave no
+       * exit signal within the transport's bounded reporting window — never as
+       * the cheaper outcome of a race against a slower report.
+       */
+      readonly exitCode?: number;
+      /**
+       * Lifecycle phase the host died in. `'session'` iff the wire reached
+       * ready (hello observed) before the close, so a boot failure is
+       * distinguishable from a mid-session death.
+       */
+      readonly phase: 'boot' | 'session';
+      /** Wire bye reason (`CloseInfo.reason`) when the host sent one. */
+      readonly reason?: string;
+      /** Whether the supervisor initiated the kill rather than the host dying. */
+      readonly released?: boolean;
+      /** Last bytes of the host's standard error, when the supervisor captured any. */
+      readonly stderrTail?: string;
+    }
   | { readonly cause: 'wire-failure'; readonly error: Error };
 
 /** Typed rejection for a second in-flight or completed runtime initialization. @internal */

@@ -48,17 +48,39 @@ export const inspectNativeWorkspace = async (filesystem: KernelFileSystem): Prom
 Pass the runtime-injected filesystem. A native kernel runs its child against `mirror.workspacePath`
 between `sync()` and `cleanup()`. Exclusions are exact workspace-relative paths, applied before
 metadata and content reads; excluding `thumbnail.webp` leaves `assets/thumbnail.webp` available.
-The mirror also enforces path, size, depth, and case-collision limits. It is not an OS sandbox.
+The mirror also enforces path, size, depth, and case-collision limits. The OS sandbox is applied
+by `NativeProcessSession` when it spawns the worker against that mirror.
 
 ## API
 
-| Export                      | Purpose                                                                                                                     |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `NativeProcessSession`      | Validated framed child-process requests, ordered progress events, cancellation, trust revocation, and artifact consumption. |
-| `NativeWorkerReportedError` | Preserves structured issues returned by the native worker.                                                                  |
-| `createWorkspaceMirror`     | Bounded, disposable projection of the injected filesystem into a private native workspace.                                  |
-| `processEnvironment`        | Constructs the child environment from the supported platform values.                                                        |
-| `terminateProcessTree`      | Terminates the owned native process tree across supported host platforms.                                                   |
+| Export                          | Purpose                                                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `NativeProcessSession`          | Sandboxed, validated framed child-process requests, ordered progress events, cancellation, and artifact consumption. |
+| `NativeWorkerReportedError`     | Preserves structured issues returned by the native worker.                                                           |
+| `NativeRuntimeUnavailableError` | Thrown (code `NATIVE_RUNTIME_UNAVAILABLE`) when the operating-system sandbox cannot start; the worker never runs.    |
+| `launchInNativeSandbox`         | Wraps one host-owned executable and argument vector in the fixed Tau sandbox profile.                                |
+| `nativeSandboxPolicy`           | The fixed capability profile: bundled runtime and source snapshot readable, one private writable root, no network.   |
+| `createWorkspaceMirror`         | Bounded, disposable projection of the injected filesystem into a private native workspace.                           |
+| `processEnvironment`            | Constructs the child environment from the supported platform values.                                                 |
+| `terminateProcessTree`          | Terminates the owned native process tree across supported host platforms.                                            |
+
+## Sandbox
+
+Every session spawns its worker through [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropics/sandbox-runtime)
+with one fixed profile: the worker reads only its bundled `runtimePath` and the mirrored workspace,
+writes only to its private artifact directory (which also serves as its `HOME` and `TMPDIR`), and has
+no network. The operating system enforces the boundary; there is no trust prompt and no unsandboxed
+fallback. When the platform sandbox or one of its prerequisites is missing, `start()` rejects with
+`NativeRuntimeUnavailableError` and the next request retries.
+
+| Host  | Mechanism                              | Prerequisites                                                             |
+| ----- | -------------------------------------- | ------------------------------------------------------------------------- |
+| macOS | Seatbelt via `/usr/bin/sandbox-exec`   | `/usr/bin` and `/bin` on the host `PATH`                                  |
+| Linux | Bubblewrap, network namespace, seccomp | `bwrap`, `socat`, `rg`; unprivileged user namespaces (AppArmor on Ubuntu) |
+
+Windows is refused explicitly until the runtime's Windows backend accepts per-launch paths. On Linux
+the worker runs in its own PID namespace and cannot see the host process: parent-liveness watchdogs
+must not treat an unaddressable supervisor as dead (the sandbox already dies with its parent).
 
 ## Environment
 

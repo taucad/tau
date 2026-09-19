@@ -16,7 +16,7 @@ import {
   waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
 import type { StorageDurabilityClass } from '@taucad/agent-host';
-import { listAgentHostPlacements } from '#lib/agent-host-placement.js';
+import { hostDirectoryOutage, hostPlacementsIncomplete, listAgentHostPlacements } from '#lib/agent-host-placement.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 
@@ -67,6 +67,14 @@ const availabilityWaiters = new Map<string, Set<AvailabilityWaiter>>();
 const availabilityKey = (projectId: string | undefined, hostId?: TauAgentHostId): string =>
   `${projectId ?? ''}:${hostId ?? 'browser'}`;
 
+/**
+ * Whether the pairing directory is what describes this placement. Only a paired
+ * device is: this computer and the page's own origin are discovered without it,
+ * so its outage — a signed-out `401` included — says nothing about either.
+ */
+const isPairedHost = (hostId: string | undefined): boolean =>
+  hostId !== undefined && hostId !== 'browser' && hostId !== 'desktop' && hostId !== 'origin';
+
 const publishAvailability = (key: string, availability: BrowserAgentHostProjectAvailability): void => {
   resolvedAvailability.set(key, availability);
   const waiters = availabilityWaiters.get(key);
@@ -98,6 +106,12 @@ export const awaitAgentHostAvailability = async (
   const settled = resolvedAvailability.get(key);
   if (settled) {
     return settled;
+  }
+  // A dead directory cannot describe a paired device at all, so refuse with
+  // what it said rather than after the timeout.
+  const outage = isPairedHost(input.hostId) ? hostDirectoryOutage() : undefined;
+  if (outage !== undefined) {
+    return { status: 'unavailable', reason: outage };
   }
   return new Promise<BrowserAgentHostProjectAvailability>((resolve) => {
     const waiters = availabilityWaiters.get(key) ?? new Set<AvailabilityWaiter>();
@@ -181,7 +195,10 @@ export const useBrowserAgentHostProjectAvailability = (providerKind: string): Br
         if (!storage) {
           throw new Error('The active project filesystem is unavailable.');
         }
-        const capabilities = await readRootedBridgeCapabilities(() => openFileSystemBridge(rootDirectory));
+        /* A capability probe of the checkout's own provider (G6). */
+        const capabilities = await readRootedBridgeCapabilities(() =>
+          openFileSystemBridge(rootDirectory, 'working-copy'),
+        );
         if (!capabilities.writable || !capabilities.durability) {
           throw new Error('The active project filesystem is not writable or did not declare durability.');
         }
@@ -262,13 +279,34 @@ export const useAgentHostPlacements = (): {
             : { status: 'unavailable', reason: `${target.label} is offline.` },
         );
       }
+      // Waiters registered before the directory answered — the seeded first
+      // turn among them — are settled here; later dispatches read the outage
+      // directly. `availabilityKey` names the browser probe's slot `:browser`,
+      // and that one is another probe's to publish.
+      const outage = hostDirectoryOutage();
+      if (outage !== undefined) {
+        for (const key of [...availabilityWaiters.keys()].filter((waiting) =>
+          isPairedHost(waiting.slice(waiting.indexOf(':') + 1)),
+        )) {
+          publishAvailability(key, { status: 'unavailable', reason: outage });
+        }
+      }
       if (active) {
         setState({ targets, loading: false });
       }
     };
     void discover();
+    /* A listing that lost a source is missing rows, not reporting their
+     * absence — so the next time the window is looked at, ask again. */
+    const rediscoverIfIncomplete = (): void => {
+      if (hostPlacementsIncomplete()) {
+        void discover();
+      }
+    };
+    globalThis.addEventListener('focus', rediscoverIfIncomplete);
     return () => {
       active = false;
+      globalThis.removeEventListener('focus', rediscoverIfIncomplete);
     };
   }, [projectId]);
 

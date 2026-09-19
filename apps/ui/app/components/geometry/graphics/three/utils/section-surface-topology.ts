@@ -9,7 +9,7 @@ import {
 import type { ModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
-const float32Epsilon = 1.192_092_895_507_812_5e-7;
+const float32Epsilon = 1.1920928955078125e-7;
 const sectionCoordinatePrecision = 100_000_000;
 const minimumNormalizedTopologyTolerance = 2 / sectionCoordinatePrecision;
 
@@ -102,6 +102,12 @@ export type VisibleSectionSurfaceSource = Readonly<{
   visibility: 'complete' | 'partial';
 }>;
 
+export type GltfSectionTopologyTiming = Readonly<{
+  submitMilliseconds: number;
+  workerMilliseconds: number;
+  hydrateMilliseconds: number;
+}>;
+
 export type SectionSurfaceSlice = Readonly<{
   status: 'complete';
   closedContours: ReadonlyArray<readonly THREE.Vector3[]>;
@@ -117,7 +123,10 @@ export type SectionSurfaceSlice = Readonly<{
 
 export type SectionSurfaceSliceResult =
   | SectionSurfaceSlice
-  | Readonly<{ status: 'unsupported' | 'failed'; failure: SectionTopologyFailure }>;
+  | Readonly<{
+      status: 'unsupported' | 'failed';
+      failure: SectionTopologyFailure;
+    }>;
 
 type TopologyBuildInput = Readonly<{
   sourceKey: string;
@@ -127,7 +136,9 @@ type TopologyBuildInput = Readonly<{
   allowSeamFallback: boolean;
 }>;
 
-type TopologyTriangleVertices = Readonly<{ vertices: readonly [number, number, number] }>;
+type TopologyTriangleVertices = Readonly<{
+  vertices: readonly [number, number, number];
+}>;
 
 export type SectionCanonicalTopologyWorkerInput = Readonly<{
   sourceKey: string;
@@ -224,7 +235,23 @@ class DisjointSet {
   }
 }
 
-const sectionSourceRegistry = new WeakMap<THREE.Object3D, readonly SectionSurfaceSource[]>();
+export type GltfSectionSurfaceRegistrationState = 'pending' | 'ready' | 'unsupported' | 'cancelled';
+
+type SectionSourceRegistration =
+  | Readonly<{ status: 'pending' }>
+  | Readonly<{ status: 'unsupported' }>
+  | Readonly<{ status: 'cancelled' }>
+  | Readonly<{ status: 'ready'; sources: readonly SectionSurfaceSource[] }>;
+
+const sectionSourceRegistry = new WeakMap<THREE.Object3D, SectionSourceRegistration>();
+
+/** Marks a loaded glTF root before its asynchronous topology registration begins. @internal */
+export const setGltfSectionSurfaceRegistrationState = (
+  scene: THREE.Group,
+  status: Exclude<GltfSectionSurfaceRegistrationState, 'ready'>,
+): void => {
+  sectionSourceRegistry.set(scene, { status });
+};
 const standaloneSourceCache = new WeakMap<SectionSurfaceMesh, SectionSurfaceSource>();
 const geometrySourceCache = new WeakMap<THREE.BufferGeometry, SectionSurfaceSource>();
 
@@ -234,7 +261,11 @@ const topologyFailure = (
   detail: string,
 ): Readonly<{ status: 'unsupported'; failure: SectionTopologyFailure }> => ({
   status: 'unsupported',
-  failure: { sourceKey, code, message: `Section topology ${sourceKey}: ${detail}` },
+  failure: {
+    sourceKey,
+    code,
+    message: `Section topology ${sourceKey}: ${detail}`,
+  },
 });
 
 const orderedPair = (left: number, right: number): readonly [number, number] =>
@@ -573,7 +604,13 @@ const buildCanonicalTopologyRecipe = (input: {
       const resolved =
         forward.length === 1
           ? ([[forward[0]!, reverse[0]!]] as const)
-          : uniquelyPairSeams({ forward, reverse, halfEdges, patches, affinities });
+          : uniquelyPairSeams({
+              forward,
+              reverse,
+              halfEdges,
+              patches,
+              affinities,
+            });
       if (!resolved) {
         return topologyFailure(sourceKey, 'ambiguous-seam', 'has an ambiguous material seam');
       }
@@ -1009,7 +1046,10 @@ const createStandaloneSource = (mesh: SectionSurfaceMesh): SectionSurfaceSource 
     root: mesh,
     owner: getModelComponentOwnerInHierarchy(mesh),
     participants: [participant],
-    topology: buildFallbackTopology({ sourceKey: mesh.uuid, participants: [participant] }),
+    topology: buildFallbackTopology({
+      sourceKey: mesh.uuid,
+      participants: [participant],
+    }),
     revision: builtRevision,
   };
   standaloneSourceCache.set(mesh, source);
@@ -1402,7 +1442,10 @@ const createRegisteredSource = async (options: {
     invalid ??
     (allIdentitiesExact
       ? combineExactTopologies(options.key, exactTopologies)
-      : await buildFallbackTopologyAsync({ sourceKey: options.key, participants: options.participants }));
+      : await buildFallbackTopologyAsync({
+          sourceKey: options.key,
+          participants: options.participants,
+        }));
   return {
     key: options.key,
     root: options.root,
@@ -1419,7 +1462,10 @@ export const registerGltfSectionSurfaceSources = async (options: {
   manifest: GeometryComponentManifest;
   unitId: string;
   parser: SectionTopologyGltfParser;
+  onTiming?: (timing: GltfSectionTopologyTiming) => void;
 }): Promise<readonly SectionSurfaceSource[]> => {
+  const startedAt = performance.now();
+  setGltfSectionSurfaceRegistrationState(options.scene, 'pending');
   const meshes: SectionSurfaceMesh[] = [];
   options.scene.updateMatrixWorld(true);
   options.scene.traverse((object) => {
@@ -1498,6 +1544,8 @@ export const registerGltfSectionSurfaceSources = async (options: {
     });
   }
 
+  const submittedAt = performance.now();
+
   const sources = await Promise.all(
     sourceInputs.map(async (input) =>
       createRegisteredSource({
@@ -1509,7 +1557,17 @@ export const registerGltfSectionSurfaceSources = async (options: {
       }),
     ),
   );
-  sectionSourceRegistry.set(options.scene, sources);
+  sectionSourceRegistry.set(options.scene, { status: 'ready', sources });
+  const completedAt = performance.now();
+  const workerMilliseconds = sources.reduce(
+    (total, source) => total + (source.topology.status === 'ready' ? source.topology.topology.buildMilliseconds : 0),
+    0,
+  );
+  options.onTiming?.({
+    submitMilliseconds: submittedAt - startedAt,
+    workerMilliseconds,
+    hydrateMilliseconds: Math.max(0, completedAt - submittedAt - workerMilliseconds),
+  });
   return sources;
 };
 
@@ -1517,13 +1575,21 @@ export const registerGltfSectionSurfaceSources = async (options: {
 export const collectSectionSurfaceSources = (root: THREE.Group): VisibleSectionSurfaceSource[] => {
   const registered: SectionSurfaceSource[] = [];
   const coveredMeshes = new Set<SectionSurfaceMesh>();
+  const blockedRoots = new Set<THREE.Object3D>();
   root.traverse((object) => {
-    const sources = sectionSourceRegistry.get(object);
-    if (!sources) {
+    const registration = sectionSourceRegistry.get(object);
+    if (!registration) {
       return;
     }
-    registered.push(...sources);
-    for (const source of sources) {
+    if (registration.status === 'pending' || registration.status === 'cancelled') {
+      blockedRoots.add(object);
+      return;
+    }
+    if (registration.status === 'unsupported') {
+      return;
+    }
+    registered.push(...registration.sources);
+    for (const source of registration.sources) {
       for (const participant of source.participants) {
         coveredMeshes.add(participant.mesh);
       }
@@ -1535,6 +1601,7 @@ export const collectSectionSurfaceSources = (root: THREE.Group): VisibleSectionS
       isSectionSurfaceMesh(object) &&
       object.type !== 'LineSegments2' &&
       !coveredMeshes.has(object) &&
+      !hasAncestorInSet(object, blockedRoots) &&
       hasPositionAttribute(object.geometry) &&
       !hasSceneTag(object, sceneTag.sectionViewHelper)
     ) {
@@ -1547,8 +1614,24 @@ export const collectSectionSurfaceSources = (root: THREE.Group): VisibleSectionS
     if (states.every((state) => state === 'hidden')) {
       return [];
     }
-    return [{ source, visibility: states.every((state) => state === 'visible') ? 'complete' : 'partial' } as const];
+    return [
+      {
+        source,
+        visibility: states.every((state) => state === 'visible') ? 'complete' : 'partial',
+      } as const,
+    ];
   });
+};
+
+const hasAncestorInSet = (object: THREE.Object3D, candidates: ReadonlySet<THREE.Object3D>): boolean => {
+  let current: THREE.Object3D | undefined = object;
+  while (current) {
+    if (candidates.has(current)) {
+      return true;
+    }
+    current = current.parent ?? undefined;
+  }
+  return false;
 };
 
 const planeBasis = (normal: THREE.Vector3): readonly [THREE.Vector3, THREE.Vector3] => {

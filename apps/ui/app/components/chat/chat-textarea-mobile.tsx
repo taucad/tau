@@ -1,4 +1,5 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useId, useState } from 'react';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { Plus, Wrench, Paperclip, ChevronRight } from 'lucide-react';
 import type { ToolSelection } from '@taucad/chat';
 import { Button } from '@taucad/ui/components/button';
@@ -6,22 +7,23 @@ import { Textarea } from '@taucad/ui/components/textarea';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { CreditBalanceChip } from '#components/billing/credit-estimate.js';
+import { ChatAgentModelSelector } from '#components/chat/chat-agent-model-selector.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
-import { ChatRevisionSelector } from '#components/chat/chat-revision-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
-import { ChatTextareaMobileImages } from '#components/chat/chat-textarea-mobile-images.js';
+import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
-import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { DraftAttachment } from '#hooks/draft.machine.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
 import { Command, CommandGroup, CommandItem, CommandList } from '@taucad/ui/components/command';
 import type { ResolvedModel } from '#hooks/use-models.js';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 
 // Styled div that looks like CommandItem but works as a trigger for nested drawers.
@@ -32,7 +34,7 @@ const menuItemClassName = cn(
 );
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
-  image: 'Add image(s)',
+  image: 'Add files',
   viewer: 'Add screenshot',
   reference: 'Add reference',
 };
@@ -52,7 +54,11 @@ type ChatTextareaMobileProperties = {
   readonly selectedMenuIndex: number;
   readonly isSubmitting: boolean;
   readonly inputText: string;
-  readonly images: string[];
+  readonly attachments: readonly DraftAttachment[];
+  readonly attachmentDirectory: AttachmentDirectories;
+  readonly sendBlockReason: string | undefined;
+  readonly attachmentAccept: string;
+  readonly attachmentInputSupported: boolean;
   readonly selectedToolChoice: ToolSelection;
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
   readonly status: string;
@@ -81,13 +87,13 @@ type ChatTextareaMobileProperties = {
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   readonly handleContextMenuSelect: (text: string) => void;
-  readonly handleContextImageAdd: (image: string, options?: DraftImageOptions) => void;
+  readonly handleContextImageAdd: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly handleAddText: (text: string) => void;
-  readonly handleAddImage: (image: string, options?: DraftImageOptions) => void;
+  readonly handleAddImage: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly handleTextareaBlur: () => void;
   readonly handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   readonly focusInput: () => void;
-  readonly removeImage: (index: number) => void;
+  readonly removeAttachment: (index: number) => void;
   readonly setShowContextMenu: (show: boolean) => void;
   readonly setAtSymbolPosition: (position: number) => void;
   readonly setContextSearchQuery: (query: string) => void;
@@ -134,7 +140,11 @@ export const ChatTextareaMobile = memo(function ({
   selectedMenuIndex,
   isSubmitting,
   inputText,
-  images,
+  attachments,
+  attachmentDirectory,
+  sendBlockReason,
+  attachmentAccept,
+  attachmentInputSupported,
   selectedToolChoice,
   setDraftToolChoice,
   status,
@@ -166,16 +176,17 @@ export const ChatTextareaMobile = memo(function ({
   handleTextareaBlur,
   handlePointerDown,
   focusInput,
-  removeImage,
+  removeAttachment,
   setShowContextMenu,
   setAtSymbolPosition,
   setContextSearchQuery,
   setSelectedMenuIndex,
 }: ChatTextareaMobileProperties): React.JSX.Element {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const blockReasonId = useId();
   const {
     execution: { execution },
-    session,
+    canSelectExecution,
   } = useChatComposer();
 
   useEffect(() => {
@@ -191,7 +202,7 @@ export const ChatTextareaMobile = memo(function ({
     };
   }, [closeOptionsRef, focusInput]);
 
-  const handleDrawerAddImage = (image: string, options?: DraftImageOptions): void => {
+  const handleDrawerAddImage = (image: string, options?: ChatAttachmentAddOptions): void => {
     handleAddImage(image, options);
     setIsDrawerOpen(false);
   };
@@ -222,7 +233,7 @@ export const ChatTextareaMobile = memo(function ({
           'relative flex size-full flex-row items-end gap-1 border bg-background',
           'overflow-hidden',
           'shadow-md',
-          'has-[[data-slot=textarea]:focus-visible]:ring-2 has-[[data-slot=textarea]:focus-visible]:ring-ring',
+          'has-[[data-slot=textarea]:focus-visible]:focus-outline',
           'h-auto min-h-9 p-1.25 md:min-h-10',
           'rounded-2xl',
           className,
@@ -259,7 +270,7 @@ export const ChatTextareaMobile = memo(function ({
               <CommandList className='max-h-none'>
                 {/* Settings Group */}
                 <CommandGroup heading='Settings'>
-                  {session ? (
+                  {canSelectExecution ? (
                     <ChatExecutionSelector
                       isNested
                       data-chat-textarea-focustrap={focusTrapAttribute}
@@ -320,13 +331,11 @@ export const ChatTextareaMobile = memo(function ({
                         </div>
                       )}
                     </ChatModelSelector>
-                  ) : null}
-
-                  {creationLocationControl}
-
-                  {/* Revision Selector */}
-                  {execution.kind === 'tau' ? (
-                    <ChatRevisionSelector
+                  ) : (
+                    /* The ACP sibling: same slot, the agent's own model
+                     * namespace (V5); nothing at all when the host advertised
+                     * no models. */
+                    <ChatAgentModelSelector
                       isNested
                       data-chat-textarea-focustrap={focusTrapAttribute}
                       popoverProperties={{ align: 'start' }}
@@ -335,22 +344,21 @@ export const ChatTextareaMobile = memo(function ({
                         focusInput();
                       }}
                     >
-                      {({ currentConfig }) => (
-                        <div className={menuItemClassName} data-slot='chat-revision-selector'>
+                      {({ selectedModel }) => (
+                        <div className={menuItemClassName}>
                           <span className='flex w-full items-center justify-between'>
-                            <div className='flex items-center gap-2'>
-                              <currentConfig.icon className='size-4' />
-                              <div className='flex flex-col items-start'>
-                                <span>{currentConfig.label}</span>
-                                <span className='text-xs text-muted-foreground'>{currentConfig.description}</span>
-                              </div>
+                            <div className='flex flex-col items-start'>
+                              <span className='truncate'>{selectedModel.name}</span>
+                              <span className='text-xs text-muted-foreground'>Model for this agent</span>
                             </div>
                             <ChevronRight className='size-4 text-muted-foreground' />
                           </span>
                         </div>
                       )}
-                    </ChatRevisionSelector>
-                  ) : null}
+                    </ChatAgentModelSelector>
+                  )}
+
+                  {creationLocationControl}
 
                   {/* Kernel Selector */}
                   {enableKernelSelector ? (
@@ -380,6 +388,12 @@ export const ChatTextareaMobile = memo(function ({
                     </ChatKernelSelector>
                   ) : null}
 
+                  {/* Available and reserved credits (P5/P6). Tau execution only —
+                   * an external agent's turns are not funded by this balance. */}
+                  {execution.kind === 'tau' ? (
+                    <CreditBalanceChip className={cn(menuItemClassName, 'h-auto w-full justify-start rounded-md')} />
+                  ) : null}
+
                   {/* Tool Selector */}
                   <ChatToolSelector isNested value={selectedToolChoice} onValueChange={setDraftToolChoice}>
                     {() => (
@@ -407,16 +421,16 @@ export const ChatTextareaMobile = memo(function ({
                   {/* Upload Image */}
                   <CommandItem
                     value='upload-image'
-                    aria-disabled={!imageInputSupported}
-                    className={cn(!imageInputSupported && 'opacity-50')}
+                    aria-disabled={!attachmentInputSupported}
+                    className={cn(!attachmentInputSupported && 'opacity-50')}
                     onSelect={handleDrawerFileSelect}
                   >
                     <span className='flex w-full items-center justify-between'>
                       <div className='flex items-center gap-2'>
                         <Paperclip className='size-4' />
                         <div className='flex flex-col items-start'>
-                          <span>Upload image</span>
-                          <span className='text-xs text-muted-foreground'>Attach an image to your message</span>
+                          <span>Upload file</span>
+                          <span className='text-xs text-muted-foreground'>Attach an image or PDF to your message</span>
                         </div>
                       </div>
                     </span>
@@ -451,7 +465,14 @@ export const ChatTextareaMobile = memo(function ({
           }}
           onPointerDown={handlePointerDown}
         >
-          <ChatTextareaMobileImages images={images} onRemoveImage={removeImage} />
+          <ChatTextareaAttachmentRail
+            attachments={attachments}
+            directory={attachmentDirectory}
+            blockReason={sendBlockReason}
+            blockReasonId={blockReasonId}
+            size='mobile'
+            onRemove={removeAttachment}
+          />
           {/*
            * Grid overlay technique for cross-browser textarea auto-resize.
            * Safari doesn't support `field-sizing: content`, so we stack a hidden div
@@ -471,7 +492,7 @@ export const ChatTextareaMobile = memo(function ({
               className={cn(
                 'p-0 py-0.5',
                 'h-full min-h-4 w-full resize-none overflow-hidden rounded-none border-none bg-transparent dark:bg-transparent',
-                'shadow-none ring-0 focus-visible:ring-0 focus-visible:outline-none',
+                'shadow-none focus-visible:outline-none',
                 '[grid-area:1/1]',
                 // Shimmer while `await onSubmit` is in-flight (homepage path).
                 isSubmitting &&
@@ -528,7 +549,7 @@ export const ChatTextareaMobile = memo(function ({
           ref={fileInputReference}
           multiple
           type='file'
-          accept='image/*'
+          accept={attachmentAccept}
           className='hidden'
           onChange={handleFileChange}
         />
@@ -537,7 +558,12 @@ export const ChatTextareaMobile = memo(function ({
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}
-          isDisabled={isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0)}
+          isDisabled={
+            isSubmitDisabled ||
+            sendBlockReason !== undefined ||
+            (inputText.trim().length === 0 && attachments.length === 0)
+          }
+          describedBy={sendBlockReason === undefined ? undefined : blockReasonId}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
           onSubmit={handleSubmit}
           onCancel={handleCancelClick}

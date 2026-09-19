@@ -22,6 +22,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { defaultGraphicsSettings, parseGraphicsViewSettings } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
+import type { ViewState } from '#types/editor.types.js';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
@@ -111,6 +112,26 @@ export function replaceViewerNewTabWithFile({
   placeholder.api.close();
 }
 
+/**
+ * Make viewer panels follow their persisted view state: a renamed file retitles
+ * its panel, and a deleted file (path cleared by the editor machine) closes it.
+ */
+export function reconcileViewerPanelPaths(api: DockviewApi, viewSettings: Record<string, ViewState>): void {
+  for (const panel of api.panels) {
+    const viewState = viewSettings[panel.id];
+    if (!isViewerPanelParameters(panel.params) || !viewState || viewState.entryPath === panel.params.entryPath) {
+      continue;
+    }
+    const { entryPath } = viewState;
+    if (entryPath === undefined) {
+      panel.api.close();
+      continue;
+    }
+    panel.api.updateParameters({ entryPath });
+    panel.api.setTitle(entryPath.split('/').pop() ?? entryPath);
+  }
+}
+
 export function ensureViewerGroup(api: DockviewApi): void {
   if (api.groups.length === 0) {
     api.addGroup();
@@ -194,6 +215,10 @@ export const listViewerSelectableFiles = (
 ): ViewerSelectableFile[] =>
   [...fileTree.values()]
     .filter((entry) => entry.type === 'file')
+    /* The viewer renders the project's own geometry; a read-only overlay or a
+     * dependency is never a render target (Exclusion Matrix). A row no view
+     * stamped keeps its place so nothing disappears when provenance is absent. */
+    .filter((entry) => entry.provenance === undefined || entry.provenance.source === 'project')
     .filter((entry) => {
       const path = entry.path.toLowerCase();
       return !viewerExcludedSourceSuffixes.some((suffix) => path.endsWith(suffix));
@@ -282,6 +307,7 @@ function ViewerEmptyState({
   readonly closeLabel?: string;
 }): React.JSX.Element {
   const { projectRef, editorRef } = useProject();
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   const files = useViewerSelectableFiles();
 
   const handleSelect = useCallback(
@@ -295,7 +321,11 @@ function ViewerEmptyState({
             graphicsSettings: { ...defaultGraphicsSettings },
           },
         });
-        projectRef.send({ type: 'createGeometryUnit', entryPath });
+        projectRef.send({
+          type: 'createGeometryUnit',
+          entryPath,
+          renderTimeout: unitSettings[entryPath]?.renderTimeout,
+        });
       };
 
       if (placeholderId) {
@@ -313,7 +343,7 @@ function ViewerEmptyState({
       });
       onViewCreated(viewId, path);
     },
-    [containerApi, group, placeholderId, projectRef, editorRef],
+    [containerApi, group, placeholderId, projectRef, editorRef, unitSettings],
   );
 
   return (
@@ -365,7 +395,9 @@ export const createInheritedGraphicsSettings = (
   }
   return {
     ...parseGraphicsViewSettings(activeSettings),
+    // A cut belongs to the geometry it was made through; how any cut is shown is a pane preference.
     cameraView: undefined,
+    sectionView: undefined,
     pinnedMeasurements: undefined,
   };
 };
@@ -418,6 +450,9 @@ export const ViewerDockview = memo(function ({
   // Read persisted layout from editor machine
   const viewerLayout = useSelector(editorRef, (state) => state.context.viewerLayout);
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  /* The entry's CAD actor owns its render timeout; a unit is seeded with the durable value at spawn
+   * rather than pushed from a mount (Finding 4, E1). */
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
 
   /**
    * Get the graphics settings to use for a new panel.
@@ -507,6 +542,13 @@ export const ViewerDockview = memo(function ({
       removeDisposable.dispose();
     };
   }, [api, projectRef, editorRef, viewSettings]);
+
+  // Follow filesystem renames/deletes routed into the editor machine's view state.
+  useEffect(() => {
+    if (api) {
+      reconcileViewerPanelPaths(api, viewSettings);
+    }
+  }, [api, viewSettings]);
 
   // Tag outgoing tab drags with the viewer MIME so the editor can identify them
   useEffect(() => {
@@ -611,10 +653,11 @@ export const ViewerDockview = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: panelEntryPath,
+          renderTimeout: unitSettings[panelEntryPath]?.renderTimeout,
         });
       }
     }
-  }, [api, projectIsReady, projectRef, editorRef, mainEntryPath, viewSettings]);
+  }, [api, projectIsReady, projectRef, editorRef, mainEntryPath, viewSettings, unitSettings]);
 
   // Listen for "open in viewer" requests from file tree or editor tab context menus.
   // Creates a new viewer panel for the requested file if one doesn't already exist.
@@ -732,11 +775,15 @@ export const ViewerDockview = memo(function ({
             viewId,
             viewState: { entryPath, graphicsSettings },
           });
-          projectRef.send({ type: 'createGeometryUnit', entryPath });
+          projectRef.send({
+            type: 'createGeometryUnit',
+            entryPath,
+            renderTimeout: unitSettings[entryPath]?.renderTimeout,
+          });
         },
       });
     },
-    [projectRef, editorRef, getInheritedSettings],
+    [projectRef, editorRef, getInheritedSettings, unitSettings],
   );
 
   // Open-file action: add a new viewer panel in the same group
@@ -766,9 +813,13 @@ export const ViewerDockview = memo(function ({
         },
       });
 
-      projectRef.send({ type: 'createGeometryUnit', entryPath: path });
+      projectRef.send({
+        type: 'createGeometryUnit',
+        entryPath: path,
+        renderTimeout: unitSettings[path]?.renderTimeout,
+      });
     },
-    [projectRef, editorRef, getInheritedSettings],
+    [projectRef, editorRef, getInheritedSettings, unitSettings],
   );
 
   return (

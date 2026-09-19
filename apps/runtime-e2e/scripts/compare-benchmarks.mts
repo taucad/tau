@@ -13,6 +13,7 @@ import { join, resolve, basename } from 'node:path';
 import { parseArgs } from 'node:util';
 import process from 'node:process';
 import { benchmarkGateExitCode, compareBenchmarkRuns } from '#benchmarks/benchmark-comparator.js';
+import type { ComparableBenchmarkResult, ComparableBenchmarkRun } from '#benchmarks/benchmark-comparator.js';
 
 const { values } = parseArgs({
   options: {
@@ -39,20 +40,17 @@ Options:
   process.exit(0);
 }
 
-type BenchResult = {
-  name: string;
+/* Extend the comparator's own types rather than restating them: a local copy that omitted
+ * `coefficientOfVariation` made every case "coefficient of variation is unrecorded" here, while the
+ * artifacts on disk have carried it since S0. */
+type BenchResult = ComparableBenchmarkResult & {
   category: string;
-  median: number;
   mean: number;
   p95: number;
-  workloadFingerprint: string;
-  outputHash: string;
-  improvementExplanation?: string;
 };
 
-type BenchmarkRun = {
+type BenchmarkRun = Omit<ComparableBenchmarkRun, 'results'> & {
   timestamp: string;
-  runnerFingerprint: string;
   results: BenchResult[];
   totalDurationMs: number;
   provenance?: {

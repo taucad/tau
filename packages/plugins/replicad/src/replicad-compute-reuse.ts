@@ -1,9 +1,14 @@
+import { actionDigest, canonicalizeComputeAction } from '@taucad/cache-core';
 import type { ActionDigest, CacheValue, ComputeAction } from '@taucad/cache-core';
-import type { KernelComputeSession } from '@taucad/runtime/kernel';
+import { sha256StringSync } from '@taucad/utils/hash';
+import type { ComputeReuseScope, ResidentCacheBinding, ResidentExportEntry } from '@taucad/runtime/kernel';
 
 const namespace = 'replicad.operation.v1';
 const brepMediaType = 'application/vnd.opencascade.brep';
-const codec: ComputeAction['codec'] = { id: 'replicad.brep-text', version: '1' };
+const codec: ComputeAction['codec'] = {
+  id: 'replicad.brep-text',
+  version: '1',
+};
 const supportedPrimitives = new Set(['makeBox', 'makeCylinder', 'makeSphere']);
 const supportedBooleans = new Set(['fuse', 'fuseAll', 'cut', 'cutAll', 'intersect', 'intersectAll']);
 const supportedTransforms = new Set(['translate', 'translateX', 'translateY', 'translateZ', 'rotate']);
@@ -21,6 +26,9 @@ type ReplicadLibraryLike = {
 
 type ShapeIdentity = { readonly actionDigest: ActionDigest };
 
+/**
+ *
+ */
 export type ReplicadComputeReuseOptions = {
   readonly library: ReplicadLibraryLike;
   readonly producer: ComputeAction['producer'];
@@ -28,9 +36,14 @@ export type ReplicadComputeReuseOptions = {
   readonly enabled: boolean;
 };
 
-export type ReplicadComputeReuseAdapter = {
-  readonly library: ReplicadLibraryLike;
-  readonly run: <T>(session: KernelComputeSession, operation: () => Promise<T>) => Promise<T>;
+/**
+ *
+ */
+export type ReplicadComputeReuseAdapter<Library extends ReplicadLibraryLike = ReplicadLibraryLike> = {
+  readonly library: Library;
+  /** The kernel-owned native cache this adapter binds one scope to. */
+  readonly resident: ResidentCacheBinding;
+  readonly run: <T>(scope: ComputeReuseScope, operation: () => Promise<T>) => Promise<T>;
   readonly unwrap: (value: unknown) => unknown;
 };
 
@@ -135,8 +148,14 @@ const isShapeLike = (value: unknown): value is ShapeLike =>
   typeof (value as Partial<ShapeLike>).delete === 'function';
 
 /** Create the version-pinned, fail-closed semantic adapter around Replicad's public library. */
-export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions): ReplicadComputeReuseAdapter => {
-  let activeSession: KernelComputeSession | undefined;
+export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
+  options: ReplicadComputeReuseOptions & { readonly library: Library },
+): ReplicadComputeReuseAdapter<Library> => {
+  let activeScope: ComputeReuseScope | undefined;
+  /** Kernel-owned residency: serialized BRep by action identity. W4 replaces it with native shapes. */
+  const residentBytes = new Map<ActionDigest, Uint8Array<ArrayBuffer>>();
+  const residentActions = new Map<ActionDigest, ComputeAction>();
+  let omissions = 0;
   const identityByShape = new WeakMap<WeakKey, ShapeIdentity>();
   const rawByProxy = new WeakMap<WeakKey, ShapeLike>();
   const proxyByRaw = new WeakMap<WeakKey, ShapeLike>();
@@ -168,18 +187,33 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
 
   const restore = (bytes: Uint8Array<ArrayBuffer>): ShapeLike => options.library.deserializeShape(text.decode(bytes));
 
-  const publish = (shape: ShapeLike, descriptor: ComputeAction): ShapeIdentity | undefined => {
-    const session = activeSession;
-    if (!session) {
+  const identify = (descriptor: ComputeAction): ActionDigest =>
+    actionDigest({
+      value: `sha256:${sha256StringSync(canonicalizeComputeAction(descriptor))}`,
+    });
+
+  const publish = (shape: ShapeLike, descriptor: ComputeAction, computeDuration: number): ShapeIdentity | undefined => {
+    const scope = activeScope;
+    if (!scope) {
       return undefined;
     }
     try {
-      const result = session.record({
-        action: descriptor,
-        bytes: utf8.encode(shape.serialize()),
-        mediaType: brepMediaType,
+      const digest = identify(descriptor);
+      const bytes = utf8.encode(shape.serialize());
+      residentBytes.set(digest, bytes);
+      residentActions.set(digest, descriptor);
+      const result = scope.announce({
+        entries: [
+          {
+            kind: 'action',
+            action: descriptor,
+            digest,
+            computeDuration,
+            estimatedBytes: bytes.byteLength,
+          },
+        ],
       });
-      return result.status === 'staged' ? { actionDigest: result.actionDigest } : undefined;
+      return result.admitted.length === 1 ? { actionDigest: digest } : { actionDigest: digest };
     } catch {
       return undefined;
     }
@@ -202,11 +236,21 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
         const original = value as (...values: unknown[]) => unknown;
         if (supportedBooleans.has(property)) {
           return (...values: readonly unknown[]) =>
-            invokeBoolean({ receiver: target, operation: property, original, values });
+            invokeBoolean({
+              receiver: target,
+              operation: property,
+              original,
+              values,
+            });
         }
         if (supportedTransforms.has(property)) {
           return (...values: readonly unknown[]) =>
-            invokeTransform({ receiver: target, operation: property, original, values });
+            invokeTransform({
+              receiver: target,
+              operation: property,
+              original,
+              values,
+            });
         }
         return original.bind(target);
       },
@@ -221,25 +265,27 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     readonly compute: () => unknown;
     readonly consumingReceiver?: ShapeLike;
   }): unknown => {
-    const session = activeSession;
-    if (!session) {
+    if (!activeScope) {
       return input.compute();
     }
-    const hit = session.lookup({ action: input.descriptor });
-    if (hit.status === 'hit') {
+    const digest = identify(input.descriptor);
+    const cached = residentBytes.get(digest);
+    if (cached) {
       try {
-        const restored = restore(hit.bytes);
+        const restored = restore(cached);
         input.consumingReceiver?.delete();
-        return wrapShape(restored, { actionDigest: hit.actionDigest });
+        return wrapShape(restored, { actionDigest: digest });
       } catch {
+        omissions += 1;
         return input.compute();
       }
     }
+    const started = performance.now();
     const result = input.compute();
     if (!isShapeLike(result)) {
       return result;
     }
-    return wrapShape(result, publish(result, input.descriptor));
+    return wrapShape(result, publish(result, input.descriptor, performance.now() - started));
   };
 
   const invokePrimitive = (
@@ -248,10 +294,13 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     values: readonly unknown[],
   ) => {
     const normalized = primitiveArguments(operation, values);
-    if (!activeSession || normalized === undefined) {
+    if (!activeScope || normalized === undefined) {
       return original(...values);
     }
-    return execute({ descriptor: action({ operation, arguments: normalized }), compute: () => original(...values) });
+    return execute({
+      descriptor: action({ operation, arguments: normalized }),
+      compute: () => original(...values),
+    });
   };
 
   type ShapeInvocation = {
@@ -265,7 +314,7 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     const normalized = booleanCall(operation, values);
     const receiverIdentity = identityByShape.get(receiver);
     const operands = normalized?.operands.map(unwrapShape);
-    if (!activeSession || !normalized || !receiverIdentity || !operands || operands.some((entry) => !entry)) {
+    if (!activeScope || !normalized || !receiverIdentity || !operands || operands.some((entry) => !entry)) {
       return original.apply(
         receiver,
         values.map((value) => rawShape(value) ?? value),
@@ -287,7 +336,14 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     return execute({
       descriptor: action({
         operation,
-        inputs: [{ kind: 'action', role: 'receiver', digest: receiverIdentity.actionDigest }, ...operandInputs],
+        inputs: [
+          {
+            kind: 'action',
+            role: 'receiver',
+            digest: receiverIdentity.actionDigest,
+          },
+          ...operandInputs,
+        ],
         arguments: normalized.options,
       }),
       compute: () => original.apply(receiver, actualValues),
@@ -297,13 +353,19 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
   const invokeTransform = ({ receiver, operation, original, values }: ShapeInvocation): unknown => {
     const normalized = transformArguments(operation, values);
     const receiverIdentity = identityByShape.get(receiver);
-    if (!activeSession || normalized === undefined || !receiverIdentity) {
+    if (!activeScope || normalized === undefined || !receiverIdentity) {
       return original.apply(receiver, [...values]);
     }
     return execute({
       descriptor: action({
         operation,
-        inputs: [{ kind: 'action', role: 'receiver', digest: receiverIdentity.actionDigest }],
+        inputs: [
+          {
+            kind: 'action',
+            role: 'receiver',
+            digest: receiverIdentity.actionDigest,
+          },
+        ],
         arguments: normalized,
       }),
       compute: () => original.apply(receiver, [...values]),
@@ -327,14 +389,59 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     },
   });
 
+  const resident: ResidentCacheBinding = {
+    contains: ({ digest }) => residentBytes.has(digest),
+    importEntries: async ({ entries }) => {
+      const imported: ActionDigest[] = [];
+      for (const entry of entries) {
+        residentBytes.set(entry.actionDigest, new Uint8Array(entry.bytes));
+        residentActions.set(entry.actionDigest, entry.action);
+        imported.push(entry.actionDigest);
+      }
+      return { imported, omitted: [] };
+    },
+    exportEntries: async ({ digests }) => {
+      const entries: ResidentExportEntry[] = [];
+      const omitted: ActionDigest[] = [];
+      for (const digest of digests) {
+        const bytes = residentBytes.get(digest);
+        const action = residentActions.get(digest);
+        if (!bytes || !action) {
+          omitted.push(digest);
+          continue;
+        }
+        const exported: ResidentExportEntry = {
+          action,
+          bytes,
+          mediaType: brepMediaType,
+          determinism: 'byte-exact',
+        };
+        entries.push(exported);
+      }
+      return { entries, omitted };
+    },
+    stats: () => ({
+      entries: residentBytes.size,
+      logicalBytes: [...residentBytes.values()].reduce((total, bytes) => total + bytes.byteLength, 0),
+      encodedBytes: { status: 'unsupported' },
+      evictions: 0,
+      omissions,
+    }),
+    clear: () => {
+      residentBytes.clear();
+      residentActions.clear();
+    },
+  };
+
   return {
     library,
-    async run(session, operation) {
-      activeSession = session;
+    resident,
+    async run(scope, operation) {
+      activeScope = scope;
       try {
         return await operation();
       } finally {
-        activeSession = undefined;
+        activeScope = undefined;
       }
     },
     unwrap(value) {
@@ -344,7 +451,10 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
       }
       if (value !== null && typeof value === 'object' && !isShapeLike(value) && 'shape' in value) {
         const record = value as Record<string, unknown>;
-        return { ...record, shape: rawShape(record['shape']) ?? record['shape'] };
+        return {
+          ...record,
+          shape: rawShape(record['shape']) ?? record['shape'],
+        };
       }
       return rawShape(value) ?? value;
     },

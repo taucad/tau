@@ -68,5 +68,9 @@
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Format kernel; no authoring surface"
   }
 }

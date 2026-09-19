@@ -10,6 +10,16 @@ describe('entitlements wire round-trip', () => {
     }
   });
 
+  /* The funded admission boundary decides eligibility from source funds, debt
+   * and route state for every tier, so the account-tier AI switch is gone from
+   * the wire and a stale payload carrying it cannot resurrect a gate. */
+  it('should no longer carry the retired aiEnabled gate in either direction', () => {
+    const wire = serializeEntitlements(entitlementsFromTier('free'));
+
+    expect(wire).not.toHaveProperty('aiEnabled');
+    expect(parseEntitlements({ ...wire, aiEnabled: false })).not.toHaveProperty('aiEnabled');
+  });
+
   it('should represent unlimited quotas as null on the wire instead of silently corrupting them', () => {
     const wire = serializeEntitlements(entitlementsFromTier('enterprise'));
 

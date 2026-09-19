@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { externalAgentDescriptorSchema } from '@taucad/agent-host';
+
 import { ENV } from '#environment.config.js';
 
 const hostDeviceSchema = z.object({
@@ -19,8 +21,8 @@ const hostDeviceSchema = z.object({
   agent: z
     .object({
       workspaceRoot: z.string(),
-      /** External ACP agents this daemon can start (W4-ACP); absent = Tau runs only. */
-      externalAgents: z.array(z.string()).optional(),
+      /** External ACP agents this daemon knows about (W4-ACP); absent = Tau runs only. */
+      externalAgents: z.array(externalAgentDescriptorSchema).max(16).optional(),
     })
     .optional(),
   /**

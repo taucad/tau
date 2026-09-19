@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import { isValidElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import { NavUser } from '#components/nav/nav-user.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
 const useNetworkConnectivityMock = vi.hoisted(() => vi.fn(() => true));
-const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free' })));
+const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free', isResolved: true })));
 
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: useEntitlementsMock,
@@ -17,12 +20,20 @@ vi.mock('#components/auth/user/user-button.js', () => ({
     size,
     side,
   }: {
-    readonly links?: React.ReactNode[];
+    readonly links?: Array<{ readonly href: string; readonly label: ReactNode } | ReactElement>;
     readonly size?: string;
     readonly side?: string;
   }) => (
     <div data-testid='user-button' data-size={size} data-side={side}>
-      {links}
+      {links?.map((link) =>
+        isValidElement(link) ? (
+          link
+        ) : (
+          <a key={link.href} href={link.href}>
+            {link.label}
+          </a>
+        ),
+      )}
     </div>
   ),
 }));
@@ -60,33 +71,47 @@ describe('NavUser', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useNetworkConnectivityMock.mockReturnValue(true);
-    useEntitlementsMock.mockReturnValue({ tier: 'free' });
+    useEntitlementsMock.mockReturnValue({ tier: 'free', isResolved: true });
   });
 
-  it('shows upgrade and settings to free users', () => {
-    render(<NavUser />);
+  it('shows product navigation, upgrade, and settings to free users', () => {
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByText('Upgrade to Pro')).toBeDefined();
     expect(screen.queryByText('Billing')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Files' })).toHaveAttribute('href', '/files');
+    expect(within(screen.getByTestId('user-button')).queryByRole('link', { name: 'Documentation' })).toBeNull();
     expect(screen.getByText('Settings')).toBeInTheDocument();
     expect(screen.getByTestId('user-button')).toHaveAttribute('data-size', 'sm');
     expect(screen.getByTestId('user-button')).toHaveAttribute('data-side', 'top');
   });
 
   it('shows billing instead of upgrade to paid users', () => {
-    useEntitlementsMock.mockReturnValue({ tier: 'pro' });
+    useEntitlementsMock.mockReturnValue({ tier: 'pro', isResolved: true });
 
-    render(<NavUser />);
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByText('Billing')).toBeInTheDocument();
     expect(screen.queryByText('Upgrade to Pro')).not.toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
   });
 
+  it('never offers an upgrade before the plan is known', () => {
+    useEntitlementsMock.mockReturnValue({ tier: 'free', isResolved: false });
+
+    render(<NavUser />, { wrapper: MemoryRouter });
+
+    expect(screen.getByText('Billing')).toBeInTheDocument();
+    expect(screen.queryByText('Upgrade to Pro')).not.toBeInTheDocument();
+  });
+
   it('moves product help into its own menu with the current version', () => {
-    render(<NavUser />);
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://docs.tau.new');
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://tau.new/legal/privacy');
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://tau.new/legal/terms');
     expect(screen.getByText('Report a bug')).toBeInTheDocument();
     expect(screen.getByText('GitHub')).toBeInTheDocument();
     expect(screen.getByText('Community Discord')).toBeInTheDocument();
@@ -97,7 +122,7 @@ describe('NavUser', () => {
   it('shows connectivity in the footer row and user menu only while offline', () => {
     useNetworkConnectivityMock.mockReturnValue(false);
 
-    render(<NavUser />);
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('status', { name: 'Offline' })).toBeInTheDocument();
     expect(screen.getByText('Offline — online features unavailable')).toBeInTheDocument();

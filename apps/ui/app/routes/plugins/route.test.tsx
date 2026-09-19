@@ -153,7 +153,7 @@ describe('PluginsRoute', () => {
     });
   });
 
-  it('should render create-skill as an installed System skill without an install action', async () => {
+  it('should render create-skill as an installed system skill without an install action', async () => {
     renderRoute();
 
     await waitFor(() => {

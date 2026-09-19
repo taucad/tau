@@ -2,7 +2,7 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts', 'src/runtime-host.ts'],
+  entry: ['src/index.ts', 'src/agent-tools.ts', 'src/runtime-host.ts'],
   sourcemap: false,
   clean: true,
   dts: true,

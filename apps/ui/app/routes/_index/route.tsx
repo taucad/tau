@@ -64,7 +64,7 @@ export const handle: Handle = {
  * SSR output stays session-neutral so `/` remains CDN-cacheable. An unresolved
  * session changes presentation only; protected operations still use real auth.
  */
-export default function Home(): React.JSX.Element {
+export default function WebHome(): React.JSX.Element {
   const marketingLanding = useFeature('marketingLanding');
   const resolvedAuth = useResolvedAuth();
 

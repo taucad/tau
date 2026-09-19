@@ -23,9 +23,10 @@ describe('file-manager.worker api-extractor import boundary', () => {
     expect(workerSource).not.toContain('FileSystemAccessProvider');
     expect(workerSource).not.toContain('navigator.storage.getDirectory');
     expect(workerSource).toContain('providerRegistry.getProvider(rootScope)');
-    expect(workerSource).toContain(
-      "fileService.mount('/node_modules', { backend: 'opfs', providerBasePath: 'tau-node-modules' })",
-    );
+    expect(workerSource).toContain("fileService.mount('/node_modules', {");
+    expect(workerSource).toContain("providerBasePath: 'tau-node-modules'");
+    // RC6: every mount declares what the revision authority may capture there.
+    expect(workerSource).toContain("class: 'derived'");
   });
 
   // R3 — `/` is Home's root, so it must follow the profile's engine pin

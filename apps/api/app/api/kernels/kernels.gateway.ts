@@ -8,8 +8,9 @@ import { fromNodeHeaders } from 'better-auth/node';
 import { WebSocketServer, WebSocket } from 'ws';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { KernelsService } from '#api/kernels/kernels.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
 import { zooCloseCodes } from '#api/billing/billing.constants.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 import { Span } from '#telemetry/tracer.service.js';
 
@@ -25,9 +26,9 @@ const zooWebSocketPath = '/v1/kernels/zoo';
  * main HTTP server. This approach avoids conflicts with Socket.IO which
  * also needs to handle WebSocket upgrades for other paths.
  *
- * Every connection is session-authenticated and entitlement-gated before any
- * proxy frame flows (B4/T2/AD9): Zoo runs on Tau's upstream API key, so an
- * ungated socket is unmetered spend.
+ * Every connection is session-authenticated before the service refuses it
+ * (B7 R3/S6): hosted Zoo is disabled, so no upstream socket and no billing
+ * read happen on this path.
  */
 @Injectable()
 export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
@@ -36,10 +37,36 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   public constructor(
     private readonly kernelsService: KernelsService,
     private readonly devWebSocketService: DevWebSocketService,
-    private readonly billingService: BillingService,
     @Inject(authInstanceKey) private readonly auth: Auth,
+    @Inject(commercialEntitlementsKey) private readonly entitlements: CommercialEntitlementsService,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
   ) {}
+
+  /**
+   * Handle Zoo API proxy connections: authenticate, then hand the socket to
+   * the disabled service, which closes it. Rejections close with the typed
+   * code the runtime's Zoo transport understands (S49).
+   */
+  @Span()
+  public async handleZooProxy(
+    socket: WebSocket,
+    queryParameters: URLSearchParams,
+    request: IncomingMessage,
+  ): Promise<void> {
+    const verdict = await this.authorizeZooConnection(request);
+    if (!verdict.ok) {
+      this.logger.warn(`Zoo proxy connection rejected (${verdict.code}): ${verdict.reason}`);
+      socket.close(verdict.code, verdict.reason);
+      return;
+    }
+
+    this.logger.debug(`Client connected to Zoo proxy (user: ${verdict.userId})`);
+    this.kernelsService.createZooProxy(socket, queryParameters, verdict.userId);
+
+    socket.on('close', () => {
+      this.logger.debug('Client disconnected from Zoo proxy');
+    });
+  }
 
   /**
    * Start the WebSocket server when the module initializes.
@@ -64,34 +91,8 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Handle Zoo API proxy connections: authenticate + authorize, then splice
-   * the upstream proxy. Rejections close with the typed codes the runtime's
-   * Zoo transport understands — before any proxy frames (S48/S49).
-   */
-  @Span()
-  public async handleZooProxy(
-    socket: WebSocket,
-    queryParameters: URLSearchParams,
-    request: IncomingMessage,
-  ): Promise<void> {
-    const verdict = await this.authorizeZooConnection(request);
-    if (!verdict.ok) {
-      this.logger.warn(`Zoo proxy connection rejected (${verdict.code}): ${verdict.reason}`);
-      socket.close(verdict.code, verdict.reason);
-      return;
-    }
-
-    this.logger.debug(`Client connected to Zoo proxy (user: ${verdict.userId})`);
-    this.kernelsService.createZooProxy(socket, queryParameters, verdict.userId);
-
-    socket.on('close', () => {
-      this.logger.debug('Client disconnected from Zoo proxy');
-    });
-  }
-
-  /**
-   * Session + entitlement gate (T2): `canUseProKernels` sources the single
-   * kernel-tier table in `@taucad/billing` via the entitlements projection.
+   * Session and commercial-entitlement gate. Self-host composition grants the
+   * operator-owned capability without creating a billing account.
    */
   private async authorizeZooConnection(
     request: IncomingMessage,
@@ -101,13 +102,13 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
       if (!session) {
         return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'UNAUTHENTICATED' };
       }
-      const entitlements = await this.billingService.getEntitlements(session.user.id);
+      const entitlements = await this.entitlements.getEntitlements(session.user.id);
       if (!entitlements.canUseProKernels) {
-        return { ok: false, code: zooCloseCodes.entitlementRequired, reason: 'PRO_KERNELS_REQUIRED' };
+        return { ok: false, code: zooCloseCodes.proRequired, reason: 'PRO_REQUIRED' };
       }
       return { ok: true, userId: session.user.id };
     } catch (error) {
-      // Fail closed: an auth outage must not open an unmetered proxy.
+      // Fail closed: an auth/entitlement outage must not open an unmetered proxy.
       this.logger.error(`Zoo proxy authorization failed: ${String(error)}`);
       return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'AUTH_ERROR' };
     }

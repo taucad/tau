@@ -353,7 +353,7 @@ describe('editorMachine', () => {
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
         'componentDisplay',
       );
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(10);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
       actor.stop();
     });
 
@@ -430,6 +430,104 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
+    /* Schema v11 (E1): `renderTimeout` is owned per file by the entry's CAD actor, so two panes on
+     * one path cannot hold two values. The longer timeout never breaks a render the shorter allowed. */
+    it('should hoist the longest per-view render timeout into the per-entry record', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            'view-a': {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
+            },
+            'view-b': {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 60_000 },
+            },
+            'view-c': {
+              entryPath: 'src/utils.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 45_000 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      expect(actor.getSnapshot().context.unitSettings).toEqual({
+        'src/main.ts': { renderTimeout: 60_000 },
+        'src/utils.ts': { renderTimeout: 45_000 },
+      });
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty('renderTimeout');
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
+      actor.stop();
+    });
+
+    it('should hoist a legacy seconds-based render timeout as milliseconds', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: undefined, renderTimeout: 30 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      expect(actor.getSnapshot().context.unitSettings['src/main.ts']).toEqual({ renderTimeout: 30_000 });
+      actor.stop();
+    });
+
+    it('should parse a v10 record without a section view into inactive defaults', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      const settings = actor.getSnapshot().context.viewSettings['view1']?.graphicsSettings;
+      expect(settings?.sectionView).toBeUndefined();
+      expect(settings?.sectionDisplay).toBeUndefined();
+      actor.stop();
+    });
+
+    it('should keep the per-entry record aligned with renames and deletions', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/foo/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      actor.send({ type: 'renameFile', oldPath: 'src/foo', newPath: 'src/bar' });
+      expect(actor.getSnapshot().context.unitSettings).toEqual({ 'src/bar/main.ts': { renderTimeout: 30_000 } });
+
+      actor.send({ type: 'pruneComponentDisplayForDeletedPath', path: 'src/bar' });
+      expect(actor.getSnapshot().context.unitSettings).toEqual({});
+      actor.stop();
+    });
+
+    it('should record a per-entry render timeout sent by the write side', async () => {
+      const actor = await startAndLoad();
+
+      actor.send({ type: 'setUnitSettings', entryPath: 'src/main.ts', settings: { renderTimeout: 90_000 } });
+
+      expect(actor.getSnapshot().context.unitSettings['src/main.ts']).toEqual({ renderTimeout: 90_000 });
+      actor.stop();
+    });
+
     it('should prune component display units for deleted files and directories', async () => {
       const mainUnitId = 'file:src/foo/main.ts';
       const nestedUnitId = 'file:src/foo/nested/part.ts';
@@ -464,6 +562,7 @@ describe('editorMachine', () => {
           [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
         },
       });
+      expect(actor.getSnapshot().context.viewSettings['view1']?.entryPath).toBeUndefined();
       actor.stop();
     });
 
@@ -729,6 +828,36 @@ describe('editorMachine', () => {
         await vi.advanceTimersByTimeAsync(0);
         await waitFor(actor, (s) => s.matches({ ready: { storing: 'idle' } }));
         expect(writeCallCount).toBe(1);
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should acknowledge a failed save and retry it on flushNow', async () => {
+      vi.useFakeTimers();
+      try {
+        let writeCallCount = 0;
+        const actor = await startAndLoad({
+          loadResult: undefined,
+          saveResult: async () => {
+            writeCallCount += 1;
+            if (writeCallCount === 1) {
+              throw new Error('editor save failed');
+            }
+          },
+        });
+
+        actor.send({ type: 'openFile', path: 'src/a.ts', source: 'user' });
+        await vi.advanceTimersByTimeAsync(500);
+        await waitFor(actor, (state) => state.matches({ ready: { storing: 'idle' } }));
+        expect(actor.getSnapshot().context.error?.message).toBe('editor save failed');
+
+        actor.send({ type: 'flushNow' });
+        await vi.advanceTimersByTimeAsync(0);
+        await waitFor(actor, (state) => state.matches({ ready: { storing: 'idle' } }));
+        expect(writeCallCount).toBe(2);
+        expect(actor.getSnapshot().context.error).toBeUndefined();
         actor.stop();
       } finally {
         vi.useRealTimers();
@@ -1098,10 +1227,35 @@ describe('ready.operation.ensuringFocusedChat', () => {
     });
     expect(ensureInvocationCount).toBe(1);
 
-    actor.send({ type: 'focusCreatedChat', chatId: 'chat-created' });
+    actor.send({ type: 'focusKnownChat', chatId: 'chat-created' });
 
     expect(actor.getSnapshot().context.requestedChatId).toBe('chat-created');
     expect(actor.getSnapshot().context.focusedChatId).toBe('chat-created');
+    expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
+    expect(ensureInvocationCount).toBe(1);
+    actor.stop();
+  });
+
+  it('keeps the focused chat for a bare project URL instead of revalidating it', async () => {
+    let ensureInvocationCount = 0;
+    const actor = await startAndLoad({
+      loadResult: stubEditorState,
+      ensureResult: async (input) => {
+        ensureInvocationCount += 1;
+        return {
+          type: 'focusedChatEnsured',
+          focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-recovered',
+        };
+      },
+    });
+    expect(ensureInvocationCount).toBe(1);
+    const { focusedChatId } = actor.getSnapshot().context;
+
+    actor.send({ type: 'setRequestedChatId', chatId: undefined });
+
+    // The route reads `requestedChatId` back to know the bare URL was consumed.
+    expect(actor.getSnapshot().context.requestedChatId).toBeUndefined();
+    expect(actor.getSnapshot().context.focusedChatId).toBe(focusedChatId);
     expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
     expect(ensureInvocationCount).toBe(1);
     actor.stop();

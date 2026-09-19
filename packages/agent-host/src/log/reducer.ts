@@ -1,10 +1,6 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { EventLogError } from '#log/event-log-error.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { parseLogEvent } from '#log/event-schema.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createEventSequence } from '#log/event-sequence.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 
 const failHistory = (message: string): never => {
@@ -53,6 +49,8 @@ export const createEventLogReducer = (): {
 } => {
   const sequence = createEventSequence();
   const knownMessageIds = new Set<string>();
+  const preparedInvocations = new Set<string>();
+  const invocationBindings = new Map<string, string>();
   let messages: ProviderMessage[] = [];
 
   const prepare = (candidate: AgentLogEvent): EventLogTransition => {
@@ -149,9 +147,37 @@ export const createEventLogReducer = (): {
         break;
       }
       case 'interrupt.recorded':
+      case 'turn.finalized':
+      case 'turn.conflicted':
+      case 'turn.failed':
       case 'run.lifecycle': {
         apply = () => undefined;
         break;
+      }
+      case 'model.invocation-prepared': {
+        if (preparedInvocations.has(event.attemptId)) {
+          failHistory(`Model invocation attempt "${event.attemptId}" cannot be prepared twice.`);
+        }
+        apply = () => preparedInvocations.add(event.attemptId);
+        break;
+      }
+      case 'model.invocation-bound': {
+        if (!preparedInvocations.has(event.attemptId)) {
+          failHistory(`Model invocation attempt "${event.attemptId}" must be prepared before binding.`);
+        }
+        const prior = invocationBindings.get(event.attemptId);
+        if (prior !== undefined && prior !== event.operationId) {
+          failHistory(`Model invocation attempt "${event.attemptId}" cannot bind to two operations.`);
+        }
+        apply = () => invocationBindings.set(event.attemptId, event.operationId);
+        break;
+      }
+      /* A record a newer writer emitted and this reader's vocabulary has no
+       * case for (D14). It is ordered, cursored and replayed like any other,
+       * and applies nothing: preserved without being executed. */
+      default: {
+        event satisfies never;
+        apply = () => undefined;
       }
     }
 

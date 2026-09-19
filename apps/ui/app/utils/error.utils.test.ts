@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { errorCategory } from '@taucad/types/constants';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import {
+  chatTurnNotStartedCode,
+  parseAdmissionFailureForPersistence,
+  parseErrorForPersistence,
+} from '#utils/error.utils.js';
 
 const googleInvalidArgumentBody = [
   {
@@ -59,5 +63,53 @@ describe('parseErrorForPersistence', () => {
     expect(parsed.message).toBe('Request contains an invalid argument.');
     expect(parsed.raw).toContain('Google request failed with status code 400');
     expect(parsed.message).not.toContain('91,123');
+  });
+
+  it('should tell the person to start a new chat when nothing can be evicted', () => {
+    const parsed = parseErrorForPersistence(
+      new Error(
+        JSON.stringify({
+          category: errorCategory.generic,
+          title: 'Something went wrong',
+          message: 'Context is oversized but has no safe history to evict.',
+          code: 'NO_EVICTABLE_HISTORY',
+        }),
+      ),
+    );
+
+    expect(parsed.code).toBe('NO_EVICTABLE_HISTORY');
+    expect(parsed.message).toBe(
+      "This chat's first message is too large to continue. Start a new chat and attach less.",
+    );
+    expect(parsed.raw).toContain('Context is oversized but has no safe history to evict.');
+  });
+});
+
+describe('parseAdmissionFailureForPersistence', () => {
+  it('should mark an uncoded dispatch failure as a turn that never started', () => {
+    const parsed = parseAdmissionFailureForPersistence(
+      new Error('This chat is still holding a workspace from an earlier run. Reload the page to release it.'),
+    );
+
+    expect(parsed.code).toBe(chatTurnNotStartedCode);
+    expect(parsed.message).toBe(
+      'This chat is still holding a workspace from an earlier run. Reload the page to release it.',
+    );
+  });
+
+  it('should leave a coded refusal on its own card', () => {
+    const parsed = parseAdmissionFailureForPersistence(
+      new Error(
+        JSON.stringify({
+          category: errorCategory.credits,
+          title: 'Credit Limit Reached',
+          message: 'Add credits to start a turn on GPT-6 Astra.',
+          code: 'INSUFFICIENT_CREDIT',
+          httpStatus: 402,
+        }),
+      ),
+    );
+
+    expect(parsed.code).toBe('INSUFFICIENT_CREDIT');
   });
 });

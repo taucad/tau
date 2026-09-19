@@ -35,7 +35,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./agent/SKILL.md",
+    "./agent": "./agent/skills.json",
+    "./agent/*": "./agent/*",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -46,12 +47,14 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./agent": "./agent/SKILL.md",
+      "./agent": "./agent/skills.json",
+      "./agent/*": "./agent/*",
       "./package.json": "./package.json"
     },
     "imports": {}
   },
   "imports": {
+    "#e2e/*.js": "./e2e/*.ts",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
@@ -63,13 +66,21 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@gltf-transform/functions": "catalog:",
+    "@taucad/assimp": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/tau-examples": "workspace:*",
     "jsdom": "catalog:",
     "jszip": "^3.10.1",
+    "uint8array-extras": "catalog:",
     "zod": "catalog:"
   },
   "taucad": {
     "hostTarget": "browser"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
   }
 }

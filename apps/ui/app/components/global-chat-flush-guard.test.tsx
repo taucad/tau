@@ -9,9 +9,6 @@ const harness = vi.hoisted(() => ({
     getChat: vi.fn().mockResolvedValue(undefined),
     patchChat: vi.fn().mockResolvedValue(undefined),
     touchChatRecency: vi.fn().mockResolvedValue(undefined),
-    setChatUnreadState: vi.fn().mockResolvedValue(undefined),
-    setMessageEdit: vi.fn().mockResolvedValue(undefined),
-    clearMessageEdit: vi.fn().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
   },
@@ -59,8 +56,13 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => harness.projectManager,
 }));
 
+// These sessions never bind a project, so the composer record client is never reached.
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => ({ client: {} }),
+}));
+
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
-const { UnloadProvider } = await import('#hooks/use-flush-on-close.js');
+const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 const { GlobalChatFlushGuard } = await import('#components/global-chat-flush-guard.js');
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 
@@ -72,7 +74,7 @@ const { ChatSessionStore } = await import('#services/chat-session-store.js');
  * `ChatInstanceRecord`s by hand; with the store, every acquired session is
  * a first-class object whose XState refs we can intercept directly.
  */
-function renderWithStore(): {
+function renderWithStore(onSessionStage: () => void = () => undefined): {
   store: InstanceType<typeof ChatSessionStore>;
   unmount: () => void;
 } {
@@ -80,6 +82,8 @@ function renderWithStore(): {
 
   function Capture(): ReactNode {
     captured = useChatSessionStore();
+    // Session close preparation starts only once every producer has settled.
+    useFlushOnClose(onSessionStage, { stage: 'session' });
     return null;
   }
 
@@ -165,6 +169,8 @@ describe('GlobalChatFlushGuard', () => {
     const b = spyOnActorSends(store.acquire('chat_b'));
 
     store.release('chat_b');
+    // Release flushes its own draft so the last keystroke is kept; only the close event's fan-out is under test.
+    b.draftSend.mockClear();
 
     dispatchVisibilityHidden();
 
@@ -174,15 +180,36 @@ describe('GlobalChatFlushGuard', () => {
     expect(b.draftSend).not.toHaveBeenCalledWith({ type: 'flushNow' });
   });
 
-  it('flushes on beforeunload as well as visibilitychange', () => {
+  /* A38's second phase may only send the push body prepared during hidden. The
+   * producer guard must not begin another chat upload on pagehide. */
+  it('does not start a fresh chat flush on pagehide', () => {
     const { store } = renderWithStore();
     const session = store.acquire('chat_alpha');
     const { persistenceSend, draftSend } = spyOnActorSends(session);
 
-    globalThis.dispatchEvent(new Event('beforeunload'));
+    globalThis.dispatchEvent(new Event('pagehide'));
 
-    expect(persistenceSend).toHaveBeenCalledWith({ type: 'flushNow' });
-    expect(draftSend).toHaveBeenCalledWith({ type: 'flushNow' });
+    expect(persistenceSend).not.toHaveBeenCalled();
+    expect(draftSend).not.toHaveBeenCalled();
+  });
+
+  it('should hold session preparation until every composer record has been written (R9)', async () => {
+    const sessionStage = vi.fn();
+    const { store } = renderWithStore(sessionStage);
+    const written = Promise.withResolvers<void>();
+    const flushComposerRecords = vi.spyOn(store, 'flushComposerRecords').mockReturnValue(written.promise);
+
+    dispatchVisibilityHidden();
+    await Promise.resolve();
+
+    expect(flushComposerRecords).toHaveBeenCalledOnce();
+    expect(sessionStage).not.toHaveBeenCalled();
+
+    written.resolve();
+
+    await vi.waitFor(() => {
+      expect(sessionStage).toHaveBeenCalledOnce();
+    });
   });
 
   it('does nothing when no sessions are live', () => {

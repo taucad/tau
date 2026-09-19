@@ -10,25 +10,36 @@
  */
 
 import type { GeoSpecNativeStepBackend } from '#step/types.js';
+import { openCascadeWasmUrl } from '#native/opencascade-wasm.js';
 import { initOcct } from '@taucad/occt-core';
 import type { OcctModuleFactory } from '@taucad/occt-core';
-
-const nativeEntry = '@taucad/geospec-engine/native/opencascade/single';
 
 let singleton: Promise<GeoSpecNativeStepBackend> | undefined;
 let compiledModule: WebAssembly.Module | undefined;
 
 const instantiate = async (): Promise<GeoSpecNativeStepBackend> => {
-  const module_ = (await import(/* @vite-ignore */ nativeEntry)) as {
+  // The specifier must stay a literal. Bundlers follow it into the subpath's
+  // `init.js`, whose `new URL('./geospec_opencascade_single.js',
+  // import.meta.url)` emits the glue as an asset; Node resolves the same string
+  // as a package self-reference. A variable specifier (or `@vite-ignore`)
+  // leaves the bare string in the bundle, and no browser can resolve that
+  // without an import map. `tsdown.config.ts` (`deps.neverBundle`) keeps the
+  // subpath external in the published build.
+  const module_ = (await import('@taucad/geospec-engine/native/opencascade/single')) as unknown as {
     default: OcctModuleFactory<GeoSpecNativeStepBackend>;
   };
   // No `variant` option: the assembly is built single-only
   // (`native/opencascade/libcascade.config.ts`), so the subpath's `init.js` has
   // exactly one variant to hand back and no capability probe to run.
   //
+  // The wasm URL is not optional once a bundler is involved: it fingerprints
+  // the glue and the binary independently, so the glue can no longer find its
+  // sibling and needs `initOcct`'s `locateFile`. In Node it resolves to the
+  // same file the glue would have found anyway.
+  //
   // Suppress OCCT messenger chatter; structured host events own observability
   // and JSON output must remain valid.
-  return initOcct(undefined, module_.default, {
+  return initOcct(openCascadeWasmUrl, module_.default, {
     ...(compiledModule ? { compiledModule } : {}),
     print: () => undefined,
     printErr: () => undefined,

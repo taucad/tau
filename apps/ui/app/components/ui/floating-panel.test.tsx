@@ -78,6 +78,35 @@ describe('FloatingPanelContentHeaderActions', () => {
     mockUseIsInsideDrawer.mockReset().mockReturnValue(false);
   });
 
+  describe('desktop reveal', () => {
+    it('should stay visible for a focused action and finish the name fade under it', () => {
+      renderInPanel(
+        <FloatingPanelContentHeader>
+          <FloatingPanelContentTitle>Title</FloatingPanelContentTitle>
+          <FloatingPanelContentHeaderActions>
+            <FloatingPanelMenuButton aria-label='Test action'>Action</FloatingPanelMenuButton>
+          </FloatingPanelContentHeaderActions>
+        </FloatingPanelContentHeader>,
+      );
+
+      const slot = screen
+        .getByRole('button', { name: 'Test action' })
+        .closest('[data-slot=floating-panel-content-header-actions]');
+      // Hidden at rest on md+, revealed by pane hover — and by keyboard focus, so a tabbed-to
+      // action is never an invisible focus ring. The slot also carries the fade scrim so a
+      // `fade-label` beside it dissolves into the header rather than stopping at a glyph.
+      expect(slot?.parentElement).toHaveClass('fade-row', '[--fade-scrim-into:var(--sidebar-background)]');
+      expect(slot).toHaveClass(
+        'md:opacity-0',
+        'group-hover/floating-panel:opacity-100',
+        'md:focus-within:opacity-100',
+        'fade-action',
+        'relative',
+        'bg-(--fade-scrim-into)',
+      );
+    });
+  });
+
   describe('mobile drawer context', () => {
     it('should fire child button onClick when clicked inside a mobile drawer', async () => {
       setMobileDrawerContext();

@@ -3148,6 +3148,9 @@ importers:
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../plugins/esbuild
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime

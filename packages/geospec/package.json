@@ -130,7 +130,9 @@
         "default": "./dist/vitest/index.mjs"
       },
       "./config": {
-        "types": "./dist/config/index.d.mts"
+        "types": "./dist/config/index.d.mts",
+        "import": "./dist/config/index.mjs",
+        "default": "./dist/config/index.mjs"
       },
       "./config/node": {
         "types": "./dist/config/node/index.d.mts",
@@ -146,6 +148,7 @@
   },
   "dependencies": {
     "@taucad/esbuild": "workspace:*",
+    "@taucad/project-core": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "zod": "catalog:"
   },

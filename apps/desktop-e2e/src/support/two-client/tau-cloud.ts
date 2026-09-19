@@ -104,12 +104,9 @@ export const seedProPlan = async (owner: TauCloudOwnerIds): Promise<void> => {
 /**
  * Register a project on the Tau Hosted Remote.
  *
- * **Stands in for a product path that does not exist** (W18 defect DEF-1):
- * `GitRepositoryService.authorize` answers `404 GIT_REPOSITORY_NOT_FOUND` until
- * a `project` row exists, and the only production writer of that table is
- * `PublicationsService`, which runs after a successful push. The red pin in
- * `two-client.spec.ts` keeps the gap failing by name; every case that needs a
- * working remote calls this and says so.
+ * A shortcut, not a stand-in: *Connect Tau Cloud* registers the project itself
+ * (`PUT /v1/projects/:id`, W18 DEF-1 / P51). This is for a case that needs the
+ * row to exist before any window has connected.
  *
  * @param owner - The project's owner.
  * @param projectId - The project id, which is also the repository id.

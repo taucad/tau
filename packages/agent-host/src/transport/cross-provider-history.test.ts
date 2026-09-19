@@ -470,8 +470,9 @@ describe('cross-provider history contract', () => {
         }
         // No message B's wire would refuse for carrying nothing.
         expect(view.emptyMessages).toEqual([]);
-        // RC2: the flag that makes Vertex cancel every later function call.
-        expect(serialized).not.toContain('stream_function_call_arguments');
+        // Gemini streams tool arguments in four deltas instead of one; no other
+        // wire has the key, and history rebuilding must not move it between them.
+        expect(serialized.includes('stream_function_call_arguments')).toBe(target === 'vertexai');
         // Gemini's per-call credential exists on no other wire.
         if (target !== 'vertexai') {
           expect(serialized).not.toContain('thought_signature');

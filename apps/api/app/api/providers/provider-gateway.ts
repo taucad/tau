@@ -1,5 +1,5 @@
 import { sign } from 'node:crypto';
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
 import type { ModelProviderWire } from '#api/llm/model-invocation.types.js';
 
@@ -155,6 +155,56 @@ export const isGatewayProviderConfigured = (config: GatewayConfig, providerId: G
     : typeof value === 'string' && value.length > 0;
 };
 
+/** Google's wire keys, spelled once so the retry and the payload cannot drift. */
+const extraBodyKey = 'extra_body';
+const googleKey = 'google';
+const streamedArgumentsKey = 'stream_function_call_arguments';
+
+/**
+ * Google answers CANCELLED as 499 on the Vertex wire. `classifyUpstreamRefusal`
+ * turns it into a 503 `PROVIDER_UNAVAILABLE`, so this is the last place the real
+ * status exists.
+ */
+const cancelledUpstreamStatus = 499;
+
+/**
+ * The same request without Gemini's streamed-arguments flag.
+ *
+ * @param body - The request body as the caller assembled it.
+ * @returns The body with the flag removed, or undefined when it carries none.
+ */
+const withoutStreamedArguments = (body: unknown): Record<string, unknown> | undefined => {
+  if (body === null || typeof body !== 'object') {
+    return undefined;
+  }
+  const record = body as Record<string, unknown>;
+  const extraBody = record[extraBodyKey];
+  if (extraBody === null || typeof extraBody !== 'object') {
+    return undefined;
+  }
+  const extraBodyRecord = extraBody as Record<string, unknown>;
+  const google = extraBodyRecord[googleKey];
+  if (google === null || typeof google !== 'object' || !(streamedArgumentsKey in google)) {
+    return undefined;
+  }
+  const remaining = { ...(google as Record<string, unknown>) };
+  delete remaining[streamedArgumentsKey];
+  return { ...record, [extraBodyKey]: { ...extraBodyRecord, [googleKey]: remaining } };
+};
+
+/**
+ * The supplier model id the request names, for the log line only.
+ *
+ * @param body - The request body as the caller assembled it.
+ * @returns The `model` field when it is a string.
+ */
+const requestedModel = (body: unknown): string | undefined => {
+  const model = body === null || typeof body !== 'object' ? undefined : (body as Record<string, unknown>)['model'];
+  return typeof model === 'string' ? model : undefined;
+};
+
+const logger = new Logger('ProviderGateway');
+
 export const executeGatewayProviderRequest = async (input: {
   readonly config: GatewayConfig;
   readonly providerId: GatewayProviderId;
@@ -175,14 +225,42 @@ export const executeGatewayProviderRequest = async (input: {
   const url = credentials
     ? `${target.url}/v1/projects/${encodeURIComponent(credentials.projectId)}/locations/global/endpoints/openapi/chat/completions`
     : target.url;
-  return fetchOnce(url, {
-    method: 'POST',
-    redirect: 'error',
-    signal: input.signal,
-    body: JSON.stringify(input.body),
-    headers:
-      input.providerId === 'anthropic'
-        ? { 'content-type': 'application/json', 'x-api-key': accessToken, ...input.headers }
-        : { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
-  });
+  const headers: Record<string, string> =
+    input.providerId === 'anthropic'
+      ? { 'content-type': 'application/json', 'x-api-key': accessToken, ...input.headers }
+      : { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` };
+  const dispatch = async (body: unknown): Promise<Response> =>
+    fetchOnce(url, {
+      method: 'POST',
+      redirect: 'error',
+      signal: input.signal,
+      body: JSON.stringify(body),
+      headers,
+    });
+  const response = await dispatch(input.body);
+  if (input.providerId !== 'vertexai' || response.status !== cancelledUpstreamStatus) {
+    return response;
+  }
+  const withoutFlag = withoutStreamedArguments(input.body);
+  if (withoutFlag === undefined) {
+    return response;
+  }
+  /* Vertex sheds streamed-argument requests while its shared-quota pool is
+   * stressed: near-deterministic inside such a window, 0/120 outside one, and
+   * the same conversation answers 200 without the flag (blueprint Finding 1,
+   * ruling Q1). Nothing has been accounted yet — refusal classification,
+   * evidence collection, `markDispatchAccepted` and the client's operation
+   * binding all read the response this returns — so one flag-free re-dispatch
+   * costs a round trip and leaves no trace anywhere else. A second cancellation
+   * is answered as it stands; the caller classifies it. */
+  await response.body?.cancel();
+  logger.warn(
+    {
+      providerId: input.providerId,
+      modelId: requestedModel(input.body),
+      upstreamStatus: response.status,
+    },
+    'Vertex cancelled a streamed-arguments request; re-dispatching once without the flag',
+  );
+  return dispatch(withoutFlag);
 };

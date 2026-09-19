@@ -47,7 +47,7 @@ describe('normalizeProjectPathToolInputAliases', () => {
   });
 
   it('leaves unsafe aliases untouched for strict schema validation', () => {
-    for (const targetFile of ['//main.ts', '/../main.ts', 'C:\\main.ts', 'file:///main.ts']) {
+    for (const targetFile of ['//main.ts', '/../main.ts', String.raw`C:\main.ts`, 'file:///main.ts']) {
       const result = normalizeProjectPathToolInputAliases(toolName.readFile, { targetFile });
       expect(result.changed).toBe(false);
       expect(readFileInputSchema.safeParse(result.input).success).toBe(false);

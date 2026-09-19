@@ -67,6 +67,14 @@ const availabilityWaiters = new Map<string, Set<AvailabilityWaiter>>();
 const availabilityKey = (projectId: string | undefined, hostId?: TauAgentHostId): string =>
   `${projectId ?? ''}:${hostId ?? 'browser'}`;
 
+/**
+ * Whether the pairing directory is what describes this placement. Only a paired
+ * device is: this computer and the page's own origin are discovered without it,
+ * so its outage — a signed-out `401` included — says nothing about either.
+ */
+const isPairedHost = (hostId: string | undefined): boolean =>
+  hostId !== undefined && hostId !== 'browser' && hostId !== 'desktop' && hostId !== 'origin';
+
 const publishAvailability = (key: string, availability: BrowserAgentHostProjectAvailability): void => {
   resolvedAvailability.set(key, availability);
   const waiters = availabilityWaiters.get(key);
@@ -99,9 +107,9 @@ export const awaitAgentHostAvailability = async (
   if (settled) {
     return settled;
   }
-  // A dead directory cannot describe a daemon placement at all, so refuse with
+  // A dead directory cannot describe a paired device at all, so refuse with
   // what it said rather than after the timeout.
-  const outage = input.hostId === undefined ? undefined : hostDirectoryOutage();
+  const outage = isPairedHost(input.hostId) ? hostDirectoryOutage() : undefined;
   if (outage !== undefined) {
     return { status: 'unavailable', reason: outage };
   }
@@ -277,7 +285,9 @@ export const useAgentHostPlacements = (): {
       // and that one is another probe's to publish.
       const outage = hostDirectoryOutage();
       if (outage !== undefined) {
-        for (const key of [...availabilityWaiters.keys()].filter((waiting) => !waiting.endsWith(':browser'))) {
+        for (const key of [...availabilityWaiters.keys()].filter((waiting) =>
+          isPairedHost(waiting.slice(waiting.indexOf(':') + 1)),
+        )) {
           publishAvailability(key, { status: 'unavailable', reason: outage });
         }
       }

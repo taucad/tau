@@ -338,6 +338,21 @@ describe('useCadAgentConfig', () => {
     });
   });
 
+  it('does not refuse this computer over a pairing directory it never appears in', async () => {
+    /* A desktop window that booted signed out: the listing answered 401 and
+     * left its message behind, then the person signed in and sent a turn on a
+     * project whose key nothing has published yet. */
+    directoryHarness.outage = 'Tau Host refused the request (UNAUTHORIZED).';
+    const settled = awaitAgentHostAvailability({ projectId: 'project-test', hostId: 'desktop' }, 1000);
+    directoryHarness.listings = [
+      [{ hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true }],
+    ];
+
+    renderHook(() => useAgentHostPlacements());
+
+    await expect(settled).resolves.toMatchObject({ status: 'available' });
+  });
+
   it('settles a dispatch already waiting when the directory fails under it', async () => {
     // The seeded first turn waits on its host before discovery answers.
     const settled = awaitAgentHostAvailability({ projectId: 'project-test', hostId: 'device-1' }, 50);

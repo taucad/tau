@@ -2,9 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { replayFixtures } from './fixtures.js';
-import { replayFixtureSchema, replayFixtureStoreSchema } from './replay-fixture.schema.js';
-import { replayEditFixture } from './runner.js';
+import { replayFixtures } from '#testing/edit-bench/fixtures.js';
+import { replayFixtureSchema, replayFixtureStoreSchema } from '#testing/edit-bench/replay-fixture.schema.js';
+import { replayEditFixture } from '#testing/edit-bench/runner.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../../../', import.meta.url));
 const legacyRowSchema = z.object({
@@ -30,6 +30,7 @@ describe('Tier-D edit replay store', () => {
       if (fixture.source.kind !== 'authored') {
         continue;
       }
+      // oxlint-disable-next-line no-await-in-loop -- fixtures are checked in authored order so the first drift names itself.
       const sourceBytes = new Uint8Array(await readFile(`${repositoryRoot}${fixture.source.sourcePath}`));
       const targetBytes = fixture.initial.files.find((file) => file.path === fixture.targetFile)?.bytes;
       expect(targetBytes, fixture.id).toEqual(sourceBytes);
@@ -88,11 +89,12 @@ describe('Tier-D edit replay store', () => {
 
   it('should fail a deliberately corrupted byte fixture and name its id', async () => {
     const source = replayFixtures.find((fixture) => fixture.id === 'unique-match-jscad-cube-size');
-    if (!source || source.expected.kind !== 'success') {
+    if (source?.expected.kind !== 'success') {
       throw new Error('Missing unique-match corruption source fixture.');
     }
     const corruptedBytes = new Uint8Array(source.expected.files[0]!.bytes);
     const finalByteIndex = corruptedBytes.byteLength - 1;
+    // oxlint-disable-next-line no-bitwise -- flipping the low bit is the corruption this canary asserts on.
     corruptedBytes[finalByteIndex] = (corruptedBytes[finalByteIndex] ?? 0) ^ 1;
     const corrupted = replayFixtureSchema.parse({
       ...source,

@@ -1,14 +1,14 @@
-import { editFileInputSchema, getToolInputSchema, type RpcClientErrorCode } from '@taucad/chat';
+import { editFileInputSchema, getToolInputSchema } from '@taucad/chat';
+import type { RpcClientErrorCode } from '@taucad/chat';
 import {
   applyClientTextMutation,
   createExactReplacementPlan,
   decodeClientText,
   handleEditFile,
-  type RpcFileSystem,
-  type RpcFileStat,
 } from '@taucad/chat/rpc';
+import type { RpcFileSystem, RpcFileStat } from '@taucad/chat/rpc';
 import ts from 'typescript';
-import type { BenchmarkErrorCode, ReplayEmission, ReplayFixture } from './replay-fixture.schema.js';
+import type { BenchmarkErrorCode, ReplayEmission, ReplayFixture } from '#testing/edit-bench/replay-fixture.schema.js';
 
 type ReplayErrorCode = RpcClientErrorCode | BenchmarkErrorCode;
 type ReplayOutcome =
@@ -40,9 +40,9 @@ const throwClientError = (errorCode: RpcClientErrorCode, message: string): never
 /** Deterministic planner/retry replay seam; this Map is not a production filesystem authority. */
 const createReplayFileSystem = (
   files: Map<string, Uint8Array<ArrayBuffer>>,
-  conflicts: readonly Uint8Array<ArrayBuffer>[],
+  conflicts: ReadonlyArray<Uint8Array<ArrayBuffer>>,
 ): RpcFileSystem => {
-  const pendingConflicts = conflicts.map(cloneBytes);
+  const pendingConflicts = conflicts.map((bytes) => cloneBytes(bytes));
   const readBytes = (path: string): Uint8Array<ArrayBuffer> => {
     const bytes = files.get(path);
     if (!bytes) {
@@ -94,6 +94,7 @@ const createReplayFileSystem = (
     async appendFile(path, content) {
       files.set(path, new TextEncoder().encode(`${files.has(path) ? readText(path) : ''}${content}`));
     },
+    // oxlint-disable-next-line max-params -- the RpcFileSystem.editFile signature
     async editFile(path, oldString, newString, replaceAll) {
       const result = await applyClientTextMutation({
         targetFile: path,
@@ -218,6 +219,7 @@ export const replayEditFixture = async (fixture: ReplayFixture): Promise<ReplayR
     }
 
     const fileSystem = createReplayFileSystem(files, emission.casConflicts ?? []);
+    // oxlint-disable-next-line no-await-in-loop -- emissions replay in order; each edit reads what the last one wrote.
     const result = await handleEditFile(editInput.data, fileSystem);
     if (!result.success) {
       outcome = { kind: 'error', errorCode: result.errorCode };
@@ -225,7 +227,7 @@ export const replayEditFixture = async (fixture: ReplayFixture): Promise<ReplayR
     }
     outcome = {
       kind: 'success',
-      staleRecovered: outcome.kind === 'success' && (outcome.staleRecovered || result.staleRecovered === true),
+      staleRecovered: outcome.staleRecovered || result.staleRecovered === true,
     };
   }
 

@@ -56,7 +56,8 @@ export function DebugProbes(): ReactNode {
       if (!openFileSystemBridge) {
         throw new Error('File manager filesystem bridge not available for GeoSpec tests.');
       }
-      return openFileSystemBridge(rootDirectory);
+      /* The GeoSpec worker is runtime composition over the working copy, like the kernel's. */
+      return openFileSystemBridge(rootDirectory, 'working-copy');
     };
     // Runs the real browser GeoSpec path with phase timings, so a slow or hung
     // run can be measured without the API's RPC budget truncating it.

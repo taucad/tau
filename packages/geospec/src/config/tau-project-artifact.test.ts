@@ -122,6 +122,20 @@ const run = async (options?: {
 };
 
 describe('exportTauProjectArtifact', () => {
+  it('preserves finalized STEP artifacts with the runtime extensionless assembly name', async () => {
+    const artifact = {
+      name: 'assembly',
+      mimeType: 'application/step',
+      bytes: new Uint8Array([1, 2, 3]),
+    } satisfies ExportFile;
+    const fixture = await run({ artifact });
+
+    expect(fixture.result).toMatchObject({ success: true, data: artifact });
+    if (fixture.result.success) {
+      expect(fixture.result.data.bytes).toBe(artifact.bytes);
+    }
+  });
+
   it('returns exact finalized bytes with manifest, asset, frame, route, and source identities', async () => {
     const fixture = await run();
 

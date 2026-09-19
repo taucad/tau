@@ -44,6 +44,11 @@ const repositoryRoot = resolve(conformanceDirectory, '../../../..');
 const applicationDirectory = resolve(conformanceDirectory, 'app');
 const m2ApplicationDirectory = resolve(repositoryRoot, 'packages/geospec/host-tests/m2-browser');
 const corpusPath = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance/early-corpus.json');
+const profilePath = resolve(
+  repositoryRoot,
+  'packages/geospec-engine-native/rust/tests/fixtures/current-profile-01/plan-corpus.json',
+);
+const currentProfileDirectory = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance');
 const m2ApplicationPath = resolve(m2ApplicationDirectory, 'app.ts');
 
 const argument = (name: string): string | undefined => {
@@ -121,19 +126,14 @@ const run = async (): Promise<void> => {
   const packageManifestPath = resolve(packedPackageDirectory, 'package.json');
   const packageManifest = JSON.parse(await readFile(packageManifestPath, 'utf8')) as PackageManifest;
   const rootExport = exportTarget(packageManifest, '.');
-  const bindingName = suite === 'm2' ? '#mixed-wasm-binding' : '#wasm-binding';
+  const bindingName = '#mixed-wasm-binding';
   const wasmBinding = importTarget(packageManifest, bindingName);
   if (rootExport === undefined || wasmBinding === undefined) {
     throw new TypeError(`Packed package manifest is missing the public root or ${bindingName} import.`);
   }
   const rootModulePath = await realpath(resolve(packedPackageDirectory, rootExport));
   const wasmBindingPath = await realpath(resolve(packedPackageDirectory, wasmBinding));
-  const wasmBinaryPath = await realpath(
-    resolve(
-      dirname(wasmBindingPath),
-      suite === 'm2' ? 'geospec_engine_native.wasm' : 'geospec_engine_native_wasm_bg.wasm',
-    ),
-  );
+  const wasmBinaryPath = await realpath(resolve(dirname(wasmBindingPath), 'geospec_engine_native.wasm'));
   const geospecManifestPath = resolve(geospecPackageDirectory, 'package.json');
   const geospecManifest =
     suite === 'm2' ? (JSON.parse(await readFile(geospecManifestPath, 'utf8')) as PackageManifest) : undefined;
@@ -145,6 +145,7 @@ const run = async (): Promise<void> => {
   const assertionModulePath =
     assertionExport === undefined ? undefined : await realpath(resolve(geospecPackageDirectory, assertionExport));
   const corpusText = await readFile(corpusPath, 'utf8');
+  const profileText = suite === 'early' ? await readFile(profilePath, 'utf8') : undefined;
   const m2Inputs =
     suite === 'm2'
       ? supplementalInput === undefined
@@ -152,6 +153,7 @@ const run = async (): Promise<void> => {
         : await loadSupplementalBrowserInputs(supplementalInput.path, supplementalInput.sha256)
       : undefined;
   const expectedM2Rows = m2Inputs?.metadata.expectedRowCount ?? 30;
+  const browserCompletionTimeout = supplementalInput === undefined ? 120_000 : 900_000;
   const m2MetadataText = m2Inputs === undefined ? undefined : JSON.stringify(m2Inputs.metadata);
   const loadedModules = new Set<string>();
   const resolvedSpecifiers = new Set<string>();
@@ -188,6 +190,7 @@ const run = async (): Promise<void> => {
         strict: true,
         allow: [
           applicationDirectory,
+          currentProfileDirectory,
           packedPackageDirectory,
           ...(suite === 'm2' ? [geospecPackageDirectory, m2ApplicationDirectory] : []),
         ],
@@ -208,6 +211,15 @@ const run = async (): Promise<void> => {
             response.setHeader('Content-Type', 'application/json; charset=utf-8');
             response.setHeader('Cache-Control', 'no-store');
             response.end(corpusText);
+          });
+          developmentServer.middlewares.use('/current-profile.json', (request, response, next) => {
+            if (request.method !== 'GET' || profileText === undefined) {
+              next();
+              return;
+            }
+            response.setHeader('Content-Type', 'application/json; charset=utf-8');
+            response.setHeader('Cache-Control', 'no-store');
+            response.end(profileText);
           });
           developmentServer.middlewares.use('/m2-inputs.json', (request, response, next) => {
             if (suite !== 'm2' || request.method !== 'GET' || m2MetadataText === undefined) {
@@ -237,8 +249,8 @@ const run = async (): Promise<void> => {
           if (source === '#native-binding' || source.endsWith('.node') || source.includes('/dist/native/')) {
             throw new Error(`Browser route resolved forbidden native loader: ${source}`);
           }
-          if (suite === 'm2' && source === '#wasm-binding') {
-            throw new Error('M2 browser route resolved the superseded wasm-bindgen binding.');
+          if (source === '#wasm-binding') {
+            throw new Error('Browser route resolved the superseded wasm-bindgen binding.');
           }
           return undefined;
         },
@@ -290,7 +302,7 @@ const run = async (): Promise<void> => {
               }
             ).__geospecConformance !== undefined,
           undefined,
-          { timeout: 120_000 },
+          { timeout: browserCompletionTimeout },
         );
         const result = await page.evaluate<BrowserCompletion>(() => {
           const completion = (
@@ -350,11 +362,9 @@ const run = async (): Promise<void> => {
     }
     const forbiddenModules = [...loadedModules].filter(
       (id) =>
-        id.includes('/dist/native/') ||
-        id.endsWith('.node') ||
-        (suite === 'm2' && id.includes('/dist/wasm/geospec_engine_native_wasm')),
+        id.includes('/dist/native/') || id.endsWith('.node') || id.includes('/dist/wasm/geospec_engine_native_wasm'),
     );
-    const mixedBindingLoaded = suite !== 'm2' || loadedModules.has(wasmBindingPath);
+    const mixedBindingLoaded = loadedModules.has(wasmBindingPath);
     const artifactPaths = [packageManifestPath, rootModulePath, wasmBindingPath, wasmBinaryPath];
     if (suite === 'm2' && assertionModulePath !== undefined) {
       artifactPaths.push(geospecManifestPath, assertionModulePath, m2ApplicationPath);
@@ -424,7 +434,7 @@ const run = async (): Promise<void> => {
       return (
         result.report.passed !== 320 ||
         result.report.failed !== 0 ||
-        result.report.admissions !== 109 ||
+        result.report.admissions !== 124 ||
         result.report.wasmAsset.sha256 !== packageArtifacts[wasmBinaryPath] ||
         (result.report.equivalentCanonicalGroups ?? []).some((group) => !group.passed)
       );

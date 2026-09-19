@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runEarlyCorpus } from '../node/run-conformance.mjs';
 
 /** @typedef {{ ingestMesh: (request: Uint8Array, mesh: Uint8Array) => Uint8Array, processRequest: (request: Uint8Array) => Uint8Array, canonicalPlan: (request: Uint8Array) => Uint8Array, evaluatePlan: (plan: Uint8Array) => Uint8Array }} BindingEngine */
-/** @typedef {{ Engine: new () => BindingEngine, canonicalize: (input: Uint8Array) => Uint8Array, initialize?: (input: Uint8Array) => Promise<void>, default?: (input: { module_or_path: Uint8Array }) => Promise<unknown> }} WasmBinding */
+/** @typedef {{ Engine: new () => BindingEngine, canonicalize: (input: Uint8Array) => Uint8Array, initialize: (input: URL) => Promise<void> }} WasmBinding */
 
 /** @type {() => Map<string, string>} */
 const parseArguments = () => {
@@ -18,34 +18,41 @@ const parseArguments = () => {
   return argumentsByName;
 };
 
-/** @type {(options: { modulePath: string, binaryPath: string, output?: string, host?: string }) => ReturnType<typeof runEarlyCorpus>} */
-export const runWasmCorpus = async ({ modulePath, binaryPath, output, host = 'wasm-node' }) => {
-  const binding = /** @type {WasmBinding} */ (await import(pathToFileURL(modulePath).href));
-  const binary = await readFile(binaryPath);
-  if (typeof binding.initialize === 'function') {
-    await binding.initialize(binary);
-  } else if (typeof binding.default === 'function') {
-    await binding.default({ module_or_path: binary });
-  } else {
-    throw new Error('WASM host module has no initializer.');
+/** @type {(options: { modulePath?: string, binaryPath?: string, output?: string, host?: string, recordIds?: string[] }) => ReturnType<typeof runEarlyCorpus>} */
+export const runWasmCorpus = async ({
+  modulePath = fileURLToPath(new URL('../../dist/wasm.mjs', import.meta.url)),
+  binaryPath,
+  output,
+  recordIds,
+  host = 'wasm-node',
+} = {}) => {
+  if (binaryPath === undefined) {
+    const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
+    const mixedBinding = manifest.imports?.['#mixed-wasm-binding'];
+    if (typeof mixedBinding !== 'string') {
+      throw new Error('Package has no mixed WASM binding import.');
+    }
+    binaryPath = fileURLToPath(
+      new URL('geospec_engine_native.wasm', new URL(mixedBinding, new URL('../../package.json', import.meta.url))),
+    );
   }
-  return runEarlyCorpus({ binding, host, artifacts: [modulePath, binaryPath], output });
+  const binding = /** @type {WasmBinding} */ (await import(pathToFileURL(modulePath).href));
+  if (typeof binding.initialize !== 'function') {
+    throw new Error('Current WASM facade has no mixed-module initializer.');
+  }
+  await binding.initialize(pathToFileURL(binaryPath));
+  return runEarlyCorpus({ binding, host, artifacts: [modulePath, binaryPath], output, recordIds });
 };
 
 if (import.meta.main) {
   const argumentsByName = parseArguments();
-  const modulePath = resolve(
-    argumentsByName.get('--module') ??
-      fileURLToPath(new URL('generated/geospec_engine_native_wasm.js', import.meta.url)),
-  );
-  const binaryPath = resolve(
-    argumentsByName.get('--binary') ??
-      fileURLToPath(new URL('generated/geospec_engine_native_wasm_bg.wasm', import.meta.url)),
-  );
+  const modulePath = argumentsByName.get('--module');
+  const binaryPath = argumentsByName.get('--binary');
   const report = await runWasmCorpus({
-    modulePath,
-    binaryPath,
+    modulePath: modulePath === undefined ? undefined : resolve(modulePath),
+    binaryPath: binaryPath === undefined ? undefined : resolve(binaryPath),
     output: argumentsByName.get('--output'),
+    recordIds: argumentsByName.get('--ids')?.split(','),
   });
   process.stdout.write(`${JSON.stringify({ passed: report.passed, failed: report.failed })}\n`);
   if (report.failed > 0) {

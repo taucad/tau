@@ -1,12 +1,6 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- This package-owned browser fixture imports its installed public root through the consumer resolver; it is not an external dependency.
 import { Engine, canonicalize, initialize } from '@taucad/geospec-engine-native';
-
-type CorpusMesh = {
-  id: string;
-  requestUtf8: string;
-  meshHex: string;
-  expectedUtf8: string;
-};
+// oxlint-disable-next-line no-restricted-imports -- Package-owned browser runner shares the pinned fixture join.
+import { joinCurrentCorpus } from '../../../conformance/current-profile.mjs';
 
 type CorpusRecord = {
   id: string;
@@ -17,13 +11,7 @@ type CorpusRecord = {
   meshHex?: string;
   expectedUtf8?: string;
   expectedCode?: string;
-};
-
-type Corpus = {
-  schemaVersion: number;
-  meshes: CorpusMesh[];
-  records: CorpusRecord[];
-  equivalentCanonicalGroups: string[][];
+  expectedMessage?: string;
 };
 
 type ByteArray = Uint8Array<ArrayBuffer>;
@@ -39,7 +27,6 @@ type CorpusResult = {
 
 type Completion = { report: unknown } | { error: string };
 
-const expectedCorpusHash = '3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -149,33 +136,21 @@ const invoke = (engine: Engine, record: CorpusRecord): ByteArray => {
   }
 };
 
-const readCorpus = async (): Promise<{
-  corpus: Corpus;
-  corpusSha256: string;
-}> => {
-  const response = await fetch('/early-corpus.json');
-  if (!response.ok) {
-    throw new Error(`Unable to read frozen corpus: ${response.status}`);
+const readCorpus = async () => {
+  const [original, profile] = await Promise.all([fetch('/early-corpus.json'), fetch('/current-profile.json')]);
+  if (!original.ok || !profile.ok) {
+    throw new Error(`Unable to read conformance authorities: ${original.status}/${profile.status}`);
   }
-  const corpusBytes = new Uint8Array(await response.arrayBuffer());
-  const corpusSha256 = await sha256(corpusBytes);
-  if (corpusSha256 !== expectedCorpusHash) {
-    throw new Error(`Frozen corpus hash changed: ${corpusSha256}`);
-  }
-  const corpus = JSON.parse(decoder.decode(corpusBytes)) as Corpus;
-  if (corpus.schemaVersion !== 1 || corpus.records.length !== 320) {
-    throw new Error('Frozen corpus schema/count changed.');
-  }
-  return { corpus, corpusSha256 };
+  return joinCurrentCorpus(new Uint8Array(await original.arrayBuffer()), new Uint8Array(await profile.arrayBuffer()));
 };
 
 const run = async () => {
-  const { corpus, corpusSha256 } = await readCorpus();
+  const corpus = await readCorpus();
   await initialize();
   const wasmUrl = performance
     .getEntriesByType('resource')
     .map((entry) => entry.name)
-    .find((url) => url.includes('geospec_engine_native_wasm_bg.wasm'));
+    .find((url) => url.includes('geospec_engine_native.wasm'));
   if (wasmUrl === undefined) {
     throw new Error('The packed public root did not load its shipped WASM asset.');
   }
@@ -189,71 +164,78 @@ const run = async () => {
   const results: CorpusResult[] = [];
   for (const record of corpus.records) {
     const engine = new Engine();
-    const admissions = [];
-    let admissionFailure;
-    for (const meshId of record.ingest) {
-      const mesh = meshes.get(meshId);
-      if (mesh === undefined) {
-        admissionFailure = { meshId, message: 'Unknown mesh ID.' };
-        break;
-      }
-      try {
-        const comparison = compareBytes(
-          engine.ingestMesh(encoder.encode(mesh.requestUtf8), fromHex(mesh.meshHex)),
-          mesh.expectedUtf8,
-        );
-        admissions.push({ meshId, ...comparison });
-        if (!comparison.bytesEqual || !comparison.decodedEqual) {
-          admissionFailure = { meshId, ...comparison };
+    try {
+      const admissions = [];
+      let admissionFailure;
+      for (const meshId of record.ingest) {
+        const mesh = meshes.get(meshId);
+        if (mesh === undefined) {
+          admissionFailure = { meshId, message: 'Unknown mesh ID.' };
           break;
         }
-      } catch (error) {
-        admissionFailure = { meshId, ...errorDetails(error) };
-        break;
+        try {
+          const comparison = compareBytes(
+            engine.ingestMesh(encoder.encode(mesh.requestUtf8), fromHex(mesh.meshHex)),
+            mesh.expectedUtf8,
+          );
+          admissions.push({ meshId, ...comparison });
+          admissionFailure = comparison.bytesEqual && comparison.decodedEqual ? undefined : { meshId, ...comparison };
+        } catch (error) {
+          admissionFailure = { meshId, ...errorDetails(error) };
+        }
+        if (admissionFailure !== undefined) {
+          break;
+        }
       }
-    }
-    if (admissionFailure !== undefined) {
-      results.push({
-        id: record.id,
-        passed: false,
-        admissions,
-        admissionFailure,
-      });
-      continue;
-    }
-
-    try {
-      const actual = invoke(engine, record);
-      if (record.expectedCode !== undefined) {
+      if (admissionFailure !== undefined) {
         results.push({
           id: record.id,
           passed: false,
           admissions,
-          expectedCode: record.expectedCode,
-          unexpectedSuccessHex: toHex(actual),
-          unexpectedSuccessUtf8: decoder.decode(actual),
+          admissionFailure,
         });
         continue;
       }
-      if (record.expectedUtf8 === undefined) {
-        throw new Error(`Corpus record ${record.id} has no success expectation.`);
+
+      try {
+        const actual = invoke(engine, record);
+        if (record.expectedCode !== undefined) {
+          results.push({
+            id: record.id,
+            passed: false,
+            admissions,
+            expectedCode: record.expectedCode,
+            unexpectedSuccessHex: toHex(actual),
+            unexpectedSuccessUtf8: decoder.decode(actual),
+          });
+          continue;
+        }
+        if (record.expectedUtf8 === undefined) {
+          throw new Error(`Corpus record ${record.id} has no success expectation.`);
+        }
+        const comparison = compareBytes(actual, record.expectedUtf8);
+        results.push({
+          id: record.id,
+          passed: comparison.bytesEqual && comparison.decodedEqual,
+          admissions,
+          ...comparison,
+        });
+      } catch (error) {
+        const actual = errorDetails(error);
+        results.push({
+          id: record.id,
+          passed:
+            record.expectedCode !== undefined &&
+            actual.code === record.expectedCode &&
+            actual.message.length > 0 &&
+            (record.expectedMessage === undefined || actual.message === record.expectedMessage),
+          admissions,
+          expectedCode: record.expectedCode,
+          ...actual,
+        });
       }
-      const comparison = compareBytes(actual, record.expectedUtf8);
-      results.push({
-        id: record.id,
-        passed: comparison.bytesEqual && comparison.decodedEqual,
-        admissions,
-        ...comparison,
-      });
-    } catch (error) {
-      const actual = errorDetails(error);
-      results.push({
-        id: record.id,
-        passed: record.expectedCode !== undefined && actual.code === record.expectedCode && actual.message.length > 0,
-        admissions,
-        expectedCode: record.expectedCode,
-        ...actual,
-      });
+    } finally {
+      engine.close();
     }
   }
 
@@ -277,7 +259,11 @@ const run = async () => {
     schemaVersion: 1,
     host: 'browser-packed-root',
     userAgent: navigator.userAgent,
-    corpus: { sha256: corpusSha256, records: corpus.records.length },
+    corpus: {
+      sha256: corpus.originalSha256,
+      currentProfileSha256: corpus.profileSha256,
+      records: corpus.records.length,
+    },
     wasmAsset: { url: wasmUrl, sha256: wasmSha256 },
     admissions: results.reduce((count, result) => count + result.admissions.length, 0),
     passed: results.length - mismatches.length,

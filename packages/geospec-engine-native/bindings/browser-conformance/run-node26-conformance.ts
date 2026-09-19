@@ -132,14 +132,14 @@ export const runNode26Packed = async ({
   const packageManifestPath = packedRequire.resolve('@taucad/geospec-engine-native/package.json');
   const packageDirectory = dirname(packageManifestPath);
   const packageManifest = JSON.parse(await readFile(packageManifestPath, 'utf8')) as {
-    imports?: { '#wasm-binding'?: unknown };
+    imports?: { '#mixed-wasm-binding'?: unknown };
   };
-  const wasmBindingExport = packageManifest.imports?.['#wasm-binding'];
+  const wasmBindingExport = packageManifest.imports?.['#mixed-wasm-binding'];
   if (typeof wasmBindingExport !== 'string') {
     throw new TypeError('Packed package manifest has no string WASM binding import.');
   }
   const wasmBindingPath = resolve(packageDirectory, wasmBindingExport);
-  const wasmBinaryPath = resolve(dirname(wasmBindingPath), 'geospec_engine_native_wasm_bg.wasm');
+  const wasmBinaryPath = resolve(dirname(wasmBindingPath), 'geospec_engine_native.wasm');
   const nativeBinaryPath = packedRequire.resolve('@taucad/geospec-engine-native-darwin-arm64');
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8')) as Corpus;
   const runner = (await import(new URL('../node/run-conformance.mjs', import.meta.url).href)) as {
@@ -155,9 +155,9 @@ export const runNode26Packed = async ({
   });
 
   const wasmBinding = (await import(pathToFileURL(wasmModulePath).href)) as Binding & {
-    initialize: (input: Uint8Array<ArrayBuffer>) => Promise<void>;
+    initialize: (input: URL) => Promise<void>;
   };
-  await wasmBinding.initialize(new Uint8Array(await readFile(wasmBinaryPath)));
+  await wasmBinding.initialize(pathToFileURL(wasmBinaryPath));
   const wasmReport = await runner.runEarlyCorpus({
     binding: wasmBinding,
     host: `${evidencePrefix}-packed-wasm`,
@@ -208,7 +208,7 @@ export const runNode26Packed = async ({
       (route) =>
         route.passed !== 320 ||
         route.failed !== 0 ||
-        route.admissions !== 109 ||
+        route.admissions !== 124 ||
         route.equivalentCanonicalGroups.some((group) => !group.passed),
     )
   ) {

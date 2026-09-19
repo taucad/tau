@@ -30,6 +30,7 @@
     "vitest.node26.config.ts",
     "bindings/browser-conformance/**/*.ts",
     "bindings/*/*.mjs",
-    "host-tests/authored-corpus-b19/*.mjs"
+    "host-tests/authored-corpus-b19/*.mjs",
+    "conformance/current-profile.mjs"
   ]
 }

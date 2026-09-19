@@ -98,10 +98,10 @@ type M2Invocation = {
 /** One authored browser cell and its frozen expected records. */
 export type M2BrowserRow = {
   authoredRequestUtf8: string;
-  cohort: 'f1' | 'half-cube' | 'paired-glb' | 'selected';
+  cohort: string;
   expected: {
     admissionUtf8: string;
-    bytes: M2ExpectedBytes;
+    bytes?: M2ExpectedBytes;
     error: null | { message: string; name: string };
     independent: null | M2IndependentBytes;
     status: string;
@@ -113,6 +113,11 @@ export type M2BrowserRow = {
     resources: M2Asset[];
   };
   invocation: M2Invocation;
+  protocolControl?: {
+    expectedError: { code: string; message: string; name: string };
+    kind: string;
+    publicApi: string;
+  };
   subjectHash: string;
   /** Optional public setup repeated before each measured route on the admitted subject. */
   warmup?: { expectedStatus: 'failed' | 'passed'; invocation: M2Invocation };
@@ -275,6 +280,29 @@ const assertWarmup = (value: unknown, rowId: string): void => {
 
 const assertCanonicalReportRow = (row: M2BrowserRow): void => {
   assertWarmup(row.warmup, row.id);
+  if (row.protocolControl !== undefined) {
+    const { expectedError, kind, publicApi } = row.protocolControl;
+    if (
+      kind !== 'direct-canonical-plan-rejection' ||
+      publicApi !== 'unavailable-negative-query' ||
+      row.invocation.polarity !== 'negative' ||
+      !['analyzeMesh', 'analyzeBrep', 'inspectGeometry', 'analyzeMeshOverlap'].includes(row.invocation.capability) ||
+      row.expected.status !== 'protocol-error' ||
+      row.expected.bytes !== undefined ||
+      row.expected.independent !== null ||
+      row.expected.error?.name !== expectedError.name ||
+      row.expected.error.message !== expectedError.message ||
+      expectedError.name !== 'ProtocolError' ||
+      expectedError.code !== 'invalid-claim' ||
+      expectedError.message !== `Ancillary capability '${row.invocation.capability}' requires positive polarity.`
+    ) {
+      throw new TypeError(`Supplemental browser row ${row.id} has an invalid direct protocol control.`);
+    }
+    return;
+  }
+  if (row.expected.bytes === undefined) {
+    throw new TypeError(`Supplemental browser row ${row.id} has no canonical report bytes.`);
+  }
   for (const key of ['canonicalClaimUtf8', 'canonicalPlanUtf8', 'canonicalResultUtf8'] as const) {
     if (typeof row.expected.bytes[key] !== 'string') {
       throw new TypeError(`Supplemental browser row ${row.id} has no canonical report field ${key}.`);

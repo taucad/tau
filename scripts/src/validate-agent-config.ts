@@ -19,6 +19,8 @@ const templateDirectories = [
   'tools/workspace-plugin/src/generators/package/files',
   'tools/workspace-plugin/src/generators/instruction-files',
 ];
+// Private documentation is published only as a symlink into the optional tau-brain checkout.
+const relocatableDocumentation = ['docs/handbooks', 'docs/incidents', 'docs/reference', 'docs/research'];
 const markdown = unified().use(remarkParse);
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -152,6 +154,19 @@ const validateBoundary = (path: string, root: string, report: (path: string, det
   return chainBytes;
 };
 
+/** Index entries under a private documentation prefix that are not the tracked symlink itself. */
+const publishedPrivateDocumentation = (root: string): string[] =>
+  execFileSync('git', ['ls-files', '-s', '-z', '--', ...relocatableDocumentation], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean)
+    .map((entry) => entry.split('\t'))
+    .filter(([meta = '', path = '']) => !(meta.startsWith('120000 ') && relocatableDocumentation.includes(path)))
+    .map(([, path = '']) => path);
+
 const hasSharedSkillAlias = (root: string): boolean => {
   const alias = resolve(root, '.claude/skills');
   return (
@@ -192,6 +207,9 @@ export const validateAgentConfig = (root: string): AgentConfigResult => {
   if (!hasSharedSkillAlias(root)) {
     issues.push('.claude/skills: expected the shared ../.agents/skills symlink');
   }
+  for (const path of publishedPrivateDocumentation(root)) {
+    issues.push(`${path}: private documentation must stay a mode-120000 symlink into repos/tau-brain`);
+  }
 
   let maximumChainBytes = 0;
   for (const path of boundaries) {
@@ -219,7 +237,7 @@ export const validateAgentConfig = (root: string): AgentConfigResult => {
       }
       const target = resolve(dirname(path), decodeURIComponent(link.split('#')[0] ?? ''));
       const local = repoPath(root, target);
-      const absentOptionalDocs = ['docs/research', 'docs/reference'].some(
+      const absentOptionalDocs = relocatableDocumentation.some(
         (prefix) => local.startsWith(`${prefix}/`) && !existsSync(resolve(root, prefix)),
       );
       if (!existsSync(target) && !absentOptionalDocs && !local.startsWith('repos/')) {

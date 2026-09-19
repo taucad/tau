@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
+import type { FinancialActivityKind } from '@taucad/billing';
 import type { ModelInvocationService, ModelProviderWire } from '#api/llm/model-invocation.types.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 
@@ -17,6 +18,8 @@ export type LlmGatewayRelayInput = {
   /** Best-effort attribution for the receipt; absent when the caller sent none. */
   readonly projectHint?: string;
   readonly chatHint?: string;
+  /** What the caller asserted this turn is, validated at the header boundary. */
+  readonly activity?: FinancialActivityKind;
 };
 
 /** Relays one authenticated request through the shared funded invocation owner. */
@@ -37,7 +40,9 @@ export class LlmGatewayService {
         ...(input.anthropicVersion === undefined ? {} : { 'anthropic-version': input.anthropicVersion }),
         ...(input.anthropicBeta === undefined ? {} : { 'anthropic-beta': input.anthropicBeta }),
       },
-      activity: 'agent',
+      // A relayed turn is agent spend unless the caller named a kind the header
+      // boundary is willing to take its word for.
+      activity: input.activity ?? 'agent',
       ...(input.projectHint === undefined ? {} : { projectHint: input.projectHint }),
       ...(input.chatHint === undefined ? {} : { chatHint: input.chatHint }),
       signal: input.signal,

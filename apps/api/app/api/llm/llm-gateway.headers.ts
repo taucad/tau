@@ -1,7 +1,9 @@
 import { BadRequestException, HttpStatus } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { financialIdentitySchema } from '@taucad/billing';
+import type { FinancialActivityKind } from '@taucad/billing';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
 import { httpHeader } from '#constants/http-header.constant.js';
@@ -108,20 +110,39 @@ export const readHint = (value: string | undefined): string | undefined =>
   readOptionalHeader(value, financialIdentitySchema);
 
 /**
+ * The only activity kind a gateway client may assert about its own turn.
+ *
+ * Every other kind is either server-produced or changes how the turn is
+ * admitted. `title` and `commit` are the ones that matter: they are the `helper`
+ * capacity pool (`helperActivityKinds`, `credit-ledger.service.ts:79-90`), which
+ * `admitOperation` counts and limits *separately* from `primary`
+ * (`credit-ledger.service.ts:550-556`), so a caller that labelled its turns with
+ * them would admit past the primary pool's limit. `summary`, `completion` and
+ * `other` share the primary pool and so cost nothing to admit, but they are
+ * produced by surfaces a gateway client does not speak for, and asserting them
+ * would only misfile the receipt. `compaction` is the one kind a client alone
+ * knows and that shares `agent`'s pool, so honouring it changes what the receipt
+ * says and nothing the caller could profit from.
+ */
+const clientAssertableActivity = z.literal('compaction');
+
+/**
  * The optional attribution every gateway route reads the same way, as members
  * ready to spread into a relay input.
  *
  * @param request - The incoming gateway request.
- * @returns The hints the caller sent, each present only when it parsed.
+ * @returns What the caller asserted, each member present only when it parsed.
  */
 export const readAttribution = (
   request: FastifyRequest,
-): { readonly projectHint?: string; readonly chatHint?: string } => {
+): { readonly projectHint?: string; readonly chatHint?: string; readonly activity?: FinancialActivityKind } => {
   const projectHint = readHint(readSingleHeader(request, httpHeader.xTauProjectId));
   const chatHint = readHint(readSingleHeader(request, httpHeader.xTauChatId));
+  const activity = readOptionalHeader(readSingleHeader(request, httpHeader.xTauActivity), clientAssertableActivity);
   return {
     ...(projectHint === undefined ? {} : { projectHint }),
     ...(chatHint === undefined ? {} : { chatHint }),
+    ...(activity === undefined ? {} : { activity }),
   };
 };
 

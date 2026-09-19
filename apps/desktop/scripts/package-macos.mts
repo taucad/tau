@@ -315,6 +315,12 @@ const packagePaths = await packager({
   electronVersion: electron.version,
   icon: resolve(desktopRoot, 'resources/icon.icns'),
   extendInfo: hostInfo,
+  /* `CFBundleURLTypes`, which is what makes `tau://` links reach `open-url` at
+   * all (R4, ruling D4) — on macOS a deep link only works from a packaged app.
+   * Safe beside `extendInfo`: the packager applies the extension plist first
+   * and writes this key afterwards, and `TauHost-Info.plist` declares document
+   * types and UTIs only, never a URL type. */
+  protocols: [{ name: 'Tau', schemes: ['tau'] }],
   asar: { unpack: '**/{*.node,bin/esbuild,@agentclientprotocol/**}' },
   prune: false,
 });

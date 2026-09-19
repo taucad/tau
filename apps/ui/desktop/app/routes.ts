@@ -49,9 +49,7 @@ const routes: RouteConfigEntry[] = await flatRoutes({
     '../../app/routes/robots[[].[]]txt/**',
     '../../app/routes/sitemap[[].[]]xml/**',
 
-    // Server-side redirects (`settings_`) and publication SSR (`s.$slug`,
-    // which also mixes server env into a component module — blueprint P-R4).
-    '../../app/routes/s.$slug/**',
+    // Server-side redirects.
     '../../app/routes/settings_/**',
     '../../app/routes/settings_.$/**',
 
@@ -60,8 +58,20 @@ const routes: RouteConfigEntry[] = await flatRoutes({
   ],
 });
 
-export default routes.map((entry) =>
-  entry.id === '../../app/routes/_index'
-    ? { ...entry, file: '../../app/routes/_index/home-surface.desktop.tsx' }
-    : entry,
-);
+/**
+ * Paths the desktop keeps but serves from a different module.
+ *
+ * Excluding a route removes the path; a `tau://` link needs the path. `/s/:slug`
+ * is where `tau://s/<slug>` lands (R4) and the web module resolves a Tau
+ * publication in a server `loader` SPA mode forbids, so the desktop swaps the
+ * module and leaves the web route's SSR, cookies and meta untouched.
+ */
+const desktopRouteFiles = new Map<string, string>([
+  ['../../app/routes/_index', '../../app/routes/_index/home-surface.desktop.tsx'],
+  ['../../app/routes/s.$slug', '../../app/routes/s.$slug/desktop-route.tsx'],
+]);
+
+export default routes.map((entry) => {
+  const file = desktopRouteFiles.get(entry.id ?? '');
+  return file === undefined ? entry : { ...entry, file };
+});

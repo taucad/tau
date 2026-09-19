@@ -154,11 +154,12 @@ const namingConventionBase = [
      * filter above one carrying only modifiers, so without it the quoted-name
      * exemption loses to the `strictCamelCase` entry above for any quoted key
      * that happens to contain neither a hyphen nor a space (`'files[0]'`).
+     * `'^'` rather than `'.'` so the empty key `{ '': … }` matches too.
      */
     selector: ['classProperty', 'objectLiteralProperty'],
     format: null,
     modifiers: ['requiresQuotes'],
-    filter: { regex: '.', match: true },
+    filter: { regex: '^', match: true },
   },
 ];
 

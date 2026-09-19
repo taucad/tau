@@ -377,6 +377,20 @@ const claudeLimitReset = (prior: AcpLimitReset | undefined, meta: unknown): AcpL
   return limitResetOf(report?.['resetsAt'], typeof window === 'string' ? window : undefined) ?? prior;
 };
 
+/**
+ * Whether a stop is the kind of limit a reset time actually clears.
+ *
+ * Both adapters file a context-window or budget exhaustion as `limit` too, with
+ * `new_session` as the only action: nothing refreshes those, and stamping the
+ * account's reset on one would have the card announce a time in place of the
+ * agent's true sentence.
+ *
+ * @param stop - The AIR failure the agent sent.
+ * @returns Whether waiting for a reset can make this stop go away.
+ */
+const limitWithReset = (stop: AcpSessionFailure): boolean =>
+  stop.category === 'limit' && !stop.actions.includes('new_session');
+
 /** Claude's window vocabulary for the window lengths `codex-acp` measures in minutes. */
 const codexWindowNames: Record<number, string> = { 300: 'five_hour', 10_080: 'seven_day' };
 
@@ -1750,7 +1764,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       return authRequired();
     }
     const title = providerSentence(stop.title);
-    const reset = stop.category === 'limit' ? (codexLimitReset(meta) ?? limitReset) : undefined;
+    const reset = limitWithReset(stop) ? (codexLimitReset(meta) ?? limitReset) : undefined;
     const details: ExternalAgentStop = {
       agentId: options.adapter.id,
       failure: { category: stop.category, title, actions: stop.actions },

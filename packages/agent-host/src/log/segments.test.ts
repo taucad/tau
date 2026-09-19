@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { mergeLogSegments } from '#log/segments.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { serializeLogEvent } from '#log/serialization.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const encoder = new TextEncoder();

@@ -67,6 +67,7 @@
     "@taucad/geometry-core": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "zod": "catalog:"
   },
   "dependencies": {

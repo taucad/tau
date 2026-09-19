@@ -17,9 +17,7 @@ import type {
 } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, isContextOverflow } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Model, Models, UserMessage } from '@earendil-works/pi-ai';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createTransportFailureDiagnostic, piMessageToProvider } from '#harness/session-record.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { SessionRecord } from '#harness/session-record.js';
 
 const clearedToolResultContent = '[Old tool result content cleared]';

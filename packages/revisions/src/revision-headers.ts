@@ -1,4 +1,3 @@
-/* eslint-disable import-x/no-extraneous-dependencies -- the package import map resolves `#*.js` to this package's own source files. */
 /**
  * The header and trailer contract every adapter preserves (S-HEADERS).
  *

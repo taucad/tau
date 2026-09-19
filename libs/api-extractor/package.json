@@ -25,5 +25,8 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "typescript": "catalog:"
   }
 }

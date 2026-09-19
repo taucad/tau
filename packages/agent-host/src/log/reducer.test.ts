@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { reduceEventLog } from '#log/reducer.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
 
 const hash = 'b'.repeat(64);

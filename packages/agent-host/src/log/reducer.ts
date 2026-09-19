@@ -1,10 +1,6 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { EventLogError } from '#log/event-log-error.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { parseLogEvent } from '#log/event-schema.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createEventSequence } from '#log/event-sequence.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 
 const failHistory = (message: string): never => {

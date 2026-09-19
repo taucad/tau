@@ -1,9 +1,6 @@
 import { z } from 'zod';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { EventLogError } from '#log/event-log-error.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent, FileRefContentBlock, JsonValue } from '#log/event-types.js';
 
 const nonEmptyString = z.string().min(1);

@@ -1,4 +1,3 @@
-/* eslint-disable import-x/no-extraneous-dependencies -- the package import map resolves these internal source files. */
 /**
  * Browser-safe surface: the port, its commit codec and identity layer and the
  * `isomorphic-git` adapter. The lifecycle machines and the effects behind them

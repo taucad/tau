@@ -1,4 +1,3 @@
-/* eslint-disable import-x/no-extraneous-dependencies -- the package import map resolves `#*.js` to this package's own source files. */
 /**
  * Revision vocabulary: what a revision *is*, who made it, and what a branch is
  * called.

@@ -20,9 +20,7 @@ import type {
 } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { cliError, exitCodes, sanitize } from '#output.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import type { CliError } from '#output.js';
 
 /** Largest prompt accepted from a file or from stdin. Bytes. */

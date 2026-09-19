@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { fileRefBlockSchema, userProviderMessageSchema } from '#log/event-schema.js';
 
 const hash = 'a'.repeat(64);

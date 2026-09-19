@@ -22,9 +22,7 @@ import { openProjectRevisions } from '@taucad/host';
 import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
 
-/* eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map aliases, not package dependencies. */
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- ditto.
 import { requireGitToolchain } from '#commands/revisions.js';
 
 /** What the project's own `tau.json` says a viewer opens with. */

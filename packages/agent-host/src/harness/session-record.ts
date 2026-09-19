@@ -2,13 +2,9 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Api, AssistantMessage, AssistantMessageDiagnostic, Model } from '@earendil-works/pi-ai';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { util as zodUtility } from 'zod';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { DurableEventLog, HostRunFailure, MaterializedDocument } from '#waist/ports.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { reduceEventLog } from '#log/reducer.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { attachmentPathPattern, fileRefBlockSchema } from '#log/event-schema.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentLogEvent,
   AssistantProviderMessage,
@@ -19,9 +15,7 @@ import type {
   ProviderMessageMetadata,
   ToolInputProviderMessage,
 } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { HostToolExecutionDetails } from '#harness/tools.js';
 
 type WithoutBase<Event> = Event extends LogEventBase ? Omit<Event, keyof LogEventBase> : never;

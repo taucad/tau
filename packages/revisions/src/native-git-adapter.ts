@@ -5,18 +5,13 @@ import { z } from 'zod';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, mergeRevisionTrees, revisionMetadataSchema, revisionId } from '#algorithms/index.js';
 import { revisionBranchName } from '#revision-authority.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import { refPatternIsHostLocal } from '#remotes.js';
 import type { FileMode } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { BranchHeadUpdateResult, Revision, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import { runGitCommand } from '#git-command.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import type { GitCommandResult } from '#git-command.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import { NativeGitError } from '#native-git.types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package import map resolves this internal source file.
 import type {
   BindNativeGitWorkspaceInput,
   CommitNativeGitWorkspaceInput,

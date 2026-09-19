@@ -140,6 +140,7 @@
     "xstate": "^5.0.0"
   },
   "devDependencies": {
+    "@taucad/utils": "workspace:*",
     "xstate": "catalog:"
   }
 }

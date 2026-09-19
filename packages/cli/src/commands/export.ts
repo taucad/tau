@@ -9,13 +9,9 @@ import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
 import { ParameterAdmissionError, resolveParameterInputValues } from '@taucad/parameters';
 import type { ParameterResolutionOptions } from '@taucad/parameters';
 import type { PicogkKernelOptions } from '@taucad/picogk';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { loadCliRuntime } from '#runtime-options.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import type { CliProfilePhase } from '#commands/export-profile.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
 
 const parseJsonObject = (flag: string, input: string | undefined): Record<string, unknown> | undefined => {

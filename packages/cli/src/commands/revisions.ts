@@ -17,7 +17,6 @@ import { openProjectRevisions, requireRevisionToolchain } from '@taucad/host';
 import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 
 /** Arguments every verb takes. */

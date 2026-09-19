@@ -6,9 +6,7 @@ import type {
 } from '@earendil-works/pi-agent-core';
 import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { HostToolInvocation, HostToolResult, ToolRegistry } from '#waist/ports.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { JsonValue } from '#log/event-types.js';
 
 const bracketArrayAlias = /^(files|include|exclude)\[(0|[1-9][0-9]*)\]$/u;

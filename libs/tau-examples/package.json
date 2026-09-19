@@ -33,7 +33,12 @@
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {
+    "@jscad/modeling": "catalog:",
     "geospec": "workspace:*",
+    "libcascade": "catalog:",
+    "manifold-3d": "catalog:",
+    "replicad": "catalog:",
+    "replicad-opencascadejs": "catalog:",
     "sharp": "^0.34.5"
   }
 }

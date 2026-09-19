@@ -23,11 +23,8 @@ import { openProjectRevisions } from '@taucad/host';
 import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
 
-/* eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map aliases, not package dependencies. */
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- ditto.
 import { requireGitToolchain } from '#commands/revisions.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- ditto.
 import { requireApi } from '#commands/publish.js';
 
 /** One project as `GET /v1/projects` answers it, as this command uses it. */

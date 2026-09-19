@@ -54,6 +54,7 @@
     "@taucad/cache-core": "workspace:*"
   },
   "devDependencies": {
-    "@taucad/revisions": "workspace:*"
+    "@taucad/revisions": "workspace:*",
+    "@taucad/utils": "workspace:*"
   }
 }

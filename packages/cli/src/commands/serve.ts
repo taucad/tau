@@ -14,9 +14,7 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { requireGitToolchain } from '#commands/revisions.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { exitCodes } from '#output.js';
 
 const runtimeChildModulePath = (): string =>

@@ -22,7 +22,12 @@ const encoder = new TextEncoder();
 const wireFamilies = ['anthropic', 'openai', 'vertexai', 'xai'] as const;
 type WireFamily = (typeof wireFamilies)[number];
 
-/** The Gemini row a same-provider model switch targets (live T4). */
+/**
+ * The model id a same-provider switch carries end to end. Hermetic: the test
+ * hands it in and asserts the same string comes back on the wire, so it reads
+ * no catalog and does not track one — the 3.1 Pro row itself now routes to
+ * `gemini-3.1-pro-preview-customtools`.
+ */
 const geminiSwitchModelId = 'gemini-3.1-pro-preview';
 
 type Flavour = {

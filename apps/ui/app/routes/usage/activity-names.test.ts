@@ -29,14 +29,23 @@ describe('projectLabel', () => {
 });
 
 describe('chatLabel', () => {
-  it('says the spend belongs to a chat without naming it, and never by id', () => {
-    const label = chatLabel('chat_01H9');
+  it('names the chat once its project storage answered', () => {
+    expect(chatLabel('chat_01H9', 'Bracket redesign')).toBe('Bracket redesign');
+  });
+
+  it('says it is looking rather than showing a name it does not have yet', () => {
+    expect(chatLabel('chat_01H9', undefined)).toBe('Finding the chat…');
+  });
+
+  it('never falls back to the id when the chat is not on this device', () => {
+    const label = chatLabel('chat_01H9', null);
 
     expect(label).not.toContain('chat_01H9');
-    expect(label).toBe('Chat name not available');
+    expect(label).toBe('Chat not on this device');
   });
 
   it('keeps spend with no chat at all on the existing label', () => {
-    expect(chatLabel(null)).toBe('Other Tau activity');
+    expect(chatLabel(null, undefined)).toBe('Other Tau activity');
+    expect(chatLabel(null, null)).toBe('Other Tau activity');
   });
 });

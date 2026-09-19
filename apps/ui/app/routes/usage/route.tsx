@@ -25,7 +25,6 @@ import { ReservedTable } from '#routes/usage/reserved-table.js';
 import { UsageSummaryCards } from '#routes/usage/usage-summary-cards.js';
 import { UsageTable } from '#routes/usage/usage-table.js';
 import { usageActivityKinds, usageFilterOptions, useUsageFilters } from '#routes/usage/use-usage-filters.js';
-import { projectLabel } from '#routes/usage/activity-names.js';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
 import { useBillingRevisionMinimum, usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
 import type { SavedUsageOutcome } from '#db/billing-snapshot-store.js';
@@ -166,7 +165,7 @@ function FilterMenu<Value extends string>({
 }
 
 export default function UsagePage(): React.JSX.Element {
-  const { filters, query, setDateRange, toggleModel, toggleActivity, toggleProject, clearFilters, hasActiveFilters } =
+  const { filters, query, setDateRange, toggleModel, toggleActivity, toggleProjects, clearFilters, hasActiveFilters } =
     useUsageFilters();
   const minimum = useBillingRevisionMinimum();
   const saved = useSavedUsage(query);
@@ -177,12 +176,12 @@ export default function UsagePage(): React.JSX.Element {
   const balance = useCredits(minimum);
   const [openEventId, setOpenEventId] = useState<string>();
   const snapshot = 'snapshot' in usage ? usage.snapshot : undefined;
-  const options = usageFilterOptions(snapshot, filters);
   /* Project names come from the account's own listing, never from local storage:
      this page is prerendered as a session-neutral offline shell, and a saved
      snapshot read with no API has nothing to resolve against anyway. */
   const { projects } = useCloudProjects({ enabled: resolvesNames(usage.status) });
   const projectNames = useMemo(() => new Map(projects.map((project) => [project.id, project.name])), [projects]);
+  const options = usageFilterOptions(snapshot, filters, projectNames);
 
   return (
     <div className='container mx-auto space-y-6 px-4 py-8'>
@@ -208,9 +207,13 @@ export default function UsagePage(): React.JSX.Element {
           />
           <FilterMenu
             label='Projects'
-            options={options.projects.map((project) => ({ id: project, label: projectLabel(project, projectNames) }))}
-            selected={filters.projects}
-            onToggle={toggleProject}
+            options={options.projects}
+            selected={options.projects
+              .filter((option) => option.ids.some((id) => filters.projects.includes(id)))
+              .map((option) => option.id)}
+            onToggle={(id) => {
+              toggleProjects(options.projects.find((option) => option.id === id)?.ids ?? []);
+            }}
           />
           {hasActiveFilters ? (
             <Button variant='ghost' size='sm' className='gap-2' onClick={clearFilters}>

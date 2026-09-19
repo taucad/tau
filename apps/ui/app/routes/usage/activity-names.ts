@@ -11,6 +11,9 @@
 /** Spend that belongs to no project or chat of its own: Tau's own helper surfaces, and history older than the hints. */
 const otherTauActivity = 'Other Tau activity';
 
+/** One label for every project the account's listing did not name, so the filter offers them together. */
+export const unresolvedProjectName = 'Project not available';
+
 /**
  * The project a receipt belongs to, by name.
  *
@@ -28,20 +31,28 @@ export const projectLabel = (hint: string | null, names: ReadonlyMap<string, str
   if (hint === null) {
     return otherTauActivity;
   }
-  return names.get(hint) ?? 'Project not available';
+  return names.get(hint) ?? unresolvedProjectName;
 };
 
 /**
- * What the Chat row can honestly say.
+ * The chat a receipt was spent in, by name.
  *
- * Chat names live in each project's own storage, so naming one here means
- * opening every project this device holds (`getAllChats`) and still answering
- * nothing for a chat made on another device. That is more work than a billing
- * table may ask for, so the row reports whether the spend belongs to a chat at
- * all and leaves the name to the chat itself.
+ * Chats live in their project's own storage, which `useChatName` reads only
+ * once a reader opens the row. A chat made on another device, or one whose
+ * storage cannot answer, has no name to give here — said plainly rather than
+ * left as a loading label that never settles.
  *
  * @param hint - `activity.chatHint`, null when the spend had no chat.
- * @returns The label for the Chat row.
+ * @param name - The resolved name, null when the lookup settled on nothing,
+ * undefined while it is still reading.
+ * @returns A name a reader recognises, never the raw id.
  */
-export const chatLabel = (hint: string | null): string =>
-  hint === null ? otherTauActivity : 'Chat name not available';
+export const chatLabel = (hint: string | null, name: string | null | undefined): string => {
+  if (hint === null) {
+    return otherTauActivity;
+  }
+  if (name === undefined) {
+    return 'Finding the chat…';
+  }
+  return name ?? 'Chat not on this device';
+};

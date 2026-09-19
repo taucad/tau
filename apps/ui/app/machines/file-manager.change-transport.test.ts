@@ -59,8 +59,14 @@ type Harness = {
   readonly peer: FileSystemBridgeProxy;
 };
 
-/** The worker's composition: one authority, the production rooted handler, the real coalescer. */
-const createHarness = async (): Promise<Harness> => {
+/**
+ * The worker's composition: one authority, the production rooted handler, the real coalescer.
+ *
+ * @param root - The root the file manager is mounted at; `'/'` is the Home file
+ * manager `root-layout.tsx` always mounts, which is where the resolver used to
+ * route nothing to the view and hear its own writes back (gate G-D, H1).
+ */
+const createHarness = async (root: string = projectRoot): Promise<Harness> => {
   const mountTable = new MountTable();
   mountTable.mount('/', new MemoryProvider(), {
     class: 'authored',
@@ -106,7 +112,7 @@ const createHarness = async (): Promise<Harness> => {
   };
 
   const openRooted = async (): Promise<FileSystemBridgeProxy> => {
-    const connection = openFileSystemBridge(worker, { root: projectRoot, consumer: 'user' });
+    const connection = openFileSystemBridge(worker, { root, consumer: 'user' });
     const proxy = createFileSystemBridgeProxy(connection);
     await proxy.ready;
     disposers.push(() => {
@@ -121,7 +127,7 @@ const createHarness = async (): Promise<Harness> => {
   await workspaceProxy.ready;
 
   const viewProxy = await openRooted();
-  const paths = new WorkspacePathResolver(projectRoot);
+  const paths = new WorkspacePathResolver(root);
   const channel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
   const announced: string[] = [];
   channel.onFileWritten({ handler: (event) => announced.push(event.path) });
@@ -162,6 +168,36 @@ describe('the file manager change transport (charter D12, W12b)', () => {
 
   it("should announce a peer's write under the root in the file manager's own namespace", async () => {
     const { announced, peer } = await createHarness();
+
+    await peer.writeFile('src/nested.scad', 'cube(4);');
+
+    await vi.waitFor(() => {
+      expect(announced).toStrictEqual(['src/nested.scad']);
+    });
+  });
+});
+
+/*
+ * The Home file manager is mounted at `/` on every route (`root-layout.tsx`),
+ * and `toRelativePath` used to build its prefix as `'//'` — so nothing routed to
+ * its view while its change channel listened on the view's port, and it heard
+ * every one of its own writes as somebody else's (gate G-D, H1).
+ */
+describe('the Home file manager change transport (charter D12, gate G-D H1)', () => {
+  it('should not announce the Home file manager its own write as an external change', async () => {
+    const { client, announced, peer } = await createHarness('/');
+
+    await client.writeFile('/home.scad', 'cube(2);');
+    await peer.writeFile('peer.scad', 'cube(3);');
+
+    await vi.waitFor(() => {
+      expect(announced).toContain('peer.scad');
+    });
+    expect(announced).not.toContain('home.scad');
+  });
+
+  it("should announce a peer's write under the Home root root-relative", async () => {
+    const { announced, peer } = await createHarness('/');
 
     await peer.writeFile('src/nested.scad', 'cube(4);');
 

@@ -197,21 +197,27 @@ describe('MountTable integration', () => {
      * W12d retired the authority's `duplicateFile`, whose read-then-write routed
      * through the mount table and therefore copied *across* mounts. The gesture a
      * consumer reaches is the rooted `duplicate`, and a rooted filesystem is
-     * captured to one exact mount (W5), so the copy stays in that mount's own
-     * provider. Recorded as a behaviour reduction with no consumer: the Files
-     * pane duplicates inside one project, and bundled types took their own rooted
-     * handle in W11.
-     *
-     * Finding for the reviewer: unlike `copyTree`, which refuses a target across
-     * a mount boundary, `duplicate` writes the shadowed path silently. Pre-existing
-     * since W5; noted here because this row is now its only coverage.
+     * captured to one exact mount (W5) — so a target the mount table would route
+     * somewhere else is not this view's to write, and shadowing it silently in
+     * the captured provider is the wrong answer (gate G-D, H5). `copyTree`
+     * refuses a target that crosses a mount boundary; this is the same refusal
+     * for the one-file copy.
      */
-    it('should keep a rooted duplicate inside the mount it captured', async () => {
+    it('should refuse a rooted duplicate whose target the captured mount does not own', async () => {
       await rootProvider.writeFile('src/util.ts', 'util code');
-      await service.createRootedFileSystem('/').duplicate!('src/util.ts', 'previews/deps/util.ts');
 
-      expect(await rootProvider.readFile('src/util.ts', 'utf8')).toBe('util code');
+      await expect(
+        service.createRootedFileSystem('/').duplicate!('src/util.ts', 'previews/deps/util.ts'),
+      ).rejects.toThrow(/cross mount boundary/u);
+      expect(await rootProvider.exists('previews/deps/util.ts')).toBe(false);
       expect(await nodeModulesProvider.exists('util.ts')).toBe(false);
+    });
+
+    it('should duplicate inside the mount it captured', async () => {
+      await rootProvider.writeFile('src/util.ts', 'util code');
+      await service.createRootedFileSystem('/').duplicate!('src/util.ts', 'src/util.copy.ts');
+
+      expect(await rootProvider.readFile('src/util.copy.ts', 'utf8')).toBe('util code');
     });
   });
 

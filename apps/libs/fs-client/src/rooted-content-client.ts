@@ -70,8 +70,12 @@ export type RootedContentClient = RootedFiles & {
  *
  * A route the product grammar claims — a project, a linked checkout, a preview
  * instance — is its own root; everything else is Home's, and Home's root is `/`.
+ *
+ * @param absolutePath - Absolute authority path.
+ * @returns The owning root and the path inside it.
+ * @public
  */
-const rootedPathOf = (absolutePath: string): Readonly<{ root: string; path: string }> => {
+export const rootedPathOf = (absolutePath: string): Readonly<{ root: string; path: string }> => {
   const canonical = resolveAuthorityPath(absolutePath);
   const { id, rest } = parseRoute(canonical);
   if (id === undefined) {
@@ -107,7 +111,14 @@ export const createRootedContentClient = (input: {
   const connections = new Map<string, Promise<RootedConnection>>();
   /** Releases for the connections that actually opened, so `dispose` stays synchronous. */
   const releases: Array<() => void> = [];
-  let disposed = false;
+  /**
+   * Which round of connections is current; `dispose` starts the next one.
+   *
+   * Not a latch: the React context wires `dispose` to an effect cleanup and the
+   * client entry renders in `StrictMode`, whose dev double-mount replays that
+   * cleanup against the same memo value. A released client is empty, not dead.
+   */
+  let generation = 0;
 
   /** One connection per root, opened once; a failed open is not remembered. */
   const connectionFor = async (root: string): Promise<RootedConnection> => {
@@ -115,6 +126,7 @@ export const createRootedContentClient = (input: {
     if (existing !== undefined) {
       return existing;
     }
+    const opened = generation;
     const opening = (async (): Promise<RootedConnection> => {
       let connection: RootedConnection;
       try {
@@ -124,12 +136,12 @@ export const createRootedContentClient = (input: {
         connections.delete(root);
         throw error;
       }
-      if (disposed) {
-        /* Released while this one was still opening; closing it here leaks no port,
-         * and the caller's own call answers "disposed", which is the truth. */
-        connection.dispose();
-      } else {
+      if (opened === generation) {
         releases.push(connection.dispose);
+      } else {
+        /* Released while this one was still opening; closing it here leaks no port,
+         * and the caller's own call answers on a connection nobody else holds. */
+        connection.dispose();
       }
       return connection;
     })();
@@ -221,7 +233,7 @@ export const createRootedContentClient = (input: {
       return files.move(relative(source), relative(target));
     },
     dispose: () => {
-      disposed = true;
+      generation += 1;
       for (const release of releases.splice(0)) {
         release();
       }

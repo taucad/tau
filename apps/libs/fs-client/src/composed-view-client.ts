@@ -1,7 +1,9 @@
 import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
-import { WorkspaceMutationError } from '@taucad/filesystem';
+import { isWorkspaceMutationError, WorkspaceMutationError } from '@taucad/filesystem';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '#file-system-client.js';
+import { rootedPathOf } from '#rooted-content-client.js';
+import { isGlobalNodeModulesPath } from '#workspace-path-resolver.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 
 /**
@@ -350,11 +352,47 @@ export const createComposedViewClient = (input: {
    * of it (a1 review C2).
    */
   const viewPath = (absolutePath: string): string | undefined => {
+    /* Whatever the root: the alias is the resolver's own branch, and at the Home
+     * root (`/`) the root prefix alone would claim it for a view confined to
+     * Home's provider, which has never held a dependency (gate G-D, H9). */
+    if (isGlobalNodeModulesPath(absolutePath)) {
+      return undefined;
+    }
+    /* Home's prefix is `/`, which every path starts with; a path another route
+     * owns sits on that route's mount, and only the mount table finds it. */
+    if (rootedPathOf(absolutePath).root !== rootedPathOf(paths.root).root) {
+      return undefined;
+    }
     const relative = paths.toRelativePath(absolutePath);
     if (relative === undefined || paths.toAbsolutePath(relative) !== absolutePath) {
       return undefined;
     }
     return absolutePath === paths.root || absolutePath.startsWith(paths.rootPrefix) ? relative : undefined;
+  };
+
+  /**
+   * The same refusal in the namespace the caller asked in.
+   *
+   * A fresh instance, not a mutated one: `path` and `target` are readonly and
+   * the class is a structured-clone wire contract, so it is rebuilt with the
+   * same `code` and `cause` and survives another hop. An operand the resolver
+   * cannot spell as a path — `canRename` refuses a bare `..` before it resolves
+   * anything — is left as it is rather than turned into a throw.
+   */
+  const absoluteRefusal = <T>(answer: T): T => {
+    if (!isWorkspaceMutationError(answer)) {
+      return answer;
+    }
+    try {
+      /* One cast: the guard narrows `T` to the error, and a new instance of it
+       * is what goes back in `T`'s place. */
+      return new WorkspaceMutationError(answer.code, paths.toAbsolutePath(answer.path), {
+        ...(answer.target === undefined ? {} : { target: paths.toAbsolutePath(answer.target) }),
+        ...(answer.cause === undefined ? {} : { cause: answer.cause }),
+      }) as T;
+    } catch {
+      return answer;
+    }
   };
 
   const readFile = async (absolutePath: string, options?: unknown): Promise<string | Uint8Array<ArrayBuffer>> => {
@@ -497,7 +535,9 @@ export const createComposedViewClient = (input: {
           if (viewMember !== undefined && routed !== undefined) {
             const answer = await (view[viewMember] as (...rest: unknown[]) => Promise<unknown>)(...routed);
             if (property !== 'bulkMove') {
-              return answer;
+              /* A preflight answers with a refusal, and the path it names is the
+               * one the caller asked about. */
+              return absoluteRefusal(answer);
             }
             /* Callers match outcomes to the edits they sent, so the edits come
              * back in the namespace they were asked in. */
@@ -511,7 +551,7 @@ export const createComposedViewClient = (input: {
             const { moved, failed } = answer as BulkMoveResult;
             return {
               moved: moved.map((outcome) => absolute(outcome)),
-              failed: failed.map((outcome) => absolute(outcome)),
+              failed: failed.map((outcome) => ({ ...absolute(outcome), error: absoluteRefusal(outcome.error) })),
             };
           }
           if (viewOnlyMutations.has(property)) {

@@ -75,6 +75,24 @@ function isAbsoluteGlobalNodeModules(absoluteNorm: string): boolean {
   );
 }
 
+/**
+ * Whether an absolute path is the worker's global `/node_modules` alias.
+ *
+ * The one mount that lives outside every checkout, and the one path
+ * {@link WorkspacePathResolver.toRelativePath} answers for without consulting
+ * the root — so a caller that routes on that answer has to be able to tell the
+ * branch apart. At a project root the alias falls outside the root prefix
+ * anyway; at the Home root (`/`) nothing else would exclude it, and the view
+ * rooted there is confined to Home's own provider (gate G-D, H9).
+ *
+ * @param absolutePath - Host absolute path to classify.
+ * @returns Whether the path is the global dependency mount or one of its members.
+ * @public
+ */
+export function isGlobalNodeModulesPath(absolutePath: string): boolean {
+  return isAbsoluteGlobalNodeModules(resolveAuthorityPath(absolutePath));
+}
+
 function resolveUnderWorkspaceRoot(rootNorm: string, relativePath: string): string {
   assertRootedPath(relativePath);
   return relativePath === '' ? rootNorm : resolveAuthorityPath(`${rootNorm === '/' ? '' : rootNorm}/${relativePath}`);
@@ -133,7 +151,7 @@ export class WorkspacePathResolver {
     if (absNorm === rootNorm) {
       return '';
     }
-    const prefix = `${rootNorm}/`;
+    const prefix = this.rootPrefix;
     if (!absNorm.startsWith(prefix)) {
       return undefined;
     }

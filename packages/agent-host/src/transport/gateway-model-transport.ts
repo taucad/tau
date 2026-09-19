@@ -172,6 +172,13 @@ export type GatewayModelTransportOptions = {
   readonly auth?: (() => string | undefined | Promise<string | undefined>) | undefined;
   readonly baseUrl: string;
   /**
+   * The cloud project every call from this composition belongs to, for the
+   * gateway's spend attribution. Per composition, since one worker serves one
+   * project. Omitted for a workspace with no cloud identity — a `tau serve`
+   * checkout — whose receipts then name no project.
+   */
+  readonly projectId?: string | undefined;
+  /**
    * Catalog limits for a host that configures one default model. Optional: a
    * host that has none — every turn names its own row — supplies these through
    * {@link ModelStreamRequest} instead, which is what the harness always does.
@@ -568,6 +575,9 @@ const authenticatedFetch =
     readonly state: GatewayFetchState;
     readonly providerKind: ModelProviderKind;
     readonly attemptId: string;
+    /** Spend attribution, each sent only when the caller has one to give. */
+    readonly projectId?: string | undefined;
+    readonly chatId?: string | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
@@ -591,6 +601,14 @@ const authenticatedFetch =
       // escape hatch, which Tau's gateway never reads (it proxies server-side).
       headers.delete('anthropic-dangerous-direct-browser-access');
       headers.set('x-tau-attempt-id', options.attemptId);
+      // The receipt is the only place this spend can be attributed to the work
+      // that caused it. Absent rather than empty when there is nothing to name.
+      if (options.projectId !== undefined) {
+        headers.set('x-tau-project-id', options.projectId);
+      }
+      if (options.chatId !== undefined) {
+        headers.set('x-tau-chat-id', options.chatId);
+      }
       let body = init?.body;
       // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
       // per-system-block cache-control wire shape and uses pi's blanket retention.
@@ -951,6 +969,10 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       state,
       providerKind: request.providerKind!,
       attemptId: request.attemptId,
+      // Per composition, then per request: the worker owns one project and
+      // serves every chat in it. T7 adds `invocationPurpose` here the same way.
+      ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+      ...(request.chatId === undefined ? {} : { chatId: request.chatId }),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }

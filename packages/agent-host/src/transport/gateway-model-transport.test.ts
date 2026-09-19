@@ -1039,6 +1039,45 @@ describe('createGatewayModelTransport', () => {
     expect(headers?.has('authorization')).toBe(false);
   });
 
+  it('names the project and chat a call belongs to, and sends neither when it has neither', async () => {
+    /* The receipt is the only place spend can be attributed: without these the
+     * `/usage` page can say nothing about which project or chat a turn belonged
+     * to. The project is per-composition (one worker serves one project) and
+     * the chat is per-request (one transport serves every chat in it). Absent,
+     * not empty, when unknown — a `tau serve` workspace has no cloud project,
+     * and the server would drop an unparseable hint anyway. */
+    const headersFor = async (
+      options: { readonly projectId?: string },
+      overrides: Partial<ModelStreamRequest> = {},
+    ): Promise<Headers> => {
+      let headers: Headers | undefined;
+      await collect(
+        createGatewayModelTransport({
+          baseUrl: 'https://gateway.example',
+          ...options,
+          fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            headers = new Headers(init?.headers);
+            return fixtureResponse();
+          }),
+        }).stream(request(overrides)),
+      );
+      return headers!;
+    };
+
+    const both = await headersFor({ projectId: 'proj_fixture' }, { chatId: 'chat_fixture' });
+    expect(both.get('x-tau-project-id')).toBe('proj_fixture');
+    expect(both.get('x-tau-chat-id')).toBe('chat_fixture');
+
+    const neither = await headersFor({});
+    expect(neither.has('x-tau-project-id')).toBe(false);
+    expect(neither.has('x-tau-chat-id')).toBe(false);
+
+    // Each stands alone: a chat in a project with no cloud identity still names itself.
+    const chatOnly = await headersFor({}, { chatId: 'chat_fixture' });
+    expect(chatOnly.has('x-tau-project-id')).toBe(false);
+    expect(chatOnly.get('x-tau-chat-id')).toBe('chat_fixture');
+  });
+
   it('strips the bundled SDK telemetry headers the gateway CORS allow-list rejects', async () => {
     const seen: Array<readonly string[]> = [];
     const transportFor = (response: () => Response) =>
@@ -1057,8 +1096,10 @@ describe('createGatewayModelTransport', () => {
       ),
     );
 
-    // Every surviving name must sit in apps/api's CORS allow-list
-    // (apps/api/app/constants/http-header.constant.ts) or be CORS-safelisted.
+    /* Every surviving name must sit in apps/api's CORS allow-list
+     * (apps/api/app/constants/http-header.constant.ts) or be CORS-safelisted.
+     * No project or chat hint here: this composition names no project and the
+     * request no chat, which is how a `tau serve` workspace calls. */
     expect(seen).toEqual([
       ['accept', 'content-type', 'user-agent', 'x-tau-attempt-id'],
       ['accept', 'anthropic-beta', 'anthropic-version', 'content-type', 'user-agent', 'x-tau-attempt-id'],

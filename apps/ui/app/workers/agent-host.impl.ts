@@ -1601,6 +1601,10 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     model: request.model,
     modelTransport: createConfiguredGatewayModelTransport({
       baseUrl: request.gatewayBaseUrl,
+      /* The project every receipt from this worker attributes to. It is the
+       * same id `GET /v1/projects` lists, so the usage page can name it; the
+       * worker refuses to initialize without one (above). */
+      projectId: request.authority.projectId,
       model: request.model,
     }),
     toolRegistry,

@@ -3,7 +3,6 @@ import { mock } from 'vitest-mock-extended';
 import { FileContentService } from '#file-content-service.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '#file-content-service.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
-import type { FileSystemClient } from '#file-system-client.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
@@ -15,10 +14,10 @@ import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createComposedViewClient } from '#composed-view-client.js';
-import type { ComposedViewProxy } from '#composed-view-client.js';
+import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
 
-function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClient {
-  const proxy = mock<FileSystemClient>({
+function createMockProxy(overrides?: Partial<ComposedViewClient>): ComposedViewClient {
+  const proxy = mock<ComposedViewClient>({
     readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFiles: vi.fn().mockResolvedValue(undefined),
@@ -26,7 +25,6 @@ function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClien
     rmdir: vi.fn().mockResolvedValue(undefined),
     move: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
     unlink: vi.fn().mockResolvedValue(undefined),
-    copyDirectory: vi.fn().mockResolvedValue(undefined),
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob()),
     duplicateFile: vi.fn().mockResolvedValue(undefined),
   });
@@ -38,7 +36,7 @@ function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClien
 
 type FileContentHarness = {
   service: FileContentService;
-  proxy: FileSystemClient;
+  proxy: ComposedViewClient;
   emitFileChanged: (event: ChangeEvent) => void;
   disposeChannel: () => void;
 };
@@ -110,7 +108,7 @@ function fileWritten(pathRelative: string): ChangeEvent {
 }
 
 describe('FileContentService', () => {
-  let proxy: FileSystemClient;
+  let proxy: ComposedViewClient;
   let service: FileContentService;
   let emitFileChanged: (event: ChangeEvent) => void;
 
@@ -578,18 +576,6 @@ describe('FileContentService', () => {
     expect(callback).toHaveBeenCalledOnce();
   });
 
-  it('should call proxy.copyDirectory for copyDirectory', async () => {
-    const events: ContentChangeEvent[] = [];
-    service.onDidContentChange((event) => {
-      events.push(event);
-    });
-
-    await service.copyDirectory('src', 'dest');
-
-    expect(proxy.copyDirectory).toHaveBeenCalledWith('/project/src', '/project/dest');
-    expect(events).toContainEqual({ type: 'directoryCopied', sourcePath: 'src', targetPath: 'dest' });
-  });
-
   it('should duplicate a file and emit a fileCopied event with the target path', async () => {
     const events: ContentChangeEvent[] = [];
     service.onDidContentChange((event) => {
@@ -789,7 +775,7 @@ describe('FileContentService', () => {
     function createPoolService(options?: { openSizeBytes?: number }): {
       service: FileContentService;
       pool: SharedPool;
-      proxy: FileSystemClient;
+      proxy: ComposedViewClient;
       emitFileChanged: (event: ChangeEvent) => void;
     } {
       const buffer = new SharedArrayBuffer(16 * 1024 * 1024);
@@ -1945,7 +1931,7 @@ describe('FileContentService over the composed view (north star W2)', () => {
   };
 
   const composedHarness = async (): Promise<
-    FileContentHarness & { authority: FileSystemClient; provider: MemoryProvider }
+    FileContentHarness & { authority: ComposedViewClient; provider: MemoryProvider }
   > => {
     const provider = new MemoryProvider();
     await provider.writeFile('main.ts', 'export {};\n');

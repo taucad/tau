@@ -67,10 +67,25 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
     expectTypeOf<WorkspaceFileService['disposeStorageRoot']>().parameters.toExtend<[storageRootKey: string]>();
   });
 
-  it('requires an explicit search root and returns results asynchronously', () => {
-    type Search = WorkspaceFileService['searchFiles'];
+  /**
+   * O1.2 at the authority (charter D3, D4, W12d).
+   *
+   * Every one of these walked, indexed or copied a project tree with no view
+   * above it. The surface a consumer reaches is the rooted one — `search`,
+   * `statTree`, `duplicate`, `copyTree` — where the composed view applies the
+   * reserved layout before any provider I/O (authority Rule 16).
+   */
+  it('carries no unmasked search, recursive stat, file copy or tree copy', () => {
+    expectTypeOf<WorkspaceFileService>().not.toHaveProperty('searchFiles');
+    expectTypeOf<WorkspaceFileService>().not.toHaveProperty('getDirectoryStat');
+    expectTypeOf<WorkspaceFileService>().not.toHaveProperty('duplicateFile');
+    expectTypeOf<WorkspaceFileService>().not.toHaveProperty('copyDirectory');
+  });
+
+  it('serves the same index rooted, and answers asynchronously', () => {
+    type Search = NonNullable<RootedFileSystem['search']>;
     expectTypeOf<Search>().parameters.toExtend<
-      [root: string, query: string, options?: { maxResults?: number; includeDirectories?: boolean }]
+      [query: string, options?: { maxResults?: number; includeDirectories?: boolean }]
     >();
     expectTypeOf<ReturnType<Search>>().toEqualTypeOf<Promise<FileStatEntry[]>>();
   });

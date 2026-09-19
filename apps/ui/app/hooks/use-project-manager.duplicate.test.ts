@@ -44,7 +44,7 @@ const mockCommitPendingProjectDirectory = vi.fn(async () => {
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    client: {
+    files: {
       readFile: vi.fn(async () => lastManifest),
       writeFiles: vi.fn(async () => {
         phases.push('files');
@@ -55,6 +55,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       }),
       exists: vi.fn(async () => false),
       rmdir: vi.fn(async () => undefined),
+    },
+    client: {
       listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },

@@ -21,21 +21,23 @@ import { serveNodeFsProvider } from '#backend/node/host.js';
  *
  * Authority policy Rule 16 says control-plane bytes are absent from every
  * composed view and refused before provider I/O. The authority-global content
- * methods that `apps/libs/fs-client` proxies for UI consumers — `searchFiles`,
- * `getDirectoryStat`, `copyDirectory` — walk the raw
- * provider instead, so each one hands a consumer the paths the registry marks
+ * methods that `apps/libs/fs-client` proxied for UI consumers — `searchFiles`,
+ * `getDirectoryStat`, `copyDirectory`, `duplicateFile` — walked the raw provider
+ * instead, so each one handed a consumer the paths the registry marks
  * `agentAccess: 'hidden'`.
  *
- * A case still marked `it.fails` is a bypass a consumer can still reach, kept
- * that way so the suite stays green for the other lanes until the work package
- * named above it flips it to a plain `it` — which it does by asserting through
- * the surface that consumer now reaches, not by filtering the old one.
+ * All four are gone as of W12(d): every pin below asserts through the surface a
+ * consumer now reaches — the rooted one, where the view supplies the mask — and
+ * the first row pins the absence of the old ones. No case is `it.fails` any
+ * more; a row that starts failing is a reachability regression, not a pending
+ * work package.
  */
 
 const projectId = 'proj_mmmmmmmmmmmmmmmmmmmmm';
 const projectRoute = `/projects/${projectId}`;
+/* A second configured project, so the fixture still has a cross-root target the
+ * authority could have copied into — and no method left that would. */
 const duplicateId = 'proj_nnnnnnnnnnnnnnnnnnnnn';
-const duplicateRoute = `/projects/${duplicateId}`;
 
 /**
  * One seed per registry answer that matters: two hidden rows, one records row,
@@ -154,19 +156,30 @@ describe('masked path reachability through the authority-global surface', () => 
   });
 
   /*
-   * W5 gave the rooted surface a mask-checked `copyTree` (the two pins below);
-   * this row is the *authority* method the Files pane still reaches through
-   * `client.copyDirectory`, and W12 closes that last bypass by routing the
-   * gesture to the view.
+   * Flipped by W12(d). The bypass this row recorded was the *authority* method,
+   * and it is gone with its last consumer: `copyDirectory`, `duplicateFile`,
+   * `searchFiles` and `getDirectoryStat` are no longer on the surface at all, so
+   * there is no unmasked walk, copy or index of a project tree for a consumer to
+   * reach. The gestures a consumer does reach are the three rows below and, for
+   * a duplicated project, the versioned-only read through the project's own view
+   * (the second `describe`).
+   *
+   * Asserted by absence rather than by outcome, which is the only honest form: a
+   * method that does not exist cannot be called with a control-plane path.
    */
-  it.fails('should not copy control-plane bytes into a duplicated project', async () => {
-    await service.copyDirectory(projectRoute, duplicateRoute);
+  it('should offer no unmasked copy, walk or index of a project tree', () => {
+    const surface = service as unknown as Record<string, unknown>;
 
-    // Reading the copy through the same unmasked surface is deliberate: it
-    // proves the bytes were physically written, not merely rendered.
-    const copied = await physically(duplicateRoute);
-
-    expect(hiddenAmong(Object.keys(copied))).toEqual([]);
+    for (const bypass of ['copyDirectory', 'duplicateFile', 'searchFiles', 'getDirectoryStat']) {
+      expect(surface[bypass], bypass).toBeUndefined();
+    }
+    /* And the rooted surface a consumer reaches does serve them, so this cannot
+     * pass by the operations having been dropped altogether. */
+    const rooted = service.createRootedFileSystem(projectRoute);
+    expect(typeof rooted.copyTree).toBe('function');
+    expect(typeof rooted.duplicate).toBe('function');
+    expect(typeof rooted.search).toBe('function');
+    expect(typeof rooted.statTree).toBe('function');
   });
 
   it('should not copy control-plane bytes through the rooted surface a consumer reaches', async () => {

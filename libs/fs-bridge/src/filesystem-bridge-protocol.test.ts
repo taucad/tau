@@ -104,8 +104,10 @@ describe('filesystem bridge Zod schemas', () => {
     const stats = [
       { type: 'file', path: 'main.ts', name: 'main.ts', size: 4, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
     ] as const;
-    const parsedDirectoryStats = fileSystemBridgeSchemas.calls.getDirectoryStat.result.safeParse(stats);
-    const parsedSearchStats = fileSystemBridgeSchemas.calls.searchFiles.result.safeParse(stats);
+    /* Both spellings are the rooted surface's since W12d: `statTree` over the
+     * root's index and `search` over the same one, masked by the view. */
+    const parsedDirectoryStats = fileSystemBridgeSchemas.calls.statTree.result.safeParse(stats);
+    const parsedSearchStats = fileSystemBridgeSchemas.calls.search.result.safeParse(stats);
 
     expect(parsedDirectoryStats.success).toBe(true);
     expect(parsedSearchStats.success).toBe(true);

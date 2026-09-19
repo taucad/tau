@@ -30,6 +30,7 @@
     "./file-write-source": "./src/file-write-source.ts",
     "./file-system-client": "./src/file-system-client.ts",
     "./composed-view-client": "./src/composed-view-client.ts",
+    "./rooted-content-client": "./src/rooted-content-client.ts",
     "./file-content-errors": "./src/file-content-errors.ts",
     "./seems-binary": "./src/seems-binary.ts",
     "./file-content-service": "./src/file-content-service.ts",
@@ -79,6 +80,11 @@
         "types": "./dist/composed-view-client.d.mts",
         "import": "./dist/composed-view-client.mjs",
         "default": "./dist/composed-view-client.mjs"
+      },
+      "./rooted-content-client": {
+        "types": "./dist/rooted-content-client.d.mts",
+        "import": "./dist/rooted-content-client.mjs",
+        "default": "./dist/rooted-content-client.mjs"
       },
       "./file-content-errors": {
         "types": "./dist/file-content-errors.d.mts",

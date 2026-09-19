@@ -581,11 +581,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const chatStore = useMemo(
     () =>
       createChatFileStore({
-        client: fileManager.client,
+        client: fileManager.files,
         projectIds: async () =>
           (queryClient.getQueryData<ProjectListing>(['projects'])?.projects ?? []).map((entry) => entry.manifest.id),
       }),
-    [fileManager.client, queryClient],
+    [fileManager.files, queryClient],
   );
   const workspaceTelemetry = useWorkspaceTelemetry();
   const projectNameClient = useProjectNameClient();
@@ -783,9 +783,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const composerAttachments = useCallback(
     (directory: string | undefined) =>
       directory === undefined
-        ? createComposerRecordStore(fileManager.client, composerRecordPaths.newProject).attachments
-        : createAttachmentStore(fileManager.client, directory),
-    [fileManager.client],
+        ? createComposerRecordStore(fileManager.files, composerRecordPaths.newProject).attachments
+        : createAttachmentStore(fileManager.files, directory),
+    [fileManager.files],
   );
 
   /**
@@ -801,7 +801,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const source = composerAttachments(operation.attachmentSource);
       await Promise.all(
         chats.map(async (chat) => {
-          const target = createChatAttachmentStore(fileManager.client, operation.manifest.id, chat.id);
+          const target = createChatAttachmentStore(fileManager.files, operation.manifest.id, chat.id);
           const references = chat.messages.flatMap((message) =>
             message.parts.flatMap((part) => {
               const reference = part.type === 'file' ? attachmentReferenceOf(part) : undefined;
@@ -812,7 +812,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }),
       );
     },
-    [composerAttachments, fileManager.client],
+    [composerAttachments, fileManager.files],
   );
 
   /**
@@ -847,14 +847,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const removeProjectComposerRecords = useCallback(
     async (projectId: string): Promise<void> => {
       try {
-        await fileManager.client.rmdir(composerRecordPaths.project(projectId), { recursive: true });
+        await fileManager.files.rmdir(composerRecordPaths.project(projectId), { recursive: true });
       } catch (error) {
         if (!isNotFound(error)) {
           throw error;
         }
       }
     },
-    [fileManager.client],
+    [fileManager.files],
   );
 
   const resumePendingProjectOperation = useCallback(
@@ -1416,9 +1416,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       await ensureDiscoveryReady();
       const read = async (): Promise<ProjectManifest | undefined> => {
         try {
-          const parsed = parseProjectManifestBytes(
-            await fileManager.client.readFile(`/projects/${projectId}/tau.json`),
-          );
+          const parsed = parseProjectManifestBytes(await fileManager.files.readFile(`/projects/${projectId}/tau.json`));
           return parsed.success ? parsed.data : undefined;
         } catch {
           return undefined;
@@ -1432,7 +1430,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       await discoverProjects();
       return read();
     },
-    [discoverProjects, ensureDiscoveryReady, fileManager.client],
+    [discoverProjects, ensureDiscoveryReady, fileManager.files],
   );
 
   /**
@@ -1448,8 +1446,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         return existing;
       }
       const [tombstone, lastActivityAt] = await Promise.all([
-        readProjectLibraryFile(fileManager.client, projectId),
-        readManifestActivityAt(fileManager.client, projectId),
+        readProjectLibraryFile(fileManager.files, projectId),
+        readManifestActivityAt(fileManager.files, projectId),
       ]);
       return worker.createProjectLibraryState({
         projectId,
@@ -1457,7 +1455,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         ...(tombstone.deletedAt === undefined ? {} : { deletedAt: tombstone.deletedAt }),
       });
     },
-    [fileManager.client],
+    [fileManager.files],
   );
 
   const ensureProjectLibraryStates = useCallback(
@@ -1475,8 +1473,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           ...(await Promise.all(
             missing.slice(offset, offset + libraryRecoveryConcurrency).map(async (projectId) => {
               const [tombstone, lastActivityAt] = await Promise.all([
-                readProjectLibraryFile(fileManager.client, projectId),
-                readManifestActivityAt(fileManager.client, projectId),
+                readProjectLibraryFile(fileManager.files, projectId),
+                readManifestActivityAt(fileManager.files, projectId),
               ]);
               return {
                 projectId,
@@ -1493,7 +1491,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       }
       return byProjectId;
     },
-    [fileManager.client],
+    [fileManager.files],
   );
 
   const getProjectRouteAccess = useCallback(
@@ -1547,13 +1545,13 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         return undefined;
       }
       const updated = deepmerge(project, update) as ProjectManifest;
-      await fileManager.client.writeFile(
+      await fileManager.files.writeFile(
         `/projects/${projectId}/tau.json`,
         serializeProjectManifest(projectToManifest(updated)),
       );
       return updated;
     },
-    [fileManager.client, getProject],
+    [fileManager.files, getProject],
   );
 
   const touchProject = useCallback(
@@ -2050,11 +2048,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (trashed?.deletedAt === undefined) {
         return false;
       }
-      await writeProjectLibraryFile(fileManager.client, projectId, { deletedAt: trashed.deletedAt });
+      await writeProjectLibraryFile(fileManager.files, projectId, { deletedAt: trashed.deletedAt });
       bumpLibraryRevision();
       return true;
     },
-    [bumpLibraryRevision, ensureDiscoveryReady, fileManager.client, getReadiedWorker],
+    [bumpLibraryRevision, ensureDiscoveryReady, fileManager.files, getReadiedWorker],
   );
 
   const restoreProject = useCallback(
@@ -2065,11 +2063,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (!restored) {
         return false;
       }
-      await writeProjectLibraryFile(fileManager.client, projectId, {});
+      await writeProjectLibraryFile(fileManager.files, projectId, {});
       bumpLibraryRevision();
       return true;
     },
-    [bumpLibraryRevision, ensureDiscoveryReady, fileManager.client, getReadiedWorker],
+    [bumpLibraryRevision, ensureDiscoveryReady, fileManager.files, getReadiedWorker],
   );
 
   const permanentlyDeleteProject = useCallback(

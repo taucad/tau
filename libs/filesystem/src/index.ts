@@ -91,9 +91,13 @@ export type {
   StorageRootConfig,
   WorkspaceScope,
 } from '#mount-table.js';
-/* `MountEntry.kind` is a `RouteKind`, so the type ships with it; the route
- * builders stay module-private until a consumer outside L1 needs one (D10). */
-export type { RouteKind } from '#project-routes.js';
+/* `MountEntry.kind` is a `RouteKind`, so the type ships with it. `parseRoute`
+ * ships because a client outside L1 needs it: the rooted content client picks
+ * the root that owns an absolute path, and this stays the only grammar that
+ * answers which one that is (D10). The route *builders* remain module-private —
+ * nothing outside L1 spells a route it did not read. */
+export type { RouteKind, ParsedRoute } from '#project-routes.js';
+export { parseRoute } from '#project-routes.js';
 
 export {
   MissingWorkspaceHandleError,

@@ -98,8 +98,6 @@ function makeMutatingFakeHandlers() {
     canDelete: vi.fn<AnyAsync>().mockResolvedValue(true),
     unlink: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     rmdir: vi.fn<AnyAsync>().mockResolvedValue(undefined),
-    duplicateFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
-    copyDirectory: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     commitPendingProjectDirectory: vi.fn<AnyAsync>().mockResolvedValue({ status: 'committed' }),
     readFile: vi.fn<AnyAsync>().mockResolvedValue(new Uint8Array()),
     readdir: vi.fn<AnyAsync>().mockResolvedValue([]),
@@ -216,20 +214,6 @@ describe('bindMutationContextForPort', () => {
       const options = { recursive: true };
       await wrapper.rmdir('/d', options);
       expect(handlers.rmdir.mock.calls[0]).toEqual(['/d', options, mutationContext]);
-    });
-
-    it('duplicateFile(source, dest) lands as service.duplicateFile(source, dest, context)', async () => {
-      const handlers = makeMutatingFakeHandlers();
-      const wrapper = bindMutationContextForPort(handlers, mutationContext);
-      await wrapper.duplicateFile('/a', '/b');
-      expect(handlers.duplicateFile.mock.calls[0]).toEqual(['/a', '/b', mutationContext]);
-    });
-
-    it('copyDirectory(source, dest) lands as service.copyDirectory(source, dest, context)', async () => {
-      const handlers = makeMutatingFakeHandlers();
-      const wrapper = bindMutationContextForPort(handlers, mutationContext);
-      await wrapper.copyDirectory('/d1', '/d2');
-      expect(handlers.copyDirectory.mock.calls[0]).toEqual(['/d1', '/d2', mutationContext]);
     });
 
     it('commitPendingProjectDirectory(input) appends the mutation context', async () => {
@@ -1091,16 +1075,6 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     {
       name: 'rmdir',
       args: ['/d'],
-      handler: buildEmitter(() => ({ type: 'directoryChanged', path: '/', backend: 'memory' })),
-    },
-    {
-      name: 'duplicateFile',
-      args: ['/a', '/b'],
-      handler: buildEmitter((a) => ({ type: 'fileWritten', path: a[1] as string, backend: 'memory' })),
-    },
-    {
-      name: 'copyDirectory',
-      args: ['/d1', '/d2'],
       handler: buildEmitter(() => ({ type: 'directoryChanged', path: '/', backend: 'memory' })),
     },
   ];

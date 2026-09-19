@@ -14,8 +14,6 @@ export type FileSystemClientCoreRpcKeys = AssertKeys<
   | 'writeFile'
   | 'stat'
   | 'readDirectory'
-  | 'getDirectoryStat'
-  | 'searchFiles'
   | 'pollExternalChanges'
   | 'exists'
   | 'watch'
@@ -92,10 +90,22 @@ describe('FileSystemClient explicit-workspace contract', () => {
     expectTypeOf<Parameters<FileSystemClient['bulkMove']>>().toEqualTypeOf<[edits: readonly BulkMoveEdit[]]>();
   });
 
-  it('keeps search rooted and allows external polling to select one routed root', () => {
-    expectTypeOf<Parameters<FileSystemClient['searchFiles']>>().toExtend<
-      [root: string, query: string, options?: { maxResults?: number; includeDirectories?: boolean }]
-    >();
+  it('allows external polling to select one routed root', () => {
     expectTypeOf<Parameters<FileSystemClient['pollExternalChanges']>>().toEqualTypeOf<[root?: string]>();
+  });
+
+  /**
+   * O1.2 at the protocol type (charter D3, D4, W12d).
+   *
+   * Each of these walked or indexed the raw provider with no view above it, so
+   * every one handed a consumer the paths the registry hides. They are the
+   * rooted surface's now — `duplicate`, `copyTree`, `search`, `statTree` — and a
+   * consumer reaches them only through a composed view.
+   */
+  it('carries no unmasked walk, copy or index of a project tree', () => {
+    expectTypeOf<FileSystemClient>().not.toHaveProperty('duplicateFile');
+    expectTypeOf<FileSystemClient>().not.toHaveProperty('copyDirectory');
+    expectTypeOf<FileSystemClient>().not.toHaveProperty('searchFiles');
+    expectTypeOf<FileSystemClient>().not.toHaveProperty('getDirectoryStat');
   });
 });

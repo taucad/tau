@@ -508,14 +508,14 @@ describe('FileManagerProvider — client + workspace facades', () => {
     return renderHook(() => useFileManager(), { wrapper });
   };
 
-  it('exposes a typed client facade whose methods route through the worker proxy', async () => {
+  it('exposes a scope-required storage facade whose reads route through the worker proxy', async () => {
     const { result } = renderProvider();
 
     expect(result.current.client).toBeDefined();
-    // Spot-check method shape: `client.readShallowDirectory` is gated on
-    // proxy readiness and forwards to the worker.
+    // Spot-check method shape: a physical scope the mount table does not route
+    // is gated on proxy readiness and forwards to the authority (charter D5).
     await act(async () => {
-      const nodes = await result.current.client.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
+      const nodes = await result.current.scopedStorage.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
       expect(nodes).toEqual([]);
     });
   });
@@ -646,18 +646,18 @@ describe('FileManagerProvider — client + workspace facades', () => {
   it('refuses a Files-pane delete of a system skill file as read-only, without asking the authority', async () => {
     const { result } = renderProvider();
 
-    await expect(result.current.client.canDelete('/projects/root/.agents/skills/demo/SKILL.md')).resolves.toMatchObject(
-      { code: 'READ_ONLY_MOUNT' },
-    );
+    await expect(result.current.canDelete('.agents/skills/demo/SKILL.md')).resolves.toMatchObject({
+      code: 'READ_ONLY_MOUNT',
+    });
     expect(mockProxyCanDelete).not.toHaveBeenCalled();
   });
 
   it('refuses a Files-pane move of a project file onto a system skill path', async () => {
     const { result } = renderProvider();
 
-    await expect(
-      result.current.client.move('/projects/root/main.ts', '/projects/root/.agents/skills/demo/SKILL.md'),
-    ).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(result.current.moveFile('main.ts', '.agents/skills/demo/SKILL.md')).rejects.toMatchObject({
+      code: 'EROFS',
+    });
     expect(mockProxyMove).not.toHaveBeenCalled();
   });
 

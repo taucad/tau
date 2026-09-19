@@ -5,7 +5,8 @@ import type { RefreshGenerationGuard } from '#refresh-generation-guard.js';
 import type { WorkerChangeChannel, WorkerRelativeRenameEvent } from '#worker-change-channel.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import type { SharedPool } from '@taucad/memory';
-import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '#file-system-client.js';
+import type { BulkMoveEdit, BulkMoveResult } from '#file-system-client.js';
+import type { ComposedViewClient } from '#composed-view-client.js';
 import type { FileWriteSource } from '#file-write-source.js';
 import { headSniffByteLength, seemsBinary } from '#seems-binary.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
@@ -80,7 +81,7 @@ export type RawReadOptions = {
 export type OutcomeChangeEvent = { path: string; result: FileContentResult };
 
 type FileContentServiceInit = {
-  proxy: FileSystemClient;
+  proxy: ComposedViewClient;
   paths: WorkspacePathResolver;
   channel: WorkerChangeChannel;
   refreshGuard: RefreshGenerationGuard;
@@ -151,10 +152,10 @@ type EditorMutationBarrier = {
  * import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
  * import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
  * import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
- * import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+ * import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
  * import type { WorkerChangeChannelTransport } from '@taucad/fs-client/worker-change-channel';
  * export function createExampleFileContentService(
- *   proxy: FileSystemClient,
+ *   proxy: ComposedViewClient,
  *   listen: WorkerChangeChannelTransport['listen'],
  * ): FileContentService {
  *   const paths = new WorkspacePathResolver('/projects/p1');
@@ -170,7 +171,7 @@ type EditorMutationBarrier = {
  */
 export class FileContentService {
   private readonly cache: BoundedFileCache;
-  private readonly proxy: FileSystemClient;
+  private readonly proxy: ComposedViewClient;
   private readonly filePool: SharedPool | undefined;
   private readonly openSizeBytes: number;
   private readonly paths: WorkspacePathResolver;
@@ -830,19 +831,6 @@ export class FileContentService {
     this.setOrphaned(destinationKey, false);
     this.publishOutcome(destinationKey, { kind: 'text', content: localCopy });
     this.notifyGlobalSubscribers({ type: 'fileCopied', sourcePath: sourceKey, targetPath: destinationKey });
-  }
-
-  /**
-   * Copy a directory. Proxy pass-through, no content caching. Emits a typed
-   * copy fact so FileTreeService and project participants refresh explicitly.
-   * @param source - Source directory (worker-resolved path form expected by proxy).
-   * @param destination - Destination directory for the copy operation.
-   */
-  public async copyDirectory(source: string, destination: string): Promise<void> {
-    const sourceKey = this.paths.toWorkspaceRelativeKey('copyDirectory', source);
-    const destinationKey = this.paths.toWorkspaceRelativeKey('copyDirectory', destination);
-    await this.proxy.copyDirectory(this.paths.toAbsolutePath(sourceKey), this.paths.toAbsolutePath(destinationKey));
-    this.notifyGlobalSubscribers({ type: 'directoryCopied', sourcePath: sourceKey, targetPath: destinationKey });
   }
 
   /**

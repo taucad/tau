@@ -3,6 +3,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { attributionFaults } from '#support/usage-receipt.js';
 import type { UsageReceipt } from '#support/usage-receipt.js';
 import {
   billingMounted,
@@ -129,7 +130,7 @@ const expectTerminalVertexOperations = async (
 
 test('Gemini creates a cube, then adds a vertical cylinder cutout on the next user turn', async () => {
   const email = `gemini-live-${String(Date.now())}@e2e.tau`;
-  await openLiveChat({ email, modelId, projectName: 'Gemini Replay Acceptance' });
+  const turn = await openLiveChat({ email, modelId, projectName: 'Gemini Replay Acceptance' });
 
   await submitTurn(
     'Create one solid 20 mm cube centered at the origin in main.scad. Create main.geospec.ts with all four requirements: watertight, exactly one solid body, 20 x 20 x 20 mm extents, and 8000 mm^3 volume. Then invoke the test_model tool once on the whole main.geospec.ts file, without filtering to a single test. Do not add a hole yet. Finish this turn only after all four requirements pass in that one run, and end your reply with the line CUBE-TURN-DONE.',
@@ -178,9 +179,12 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
   for (const receipt of usage) {
     expect(receipt.model.providerId).toBe('vertexai');
   }
+  // Every receipt has to say which project and chat earned it, or `/usage` can
+  // only file this spend under "Other Tau activity".
+  expect(attributionFaults(usage, turn)).toEqual([]);
   const operations = await expectTerminalVertexOperations(email, 6);
   await target.writeArtifact(
     'gemini-browser-agent-host-live-evidence.json',
-    `${JSON.stringify({ modelId, usage, operations }, null, 2)}\n`,
+    `${JSON.stringify({ modelId, turn, usage, operations }, null, 2)}\n`,
   );
 }, 1_200_000);

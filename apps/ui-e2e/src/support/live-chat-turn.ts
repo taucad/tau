@@ -13,8 +13,8 @@ import { expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
-import { classifyReceipts } from '#support/usage-receipt.js';
-import type { UsageReceipt } from '#support/usage-receipt.js';
+import { classifyReceipts, turnIdentityFromUrl } from '#support/usage-receipt.js';
+import type { TurnIdentity, UsageReceipt } from '#support/usage-receipt.js';
 
 /** A catalog row a live spec drives: the selector/cookie id and the provider that bills it. */
 export type LiveModel = {
@@ -54,12 +54,15 @@ const withPageText = async (message: string, assertion: () => Promise<void>): Pr
  * Sign a funded test account in, pin the model and kernel, and open a new project's chat.
  *
  * @param options - The account email, the catalog model the first turn runs on, and the project name.
+ * @returns The project and chat the turns will run in — the same two ids the
+ * browser host sends as `x-tau-project-id`/`x-tau-chat-id`, read here while the
+ * route is pinned rather than after later navigation has moved it.
  */
 export const openLiveChat = async (options: {
   readonly email: string;
   readonly modelId: string;
   readonly projectName: string;
-}): Promise<void> => {
+}): Promise<TurnIdentity> => {
   await target.authenticateTauTestUser({
     creditAtoms: '100000000',
     email: options.email,
@@ -83,6 +86,7 @@ export const openLiveChat = async (options: {
   await target.waitFor(() => document.querySelector('[aria-label="Ask Tau to build anything..."]') !== null, null, {
     timeout: 60_000,
   });
+  return turnIdentityFromUrl(await target.currentUrl());
 };
 
 /**

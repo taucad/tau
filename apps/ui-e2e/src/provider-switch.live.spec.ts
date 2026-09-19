@@ -15,6 +15,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { LiveModel } from '#support/live-chat-turn.js';
+import { attributionFaults } from '#support/usage-receipt.js';
 import {
   billingMounted,
   expandActivities,
@@ -106,7 +107,7 @@ const namesModel = (model: LiveModel, invokedId: string): boolean =>
 for (const [name, first, second] of pairs) {
   test(`${name}: the second turn replays the first turn's tool result`, async () => {
     const email = `switch-live-${String(Date.now())}@e2e.tau`;
-    await openLiveChat({ email, modelId: first.id, projectName: `Provider Switch ${name}` });
+    const turn = await openLiveChat({ email, modelId: first.id, projectName: `Provider Switch ${name}` });
 
     await submitTurn(firstPrompt);
     await expectAssistantText(/EDGE-WRITTEN/u);
@@ -156,9 +157,13 @@ for (const [name, first, second] of pairs) {
     expect(new Set(settled.map((receipt) => receipt.model.providerId))).toEqual(
       new Set([first.providerId, second.providerId]),
     );
+    // Both sides of the switch bill the same chat: the provider changed, the
+    // attribution did not. Matching by provider also sweeps in the API's own
+    // name and commit generation, which `attributionFaults` leaves alone.
+    expect(attributionFaults(settled, turn)).toEqual([]);
     await target.writeArtifact(
       `provider-switch-live-${first.providerId}-to-${second.providerId}.json`,
-      `${JSON.stringify({ from: first, to: second, invokedModels, settled }, null, 2)}\n`,
+      `${JSON.stringify({ from: first, to: second, turn, invokedModels, settled }, null, 2)}\n`,
     );
   }, 900_000);
 }

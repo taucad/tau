@@ -418,17 +418,6 @@ export class HostsService implements OnModuleDestroy {
     return { deviceId, label: cloudHostLabel, state: 'provisioned' };
   }
 
-  private async findCloudHost(userId: string, projectId: string) {
-    const rows = await this.databaseService.database
-      .select({ id: hostDevice.id, label: hostDevice.label })
-      .from(hostDevice)
-      .where(
-        and(eq(hostDevice.ownerId, userId), eq(hostDevice.cloudProjectId, projectId), isNull(hostDevice.revokedAt)),
-      )
-      .limit(1);
-    return rows[0];
-  }
-
   /**
    * The run directory rows one host owns, newest first.
    *
@@ -580,53 +569,6 @@ export class HostsService implements OnModuleDestroy {
       Math.ceil(sessionOfferTimeout / 1000),
     );
     await this.redisService.client.publish(sessionOutcomeChannel(message.sessionId), payload);
-  }
-
-  /**
-   * Upsert one run's directory row from its host's control frame.
-   *
-   * The owner and the project are read from the device rather than trusted from
-   * the wire: a daemon knows neither (its T0 vocabulary carries no project
-   * identity), and a compromised one must not be able to file a run against
-   * somebody else's account.
-   *
-   * ponytail: one indexed primary-key read per lifecycle transition (about five
-   * per run). Cache the owner on the control connection if a host ever reports
-   * often enough for it to matter.
-   */
-  private async recordRun(
-    deviceId: string,
-    message: Extract<HostControlMessage, { readonly type: 'run' }>,
-  ): Promise<void> {
-    const rows = await this.databaseService.database
-      .select({ ownerId: hostDevice.ownerId, cloudProjectId: hostDevice.cloudProjectId })
-      .from(hostDevice)
-      .where(and(eq(hostDevice.id, deviceId), isNull(hostDevice.revokedAt)))
-      .limit(1);
-    const device = rows[0];
-    if (!device) {
-      return;
-    }
-    const updatedAt = new Date(message.updatedAt);
-    const row = {
-      runId: message.runId,
-      chatId: message.chatId,
-      projectId: message.projectId ?? device.cloudProjectId,
-      ownerId: device.ownerId,
-      placement: deviceId,
-      state: message.state,
-      updatedAt,
-    };
-    await this.databaseService.database
-      .insert(agentRun)
-      .values(row)
-      .onConflictDoUpdate({
-        target: agentRun.runId,
-        set: { chatId: row.chatId, projectId: row.projectId, state: row.state, updatedAt },
-        /* Frames are ordered on one socket but a reconnect can replay an older
-         * one; a directory that can go backwards is worse than a stale one. */
-        setWhere: lt(agentRun.updatedAt, updatedAt),
-      });
   }
 
   public async listDevices(userId: string): Promise<HostDeviceListing[]> {
@@ -860,6 +802,64 @@ export class HostsService implements OnModuleDestroy {
       return;
     }
     await this.parkRoute({ ...options, side: 'host', deviceId: grant.deviceId });
+  }
+
+  private async findCloudHost(userId: string, projectId: string) {
+    const rows = await this.databaseService.database
+      .select({ id: hostDevice.id, label: hostDevice.label })
+      .from(hostDevice)
+      .where(
+        and(eq(hostDevice.ownerId, userId), eq(hostDevice.cloudProjectId, projectId), isNull(hostDevice.revokedAt)),
+      )
+      .limit(1);
+    return rows[0];
+  }
+
+  /**
+   * Upsert one run's directory row from its host's control frame.
+   *
+   * The owner and the project are read from the device rather than trusted from
+   * the wire: a daemon knows neither (its T0 vocabulary carries no project
+   * identity), and a compromised one must not be able to file a run against
+   * somebody else's account.
+   *
+   * ponytail: one indexed primary-key read per lifecycle transition (about five
+   * per run). Cache the owner on the control connection if a host ever reports
+   * often enough for it to matter.
+   */
+  private async recordRun(
+    deviceId: string,
+    message: Extract<HostControlMessage, { readonly type: 'run' }>,
+  ): Promise<void> {
+    const rows = await this.databaseService.database
+      .select({ ownerId: hostDevice.ownerId, cloudProjectId: hostDevice.cloudProjectId })
+      .from(hostDevice)
+      .where(and(eq(hostDevice.id, deviceId), isNull(hostDevice.revokedAt)))
+      .limit(1);
+    const device = rows[0];
+    if (!device) {
+      return;
+    }
+    const updatedAt = new Date(message.updatedAt);
+    const row = {
+      runId: message.runId,
+      chatId: message.chatId,
+      projectId: message.projectId ?? device.cloudProjectId,
+      ownerId: device.ownerId,
+      placement: deviceId,
+      state: message.state,
+      updatedAt,
+    };
+    await this.databaseService.database
+      .insert(agentRun)
+      .values(row)
+      .onConflictDoUpdate({
+        target: agentRun.runId,
+        set: { chatId: row.chatId, projectId: row.projectId, state: row.state, updatedAt },
+        /* Frames are ordered on one socket but a reconnect can replay an older
+         * one; a directory that can go backwards is worse than a stale one. */
+        setWhere: lt(agentRun.updatedAt, updatedAt),
+      });
   }
 
   private async parkRoute(options: {

@@ -147,31 +147,6 @@ export class PublicationsService {
     };
   }
 
-  private async assertPrivateVisibilityAllowed(args: { ownerId: string; projectId?: string }): Promise<void> {
-    const entitlements = await this.entitlementsService.getEntitlements(args.ownerId);
-    if (entitlements.canCreatePrivateShares) {
-      return;
-    }
-
-    if (args.projectId !== undefined) {
-      const [existing] = await this.databaseService.database
-        .select({ visibility: schema.publication.visibility })
-        .from(schema.project)
-        .innerJoin(schema.publication, eq(schema.project.currentPublicationId, schema.publication.id))
-        .where(and(eq(schema.project.id, args.projectId), eq(schema.project.ownerId, args.ownerId)))
-        .limit(1);
-      if (existing?.visibility === 'private') {
-        // Content-only update to a grandfathered private publication.
-        return;
-      }
-    }
-
-    throw new ForbiddenException({
-      code: publicationApiCode.ENTITLEMENT_REQUIRED,
-      message: 'Private publications require the Pro plan',
-    });
-  }
-
   /**
    * Reads the current Better Auth `user` row and returns a denormalised snapshot suitable
    * for persisting on the publication record. Returns `null` when the user no longer exists
@@ -750,6 +725,31 @@ export class PublicationsService {
         .set({ viewCount: sql`${schema.publication.viewCount} + 1` })
         .where(eq(schema.publication.id, publication.id));
     }
+  }
+
+  private async assertPrivateVisibilityAllowed(args: { ownerId: string; projectId?: string }): Promise<void> {
+    const entitlements = await this.entitlementsService.getEntitlements(args.ownerId);
+    if (entitlements.canCreatePrivateShares) {
+      return;
+    }
+
+    if (args.projectId !== undefined) {
+      const [existing] = await this.databaseService.database
+        .select({ visibility: schema.publication.visibility })
+        .from(schema.project)
+        .innerJoin(schema.publication, eq(schema.project.currentPublicationId, schema.publication.id))
+        .where(and(eq(schema.project.id, args.projectId), eq(schema.project.ownerId, args.ownerId)))
+        .limit(1);
+      if (existing?.visibility === 'private') {
+        // Content-only update to a grandfathered private publication.
+        return;
+      }
+    }
+
+    throw new ForbiddenException({
+      code: publicationApiCode.ENTITLEMENT_REQUIRED,
+      message: 'Private publications require the Pro plan',
+    });
   }
 
   /**

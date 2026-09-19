@@ -11,6 +11,23 @@ use serde_json::Value;
 mod support;
 use support::current_profile::{bind_claim, bind_ingest};
 
+const QUALIFIED: &str = include_str!("fixtures/current-profile-01/qualified-results.json");
+
+fn qualified_record(index: usize) -> Value {
+    let fixture: Value = serde_json::from_str(QUALIFIED).unwrap();
+    assert_eq!(
+        fixture["authority"]["adoptedRuling"],
+        "W2.C-CURRENT-PROFILE-CONFORMANCE-01"
+    );
+    fixture["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["id"] == format!("selected-bore-void/{index}"))
+        .unwrap()
+        .clone()
+}
+
 fn claim_result(json: &str) -> Value {
     let value: Value = serde_json::from_str(json).unwrap();
     let results = value["result"]["results"].as_array().unwrap();
@@ -96,6 +113,20 @@ fn selected_bore_void_original_four_requests_and_budget_refusal() {
             bound.original_subject_hash, bound.effective_subject_hash
         );
         let request = bound.json;
+        let declared = qualified_record(i);
+        assert_eq!(
+            declared["originalRequestPath"],
+            format!("native/occt/rust/tests/fixtures/nominal-bore-void/{i}.request.json")
+        );
+        assert_eq!(
+            request,
+            declared["effectiveRequestUtf8"].as_str().unwrap(),
+            "derived request must match the predeclared registry/subject-only binding"
+        );
+        assert_eq!(
+            bound.effective_subject_hash,
+            declared["effectiveSubjectHash"]
+        );
         let submitted: Value = serde_json::from_str(&request).unwrap();
         let claims = submitted["plan"]["claims"].as_array().unwrap();
         assert_eq!(claims.len(), 1);
@@ -105,6 +136,11 @@ fn selected_bore_void_original_four_requests_and_budget_refusal() {
         let result =
             String::from_utf8(engine.process_request(request.as_bytes()).unwrap()).unwrap();
         eprintln!("BORE_VOID_ORIGINAL {i} {result}");
+        assert_eq!(
+            result,
+            declared["expectedResponseUtf8"].as_str().unwrap(),
+            "complete candidate-derived regression snapshot; independent semantic review is separate"
+        );
         let claim = claim_result(&result);
         assert_eq!(claim["claimId"], claims[0]["claimId"]);
         assert_eq!(

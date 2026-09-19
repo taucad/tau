@@ -57,6 +57,7 @@ import type { MutationPipeline } from '#mutation-pipeline.js';
 import { isProjectDirectoryPath } from '#mutation-pipeline.js';
 import type { TreeIndexes } from '#tree-index.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
+import { isDurableScope, projectLocatorFor } from '#backend/scope.js';
 import { isNotFoundError } from '#workspace-errors.js';
 import { projectRoute } from '#project-routes.js';
 
@@ -135,7 +136,7 @@ const pendingProjectScopeSchema = z
     z.object({ backend: z.literal('memory'), storageRootKey: z.string() }),
   ])
   .superRefine((scope, context) => {
-    if (scope.backend === 'memory') {
+    if (!isDurableScope(scope)) {
       context.addIssue({ code: 'custom', message: 'Pending project commits require durable storage.' });
     }
   })
@@ -318,17 +319,7 @@ export class ProjectDirectories {
       }
       const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
         const relativeDirectory = assertRootedPath(directory);
-        const locator: ProjectLocator =
-          root.backend === 'webaccess'
-            ? {
-                backend: root.backend,
-                storageRootKey,
-                relativeDirectory,
-                workspaceId: root.workspaceId,
-              }
-            : root.backend === 'node'
-              ? { backend: root.backend, storageRootKey, relativeDirectory, path: root.path }
-              : { backend: root.backend, storageRootKey, relativeDirectory };
+        const locator = projectLocatorFor(root, storageRootKey, relativeDirectory);
         let bytes: Uint8Array<ArrayBuffer>;
         try {
           bytes = await provider.readFile(joinRelativePath(relativeDirectory, 'tau.json'));
@@ -459,8 +450,9 @@ export class ProjectDirectories {
     if (!isProjectDirectoryPath(path)) {
       throw new TypeError('Permanent delete target must be an immediate child of the workspace root.');
     }
-    const uncheckedScope = input.scope as WorkspaceScope;
-    if (uncheckedScope.backend === 'memory') {
+    // `StorageRootConfig` has no ephemeral member, but an untyped RPC caller can
+    // still deliver one, and this operation must never run against it.
+    if (!isDurableScope(input.scope)) {
       throw new TypeError('Permanent project deletion requires durable storage.');
     }
     const scope: StorageRootConfig = { ...input.scope };

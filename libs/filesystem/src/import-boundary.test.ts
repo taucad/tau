@@ -84,24 +84,18 @@ const boundaryRules: readonly BoundaryRule[] = [
 ];
 
 /**
- * Today's violations, each cleared by the named work package.
- *
- * | Work package | Clears |
- * | --- | --- |
- * | W9 | `backend-identity` |
+ * Today's violations, each cleared by the named work package. Empty: every rule
+ * holds unconditionally.
  *
  * `project-manifest` is cleared: W7 moved the manifest I/O — and the discovery
  * vocabulary that names a manifest — into `project-directories.ts`, which the
- * rule exempts.
+ * rule exempts. `backend-identity` is cleared: W9 gave backends the `observe()`
+ * capability, and the last four sites — the pending-commit scope schema, the
+ * permanent-delete guard and the discovery locator — read `isDurableScope` and
+ * `projectLocatorFor` from `backend/scope.ts`, the layer that owns the
+ * discriminant.
  */
-const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage: string]> = [
-  /* Discovery locators and the pending-commit scope schema discriminate on the
-   * backend. W9 cleared the authority and gave backends the `observe()`
-   * capability; these three sites map one config union onto another rather than
-   * selecting a mechanism, and clearing them needs a `ProjectLocator` factory
-   * this package did not own. */
-  ['project-directories.ts', 'backend-identity', 'W9'],
-];
+const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage: string]> = [];
 
 describe('@taucad/filesystem layer-1 core boundary', () => {
   const base = new URL('.', import.meta.url).pathname;

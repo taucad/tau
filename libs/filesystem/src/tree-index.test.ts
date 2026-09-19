@@ -310,6 +310,35 @@ describe('TreeIndexes', () => {
     expect(indexes.statTree('/b')).toBeUndefined();
   });
 
+  /* G7: one index holds one mount's tree, because that is all the scan that
+   * built it walked. Answering for a path behind a nested mount reports a false
+   * empty (or invents entries) where the caller must fall back to a walk. */
+  it('does not answer for a path behind a nested mount', () => {
+    const indexes = new TreeIndexes(() => ['/', '/projects/x']);
+    indexes.build('/', [file('main.ts')]);
+
+    expect(indexes.statTree('/projects/x')).toBeUndefined();
+    expect(indexes.statType('/projects/x/src/a.ts')).toBeUndefined();
+
+    indexes.addFile('/projects/x/added.ts', { size: 1, contentKind: 'binary' });
+
+    expect(indexes.get('/')?.stat('projects/x/added.ts')).toBeUndefined();
+    expect(indexes.statTree('/')).toMatchObject([{ path: 'main.ts' }]);
+  });
+
+  it('evicts a root and every index nested under it when its mount goes', () => {
+    const indexes = new TreeIndexes(() => ['/', '/projects/x']);
+    indexes.build('/', [file('main.ts')]);
+    indexes.build('/projects/x', [file('main.ts')]);
+    indexes.build('/projects/x/src', [file('a.ts')]);
+
+    indexes.evict('/projects/x');
+
+    expect(indexes.get('/projects/x')).toBeUndefined();
+    expect(indexes.get('/projects/x/src')).toBeUndefined();
+    expect(indexes.get('/')).toBeDefined();
+  });
+
   it('drops every index on clear', () => {
     const indexes = new TreeIndexes();
     indexes.build('/a', [file('one.ts')]);

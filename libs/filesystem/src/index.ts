@@ -30,9 +30,11 @@ export type {
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,
 } from '#project-directories.js';
-export { MutationPipeline } from '#mutation-pipeline.js';
+/* `MutationPipeline`, `RootedViews` and `TreeIndex` are the composition root's
+ * own collaborators (D14): a consumer reaches them through
+ * `WorkspaceFileService`, never by constructing one, so only the shapes they
+ * hand back are exported. */
 export type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
-export { RootedViews } from '#rooted-views.js';
 export type { RootedFileSystem, RootedPorcelain } from '#rooted-views.js';
 
 export { ProviderRegistry } from '#provider-registry.js';
@@ -53,8 +55,6 @@ export { BoundedFileCache } from '#bounded-file-cache.js';
 export { ResourceQueue } from '#resource-queue.js';
 export type { ResourceQueueClaim } from '#resource-queue.js';
 export { ChangeEventBus } from '#change-event-bus.js';
-export { TreeIndex } from '#tree-index.js';
-export type { TreeNode } from '#tree-index.js';
 export { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
 export type { CoalescerOptions } from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';

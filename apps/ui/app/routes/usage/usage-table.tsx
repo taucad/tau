@@ -12,6 +12,7 @@ import { formatCreditAtoms } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { usageColumns, usageEventId, usageEventNetAtoms } from '#routes/usage/columns.js';
 import { chatLabel, projectLabel } from '#routes/usage/activity-names.js';
+import { useChatName } from '#routes/usage/use-chat-name.js';
 
 const tableHooks = { useReactTable };
 
@@ -28,11 +29,28 @@ type UsageTableProps = {
   readonly onOpenEventChange: (id: string | undefined) => void;
 };
 
-function DetailRow({ label, value }: { readonly label: string; readonly value: string }): React.JSX.Element {
+function DetailRow({
+  label,
+  value,
+  isPending,
+}: {
+  readonly label: string;
+  readonly value: string;
+  /** Present when this row resolves after the panel opens; the live region then exists before its value changes. */
+  readonly isPending?: boolean;
+}): React.JSX.Element {
   return (
     <div className='flex justify-between gap-4'>
       <dt className='text-muted-foreground'>{label}</dt>
-      <dd className='font-mono'>{value}</dd>
+      <dd className='font-mono'>
+        {isPending === undefined ? (
+          value
+        ) : (
+          <span role='status' aria-busy={isPending}>
+            {value}
+          </span>
+        )}
+      </dd>
     </div>
   );
 }
@@ -47,6 +65,10 @@ function UsageEventDetail({
   readonly event: WireUsageEvent;
   readonly projectNames: ReadonlyMap<string, string>;
 }): React.JSX.Element {
+  /* Mounted only for the row a reader opened, so no chat storage is touched
+     until then — the page, prerendered shell included, still renders with no
+     local source behind it. */
+  const chatName = useChatName(event.activity.projectHint, event.activity.chatHint);
   return (
     <div className='grid gap-4 rounded-md border p-4 text-sm md:grid-cols-3' data-testid='usage-event-detail'>
       <dl className='flex flex-col gap-1'>
@@ -54,7 +76,11 @@ function UsageEventDetail({
         <DetailRow label='Model' value={event.model.id} />
         <DetailRow label='Activity' value={event.activity.kind} />
         <DetailRow label='Project' value={projectLabel(event.activity.projectHint, projectNames)} />
-        <DetailRow label='Chat' value={chatLabel(event.activity.chatHint)} />
+        <DetailRow
+          label='Chat'
+          value={chatLabel(event.activity.chatHint, chatName)}
+          isPending={event.activity.chatHint === null ? undefined : chatName === undefined}
+        />
         <DetailRow label='Usage time' value={event.usageOccurredAt ?? 'Not reported'} />
         <DetailRow label='Range timing' value={event.timingStatus} />
       </dl>

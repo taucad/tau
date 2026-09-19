@@ -12,7 +12,9 @@ const useSavedUsage = vi.hoisted(() => vi.fn());
 const useBillingRevisionMinimum = vi.hoisted(() => vi.fn());
 const usePersistSavedUsage = vi.hoisted(() => vi.fn());
 const useCloudProjects = vi.hoisted(() => vi.fn());
+const useChatName = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useCloudProjects }));
+vi.mock('#routes/usage/use-chat-name.js', () => ({ useChatName }));
 vi.mock('@taucad/billing/hooks/use-usage-snapshot', () => ({ useUsageSnapshot }));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
 vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
@@ -25,7 +27,7 @@ vi.mock('#db/billing-snapshot-store.js', () => ({
 
 const timestamp = '2026-09-12T00:00:00.000Z';
 const groupTotals = { accountDeltaCreditAtoms: '-12345', netUsedCreditAtoms: '12345', eventCount: '1' };
-const snapshot = wireUsageSnapshotSchema.parse({
+const rawSnapshot = {
   schemaVersion: 1,
   environment: 'development',
   ownerId: 'user',
@@ -102,7 +104,23 @@ const snapshot = wireUsageSnapshotSchema.parse({
     complete: true,
   },
   activities: { items: [{ activity: 'agent', ...groupTotals }], nextCursor: null, complete: true },
-});
+};
+const snapshot = wireUsageSnapshotSchema.parse(rawSnapshot);
+
+/** The same range, spent in two projects this device can name neither of. */
+const unnamedProjectsSnapshot = ((): typeof snapshot => {
+  const [first] = rawSnapshot.rows.items;
+  const variant = (operationId: string, projectHint: string): unknown => ({
+    ...first,
+    operationId,
+    baseTransactionId: `txn_${operationId}`,
+    activity: { ...first!.activity, projectHint },
+  });
+  return wireUsageSnapshotSchema.parse({
+    ...rawSnapshot,
+    rows: { ...rawSnapshot.rows, items: [variant('op_x', 'project-x'), variant('op_y', 'project-y')] },
+  });
+})();
 
 const balance = {
   balance: {
@@ -170,6 +188,7 @@ beforeEach(() => {
     projects: [{ id: 'project-a', name: 'Gearbox', role: 'owner' }],
     isSettled: true,
   });
+  useChatName.mockReturnValue('Bracket redesign');
 });
 
 afterEach(() => {
@@ -232,13 +251,53 @@ describe('UsagePage', () => {
     expect(detail).not.toHaveTextContent('project-a');
   });
 
-  it('never renders the chat id, which no cheap source here can name', async () => {
+  it('names the chat the spend happened in, and never its id', async () => {
     renderPage();
     await userEvent.click(screen.getByText('agent'));
 
     const detail = screen.getByTestId('usage-event-detail');
-    expect(detail).toHaveTextContent('Chat name not available');
+    expect(detail).toHaveTextContent('Bracket redesign');
     expect(detail).not.toHaveTextContent('chat-a');
+    expect(useChatName).toHaveBeenCalledWith('project-a', 'chat-a');
+  });
+
+  it('reads no local storage until a row is opened', () => {
+    renderPage();
+
+    expect(useChatName).not.toHaveBeenCalled();
+  });
+
+  /* A live region from the moment the row opens, so the name replacing the
+     loading label is announced rather than landing silently. */
+  it.each([
+    { label: 'still reading', value: undefined, text: 'Finding the chat…', busy: 'true' },
+    { label: 'not on this device', value: null, text: 'Chat not on this device', busy: 'false' },
+    { label: 'named', value: 'Bracket redesign', text: 'Bracket redesign', busy: 'false' },
+  ])('announces the chat row politely while it is $label', async ({ value, text, busy }) => {
+    useChatName.mockReturnValue(value);
+    renderPage();
+    await userEvent.click(screen.getByText('agent'));
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(text);
+    expect(status).toHaveAttribute('aria-busy', busy);
+  });
+
+  it('collapses every project it cannot name into one filter option covering all of them', async () => {
+    useCloudProjects.mockReturnValue({ projects: [], isSettled: true });
+    useUsageSnapshot.mockReturnValue({ status: 'ready', snapshot: unnamedProjectsSnapshot, retry: vi.fn() });
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Projects/u }));
+
+    const options = await screen.findAllByRole('menuitemcheckbox');
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent('Project not available');
+
+    await userEvent.click(options[0]!);
+    expect(useUsageSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ projects: ['project-x', 'project-y'] }),
+      expect.any(Object),
+    );
   });
 
   it('offers the project filter by name', async () => {

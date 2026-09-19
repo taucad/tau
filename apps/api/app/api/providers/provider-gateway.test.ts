@@ -50,7 +50,10 @@ const stubUpstream = (statuses: readonly number[]) => {
         headers: { 'content-type': 'application/json' },
       });
     }
-    bodies.push(JSON.parse(String(init?.body)));
+    if (typeof init?.body !== 'string') {
+      throw new TypeError('Expected a JSON string body');
+    }
+    bodies.push(JSON.parse(init.body));
     return new Response('', { status: statuses[bodies.length - 1] ?? 500 });
   });
   return { fetchOnce, bodies };

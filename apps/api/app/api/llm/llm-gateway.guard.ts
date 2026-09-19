@@ -13,6 +13,7 @@ import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { readSingleHeader } from '#api/llm/llm-gateway.headers.js';
 
 const principalKey = Symbol('llmGatewayPrincipal');
+// oxlint-disable-next-line typescript/no-restricted-types -- AuthGuard assigns `session?.user ?? null` (auth.guard.ts:58); typing it `undefined` would describe a value this request never carries.
 type PrincipalRequest = FastifyRequest & { [principalKey]?: string; user?: { id?: string } | null };
 
 @Injectable()
@@ -73,7 +74,9 @@ export class LlmGatewayAuthGuard extends AuthGuard implements CanActivate {
    */
   private async assertTauOrigin(origin: string | undefined): Promise<void> {
     const allowed = await new Promise<boolean>((resolve) => {
-      this.validateOrigin(origin, (error, result) => resolve(error === null && result));
+      this.validateOrigin(origin, (error, result) => {
+        resolve(error === null && result);
+      });
     });
     if (!allowed) {
       throw new LlmGatewayError(

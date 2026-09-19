@@ -172,6 +172,31 @@ export const expectAssistantText = async (marker: RegExp): Promise<void> => {
   });
 };
 
+/**
+ * Whether the API this browser talks to mounts billing.
+ *
+ * A self-hosted API answers 404 on the usage route and writes no receipts, so
+ * there the transcript, files and revision graph are the whole proof. The
+ * answer comes from the API itself, never from this runner's environment, and
+ * any other refusal throws rather than skipping the receipt assertions.
+ *
+ * @returns `false` only when the usage route does not exist.
+ */
+export const billingMounted = async (): Promise<boolean> => {
+  const status = await target.evaluate<number, string>(async (query) => {
+    const origin = (globalThis as unknown as { ENV?: { TAU_API_URL?: string } }).ENV?.TAU_API_URL;
+    if (origin === undefined) {
+      throw new Error('The page did not publish TAU_API_URL.');
+    }
+    const response = await fetch(`${origin}${query}`, { credentials: 'include' });
+    return response.status;
+  }, '/v1/billing/usage?range=all_time&collection=rows&pageSize=1');
+  if (status !== 404 && (status < 200 || status >= 300)) {
+    throw new Error(`Billing usage returned HTTP ${String(status)}.`);
+  }
+  return status !== 404;
+};
+
 /** Every base usage row the signed-in account has, newest run included. */
 export const readUsageReceipts = async (): Promise<readonly UsageReceipt[]> => {
   const snapshot = await target.evaluate<

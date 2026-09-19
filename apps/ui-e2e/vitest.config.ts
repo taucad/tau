@@ -72,8 +72,6 @@ export default defineConfig({
           provide: {
             webGpuProfile: requiredWebGpuProfile,
             acpLiveEnabled: process.env['TAU_ACP_LIVE_TESTS'] === 'true',
-            // Receipts exist only where the API mounts billing; a self-hosted API answers 404.
-            billingMetered: process.env['TAU_CLOUD_ENABLED'] === 'true',
           },
         },
         {

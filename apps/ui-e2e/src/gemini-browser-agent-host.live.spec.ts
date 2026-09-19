@@ -1,10 +1,11 @@
 /* oxlint-disable no-await-in-loop -- Reading and expanding one transcript activity at a time is the interaction under test. */
 /* oxlint-disable typescript/no-unnecessary-condition -- `document.body.textContent` is typed non-nullish but is read back at runtime from a page that may already be torn down. */
-import { expect, inject, test } from 'vitest';
+import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { UsageReceipt } from '#support/live-chat-turn.js';
 import {
+  billingMounted,
   expandActivities,
   expectAssistantText,
   expectSettledReceipts,
@@ -159,7 +160,11 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
   // names the metering rather than the provider wire. Each turn bills at least
   // its first model call and its post-tool continuation. A self-hosted API
   // mounts no billing, so there the evidence above is the whole proof.
-  if (!inject('billingMetered')) {
+  if (!(await billingMounted())) {
+    await target.writeArtifact(
+      'gemini-browser-agent-host-live-evidence.json',
+      `${JSON.stringify({ modelId, billing: 'not mounted by this API; receipts not asserted' }, null, 2)}\n`,
+    );
     return;
   }
   const usage = await expectSettledReceipts(isGeminiReceipt, 4);

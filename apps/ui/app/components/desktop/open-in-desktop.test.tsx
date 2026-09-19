@@ -71,6 +71,17 @@ describe('OpenInDesktop', () => {
     expect(screen.getByText('Opening Tau Desktop')).toBeInTheDocument();
   });
 
+  /* The canvas's landing carries the browser continuation beside the offer:
+     over a full-bleed page (`/s/:slug`) it is the only way to put the card away. */
+  it('lets the person decline the offer before ever trying it', async () => {
+    mountAt('/invitations/tok_abcdef');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Accept in the browser' }));
+
+    expect(screen.queryByRole('button', { name: 'Open in Tau Desktop' })).not.toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it('puts the offer away when the person continues in the browser', async () => {
     mountAt('/invitations/tok_abcdef');
 

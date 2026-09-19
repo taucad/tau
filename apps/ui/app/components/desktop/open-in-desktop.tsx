@@ -191,6 +191,15 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
           <ExternalLink aria-hidden='true' />
           Open in Tau Desktop
         </Button>
+        <Button
+          variant='outline'
+          className='w-full'
+          onClick={() => {
+            setStage('dismissed');
+          }}
+        >
+          {continueLabel}
+        </Button>
         <div className='flex items-center gap-2'>
           <Checkbox
             id={checkboxId}

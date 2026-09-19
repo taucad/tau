@@ -84,15 +84,6 @@ export function scopeForRouteConfig(
 export const isDurableScope = (scope: WorkspaceScope): boolean => scope.backend !== 'memory';
 
 /**
- * Whether a standalone read of this scope can render a cross-mount tree: the
- * listable namespace is exactly the durable one.
- *
- * @param scope - The standalone scope a read named.
- * @returns Whether the scope has a listable persisted namespace.
- */
-export const hasStandaloneTree = (scope: WorkspaceScope): boolean => isDurableScope(scope);
-
-/**
  * The locator one discovered project directory is addressed by: the storage
  * root's own physical identity plus where the directory sits inside it. One
  * config union mapped onto another — the backend layer owns the discriminant

@@ -22,6 +22,8 @@ use crate::{
 const AXES: [&str; 3] = ["x", "y", "z"];
 const BOUNDS_FIELDS: [&str; 4] = ["min", "max", "size", "center"];
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+type BoundNumbers = [Option<f64>; 3];
+type BoundRanges = [Option<NumericExpectation>; 3];
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ScalarExpectation {
@@ -49,7 +51,8 @@ pub(crate) struct IntegrityExpectation {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Prepared {
     BoundingBox {
-        declared: [[Option<f64>; 3]; 4],
+        declared: [BoundNumbers; 4],
+        ranges: Box<[BoundRanges; 4]>,
         tolerance: f64,
         authored_expected: Json,
     },
@@ -96,14 +99,16 @@ fn prepare_bounding_box(expected: &Json) -> Result<Prepared, ProtocolError> {
         "bounding-box expected",
     )?;
     let mut declared = [[None; 3]; 4];
+    let mut ranges = Box::new(std::array::from_fn(|_| std::array::from_fn(|_| None)));
     for (index, name) in BOUNDS_FIELDS.iter().enumerate() {
         if let Some(value) = optional_field(fields, name) {
-            declared[index] = axes(value, "bounding-box axes")?;
+            (declared[index], ranges[index]) = axes(value, "bounding-box axes")?;
         }
     }
     Ok(Prepared::BoundingBox {
         authored_expected: expected.clone(),
         declared,
+        ranges,
         tolerance: prepared::tolerance(fields, "tolerance", DEFAULT_LINEAR_TOLERANCE)?,
     })
 }
@@ -218,27 +223,34 @@ fn prepare_center(expected: &Json) -> Result<Prepared, ProtocolError> {
     })
 }
 
-fn axes(value: &Json, label: &str) -> Result<[Option<f64>; 3], ProtocolError> {
+fn axes(value: &Json, label: &str) -> Result<(BoundNumbers, BoundRanges), ProtocolError> {
+    let mut declared = [None; 3];
+    let mut ranges = std::array::from_fn(|_| None);
     match value {
         Json::Array(values) if values.len() == 3 => {
-            let mut result = [None; 3];
             for (index, value) in values.iter().enumerate() {
-                result[index] = Some(prepared::finite(value, label)?);
+                declared[index] = Some(prepared::finite(value, label)?);
             }
-            Ok(result)
         }
         Json::Object(fields) => {
             require_fields(fields, &AXES, &[], label)?;
-            let mut result = [None; 3];
             for (index, axis) in AXES.iter().enumerate() {
-                result[index] = optional_field(fields, axis)
-                    .map(|value| prepared::finite(value, label))
-                    .transpose()?;
+                let Some(value) = optional_field(fields, axis) else {
+                    continue;
+                };
+                match NumericExpectation::parse(value)? {
+                    NumericExpectation::Equal(value) => declared[index] = Some(value),
+                    expectation => ranges[index] = Some(expectation),
+                }
             }
-            Ok(result)
         }
-        _ => invalid_claim("Bounding-box fields require axis objects or length-three arrays."),
+        _ => {
+            return invalid_claim(
+                "Bounding-box fields require axis objects or length-three arrays.",
+            );
+        }
     }
+    Ok((declared, ranges))
 }
 
 fn boolean(value: &Json, label: &str) -> Result<bool, ProtocolError> {
@@ -274,13 +286,19 @@ impl Prepared {
         match self {
             Self::BoundingBox {
                 declared,
+                ranges,
                 tolerance,
                 ..
             } => {
                 let mut fields = Vec::new();
-                for (name, point) in BOUNDS_FIELDS.iter().zip(declared) {
-                    if point.iter().any(Option::is_some) {
-                        fields.push(((*name).into(), optional_point(*point)));
+                for (index, name) in BOUNDS_FIELDS.iter().enumerate() {
+                    if declared[index].iter().any(Option::is_some)
+                        || ranges[index].iter().any(Option::is_some)
+                    {
+                        fields.push((
+                            (*name).into(),
+                            optional_bounds_point(&declared[index], &ranges[index]),
+                        ));
                     }
                 }
                 fields.push(("tolerance".into(), Json::Number(*tolerance)));
@@ -533,9 +551,10 @@ fn evaluate_family(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> 
     match prepared {
         Prepared::BoundingBox {
             declared,
+            ranges,
             tolerance,
             authored_expected,
-        } => evaluate_bounds(*declared, *tolerance, authored_expected, context),
+        } => evaluate_bounds(declared, ranges, *tolerance, authored_expected, context),
         Prepared::ConnectedComponents {
             count,
             tolerance_mm,
@@ -585,7 +604,8 @@ fn mismatch(
 }
 
 fn evaluate_bounds(
-    declared: [[Option<f64>; 3]; 4],
+    declared: &[BoundNumbers; 4],
+    ranges: &[BoundRanges; 4],
     tolerance: f64,
     authored_expected: &Json,
     context: &mut EvaluationContext<'_>,
@@ -599,6 +619,11 @@ fn evaluate_bounds(
             .mesh_record()
             .map_or(0, |record| record.triangles.len() * 3)
             + declared
+                .iter()
+                .flatten()
+                .filter(|axis| axis.is_some())
+                .count()
+            + ranges
                 .iter()
                 .flatten()
                 .filter(|axis| axis.is_some())
@@ -658,19 +683,27 @@ fn evaluate_bounds(
     };
     let mut failures = Vec::new();
     let mut names = Vec::new();
-    for (field_index, expected) in declared.iter().enumerate() {
-        for axis in 0..3 {
-            if let Some(expected) = expected[axis] {
-                let actual = bounds[field_index][axis];
-                if outside_tolerance(actual, expected, tolerance) {
-                    failures.push(Json::object([
-                        ("axis", Json::string(AXES[axis])),
-                        ("expected", Json::Number(expected)),
-                        ("actual", finite_or_string(actual)),
-                        ("field", Json::string(BOUNDS_FIELDS[field_index])),
-                    ]));
-                    names.push(format!("{}.{}", BOUNDS_FIELDS[field_index], AXES[axis]));
-                }
+    for field_index in 0..BOUNDS_FIELDS.len() {
+        for (axis, axis_name) in AXES.iter().enumerate() {
+            let actual = bounds[field_index][axis];
+            let (failed, expected) = if let Some(expected) = declared[field_index][axis] {
+                (
+                    outside_tolerance(actual, expected, tolerance),
+                    Json::Number(expected),
+                )
+            } else if let Some(expected) = &ranges[field_index][axis] {
+                (!expected.holds(actual, tolerance), expected.to_json())
+            } else {
+                continue;
+            };
+            if failed {
+                failures.push(Json::object([
+                    ("axis", Json::string(axis_name)),
+                    ("expected", expected),
+                    ("actual", finite_or_string(actual)),
+                    ("field", Json::string(BOUNDS_FIELDS[field_index])),
+                ]));
+                names.push(format!("{}.{}", BOUNDS_FIELDS[field_index], axis_name));
             }
         }
     }
@@ -700,7 +733,8 @@ fn evaluate_bounds(
         );
     }
     let normalized_expected = Prepared::BoundingBox {
-        declared,
+        declared: *declared,
+        ranges: Box::new((*ranges).clone()),
         tolerance,
         authored_expected: authored_expected.clone(),
     }
@@ -1531,6 +1565,20 @@ fn optional_point(point: [Option<f64>; 3]) -> Json {
     )
 }
 
+fn optional_bounds_point(declared: &BoundNumbers, ranges: &BoundRanges) -> Json {
+    Json::Object(
+        AXES.into_iter()
+            .enumerate()
+            .filter_map(|(index, axis)| {
+                declared[index]
+                    .map(Json::Number)
+                    .or_else(|| ranges[index].as_ref().map(NumericExpectation::to_json))
+                    .map(|value| (axis.into(), value))
+            })
+            .collect(),
+    )
+}
+
 fn outside_tolerance(actual: f64, expected: f64, tolerance: f64) -> bool {
     (actual - expected)
         .abs()
@@ -2045,3 +2093,7 @@ mod preparation_tests {
 #[cfg(test)]
 #[path = "../../tests/matcher_mesh.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/current_bounds.rs"]
+mod current_bounds;

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Resvg as ResvgType, ResvgRenderOptions } from '@resvg/resvg-wasm';
 import { compileWasmStreaming, defineTranscoder, loadWasmBinary } from '@taucad/runtime/transcoder';
 import type { ExportFile } from '@taucad/runtime/types';
+import { loadImageBackend } from '#image-backend.js';
 import {
   renderImageAnnotatedMinDimension,
   renderImageBackgroundPattern,
@@ -77,9 +78,17 @@ export const svgPngOptionsSchema = z
     }
   });
 
+/** Strict SVG-to-WebP options, including encoder quality. @public */
+export const svgWebpOptionsSchema = svgPngOptionsSchema.safeExtend({
+  quality: z.number().min(0).max(1).default(1),
+});
+
 /** SVG rendering options accepted by {@link renderSvgPng}. @public */
 export type SvgPngOptions = z.input<typeof svgPngOptionsSchema>;
+/** SVG rendering options accepted by {@link renderSvgWebp}. @public */
+export type SvgWebpOptions = z.input<typeof svgWebpOptionsSchema>;
 type ParsedSvgPngOptions = z.output<typeof svgPngOptionsSchema>;
+type ParsedSvgWebpOptions = z.output<typeof svgWebpOptionsSchema>;
 type SvgFailureCode = 'parse' | 'backend' | 'encode';
 
 /** Stable failure returned by direct SVG rendering and mapped by the service. @public */
@@ -276,21 +285,23 @@ const assertPng = (bytes: Uint8Array<ArrayBuffer>, width: number, height: number
   }
 };
 
-/**
- * Render one canonical SVG artifact to a deterministic annotated PNG.
- * @param svg - Complete source SVG document.
- * @param rawOptions - Output size and annotation options.
- * @returns The rendered PNG artifact.
- * @public
- */
-export const renderSvgPng = async (svg: string, rawOptions: SvgPngOptions = {}): Promise<ExportFile> => {
-  let options: ParsedSvgPngOptions;
-  try {
-    options = svgPngOptionsSchema.parse(rawOptions);
-  } catch (error) {
-    throw new SvgRenderError('parse', error instanceof Error ? error.message : String(error), { cause: error });
+const assertWebp = (bytes: Uint8Array<ArrayBuffer>): void => {
+  if (
+    bytes.length < 12 ||
+    textDecoder.decode(bytes.subarray(0, 4)) !== 'RIFF' ||
+    textDecoder.decode(bytes.subarray(8, 12)) !== 'WEBP'
+  ) {
+    throw new SvgRenderError('encode', 'image backend returned invalid WebP bytes');
   }
+};
 
+type RenderedSvgImage = ReturnType<InstanceType<ResvgConstructor>['render']>;
+
+const withRenderedSvg = async <Result>(
+  svg: string,
+  options: ParsedSvgPngOptions,
+  consume: (image: RenderedSvgImage) => Promise<Result> | Result,
+): Promise<Result> => {
   let backend: ResvgBackend;
   try {
     backend = await loadBackend();
@@ -345,9 +356,18 @@ export const renderSvgPng = async (svg: string, rawOptions: SvgPngOptions = {}):
         throw new SvgRenderError('backend', 'resvg did not expose the internal drawing image for resolution');
       }
       finalRenderer.resolveImage(internalImageUrl, sourcePng);
-      const bytes = renderPng(finalRenderer);
-      assertPng(bytes, options.width, options.height);
-      return { name: 'render.png', mimeType: 'image/png', bytes };
+      const image = finalRenderer.render();
+      try {
+        if (image.width !== options.width || image.height !== options.height) {
+          throw new SvgRenderError(
+            'encode',
+            `resvg returned ${image.width}×${image.height} instead of ${options.width}×${options.height}`,
+          );
+        }
+        return await consume(image);
+      } finally {
+        image.free();
+      }
     } finally {
       finalRenderer.free();
     }
@@ -359,12 +379,80 @@ export const renderSvgPng = async (svg: string, rawOptions: SvgPngOptions = {}):
   }
 };
 
+/**
+ * Render one canonical SVG artifact to a deterministic annotated PNG.
+ * @param svg - Complete source SVG document.
+ * @param rawOptions - Output size and annotation options.
+ * @returns The rendered PNG artifact.
+ * @public
+ */
+export const renderSvgPng = async (svg: string, rawOptions: SvgPngOptions = {}): Promise<ExportFile> => {
+  let options: ParsedSvgPngOptions;
+  try {
+    options = svgPngOptionsSchema.parse(rawOptions);
+  } catch (error) {
+    throw new SvgRenderError('parse', error instanceof Error ? error.message : String(error), { cause: error });
+  }
+
+  return withRenderedSvg(svg, options, (image) => {
+    const bytes = new Uint8Array(image.asPng());
+    assertPng(bytes, options.width, options.height);
+    return { name: 'render.png', mimeType: 'image/png', bytes };
+  });
+};
+
+/**
+ * Render one canonical SVG artifact to deterministic annotated WebP.
+ * @param svg - Complete source SVG document.
+ * @param rawOptions - Output size, annotations, and encoder quality.
+ * @returns The rendered WebP artifact.
+ * @public
+ */
+export const renderSvgWebp = async (svg: string, rawOptions: SvgWebpOptions = {}): Promise<ExportFile> => {
+  let options: ParsedSvgWebpOptions;
+  try {
+    options = svgWebpOptionsSchema.parse(rawOptions);
+  } catch (error) {
+    throw new SvgRenderError('parse', error instanceof Error ? error.message : String(error), { cause: error });
+  }
+
+  return withRenderedSvg(svg, options, async (image) => {
+    let backend: Awaited<ReturnType<typeof loadImageBackend>>;
+    try {
+      backend = await loadImageBackend();
+    } catch (error) {
+      throw new SvgRenderError('backend', error instanceof Error ? error.message : String(error), { cause: error });
+    }
+    try {
+      const bytes = await backend.encodeRgbaWebp(new Uint8Array(image.pixels), {
+        width: options.width,
+        height: options.height,
+        quality: options.quality,
+        alpha: 'premultiplied',
+      });
+      assertWebp(bytes);
+      return { name: 'render.webp', mimeType: 'image/webp', bytes };
+    } catch (error) {
+      if (error instanceof SvgRenderError) {
+        throw error;
+      }
+      throw new SvgRenderError('encode', error instanceof Error ? error.message : String(error), { cause: error });
+    }
+  });
+};
+
 const edges = [
   {
     from: 'svg',
     to: 'png',
     fidelity: 'mesh',
     optionsSchema: svgPngOptionsSchema,
+  },
+  {
+    from: 'svg',
+    to: 'webp',
+    fidelity: 'mesh',
+    optionsSchema: svgWebpOptionsSchema,
   },
 ] as const;
 
@@ -396,9 +484,11 @@ export const svgTranscoder = defineTranscoder({
       };
     }
     try {
-      runtime.logger.log('Rendering SVG → png');
+      runtime.logger.log(`Rendering SVG → ${input.to}`);
       const svg = textDecoder.decode(input.files[0]!.bytes);
-      return { success: true, data: [await renderSvgPng(svg, input.options)], issues: [] };
+      const rendered =
+        input.to === 'webp' ? await renderSvgWebp(svg, input.options) : await renderSvgPng(svg, input.options);
+      return { success: true, data: [rendered], issues: [] };
     } catch (error) {
       const failure = error instanceof SvgRenderError ? error : new SvgRenderError('parse', String(error));
       return {

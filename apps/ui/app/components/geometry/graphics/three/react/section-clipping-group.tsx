@@ -64,7 +64,7 @@ export function SectionClippingGroup({
   }, [backend, clippingGroup]);
 
   React.useLayoutEffect(() => {
-    if (backend !== 'webgl' || !innerRef.current) {
+    if (backend !== 'webgl' || !innerRef.current || children === undefined || children === null) {
       webGlMeshesRef.current = [];
       webGlLinesRef.current = [];
       return;
@@ -79,7 +79,7 @@ export function SectionClippingGroup({
 
     webGlMeshesRef.current = meshes;
     webGlLinesRef.current = lines;
-  }, [backend, children, enabled, enableLines, enableMesh, innerRef, plane]);
+  }, [backend, children, enableLines, enableMesh, innerRef, plane]);
 
   const applyCommittedSnapshot = React.useCallback((): void => {
     const committed = enabled ? snapshotRef.current.committed : undefined;
@@ -97,7 +97,11 @@ export function SectionClippingGroup({
     );
   }, [backend, clippingGroup, enableLines, enableMesh, enabled, gl, plane, snapshotRef]);
 
-  React.useLayoutEffect(applyCommittedSnapshot, [applyCommittedSnapshot, children]);
+  React.useLayoutEffect(() => {
+    if (children !== undefined && children !== null) {
+      applyCommittedSnapshot();
+    }
+  }, [applyCommittedSnapshot, children]);
   useFrame(applyCommittedSnapshot);
 
   React.useEffect(

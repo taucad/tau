@@ -70,7 +70,7 @@ const lightColorSchema = z.tuple([
   finiteNumber.min(renderImageLightColorRange[0]).max(renderImageLightColorRange[1]),
 ]);
 const lightingSchema = z.union([
-  z.literal('studio'),
+  z.literal('studio').meta({ title: 'Studio' }),
   z
     .object({
       lights: z
@@ -91,7 +91,8 @@ const lightingSchema = z.union([
       space: z.enum(['view', 'world']).optional(),
       exposure: finiteNumber.min(renderImageExposureRange[0]).max(renderImageExposureRange[1]).optional(),
     })
-    .strict(),
+    .strict()
+    .meta({ title: 'Directional lights' }),
 ]);
 const imageExportModeSchema = z.enum(['single', 'batch']);
 const imageLabelSchema = z
@@ -169,7 +170,7 @@ const orthographicFixedProjectionSchema = z
 const fitCameraSchema = z
   .object({
     framing: z.literal('fit'),
-    direction: nonZeroCameraVectorSchema.default([0.612_372_435_7, -0.612_372_435_7, 0.5]),
+    direction: nonZeroCameraVectorSchema.default([0.6123724357, -0.6123724357, 0.5]),
     up: nonZeroCameraVectorSchema.default([0, 0, 1]),
     margin: z.number().min(renderImageMarginRange[0]).max(renderImageMarginRange[1]).default(0.1),
     projection: z
@@ -228,7 +229,7 @@ const imageCameraSchema = z
 
 const defaultImageCamera = (): z.output<typeof fitCameraSchema> => ({
   framing: 'fit',
-  direction: [0.612_372_435_7, -0.612_372_435_7, 0.5] as const,
+  direction: [0.6123724357, -0.6123724357, 0.5] as const,
   up: [0, 0, 1] as const,
   margin: 0.1,
   projection: { kind: 'perspective', verticalFieldOfView: 45 },

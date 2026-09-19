@@ -12,8 +12,9 @@ import type {
   ErrorListProps,
   RJSFSchema,
 } from '@rjsf/utils';
-import { ChevronDown, Trash2 } from 'lucide-react';
+import { ChevronDown, Info, SearchX, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { projectParameterField } from '@taucad/parameters';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Input } from '@taucad/ui/components/input';
@@ -21,25 +22,26 @@ import { ParametersBoolean } from '#components/geometry/parameters/parameters-bo
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { ParametersWidget } from '#components/geometry/parameters/parameters-widget.js';
 import {
-  rjsfIdToJsonPath,
   isSchemaMatchingSearch,
   getFieldDefaultValue,
   getDiscriminatedUnionInfo,
   isObjectLikeSchema,
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { hasCustomValue } from '#utils/object.utils.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { InlineCode } from '#components/code/code-block.js';
 import {
   emptyRjsfLayoutContext,
   rjsfLayoutContext,
   useRjsfLayoutContext,
 } from '#components/geometry/parameters/rjsf-context.js';
+import { toInstancePointer, useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext, RjsfLayoutContextValue } from '#components/geometry/parameters/rjsf-context.js';
 
 const ArrayItemRemoveAction = ({ action }: { readonly action: RjsfLayoutContextValue['arrayItemAction'] }) => {
@@ -50,18 +52,19 @@ const ArrayItemRemoveAction = ({ action }: { readonly action: RjsfLayoutContextV
   return (
     <Tooltip>
       <TooltipTrigger asChild>
+        {/* The sidebar row's action: 24 px, nested-action tone, so it reads as a surface on the lit header. */}
         <Button
           type='button'
           variant='ghost'
-          size='icon-sm'
-          className='mr-1 text-muted-foreground hover:text-foreground'
+          size='icon'
+          className={nestedActionVariants({ className: 'mr-1 size-6 shrink-0 text-muted-foreground' })}
           aria-label={action.label}
           onClick={(event) => {
             event.stopPropagation();
             action.onRemove();
           }}
         >
-          <Trash2 aria-hidden='true' />
+          <Trash2 aria-hidden='true' className='size-3.5' />
         </Button>
       </TooltipTrigger>
       <TooltipContent side='left'>{action.label}</TooltipContent>
@@ -128,10 +131,10 @@ function CompositeFieldTemplate({
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none focus-within:bg-sidebar-accent hover:bg-sidebar-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
-          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
           aria-label={`Group: ${prettyTitle}`}
         >
           <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
@@ -165,9 +168,10 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
   const { formContext } = registry;
   const layoutContext = useRjsfLayoutContext();
-  const fieldPath = rjsfIdToJsonPath(id, formContext.idPrefix);
+  const renderedField = useRenderedFieldPath();
+  const fieldPath = renderedField?.path;
 
-  if (layoutContext.embeddedDiscriminator !== undefined && layoutContext.embeddedDiscriminator === fieldPath.at(-1)) {
+  if (layoutContext.embeddedDiscriminator !== undefined && layoutContext.embeddedDiscriminator === fieldPath?.at(-1)) {
     return null;
   }
 
@@ -222,7 +226,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     let isInMatchingGroup = false;
     if (!labelMatches && !descriptionMatches) {
       // Parse the ID to extract parent group names (e.g., ///root///handrails///colors///post)
-      const idParts = rjsfIdToJsonPath(id, formContext.idPrefix);
+      const idParts = fieldPath ?? [];
       for (let i = 0; i < idParts.length - 1; i++) {
         const parentSegment = idParts[i];
         if (parentSegment) {
@@ -244,36 +248,71 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   }
 
   // Get the appropriate default value (handles array items specially)
-  const defaultValue = formContext.defaultParameters
-    ? getFieldDefaultValue({
-        fieldPath,
-        formData,
-        schemaDefault: schema.default,
-        defaultParameters: formContext.defaultParameters,
-      })
-    : schema.default;
+  const defaultValue =
+    formContext.defaultParameters && fieldPath !== undefined
+      ? getFieldDefaultValue({
+          fieldPath,
+          formData,
+          schemaDefault: schema.default,
+          defaultParameters: formContext.defaultParameters,
+        })
+      : schema.default;
 
-  const fieldHasValue = hasCustomValue(formData, defaultValue, fieldPath);
+  const fieldHasValue =
+    fieldPath !== undefined &&
+    (Object.is(formData, null) ? !Object.is(defaultValue, null) : hasCustomValue(formData, defaultValue, fieldPath));
+  const canReset = !(renderedField?.isArrayItem && defaultValue === undefined);
+  const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
+  const fieldProjection =
+    instancePointer === undefined
+      ? undefined
+      : projectParameterField(formContext.parameterManifest, instancePointer, {}, formContext.parameterGroup);
+  const inferredHint =
+    fieldProjection?.guessed === true
+      ? fieldProjection.inferredFields?.includes('unit') === true
+        ? 'Inferred unit'
+        : 'Inferred semantics'
+      : undefined;
 
   const handleReset = () => {
-    formContext.resetSingleParameter(fieldPath);
+    if (fieldPath !== undefined && canReset) {
+      formContext.resetSingleParameter({ fieldPath, defaultValue });
+    }
   };
 
   return (
     <div className='group/field @container/parameter my-1.5 flex flex-col gap-0.5 px-2.5 transition-colors'>
       <div className='flex items-center gap-2 @[240px]/parameter:flex-row'>
         <div className='flex min-w-0 shrink-0 items-center gap-1.5 @[240px]/parameter:w-[40%]'>
-          <span
-            className={cn(
-              'truncate text-sm',
-              fieldHasValue ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
-            )}
-            aria-label={`Parameter: ${prettyLabel}`}
-          >
-            <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
-            {required ? <span className='text-destructive/50'>*</span> : null}
-          </span>
-          {fieldHasValue ? (
+          <div className='flex min-w-0 items-center gap-0.5'>
+            <span
+              className={cn(
+                'min-w-0 truncate text-sm',
+                fieldHasValue ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
+              )}
+              aria-label={`Parameter: ${prettyLabel}`}
+            >
+              <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
+              {required ? <span className='text-destructive/50'>*</span> : null}
+            </span>
+            {inferredHint ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon-xs'
+                    className='text-muted-foreground/60 hover:bg-transparent hover:text-foreground'
+                    aria-label={`${inferredHint} for ${prettyLabel}`}
+                  >
+                    <Info aria-hidden='true' className='size-3' />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{inferredHint}</TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
+          {fieldHasValue && canReset ? (
             <ModifiedIndicator
               onReset={handleReset}
               tooltip={`Reset ${prettyLabel}`}
@@ -348,9 +387,11 @@ function ObjectFieldTemplate(
 
     return (
       <div className='[&:has(.properties:not(:empty))_.no-params]:hidden'>
-        <CollectionEmptyState className='no-params break-all'>
-          No parameters matching &quot;{formContext.searchTerm}&quot;
-        </CollectionEmptyState>
+        <PanelEmptyState
+          icon={SearchX}
+          title={`No parameters matching "${formContext.searchTerm}"`}
+          className='no-params break-all'
+        />
         <div
           data-slot='parameter-catalog'
           className='properties m-2 overflow-hidden rounded-md border border-border bg-card p-1 empty:hidden'
@@ -412,10 +453,10 @@ function ObjectFieldTemplate(
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none focus-within:bg-sidebar-accent hover:bg-sidebar-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
-          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
           aria-label={`Group: ${prettyTitle}`}
         >
           <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
@@ -493,7 +534,7 @@ function ArrayFieldTemplate(
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger
-        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-sidebar-accent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
         aria-label={`Group: ${prettyTitle}`}
       >
         <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
@@ -527,6 +568,7 @@ function ScopedArrayFieldItem({
   readonly item: ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>;
   readonly title: string;
 }): React.ReactNode {
+  const { key, ...itemProps } = item;
   const layoutContext = useMemo<RjsfLayoutContextValue>(
     () => ({
       objectArrayItem: isObjectLikeSchema(item.schema),
@@ -542,7 +584,7 @@ function ScopedArrayFieldItem({
 
   return (
     <rjsfLayoutContext.Provider value={layoutContext}>
-      <ArrayFieldItemTemplate {...item} />
+      <ArrayFieldItemTemplate key={key} {...itemProps} />
     </rjsfLayoutContext.Provider>
   );
 }
@@ -782,11 +824,9 @@ export const templates: TemplatesType<Record<string, unknown>, RJSFSchema, RJSFC
   FieldErrorTemplate: ({ errors }) => (errors ? <div className='mt-1 text-xs text-destructive'>{errors}</div> : null),
   FieldHelpTemplate: ({ help }) => (help ? <div className='mt-1 text-xs text-muted-foreground'>{help}</div> : null),
   TitleFieldTemplate: ({ title }) => (title ? <h2 className='mb-2 text-lg font-medium'>{title}</h2> : null),
-  UnsupportedFieldTemplate({ reason, schema, idSchema, registry }) {
-    const fieldId: unknown = idSchema?.$id;
-    const { formContext } = registry;
-    const fieldPath = typeof fieldId === 'string' ? rjsfIdToJsonPath(fieldId, formContext.idPrefix) : [];
-    const fieldName = fieldPath.at(-1) ?? 'root';
+  UnsupportedFieldTemplate({ reason, schema }) {
+    const fieldPath = useRenderedFieldPath()?.path;
+    const fieldName = fieldPath?.at(-1) ?? 'root';
     const isArrayType = schema.type === 'array';
 
     return (

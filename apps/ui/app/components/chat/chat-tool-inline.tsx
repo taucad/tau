@@ -56,7 +56,7 @@ export function ChatToolInline({
     >
       {isLoading ? (
         <>
-          <LoaderCircle className='size-3 shrink-0 animate-spin text-inherit' />
+          <LoaderCircle className='size-3 shrink-0 animate-spin text-inherit motion-reduce:animate-none' />
           <AnimatedShinyText className='min-w-0 truncate'>{children}</AnimatedShinyText>
         </>
       ) : (

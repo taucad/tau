@@ -1,5 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Manifest } from '#check-pack-install.js';
@@ -10,9 +13,43 @@ import {
   isToleratedImportFailure,
   manifestViolations,
   requiredArtifactPaths,
+  probeSource,
 } from '#check-pack-install.js';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
+
+it('loads JSON and documentation assets without suppressing broken modules or missing assets', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tau-pack-probe-'));
+  try {
+    writeFileSync(join(directory, 'schema.json'), '{"type":"object"}');
+    writeFileSync(join(directory, 'agent.md'), '# Plugin instructions');
+    writeFileSync(join(directory, 'invalid.json'), '{');
+    writeFileSync(join(directory, 'broken.mjs'), 'throw new Error("module failure");');
+    writeFileSync(join(directory, 'probe.mjs'), probeSource);
+    writeFileSync(
+      join(directory, 'probe-plan.json'),
+      JSON.stringify({
+        specifiers: ['./schema.json', './agent.md', './invalid.json', './missing.md', './broken.mjs'],
+        instantiations: {},
+      }),
+    );
+    const result = spawnSync(process.execPath, ['probe.mjs'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([
+      expect.objectContaining({ specifier: './invalid.json' }),
+      expect.objectContaining({ specifier: './missing.md', code: 'ENOENT' }),
+      expect.objectContaining({
+        specifier: './broken.mjs',
+        message: 'module failure',
+      }),
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 const readManifest = (packageDirectory: string): Manifest =>
   JSON.parse(readFileSync(join(repositoryRoot, packageDirectory, 'package.json'), 'utf8')) as Manifest & {
@@ -21,8 +58,13 @@ const readManifest = (packageDirectory: string): Manifest =>
 
 /** `pnpm pack` folds `publishConfig.exports` into `exports`; the gate reads the packed shape. */
 const publishedManifest = (packageDirectory: string): Manifest => {
-  const manifest = readManifest(packageDirectory) as Manifest & { publishConfig?: { exports?: Manifest['exports'] } };
-  return { ...manifest, exports: manifest.publishConfig?.exports ?? manifest.exports };
+  const manifest = readManifest(packageDirectory) as Manifest & {
+    publishConfig?: { exports?: Manifest['exports'] };
+  };
+  return {
+    ...manifest,
+    exports: manifest.publishConfig?.exports ?? manifest.exports,
+  };
 };
 
 describe('importableSpecifiers', () => {
@@ -31,8 +73,16 @@ describe('importableSpecifiers', () => {
       name: '@taucad/example',
       version: '1.0.0',
       exports: {
-        '.': { types: './dist/index.d.mts', import: './dist/index.mjs', default: './dist/index.mjs' },
-        './kernel': { types: './dist/kernel.d.mts', default: './dist/kernel.mjs' },
+        '.': {
+          types: './dist/index.d.mts',
+          import: './dist/index.mjs',
+          default: './dist/index.mjs',
+        },
+        './kernel': {
+          types: './dist/kernel.d.mts',
+          default: './dist/kernel.mjs',
+        },
+        './agent/*': './agent/*',
         './types': { types: './dist/types.d.mts' },
         './package.json': './package.json',
       },
@@ -51,6 +101,9 @@ describe('importableSpecifiers', () => {
     ]);
     expect(importableSpecifiers(publishedManifest('packages/runtime'))).toContain('@taucad/runtime/plugin');
     expect(importableSpecifiers(publishedManifest('packages/runtime'))).not.toContain('@taucad/runtime/presets');
+    expect(importableSpecifiers(publishedManifest('packages/plugins/middleware'))).toContain(
+      '@taucad/middleware/parameter-units',
+    );
   });
 });
 
@@ -61,13 +114,30 @@ describe('requiredArtifactPaths', () => {
         name: '@taucad/example',
         version: '1.0.0',
         files: ['dist', 'README.md'],
-        exports: { '.': { types: './dist/index.d.mts', import: './dist/index.mjs', default: './dist/index.mjs' } },
+        exports: {
+          '.': {
+            types: './dist/index.d.mts',
+            import: './dist/index.mjs',
+            default: './dist/index.mjs',
+          },
+        },
       }),
     ).toStrictEqual(['dist', 'README.md', './dist/index.d.mts', './dist/index.mjs', './dist/index.mjs']);
   });
 
   it('keeps the geospec-engine files entries that only prepack produces', () => {
     expect(requiredArtifactPaths(publishedManifest('packages/geospec-engine'))).toContain('provenance.json');
+  });
+
+  it('leaves wildcard exports to concrete files entries', () => {
+    expect(
+      requiredArtifactPaths({
+        name: '@taucad/example',
+        version: '1.0.0',
+        files: ['agent'],
+        exports: { './agent/*': './agent/*' },
+      }),
+    ).toStrictEqual(['agent']);
   });
 });
 
@@ -96,7 +166,11 @@ describe('manifestViolations', () => {
   it('rejects a bundled private library that escaped into a published manifest', () => {
     expect(
       manifestViolations(
-        { name: '@taucad/example', version: '1.0.0', dependencies: { '@taucad/rpc': '0.1.0' } },
+        {
+          name: '@taucad/example',
+          version: '1.0.0',
+          dependencies: { '@taucad/rpc': '0.1.0' },
+        },
         bundledLibraryNames,
       ),
     ).toStrictEqual(['@taucad/example leaks bundled private dependency @taucad/rpc.']);
@@ -160,7 +234,13 @@ describe('isToleratedImportFailure', () => {
 
   it('does not tolerate removed environment-dependent subpaths', () => {
     expect(
-      isToleratedImportFailure({ specifier: '@taucad/runtime/worker/node', message: 'removed worker entry' }, []),
+      isToleratedImportFailure(
+        {
+          specifier: '@taucad/runtime/worker/node',
+          message: 'removed worker entry',
+        },
+        [],
+      ),
     ).toBe(false);
   });
 });

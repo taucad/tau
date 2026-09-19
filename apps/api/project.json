@@ -95,6 +95,17 @@
         "cwd": "{projectRoot}"
       }
     },
+    "test:live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Live provider suites driven through the in-process model gateway (app/testing/live). Each suite skips when its provider credential is absent from apps/api/.env."
+      },
+      "options": {
+        "command": "vitest run --config vitest.live.config.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
     "test:geospec": {
       "executor": "nx:run-commands",
       "options": {
@@ -106,6 +117,127 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "bash apps/api/scripts/sync-grafana-dashboards.sh"
+      }
+    },
+    "test:billing-foundation": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/api/scripts/test-billing-foundation.mts"
+      },
+      "dependsOn": ["build:billing-command"]
+    },
+    "test:billing-stripe": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Mandatory real Stripe test-mode acceptance. Requires separate restricted create/read/refund keys, Stripe CLI and ngrok; never skips when invoked."
+      },
+      "options": {
+        "command": "test -n \"$STRIPE_SECRET_KEY\" && test -n \"$STRIPE_READ_SECRET_KEY\" && test -n \"$STRIPE_REFUND_SECRET_KEY\" && test -n \"$STRIPE_ACCOUNT_ID\" && test -n \"$STRIPE_PRICE_ID_PRO_MONTHLY\" && test -n \"$STRIPE_PRODUCT_ID_CREDIT_PACK\" && BILLING_STRIPE_ACCEPTANCE=true vitest run --config vitest.integration.config.ts app/testing/billing-stripe.acceptance.test.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "generate:billing-policy:development": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Rewrite the fleet, rates and routes of infra/billing/development.billing-policy.json from the code-owned billable model route table."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/api/scripts/generate-development-billing-policy.mts"
+      }
+    },
+    "generate-email-palette": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Reproject packages/ui/src/styles/tokens.css into app/email/templates/email-palette.generated.ts. Pass --check to fail on drift."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/api/scripts/generate-email-palette.mts"
+      }
+    },
+    "billing-policy:publish:development": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Bootstrap local billing: install the billing protections, seed the development supplier budgets, then publish infra/billing/development.billing-policy.json as the development tariff authority. Re-running fails on the head revision once a policy exists; that is deliberate. To publish a regenerated policy over an existing head, run the publish command directly with a fresh --activation-id/--job-key plus --expected-head-revision and --expected-predecessor-activation-id read from billing.billing_policy_head."
+      },
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js protect",
+          "node --env-file-if-exists=apps/api/.env --import @oxc-node/core/register apps/api/app/testing/development-billing-account.ts budgets",
+          "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js publish --environment development --file infra/billing/development.billing-policy.json --activation-id development-bootstrap-v1 --job-key development-bootstrap-v1 --expected-head-revision 0 --expected-predecessor-activation-id none --announced-at now --effective-at now"
+        ]
+      }
+    },
+    "build:billing-command": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist/billing-command.js"],
+      "options": {
+        "command": "vite build --config vite.billing-command.config.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "build:maintenance-command": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/dist/maintenance-command.js"],
+      "options": {
+        "command": "vite build --config vite.maintenance-command.config.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "billing-recovery": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js recover-llm-worker --environment development --limit 100 --poll-milliseconds 5000",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "OTEL_METRICS_PORT": "9465"
+        }
+      }
+    },
+    "billing-operations": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "command": "node --env-file-if-exists=apps/api/.env apps/api/dist/billing-command.js billing-operations-worker --environment development --limit 100 --poll-milliseconds 60000",
+        "cwd": "{workspaceRoot}",
+        "env": {
+          "OTEL_METRICS_PORT": "9466"
+        }
+      }
+    },
+    "test:billing-load": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Run one B8.3 local capacity profile on a disposable PostgreSQL 17 cluster it creates and destroys itself; never touches the developer database. Reports land under docs/research/artifacts/tau-cloud-credit-billing-launch-charter/runs/implementation/chunks/C09/lanes/i3/, raw logs under out/research/. Append `-- --runtime=native --postgres-bin=\u2026` for a PostgreSQL 17 keg; the default compose runtime needs a local postgres:17-alpine image."
+      },
+      "dependsOn": ["build:billing-command"],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=local-smoke"
+      },
+      "configurations": {
+        "smoke": {
+          "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=local-smoke"
+        },
+        "growth": {
+          "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=local-growth"
+        },
+        "surge": {
+          "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=surge-64"
+        }
       }
     }
   }

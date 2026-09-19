@@ -11,6 +11,7 @@ import { createChannelClient, createChannelServer, wrapMessagePort } from '@tauc
 import type { Channel } from '@taucad/rpc';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import { protocolVersion } from '#types/protocol-header.types.js';
 import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
 import { signalBufferByteLength, signalBufferMaxByteLength } from '#framework/runtime-framework.constants.js';
 
@@ -83,7 +84,7 @@ describe('cooperative-abort transport conformance (C7)', () => {
     const server = createChannelServer<RuntimeProtocol>({
       port: serverPort,
       sessionKey: 'c7-wire-notify',
-      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion: 1 },
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
       impl: {
         async call() {
           throw new Error('C7 transport test does not call');

@@ -1,0 +1,45 @@
+# libcascade — TColgp
+
+21 top-level symbols. Signatures are verbatim typescript.
+
+TColgp_Array1OfPnt: NCollection_Array1_gp_Pnt
+
+TColgp_Array1OfPnt2d: NCollection_Array1_gp_Pnt2d
+
+TColgp_Array1OfVec: NCollection_Array1_gp_Vec
+
+TColgp_Array1OfVec2d: NCollection_Array1_gp_Vec2d
+
+TColgp_Array1OfXY: NCollection_Array1_gp_XY
+
+TColgp_Array1OfXYZ: NCollection_Array1_gp_XYZ
+
+TColgp_Array2OfPnt: NCollection_Array2_gp_Pnt
+
+TColgp_Array2OfPnt2d: NCollection_Array2_gp_Pnt2d
+
+TColgp_Array2OfVec: NCollection_Array2_gp_Vec
+
+TColgp_Array2OfXYZ: NCollection_Array2_gp_XYZ
+
+TColgp_HArray1OfPnt: NCollection_HArray1_gp_Pnt
+
+TColgp_HArray1OfPnt2d: NCollection_HArray1_gp_Pnt2d
+
+TColgp_HArray1OfXY: NCollection_HArray1_gp_XY
+
+TColgp_HArray1OfXYZ: NCollection_HArray1_gp_XYZ
+
+TColgp_HArray2OfPnt: NCollection_HArray2_gp_Pnt
+
+TColgp_HArray2OfPnt2d: NCollection_HArray2_gp_Pnt2d
+
+TColgp_HArray2OfXYZ: NCollection_HArray2_gp_XYZ
+
+TColgp_HSequenceOfPnt: NCollection_HSequence_gp_Pnt
+
+TColgp_SequenceOfPnt: NCollection_Sequence_gp_Pnt
+
+TColgp_SequenceOfPnt2d: NCollection_Sequence_gp_Pnt2d
+
+TColgp_SequenceOfXY: NCollection_Sequence_gp_XY

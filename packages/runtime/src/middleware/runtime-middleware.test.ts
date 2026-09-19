@@ -14,6 +14,7 @@ import {
   createMiddlewareRuntime,
 } from '#middleware/runtime-middleware.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
 import { createMockFileSystem } from '../../test/support/kernel-worker.fixture.js';
 
@@ -31,6 +32,9 @@ const mockDependencies: readonly Dependency[] = [
 ];
 const testSignal = new AbortController().signal;
 const testTracer = { startSpan: vi.fn(() => ({ end: vi.fn() })) };
+const testCompute = createComputeCapabilityHost({ binding: { mode: 'memory' }, workspace: 'test' }).capability(
+  testSignal,
+);
 
 describe('defineMiddleware', () => {
   it('should create public plugin metadata and hide lifecycle details', async () => {
@@ -273,6 +277,7 @@ describe('createMiddlewareRuntime', () => {
       onLog: onLog as OnWorkerLog,
       middlewareName: 'TestMiddleware',
       filesystem,
+      compute: testCompute,
       dependencies: mockDependencies,
       dependencyHash: mockDependencyHash,
     });
@@ -280,6 +285,7 @@ describe('createMiddlewareRuntime', () => {
     expect(runtime.logger).toBeDefined();
     expect(runtime.tracer).toBe(testTracer);
     expect(runtime.filesystem).toBe(filesystem);
+    expect(runtime.compute).toBe(testCompute);
     expect(runtime.state).toBeDefined();
     expect(runtime.state.value).toEqual({});
     expect(runtime.dependencies).toBe(mockDependencies);
@@ -299,6 +305,7 @@ describe('createMiddlewareRuntime', () => {
       onLog: onLog as OnWorkerLog,
       middlewareName: 'TestMiddleware',
       filesystem,
+      compute: testCompute,
       dependencies: mockDependencies,
       dependencyHash: mockDependencyHash,
       stateSchema,
@@ -321,6 +328,7 @@ describe('createMiddlewareRuntime', () => {
       onLog: onLog as OnWorkerLog,
       middlewareName: 'MyMiddleware',
       filesystem,
+      compute: testCompute,
       dependencies: mockDependencies,
       dependencyHash: mockDependencyHash,
     });
@@ -367,6 +375,7 @@ describe('wrap hook behavior', () => {
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),
+      compute: testCompute,
       dependencies: mockDependencies,
       dependencyHash: 'a'.repeat(64),
     });
@@ -425,6 +434,7 @@ describe('wrap hook behavior', () => {
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),
+      compute: testCompute,
       dependencies: mockDependencies,
       dependencyHash: 'a'.repeat(64),
     });
@@ -479,6 +489,7 @@ describe('wrap hook behavior', () => {
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),
+      compute: testCompute,
       dependencies: mockDependencies,
       dependencyHash: 'a'.repeat(64),
       stateSchema,

@@ -9,6 +9,10 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer, request } from 'node:http';
+import type { IncomingMessage } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -67,6 +71,66 @@ afterEach(async () => {
 });
 
 describe('createHostMcpEndpoint capability', () => {
+  it.each([
+    { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
+    { name: 'test_model', input: {} },
+    { name: 'screenshot', input: { targetFile: 'main.scad', mode: 'single' } },
+    { name: 'export_geometry', input: { targetFile: 'main.scad', format: 'glb' } },
+  ])('does not release admitted $name work until it settles', async ({ name, input }) => {
+    const entered = Promise.withResolvers<void>();
+    const unblock = Promise.withResolvers<void>();
+    const order: string[] = [];
+    endpoint = createHostMcpEndpoint({
+      secret,
+      registry: {
+        list: () => [],
+        invoke: async (input) => {
+          entered.resolve();
+          await unblock.promise;
+          order.push('work');
+          return registry.invoke(input);
+        },
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot: '/tmp/tau-mcp-test', mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'candidate', chatId: 'chat-1' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'candidate',
+      chatId: 'chat-1',
+      signal: new AbortController().signal,
+    });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+    const call = client.callTool(name, input);
+    await entered.promise;
+    const releasing = (async () => {
+      // oxlint-disable-next-line no-await-in-loop -- a turn must settle before the next binding.
+      await release();
+      order.push('release');
+    })();
+    try {
+      expect(release()).toBeInstanceOf(Promise);
+      expect(() =>
+        endpoint!.activate({
+          token: capability.token,
+          runId: 'candidate',
+          chatId: 'chat-1',
+          signal: new AbortController().signal,
+        }),
+      ).toThrow();
+      expect(order).toEqual([]);
+    } finally {
+      unblock.resolve();
+      await call;
+      await releasing;
+    }
+    expect(order).toEqual(['work', 'release']);
+  });
+
   it('verifies its own capability and refuses tampered, expired and foreign ones', () => {
     let clock = 1_000_000;
     const mcp = createHostMcpEndpoint({ secret, registry, now: () => clock });
@@ -74,6 +138,7 @@ describe('createHostMcpEndpoint capability', () => {
 
     const claims = mcp.verify(capability.token);
     expect(claims).toMatchObject({ v: 1, runId: 'run-1', chatId: 'chat-1' });
+    expect(claims.sessionKey).toMatch(/^[\w-]+$/u);
     expect(claims.allowedTools).toEqual(['get_kernel_result', 'test_model', 'screenshot', 'export_geometry']);
 
     const [prefix, encoded, signature] = capability.token.split('.');
@@ -91,19 +156,126 @@ describe('createHostMcpEndpoint capability', () => {
     expect(() => mcp.verify(capability.token)).toThrow(HostMcpCapabilityError);
   });
 
-  it('fences MCP sessions by run, never by session id alone', () => {
+  it('fences MCP sessions by chat session, never by session id alone', () => {
     const mcp = createHostMcpEndpoint({ secret, registry });
-    const first = mcp.authorityKey(mcp.verify(mcp.mint({ runId: 'run-1', chatId: 'chat-1' }).token));
-    const second = mcp.authorityKey(mcp.verify(mcp.mint({ runId: 'run-2', chatId: 'chat-1' }).token));
-    const again = mcp.authorityKey(mcp.verify(mcp.mint({ runId: 'run-1', chatId: 'chat-1' }).token));
+    const session = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
+    const key = mcp.authorityKey(mcp.verify(session.token));
 
-    expect(first).not.toBe(second);
-    // Stable across mints: two capabilities for one run share one MCP session.
-    expect(first).toBe(again);
+    /* Stable for the life of the session: every turn of the chat presents the
+     * same capability, because it is minted when the session is opened (V7). */
+    expect(mcp.authorityKey(mcp.verify(session.token))).toBe(key);
+    // A capability naming another chat — or another session — is a different authority.
+    expect(mcp.authorityKey(mcp.verify(mcp.mint({ runId: 'run-9', chatId: 'chat-2' }).token))).not.toBe(key);
+    expect(mcp.authorityKey(mcp.verify(mcp.mint({ runId: 'run-2', chatId: 'chat-1' }).token))).not.toBe(key);
+  });
+
+  /* The run is provenance, and provenance must not fence: one session answers
+   * every turn of a chat, so a capability keyed to the run that opened it would
+   * refuse the chat's second turn. */
+  it('keeps serving a chat under the capability its session was opened with', () => {
+    const mcp = createHostMcpEndpoint({ secret, registry });
+    const opened = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
+
+    const claims = mcp.verify(opened.token);
+
+    expect(claims.runId).toBe('run-1');
+    expect(mcp.authorityKey(claims)).toBe(mcp.authorityKey(mcp.verify(opened.token)));
   });
 });
 
 describe('the mounted /mcp route', () => {
+  it('never attributes a request admitted under one run to the next run', async () => {
+    const runIds: string[] = [];
+    endpoint = createHostMcpEndpoint({
+      secret,
+      registry: {
+        list: () => [],
+        invoke: async (invocation) => {
+          expect(invocation.runId).toBeDefined();
+          if (invocation.runId === undefined) {
+            throw new Error('missing run id');
+          }
+          runIds.push(invocation.runId);
+          return { content: { success: true, status: 'ready' }, isError: false };
+        },
+      },
+    });
+    const rawServer = createServer((incoming, response) => {
+      void endpoint?.handle(incoming, response);
+    });
+    rawServer.listen(0, '127.0.0.1');
+    await once(rawServer, 'listening');
+    const address = rawServer.address() as AddressInfo;
+    const url = `http://127.0.0.1:${String(address.port)}/mcp`;
+    const capability = endpoint.mint({ chatId: 'chat-1', runId: 'run-1' });
+    const headers = {
+      authorization: `Bearer ${capability.token}`,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    };
+    try {
+      const initialized = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 0,
+          method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+        }),
+      });
+      const mcpSessionId = initialized.headers.get('mcp-session-id');
+      await initialized.text();
+      expect(mcpSessionId).toBeTypeOf('string');
+
+      const releaseFirst = endpoint.activate({
+        token: capability.token,
+        runId: 'run-1',
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+      const admitted = once(rawServer, 'request');
+      const slow = request(url, { method: 'POST', headers: { ...headers, 'mcp-session-id': mcpSessionId ?? '' } });
+      const response = new Promise<IncomingMessage>((resolve) => {
+        slow.once('response', resolve);
+      });
+      slow.write(' ');
+      await admitted;
+      await releaseFirst();
+      const releaseSecond = endpoint.activate({
+        token: capability.token,
+        runId: 'run-2',
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+      slow.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+        }),
+      );
+      const reply = await response;
+      reply.resume();
+      await once(reply, 'end');
+      await releaseSecond();
+
+      expect(runIds).not.toContain('run-2');
+    } finally {
+      rawServer.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        rawServer.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+  }, 30_000);
+
   it('dispatches a tool call into the daemon registry and refuses an unauthorized one', async () => {
     endpoint = createHostMcpEndpoint({ secret, registry });
     server = startAgentServer({
@@ -123,6 +295,13 @@ describe('the mounted /mcp route', () => {
     expect(unauthorized.status).toBe(401);
 
     const capability = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
+    const turn = new AbortController();
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-1',
+      chatId: 'chat-1',
+      signal: turn.signal,
+    });
     const client = await connectMcpOverFetch({
       url,
       headers: { authorization: `Bearer ${capability.token}` },
@@ -133,5 +312,97 @@ describe('the mounted /mcp route', () => {
     expect(result.structuredContent).toMatchObject({ passed: 1, total: 1 });
     expect(invocations).toHaveLength(1);
     expect(invocations[0]?.toolName).toBe('test_model');
+    /* The run the capability was minted for rides the invocation, so a candidate
+     * turn's Tau tools resolve that run's checkout rather than the live root. */
+    expect(invocations[0]?.runId).toBe('run-1');
+    turn.abort();
+    expect(invocations[0]?.signal.aborted).toBe(true);
+    await release();
+
+    const idle = await client.callTool('test_model', {});
+    expect(idle.isError).toBe(true);
+    expect(JSON.stringify(idle)).toContain('MCP_RUN_INACTIVE');
+    expect(invocations).toHaveLength(1);
+  }, 30_000);
+
+  it('captures the active run for each call made through one long-lived MCP session', async () => {
+    endpoint = createHostMcpEndpoint({ secret, registry });
+    server = startAgentServer({
+      launcher: stubLauncher(),
+      token,
+      workspaceRoot: '/tmp/tau-mcp-test',
+      mcp: endpoint,
+    });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-opened', chatId: 'chat-1' });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+
+    for (const runId of ['run-1', 'run-2']) {
+      const release = endpoint.activate({
+        token: capability.token,
+        runId,
+        chatId: 'chat-1',
+        signal: new AbortController().signal,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- the release between calls is the contract under test.
+      await client.callTool('test_model', {});
+      // oxlint-disable-next-line no-await-in-loop -- finish this turn before rebinding the shared MCP session.
+      await release();
+    }
+
+    expect(invocations.map((invocation) => invocation.runId)).toEqual(['run-1', 'run-2']);
+  }, 30_000);
+
+  it('refuses a capability minted for another chat on this session', async () => {
+    endpoint = createHostMcpEndpoint({ secret, registry });
+    server = startAgentServer({
+      launcher: stubLauncher(),
+      token,
+      workspaceRoot: '/tmp/tau-mcp-test',
+      mcp: endpoint,
+    });
+    await server.ready;
+    const url = new URL('mcp', server.url()).href;
+    const post = async (bearer: string, body: unknown, session: string): Promise<Response> =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          authorization: `Bearer ${bearer}`,
+          ...(session === '' ? {} : { 'mcp-session-id': session }),
+        },
+        body: JSON.stringify(body),
+      });
+
+    const mine = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
+    const initialized = await post(
+      mine.token,
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '0' } },
+      },
+      '',
+    );
+    const mcpSessionId = initialized.headers.get('mcp-session-id') ?? '';
+    expect(mcpSessionId).not.toBe('');
+
+    /* A well-formed capability this daemon really did mint — for a different
+     * chat. It verifies, and it is still refused on this session (V7). */
+    const foreign = endpoint.mint({ runId: 'run-2', chatId: 'chat-2' });
+    const refused = await post(
+      foreign.token,
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'test_model', arguments: {} } },
+      mcpSessionId,
+    );
+
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain('authority mismatch');
+    expect(invocations).toHaveLength(0);
   }, 30_000);
 });

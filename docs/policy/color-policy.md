@@ -131,7 +131,7 @@ Components always use semantic Tailwind classes. Shared CSS-variable mappings li
 | Structural selection | `--accent`           | `bg-accent`, `text-accent-foreground` |
 | Border               | `--border`           | `border-border`                       |
 | Input field          | `--input`            | `border-input`                        |
-| Focus ring           | `--ring`             | `ring-ring`                           |
+| Focus outline        | `--ring`             | `focus-visible:focus-outline`         |
 | Error state          | `--destructive`      | `bg-destructive`, `text-destructive`  |
 | Success state        | `--success`          | `bg-success`, `text-success`          |
 

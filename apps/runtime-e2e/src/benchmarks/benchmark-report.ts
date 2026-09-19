@@ -308,7 +308,7 @@ export function generateHtmlReport(run: BenchmarkRunResult, comparison?: Benchma
   .cat-badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; color: white; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; margin-right: 6px; }
   .chart-container { margin: 1.5rem 0; overflow-x: auto; }
   details { margin: 0.75rem 0; }
-  summary { cursor: pointer; padding: 0.5rem; background: #F3F4F6; border-radius: 6px; font-size: 0.875rem; }
+  summary { padding: 0.5rem; background: #F3F4F6; border-radius: 6px; font-size: 0.875rem; }
   summary:hover { background: #E5E7EB; }
   .oc-table { margin-top: 0.5rem; }
   .oc-table td, .oc-table th { padding: 0.35rem 0.5rem; }

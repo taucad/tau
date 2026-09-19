@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { forwardRef, useImperativeHandle } from 'react';
+import { createContext, forwardRef, useContext, useEffect, useImperativeHandle } from 'react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -14,6 +14,9 @@ const state = vi.hoisted(() => ({
   isMobile: false,
   sidebarOpen: true,
   allotmentResize: vi.fn(),
+  providers: [] as Array<{ handle: { providers: () => React.JSXElementConstructor<React.PropsWithChildren> } }>,
+  commandPalette: [] as Array<{ id: string; handle: { commandPalette: () => ReactNode } }>,
+  sidebarMounts: 0,
 }));
 
 vi.mock('react-router', () => ({
@@ -51,18 +54,25 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
         ? [{ id: 'breadcrumb', handle: { breadcrumb: () => <span>Projects</span> } }]
         : [],
       actions: [],
-      commandPalette: [],
+      commandPalette: state.commandPalette,
       enablePageWrapper:
         state.enablePageWrapper === undefined ? [] : [{ handle: { enablePageWrapper: state.enablePageWrapper } }],
       enablePageHeader:
         state.enablePageHeader === undefined ? [] : [{ handle: { enablePageHeader: state.enablePageHeader } }],
       enableOverflowY: [],
-      providers: [],
+      providers: state.providers,
       enablePageFooter: [],
     }),
 }));
 vi.mock('#components/layout/app-sidebar.js', () => ({
-  AppSidebar: () => <aside aria-label='Application sidebar'>Sidebar</aside>,
+  AppSidebar: () => {
+    /* The probe is the sidebar's mount, because that is what a person loses
+     * when the shell is re-created below a new provider (Finding 5b). */
+    useEffect(() => {
+      state.sidebarMounts += 1;
+    }, []);
+    return <aside aria-label='Application sidebar'>Sidebar</aside>;
+  },
 }));
 vi.mock('#components/layout/desktop-titlebar-controls.js', () => ({
   DesktopTitlebarControls: () => <div data-slot='desktop-titlebar-controls' />,
@@ -104,15 +114,16 @@ vi.mock('@taucad/ui/components/breadcrumb', () => ({
   BreadcrumbSeparator: () => <span>/</span>,
 }));
 vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => <span /> }));
-vi.mock('#components/ui/utils/compose.js', () => ({
-  Compose: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
-}));
 vi.mock('#components/layout/page-footer.js', () => ({ PageFooter: () => <footer /> }));
 vi.mock('#components/icons/tau-wordmark.js', () => ({
   TauWordmark: (properties: React.ComponentProps<'svg'>) => <svg {...properties} />,
 }));
 vi.mock('#components/cookie-consent.js', () => ({ CookieConsent: () => null }));
-vi.mock('#components/settings/settings-dialog.js', () => ({ SettingsDialog: () => null }));
+vi.mock('#components/settings/settings-dialog.js', () => ({
+  /* `ComputeReuseSettings` inside the real dialog reads the project context the
+   * matched route contributes, so the dialog is probed the same way. */
+  SettingsDialog: () => (useContext(RouteProviderContext) ? <span>Settings dialog</span> : undefined),
+}));
 
 const { Page } = await import('#components/layout/page.js');
 
@@ -124,8 +135,31 @@ beforeEach(() => {
   state.isMobile = false;
   state.sidebarOpen = true;
   state.allotmentResize.mockReset();
+  state.providers = [];
+  state.commandPalette = [];
+  state.sidebarMounts = 0;
   vi.unstubAllEnvs();
 });
+
+const RouteProviderContext = createContext(false);
+
+/** What a route handle contributes: a component wrapped around the page. */
+function RouteProvider({ children }: React.PropsWithChildren): React.JSX.Element {
+  return (
+    <RouteProviderContext.Provider value>
+      <div data-slot='route-provider'>{children}</div>
+    </RouteProviderContext.Provider>
+  );
+}
+
+/**
+ * Stands in for `ProjectCommandPaletteItems`: it needs its own route's context
+ * and renders nothing without it, which is how the project palette emptied
+ * silently once the shell moved above the composed providers.
+ */
+function RouteCommandPaletteProbe(): React.JSX.Element | undefined {
+  return useContext(RouteProviderContext) ? <span>Project commands</span> : undefined;
+}
 
 describe('Page application shell', () => {
   it('renders stable sidebar and main Allotment panes', () => {
@@ -159,6 +193,36 @@ describe('Page application shell', () => {
     ).toBe(sidebarTrigger);
   });
 
+  it('should keep the sidebar mounted when the matched routes start contributing providers', () => {
+    const { rerender } = render(<Page />);
+    expect(state.sidebarMounts).toBe(1);
+
+    /* Home → project: the project route contributes one provider, so the
+     * composed list grows. The shell must not be re-created below it. */
+    state.providers = [{ handle: { providers: () => RouteProvider } }];
+    rerender(<Page />);
+
+    expect(screen.getByText('Page content').closest('[data-slot=route-provider]')).not.toBeNull();
+    expect(state.sidebarMounts).toBe(1);
+  });
+
+  it("should render a route's command palette items inside that route's providers", () => {
+    state.providers = [{ handle: { providers: () => RouteProvider } }];
+    state.commandPalette = [{ id: 'project', handle: { commandPalette: () => <RouteCommandPaletteProbe /> } }];
+
+    render(<Page />);
+
+    expect(screen.getByText('Project commands').closest('[data-slot=route-provider]')).not.toBeNull();
+  });
+
+  it('should render the settings dialog inside the matched routes providers', () => {
+    state.providers = [{ handle: { providers: () => RouteProvider } }];
+
+    render(<Page />);
+
+    expect(screen.getByText('Settings dialog').closest('[data-slot=route-provider]')).not.toBeNull();
+  });
+
   it('hides the outer sidebar pane on mobile while keeping main content mounted', () => {
     state.isMobile = true;
     const { container } = render(<Page />);
@@ -177,12 +241,14 @@ describe('Page application shell', () => {
     expect(controlRegion.children[0]).toBe(within(controlRegion).getByRole('link', { name: 'Home' }));
     expect(controlRegion.children[1]).toBe(within(controlRegion).getByRole('button', { name: 'Toggle Sidebar' }));
     expect(controlRegion.children).toHaveLength(2);
-    expect(controlRegion).toHaveClass('gap-2');
+    // The wordmark clears the first control by the row's own gap, not a wider one.
+    expect(controlRegion).toHaveClass('gap-1', 'pl-2', 'pr-1');
+    expect(controlRegion).not.toHaveClass('gap-2', 'px-2');
     expect(
       container
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
-    ).toBe('calc(var(--spacing) * 28)');
+    ).toBe('calc(var(--spacing) * 26)');
   });
 
   it('resizes the sidebar by 16px and clamps to the pane bounds', () => {
@@ -246,10 +312,45 @@ describe('Page header contract', () => {
       container
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
-    ).toBe('calc(var(--spacing) * 47)');
+    ).toBe('calc(var(--spacing) * 44)');
     expect(container.querySelector('header > div')).toHaveClass(
       'md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
     );
+  });
+});
+
+describe('Desktop window drag band', () => {
+  it('spans the window on desktop and leaves the header chrome clickable', () => {
+    state.hasBreadcrumb = true;
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { container } = render(<Page />);
+
+    expect(container.querySelector('[data-slot=desktop-drag-band]')).toHaveClass(
+      'fixed',
+      'inset-x-0',
+      'top-0',
+      'h-9',
+      '[app-region:drag]',
+    );
+    for (const chrome of container.querySelectorAll('header > div')) {
+      expect(chrome).toHaveClass('[app-region:no-drag]');
+    }
+  });
+
+  it('survives the routes that opt out of the application shell', () => {
+    state.enablePageWrapper = false;
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { container } = render(<Page />);
+
+    expect(container.querySelector('[data-slot=application-shell]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-slot=desktop-drag-band]')).toBeInTheDocument();
+  });
+
+  it('stays out of the browser build, which keeps its own title bar', () => {
+    const { container } = render(<Page />);
+
+    expect(container.querySelector('[data-slot=desktop-drag-band]')).not.toBeInTheDocument();
+    expect(container.querySelector('header > div')).not.toHaveClass('[app-region:no-drag]');
   });
 });
 

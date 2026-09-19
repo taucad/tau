@@ -88,8 +88,8 @@ const GeoSpecRunnerDebugRoute = (): React.JSX.Element => {
           files: seedFiles,
           editorState: {
             panelState: {
-              // The GeoSpec worker client is owned by the chat RPC hook, so
-              // the Chat lane must mount for the probe to exist.
+              // The probe globals mount with the focused chat's session gate,
+              // so the Chat lane must be open for them to exist.
               desktopLayout: { chatOpen: true, workbenchOpen: true, workbenchWidth: 460 },
             },
           },

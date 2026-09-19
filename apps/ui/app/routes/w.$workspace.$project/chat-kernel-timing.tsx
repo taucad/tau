@@ -1,15 +1,19 @@
-import { Check, ChevronDown } from 'lucide-react';
+import { Activity, Check, ChevronDown } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { FilterCondition } from '#components/kernel/trace-condition-picker.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { Button } from '@taucad/ui/components/button';
+import { downloadBlob } from '@taucad/utils/file';
+import type { TelemetrySpanRecord } from '@taucad/runtime';
+import { rendererSpans, telemetryJsonl } from '#lib/renderer-telemetry.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type {
   DisplaySettings,
   PipelineLane,
+  SpanNode,
   TelemetryTrace,
   ViewMode,
 } from '#routes/w.$workspace.$project/chat-kernel-types.js';
@@ -186,23 +190,21 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   const traces = useMemo(() => buildTelemetryTraces(telemetryEntries), [telemetryEntries]);
   const latestTrace = useMemo(() => getLatestLifecycleTrace(traces), [traces]);
 
-  const [selectedTraceId, setSelectedTraceId] = useState('latest');
+  /* D9: hold the trace itself, not just its id. The machine's telemetry ring evicts the oldest
+   * traces, and a pane that looked its selection up by id on every rebuild would silently snap back to the
+   * newest one — losing exactly the slow trace the user pinned to read. */
+  const [pinnedTrace, setPinnedTrace] = useState<TelemetryTrace>();
   const [selectedSpanId, setSelectedSpanId] = useState<string>();
   const [collapsedSpans, setCollapsedSpans] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>('trace');
   const [filters, setFilters] = useState<FilterCondition[]>([]);
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(defaultDisplaySettings);
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      setSelectedTraceId('latest');
-      setSelectedSpanId(undefined);
-      setCollapsedSpans(new Set());
-    });
-  }, [cadRef]);
-
+  const selectedTraceId = pinnedTrace?.id ?? 'latest';
+  /* A pinned trace that is still in the ring is taken from the rebuilt list, so it keeps growing
+   * with its own late spans; once evicted, the held object stands in for it. */
   const selectedTrace =
-    selectedTraceId === 'latest' ? latestTrace : (traces.find(({ id }) => id === selectedTraceId) ?? latestTrace);
+    pinnedTrace === undefined ? latestTrace : (traces.find(({ id }) => id === pinnedTrace.id) ?? pinnedTrace);
   const sourceTree = useMemo(() => (selectedTrace ? [selectedTrace.root] : []), [selectedTrace]);
   const hasActiveStructuredFilters = filters.some(({ value }) => value !== '');
   const isFiltering = query.trim() !== '' || hasActiveStructuredFilters;
@@ -246,6 +248,29 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   }, []);
 
   const allCollapsibleIds = useMemo(() => collectAllSpanIds(processedTree), [processedTree]);
+
+  /* D8/OQ1: the browser has no host-visible sink, so the buffered spans leave by a deliberate act —
+   * every producer in one file, ordered on the absolute clock the epochs carry. */
+  const exportTrace = useCallback(() => {
+    /* The pane keeps showing a pinned trace after the ring evicted it (D9), so the export carries
+     * it too: the buffer alone would omit exactly what the user is looking at. While the trace is
+     * still buffered its nodes hold those same records, so identity is the whole deduplication. */
+    const buffered = new Set<TelemetrySpanRecord>(telemetryEntries);
+    const evicted: TelemetrySpanRecord[] = [];
+    const collect = (node: SpanNode): void => {
+      if (!buffered.has(node.entry)) {
+        evicted.push(node.entry);
+      }
+      for (const child of node.children) {
+        collect(child);
+      }
+    };
+    if (selectedTrace) {
+      collect(selectedTrace.root);
+    }
+    const body = telemetryJsonl([...telemetryEntries, ...evicted, ...rendererSpans()]);
+    downloadBlob(new Blob([body], { type: 'application/x-ndjson' }), 'tau-trace.jsonl');
+  }, [selectedTrace, telemetryEntries]);
   const isAllCollapsed =
     allCollapsibleIds.size > 0 && [...allCollapsibleIds].every((spanId) => collapsedSpans.has(spanId));
   const toggleCollapseAll = useCallback(() => {
@@ -255,7 +280,13 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   return (
     <div className='flex size-full min-h-0 flex-col overflow-hidden p-2' data-slot='telemetry-unit-content'>
       <div className='flex shrink-0 items-center justify-between gap-2'>
-        <TraceHistorySelector traces={traces} selectedId={selectedTraceId} onSelect={setSelectedTraceId} />
+        <TraceHistorySelector
+          traces={traces}
+          selectedId={selectedTraceId}
+          onSelect={(id) => {
+            setPinnedTrace(traces.find((trace) => trace.id === id));
+          }}
+        />
         <span
           role='status'
           aria-live='polite'
@@ -297,6 +328,7 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
 
           <div className='mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card'>
             <TraceToolbar
+              onExport={exportTrace}
               viewMode={viewMode}
               displaySettings={displaySettings}
               filters={filters}
@@ -308,7 +340,7 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
             />
 
             {processedTree.length === 0 ? (
-              <CollectionEmptyState className='min-h-20 flex-1'>No matching telemetry</CollectionEmptyState>
+              <PanelEmptyState icon={Activity} title='No matching telemetry' className='min-h-20 flex-1' />
             ) : viewMode === 'trace' ? (
               <TraceTreeView
                 spanTree={processedTree}
@@ -337,9 +369,11 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
           </div>
         </>
       ) : (
-        <CollectionEmptyState className='min-h-24 flex-1'>
-          {renderPhase ? 'Recording telemetry for the current render…' : 'No telemetry recorded yet'}
-        </CollectionEmptyState>
+        <PanelEmptyState
+          icon={Activity}
+          title={renderPhase ? 'Recording telemetry for the current render…' : 'No telemetry recorded yet'}
+          className='min-h-24 flex-1'
+        />
       )}
     </div>
   );

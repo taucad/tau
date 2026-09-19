@@ -1190,13 +1190,13 @@ describe('extractModifiedProperties', () => {
   });
 
   describe('Complex scenarios', () => {
-    it('should exclude non-finite numbers and null-filled tuple remnants', () => {
+    it('should exclude non-finite numbers but preserve explicit null array values', () => {
       const result = extractModifiedProperties(
         { width: Number.NaN, height: Number.POSITIVE_INFINITY, background: [null, null, null, null], quality: 0 },
         { width: 10, height: 10, background: ['#fff'], quality: 1 },
       );
 
-      expect(result).toEqual({ quality: 0 });
+      expect(result).toEqual({ background: [null, null, null, null], quality: 0 });
     });
 
     it('should exclude arrays containing non-finite numbers', () => {

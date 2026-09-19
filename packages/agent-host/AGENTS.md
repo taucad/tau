@@ -1,6 +1,6 @@
 # Agent host
 
-`@taucad/agent-host` owns portable, browser-safe CAD-agent execution, lifecycle, and the durable session log. Keep provider orchestration, UI state, and application-framework composition in their hosts. Consume shared wire and tool contracts from `libs/chat`. Follow `docs/policy/library-api-policy.md`, `docs/policy/chat-request-config-policy.md`, `docs/policy/context-engineering-policy.md`, and `docs/policy/typescript-policy.md`.
+`@taucad/agent-host` owns portable, browser-safe CAD-agent execution, lifecycle, and the durable session log. Keep provider orchestration, UI state, and application-framework composition in their hosts. Own the wire and tool contracts this package publishes (`src/launchers/node/agent-wire.ts`, `src/harness/tools.ts`); a published package cannot depend on the private `libs/chat`, so consumers there mirror them. Follow `docs/policy/library-api-policy.md`, `docs/policy/chat-request-config-policy.md`, `docs/policy/context-engineering-policy.md`, and `docs/policy/typescript-policy.md`.
 
 ## Operational invariants
 

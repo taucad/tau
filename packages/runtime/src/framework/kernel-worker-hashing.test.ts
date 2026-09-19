@@ -5,6 +5,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { OnWorkerLog } from '@taucad/types';
 import type { CreateGeometryResult } from '#types/runtime.types.js';
 import type { GetDependenciesInput, KernelRuntime, RuntimeImplementationAsset } from '#types/runtime-kernel.types.js';
@@ -258,7 +262,7 @@ describe('kernel-worker hashing', () => {
       globalThis.fetch = vi.fn(async () => new Response(null, { status: 503 }));
 
       await expect(createWorker().verifyAssets('replicad', [asset('0'.repeat(64))])).rejects.toThrow(
-        'Failed to fetch implementation asset replicad:engine (503)',
+        'Failed to load implementation asset replicad:engine: Failed to fetch WASM binary',
       );
     });
 
@@ -272,6 +276,33 @@ describe('kernel-worker hashing', () => {
       await worker.verifyAssets('replicad', [asset(digest)]);
 
       expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('should verify a Node file URL and still reject its wrong digest', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'tau-runtime-asset-'));
+      try {
+        const bytes = new Uint8Array([4, 5, 6]);
+        const path = join(directory, 'engine.wasm');
+        await writeFile(path, bytes);
+        const fileAsset = (sha256: string): RuntimeImplementationAsset => ({
+          id: 'engine',
+          url: pathToFileURL(path).href,
+          sha256,
+        });
+        globalThis.fetch = vi.fn(() => {
+          throw new Error('file assets must not use fetch in Node');
+        });
+
+        await expect(
+          createWorker().verifyAssets('replicad', [fileAsset(await sha256Bytes(bytes))]),
+        ).resolves.toBeUndefined();
+        await expect(createWorker().verifyAssets('replicad', [fileAsset('0'.repeat(64))])).rejects.toThrow(
+          'Implementation asset digest mismatch for replicad:engine',
+        );
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
     });
   });
 });

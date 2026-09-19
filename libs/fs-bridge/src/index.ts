@@ -8,6 +8,7 @@ export {
   filesystemBridgeConnectMessageType,
   filesystemBridgeReadyMessageType,
   openFileSystemBridge,
+  serveFileSystemBridgePort,
   waitForWorkerReady,
   workerReadyMessageType,
 } from '#filesystem-bridge.js';
@@ -21,6 +22,9 @@ export type {
   FileSystemBridgeConnection,
   FileSystemBridgePort,
   FileSystemBridgeProxy,
+  FileSystemBridgeProxyTransport,
+  FileSystemBridgeRootedProxy,
+  FileSystemBridgeWorkspaceProxy,
   FileSystemBridgeOptions,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
@@ -36,7 +40,9 @@ export {
 
 export type {
   FileSystemBridgeHello,
+  FileSystemBridgeRootedCalls,
   FileSystemBridgeRuntimeService,
   FileSystemBridgeService,
+  FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';

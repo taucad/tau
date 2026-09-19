@@ -8,7 +8,6 @@ describe('entitlementsFromTier', () => {
     expect(entitlements).toMatchObject({
       tier: 'free',
       status: 'none',
-      aiEnabled: true,
       canUseProKernels: false,
       canCreatePrivateShares: false,
       canSyncFiles: false,
@@ -47,7 +46,6 @@ describe('entitlementsFromTier', () => {
     expect(entitlements).toMatchObject({
       tier: 'pro',
       status: 'active',
-      aiEnabled: true,
       canUseProKernels: true,
       canCreatePrivateShares: true,
       canSyncFiles: true,

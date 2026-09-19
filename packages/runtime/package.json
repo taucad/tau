@@ -40,6 +40,11 @@
     "./types": "./src/types/index.ts",
     "./metadata": "./src/utils/package-info.ts",
     "./client": "./src/client/index.ts",
+    "./configuration": "./src/configuration/index.ts",
+    "./configuration/zod": "./src/configuration/zod.ts",
+    "./job": "./src/jobs/index.ts",
+    "./machine": "./src/machines/index.ts",
+    "./host": "./src/host/index.ts",
     "./worker": "./src/worker/index.ts",
     "./plugin": "./src/plugins/plugin-entry.ts",
     "./kernel": "./src/plugins/kernel-plugin-entry.ts",
@@ -97,6 +102,31 @@
         "types": "./dist/client/index.d.mts",
         "import": "./dist/client/index.mjs",
         "default": "./dist/client/index.mjs"
+      },
+      "./configuration": {
+        "types": "./dist/configuration/index.d.mts",
+        "import": "./dist/configuration/index.mjs",
+        "default": "./dist/configuration/index.mjs"
+      },
+      "./configuration/zod": {
+        "types": "./dist/configuration/zod.d.mts",
+        "import": "./dist/configuration/zod.mjs",
+        "default": "./dist/configuration/zod.mjs"
+      },
+      "./job": {
+        "types": "./dist/jobs/index.d.mts",
+        "import": "./dist/jobs/index.mjs",
+        "default": "./dist/jobs/index.mjs"
+      },
+      "./machine": {
+        "types": "./dist/machines/index.d.mts",
+        "import": "./dist/machines/index.mjs",
+        "default": "./dist/machines/index.mjs"
+      },
+      "./host": {
+        "types": "./dist/host/index.d.mts",
+        "import": "./dist/host/index.mjs",
+        "default": "./dist/host/index.mjs"
       },
       "./worker": {
         "types": "./dist/worker/index.d.mts",
@@ -242,8 +272,15 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@cfworker/json-schema": "catalog:",
+    "@json-structure/sdk": "catalog:",
     "@msgpack/msgpack": "catalog:",
     "@taucad/project-core": "workspace:*",
+    "@standard-schema/spec": "catalog:",
+    "@taucad/cache-core": "workspace:*",
+    "@taucad/parameters": "workspace:*",
+    "@taucad/revisions": "workspace:*",
+    "@taucad/units": "workspace:*",
     "@types/json-schema": "catalog:",
     "cdn-resolve": "catalog:",
     "deepmerge": "catalog:",
@@ -257,6 +294,7 @@
     "electron": ">=37.0.0",
     "next": ">=15.3.0 <17.0.0",
     "vite": "^7.0.0 || ^8.0.0",
+    "xstate": "^5.0.0",
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
@@ -284,6 +322,7 @@
     "next": "catalog:next16",
     "vite": "catalog:electron-vite7",
     "vitest": "catalog:",
+    "xstate": "catalog:",
     "zod": "catalog:"
   }
 }

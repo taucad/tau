@@ -74,8 +74,16 @@ const locator = (providerBasePath: string) =>
     providerBasePath,
   }) as const;
 
+const deferred = <T>() => {
+  let release!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => {
+    release = resolve;
+  });
+  return { promise, resolve: release };
+};
+
 const renderArtifact = async () => {
-  const result = await thumbnailInput!.render({ kind: 'manual-thumbnail' });
+  const result = await thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal });
   if ('status' in result) {
     throw new Error('Expected a rendered thumbnail artifact');
   }
@@ -109,6 +117,7 @@ describe('useThumbnailGenerator', () => {
       kind: 'manual-thumbnail',
       identity: 'proj_aaaaaaaaaaaaaaaaaaaaa:unsettled',
       projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+      signal: exportImage.mock.calls[0]![0].signal,
       sourceFormat: 'glb',
       sourcePath: sourceEntryPath,
       geometryHash: 'geometry-hash',
@@ -121,7 +130,7 @@ describe('useThumbnailGenerator', () => {
         lineWidth: 3,
         camera: {
           framing: 'bounds',
-          direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+          direction: [0.6123724357, -0.6123724357, 0.5],
           up: [0, 0, 1],
           margin: 0.1,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
@@ -142,11 +151,11 @@ describe('useThumbnailGenerator', () => {
     renderHook(() => useThumbnailGenerator());
 
     try {
-      await thumbnailInput!.render({ kind: 'manual-thumbnail' });
+      await thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal });
       expect.fail('render should reject without a settled entry path');
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe('source-unavailable: settled canonical GLB not ready');
+      expect((error as Error).message).toBe('source-unavailable: settled canonical geometry not ready');
     }
     expect(exportImage).not.toHaveBeenCalled();
   });
@@ -155,43 +164,64 @@ describe('useThumbnailGenerator', () => {
     exportImage.mockResolvedValueOnce([]);
     renderHook(() => useThumbnailGenerator());
 
-    await expect(thumbnailInput!.render({ kind: 'manual-thumbnail' })).rejects.toThrow(
-      'Thumbnail export expected exactly one non-empty image/webp artifact, received 0:',
-    );
+    await expect(
+      thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal }),
+    ).rejects.toThrow('Thumbnail export expected exactly one non-empty image/webp artifact, received 0:');
 
     exportImage.mockResolvedValueOnce([
       { name: 'render.webp', mimeType: 'image/webp', bytes: webpBytes(1) },
       { name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array() },
     ]);
-    await expect(thumbnailInput!.render({ kind: 'manual-thumbnail' })).rejects.toThrow(
+    await expect(
+      thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal }),
+    ).rejects.toThrow(
       'Thumbnail export expected exactly one non-empty image/webp artifact, received 2: image/webp 13B, image/png 0B',
     );
     exportImage.mockResolvedValueOnce([
       { name: 'render.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) },
     ]);
-    await expect(thumbnailInput!.render({ kind: 'manual-thumbnail' })).rejects.toThrow('without a WebP signature');
+    await expect(
+      thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal }),
+    ).rejects.toThrow('without a WebP signature');
     vi.mocked(createImageBitmap).mockResolvedValueOnce({
       width: 640,
       height: 480,
       close: vi.fn(),
     } as unknown as ImageBitmap);
     exportImage.mockResolvedValueOnce(webpFile(2));
-    await expect(thumbnailInput!.render({ kind: 'manual-thumbnail' })).rejects.toThrow(
-      'expected 768×576 pixels, received 640×480',
-    );
+    await expect(
+      thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal }),
+    ).rejects.toThrow('expected 768×576 pixels, received 640×480');
     expect(writeFile).not.toHaveBeenCalled();
   });
 
-  it('should return a typed skip for automatic SVG sources without exporting them', async () => {
+  it('should render automatic and manual SVG thumbnails as canonical WebP artifacts', async () => {
     geometryFormat = 'svg';
     renderHook(() => useThumbnailGenerator());
 
-    await expect(thumbnailInput!.render({ kind: 'automatic-thumbnail', identity: 'svg-identity' })).resolves.toEqual({
-      status: 'skipped',
+    const automatic = await thumbnailInput!.render({
+      kind: 'automatic-thumbnail',
       identity: 'svg-identity',
-      reason: 'svg-source',
+      signal: new AbortController().signal,
     });
-    expect(exportImage).not.toHaveBeenCalled();
+    expect(automatic).toMatchObject({ identity: 'svg-identity' });
+    await expect(
+      thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      identity: 'proj_aaaaaaaaaaaaaaaaaaaaa:unsettled',
+    });
+    expect(exportImage).toHaveBeenCalledTimes(2);
+    expect(exportImage).toHaveBeenCalledWith({
+      kind: 'automatic-thumbnail',
+      identity: 'svg-identity',
+      projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+      signal: exportImage.mock.calls[0]![0].signal,
+      sourceFormat: 'svg',
+      sourcePath: sourceEntryPath,
+      content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+      format: 'webp',
+      exportOptions: { width: 768, height: 576, quality: 0.9 },
+    });
   });
 
   it('should include the render recipe in the settled thumbnail identity', () => {
@@ -264,5 +294,34 @@ describe('useThumbnailGenerator', () => {
       kind: 'manual-thumbnail',
       identity: 'manual-identity',
     });
+  });
+
+  it('should settle pending manual regeneration when the hook unmounts', async () => {
+    const hook = renderHook(() => useThumbnailGenerator());
+    const outcome = hook.result.current.regenerate();
+
+    hook.unmount();
+
+    await expect(outcome).resolves.toMatchObject({
+      status: 'failed',
+      kind: 'manual-thumbnail',
+      error: { name: 'AbortError' },
+    });
+  });
+
+  it('should recheck generation after an awaited locator lookup before writing', async () => {
+    const lookup = deferred<ReturnType<typeof locator>>();
+    getProjectFileSystemConfig
+      .mockResolvedValueOnce(locator('/projects/one'))
+      .mockImplementationOnce(async () => lookup.promise);
+    const hook = renderHook(() => useThumbnailGenerator());
+    const artifact = await renderArtifact();
+    const storage = thumbnailInput!.store(artifact);
+
+    hook.unmount();
+    lookup.resolve(locator('/projects/one'));
+
+    await expect(storage).resolves.toEqual({ status: 'skipped', reason: 'superseded' });
+    expect(writeFile).not.toHaveBeenCalled();
   });
 });

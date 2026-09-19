@@ -3,6 +3,7 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { NodeIO } from '@gltf-transform/core';
 import type { Document } from '@gltf-transform/core';
 import { Window } from 'happy-dom';
@@ -10,16 +11,19 @@ import type {
   FileExtension,
   GeometryResponse,
   HashedGeometryResult,
-  JSONSchema7,
   RuntimeContentInput,
   TelemetryEntry,
 } from '@taucad/runtime/types';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { ExportResult } from '@taucad/runtime';
 
 import { replicadKernel } from '#replicad.kernel.js';
+import { normalizeRenderShapes } from '#utils/render-output.js';
+import type { NativeHandleEntry } from '#interface-resolution.js';
 import {
   assertFailure,
   assertSuccess,
+  createMockKernelRuntime,
   createGeometryFile,
   createGeometryTestHelpers,
   createTestGeometry,
@@ -57,11 +61,14 @@ const testClients = new Set<TestClient>();
 /** Create a production-path in-process client for tests with the provided files. */
 const createClient = (
   files: Record<string, string>,
-  options?: ReplicadTestOptions & { readonly onTelemetry?: (entries: TelemetryEntry[]) => void },
+  options?: ReplicadTestOptions & { readonly onTelemetry?: (entries: readonly TelemetryEntry[]) => void },
 ): TestClient => {
   const client = createTestRuntimeClient({ runtime: createReplicadRuntime(options), files });
   if (options?.onTelemetry) {
-    client.on('telemetry', options.onTelemetry);
+    const { onTelemetry } = options;
+    client.on('telemetry', (batch) => {
+      onTelemetry(batch.entries);
+    });
   }
   testClients.add(client);
   return client;
@@ -216,13 +223,8 @@ const mapStlEvidenceToYUp = ({
 };
 
 /** Helper to extract parameters and assert success. */
-const getParameters = async (
-  files: Record<string, string>,
-  mainFile: string,
-): Promise<{
-  jsonSchema: JSONSchema7;
-  defaultParameters: Record<string, unknown>;
-}> => getTestParameters({ runtime: createReplicadRuntime(), files, mainFile });
+const getParameters = async (files: Record<string, string>, mainFile: string): Promise<ParameterManifest> =>
+  getTestParameters({ runtime: createReplicadRuntime(), files, mainFile });
 
 /** Helper to create geometry and return the result. */
 const createGeometry = async ({
@@ -264,7 +266,7 @@ describe('ReplicadWorker', () => {
   describe('getParameters', () => {
     describe('ESM style - export syntax', () => {
       it('should extract defaultParams from exported const', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.ts': `
               import { drawRoundedRectangle } from 'replicad';
@@ -284,12 +286,12 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({
+        expect(defaults).toEqual({
           width: 100,
           height: 50,
           depth: 30,
         });
-        expect(jsonSchema).toMatchObject({
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             width: { type: 'integer', default: 100 },
@@ -300,7 +302,7 @@ describe('ReplicadWorker', () => {
       });
 
       it('should extract nested defaultParams', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -324,11 +326,11 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({
+        expect(defaults).toEqual({
           dimensions: { width: 100, height: 50 },
           options: { rounded: true, radius: 5 },
         });
-        expect(jsonSchema).toMatchObject({
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             dimensions: {
@@ -350,7 +352,7 @@ describe('ReplicadWorker', () => {
       });
 
       it('should handle array parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -368,7 +370,7 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({
+        expect(defaults).toEqual({
           sizes: [10, 20, 30],
           position: [0, 0, 0],
         });
@@ -377,7 +379,7 @@ describe('ReplicadWorker', () => {
 
     describe('CommonJS style - global defaultParams', () => {
       it('should extract defaultParams from global variable', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.js': `
               const { draw } = replicad;
@@ -396,8 +398,8 @@ describe('ReplicadWorker', () => {
           'box.js',
         );
 
-        expect(defaultParameters).toEqual({ width: 80, height: 40 });
-        expect(jsonSchema).toMatchObject({
+        expect(defaults).toEqual({ width: 80, height: 40 });
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             width: { type: 'integer', default: 80 },
@@ -409,7 +411,7 @@ describe('ReplicadWorker', () => {
 
     describe('Edge cases', () => {
       it('should return empty parameters for file without defaultParams', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -422,14 +424,14 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({});
-        expect(jsonSchema).toMatchObject({
+        expect(defaults).toEqual({});
+        expect(schema).toMatchObject({
           type: 'object',
         });
       });
 
       it('should handle boolean parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -447,11 +449,11 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({ addHoles: true, centered: false });
+        expect(defaults).toEqual({ addHoles: true, centered: false });
       });
 
       it('should handle string parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -469,7 +471,7 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({ label: 'My Box', material: 'PLA' });
+        expect(defaults).toEqual({ label: 'My Box', material: 'PLA' });
       });
     });
   });
@@ -3240,7 +3242,7 @@ describe('OC API Call Tracing', () => {
   }
 
   it('emits separate Replicad render spans for BRep execution, tessellation, and glTF packing', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3290,7 +3292,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits a nested Replicad edge tessellation span when BRep edges are enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3325,7 +3327,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('uses prototype tessellation for repeated translated shape instances by default', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'shafts.ts': repeatedCylinderCode },
@@ -3376,7 +3378,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('keeps the legacy per-shape tessellation path when tessellationInstancing is disabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'shafts.ts': repeatedCylinderCode },
@@ -3407,7 +3409,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('uses prototype edge tessellation for repeated translated shape instances when BRep edges are enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'shafts.ts': repeatedCylinderCode },
@@ -3465,7 +3467,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits Replicad library summary telemetry under run-main when summary tracing is enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       {
@@ -3510,7 +3512,7 @@ describe('OC API Call Tracing', () => {
   }, 15_000);
 
   it('emits Replicad library per-call telemetry under run-main when per-call tracing is enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       {
@@ -3567,7 +3569,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits no Replicad library telemetry when library tracing is off', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3591,7 +3593,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits Replicad library summary telemetry when user code fails after library calls', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       {
@@ -3631,7 +3633,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits an oc.summary span in summary mode', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3659,7 +3661,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits individual oc.* spans in per-call mode', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3686,7 +3688,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits no oc spans when tracing is off', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3710,7 +3712,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('summary span contains per-class statistics', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -4213,30 +4215,44 @@ describe('Normal consistency', () => {
 // serializeNativeHandle / deserializeNativeHandle
 // =============================================================================
 
+// A display render no longer carries the durable snapshot (charter D12/W6b), so these tests call the
+// kernel's serializer the way the framework does: on the native handle `createGeometry` produces.
+type ReplicadKernelContext = Parameters<typeof replicadDefinition.serializeNativeHandle>[2];
+
+const serializeHandle = (nativeHandle: NativeHandleEntry[]): unknown =>
+  replicadDefinition.serializeNativeHandle({ nativeHandle }, createMockKernelRuntime(), mock<ReplicadKernelContext>());
+
 describe('serializeNativeHandle', () => {
+  // The `replicad` library binds its OpenCASCADE instance process-globally through `setOC`, so one render
+  // installs the kernel's instance and the handles below are built with the very library the kernel used.
+  beforeAll(async () => {
+    replicadDefinition = await resolveReplicadDefinition();
+    assertSuccess(
+      await createGeometry({
+        files: {
+          'bootstrap.ts': `
+            import { makeBox } from 'replicad';
+            export default function main() {
+              return makeBox([0, 0, 0], [1, 1, 1]);
+            }
+          `,
+        },
+        mainFile: 'bootstrap.ts',
+      }),
+    );
+  }, 60_000);
+
   it('should serialize nativeHandle to BRep strings with metadata', async () => {
-    const result = await createGeometry({
-      files: {
-        'box.ts': `
-          import { drawRoundedRectangle } from 'replicad';
-          export default function main() {
-            return {
-              shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10),
-              name: 'TestBox',
-              color: '#ff0000',
-              metalness: 0.8,
-              roughness: 0.3,
-            };
-          }
-        `,
-      },
-      mainFile: 'box.ts',
-    });
-
-    assertSuccess(result);
-    expect(result.serializedNativeHandle).toBeDefined();
-
-    const serialized = result.serializedNativeHandle as Array<{
+    const { drawRoundedRectangle } = await import('replicad');
+    const serialized = serializeHandle(
+      normalizeRenderShapes({
+        shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10),
+        name: 'TestBox',
+        color: '#ff0000',
+        metalness: 0.8,
+        roughness: 0.3,
+      }),
+    ) as Array<{
       brep: string;
       metadata: Record<string, unknown>;
     }>;
@@ -4251,25 +4267,18 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should round-trip serialize/deserialize preserving shape geometry', async () => {
-    const result = await createGeometry({
-      files: {
-        'box.ts': `
-          import { drawRoundedRectangle, drawCircle } from 'replicad';
-          export default function main() {
-            return [
-              { shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10), name: 'Box', color: '#ff0000' },
-              { shape: drawCircle(10).sketchOnPlane().extrude(20).translate([0, 0, 10]), name: 'Cylinder', color: '#0000ff', opacity: 0.7 },
-            ];
-          }
-        `,
-      },
-      mainFile: 'box.ts',
-    });
-
-    assertSuccess(result);
-    expect(result.serializedNativeHandle).toBeDefined();
-
-    const serialized = result.serializedNativeHandle as Array<{
+    const { drawRoundedRectangle, drawCircle } = await import('replicad');
+    const serialized = serializeHandle(
+      normalizeRenderShapes([
+        { shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10), name: 'Box', color: '#ff0000' },
+        {
+          shape: drawCircle(10).sketchOnPlane().extrude(20).translate([0, 0, 10]),
+          name: 'Cylinder',
+          color: '#0000ff',
+          opacity: 0.7,
+        },
+      ]),
+    ) as Array<{
       brep: string;
       metadata: { name: string; color?: string; opacity?: number };
     }>;

@@ -11,14 +11,14 @@ import * as mdxParser from '@taucad/oxlint/mdx-parser';
 const unlayeredTargetTypes = ['type:lib', 'type:package', 'type:tool', 'type:example'];
 
 /**
- * Workspace root plus every workspace member directory that has a `package.json`
- * (`packages/*`, nested package groups, `libs/*`, `apps/*`, `apps/libs/*`, `examples/*`,
- * `scripts`), so
- * `import-x/no-extraneous-dependencies` resolves deps from the owning manifest.
+ * Every workspace member directory that has a `package.json` (`packages/*`, nested
+ * package groups, `libs/*`, `apps/*`, `apps/libs/*`, `examples/*`, `tools/*`, `scripts`),
+ * shallowest first so a nested member's config block overrides its parent's.
  */
 const workspacePackageDirectories = () => {
   const root = import.meta.dirname;
-  const directories = new Set([root]);
+  /** @type {Set<string>} */
+  const directories = new Set();
 
   const absorbChildren = (base) => {
     try {
@@ -46,19 +46,61 @@ const workspacePackageDirectories = () => {
   absorbChildren(path.join(root, 'libs'));
   absorbChildren(path.join(root, 'apps'));
   absorbChildren(path.join(root, 'apps/libs'));
+  for (const app of fs.readdirSync(path.join(root, 'apps'))) {
+    absorbChildren(path.join(root, 'apps', app, 'apps'));
+  }
   absorbChildren(path.join(root, 'examples'));
+  absorbChildren(path.join(root, 'tools'));
   if (fs.existsSync(path.join(root, 'scripts/package.json'))) {
     directories.add(path.join(root, 'scripts'));
   }
 
-  return [...directories];
+  return [...directories].sort((a, b) => a.split(path.sep).length - b.split(path.sep).length);
 };
+
+const noExtraneousDependenciesOptions = {
+  devDependencies: true,
+  optionalDependencies: false,
+  peerDependencies: false,
+  includeTypes: true,
+};
+
+/*
+ * `import-x/no-extraneous-dependencies` merges every manifest in an array
+ * `packageDir`, so each member gets its own block: its manifest plus the root,
+ * which holds the apps' dependencies and the shared dev tooling (npm policy §1).
+ * Published and bundled source is narrowed to its own manifest further down.
+ */
+const noExtraneousDependenciesByProject = workspacePackageDirectories().map((directory) => ({
+  files: [`${path.relative(import.meta.dirname, directory)}/**/*.{ts,tsx,mts,cts}`],
+  rules: {
+    'import-x/no-extraneous-dependencies': [
+      'error',
+      { ...noExtraneousDependenciesOptions, packageDir: [directory, import.meta.dirname] },
+    ],
+  },
+}));
 
 const dreiDeepJsImportRestriction = {
   group: ['@react-three/drei/*/*.js'],
   allowTypeImports: true,
   message:
     'Do not value-import Drei deep .js modules from app code. Netlify SSR can classify typeless Drei .js files as CommonJS; import from the Drei barrel or a direct dependency instead. See docs/research/netlify-drei-camera-controls-ssr-crash.md.',
+};
+
+/*
+ * `useMonaco`, `Editor` and `DiffEditor` call `loader.init()` on mount, and a
+ * first `init()` before `configureMonaco` has run `loader.config` binds the page
+ * to the loader's CDN Monaco for good. Only the two owners may touch them:
+ * `lib/monaco.lib.client.ts` (configures the loader) and
+ * `components/code/code-editor.client.tsx` (mounts `Editor` once configured).
+ */
+const monacoLoaderImportRestriction = {
+  name: '@monaco-editor/react',
+  importNames: ['default', 'DiffEditor', 'Editor', 'loader', 'useMonaco'],
+  allowTypeImports: true,
+  message:
+    'Read Monaco with `useConfiguredMonaco` (#hooks/use-monaco-configuration) and render editors with `CodeEditor`; these exports run `loader.init()`, which fetches Monaco from a CDN if it runs before `configureMonaco`. See docs/research/editor-loading-splash-removal-blueprint.md.',
 };
 
 /**
@@ -136,11 +178,12 @@ const namingConventionBase = [
      * filter above one carrying only modifiers, so without it the quoted-name
      * exemption loses to the `strictCamelCase` entry above for any quoted key
      * that happens to contain neither a hyphen nor a space (`'files[0]'`).
+     * `'^'` rather than `'.'` so the empty key `{ '': … }` matches too.
      */
     selector: ['classProperty', 'objectLiteralProperty'],
     format: null,
     modifiers: ['requiresQuotes'],
-    filter: { regex: '.', match: true },
+    filter: { regex: '^', match: true },
   },
 ];
 
@@ -231,6 +274,9 @@ const config = [
       '**/stats.html',
       '**/out-tsc',
       '**/generated',
+      // `@taucad/api-extractor` output, one per kernel package.
+      '**/agent/resources.js',
+      '**/agent/resources.d.ts',
       '**/assets',
       '**/.netlify',
       '**/*.prompt.example.*',
@@ -249,6 +295,10 @@ const config = [
       // oxlint/eslint disable banner and lives in no tsconfig project.
       '**/.agents/skills/*/references/*.d.ts',
       '**/reports/**',
+      '**/package-out*/**',
+      'package-out*/**',
+      'apps/desktop/package-out*/**',
+      'apps/desktop/resources/python/**',
       // GeoSpec fixture generation scripts are verbatim-normative model-code
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
@@ -261,6 +311,10 @@ const config = [
       // wasm bindings. They are unpublished (`files` excludes `bench/`) and
       // outside the package tsconfig.
       'packages/plugins/opencascade-native/bench/**',
+      // Same class: the compute-reuse baseline harness (charter W0) is an
+      // opt-in benchmark reaching runtime-internal seams through a loader
+      // hook; `.mts` files outside the project tsconfig.
+      'apps/runtime-e2e/src/compute-baseline/harness/**',
     ],
   },
 
@@ -292,6 +346,21 @@ const config = [
         'error',
         {
           allowCircularSelfDependency: true,
+          /*
+           * Libraries that are deliberately lazy-loaded in one consumer and
+           * statically imported in another: the UI keeps the runtime and the
+           * filesystem bridge out of its initial bundle, and the CLI client
+           * loads the agent host on demand, while the Node daemon, its render
+           * probe and the integration tests import the same packages directly.
+           * Entries are matched as regular expressions against the import
+           * specifier, so `(/|$)` keeps `@taucad/runtime` from also exempting
+           * `@taucad/runtime-testing`.
+           */
+          checkDynamicDependenciesExceptions: [
+            '@taucad/runtime(/|$)',
+            '@taucad/agent-host(/|$)',
+            '@taucad/fs-bridge(/|$)',
+          ],
           depConstraints: [
             {
               sourceTag: 'scope:api',
@@ -395,25 +464,165 @@ const config = [
       'no-restricted-syntax': [
         'error',
         {
+          // The materialized-workspace directory the north star deleted (W3d).
+          // A residual one is inert — `reservedTauPathClassification` keeps any
+          // unlisted `.tau` member out of revisions and out of the agent's
+          // hands (P13) — but nothing in the product may name it again.
+          // Both halves: a plain string and a template literal's text, which is
+          // how the e2e specs spell it.
+          selector: 'Literal[value=/\\.tau\\/workspaces/], TemplateElement[value.raw=/\\.tau\\/workspaces/]',
+          message:
+            "`.tau/workspaces` is retired. A turn is placed on its chat's checkout; leases live " +
+            'at `.tau/runs/<runId>.json` and the store at `.git`. ' +
+            'See docs/architecture/workspace-filesystem-and-revisions.md (A38).',
+        },
+        {
+          // The browser's second name for the repository, retired by D29: one
+          // `.git` on every host, in the project's own filesystem. A residual
+          // directory is inert — it falls to `reservedTauPathClassification`
+          // like any unlisted `.tau` member (P13) — but nothing may name it
+          // again. Three halves: a plain string, a template literal's text, and
+          // the path-segment array the desktop e2e specs build, which is the
+          // spelling that survived the first sweep of this rename.
+          // (Comments are not AST nodes, so the two prose mentions that explain
+          // the history are untouched, and so is this rule's own source: this
+          // config is `.mjs` and the block only lints `.ts`/`.tsx`.)
+          selector:
+            'Literal[value=/\\.tau\\/revisions/], TemplateElement[value.raw=/\\.tau\\/revisions/], ArrayExpression > Literal[value=".tau"] + Literal[value="revisions"]',
+          message:
+            '`.tau/revisions` is retired. The repository is `.git` in the project root on every ' +
+            'host, browser included, and the durable sync queue is `.git/sync-pending`. ' +
+            'See docs/policy/revisions-policy.md and the charter (D29, ND23).',
+        },
+        {
+          // The three modules S43 deleted, by name: the Jujutsu adapter, the
+          // wasm revision algebra and the multipart publication upload. A
+          // module path is a string, so this is the string half of the pin
+          // below — an import, a dynamic import, a mock path or a test fixture
+          // that names one of them fails here. (Comments are not AST nodes, so
+          // the two prose mentions of the algebra spike in `object-hash.ts` and
+          // `git-objects.ts` are untouched, and so is this rule's own source:
+          // this config is `.mjs` and the block only lints `.ts`/`.tsx`.)
+          selector:
+            'Literal[value=/(jj-adapter|revision-algebra|publish-multipart)/], TemplateElement[value.raw=/(jj-adapter|revision-algebra|publish-multipart)/]',
+          message:
+            'That module is retired. The disk host is `createNativeGitRevisionPort`, the browser ' +
+            'store is `createIsomorphicGitRevisionPort`, and a publication is a named version of ' +
+            'the synced graph — there is no jj adapter, no wasm algebra and no multipart upload. ' +
+            'See docs/research/workspace-filesystem-revisions-charter.md (D11, D30, EQ14).',
+        },
+        {
           selector: 'TSAsExpression > TSNeverKeyword',
           message:
             '`as never` erases all type information and masks underlying type errors. ' +
             'Fix the root cause: use proper typing, type narrowing, or `as unknown as Type`. ' +
             'See docs/policy/typescript-policy.md.',
         },
-      ],
-      'import-x/no-extraneous-dependencies': [
-        'error',
         {
-          packageDir: workspacePackageDirectories(),
-          devDependencies: true,
-          optionalDependencies: false,
-          peerDependencies: false,
-          includeTypes: true,
+          // Retired by the workspace-filesystem north star (D2, D3, D30, A31).
+          // Path classification is one registry, and the unreachable git code
+          // is gone; no shim, alias or re-export brings either name back.
+          selector: `Identifier[name=/^(${[
+            // Six private path classifiers, replaced by @taucad/filesystem/path-registry.
+            'isDesignPath',
+            'revisionPathPolicy',
+            'excludedRevisionPaths',
+            'maskedDirectories',
+            'isMaskedPath',
+            'maskWorkspaceWrites',
+            // The Jujutsu adapter and its generated per-project configuration.
+            'generatedJjConfigContent',
+            'generatedJjConfigPath',
+            'pinnedJjRelease',
+            'resolveJjExecutable',
+            'createJjRevisionPort',
+            // The dead native-git persistence wrapper.
+            'createNativeGitRevisionPersistence',
+            // Bundles as a wire; git smart HTTP is the only transport. The
+            // selector is anchored, so `createBundler`/`createBundlerSourceHost`
+            // in the bundler toolkits are untouched (review R3).
+            'importBundle',
+            'createBundle',
+            'fetchBundle',
+            'RevisionBundleInput',
+            'ImportRevisionBundleInput',
+            'CreateNativeGitBundleInput',
+            'FetchNativeGitBundleInput',
+            // The hand-rolled browser store, superseded by `isomorphic-git` (EQ12, W3).
+            'createBrowserRevisionPort',
+            'BrowserRevisionPortOptions',
+            // The blob, tree and pack codec `isomorphic-git` and `git` now own.
+            'encodeTreeGraph',
+            'encodeTree',
+            'encodeBlob',
+            'decodeTree',
+            'EncodedTreeGraph',
+            'FlatTreeEntry',
+            'GitMode',
+            // Publications are named versions of the synced graph (D11): no blob
+            // store of uploaded files stands beside it.
+            'BlobStore',
+            // The compiled wasm revision algebra and its out-of-tree artifact.
+            'loadRevisionAlgebra',
+            'RevisionAlgebra',
+            'algebraContract',
+            'algebraSourceRevision',
+            'algebraProvenanceDigest',
+            'algebraRawWasmSha256',
+            'algebraNativeDarwinArm64Sha256',
+            'resolveAlgebraArtifact',
+            'algebraArtifactEnvironmentVariable',
+            // The turn recorder and its branch-per-chat placement (D7, I18, W3c):
+            // a turn attaches to a checkout through `turn.machine` and never
+            // creates one, and the effects behind it are `createRevisionActors`.
+            'TurnRevisionRecorder',
+            'TurnRevisionMode',
+            'turnRevisionBranch',
+            'defaultTurnCaptureExclusions',
+            'withTurnRevisions',
+            'sweepTurnWorkspaces',
+            'hostRevisionModes',
+            'hostTurnCaptureExclusions',
+            // The materialized workspace and its claim file (D7, A38, W3d): a
+            // turn is placed on a checkout the revision root already holds,
+            // there is no second copy of the tree and no claim beside it.
+            'MaterializedWorkspace',
+            'MaterializedWorkspaceAuthority',
+            'MaterializedWorkspaceError',
+            'MaterializedWorkspaceId',
+            'MaterializedWorkspaceIdentity',
+            'MaterializedWorkspaceMetrics',
+            'MaterializedWorkspaceMode',
+            'materializedWorkspaceId',
+            'WorkspaceClaim',
+            'PersistedChatWorkspaceClaim',
+            // Revision *mode* as a wire word (D7, I18, P12): placement is
+            // non-branching by default, so nothing picks one.
+            'ChatRevisionMode',
+            'chatRevisionModeSchema',
+            'useChatRevisionMode',
+            'revisionMode',
+            'placementRevisionModes',
+          ].join('|')})$/]`,
+          message:
+            'This identifier is retired. Path classification is `classify` from ' +
+            '`@taucad/filesystem/path-registry`; the jj adapter, the dead native-git persistence ' +
+            'wrapper, the bundle transport, the hand-rolled browser codec and the wasm revision ' +
+            'algebra are deleted — the browser store is `createIsomorphicGitRevisionPort` and the ' +
+            'disk host is `createNativeGitRevisionPort`. Do not reintroduce a shim or alias. ' +
+            'The turn recorder, its `agent/<chat>` branches and the Node revision modes are ' +
+            'replaced by `projectRevisionsMachine` over `createRevisionActors`. ' +
+            'The materialized workspace, its `.tau/workspaces` claim file and the revision-mode ' +
+            "wire word are gone with it: a turn is placed on its chat's checkout and the host " +
+            'records the revision. ' +
+            'See docs/research/workspace-filesystem-revisions-charter.md (D2, D3, D7, D30, EQ12, EQ14).',
         },
       ],
+      'import-x/no-extraneous-dependencies': ['error', noExtraneousDependenciesOptions],
     },
   },
+
+  ...noExtraneousDependenciesByProject,
 
   {
     files: ['**/*.tsx'],
@@ -443,20 +652,16 @@ const config = [
   },
 
   {
-    files: ['packages/**/*.{ts,tsx}'],
-    ignores: ['packages/**/*.{spec,test,config,setup}.{ts,tsx}'],
+    /*
+     * Published packages, the private libraries bundled into them or into an app,
+     * and the standalone examples answer to their own manifest alone: a root
+     * install must not hide a consumer runtime requirement (npm policy §1).
+     * Omitting `packageDir` reads the nearest `package.json`.
+     */
+    files: ['{packages,libs,apps/libs,examples}/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/*.{spec,test,test-d,config,setup}.{ts,tsx,mts,cts}', '**/e2e/**', '**/scripts/**'],
     rules: {
-      'import-x/no-extraneous-dependencies': [
-        'error',
-        {
-          packageDir: workspacePackageDirectories(),
-          devDependencies: true,
-          optionalDependencies: false,
-          peerDependencies: true,
-          includeTypes: true,
-          includeInternal: true,
-        },
-      ],
+      'import-x/no-extraneous-dependencies': ['error', { ...noExtraneousDependenciesOptions, peerDependencies: true }],
     },
   },
 
@@ -734,6 +939,7 @@ const config = [
       '@typescript-eslint/no-restricted-imports': [
         'error',
         {
+          paths: [monacoLoaderImportRestriction],
           patterns: [
             {
               group: ['monaco-editor', 'monaco-editor/*'],
@@ -770,6 +976,42 @@ const config = [
     },
   },
   {
+    /* Client and worker modules may value-import `monaco-editor`, but not the
+     * loader-bound React exports — except their two owners. */
+    files: [
+      'apps/ui/app/**/*.client.ts',
+      'apps/ui/app/**/*.client.tsx',
+      'apps/ui/app/**/*.worker.ts',
+      'apps/ui/app/**/*.worker.tsx',
+    ],
+    ignores: ['apps/ui/app/components/code/code-editor.client.tsx', 'apps/ui/app/lib/monaco.lib.client.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [monacoLoaderImportRestriction],
+          patterns: [dreiDeepJsImportRestriction],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/api/**/*.{ts,tsx,mts,cts}'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@taucad/billing/hooks/*'],
+              message: 'API code must not import the React-only @taucad/billing hooks surface.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: [
       'apps/ui/app/machines/cad.machine.ts',
       'apps/ui/app/workers/geospec-runner.impl.ts',
@@ -789,6 +1031,58 @@ const config = [
                 'Latency-sensitive runtime consumers must use the narrowest existing @taucad/runtime subpath; root value imports add the full barrel to cold start.',
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    /*
+     * I12: reserved engineering vocabulary may not reach operator-facing copy.
+     *
+     * Policy rule 1 gives each term one meaning and keeps the engineering ones
+     * out of product text — a person sees Revision, Branch, Current, Restore,
+     * Sync, never checkout, lease, ref, HEAD, worktree or backend. Two refusal
+     * sentences in this program shipped naming a *checkout* and a *lease*, and
+     * the manual "terminology scan" that was supposed to catch them is what
+     * this rule replaces.
+     *
+     * Scoped to rendered text only: JSXText, and the handful of attributes that
+     * are read aloud or shown. A prop *value* is not copy — `compareAgainst=
+     * 'checkout'` and `checkoutId` are the vocabulary of the code, and flagging
+     * them would make the rule noise that gets disabled. `repository` and
+     * `commit` are deliberately absent: neither is reserved, and both are what
+     * a person actually picks and reads on GitHub.
+     */
+    files: ['apps/ui/app/routes/w.$workspace.$project/**/*.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXText[value=/\\b(checkouts?|leases?|worktrees?|backends?|refs?)\\b/i]',
+          message:
+            'Reserved engineering vocabulary in rendered copy (policy rule 1). Say it in product ' +
+            'words: a Revision, a Branch, Current, Restore, Switch, Merge, Discard, Work in, Sync. ' +
+            'See docs/policy/revisions-policy.md (rule 1) and DESIGN.md.',
+        },
+        {
+          selector: 'JSXText[value=/\\bHEAD\\b/]',
+          message:
+            'HEAD is not product vocabulary (policy rule 1). Name what the person sees — the ' +
+            'Current revision, or the branch it is on. See docs/policy/revisions-policy.md.',
+        },
+        {
+          selector:
+            'JSXAttribute[name.name=/^(aria-label|aria-description|title|placeholder|alt|label)$/] > Literal[value=/\\b(checkouts?|leases?|worktrees?|backends?|refs?)\\b/i]',
+          message:
+            'Reserved engineering vocabulary in an accessible name (policy rule 1) — a screen ' +
+            'reader reads this aloud, so it is copy. See docs/policy/revisions-policy.md.',
+        },
+        {
+          selector:
+            'JSXAttribute[name.name=/^(aria-label|aria-description|title|placeholder|alt|label)$/] > Literal[value=/\\bHEAD\\b/]',
+          message:
+            'HEAD is not product vocabulary (policy rule 1), and an accessible name is read ' +
+            'aloud. See docs/policy/revisions-policy.md.',
         },
       ],
     },

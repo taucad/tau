@@ -1,4 +1,5 @@
-import type { FileEntry, FileStatEntry } from '@taucad/types';
+import { classify, pathRegistry } from '@taucad/filesystem/path-registry';
+import type { FileEntry, FileProvenance, FileStatEntry } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import { fuzzyMatch } from '#components/chat/tiptap/fuzzy-match.js';
@@ -6,7 +7,42 @@ import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 
 const recentFilesLimit = 3;
 
-const isTauInternal = (path: string): boolean => path === '.tau' || path.startsWith('.tau/');
+/**
+ * Whether a row is one of the user's own project files.
+ *
+ * A `@`-mention offers the design, not the host's bookkeeping: the reserved
+ * `.tau` layout, regenerable cache and the control plane are out, and so are the
+ * read-only overlays and mounts the composed view merges in (Exclusion Matrix
+ * row `P`). Everything else the project owns is offerable whether or not a
+ * revision carries it — an exported STL is the user's (a1 review R1).
+ *
+ * One rule for both callers: the view's answer wherever it rode along, and the
+ * same registry the view derives its classes from for a row that never met a
+ * view (the authority's own project search carries no provenance).
+ */
+const isOfferableProjectPath = (path: string, provenance: FileProvenance | undefined): boolean => {
+  const { class: pathClass } = classify(path);
+  if (pathClass === 'cache' || pathClass === 'control-plane' || isReservedPath(path)) {
+    return false;
+  }
+  return provenance === undefined || provenance.source === 'project';
+};
+
+/**
+ * Whether a path is part of the reserved project layout rather than the design.
+ *
+ * `.tau` itself names no registry row — its children do — so `classify` calls it
+ * authored. Asking the registry which rows sit inside a container answers both
+ * the container and everything under it, which keeps the answer in the one
+ * table instead of restoring a `.tau` prefix test here.
+ */
+const isReservedPath = (path: string): boolean =>
+  pathRegistry.some(
+    (row) =>
+      row.anchored &&
+      row.prefix.includes('/') &&
+      (row.prefix === path || row.prefix.startsWith(`${path}/`) || path.startsWith(`${row.prefix}/`)),
+  );
 
 export type BuildContextItemsOptions = {
   fileTree: Map<string, FileEntry>;
@@ -37,7 +73,7 @@ export function buildContextItems({ fileTree, chats, actionItems }: BuildContext
   const items: ContextSuggestionItem[] = [];
 
   const fileEntries = [...fileTree.entries()]
-    .filter(([path, entry]) => entry.type === 'file' && !isTauInternal(path))
+    .filter(([path, entry]) => entry.type === 'file' && isOfferableProjectPath(path, entry.provenance))
     .sort(([, a], [, b]) => b.mtimeMs - a.mtimeMs);
 
   const recentPaths = new Set(fileEntries.slice(0, recentFilesLimit).map(([path]) => path));
@@ -64,7 +100,7 @@ export function buildContextItems({ fileTree, chats, actionItems }: BuildContext
   }
 
   for (const [path, entry] of fileTree) {
-    if (entry.type === 'dir' && !isTauInternal(path)) {
+    if (entry.type === 'dir' && isOfferableProjectPath(path, entry.provenance)) {
       items.push({
         id: path,
         label: entry.name,
@@ -80,7 +116,7 @@ export function buildContextItems({ fileTree, chats, actionItems }: BuildContext
       id: chat.id,
       label: chat.name,
       chipType: 'chat',
-      path: `.tau/transcripts/${chat.id}.jsonl`,
+      path: `.tau/chats/${chat.id}/events.jsonl`,
       group: pastChatsGroup,
       sortKey: getChatRecencyAt(chat),
     });
@@ -104,7 +140,7 @@ export function buildContextItemsFromSearch({
 }: BuildContextItemsFromSearchOptions): ContextSuggestionItem[] {
   const items: ContextSuggestionItem[] = [];
 
-  const filtered = fileEntries.filter((entry) => !isTauInternal(entry.path));
+  const filtered = fileEntries.filter((entry) => isOfferableProjectPath(entry.path, entry.provenance));
   const sorted = [...filtered].sort((a, b) => b.mtimeMs - a.mtimeMs);
   const recentPaths = new Set(sorted.slice(0, recentFilesLimit).map((entry) => entry.path));
 
@@ -134,7 +170,7 @@ export function buildContextItemsFromSearch({
       id: chat.id,
       label: chat.name,
       chipType: 'chat',
-      path: `.tau/transcripts/${chat.id}.jsonl`,
+      path: `.tau/chats/${chat.id}/events.jsonl`,
       group: pastChatsGroup,
       sortKey: getChatRecencyAt(chat),
     });

@@ -54,7 +54,11 @@ export type AgentHostTransportRequest = AgentHostWorkerCommandInput | { readonly
  * @public
  */
 export type AgentHostTransportResponse =
-  | { readonly type: 'result'; readonly operation: AgentChannelResultOperation; readonly snapshot: HostRunSnapshot }
+  | {
+      readonly type: 'result';
+      readonly operation: AgentChannelResultOperation | 'record-settlement';
+      readonly snapshot: HostRunSnapshot;
+    }
   | { readonly type: 'tail'; readonly chatId: string; readonly batch: EventLogBatch }
   | {
       readonly type: 'attach';

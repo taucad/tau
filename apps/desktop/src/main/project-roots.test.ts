@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -15,6 +15,14 @@ describe('createProjectRootRegistry', () => {
     expect(registry.isTrusted(homeRoot)).toBe(true);
     expect(registry.isTrusted(`${homeRoot}/widget`)).toBe(true);
     expect(registry.isTrusted(`${homeRoot}/widget/nested/deep`)).toBe(true);
+  });
+
+  it('returns the canonical spelling of a trusted project without collapsing it to Home', () => {
+    const registry = createProjectRootRegistry();
+    registry.admit(homeRoot);
+    expect(registry.canonical(`${homeRoot}/widget/.`)).toBe(`${homeRoot}/widget`);
+    expect(registry.canonical(`${homeRoot}/other`)).toBe(`${homeRoot}/other`);
+    expect(registry.canonical('/etc')).toBeUndefined();
   });
 
   it('refuses a sibling whose name merely starts with an admitted root', () => {
@@ -58,6 +66,44 @@ describe('createProjectRootRegistry', () => {
     expect(registry.isTrusted('home/widget')).toBe(false);
     expect(registry.isTrusted('../../etc')).toBe(false);
   });
+
+  it('should trust the real spelling of an admitted path alias', () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'tau-roots-alias-'));
+    try {
+      const actual = join(temporary, 'actual');
+      const alias = join(temporary, 'alias');
+      mkdirSync(actual);
+      symlinkSync(actual, alias, 'dir');
+
+      const registry = createProjectRootRegistry();
+      registry.admit(alias);
+      const canonical = realpathSync.native(actual);
+
+      expect(registry.roots()).toEqual([alias]);
+      expect(registry.isTrusted(join(canonical, 'project'))).toBe(true);
+      expect(registry.canonical(join(alias, 'project'))).toBe(join(canonical, 'project'));
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+
+  it('should refuse a symlink that escapes an admitted root', () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'tau-roots-escape-'));
+    try {
+      const admitted = join(temporary, 'admitted');
+      const outside = join(temporary, 'outside');
+      mkdirSync(admitted);
+      mkdirSync(outside);
+      symlinkSync(outside, join(admitted, 'escape'), 'dir');
+
+      const registry = createProjectRootRegistry();
+      registry.admit(admitted);
+
+      expect(registry.isTrusted(join(admitted, 'escape'))).toBe(false);
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createKernelForkResolver', () => {
@@ -77,10 +123,40 @@ describe('createKernelForkResolver', () => {
     expect(resolverFor()({})).toEqual({ env: { TAU_PROJECT_ROOT: homeRoot } });
   });
 
+  it('selects memory-backed ephemeral purpose without falling back to Home', () => {
+    expect(resolverFor()({ purpose: 'ephemeral', definition: 'default' })).toEqual({
+      env: { TAU_RUNTIME_EPHEMERAL: '1' },
+    });
+  });
+
+  it('refuses a root combined with ephemeral purpose', () => {
+    expect(() => resolverFor()({ purpose: 'ephemeral', projectRoot: homeRoot })).toThrow(/rooted ephemeral/u);
+  });
+
+  it('refuses unknown purposes and definitions instead of selecting a fallback', () => {
+    expect(() => resolverFor()({ purpose: 'temporary' })).toThrow(/unknown runtime purpose/u);
+    expect(() => resolverFor()({ definition: 'developer' })).toThrow(/unknown runtime definition/u);
+  });
+
   it('refuses an untrusted root instead of silently substituting the default', () => {
     /* Substituting would hand the renderer a working kernel over the wrong
      * directory; throwing makes the broker fork nothing and report. */
     expect(() => resolverFor()({ projectRoot: '/etc' })).toThrow(/untrusted project root/u);
+  });
+
+  it('accepts a main-attested candidate root without persisting it as a user grant', () => {
+    const registry = createProjectRootRegistry();
+    registry.admit(homeRoot);
+    const candidate = '/var/tau/checkouts/project-a/run-1';
+    const resolver = createKernelForkResolver({
+      registry,
+      defaultRoot: homeRoot,
+      isTrustedRoot: (root) => registry.isTrusted(root) || root === candidate,
+    });
+
+    expect(resolver({ projectRoot: candidate })).toEqual({ env: { TAU_PROJECT_ROOT: candidate } });
+    expect(registry.roots()).toEqual([homeRoot]);
+    expect(() => resolver({ projectRoot: '/etc' })).toThrow(/untrusted project root/u);
   });
 
   it('selects the source-mapping recipe by environment, not a second bundle', () => {

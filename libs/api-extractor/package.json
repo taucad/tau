@@ -20,15 +20,13 @@
       "types": "./src/authoring-types.ts",
       "import": "./src/authoring-types.ts",
       "default": "./src/authoring-types.ts"
-    },
-    "./kcl-reference": {
-      "types": "./src/kcl-reference.ts",
-      "import": "./src/kcl-reference.ts",
-      "default": "./src/kcl-reference.ts"
     }
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "typescript": "catalog:"
   }
 }

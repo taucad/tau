@@ -13,7 +13,6 @@ import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as DesktopKernelOptions from '#constants/desktop-kernel-options.js';
 import type * as HandleStore from '#filesystem/handle-store.js';
-import type * as KernelOptionsPresets from '#constants/kernel-options.presets.js';
 
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
@@ -52,14 +51,12 @@ const installDesktopBridge = (): void => {
 /** Fresh module graph per case: the target flag is read once at module scope. */
 const loadModules = async (): Promise<{
   desktop: typeof DesktopKernelOptions;
-  presets: typeof KernelOptionsPresets;
   handleStore: typeof HandleStore;
 }> => {
   vi.resetModules();
   globalThis.indexedDB = new IDBFactory();
   return {
     desktop: await import('#constants/desktop-kernel-options.js'),
-    presets: await import('#constants/kernel-options.presets.js'),
     handleStore: await import('#filesystem/handle-store.js'),
   };
 };
@@ -76,29 +73,6 @@ afterEach(() => {
   requestRuntimePort.mockReset();
 });
 
-describe('localKernelOptions', () => {
-  it(
-    'keeps the browser preset off the desktop build',
-    async () => {
-      const { desktop, presets } = await loadModules();
-
-      expect(desktop.localKernelOptions(projectId)).toBe(presets.debugKernelOptions);
-    },
-    moduleGraphTimeout,
-  );
-
-  it(
-    'selects the desktop preset behind the TAU_TARGET define',
-    async () => {
-      installDesktopBridge();
-      const { desktop, presets } = await loadModules();
-
-      expect(desktop.localKernelOptions(projectId)).not.toBe(presets.debugKernelOptions);
-    },
-    moduleGraphTimeout,
-  );
-});
-
 describe('desktopKernelOptions', () => {
   it(
     'forks the utility against the project directory under Home',
@@ -108,9 +82,12 @@ describe('desktopKernelOptions', () => {
       const { desktop, handleStore } = await loadModules();
       await handleStore.setProjectFileSystemConfig({ projectId, backend: 'node', providerBasePath: 'widget' });
 
-      const factory = await desktop.desktopKernelOptions(projectId)();
+      const factory = await desktop.desktopKernelOptions(projectId, undefined, 'off')();
 
+      // Charter D3: the utility is forked with the caller's reuse mode, never a
+      // preset literal — the desktop preset carries no default of its own.
       expect(requestRuntimePort).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
+        computeMode: 'off',
         definition: 'default',
         projectRoot: `${homeRoot}/widget`,
       });
@@ -140,9 +117,10 @@ describe('desktopKernelOptions', () => {
         providerBasePath: 'widget',
       });
 
-      await desktop.desktopKernelOptions(projectId)();
+      await desktop.desktopKernelOptions(projectId, undefined, 'durable')();
 
       expect(requestRuntimePort).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
+        computeMode: 'durable',
         definition: 'default',
         projectRoot: '/Users/tester/Projects/Workshop/widget',
       });
@@ -158,7 +136,7 @@ describe('desktopKernelOptions', () => {
       const { desktop, handleStore } = await loadModules();
       await handleStore.setProjectFileSystemConfig({ projectId, backend: 'opfs', providerBasePath: 'widget' });
 
-      await expect(desktop.desktopKernelOptions(projectId)()).rejects.toThrow(/not on disk/);
+      await expect(desktop.desktopKernelOptions(projectId, undefined, 'off')()).rejects.toThrow(/not on disk/);
       expect(requestRuntimePort).not.toHaveBeenCalled();
     },
     moduleGraphTimeout,

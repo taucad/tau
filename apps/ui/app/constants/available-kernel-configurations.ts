@@ -28,7 +28,7 @@ export const nativeKernelRequirementForEntryPath = (
   const configuration = kernelConfigurations.find(
     ({ mainFile }) => extension !== undefined && mainFile.toLowerCase().endsWith(`.${extension}`),
   ) as KernelConfiguration | undefined;
-  if (!configuration?.requiresNativeCodeTrust || !configuration.requiresRuntimeKernelId) {
+  if (!configuration?.requiresRuntimeKernelId) {
     return undefined;
   }
   return { configuration, runtimeKernelId: configuration.requiresRuntimeKernelId };

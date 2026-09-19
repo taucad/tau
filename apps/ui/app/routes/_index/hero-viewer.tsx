@@ -1,13 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Download, Check, ChevronDown, ArrowUpRight } from 'lucide-react';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { openrscad } from '@taucad/openrscad';
-import { parameterCache, geometryCache, gltfEdgeDetection } from '@taucad/middleware';
-import { esbuild } from '@taucad/esbuild';
-import { assimp } from '@taucad/assimp';
 import { parameterEntryPath } from '@taucad/types';
 import { deriveExportFormatOptions } from '#routes/_index/hero-viewer.utils.js';
 import type { ExportFormatOption } from '#routes/_index/hero-viewer.utils.js';
@@ -27,21 +20,13 @@ import qrcodeScad from '#routes/_index/qrcode.scad?raw';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
+import { heroClientOptions } from '#runtime/demo-client-options.js';
 
 const heroMainFile = 'main.scad';
 
 const heroCode = { [heroMainFile]: qrcodeScad };
 
-const heroUnits: Units = { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } };
-
-const heroRuntime = defineRuntime({
-  plugins: [assimp(), openrscad(), esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfEdgeDetection()],
-});
-const heroKernelClientOptions = {
-  runtime: heroRuntime,
-  transport: inProcessTransport({ runtime: heroRuntime, fileSystem: fromMemoryFs() }),
-};
+const heroUnits: Units = { length: { displaySymbol: 'mm' } };
 
 export function HeroViewer(): React.JSX.Element {
   const navigate = useNavigate();
@@ -52,12 +37,18 @@ export function HeroViewer(): React.JSX.Element {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const { geometry, status, defaultParameters, jsonSchema, exportGeometry, capabilities, setParameters } = useRuntime({
-    clientOptions: heroKernelClientOptions,
-    source: { files: heroCode },
-  });
+  const {
+    geometry,
+    status,
+    defaultParameters,
+    jsonSchema,
+    parameterManifest,
+    exportGeometry,
+    capabilities,
+    setParameters,
+  } = useRuntime({ clientOptions: heroClientOptions, source: { files: heroCode } });
 
-  const hasParameters = Boolean(jsonSchema);
+  const hasParameters = Boolean(jsonSchema && parameterManifest);
 
   type HeroExportFormat = NonNullable<typeof capabilities>['routes'][number]['targetFormat'];
   type HeroExportFormatOption = ExportFormatOption<HeroExportFormat>;
@@ -194,6 +185,8 @@ export function HeroViewer(): React.JSX.Element {
                   parameters={currentParams}
                   defaultParameters={defaultParameters}
                   jsonSchema={jsonSchema}
+                  parameterManifest={parameterManifest!}
+                  parameterEdit={{ kind: 'transient' }}
                   units={heroUnits}
                   emptyDescription='Loading parameters...'
                   onParametersChange={handleParametersChange}

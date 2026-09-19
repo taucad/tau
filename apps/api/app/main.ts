@@ -9,11 +9,11 @@ import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
-import multipart from '@fastify/multipart';
 import { FastifyOtelInstrumentation } from '@fastify/otel';
-import { idPrefix, publicationMaxMultipartFiles } from '@taucad/types/constants';
+import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { AppModule } from '#app.module.js';
+import { getEnvironment } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
@@ -31,7 +31,7 @@ async function createApiApp() {
     logger: getFastifyLoggingConfig(),
   });
 
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter, {
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule.forRoot(getEnvironment()), fastifyAdapter, {
     bufferLogs: true, // Buffer logs until pino logger is ready. This ensures all logs are consistently formatted.
   });
 
@@ -69,14 +69,6 @@ async function createApiApp() {
   await fastifyInstance.register(cookie, {
     secret: viewCookieSecret,
     hook: 'onRequest',
-  });
-
-  await fastifyInstance.register(multipart, {
-    limits: {
-      fieldSize: 1024 * 1024,
-      fileSize: 25 * 1024 * 1024,
-      files: publicationMaxMultipartFiles,
-    },
   });
 
   return app;

@@ -21,6 +21,8 @@ import { defineRuntime } from '#worker/runtime-definition.js';
 import type { RuntimeConfigInput, RuntimeConfigOutput } from '#worker/runtime-definition.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 const typedRenderSchema = z.object({
@@ -54,7 +56,7 @@ const makeKernel = () =>
     },
     async getParameters(input) {
       expectTypeOf(input.entryPath).toEqualTypeOf<string>();
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return createParameterDeclaration();
     },
     async createGeometry(input) {
       expectTypeOf(input.entryPath).toEqualTypeOf<string>();
@@ -95,7 +97,7 @@ describe('defineKernel', () => {
         return { resolved: [], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry() {
         return { geometry: testGeometry, nativeHandle: {} };
@@ -120,7 +122,7 @@ describe('defineKernel', () => {
         return { resolved: [], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry() {
         return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
@@ -168,7 +170,7 @@ describe('defineKernel', () => {
         return { resolved: [], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry() {
         return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
@@ -197,7 +199,7 @@ const minimalKernelDefinition = {
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { geometry: testGeometry, nativeHandle: {} };
@@ -532,6 +534,72 @@ describe('defineTranscoder', () => {
     assertType<() => TranscoderPlugin>(transcoder);
     expectTypeOf(transcoder().id).toEqualTypeOf<'typedTranscoder'>();
   });
+
+  it('preserves real source-target tuples on direct RuntimeClient transcodes', () => {
+    const transcoder = defineTranscoder({
+      id: 'correlatedTranscoder',
+      name: 'CorrelatedTranscoder',
+      version: '1.0.0',
+      edges: [
+        { from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.object({ width: z.number() }) },
+        { from: 'svg', to: 'png', fidelity: 'mesh', optionsSchema: z.object({ density: z.number() }) },
+      ] as const,
+      async initialize() {
+        return {};
+      },
+      async transcode(input) {
+        return { success: true, data: input.files, issues: [] };
+      },
+    })();
+    const runtime = defineRuntime({ transcoders: [transcoder] });
+    const client = createRuntimeClient({ transport: inProcessTransport({ runtime }) });
+    const files = [{ name: 'input.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }] as const;
+
+    void client.transcode({ from: 'glb', to: 'webp', files: [...files], options: { width: 640 } });
+    void client.transcode({ from: 'svg', to: 'png', files: [...files], options: { density: 2 } });
+    // @ts-expect-error -- no svg → webp edge exists.
+    void client.transcode({ from: 'svg', to: 'webp', files: [...files], options: { width: 640 } });
+    // @ts-expect-error -- png options belong only to the svg → png edge.
+    void client.transcode({ from: 'svg', to: 'png', files: [...files], options: { width: 640 } });
+  });
+
+  it('types duplicate direct routes from the first registration only', () => {
+    const first = defineTranscoder({
+      id: 'firstRoute',
+      name: 'First route',
+      version: '1.0.0',
+      edges: [
+        { from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.object({ first: z.literal(true) }) },
+      ] as const,
+      async initialize() {
+        return {};
+      },
+      async transcode(input) {
+        return { success: true, data: input.files, issues: [] };
+      },
+    })();
+    const second = defineTranscoder({
+      id: 'secondRoute',
+      name: 'Second route',
+      version: '1.0.0',
+      edges: [
+        { from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.object({ second: z.literal(true) }) },
+      ] as const,
+      async initialize() {
+        return {};
+      },
+      async transcode(input) {
+        return { success: true, data: input.files, issues: [] };
+      },
+    })();
+    const runtime = defineRuntime({ transcoders: [first, second] });
+    const client = createRuntimeClient({ transport: inProcessTransport({ runtime }) });
+    const files = [{ name: 'input.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }] as const;
+
+    void client.transcode({ from: 'glb', to: 'webp', files: [...files], options: { first: true } });
+    // @ts-expect-error -- the shadowed registration's options are not public.
+    void client.transcode({ from: 'glb', to: 'webp', files: [...files], options: { second: true } });
+  });
 });
 
 describe('defineRuntime and client projections', () => {
@@ -671,7 +739,7 @@ describe('route-scoped content projections', () => {
       return { resolved: [], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return createParameterDeclaration();
     },
     async createGeometry(input) {
       expectTypeOf(input).not.toHaveProperty('content');
@@ -724,7 +792,7 @@ describe('route-scoped content projections', () => {
       return { resolved: [], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return createParameterDeclaration();
     },
     async createGeometry(input) {
       expectTypeOf(input).not.toHaveProperty('content');

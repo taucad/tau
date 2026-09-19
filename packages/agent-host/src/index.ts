@@ -1,10 +1,8 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { EventLogError } from '#log/event-log-error.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { reduceEventLog } from '#log/reducer.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+export { mergeLogSegments } from '#log/segments.js';
+export type { ChatLogSegment } from '#log/segments.js';
 export {
   agentLogEventSchema,
   jsonValueSchema,
@@ -12,25 +10,32 @@ export {
   providerMessageSchema,
   userProviderMessageSchema,
 } from '#log/event-schema.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-export { createAgentSession, createTransportStreamFunction } from '#harness/session.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-export { createTauAgentHost } from '#host/tau-agent-host.js';
+export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
+export { createTauAgentHost, isResumableRunFailure } from '#host/tau-agent-host.js';
 /* The daemon channel vocabulary. Zod only — the WebSocket client half validates
  * against these same schemas inside a browser bundle, so they must not ride the
  * Node-only `/node-launcher` subpath. */
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export {
   admissionConfigFor,
   agentChannelAdmissionConfigSchema,
   agentChannelCommandSchema,
   agentChannelEventSchema,
   agentChannelLiveEventSchema,
+  agentChannelRevisionEventSchema,
+  agentChannelModelCostSchema,
+  agentChannelModelSchema,
   agentChannelProtocolSchemas,
   agentChannelResponseSchema,
+  agentChannelSystemPromptBlockSchema,
   agentChannelTailBatchLimit,
+  agentChannelToolChoiceSchema,
+  externalAgentAuthMethodSchema,
+  externalAgentDescriptorSchema,
+  externalAgentLoginSchema,
+  externalAgentRefusalCodes,
+  externalAgentStopCodes,
+  externalAgentStopSchema,
 } from '#launchers/node/agent-wire.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type {
   AgentChannelAdmissionConfig,
   AgentChannelCommand,
@@ -38,19 +43,24 @@ export type {
   AgentChannelLeadership,
   AgentChannelLiveEvent,
   AgentChannelProtocol,
+  AgentChannelRequest,
+  AgentChannelRevisionCommand,
+  AgentChannelRevisionEvent,
   AgentChannelResponse,
   AgentChannelResultOperation,
+  ExternalAgentDescriptor,
+  ExternalAgentLogin,
+  ExternalAgentRefusalCode,
+  ExternalAgentStop,
+  ExternalAgentStopCode,
 } from '#launchers/node/agent-wire.js';
 /* The transport union and its close vocabulary. Types only — the client half
  * itself ships from `@taucad/agent-host/channel-client`. */
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { AgentChannelEndpoint } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { AgentChannelClient, AgentChannelCloseReason } from '#channel/agent-channel-client.js';
 /* R3: apps never import `@taucad/rpc`, so the few channel types an app needs to
  * declare its own worker protocol are re-exported from here. */
 export type { Channel, ChannelServer, ChannelServerHandle, WireProtocolSchemas, WithTransferables } from '@taucad/rpc';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export {
   GatewayModelTransportError,
   createCachedSystemPromptBlocks,
@@ -59,21 +69,14 @@ export {
   isGatewayProviderKind,
   isOpenAiGatewayProviderKind,
 } from '#transport/gateway-model-transport.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+export { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 export { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { normalizeLatexDelimiters, trimToolResultContext } from '#harness/cad-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { HostCompactionError } from '#harness/compaction.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { canonicalJson, defaultSafeguardThresholds, summarizeToolEvents } from '#harness/safeguards.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-export { normalizeToolInput, toPiToolContent } from '#harness/tools.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+export { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 export type { EventLogErrorCode } from '#log/event-log-error.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { EventLogAppender, EventLogAppendOutcome, EventLogBatch } from '#log/event-log-appender.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type {
   AgentLogEvent,
   AgentToolChoice,
@@ -88,14 +91,22 @@ export type {
   ModelProviderKind,
   MessageAppendedEvent,
   MessageEnvelopeReplacedEvent,
+  ModelInvocationBoundEvent,
+  ModelInvocationPreparedEvent,
+  ModelReasoningConfig,
   ProviderMessage,
   ProviderMessageMetadata,
+  TurnConflictedLogEvent,
+  TurnFailedLogEvent,
+  TurnFinalizedLogEvent,
   RunLifecycleEvent,
   RunTrigger,
   RunLifecycleState,
   SafeguardRecordedEvent,
   SnapshotContextRefreshedEvent,
   StorageDurabilityClass,
+  ToolCallLocation,
+  ToolCallProjection,
   ToolInputProviderMessage,
   ToolOutputProviderMessage,
   TurnContextSnapshot,
@@ -104,9 +115,7 @@ export type {
   UserProviderMessage,
 } from '#log/event-types.js';
 export { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { PromptCacheControl } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type {
   DurableEventLog,
   AgentLiveEvent,
@@ -119,20 +128,18 @@ export type {
   InterruptApprovalPort,
   InterruptRequest,
   InterruptResolution,
+  MaterializedDocument,
   ModelStreamEvent,
+  ModelInvocationBinding,
   ModelStreamRequest,
   ModelTransport,
   RunLifecycleCommands,
   ToolRegistry,
 } from '#waist/ports.js';
 export type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { ModelCallMiddleware, ModelCallRequest } from '#harness/model-call-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { ClientContext, ClientSkill, RecentSkill, RecentSkillsPort } from '#harness/cad-middleware.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type {
   AnomalyPattern,
   SafeguardDetection,
@@ -140,24 +147,25 @@ export type {
   SafeguardThresholds,
   ToolEventSummary,
 } from '#harness/safeguards.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+export { materializeAttachments } from '#harness/session-record.js';
+export type { AttachmentReader, DocumentBlockBuilder, MaterializedAttachments } from '#harness/session-record.js';
 export type {
   CreateTauAgentHostOptions,
   ExternalAgentLogEvent,
   ExternalAgentPort,
   ExternalAgentTurn,
   ExternalRunKind,
+  ExternalSessionState,
+  ExternalTurnOutcome,
   TauAgentAdmissionConfig,
   TauAgentHost,
   TauAgentTurnRequest,
 } from '#host/tau-agent-host.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type {
   CachedSystemPromptOptions,
+  GatewayFundedOperationProtocol,
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';

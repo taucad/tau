@@ -1,12 +1,15 @@
 export {
   acpAdapterOverrideVariable,
-  acpAdapterPins,
+  acpAgentProfiles,
   acpCliProbeTimeout,
+  acpModelProbeTimeout,
   discoverAcpAgents,
+  externalAgentDescriptors,
+  probeAcpAgentModels,
   probeAcpAgents,
   resolveAcpAdapters,
 } from '#acp/registry.js';
-export type { AcpAdapter, AcpAdapterPin, AcpAdapterRefusal, AcpAgentDiscovery } from '#acp/registry.js';
+export type { AcpAdapter, AcpAdapterRefusal, AcpAgentDiscovery, AcpAgentProfile } from '#acp/registry.js';
 export {
   acpAdapterEnvironment,
   acpEnvironmentAllowlist,
@@ -14,7 +17,7 @@ export {
   spawnAcpAdapter,
 } from '#acp/spawn.js';
 export type { AcpWireFrame, SpawnedAcpAdapter } from '#acp/spawn.js';
-export { branchDirectory, createAcpExternalAgentPort, tauMcpServerName } from '#acp/run.js';
+export { acpLiveSessionLimit, acpSessionIdleTimeout, createAcpExternalAgentPort, tauMcpServerName } from '#acp/run.js';
 export type { AcpExternalAgentPortOptions } from '#acp/run.js';
-export { ensureBranchDirectory, runAcpSession } from '#acp/session.js';
-export type { AcpTurnOutcome, RunAcpSessionOptions } from '#acp/session.js';
+export { acpNativeToolNamePaths, modelChoice, openAcpSession } from '#acp/session.js';
+export type { AcpAgentFacts, AcpPromptTurn, AcpSession, AcpTurnOutcome, OpenAcpSessionOptions } from '#acp/session.js';

@@ -3,13 +3,18 @@ import type { EmailTemplate } from '#email/email.types.js';
 const authEmailPaths = {
   'magic-link': '/auth/magic-link/verify',
   'reset-password': '/auth/reset-password',
+  'password-changed': '/auth/forgot-password',
   'verify-email': '/auth/verify-email',
-} as const satisfies Record<Extract<EmailTemplate['kind'], 'magic-link' | 'reset-password' | 'verify-email'>, string>;
+} as const satisfies Record<
+  Extract<EmailTemplate['kind'], 'magic-link' | 'reset-password' | 'password-changed' | 'verify-email'>,
+  string
+>;
 
 export const sanitizeFrontendRedirectPath = ({
   callbackURL,
   frontendURL,
 }: {
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- URLSearchParams.get returns null for a missing key
   readonly callbackURL?: string | null;
   readonly frontendURL: string;
 }): string => {
@@ -68,6 +73,10 @@ export const buildFrontendResetPasswordUrl = ({
   resetUrl.searchParams.set('token', token);
   return resetUrl.toString();
 };
+
+/** Where a recipient who did not change their password goes to take the account back. */
+export const buildFrontendForgotPasswordUrl = ({ frontendURL }: { readonly frontendURL: string }): string =>
+  new URL(authEmailPaths['password-changed'], frontendURL).toString();
 
 export const buildFrontendMagicLinkVerifyUrl = ({
   frontendURL,

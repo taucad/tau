@@ -1,0 +1,17 @@
+{
+  "name": "parameters",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/parameters",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "tsdown --config-loader=tsx",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

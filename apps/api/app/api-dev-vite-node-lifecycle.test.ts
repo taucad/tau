@@ -180,6 +180,26 @@ describe('API dev Vite node lifecycle', () => {
     expect(secondRequest.next).not.toHaveBeenCalled();
   });
 
+  it('reports the original init failure without re-initializing the same app', async () => {
+    const lifecycle = createApiDevViteNodeLifecycle();
+    const initError = new Error('Schema compatibility check failed');
+    const app = createMockApp({
+      init: async () => {
+        throw initError;
+      },
+    });
+    const firstRequest = createAdapterParams(app);
+    const secondRequest = createAdapterParams(app);
+
+    await lifecycle.adapter(firstRequest);
+    await lifecycle.adapter(secondRequest);
+
+    expect(app.init).toHaveBeenCalledOnce();
+    expect(firstRequest.next).toHaveBeenCalledWith(initError);
+    expect(secondRequest.next).toHaveBeenCalledWith(initError);
+    expect(app.fastify.routing).not.toHaveBeenCalled();
+  });
+
   it('reuses an initialized app for repeated requests', async () => {
     const lifecycle = createApiDevViteNodeLifecycle();
     const app = createMockApp();

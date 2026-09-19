@@ -1,7 +1,15 @@
 import type { GraphicsBackendPreference, ResolvedGraphicsBackend } from '#constants/editor.constants.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
 
-/** Query-param override for e2e and manual testing (whole-tab). */
-const graphicsBackendQueryValues = ['webgl', 'webgpu'] as const;
+/**
+ * Query-param override for e2e and manual testing (whole-tab).
+ *
+ * Neither {@link useSearchParameter} nor a codec fits this one (D3): it is read
+ * outside React, and its "absent" value is `undefined` rather than a member of
+ * `GraphicsBackendPreference`, so a codec would need a sentinel that the domain
+ * type does not have. What it does share is the name.
+ */
+const graphicsBackendQueryValues: readonly string[] = ['webgl', 'webgpu'] satisfies GraphicsBackendPreference[];
 
 /**
  * Probe WebGPU adapter availability without creating a GPUDevice.
@@ -75,16 +83,8 @@ export function readGraphicsBackendQueryOverride(): GraphicsBackendPreference | 
     return undefined;
   }
 
-  const graphicsBackendParameter = new URLSearchParams(browserWindow.location.search).get('graphicsBackend');
-  if (!graphicsBackendParameter) {
-    return undefined;
-  }
-
-  if ((graphicsBackendQueryValues as readonly string[]).includes(graphicsBackendParameter)) {
-    return graphicsBackendParameter as GraphicsBackendPreference;
-  }
-
-  return undefined;
+  const raw = new URLSearchParams(browserWindow.location.search).get(searchParameterName.graphicsBackend);
+  return raw !== null && graphicsBackendQueryValues.includes(raw) ? (raw as GraphicsBackendPreference) : undefined;
 }
 
 /**

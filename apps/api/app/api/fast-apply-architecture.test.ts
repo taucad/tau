@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { getEnvironment } from '#config/environment.config.js';
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
 const architectureTestPath = fileURLToPath(import.meta.url);
@@ -44,8 +45,9 @@ describe('Morph fast-apply architecture', () => {
     const morphApiKey = process.env.MORPH_API_KEY;
     process.env.MORPH_API_KEY = '';
     try {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the imported classes' own exported names
       const [{ Test }, { AppModule }] = await Promise.all([import('@nestjs/testing'), import('#app.module.js')]);
-      const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+      const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot(getEnvironment())] }).compile();
       await moduleRef.close();
     } finally {
       if (morphApiKey === undefined) {

@@ -43,13 +43,12 @@ export type PicogkKernelOptions = z.infer<typeof picogkOptionsSchema>;
 /**
  * Locate one host-owned, target-specific PicoGK worker payload.
  *
- * @param options - Prepared resource root, trust marker, and optional host target.
+ * @param options - Prepared resource root and optional host target.
  * @returns Absolute, integrity-pinned PicoGK kernel options.
  * @public
  */
 export const loadPicogkKernelOptions = (options: {
   readonly resourceRoot: string;
-  readonly trustFile: string;
   readonly target?: string;
 }): PicogkKernelOptions => {
   const target = options.target ?? `${process.platform}-${process.arch}`;
@@ -63,7 +62,6 @@ export const loadPicogkKernelOptions = (options: {
   return picogkOptionsSchema.parse({
     workerExecutable: join(targetRoot, manifest.workerPath),
     workerSha256: manifest.workerSha256,
-    trustFile: options.trustFile,
     resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
       ...resource,
       path: join(targetRoot, path),

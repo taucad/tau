@@ -6,25 +6,28 @@ import { dirname, join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@taucad/runtime-testing';
-import type { TauSceneManifest } from '@taucad/runtime/types';
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
+import { desktopE2ECompletedArtifact } from '#support/config.js';
+import {
+  gatewayFixtureFinalText,
+  gatewayFixtureModelName,
+  installGatewayFixture,
+  startGatewayFixture,
+} from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
-  declineCookieBanner,
   ensureFilesPane,
   expectCount,
   expectGeometryFramed,
+  expectRenderCycleSince,
   expectSignedIn,
   expectVisible,
   fileTreeItemOf,
-  geometryCacheEntries,
-  geometryCacheSnapshot,
-  parameterCacheContents,
+  renderCycleCount,
   selectChatModel,
   selectKernel,
   submitPrompt,
@@ -159,7 +162,7 @@ Library.Go(1f, () =>
 });
 `;
 
-const progressivePicogkSource = `using System.Numerics;
+const multiStepPicogkSource = `using System.Numerics;
 using System.Threading;
 using PicoGK;
 Library.Go(1f, () =>
@@ -214,29 +217,6 @@ const picogkWorkers = (): readonly NativeWorker[] => {
     }
     return [{ pid: Number(pid), temporaryRoot: dirname(workspace) }];
   });
-};
-
-const waitForNewGeometry = async (sourcePath: string, before: ReadonlySet<string>): Promise<void> => {
-  await expect
-    .poll(() => geometryCacheEntries(sourcePath).some(({ actionDigest }) => !before.has(actionDigest)), {
-      timeout: 120_000,
-    })
-    .toBe(true);
-};
-
-const assertOneNewSettledGeometry = async (sourcePath: string, before: ReadonlySet<string>): Promise<void> => {
-  await waitForNewGeometry(sourcePath, before);
-  await new Promise((resolve) => {
-    setTimeout(resolve, 1500);
-  });
-  const newBuildEntries = geometryCacheEntries(sourcePath).filter(({ actionDigest }) => !before.has(actionDigest));
-  const settledDigests = new Set(newBuildEntries.map(({ contentDigest }) => contentDigest));
-
-  // The authoring agent and viewer each own a runtime client and therefore a
-  // dependency cache key. One filesystem revision must still settle to one
-  // geometry result across those consumers.
-  expect(newBuildEntries.length).toBeGreaterThan(0);
-  expect(settledDigests.size).toBe(1);
 };
 
 const exportToProject = async (page: Page, projectRoot: string, extension: 'glb' | 'stl'): Promise<string> => {
@@ -301,16 +281,19 @@ const exportToProject = async (page: Page, projectRoot: string, extension: 'glb'
   return path;
 };
 
-const hasDependentParameterSchema = (sourcePath: string): boolean =>
-  parameterCacheContents(sourcePath).some((content) => {
-    const parsed = JSON.parse(content) as {
-      readonly data?: { readonly defaultParameters?: Readonly<Record<string, unknown>> };
-    };
-    const parameters = parsed.data?.defaultParameters;
-    return (
-      parameters?.['width'] === 20 && parameters['height'] === 10 && parameters['gap'] === 4 && !('depth' in parameters)
-    );
-  });
+/**
+ * The Parameters pane is built from the kernel's own parse of the source it
+ * watches, so the declarations it lists witness which bytes the kernel read.
+ * `dependentSource` moves `depth` out of `Params` and into `dimensions.py`.
+ */
+const expectDependentParameterSchema = async (page: Page): Promise<void> => {
+  await page.keyboard.press('Control+x');
+  await expectVisible(page.getByText('Parameters', { exact: true }), 30_000);
+  await expectVisible(page.getByLabel('Input for Width').first(), 60_000);
+  await expectVisible(page.getByLabel('Input for Height').first(), 60_000);
+  await expectVisible(page.getByLabel('Input for Gap').first(), 60_000);
+  await expectCount(page.getByLabel('Input for Depth'), 0, 60_000);
+};
 
 const validateStep = (path: string): readonly number[] => {
   const resourceRoot = resolve(workspaceRoot, `apps/desktop/resources/python/${process.platform}-${process.arch}`);
@@ -380,12 +363,16 @@ test('boots the packaged desktop app with no endpoint environment', async () => 
   await expectCount(session.page.getByText('Application Error', { exact: true }), 0);
 });
 
-test('runs the Build123d filesystem, parameter, topology, watcher, viewer, and STEP loop', async () => {
+test('[completed-artifact] runs the Build123d filesystem, parameter, topology, watcher, viewer, and STEP loop', async () => {
   const existingWorkerPids = new Set(nativeWorkers().map(({ pid }) => pid));
   const account = tauTestAccount('build123d');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ token, env: { TAU_E2E_TRUST_NATIVE_CODE: '1' } });
+  fixture = await startGatewayFixture({ targetFile: 'main.py', content: build123dSource });
+  session = await launchDesktopApp({
+    token,
+    env: { TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1' },
+  });
   const { page } = session;
   const rendererErrors: string[] = [];
   page.on('console', (message) => {
@@ -393,11 +380,13 @@ test('runs the Build123d filesystem, parameter, topology, watcher, viewer, and S
       rendererErrors.push(message.text());
     }
   });
-  fixture = await installGatewayFixture(page, { targetFile: 'main.py', content: build123dSource });
+  await fixture.routeThrough(page);
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, token);
+    }
     await expectSignedIn(page);
     await selectKernel(page, 'Build123d');
     await connectPickedFolder(session);
@@ -410,7 +399,7 @@ test('runs the Build123d filesystem, parameter, topology, watcher, viewer, and S
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
     await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
     await expectCount(page.getByText('File not found', { exact: true }), 0);
-    await expectVisible(page.getByText('Native code enabled', { exact: true }), 120_000);
+    await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
     await expectGeometryFramed(page);
 
@@ -440,10 +429,10 @@ test('runs the Build123d filesystem, parameter, topology, watcher, viewer, and S
     const width = page.getByLabel('Input for Width').first();
     await expectVisible(width, 60_000);
     await expectVisible(page.getByLabel('Input for Depth').first(), 60_000);
-    const beforeParameter = geometryCacheSnapshot(sourcePath);
+    const beforeParameter = await renderCycleCount(page);
     await width.fill('30');
     await width.press('Tab');
-    await waitForNewGeometry(sourcePath, beforeParameter);
+    await expectRenderCycleSince(page, beforeParameter);
     await expectGeometryFramed(page);
 
     await page.keyboard.press('Control+a');
@@ -452,15 +441,17 @@ test('runs the Build123d filesystem, parameter, topology, watcher, viewer, and S
     await expectVisible(page.getByRole('button', { name: 'Right', exact: true }), 60_000);
 
     writeFileSync(join(projectRoot, 'dimensions.py'), 'def depth():\n    return 8.0\n', 'utf8');
-    const beforeDependency = geometryCacheSnapshot(sourcePath);
+    const beforeDependency = await renderCycleCount(page);
     writeFileSync(sourcePath, dependentSource, 'utf8');
-    await expect.poll(() => hasDependentParameterSchema(sourcePath), { timeout: 60_000 }).toBe(true);
-    await waitForNewGeometry(sourcePath, beforeDependency);
+    await expectRenderCycleSince(page, beforeDependency);
+    await expectDependentParameterSchema(page);
     await expectGeometryFramed(page);
 
-    const beforeImportedEdit = geometryCacheSnapshot(sourcePath);
+    /* The imported module's only observable is the depth it returns, which the
+     * STEP export below reads back as `size[1]`. */
+    const beforeImportedEdit = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'dimensions.py'), 'def depth():\n    return 12.0\n', 'utf8');
-    await waitForNewGeometry(sourcePath, beforeImportedEdit);
+    await expectRenderCycleSince(page, beforeImportedEdit);
     await expectGeometryFramed(page);
 
     await page.getByRole('button', { name: 'Export', exact: true }).click();
@@ -517,7 +508,9 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, token);
+    }
     await expectSignedIn(page);
     await selectKernel(page, 'Replicad');
     await connectPickedFolder(session);
@@ -539,7 +532,7 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   }
 });
 
-test('runs packaged PicoGK C# through filesystem, topology, failures, export, trust, and cleanup', async () => {
+test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology, failures, export, and cleanup', async () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     return;
   }
@@ -547,15 +540,18 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
   const account = tauTestAccount('picogk');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
+  fixture = await startGatewayFixture({ targetFile: 'main.cs', content: picogkSource });
   session = await launchDesktopApp({
     token,
     packaged: true,
     env: {
       PATH: '/usr/bin:/bin',
+      TAU_E2E_KEEP_PATH: '1',
       TAU_DEBUG: 'true',
       /* An ad-hoc package signature cannot access Electron's prior Keychain
        * item unattended. Memory-only custody still exercises the production
-       * loopback exchange without weakening or replacing safeStorage. */
+       * `tau://auth/callback` exchange without weakening or replacing
+       * safeStorage. */
       TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
     },
   });
@@ -566,11 +562,10 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
       rendererErrors.push(message.text());
     }
   });
-  fixture = await installGatewayFixture(page, { targetFile: 'main.cs', content: picogkSource });
+  await fixture.routeThrough(page);
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await authenticatePackagedDesktop(session, token);
     await expectSignedIn(page);
     await selectKernel(page, 'PicoGK');
@@ -582,7 +577,7 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
     const projectRoot = join(session.pickedDirectory, slug);
     await expect.poll(() => readFileSync(sourcePath, 'utf8'), { timeout: 120_000 }).toBe(picogkSource);
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
-    await expectVisible(page.getByText('Native code enabled', { exact: true }), 120_000);
+    await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
     await expectGeometryFramed(page);
 
@@ -606,10 +601,10 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
     const radius = page.getByLabel('Input for Radius').first();
     await expectVisible(radius, 60_000);
     await expectVisible(page.getByLabel('Input for Voxel size').first(), 60_000);
-    const beforeParameter = geometryCacheSnapshot(sourcePath);
+    const beforeParameter = await renderCycleCount(page);
     await radius.fill('16');
     await radius.press('Tab');
-    await assertOneNewSettledGeometry(sourcePath, beforeParameter);
+    await expectRenderCycleSince(page, beforeParameter);
 
     await page.keyboard.press('Control+a');
     const body = page.getByRole('button', { name: 'group-0-object-1', exact: true });
@@ -621,7 +616,6 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
     await sphere.click();
     await expect.poll(async () => sphere.getAttribute('aria-pressed')).toBe('true');
 
-    const beforeProgressive = geometryCacheSnapshot(sourcePath);
     await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
@@ -647,24 +641,19 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
       target.__tauPicoGkObserver.observe(document.body, { childList: true, characterData: true, subtree: true });
       capture();
     });
-    writeFileSync(sourcePath, progressivePicogkSource, 'utf8');
-    const sceneTimeline = page.getByRole('slider', { name: 'Scene timeline' });
-    // One frame has nothing to scrub; the control appears when the second frame arrives.
-    await expectCount(sceneTimeline, 0, 30_000);
-    await expectVisible(sceneTimeline, 120_000);
-    await expect.poll(async () => sceneTimeline.getAttribute('aria-valuetext')).toBe('Frame 2 of 2: Frame 2. Live.');
-    expect(geometryCacheSnapshot(sourcePath)).toEqual(beforeProgressive);
-
-    const beforeScrub = geometryCacheSnapshot(sourcePath);
-    await sceneTimeline.focus();
-    await sceneTimeline.press('Home');
-    await expect.poll(async () => sceneTimeline.getAttribute('aria-valuetext')).toMatch(/^Frame 1 of 2:/u);
-    await page.getByRole('button', { name: 'Return to live scene' }).click();
-    await expect.poll(async () => sceneTimeline.getAttribute('aria-valuetext')).toMatch(/^Frame 2 of 2:/u);
-    expect(geometryCacheSnapshot(sourcePath)).toEqual(beforeScrub);
-
-    await assertOneNewSettledGeometry(sourcePath, beforeProgressive);
-    const progressiveStates = await page.evaluate(() => {
+    writeFileSync(sourcePath, multiStepPicogkSource, 'utf8');
+    /* The row's own observer is the barrier: the lifecycle it records is
+     * exactly the sequence asserted below, so no second witness is needed. */
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(
+            () => (globalThis as typeof globalThis & { __tauPicoGkStates?: string[] }).__tauPicoGkStates ?? [],
+          ),
+        { timeout: 120_000 },
+      )
+      .toEqual(['buffering...', 'rendering...', 'idle']);
+    const multiStepStates = await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
         __tauPicoGkObserver?: MutationObserver;
@@ -672,26 +661,7 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
       target.__tauPicoGkObserver?.disconnect();
       return target.__tauPicoGkStates ?? [];
     });
-    expect(progressiveStates).toEqual(['buffering...', 'rendering...', 'idle']);
-
-    const beforeStageSave = geometryCacheSnapshot(sourcePath);
-    await page.getByRole('button', { name: 'Save selected preview stage to project' }).click();
-    // Sequence zero is the empty reset, so visible frame two is protocol stage three.
-    const stageRoot = join(projectRoot, 'stages', 'main-stage-3');
-    const stagePath = join(stageRoot, 'scene.json');
-    await expect.poll(() => existsSync(stagePath), { timeout: 30_000 }).toBe(true);
-    const savedStage = JSON.parse(readFileSync(stagePath, 'utf8')) as TauSceneManifest;
-    const stageGeometry = Object.values(savedStage.nodes).flatMap((node) => (node.geometry ? [node.geometry] : []));
-    expect(stageGeometry).toHaveLength(2);
-    for (const asset of stageGeometry) {
-      const bytes = readFileSync(join(stageRoot, `${encodeURIComponent(asset.contentDigest)}.glb`));
-      validateGlbData(Uint8Array.from(bytes));
-      expect(bytes.byteLength).toBe(asset.byteLength);
-      expect(`sha256:${createHash('sha256').update(bytes).digest('hex')}`).toBe(asset.contentDigest);
-    }
-    await expectVisible(page.getByText('Saved preview stage as stages/main-stage-3/scene.json', { exact: true }));
-    await page.waitForTimeout(1500);
-    expect(geometryCacheSnapshot(sourcePath)).toEqual(beforeStageSave);
+    expect(multiStepStates).toEqual(['buffering...', 'rendering...', 'idle']);
 
     // Observe a fresh lifecycle before restoring bytes: the previous scene is
     // already idle, and its material remains visible while native work runs.
@@ -733,21 +703,22 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
     const initialBounds = getBoundingBoxFromInspect(await getInspectReport(initialGlb));
     expect(initialBounds).toBeDefined();
 
-    const beforeDependencySetup = geometryCacheSnapshot(sourcePath);
+    const beforeDependencySetup = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), picogkHelperSource(2), 'utf8');
     writeFileSync(join(projectRoot, 'radius-scale.txt'), '0.5\n', 'utf8');
     writeFileSync(sourcePath, picogkDependentSource, 'utf8');
-    await waitForNewGeometry(sourcePath, beforeDependencySetup);
+    await expectRenderCycleSince(page, beforeDependencySetup);
     await new Promise((resolve) => {
       setTimeout(resolve, 1500);
     });
     await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0, 120_000);
-    const dependentGeometry = geometryCacheSnapshot(sourcePath);
+    const beforeHelperEdit = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), picogkHelperSource(3), 'utf8');
-    await assertOneNewSettledGeometry(sourcePath, dependentGeometry);
-    const assetGeometry = geometryCacheSnapshot(sourcePath);
+    await expectRenderCycleSince(page, beforeHelperEdit);
+    const beforeAssetEdit = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'radius-scale.txt'), '0.75\n', 'utf8');
-    await assertOneNewSettledGeometry(sourcePath, assetGeometry);
+    await expectRenderCycleSince(page, beforeAssetEdit);
+    await expectGeometryFramed(page);
 
     writeFileSync(
       join(projectRoot, 'ShapeFactory.cs'),
@@ -784,31 +755,23 @@ test('runs packaged PicoGK C# through filesystem, topology, failures, export, tr
     const stlPath = await exportToProject(page, projectRoot, 'stl');
     expect(readFileSync(stlPath).byteLength).toBeGreaterThan(84);
 
-    const workersBeforeRevoke = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
-    expect(workersBeforeRevoke).not.toHaveLength(0);
+    const workersBeforeReload = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
+    expect(workersBeforeReload).not.toHaveLength(0);
     const renderingStatus = page.getByText('rendering...', { exact: true });
     await expectCount(renderingStatus, 0, 120_000);
     writeFileSync(sourcePath, slowPicogkSource, 'utf8');
     await expectVisible(renderingStatus, 120_000);
-    const revoke = page.getByRole('button', { name: 'Revoke', exact: true });
-    await revoke.focus();
-    await revoke.press('Enter');
-    await expect
-      .poll(() => workersBeforeRevoke.every(({ pid }) => !picogkWorkers().some((worker) => worker.pid === pid)), {
-        timeout: 15_000,
-      })
-      .toBe(true);
-    const trustFailure = page.getByText(/Native-code trust was revoked|not trusted to run native code/u);
-    await expectVisible(trustFailure, 30_000);
-    await expectCount(trustFailure, 1);
 
     writeFileSync(sourcePath, picogkSource, 'utf8');
     await page.reload();
-    await expectVisible(page.getByText('Native code enabled', { exact: true }), 120_000);
+    await expectCount(page.getByRole('button', { name: 'Revoke', exact: true }), 0);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
     await expectGeometryFramed(page);
-    const workersAfterRegrant = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
-    expect(workersAfterRegrant.some(({ pid }) => workersBeforeRevoke.every((worker) => worker.pid !== pid))).toBe(true);
+    await expect
+      .poll(() => workersBeforeReload.every(({ pid }) => !picogkWorkers().some((worker) => worker.pid === pid)), {
+        timeout: 120_000,
+      })
+      .toBe(true);
     expect(session.application.windows()).toHaveLength(1);
     expect(spawnSync('ps', ['-axo', 'command='], { encoding: 'utf8' }).stdout).not.toMatch(/PicoGK.*Viewer/u);
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);

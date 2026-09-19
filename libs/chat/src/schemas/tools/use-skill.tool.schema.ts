@@ -15,6 +15,8 @@ export const useSkillOutputSchema = z.object({
   skillPath: z.string().optional(),
   baseDirectory: z.string().optional(),
   source: z.string(),
+  version: z.string().optional(),
+  whenToUse: z.string().optional(),
   fingerprint: z.string().optional(),
   frontmatter: z.record(z.string(), z.unknown()),
   content: z.string().describe('The raw SKILL.md markdown content without read_file gutters.'),

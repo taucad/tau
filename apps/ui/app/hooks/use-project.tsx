@@ -1,18 +1,20 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import {
+  getActiveGroupValues,
   parameterEntryPath,
-  parametersDirectory,
   parseProjectManifestBytes,
   projectToManifest,
   serializeProjectManifest,
 } from '@taucad/types';
-import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -20,6 +22,7 @@ import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { projectMachine } from '#machines/project.machine.js';
 import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { editorMachine } from '#machines/editor.machine.js';
+import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
@@ -28,11 +31,14 @@ import { serializeModelComponentDisplayState } from '#machines/model-interaction
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { StorageProvider } from '#types/storage.types.js';
-import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
-import { joinPath } from '@taucad/utils/path';
-import { parseParameterEntry, createDefaultEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
+import type { Chat } from '@taucad/chat';
+import type { ChatStorage } from '#types/storage.types.js';
+import { localKernelOptions } from '#constants/local-kernel-options.js';
+import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { createParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { toast } from 'sonner';
 
 type ProjectContextType = {
   projectId: string;
@@ -46,17 +52,28 @@ type ProjectContextType = {
   /** The main entry path from project.assets.main.entryPath. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
-  setCodeParameters: (
-    files: Record<string, { content: Uint8Array<ArrayBuffer> }>,
+  resolveParameterEntry: (filePath: string, manifest: ParameterManifest) => void;
+  setGeometryUnitParameters: (
+    filePath: string,
+    manifest: ParameterManifest,
     parameters: Record<string, unknown>,
   ) => void;
-  setParameters: (parameters: Record<string, unknown>) => void;
-  setGeometryUnitParameters: (filePath: string, parameters: Record<string, unknown>) => void;
-  switchParameterGroup: (filePath: string, groupName: string) => void;
-  createParameterGroup: (filePath: string, groupName: string, values?: Record<string, unknown>) => void;
-  deleteParameterGroup: (filePath: string, groupName: string) => void;
-  renameParameterGroup: (filePath: string, oldName: string, newName: string) => void;
-  parameterEntries: Map<string, FileParameterEntry>;
+  switchParameterGroup: (filePath: string, manifest: ParameterManifest, groupName: string) => void;
+  createParameterGroup: (
+    filePath: string,
+    manifest: ParameterManifest,
+    input: Readonly<{
+      groupName: string;
+      values?: Record<string, unknown>;
+    }>,
+  ) => void;
+  deleteParameterGroup: (filePath: string, manifest: ParameterManifest, groupName: string) => void;
+  renameParameterGroup: (
+    filePath: string,
+    manifest: ParameterManifest,
+    input: Readonly<{ oldName: string; newName: string }>,
+  ) => void;
+  parameterService: ParameterSetService;
   updateName: (name: string) => void;
   updateDescription: (description: string) => void;
   updateTags: (tags: string[]) => void;
@@ -66,7 +83,10 @@ type ProjectContextType = {
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
-type FocusedChatWorker = Pick<StorageProvider, 'getChatsForResource' | 'createNavigationRepairChat'>;
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : 'Parameter operation failed.';
+
+type FocusedChatWorker = Pick<ChatStorage, 'getChatsForResource' | 'createNavigationRepairChat'>;
 
 export async function ensureFocusedChatForProject({
   projectId,
@@ -103,6 +123,32 @@ export async function ensureFocusedChatForProject({
   const created = await worker.createNavigationRepairChat(projectId);
   onCreatedChat?.();
   return { type: 'focusedChatEnsured', focusedChatId: created.id };
+}
+
+/**
+ * Whether `chatId` is a chat the client already holds — freshly created here, or
+ * present in a cached `['chats', projectId, …]` list. Such a chat needs no async
+ * ensure round trip, so the editor can focus it synchronously.
+ *
+ * @returns True when the chat is already known.
+ */
+export function isKnownChatId({
+  chatId,
+  createdChatId,
+  projectId,
+  queryClient,
+}: {
+  readonly chatId: string;
+  readonly createdChatId: string | undefined;
+  readonly projectId: string;
+  readonly queryClient: QueryClient;
+}): boolean {
+  if (chatId === createdChatId) {
+    return true;
+  }
+  return queryClient
+    .getQueriesData<Chat[]>({ queryKey: ['chats', projectId] })
+    .some(([, chats]) => chats?.some((chat) => chat.id === chatId));
 }
 
 export const createProjectManifestChangeObserver = ({
@@ -173,7 +219,7 @@ export function ProjectProvider({
   onFocusedChatResolved,
   provide,
   input,
-  kernelOptionsFactory = defaultKernelOptions,
+  kernelOptionsFactory,
   profile = 'editor',
 }: {
   readonly children: ReactNode;
@@ -189,10 +235,46 @@ export function ProjectProvider({
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
+  // The shared-project workbench passes no factory, so this default is a real
+  // product path: it reads the same preference the focused workbench does
+  // instead of silently opting into durable reuse (charter D3).
+  const computeMode = useComputeReuseMode();
+  const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId, undefined, computeMode);
   const queryClient = useQueryClient();
   // Create the project machine actor - it will auto-load based on projectId
   const fileManager = useFileManager();
   const projectManager = useProjectManager();
+  const fileSystemRoot = useSelector(fileManager.fileManagerRef, (state) => state.context.rootDirectory);
+  const parameterService = useMemo(
+    () =>
+      createParameterSetService({
+        rootDirectory: fileSystemRoot,
+        client: fileManager.files,
+        subscribe: (path, listener) => fileManager.contentService?.subscribe(path, listener) ?? (() => undefined),
+        onError: (error) => {
+          toast.error(errorMessage(error));
+        },
+      }),
+    [fileManager.files, fileManager.contentService, fileSystemRoot],
+  );
+  /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:
+   * the project session owns the final close and Strict Mode would close a live service. */
+  const previousParameterService = useRef(parameterService);
+  useEffect(() => {
+    const previous = previousParameterService.current;
+    previousParameterService.current = parameterService;
+    if (previous === parameterService) {
+      return;
+    }
+    // async-iife: bootstrap -- an effect cannot await the replaced service's close.
+    void (async () => {
+      try {
+        await previous.close();
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    })();
+  }, [parameterService]);
 
   const actorRef = useActorRef(
     projectMachine.provide({
@@ -200,49 +282,17 @@ export function ProjectProvider({
         loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
           const readySnapshot = await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
 
-          const parameterEntries = new Map<string, FileParameterEntry>();
-          const { contentService, proxy, rootDirectory } = readySnapshot.context;
+          const { contentService } = readySnapshot.context;
           if (!contentService) {
             throw new Error(`Project content service is unavailable for ${input.projectId}`);
           }
-          const project = await resolveScopedProjectManifest({ contentService, projectId: input.projectId });
-          const mainFile = project.assets.main.entryPath;
-
-          if (proxy) {
-            const absoluteParamsDirectory = joinPath(rootDirectory, parametersDirectory);
-            try {
-              const allFiles = await proxy.getDirectoryContents(absoluteParamsDirectory);
-              for (const [relativePath, data] of Object.entries(allFiles)) {
-                if (!relativePath.endsWith('.json')) {
-                  continue;
-                }
-                const entryPath = relativePath.slice(0, -'.json'.length);
-                try {
-                  const text = new TextDecoder().decode(data);
-                  parameterEntries.set(entryPath, parseParameterEntry(text));
-                } catch {
-                  // Corrupt parameter file — skip
-                }
-              }
-            } catch {
-              // Parameters directory doesn't exist yet — new project
-            }
-
-            if (!parameterEntries.has(mainFile)) {
-              const defaultEntry = createDefaultEntry();
-              parameterEntries.set(mainFile, defaultEntry);
-              const serialized = serializeParameterEntry(defaultEntry);
-              await contentService.write(parameterEntryPath(mainFile), new TextEncoder().encode(serialized), 'machine');
-            }
-          }
-
-          const library =
-            profile === 'editor' ? await projectManager.getProjectLibraryState(input.projectId) : undefined;
+          const project = await resolveScopedProjectManifest({
+            contentService,
+            projectId: input.projectId,
+          });
           return {
             type: 'projectRetrieved',
             project,
-            revisionState: library?.revisionState,
-            parameterEntries,
           };
         }),
         writeProjectActor: fromSafeAsync(async ({ input }) => {
@@ -252,21 +302,6 @@ export function ProjectProvider({
           }
           await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
         }),
-        writeParameterFileActor: fromSafeAsync(async ({ input, signal }) => {
-          if (signal.aborted) {
-            return;
-          }
-          const path = parameterEntryPath(input.filePath);
-          const serialized = serializeParameterEntry(input.entry);
-          const encoded = new TextEncoder().encode(serialized);
-          if (encoded.byteLength === 0) {
-            return;
-          }
-          const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
-          if (contentService) {
-            await contentService.write(path, encoded, 'machine');
-          }
-        }),
       },
       ...provide,
     }),
@@ -274,12 +309,25 @@ export function ProjectProvider({
       input: {
         projectId,
         fileManagerRef: fileManager.fileManagerRef,
-        fileSystemRoot: fileManager.fileManagerRef.getSnapshot().context.rootDirectory,
-        kernelOptionsFactory,
+        fileSystemRoot,
+        kernelOptionsFactory: resolvedKernelOptionsFactory,
         ...input,
       },
       inspect,
     },
+  );
+
+  useEffect(
+    () => () => {
+      /* XState root stops do not run machine exit actions. This provider is
+       * the project resource boundary, so release each child runtime before
+       * React drops the actor tree. The helper is idempotent with the machine's
+       * normal `destroyKernel` path. */
+      for (const unit of actorRef.getSnapshot().context.geometryUnits.values()) {
+        disposeCadRuntime(unit.getSnapshot().context);
+      }
+    },
+    [actorRef],
   );
 
   // Get the worker for Editor state persistence
@@ -319,18 +367,24 @@ export function ProjectProvider({
         }),
         ensureFocusedChatActor: fromSafeAsync(async ({ input }) => {
           if (profile === 'shared') {
-            return { type: 'focusedChatEnsured', focusedChatId: `shared:${input.projectId}` };
+            return {
+              type: 'focusedChatEnsured',
+              focusedChatId: `shared:${input.projectId}`,
+            };
           }
-          const worker = await getReadiedWorker();
           return ensureFocusedChatForProject({
             projectId: input.projectId,
             requestedChatId: input.requestedChatId,
             persistedChatId: input.persistedChatId,
-            worker,
+            /* Chats are files now (W17): the project manager owns the store,
+             * and the object-store worker knows nothing about them. */
+            worker: projectManager,
             onCreatedChat: () => {
               // Surface the new chat through TanStack Query so `useChats`
               // refetches and the history selector picks it up immediately.
-              void queryClient.invalidateQueries({ queryKey: ['chats', input.projectId] });
+              void queryClient.invalidateQueries({
+                queryKey: ['chats', input.projectId],
+              });
             },
           });
         }),
@@ -342,13 +396,17 @@ export function ProjectProvider({
     },
   );
 
+  /* A chat we already hold is focused synchronously. `setRequestedChatId` re-enters
+   * `ensuringFocusedChat` for an async chat-list round trip, which flashes the chat
+   * pane's skeleton — correct for an unknown/absent id, a visible flicker for every
+   * switch between chats the sidebar just listed. */
   useEffect(() => {
     editorRef.send(
-      createdChatId === requestedChatId && createdChatId !== undefined
-        ? { type: 'focusCreatedChat', chatId: createdChatId }
+      requestedChatId !== undefined && isKnownChatId({ chatId: requestedChatId, createdChatId, projectId, queryClient })
+        ? { type: 'focusKnownChat', chatId: requestedChatId }
         : { type: 'setRequestedChatId', chatId: requestedChatId },
     );
-  }, [createdChatId, editorRef, requestedChatId]);
+  }, [createdChatId, editorRef, projectId, queryClient, requestedChatId]);
 
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
@@ -360,8 +418,89 @@ export function ProjectProvider({
     (state) => state.context.mainEntryPath,
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
-  const parameterEntries = useSelector(actorRef, (state) => state.context.parameterEntries);
+  const appliedParameterValues = useRef(new Map<string, string>());
+  /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path
+   * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
+  const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
+
+  /* The kernel learns a committed value from the set actor's own notification, which runs in the
+   * same synchronous turn as the checked write — ahead of React's render of this provider. */
+  const dispatchParameters = useCallback(
+    (entryPath: string, mode: 'dispatch' | 'seed' = 'dispatch'): void => {
+      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
+      const current = parameterService.snapshot(entryPath);
+      if (cadRef === undefined || current === undefined) {
+        return;
+      }
+      const fingerprint = JSON.stringify(getActiveGroupValues(current.entry));
+      const appliedFingerprint = appliedParameterValues.current.get(entryPath);
+      if (mode === 'dispatch' && appliedFingerprint !== fingerprint && current.bytes !== null) {
+        /* Only the bytes the authority just persisted travel: the runtime resolves the values from
+         * them and observes that revision itself, so the sidecar's own watch event has nothing left
+         * to re-render, and this machine keeps no second copy of the stored values. */
+        cadRef.send({ type: 'commitParameters', stage: { [parameterEntryPath(entryPath)]: current.bytes } });
+      }
+      appliedParameterValues.current.set(entryPath, fingerprint);
+    },
+    [actorRef, parameterService],
+  );
+
+  const observeParameters = useCallback(
+    (entryPath: string): void => {
+      const actor = parameterService.actor(entryPath);
+      const existing = parameterObservers.current.get(entryPath);
+      if (actor === undefined || existing?.actor === actor) {
+        return;
+      }
+      existing?.unsubscribe();
+      let last: unknown;
+      const subscription = actor.subscribe((snapshot) => {
+        const { current } = snapshot.context;
+        if (current !== undefined && current !== last) {
+          last = current;
+          dispatchParameters(entryPath);
+        }
+      });
+      parameterObservers.current.set(entryPath, {
+        actor,
+        unsubscribe: () => {
+          subscription.unsubscribe();
+        },
+      });
+      /* The first observation only records what the record holds: `parameterFileResolver` reads the
+       * same file on every render, so the unit's opening render already carries these values and
+       * dispatching them here would render the model a second time for no change. */
+      dispatchParameters(entryPath, 'seed');
+    },
+    [dispatchParameters, parameterService],
+  );
+
+  useEffect(() => {
+    const observers = parameterObservers.current;
+    const observeAll = (): void => {
+      for (const entryPath of geometryUnits.keys()) {
+        observeParameters(entryPath);
+      }
+    };
+    observeAll();
+    const unsubscribeActors = parameterService.subscribeActors(observeAll);
+    for (const [entryPath, { unsubscribe }] of observers) {
+      if (!geometryUnits.has(entryPath)) {
+        unsubscribe();
+        observers.delete(entryPath);
+        appliedParameterValues.current.delete(entryPath);
+      }
+    }
+    return () => {
+      unsubscribeActors();
+      for (const { unsubscribe } of observers.values()) {
+        unsubscribe();
+      }
+      observers.clear();
+    };
+  }, [geometryUnits, observeParameters, parameterService]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
+  const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
   const modelComponentDisplay = useSelector(editorRef, (state) => state.context.modelComponentDisplay);
   const needsModelComponentDisplayMigration = useSelector(
@@ -379,7 +518,10 @@ export function ProjectProvider({
     if (!focusedChatResolved || restoredModelInteractionRef.current === modelInteractionRef) {
       return;
     }
-    modelInteractionRef.send({ type: 'restoreComponentDisplay', componentDisplay: modelComponentDisplay });
+    modelInteractionRef.send({
+      type: 'restoreComponentDisplay',
+      componentDisplay: modelComponentDisplay,
+    });
     restoredModelInteractionRef.current = modelInteractionRef;
   }, [focusedChatResolved, modelComponentDisplay, modelInteractionRef]);
 
@@ -387,7 +529,11 @@ export function ProjectProvider({
     if (!focusedChatResolved || restoredModelInteractionRef.current !== modelInteractionRef) {
       return;
     }
-    const componentDisplay = serializeModelComponentDisplayState(modelInteractionRef.getSnapshot().context);
+    const snapshot = modelInteractionRef.getSnapshot();
+    if (snapshot.context.displayRevision !== modelDisplayRevision) {
+      return;
+    }
+    const componentDisplay = serializeModelComponentDisplayState(snapshot.context);
     if (
       !needsModelComponentDisplayMigration &&
       JSON.stringify(componentDisplay) === JSON.stringify(modelComponentDisplay)
@@ -405,10 +551,10 @@ export function ProjectProvider({
   ]);
 
   useEffect(() => {
-    if (focusedChatResolved && focusedChatId !== undefined) {
+    if (focusedChatResolved && focusedChatId !== undefined && resolvedRequestedChatId === requestedChatId) {
       onFocusedChatResolved?.(focusedChatId);
     }
-  }, [focusedChatId, focusedChatResolved, onFocusedChatResolved]);
+  }, [focusedChatId, focusedChatResolved, onFocusedChatResolved, requestedChatId, resolvedRequestedChatId]);
 
   useEffect(() => {
     if (profile === 'shared') {
@@ -431,12 +577,8 @@ export function ProjectProvider({
       await projectManager.touchProject(projectId);
       await queryClient.invalidateQueries({ queryKey: ['projects'] });
     });
-    const revision = actorRef.on('revisionStateUpdated', (event) => {
-      void projectManager.setProjectRevisionState(projectId, event.revisionState);
-    });
     return () => {
       activity.unsubscribe();
-      revision.unsubscribe();
     };
   }, [actorRef, profile, projectId, projectManager, queryClient]);
 
@@ -462,79 +604,94 @@ export function ProjectProvider({
     };
   }, [actorRef, fileManager]);
 
-  // Subscribe to external parameter file changes (per-geometry-unit files under the parameters directory)
-  useEffect(() => {
-    const { contentService } = fileManager;
-    if (!contentService) {
-      return;
-    }
-
-    const parametersPrefix = `${parametersDirectory}/`;
-    const unsubscribe = contentService.onDidContentChange((event) => {
-      if (event.type !== 'written' || !event.path.startsWith(parametersPrefix) || event.source === 'machine') {
-        return;
-      }
+  const reportParameterOperation = useCallback((operation: Promise<unknown>): void => {
+    const report = async (): Promise<void> => {
       try {
-        const text = new TextDecoder().decode(event.data);
-        const entry = parseParameterEntry(text);
-        const filePath = event.path.slice(parametersPrefix.length, -'.json'.length);
-        actorRef.send({ type: 'parameterFileChanged', filePath, entry });
-      } catch {
-        // Invalid JSON — ignore
+        await operation;
+      } catch (error) {
+        toast.error(errorMessage(error));
       }
-    });
+    };
+    // async-iife: bootstrap -- UI event callbacks cannot return the operation promise.
+    void report();
+  }, []);
 
-    return unsubscribe;
-  }, [fileManager, actorRef]);
-
-  // Memoize callbacks
-  const setCodeParameters = useCallback(
-    (files: Record<string, { content: Uint8Array<ArrayBuffer> }>, parameters: Record<string, unknown>) => {
-      actorRef.send({ type: 'updateCodeParameters', files, parameters });
+  const resolveParameterEntry = useCallback(
+    (filePath: string, manifest: ParameterManifest) => {
+      /* `resolve` creates the set actor synchronously. Nothing forwards its values to the kernel:
+       * the runtime watches the sidecar itself, so the checked write is the only render trigger. */
+      const operation = parameterService.resolve(filePath, manifest);
+      // A failed load is shown in the panel with its recovery action, so it is not also a toast.
+      const settle = async (): Promise<void> => {
+        try {
+          await operation;
+        } catch {
+          // The set actor holds the typed diagnostic.
+        }
+      };
+      // async-iife: bootstrap -- resolution is observed through the set actor, not this promise.
+      void settle();
     },
-    [actorRef],
-  );
-
-  const setParameters = useCallback(
-    (parameters: Record<string, unknown>) => {
-      actorRef.send({ type: 'setParameters', parameters });
-    },
-    [actorRef],
+    [parameterService],
   );
 
   const setGeometryUnitParameters = useCallback(
-    (filePath: string, parameters: Record<string, unknown>) => {
-      actorRef.send({ type: 'setGeometryUnitParameters', filePath, parameters });
+    (filePath: string, manifest: ParameterManifest, parameters: Record<string, unknown>) => {
+      reportParameterOperation(parameterService.replaceValues(filePath, manifest, parameters));
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const switchParameterGroup = useCallback(
-    (filePath: string, groupName: string) => {
-      actorRef.send({ type: 'switchParameterGroup', filePath, groupName });
+    (filePath: string, manifest: ParameterManifest, groupName: string) => {
+      reportParameterOperation(parameterService.selectGroup(filePath, manifest, groupName));
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const createParameterGroup = useCallback(
-    (filePath: string, groupName: string, values?: Record<string, unknown>) => {
-      actorRef.send({ type: 'createParameterGroup', filePath, groupName, values });
+    (
+      filePath: string,
+      manifest: ParameterManifest,
+      {
+        groupName,
+        values,
+      }: Readonly<{
+        groupName: string;
+        values?: Record<string, unknown>;
+      }>,
+    ) => {
+      reportParameterOperation(
+        parameterService.createGroup(filePath, manifest, {
+          group: groupName,
+          ...(values === undefined ? {} : { values }),
+        }),
+      );
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const deleteParameterGroup = useCallback(
-    (filePath: string, groupName: string) => {
-      actorRef.send({ type: 'deleteParameterGroup', filePath, groupName });
+    (filePath: string, manifest: ParameterManifest, groupName: string) => {
+      reportParameterOperation(parameterService.deleteGroup(filePath, manifest, groupName));
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const renameParameterGroup = useCallback(
-    (filePath: string, oldName: string, newName: string) => {
-      actorRef.send({ type: 'renameParameterGroup', filePath, oldName, newName });
+    (
+      filePath: string,
+      manifest: ParameterManifest,
+      { oldName, newName }: Readonly<{ oldName: string; newName: string }>,
+    ) => {
+      reportParameterOperation(
+        parameterService.renameGroup(filePath, manifest, {
+          group: oldName,
+          nextGroup: newName,
+        }),
+      );
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const updateName = useCallback(
@@ -585,9 +742,8 @@ export function ProjectProvider({
       geometryUnits,
       mainEntryPath,
       logRef,
-      parameterEntries,
-      setCodeParameters,
-      setParameters,
+      parameterService,
+      resolveParameterEntry,
       setGeometryUnitParameters,
       switchParameterGroup,
       createParameterGroup,
@@ -608,9 +764,8 @@ export function ProjectProvider({
     geometryUnits,
     mainEntryPath,
     logRef,
-    parameterEntries,
-    setCodeParameters,
-    setParameters,
+    parameterService,
+    resolveParameterEntry,
     setGeometryUnitParameters,
     switchParameterGroup,
     createParameterGroup,
@@ -657,6 +812,22 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
   }
 
   return undefined;
+}
+
+/**
+ * The live parameter-set actor for an entry, re-read whenever the service creates or retires one.
+ * @param entryPath - The geometry entry whose parameters the actor owns.
+ * @returns The actor, or `undefined` before the entry has been resolved.
+ */
+export function useParameterSetActor(
+  entryPath: string | undefined,
+): ReturnType<ProjectContextType['parameterService']['actor']> {
+  const { parameterService } = useProject();
+  return useSyncExternalStore(
+    parameterService.subscribeActors,
+    () => (entryPath === undefined ? undefined : parameterService.actor(entryPath)),
+    () => undefined,
+  );
 }
 
 export function useProject<T extends ProjectContextType = ProjectContextType>(options?: {

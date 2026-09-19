@@ -77,6 +77,9 @@ const openSeededProject = async (): Promise<void> => {
 type TabVisualState = {
   readonly backgroundColor: string;
   readonly borderRadius: number;
+  readonly closeFade: string;
+  readonly closeFadeBackground: string;
+  readonly closeBackgroundColor: string;
   readonly closePosition: string;
   readonly closeLayer: string;
   readonly color: string;
@@ -97,6 +100,9 @@ const readTabVisualState = async (tab: Locator): Promise<TabVisualState> =>
     return {
       backgroundColor: style.backgroundColor,
       borderRadius: Number.parseFloat(style.borderRadius),
+      closeFade: getComputedStyle(close, '::before').content,
+      closeFadeBackground: getComputedStyle(close, '::before').backgroundImage,
+      closeBackgroundColor: closeStyle.backgroundColor,
       closePosition: closeStyle.position,
       closeLayer: closeStyle.zIndex,
       color: style.color,
@@ -143,7 +149,11 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   expect(activeLight.width).toBeGreaterThanOrEqual(112);
   expect(activeLight.width).toBeLessThanOrEqual(160);
   expect(activeLight.borderRadius).toBeGreaterThan(0);
-  expect(activeLight.maskImage).toContain('linear-gradient');
+  expect(activeLight.maskImage).toContain('linear-gradient(to right');
+  expect(activeLight.maskImage).toContain('42px');
+  expect(activeLight.closeFade).not.toBe('none');
+  expect(activeLight.closeFadeBackground).toContain('linear-gradient(to right');
+  expect(activeLight.closeBackgroundColor).toBe(activeLight.backgroundColor);
   expect(activeLight.closePosition).toBe('absolute');
   expect(Number(activeLight.closeLayer)).toBeGreaterThan(0);
   expect(activeLight.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
@@ -214,6 +224,8 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
     if (!(strip instanceof HTMLElement)) {
       throw new Error('Dockview tab strip was missing.');
     }
+    const scrollable = element.closest<HTMLElement>('.dv-scrollable');
+    const overlayScrollbar = scrollable?.querySelector<HTMLElement>('.dv-scrollbar-horizontal');
 
     strip.scrollLeft = 0;
     const forward = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 });
@@ -227,20 +239,27 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
       afterReverse: strip.scrollLeft,
       forwardDispatch,
       forwardPrevented: forward.defaultPrevented,
-      hasLegacyWrapper: element.closest('.dv-scrollable') !== null,
+      hasOverlayScrollbar: Boolean(overlayScrollbar),
+      overlayScrollbarHeight: overlayScrollbar ? getComputedStyle(overlayScrollbar).height : undefined,
+      overlayScrollbarPosition: overlayScrollbar ? getComputedStyle(overlayScrollbar).position : undefined,
       reverseDispatch,
       reversePrevented: reverse.defaultPrevented,
+      scrollableHeight: scrollable?.getBoundingClientRect().height,
+      stripHeight: strip.getBoundingClientRect().height,
     };
   });
-  expect(wheelState).toEqual({
+  expect(wheelState).toMatchObject({
     afterForward: 80,
     afterReverse: 40,
     forwardDispatch: false,
     forwardPrevented: true,
-    hasLegacyWrapper: false,
+    hasOverlayScrollbar: true,
+    overlayScrollbarHeight: '4.5px',
+    overlayScrollbarPosition: 'absolute',
     reverseDispatch: false,
     reversePrevented: true,
   });
+  expect(wheelState.stripHeight).toBe(wheelState.scrollableHeight);
 
   const longTooltipTrigger = tabTooltipTrigger('public/models/nested/strainer.js');
   // Radix intentionally suppresses a tooltip on pointer-down until the

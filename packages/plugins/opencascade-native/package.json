@@ -68,6 +68,10 @@
   "taucad": {
     "hostTarget": "node"
   },
+  "tau": {
+    "skills": null,
+    "reason": "Backend kernel; no authoring surface"
+  },
   "dependencies": {
     "@taucad/geometry-core": "workspace:*"
   },

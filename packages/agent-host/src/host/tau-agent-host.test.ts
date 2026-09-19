@@ -8,11 +8,19 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-import { createTauAgentHost } from '#host/tau-agent-host.js';
+import {
+  createTauAgentHost,
+  hostRunStateOfLifecycle,
+  isResumableRunFailure,
+  runLedgerOf,
+} from '#host/tau-agent-host.js';
+import type { ExternalAgentPort } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
-import type { JsonObject, ProviderMessage } from '#log/event-types.js';
-import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
+import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
+import { GatewayModelTransportError, gatewayModelErrorCodes } from '#transport/gateway-model-transport.js';
+import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
+import type { HostCompactionError } from '#harness/compaction.js';
 
 const tauInternal = (message: ProviderMessage | undefined): JsonObject | undefined => message?.metadata?.tauInternal;
 
@@ -41,6 +49,65 @@ const createMemoryLogFile = () => {
 const createIds = (prefix: string) => {
   let next = 0;
   return () => `${prefix}-${next++}`;
+};
+
+/** One scripted durable record, with the log's own base fields left to {@link seedLog}. */
+type SeededLogEvent = AgentLogEvent extends infer Event
+  ? Event extends AgentLogEvent
+    ? Omit<Event, 'version' | 'leaderEpoch' | 'sequence' | 'recordedAt'>
+    : never
+  : never;
+
+/**
+ * Write a scripted log before any host opens it.
+ *
+ * Lets a row state the log's exact shape — including shapes a fixed host will
+ * no longer write, such as a settlement recorded under a run that was never
+ * admitted — instead of driving a sequence of turns to approximate one.
+ */
+const seedLog = async (file: ReturnType<typeof createMemoryLogFile>, events: readonly SeededLogEvent[]) => {
+  const appender = await file.open();
+  let sequence = 0;
+  for (const event of events) {
+    // oxlint-disable-next-line no-await-in-loop -- the log's sequence discipline is serial by construction.
+    await appender.append({
+      ...event,
+      version: 1,
+      leaderEpoch: 'epoch-seed',
+      sequence,
+      recordedAt: new Date(Date.UTC(2026, 8, 1)).toISOString(),
+    } as AgentLogEvent);
+    sequence++;
+  }
+  await appender.close();
+};
+
+/** Every record a log holds, read through a fresh appender. */
+const readLog = async (file: ReturnType<typeof createMemoryLogFile>) => {
+  const appender = await file.open();
+  return appender.read();
+};
+
+/** A completed first turn, as a chat's log holds it. */
+const completedFirstTurn: readonly SeededLogEvent[] = [
+  { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+  { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+  { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+  {
+    type: 'message.appended',
+    runId: 'run-1',
+    message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+  },
+  { type: 'run.lifecycle', runId: 'run-1', state: 'completed' },
+];
+
+/** The abandoned second turn's settlement, written under a run nothing admitted. */
+const settlementOnlySecondRun: SeededLogEvent = {
+  type: 'turn.failed',
+  runId: 'run-2',
+  chatId: 'chat-settlement-only',
+  turnId: 'turn-2',
+  reason: 'The turn ended before it recorded a revision.',
 };
 
 const resolvedInterruptPort = () =>
@@ -129,7 +196,15 @@ describe('createTauAgentHost', () => {
       message: { id: 'turn-live', role: 'user', content: 'Stream.' },
     });
 
-    expect(order).toEqual(['text-delta:live-0', 'thinking-delta:live-0', 'durable:live-0']);
+    expect(order).toEqual([
+      'text-start:live-0',
+      'text-delta:live-0',
+      'text-end:live-0',
+      'thinking-start:live-0',
+      'thinking-delta:live-0',
+      'thinking-end:live-0',
+      'durable:live-0',
+    ]);
     await host.close();
   });
 
@@ -198,10 +273,61 @@ describe('createTauAgentHost', () => {
     await host.close();
   });
 
+  it('records a revision settlement through the chat log writer', async () => {
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'settlement',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-settlement',
+      runId: 'run-settlement',
+      trigger: 'submit',
+      message: { id: 'turn-settlement', role: 'user', content: 'Settle.' },
+    });
+
+    await host.recordSettlement({
+      chatId: 'chat-settlement',
+      runId: 'run-settlement',
+      event: {
+        type: 'turn.finalized',
+        turnId: 'turn-settlement',
+        chatId: 'chat-settlement',
+        projectId: 'project-settlement',
+        checkoutId: 'live',
+        revisionId: 'revision-settlement',
+        branch: 'main',
+        changedPaths: ['main.ts'],
+        treeId: 'tree-settlement',
+        trigger: 'turn',
+        runIds: ['run-settlement'],
+      },
+    });
+
+    const recorded = await readLog(file);
+    expect(recorded.at(-1)).toMatchObject({
+      type: 'turn.finalized',
+      runId: 'run-settlement',
+      revisionId: 'revision-settlement',
+    });
+    await host.close();
+  });
+
   it.each([
     ['INSUFFICIENT_CREDIT', 402],
     ['MODEL_NOT_IN_CATALOG', 400],
     ['RATE_LIMITED', 429],
+    ['FUNDED_OPERATION_LIMIT', 429],
+    ['FUNDED_HELPER_LIMIT', 429],
+    ['BILLING_RECOVERY_UNAVAILABLE', 503],
   ] as const)('retains %s as a typed failed-run snapshot', async (code, status) => {
     const file = createMemoryLogFile();
     const host = createTauAgentHost(
@@ -232,6 +358,278 @@ describe('createTauAgentHost', () => {
     expect(snapshot.state).toBe('failed');
     expect(snapshot.failure).toEqual({ code, status, message: `fixture ${code}` });
     await host.close();
+  });
+
+  it('records the credit denial shortfall on the in-process terminal run record', async () => {
+    const details = {
+      requiredCreditAtoms: '4244000',
+      availableCreditAtoms: '300000',
+      routeId: 'anthropic-claude-astra-5',
+    };
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => ({
+            [Symbol.asyncIterator]: () => ({
+              next: async (): Promise<IteratorResult<ModelStreamEvent>> => {
+                throw new GatewayModelTransportError({
+                  code: 'INSUFFICIENT_CREDIT',
+                  status: 402,
+                  message: 'Insufficient Tau credit for this model request.',
+                  details,
+                });
+              },
+            }),
+          }),
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'denied',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-denied',
+      runId: 'run-denied',
+      trigger: 'submit',
+      message: { id: 'turn-denied', role: 'user', content: 'Spend credit I do not have.' },
+    });
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    const failed = events.flatMap((event) =>
+      event.type === 'run.lifecycle' && event.state === 'failed' ? [event.detail] : [],
+    );
+
+    expect(failed).toEqual([
+      {
+        message: 'Insufficient Tau credit for this model request.',
+        code: 'INSUFFICIENT_CREDIT',
+        status: 402,
+        details,
+      },
+    ]);
+    await host.close();
+  });
+
+  it.each([
+    ['INSUFFICIENT_CREDIT', 402, true],
+    /* The in-stream guard wraps a provider failure with the *healthy*
+     * response's status, so a mid-call `NETWORK_ERROR` carries a 200. */
+    ['NETWORK_ERROR', 200, true],
+    ['MODEL_NOT_IN_CATALOG', 400, false],
+  ] as const)('resumes a %s failure at the blocked step only when it is retryable', async (code, status, retryable) => {
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
+    let call = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            call++;
+            if (call === 1) {
+              yield {
+                type: 'tool-input',
+                toolCallId: 'refused-call-read',
+                toolName: 'read_file',
+                input: { targetFile: 'main.ts' },
+              };
+              yield { type: 'completed', stopReason: 'toolUse' };
+              return;
+            }
+            if (call === 2) {
+              throw new GatewayModelTransportError({
+                code,
+                status,
+                message: `fixture ${code}`,
+                details: { requiredCreditAtoms: '4244000', availableCreditAtoms: '300000', routeId: 'route' },
+              });
+            }
+            yield { type: 'text-delta', text: 'Finished after the account was funded.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: `refused-${code}`,
+      }),
+    );
+
+    await host.admit({
+      chatId: `chat-refused-${code}`,
+      runId: `run-refused-${code}`,
+      trigger: 'submit',
+      message: { id: `turn-refused-${code}`, role: 'user', content: 'Read main.ts, then answer.' },
+    });
+    const refused = await host.snapshot(`chat-refused-${code}`);
+    const resumed = await host.resume(`chat-refused-${code}`);
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    const lifecycle = events.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []));
+
+    expect(refused.state).toBe('failed');
+    expect(refused.failure).toMatchObject({ code, status });
+    // One tool call, whoever resumed: the settled result is replayed from the
+    // log, never paid for twice.
+    expect(invoke).toHaveBeenCalledTimes(1);
+    if (!retryable) {
+      expect(requests).toHaveLength(2);
+      expect(lifecycle).toEqual(['admitted', 'running', 'failed']);
+      expect(resumed).toEqual(refused.messages);
+      await host.close();
+      return;
+    }
+    // A new attempt on the same run, from the same context the refusal was
+    // built from: the prior tool result intact, the user turn appearing once,
+    // and no rewind of the turn itself.
+    expect(lifecycle).toEqual(['admitted', 'running', 'failed', 'running', 'completed']);
+    /* The one retraction a resume makes: the trailing failure marker, and
+     * nothing before it (R4). A `regenerate` would retain nothing past the
+     * user message instead. */
+    const rewound = events.filter((event) => event.type === 'history.rewound');
+    expect(rewound.map((event) => event.trigger)).toEqual(['retry']);
+    expect(rewound[0]?.retainedMessageIds).toEqual(refused.messages.slice(0, -1).map((message) => message.id));
+    expect(requests).toHaveLength(3);
+    expect(requests[2]?.messages.map((message) => `${message.role}:${message.id}`)).toEqual(
+      requests[1]?.messages.map((message) => `${message.role}:${message.id}`),
+    );
+    expect(requests[2]?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(requests[2]?.messages.at(-1)).toMatchObject({
+      role: 'tool-output',
+      toolCallId: 'refused-call-read',
+      isError: false,
+    });
+    expect(resumed.at(-1)).toMatchObject({ role: 'assistant', content: [{ type: 'text' }] });
+    expect(await host.snapshot(`chat-refused-${code}`)).toMatchObject({
+      runId: `run-refused-${code}`,
+      state: 'completed',
+    });
+    await host.close();
+  });
+
+  it('resumes from the real result of a tool that ran before the stream failed', async () => {
+    /* The stream starts a tool the moment its call is complete (`prestartTool`),
+     * so a failure one frame later leaves a tool that *ran* with no durable
+     * result: pi never executes the call, and the dropped promise used to reach
+     * the resumed model as `CLIENT_DISCONNECTED` — an invitation to apply a
+     * non-idempotent tool twice (F2). */
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
+    let call = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            call++;
+            if (call === 1) {
+              yield {
+                type: 'tool-input',
+                toolCallId: 'prestart-call-read',
+                toolName: 'read_file',
+                input: { targetFile: 'main.ts' },
+              };
+              throw new GatewayModelTransportError({
+                code: 'NETWORK_ERROR',
+                status: 200,
+                message: 'fixture NETWORK_ERROR',
+              });
+            }
+            yield { type: 'text-delta', text: 'Answered from the tool result that survived.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: 'prestart',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-prestart',
+      runId: 'run-prestart',
+      trigger: 'submit',
+      message: { id: 'turn-prestart', role: 'user', content: 'Read main.ts, then answer.' },
+    });
+    const refused = await host.snapshot('chat-prestart');
+    const resumed = await host.resume('chat-prestart');
+    const events = await readLog(file);
+
+    expect(refused.state).toBe('failed');
+    expect(refused.failure).toMatchObject({ code: 'NETWORK_ERROR' });
+    // The tool ran once, before the failure, and is never dispatched again.
+    expect(invoke).toHaveBeenCalledTimes(1);
+    // Its real result is durable, and there is exactly one record of it.
+    expect(
+      resumed.filter((message) => message.role === 'tool-output' && message.toolCallId === 'prestart-call-read'),
+    ).toMatchObject([{ content: 'fixture-main', isError: false }]);
+    // The re-issued call carries that result, not a fabricated disconnect.
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages.at(-1)).toMatchObject({
+      role: 'tool-output',
+      toolCallId: 'prestart-call-read',
+      isError: false,
+      content: 'fixture-main',
+    });
+    expect(JSON.stringify(requests[1]?.messages)).not.toContain('CLIENT_DISCONNECTED');
+    // The assistant row the provider sees is a plain tool-use turn, not a marker.
+    const assistant = requests[1]?.messages.filter((message) => message.role === 'assistant') ?? [];
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]?.metadata).toMatchObject({ stopReason: 'toolUse' });
+    expect(assistant[0]?.metadata?.errorMessage).toBeUndefined();
+    // The turn itself is untouched: the one user message, and no rewind of it.
+    expect(requests[1]?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'history.rewound')).toHaveLength(0);
+    /* The marker's diagnostic is what `snapshot` reads a chat's failure from,
+     * so a marker left in history would report this chat as failed for the rest
+     * of its life. */
+    const completed = await host.snapshot('chat-prestart');
+    expect(completed.state).toBe('completed');
+    expect(completed.failure).toBeUndefined();
+    await host.close();
+  });
+
+  it('rules every failure code a run can end on either resumable or not', () => {
+    /* Q5: the *non-resumable* half of the ruling lives here rather than in a
+     * second production set nothing would read. Both unions are keyed
+     * exhaustively, so a code added to the transport or to compaction fails to
+     * compile until this table rules it one way or the other. */
+    /* eslint-disable @typescript-eslint/naming-convention -- the keys are wire failure codes, not identifiers. */
+    const resumability = {
+      // Gateway transport (`gatewayModelErrorCodes`); the seven resumable ones are Q2's list.
+      BILLING_RECOVERY_UNAVAILABLE: false,
+      FUNDED_HELPER_LIMIT: false,
+      FUNDED_OPERATION_LIMIT: false,
+      INSUFFICIENT_CREDIT: true,
+      MODEL_NOT_IN_CATALOG: false,
+      MODEL_PROVIDER_UNSUPPORTED: false,
+      ORIGIN_NOT_ALLOWED: false,
+      PROVIDER_ACCOUNT_EXHAUSTED: false,
+      RATE_LIMITED: true,
+      UNAUTHENTICATED: true,
+      INVALID_REQUEST: true,
+      PROVIDER_UNAVAILABLE: true,
+      UPSTREAM_REJECTED: true,
+      MALFORMED_RESPONSE: true,
+      NETWORK_ERROR: true,
+      UNKNOWN_GATEWAY_ERROR: false,
+      // Compaction and leadership (R12): a resume would meet the same wall.
+      SUMMARY_REQUIRED: false,
+      NO_EVICTABLE_HISTORY: false,
+      SESSION_LOG_INTEGRITY: false,
+      CIRCUIT_BREAKER_OPEN: false,
+      LEADERSHIP_LOST: false,
+    } as const satisfies Record<GatewayModelErrorCode | HostCompactionError['code'] | 'LEADERSHIP_LOST', boolean>;
+    /* eslint-enable @typescript-eslint/naming-convention -- ends the wire-code key exception. */
+    const ruled = Object.entries(resumability);
+
+    expect(gatewayModelErrorCodes.filter((code) => !(code in resumability))).toEqual([]);
+    expect(
+      ruled.filter(([code]) => isResumableRunFailure({ message: `fixture ${code}`, code })).map(([code]) => code),
+    ).toEqual(ruled.filter(([, resumable]) => resumable).map(([code]) => code));
   });
 
   it('executes tool and steady-state turns, then cold-rebuilds the completed transcript', async () => {
@@ -493,7 +891,7 @@ the cancelled tools left the system unchanged.
     });
     await expect(
       host.resolveInterrupt({ runId: 'wrong-run', interruptId: 'interrupt-1', outcome: 'approved' }),
-    ).rejects.toThrow('does not belong');
+    ).rejects.toThrow('is not pending on run wrong-run');
     await host.resolveInterrupt({ runId: 'run-interrupt', interruptId: 'interrupt-1', outcome: 'approved' });
     await expect(interruption).resolves.toEqual({ interruptId: 'interrupt-1', outcome: 'approved' });
 
@@ -752,6 +1150,60 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  /**
+   * F2, closeout: a rewind of any turn but the first.
+   *
+   * The client's transcript and this log do not share assistant message ids —
+   * one run is one assistant message on a page and any number of provider
+   * messages here — so a client can only ever name the *user* message its turn
+   * belongs to. Matching its `retainedMessageIds` against this projection
+   * refused every *Try again* and every edit whose retained prefix contained
+   * an assistant message, which is every one after the first turn.
+   */
+  it('rewinds to the turn the client names, not to the prefix it guessed', async () => {
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 3)),
+        toolRegistry: tools(async () => ({ content: 'fixture-main', isError: false })),
+        idPrefix: 'anchor',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-one',
+      trigger: 'submit',
+      message: { id: 'turn-one', role: 'user', content: 'First.' },
+    });
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-two',
+      trigger: 'submit',
+      message: { id: 'turn-two', role: 'user', content: 'Second.' },
+    });
+
+    /* What the page retains: its own ids, where the assistant message of turn
+     * one is named after the run that produced it. */
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-three',
+      trigger: 'regenerate',
+      retainedMessageIds: ['turn-one', 'run-one'],
+      message: { id: 'turn-two', role: 'user', content: 'Second.' },
+    });
+
+    const log = await file.open();
+    const events = await log.read();
+    expect(events).toContainEqual(expect.objectContaining({ type: 'history.rewound', trigger: 'regenerate' }));
+    expect(
+      reduceEventLog(events)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.id),
+    ).toEqual(['turn-one', 'turn-two']);
+    await host.close();
+  });
+
   it('resolves every tool call of a turn that fires four of them at once', async () => {
     // The API-coordinated placement deadlocked here (Postgres 40P01): three
     // delivery transactions locked `chat_rpc_exchange` rows and the
@@ -855,5 +1307,558 @@ the cancelled tools left the system unchanged.
         .map((message) => message.id),
     ).toEqual(['turn-first']);
     await host.close();
+  });
+
+  it('hands the second turn of a chat the session the first one remembered', async () => {
+    const file = createMemoryLogFile();
+    const seen: Array<{ readonly agentId: string; readonly state: JsonObject | undefined }> = [];
+    const closedChats: string[] = [];
+    let nextSession = 0;
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent', 'other-agent'],
+      run: async (turn) => {
+        seen.push({ agentId: turn.agentId, state: turn.state });
+        if (typeof turn.state?.['acpSessionId'] !== 'string') {
+          nextSession += 1;
+          await turn.remember({ acpSessionId: `session-${String(nextSession)}`, model: 'stub-model' });
+        }
+      },
+      closeChat: async (chatId) => {
+        closedChats.push(chatId);
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-session',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    const start = async (input: {
+      readonly runId: string;
+      readonly messageId: string;
+      readonly agentId: string;
+    }): Promise<void> => {
+      await host.admit({
+        chatId: 'chat-external-session',
+        runId: input.runId,
+        trigger: 'submit',
+        message: { id: input.messageId, role: 'user', content: 'Run this elsewhere.' },
+        config: {
+          systemPrompt: 'unused by an external turn',
+          toolChoice: 'none',
+          agent: { kind: 'acp', id: input.agentId },
+        },
+      });
+      await host.cancel({ runId: input.runId });
+    };
+
+    await start({ runId: 'run-1', messageId: 'turn-1', agentId: 'stub-agent' });
+    await start({ runId: 'run-2', messageId: 'turn-2', agentId: 'stub-agent' });
+    // A different agent in the same chat never inherits another vendor's session.
+    await start({ runId: 'run-3', messageId: 'turn-3', agentId: 'other-agent' });
+
+    expect(seen[0]?.state?.['acpSessionId']).toBeUndefined();
+    expect(seen[1]?.state).toMatchObject({ acpSessionId: 'session-1', model: 'stub-model', agentId: 'stub-agent' });
+    expect(seen[2]?.state?.['acpSessionId']).toBeUndefined();
+
+    /* A rewind retracts a turn the vendor thread still holds, so the runner is
+     * told to end that session and the retained selection loses its id. */
+    const log = await file.open();
+    const retained = reduceEventLog(await log.read())
+      .map((message) => message.id)
+      .slice(0, 1);
+    await host.admit({
+      chatId: 'chat-external-session',
+      runId: 'run-4',
+      trigger: 'retry',
+      retainedMessageIds: retained,
+      message: { id: 'turn-4', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await host.cancel({ runId: 'run-4' });
+    expect(closedChats).toEqual(['chat-external-session']);
+    expect(seen[3]?.state?.['acpSessionId']).toBeUndefined();
+    expect(seen[3]?.state).toMatchObject({ model: 'stub-model' });
+
+    await host.close();
+    // Closing the host ends every chat the runner still holds open.
+    expect(closedChats).toEqual(['chat-external-session', 'chat-external-session']);
+  });
+
+  it('should record the stop details an external runner throws on its failed run', async () => {
+    const file = createMemoryLogFile();
+    const details = {
+      agentId: 'stub-agent',
+      failure: { category: 'limit', title: 'You have hit your usage limit.', actions: [] },
+    };
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async () => {
+        throw Object.assign(new Error('You have hit your usage limit.'), {
+          code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+          details,
+        });
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-stop',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId: 'chat-external-stop',
+      runId: 'run-external-stop',
+      trigger: 'submit',
+      message: { id: 'turn-external-stop', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+
+    await vi.waitFor(async () => {
+      const log = await file.open();
+      const events = await log.read();
+      const failed = events.flatMap((event) =>
+        event.type === 'run.lifecycle' && event.state === 'failed' ? [event.detail] : [],
+      );
+      expect(failed).toEqual([
+        { message: 'You have hit your usage limit.', code: 'EXTERNAL_AGENT_LIMIT_REACHED', details },
+      ]);
+    });
+    await host.close();
+  });
+
+  it.each([
+    ['a retry the agent offers', ['retry'], true],
+    // A usage limit: nothing helps *now*, and what clears it is time.
+    ['a usage limit with no action at all', [], true],
+    ['a context limit only a new session clears', ['new_session'], false],
+  ] as const)('continues an external stop on the session it remembered for %s', async (_label, actions, resumable) => {
+    const file = createMemoryLogFile();
+    const seen: Array<JsonObject | undefined> = [];
+    const closedChats: string[] = [];
+    let attempt = 0;
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        seen.push(turn.state);
+        attempt += 1;
+        if (attempt > 1) {
+          return;
+        }
+        await turn.remember({ acpSessionId: 'session-1' });
+        throw Object.assign(new Error('The agent is rate limited.'), {
+          code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+          details: {
+            agentId: 'stub-agent',
+            failure: { category: 'limit', title: 'The agent is rate limited.', actions },
+          },
+        });
+      },
+      closeChat: async (chatId) => {
+        closedChats.push(chatId);
+      },
+    };
+    const slug = actions.join('-') || 'none';
+    const chatId = `chat-external-${slug}`;
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: `external-${slug}`,
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId,
+      runId: 'run-external-limit',
+      trigger: 'submit',
+      message: { id: 'turn-external-limit', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await vi.waitFor(async () => {
+      const settling = await host.snapshot(chatId);
+      expect(settling.state).toBe('failed');
+    });
+    /* The gesture a person actually makes: a surface reads the run's failure
+     * off the snapshot and only calls resume when that record says it can be
+     * continued. An external stop writes no assistant diagnostic, so a
+     * snapshot that reported no failure at all made every Resume a rewind
+     * (F1). */
+    const stopped = await host.snapshot(chatId);
+    expect(stopped.failure).toMatchObject({
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+      message: 'The agent is rate limited.',
+    });
+    expect(isResumableRunFailure(stopped.failure)).toBe(resumable);
+    await host.resume(chatId);
+    if (!resumable) {
+      const settled = await readLog(file);
+      expect(seen).toHaveLength(1);
+      expect(settled.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []))).toEqual([
+        'admitted',
+        'running',
+        'failed',
+      ]);
+      await host.close();
+      return;
+    }
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(2);
+    });
+    const events = await readLog(file);
+    /* The agent said retrying can help, so the turn continues in the vendor
+     * session it already holds: nothing told the runner to close the chat,
+     * the second attempt carries the remembered session id, and the turn is
+     * neither rewound nor sent a second time (R9/S11). */
+    expect(seen).toHaveLength(2);
+    expect(closedChats).toEqual([]);
+    expect(seen[1]).toMatchObject({ acpSessionId: 'session-1', agentId: 'stub-agent' });
+    expect(events.some((event) => event.type === 'history.rewound')).toBe(false);
+    expect(
+      reduceEventLog(events)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.id),
+    ).toEqual(['turn-external-limit']);
+    await host.close();
+  });
+
+  it('holds cancel open until an external run settles as cancelled', async () => {
+    const file = createMemoryLogFile();
+    const settled = Promise.withResolvers<void>();
+    let aborted = false;
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        turn.signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            // A real adapter answers `session/cancel` a beat later, with its
+            // own terminal stop reason; settle after the turn, not inside it.
+            globalThis.setTimeout(() => {
+              settled.resolve();
+            }, 20);
+          },
+          { once: true },
+        );
+        await settled.promise;
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-cancel',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId: 'chat-external-cancel',
+      runId: 'run-external-cancel',
+      trigger: 'submit',
+      message: { id: 'turn-external-cancel', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await expect(host.snapshot('chat-external-cancel')).resolves.toMatchObject({ state: 'running' });
+
+    await host.cancel({ runId: 'run-external-cancel' });
+
+    expect(aborted).toBe(true);
+    await expect(host.snapshot('chat-external-cancel')).resolves.toMatchObject({ state: 'cancelled' });
+    await host.close();
+  });
+  it('admits a run whose only record is a settlement written under its id', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [...completedFirstTurn, settlementOnlySecondRun]);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'settlement-only',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-settlement-only',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+
+    const events = await readLog(file);
+    expect(
+      events.flatMap((event) => (event.runId === 'run-2' && event.type === 'run.lifecycle' ? [event.state] : [])),
+    ).toEqual(['admitted', 'running', 'completed']);
+    /* The turn the user actually sent is committed under the new run, which is
+     * what a replayed `start` reads to tell a real admission from a phantom. */
+    expect(
+      events.find((event) => event.runId === 'run-2' && event.type === 'turn.history-projection-committed'),
+    ).toMatchObject({ message: { id: 'turn-2' } });
+    await host.close();
+  });
+
+  it('refuses a re-admission of a run that already has a lifecycle record', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'readmit',
+      }),
+    );
+
+    await expect(
+      host.admit({
+        chatId: 'chat-readmit',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'turn-1-again', role: 'user', content: 'Again.' },
+      }),
+    ).rejects.toMatchObject({ code: 'RUN_ADMISSION_CONFLICT' });
+    await host.close();
+  });
+
+  it('names the last run with a lifecycle and resumes nothing for a settlement-only tail', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [...completedFirstTurn, settlementOnlySecondRun]);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'settlement-tail',
+      }),
+    );
+
+    await expect(host.snapshot('chat-settlement-only')).resolves.toMatchObject({
+      runId: 'run-1',
+      state: 'completed',
+    });
+    const before = await readLog(file);
+    await host.resume('chat-settlement-only');
+
+    const after = await readLog(file);
+    expect(after).toHaveLength(before.length);
+    await host.close();
+  });
+
+  it('refuses a settlement for a run that was never admitted', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'unadmitted-settlement',
+      }),
+    );
+
+    await expect(
+      host.recordSettlement({
+        chatId: 'chat-unadmitted',
+        runId: 'run-unknown',
+        event: {
+          type: 'turn.failed',
+          turnId: 'turn-1',
+          chatId: 'chat-unadmitted',
+          reason: 'The turn ended before it recorded a revision.',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_WITHOUT_RUN' });
+    const remaining = await readLog(file);
+    expect(remaining).toHaveLength(completedFirstTurn.length);
+    await host.close();
+  });
+});
+
+/**
+ * The run ledger, driven through a real host (R9, C5).
+ *
+ * `admit`, `resume` and the settlement writers each used to decide their own
+ * legality from a different reading of the same facts, and the table that was
+ * meant to unify them was read by two of the four operations and pinned by a
+ * test that re-declared it. These rows drive a host over scripted logs instead,
+ * one per cell of the fold.
+ */
+describe('the host run ledger', () => {
+  const ledgerHost = (file: ReturnType<typeof createMemoryLogFile>, idPrefix: string) =>
+    createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix,
+      }),
+    );
+
+  const settlement = {
+    type: 'turn.failed',
+    turnId: 'turn-1',
+    chatId: 'chat-ledger',
+    reason: 'The turn ended before it recorded a revision.',
+  } as const;
+
+  /** One seeded body under the envelope the fold reads it through. */
+  const recorded = (event: SeededLogEvent, sequence: number): AgentLogEvent =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- one envelope over a closed union of seeded bodies.
+    ({ ...event, version: 1, leaderEpoch: 'epoch-fold', sequence, recordedAt: '' }) as AgentLogEvent;
+
+  it('should fold one log into the chat run and every run append state', () => {
+    const seeded: readonly SeededLogEvent[] = [
+      ...completedFirstTurn,
+      {
+        type: 'turn.finalized',
+        runId: 'run-1',
+        turnId: 'turn-1',
+        chatId: 'chat-ledger',
+        projectId: 'project-1',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-1'],
+      },
+      { type: 'run.lifecycle', runId: 'run-2', state: 'admitted' },
+      settlementOnlySecondRun,
+    ];
+
+    const ledger = runLedgerOf(seeded.map((event, index) => recorded(event, index)));
+
+    expect(ledger.chat).toEqual({ runId: 'run-2', state: 'admitted' });
+    expect(ledger.runs.get('run-1')?.state).toBe('settled');
+    /* `run-2` carries both an admission and, from the seeded tail, a
+     * settlement — the shape a fixed host will no longer write. */
+    expect(ledger.runs.get('run-2')?.state).toBe('settled');
+    expect(runLedgerOf([]).chat).toBeUndefined();
+  });
+
+  it('should treat an identical repeat of a settlement as a no-op', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = ledgerHost(file, 'settle-twice');
+
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    const once = await readLog(file);
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+
+    /* At-least-once delivery is what makes "exactly one settlement" reachable
+     * at all, so the repeat has to add nothing rather than refuse (V10). */
+    expect(await readLog(file)).toHaveLength(once.length);
+    await host.close();
+  });
+
+  it('should refuse a second settlement that says something else', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = ledgerHost(file, 'settle-conflict');
+
+    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+
+    await expect(
+      host.recordSettlement({
+        chatId: 'chat-ledger',
+        runId: 'run-1',
+        event: {
+          type: 'turn.finalized',
+          turnId: 'turn-1',
+          chatId: 'chat-ledger',
+          projectId: 'project-1',
+          changedPaths: [],
+          trigger: 'turn',
+          runIds: ['run-1'],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_CONFLICT' });
+    await host.close();
+  });
+
+  it('should refuse to describe a chat whose log admitted no run', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [settlementOnlySecondRun]);
+    const host = ledgerHost(file, 'no-run');
+
+    /* R2: a run with no lifecycle record is not a run. `snapshot` answered
+     * `admitted` for one, which is the same default that made an abandoned
+     * lease's settlement look like a live turn. */
+    await expect(host.snapshot('chat-no-run')).rejects.toMatchObject({ code: 'NO_RUN_ADMITTED' });
+    await host.close();
+  });
+
+  it.each([
+    [undefined, 'none'],
+    ['admitted', 'admitted'],
+    ['running', 'running'],
+    ['paused', 'paused'],
+    ['completed', 'terminal'],
+    ['failed', 'terminal'],
+    ['cancelled', 'terminal'],
+  ] as const)('should read the lifecycle %s as %s', (lifecycle, expected) => {
+    expect(hostRunStateOfLifecycle(lifecycle)).toBe(expected);
   });
 });

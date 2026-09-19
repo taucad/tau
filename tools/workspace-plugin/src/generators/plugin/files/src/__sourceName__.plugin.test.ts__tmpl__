@@ -21,6 +21,8 @@ describe('<%= importPath %>', () => {
     expect(capabilities.middleware.map(({ id }) => id)).toEqual([<% for (const capability of capabilities.filter(({ role }) => role === 'middleware')) { %>'<%= name %>'<% } %>]);
     expect(capabilities.bundlers.map(({ id }) => id)).toEqual([<% for (const capability of capabilities.filter(({ role }) => role === 'bundler')) { %>'<%= name %>'<% } %>]);
     expect(capabilities.transcoders.map(({ id }) => id)).toEqual([<% for (const capability of capabilities.filter(({ role }) => role === 'transcoder')) { %>'<%= name %>'<% } %>]);
+    expect(capabilities.jobs.map(({ id }) => id)).toEqual([<% for (const capability of capabilities.filter(({ role }) => role === 'job')) { %>'<%= name %>'<% } %>]);
+    expect(capabilities.machines.map(({ id }) => id)).toEqual([<% for (const capability of capabilities.filter(({ role }) => role === 'machine')) { %>'<%= name %>'<% } %>]);
   });
 
 <% if (hostTarget === 'browser') { %>

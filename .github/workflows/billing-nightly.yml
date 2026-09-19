@@ -1,0 +1,54 @@
+name: Billing nightly (slow matrix)
+
+# The real Stripe test-mode acceptance runs nightly against its isolated
+# account. The same target runs in the internal PR/push L3 lane.
+
+on:
+  schedule:
+    - cron: '17 14 * * *' # 14:17 UTC — quiet hours for the shared test account.
+  workflow_dispatch: {}
+
+concurrency:
+  group: stripe-test-account
+  cancel-in-progress: false
+
+jobs:
+  billing-nightly:
+    name: Billing L3 nightly
+    runs-on: ubuntu-latest
+    env:
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_CREATE_RESTRICTED_KEY }}
+      STRIPE_READ_SECRET_KEY: ${{ secrets.STRIPE_TEST_READ_RESTRICTED_KEY }}
+      STRIPE_REFUND_SECRET_KEY: ${{ secrets.STRIPE_TEST_REFUND_RESTRICTED_KEY }}
+      STRIPE_ACCOUNT_ID: ${{ secrets.STRIPE_TEST_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Require isolated Stripe acceptance credentials
+        run: |
+          test -n "$STRIPE_SECRET_KEY"
+          test -n "$STRIPE_READ_SECRET_KEY"
+          test -n "$STRIPE_REFUND_SECRET_KEY"
+          test -n "$STRIPE_ACCOUNT_ID"
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Install Stripe CLI
+        run: |
+          curl -fsSL https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
+          sudo apt-get update -qq && sudo apt-get install -y stripe
+
+      - name: Prepare API env file
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Start Postgres + Redis + MinIO
+        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+
+      - name: Apply Drizzle migrations
+        run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
+
+      - name: Run real Stripe billing acceptance (L3)
+        run: pnpm nx run api:test:billing-stripe

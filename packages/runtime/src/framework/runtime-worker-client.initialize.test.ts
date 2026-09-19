@@ -115,4 +115,15 @@ describe('RuntimeWorkerClient initialize hello gate', () => {
     );
     expect(fixture.initialize).not.toHaveBeenCalled();
   });
+
+  it('rejects a version-1 worker before invoking its pre-transcode runtime', async () => {
+    const fixture = createFixture({
+      server: 'kernel-runtime-worker',
+      runtimeVersion: 'old-worker',
+      protocolVersion: 1,
+    });
+
+    await expect(fixture.client.initialize()).rejects.toEqual(new TransportProtocolVersionError(3, 1));
+    expect(fixture.initialize).not.toHaveBeenCalled();
+  });
 });

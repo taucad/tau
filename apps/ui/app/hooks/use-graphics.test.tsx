@@ -1,5 +1,7 @@
 import { StrictMode, useLayoutEffect } from 'react';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, fromPromise } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -8,16 +10,60 @@ import type { RenderFrame } from '@taucad/spatial';
 import {
   GraphicsProvider,
   useCameraRig,
-  useCameraViewInitialization,
+  useGraphicsCameraRigQuery,
   useRenderFrame,
   useRenderFrameRetarget,
   useSetRenderFrame,
+  useViewCameraFraming,
 } from '#hooks/use-graphics.js';
-import type { CameraViewInitialization } from '#hooks/use-graphics.js';
-import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
+import {
+  acquireViewCameraSession,
+  getGraphicsCameraState,
+  getViewCameraSession,
+  hasGraphicsCameraRig,
+  notifyViewCameraSession,
+} from '#services/graphics-camera-registry.js';
+import type { ViewCameraFraming, ViewCameraSession } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const actors: Array<ActorRefFrom<typeof graphicsMachine>> = [];
+
+const compiledGraphics = await (async () => {
+  const { transformSync } = await import('oxc-transform-react');
+  const source = await readFile(new URL('use-graphics.tsx', pathToFileURL(import.meta.filename)), 'utf8');
+  const compiled = transformSync('use-graphics.tsx', source, {
+    lang: 'tsx',
+    reactCompiler: { target: '19' },
+  });
+  if (compiled.fatal || compiled.errors.length > 0) {
+    throw new Error(`React Compiler refused use-graphics: ${JSON.stringify(compiled.errors)}`);
+  }
+  const specifiers = [...compiled.code.matchAll(/^import {[^}]*} from "([^"]+)";$/gm)].map((match) => match[1]!);
+  const modules = Object.fromEntries(
+    await Promise.all(specifiers.map(async (specifier) => [specifier, await import(specifier)] as const)),
+  );
+  const linked = compiled.code
+    .replaceAll(
+      /^import {([^}]*)} from "([^"]+)";$/gm,
+      (_match, names: string, specifier: string) =>
+        `const { ${names.replaceAll(' as ', ': ')} } = __modules[${JSON.stringify(specifier)}];`,
+    )
+    .replaceAll(/^export /gm, '');
+  // oxlint-disable-next-line no-new-func -- this pin executes the app's compiler output.
+  const factory = new Function(
+    '__modules',
+    `${linked}\nreturn { useGraphicsCameraRigQuery, useViewCameraSession };`,
+  ) as (dependencies: Record<string, unknown>) => {
+    useGraphicsCameraRigQuery: () => (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => boolean;
+    useViewCameraSession: (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => ViewCameraSession | undefined;
+  };
+  const compiledHooks = factory(modules);
+  return {
+    code: compiled.code,
+    useGraphicsCameraRigQuery: compiledHooks.useGraphicsCameraRigQuery,
+    useViewCameraSession: compiledHooks.useViewCameraSession,
+  };
+})();
 
 const createGraphicsActor = () => {
   const actor = createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
@@ -36,15 +82,17 @@ function RigProbe({ onRig }: { readonly onRig: (rig: ThreeCameraRig) => void }):
   return undefined;
 }
 
-function InitializationProbe({
-  onBegin,
-}: {
-  readonly onBegin: (begin: () => CameraViewInitialization) => void;
-}): undefined {
-  const initialization = useCameraViewInitialization();
+function FramingProbe({ onFraming }: { readonly onFraming: (framing: ViewCameraFraming) => void }): undefined {
+  const framing = useViewCameraFraming();
   useLayoutEffect(() => {
-    onBegin(initialization.begin);
-  }, [initialization, onBegin]);
+    onFraming(framing);
+  }, [framing, onFraming]);
+  return undefined;
+}
+
+/** Subscribes to the camera registry store the way the chat and command surfaces do. */
+function RigQueryProbe(): undefined {
+  useGraphicsCameraRigQuery();
   return undefined;
 }
 
@@ -108,11 +156,85 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(hasGraphicsCameraRig(graphicsActor)).toBe(true);
   });
 
-  it('constructs a card camera at its requested field of view before the first frame', () => {
+  it('should refresh the compiled camera-rig query when a session is created and released', async () => {
+    expect(compiledGraphics.code).toContain('from "react/compiler-runtime"');
+    expect(compiledGraphics.code).toMatch(/useGraphicsCameraRigQuery = \(\) => {\s*const \$ = _c\(/);
+    const graphicsActor = createGraphicsActor();
+    const { result } = renderHook(() => compiledGraphics.useGraphicsCameraRigQuery());
+    const initialQuery = result.current;
+    expect(initialQuery(graphicsActor)).toBe(false);
+
+    act(() => {
+      notifyViewCameraSession(acquireViewCameraSession(graphicsActor));
+    });
+    await waitFor(() => {
+      expect(result.current(graphicsActor)).toBe(true);
+    });
+    expect(result.current).not.toBe(initialQuery);
+
+    act(() => {
+      graphicsActor.stop();
+    });
+    await waitFor(() => {
+      expect(result.current(graphicsActor)).toBe(false);
+    });
+  });
+
+  /* The React Compiler runs on this app in every real build and is off under vitest, so only the
+   * compiled hook catches this one: a registry read memoised on `graphicsRef` alone hands a reader
+   * that rendered before any canvas the `undefined` it saw then, for the life of the actor. The
+   * write-side host is exactly that reader, and the view's camera keys were never written. */
+  it('should give the compiled session hook the session that appeared after its first render', async () => {
+    const graphicsActor = createGraphicsActor();
+    const { result } = renderHook(() => compiledGraphics.useViewCameraSession(graphicsActor));
+    expect(result.current).toBeUndefined();
+
+    act(() => {
+      notifyViewCameraSession(acquireViewCameraSession(graphicsActor));
+    });
+
+    await waitFor(() => {
+      expect(result.current).toBe(getViewCameraSession(graphicsActor));
+    });
+    expect(result.current).toBeDefined();
+  });
+
+  /* Acquiring a session is a render-phase call, so publishing it to the registry's
+   * `useSyncExternalStore` consumers has to wait for the commit phase; React rejects an update to a
+   * component that is not the one rendering. */
+  it('should publish a new session to registry consumers without updating them during render', () => {
+    const graphicsActor = createGraphicsActor();
+    const errors: string[] = [];
+    const consoleError = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+
+    try {
+      const mounted = render(<RigQueryProbe />);
+
+      mounted.rerender(
+        <>
+          <RigQueryProbe />
+          <GraphicsProvider graphicsRef={graphicsActor}>
+            <RigProbe onRig={() => undefined} />
+          </GraphicsProvider>
+        </>,
+      );
+
+      expect(errors.filter((message) => message.includes('Cannot update a component'))).toEqual([]);
+      expect(hasGraphicsCameraRig(graphicsActor)).toBe(true);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  /* Law 2: the graphics actor stores no copy of the field of view, so a rig built without a seed
+   * reads the portable camera default rather than a value latched when the actor was spawned. */
+  it('builds the rig at the portable default when the host supplies no seed', () => {
     const graphicsActor = createGraphicsActor();
     let rig: ThreeCameraRig | undefined;
     render(
-      <GraphicsProvider graphicsRef={graphicsActor} initialVerticalFieldOfView={45}>
+      <GraphicsProvider graphicsRef={graphicsActor}>
         <RigProbe
           onRig={(value) => {
             rig = value;
@@ -121,78 +243,109 @@ describe('GraphicsProvider camera rig ownership', () => {
       </GraphicsProvider>,
     );
 
-    expect(rig?.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(45);
-    expect(rig?.perspectiveCamera.fov).toBe(45);
+    expect(rig?.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(60);
   });
 
-  it('unregisters and stops the committed rig after StrictMode unmount', async () => {
+  /* The prop is a seed, not a control. It follows the persisted setting, which the viewer rewrites
+   * as soon as the person moves the slider -- rebuilding the rig there would drop the live camera. */
+  it('keeps the committed rig when the requested field of view changes', () => {
     const graphicsActor = createGraphicsActor();
-    let stop: ReturnType<typeof vi.spyOn> | undefined;
-    const mounted = render(
-      <StrictMode>
-        <GraphicsProvider graphicsRef={graphicsActor}>
-          <RigProbe
-            onRig={(value) => {
-              stop ??= vi.spyOn(value.actorRef, 'stop');
-            }}
-          />
-        </GraphicsProvider>
-      </StrictMode>,
-    );
-
-    mounted.unmount();
-    await waitFor(() => {
-      expect(hasGraphicsCameraRig(graphicsActor)).toBe(false);
-    });
-    expect(stop).toHaveBeenCalled();
-  });
-
-  it('isolates graphics-actor replacement and stops the previous rig', async () => {
-    const firstActor = createGraphicsActor();
-    const secondActor = createGraphicsActor();
     const rigs: ThreeCameraRig[] = [];
-    let begin: (() => CameraViewInitialization) | undefined;
     const onRig = (rig: ThreeCameraRig): void => {
       if (rigs.at(-1) !== rig) {
         rigs.push(rig);
       }
     };
     const mounted = render(
-      <GraphicsProvider graphicsRef={firstActor} cameraViewRestore={{ identity: 'file-a' }}>
+      <GraphicsProvider graphicsRef={graphicsActor} initialVerticalFieldOfView={45}>
         <RigProbe onRig={onRig} />
-        <InitializationProbe
-          onBegin={(value) => {
-            begin = value;
-          }}
-        />
+      </GraphicsProvider>,
+    );
+
+    mounted.rerender(
+      <GraphicsProvider graphicsRef={graphicsActor} initialVerticalFieldOfView={20}>
+        <RigProbe onRig={onRig} />
+      </GraphicsProvider>,
+    );
+
+    expect(rigs).toHaveLength(1);
+    expect(rigs[0]?.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(45);
+    // The rig synchronises its cameras on construction, so the seed reaches the THREE camera too.
+    expect(rigs[0]?.perspectiveCamera.fov).toBe(45);
+  });
+
+  /* Law 3: the camera's owner is the graphics actor, not this mount. A StrictMode double invoke
+   * acquires one session, and unmounting the provider must not take the person's camera with it. */
+  it('should acquire one session in StrictMode and keep it past provider unmount', () => {
+    const graphicsActor = createGraphicsActor();
+    const rigs: ThreeCameraRig[] = [];
+    const onRig = (rig: ThreeCameraRig): void => {
+      if (rigs.at(-1) !== rig) {
+        rigs.push(rig);
+      }
+    };
+    const mounted = render(
+      <StrictMode>
+        <GraphicsProvider graphicsRef={graphicsActor}>
+          <RigProbe onRig={onRig} />
+        </GraphicsProvider>
+      </StrictMode>,
+    );
+    expect(rigs).toHaveLength(1);
+    const stop = vi.spyOn(rigs[0]!.actorRef, 'stop');
+
+    mounted.unmount();
+
+    expect(stop).not.toHaveBeenCalled();
+    expect(hasGraphicsCameraRig(graphicsActor)).toBe(true);
+    expect(getGraphicsCameraState(graphicsActor)).toBeDefined();
+
+    act(() => {
+      graphicsActor.stop();
+    });
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(hasGraphicsCameraRig(graphicsActor)).toBe(false);
+  });
+
+  it('should acquire a second session when the graphics actor is replaced and release the first with its actor', () => {
+    const firstActor = createGraphicsActor();
+    const secondActor = createGraphicsActor();
+    const rigs: ThreeCameraRig[] = [];
+    const onRig = (rig: ThreeCameraRig): void => {
+      if (rigs.at(-1) !== rig) {
+        rigs.push(rig);
+      }
+    };
+    const mounted = render(
+      <GraphicsProvider graphicsRef={firstActor} seed={{ identity: 'file-a' }}>
+        <RigProbe onRig={onRig} />
       </GraphicsProvider>,
     );
     const firstRig = rigs[0]!;
     const stop = vi.spyOn(firstRig.actorRef, 'stop');
-    expect(begin?.()).toEqual({ initialize: true, cameraView: undefined });
 
     mounted.rerender(
-      <GraphicsProvider graphicsRef={secondActor} cameraViewRestore={{ identity: 'file-a' }}>
+      <GraphicsProvider graphicsRef={secondActor} seed={{ identity: 'file-a' }}>
         <RigProbe onRig={onRig} />
-        <InitializationProbe
-          onBegin={(value) => {
-            begin = value;
-          }}
-        />
       </GraphicsProvider>,
     );
-    await waitFor(() => {
-      expect(stop).toHaveBeenCalledOnce();
-    });
 
     expect(rigs).toHaveLength(2);
     expect(rigs[1]).not.toBe(firstRig);
-    expect(hasGraphicsCameraRig(firstActor)).toBe(false);
     expect(hasGraphicsCameraRig(secondActor)).toBe(true);
-    expect(begin?.()).toEqual({ initialize: true, cameraView: undefined });
+    expect(stop).not.toHaveBeenCalled();
+    expect(hasGraphicsCameraRig(firstActor)).toBe(true);
+
+    act(() => {
+      firstActor.stop();
+    });
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(hasGraphicsCameraRig(firstActor)).toBe(false);
   });
 
-  it('consumes one saved view per entry identity without recreating the rig', () => {
+  it('should keep one framing record per entry identity without recreating the rig', () => {
     const graphicsActor = createGraphicsActor();
     const cameraView = {
       frameId: 'tau:root',
@@ -202,55 +355,57 @@ describe('GraphicsProvider camera rig ownership', () => {
       verticalSpan: 12,
       perspectiveZoom: 1,
     } as const;
-    let begin: (() => CameraViewInitialization) | undefined;
+    let framing: ViewCameraFraming | undefined;
     let rig: ThreeCameraRig | undefined;
-    const onBegin = (value: () => CameraViewInitialization): void => {
-      begin = value;
+    const onFraming = (value: ViewCameraFraming): void => {
+      framing = value;
     };
     const mounted = render(
-      <GraphicsProvider graphicsRef={graphicsActor} cameraViewRestore={{ identity: 'file-a', cameraView }}>
+      <GraphicsProvider graphicsRef={graphicsActor} seed={{ identity: 'file-a', camera: { cameraView } }}>
         <RigProbe
           onRig={(value) => {
             rig = value;
           }}
         />
-        <InitializationProbe onBegin={onBegin} />
+        <FramingProbe onFraming={onFraming} />
       </GraphicsProvider>,
     );
     const firstRig = rig;
 
     expect(rig!.actorRef.getSnapshot().context.view).toMatchObject(cameraView);
-    expect(begin?.()).toEqual({ initialize: true, cameraView });
-    expect(begin?.()).toEqual({ initialize: false });
+    expect(framing).toEqual({ identity: 'file-a', pendingView: cameraView, initialized: false });
+
+    // The canvas frames the first geometry and consumes the pose.
+    framing!.initialized = true;
 
     mounted.rerender(
       <GraphicsProvider
         graphicsRef={graphicsActor}
-        cameraViewRestore={{ identity: 'file-a', cameraView: { ...cameraView, verticalSpan: 99 } }}
+        seed={{ identity: 'file-a', camera: { cameraView: { ...cameraView, verticalSpan: 99 } } }}
       >
         <RigProbe
           onRig={(value) => {
             rig = value;
           }}
         />
-        <InitializationProbe onBegin={onBegin} />
+        <FramingProbe onFraming={onFraming} />
       </GraphicsProvider>,
     );
     expect(rig).toBe(firstRig);
-    expect(begin?.()).toEqual({ initialize: false });
+    expect(framing).toEqual({ identity: 'file-a', pendingView: cameraView, initialized: true });
 
     mounted.rerender(
-      <GraphicsProvider graphicsRef={graphicsActor} cameraViewRestore={{ identity: 'file-b' }}>
+      <GraphicsProvider graphicsRef={graphicsActor} seed={{ identity: 'file-b' }}>
         <RigProbe
           onRig={(value) => {
             rig = value;
           }}
         />
-        <InitializationProbe onBegin={onBegin} />
+        <FramingProbe onFraming={onFraming} />
       </GraphicsProvider>,
     );
     expect(rig).toBe(firstRig);
-    expect(begin?.()).toEqual({ initialize: true, cameraView: undefined });
+    expect(framing).toEqual({ identity: 'file-b', pendingView: undefined, initialized: false });
   });
 
   it('keeps sibling viewer camera views isolated', () => {
@@ -273,17 +428,17 @@ describe('GraphicsProvider camera rig ownership', () => {
       perspectiveZoom: 1,
     } as const;
     const rigs = new Map<string, ThreeCameraRig>();
-    const initializers = new Map<string, () => CameraViewInitialization>();
+    const framings = new Map<string, ViewCameraFraming>();
 
     render(
       <>
-        <GraphicsProvider graphicsRef={firstActor} cameraViewRestore={{ identity: 'first', cameraView: firstView }}>
+        <GraphicsProvider graphicsRef={firstActor} seed={{ identity: 'first', camera: { cameraView: firstView } }}>
           <RigProbe onRig={(rig) => rigs.set('first', rig)} />
-          <InitializationProbe onBegin={(begin) => initializers.set('first', begin)} />
+          <FramingProbe onFraming={(framing) => framings.set('first', framing)} />
         </GraphicsProvider>
-        <GraphicsProvider graphicsRef={secondActor} cameraViewRestore={{ identity: 'second', cameraView: secondView }}>
+        <GraphicsProvider graphicsRef={secondActor} seed={{ identity: 'second', camera: { cameraView: secondView } }}>
           <RigProbe onRig={(rig) => rigs.set('second', rig)} />
-          <InitializationProbe onBegin={(begin) => initializers.set('second', begin)} />
+          <FramingProbe onFraming={(framing) => framings.set('second', framing)} />
         </GraphicsProvider>
       </>,
     );
@@ -291,8 +446,8 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(rigs.get('first')).not.toBe(rigs.get('second'));
     expect(rigs.get('first')?.actorRef.getSnapshot().context.view).toMatchObject(firstView);
     expect(rigs.get('second')?.actorRef.getSnapshot().context.view).toMatchObject(secondView);
-    expect(initializers.get('first')?.()).toEqual({ initialize: true, cameraView: firstView });
-    expect(initializers.get('second')?.()).toEqual({ initialize: true, cameraView: secondView });
+    expect(framings.get('first')?.pendingView).toEqual(firstView);
+    expect(framings.get('second')?.pendingView).toEqual(secondView);
   });
 
   it('retargets one viewport scene and camera without changing its sibling', () => {

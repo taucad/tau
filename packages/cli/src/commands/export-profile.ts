@@ -75,7 +75,7 @@ type ProfileSummary = {
  * @internal
  */
 export type CliExportProfile = {
-  readonly schema: 'taucad.cli-export-profile.v1';
+  readonly schema: 'tau.cli-export-profile.v1';
   readonly generatedAt: string;
   readonly clock: {
     readonly unit: 'milliseconds';
@@ -304,7 +304,7 @@ export const buildExportProfile = (options: ExportProfileOptions): CliExportProf
   const { nodeTiming } = performance;
 
   return {
-    schema: 'taucad.cli-export-profile.v1',
+    schema: 'tau.cli-export-profile.v1',
     generatedAt: new Date().toISOString(),
     clock: {
       unit: 'milliseconds',

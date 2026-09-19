@@ -6,11 +6,10 @@ import { z } from 'zod';
 const absolutePath = z.string().min(1).refine(isAbsolute, 'Expected an absolute path');
 const sha256 = z.string().regex(/^[\da-f]{64}$/i, 'Expected a SHA-256 digest');
 
-/** Trusted host-owned resources required by the native Python kernel. @public */
+/** Host-owned resources required by the sandboxed native Python kernel. @public */
 export const build123dOptionsSchema = z.object({
   pythonExecutable: absolutePath,
   workerPath: absolutePath,
-  trustFile: absolutePath,
   pythonSha256: sha256,
   workerSha256: sha256,
   supportFiles: z

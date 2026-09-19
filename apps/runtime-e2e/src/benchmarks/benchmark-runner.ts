@@ -11,7 +11,7 @@
 
 import type { TelemetryEntry } from '@taucad/runtime/types';
 import { createHash } from 'node:crypto';
-import { cpus } from 'node:os';
+import { cpus, loadavg } from 'node:os';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
@@ -23,6 +23,9 @@ import { getGeometryStatsFromInspect, getInspectReport } from '@taucad/runtime-t
 import type { BenchmarkCase, BenchmarkKernel } from '#benchmarks/benchmark-suite.js';
 import type { CpuProfile, CpuProfiler } from '#benchmarks/cpu-profiler.js';
 import type { ProfileAnalysis } from '#benchmarks/profile-analyzer.js';
+import { noRendererAdapter, readContention } from '#benchmarks/measurement-tags.js';
+import { mergeRuntimeTrace } from '#benchmarks/runtime-trace.js';
+import type { MeasurementTags } from '#benchmarks/measurement-tags.js';
 
 // =============================================================================
 // Types
@@ -115,6 +118,8 @@ export type BenchmarkRunResult = {
   totalDurationMs: number;
   wasmSizes?: WasmSizeInfo;
   provenance?: BuildProvenance;
+  /** Conditions this run was measured under (charter D14); gates comparison and budget binding. */
+  measurement: MeasurementTags;
 };
 
 /** Options for configuring a benchmark run. */
@@ -255,6 +260,24 @@ const sha256 = (value: string | Uint8Array<ArrayBuffer>): string => createHash('
 const durationOf = (entries: readonly TelemetryEntry[], names: readonly string[]): number =>
   entries.filter(({ name }) => names.includes(name)).reduce((total, { duration }) => total + duration, 0);
 
+/**
+ * The conditions this run is measured under (charter D14). The renderer tag is
+ * `none` because the runner drives the kernel in-process with no graphics
+ * device at all, and the process identity is this process.
+ */
+const measurementTags = (wasm: NonNullable<BenchmarkRunnerOptions['wasm']>): MeasurementTags => ({
+  build: process.env['NODE_ENV'] === 'production' ? 'production' : 'development',
+  wasmVariant: typeof wasm === 'string' ? wasm : wasm.wasmUrl,
+  adapter: noRendererAdapter,
+  kernelProcess: { kind: 'in-process', role: 'runtime-e2e benchmark runner', pid: process.pid },
+  crossOriginIsolated: false,
+  contention: readContention({
+    loadAverage1m: loadavg()[0] ?? 0,
+    cpuCount: cpus().length,
+    operatorTag: process.env['TAU_MEASUREMENT_CONTENTION'],
+  }),
+});
+
 const runnerFingerprint = sha256(
   JSON.stringify({
     arch: process.arch,
@@ -304,6 +327,8 @@ export async function runBenchmarks(
   } = options;
   const totalWork = cases.length;
   const results: BenchmarkResult[] = [];
+  /* Read before the first case so the load average describes the run, not its own heat. */
+  const measurement = measurementTags(wasm);
   const runStart = performance.now();
 
   for (const [caseIndex, benchCase] of cases.entries()) {
@@ -342,8 +367,8 @@ export async function runBenchmarks(
       transport,
     });
 
-    client.on('telemetry', (entries) => {
-      telemetryBatches.push(entries);
+    client.on('telemetry', (batch) => {
+      telemetryBatches.push([...batch.entries]);
     });
     client.on('log', (entry) => {
       // Surface kernel-side info/warn lines (e.g. WASM auto-selection log,
@@ -509,6 +534,17 @@ export async function runBenchmarks(
   onProgress?.(totalWork, totalWork, 'done');
 
   const wasmSizes = await collectWasmSizes();
+  /* W28: the dispatcher's sink already wrote this run's spans, one file per producer, wherever the
+   * operator pointed `TAU_TELEMETRY_DIR`. Naming the merge in the artifact is what lets a regression
+   * be read rather than guessed — the same file the open-to-frame driver records. */
+  const traceDirectory = process.env['TAU_TELEMETRY_DIR'];
+  const trace =
+    traceDirectory === undefined
+      ? undefined
+      : await mergeRuntimeTrace({
+          directory: `${traceDirectory}/traces`,
+          destination: `${traceDirectory}/benchmark-trace.jsonl`,
+        });
 
   return {
     timestamp: new Date().toISOString(),
@@ -516,6 +552,7 @@ export async function runBenchmarks(
     results,
     totalDurationMs: performance.now() - runStart,
     wasmSizes,
+    measurement: trace === undefined ? measurement : { ...measurement, runtimeTraceJsonl: trace.file },
   };
 }
 

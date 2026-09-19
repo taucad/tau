@@ -60,7 +60,8 @@ export const isJsonSchemaValid = (schema: RJSFSchema, formData: unknown, rootSch
     $defs: rootSchema.$defs,
     ...schema,
   };
-  return rawValidation(resolvedSchema, formData).errors === undefined;
+  const result = rawValidation(resolvedSchema, formData);
+  return result.validationError === undefined && result.errors === undefined;
 };
 
 export const rjsfValidator: RjsfValidator = {

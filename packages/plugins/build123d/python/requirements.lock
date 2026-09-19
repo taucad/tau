@@ -552,6 +552,7 @@ numpy==2.5.2 \
     --hash=sha256:f06571a052127dc1b4e8b83029b4d1b20daa2b64a31cdd181fc6bc774e9000eb \
     --hash=sha256:fd0d703772bba096843785bd38371e31bb4a0c1151497ad5739d182114a73f7f
     # via
+    #   -r packages/plugins/build123d/python/requirements.in
     #   build123d
     #   ezdxf
     #   ocp-gordon

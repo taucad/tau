@@ -1,4 +1,4 @@
-import { AtSign, Eye, EyeOff, FileBox, Focus, MoreHorizontal, RotateCcw, Target } from 'lucide-react';
+import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, RotateCcw, Target } from 'lucide-react';
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentReference } from '@taucad/types';
 import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
@@ -118,7 +118,7 @@ export function ModelComponentActionDropdown({
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button type='button' className={actionButtonClassName} aria-label={`Actions for ${data.node.name}`}>
-          <MoreHorizontal className='size-3.5' />
+          <EllipsisVertical className='size-3.5' />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

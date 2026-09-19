@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RpcFileSystem } from '@taucad/chat/rpc';
+import type {
+  RpcFileSystem,
+  RpcGraphicsClient,
+  RpcInvocationContext,
+  RpcParameterClient,
+  RpcRuntimeClient,
+} from '@taucad/chat/rpc';
+import type { JsonValue } from '@taucad/agent-host';
 
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
@@ -15,7 +22,12 @@ const emptyFileSystem = (): RpcFileSystem => ({
   appendFile: async () => undefined,
   editFile: async () => ({
     occurrences: 1,
-    diffStats: { linesAdded: 0, linesRemoved: 0, originalContent: '', modifiedContent: '' },
+    diffStats: {
+      linesAdded: 0,
+      linesRemoved: 0,
+      originalContent: '',
+      modifiedContent: '',
+    },
   }),
   stat: async () => ({
     size: 24,
@@ -47,8 +59,8 @@ const invoke = async (
   registry.invoke({
     toolCallId: 'call-1',
     toolName,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- test input is the tool's own JSON shape.
-    input: call.input as never,
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- tests intentionally exercise unvalidated JSON shapes.
+    input: call.input as JsonValue,
     signal: call.signal ?? new AbortController().signal,
   });
 
@@ -93,18 +105,20 @@ describe('createChatToolRegistry listing', () => {
       withheld: ['test_model', 'screenshot'],
     },
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- table rows are partial option sets by construction.
-  ] as Array<{ label: string; options: Partial<ChatToolRegistryOptions>; offered: string[]; withheld: string[] }>)(
-    'offers $label exactly what its clients can serve',
-    ({ options, offered, withheld }) => {
-      const names = listOf(options);
-      for (const tool of [...fileTools, ...offered]) {
-        expect(names).toContain(tool);
-      }
-      for (const tool of withheld) {
-        expect(names).not.toContain(tool);
-      }
-    },
-  );
+  ] as Array<{
+    label: string;
+    options: Partial<ChatToolRegistryOptions>;
+    offered: string[];
+    withheld: string[];
+  }>)('offers $label exactly what its clients can serve', ({ options, offered, withheld }) => {
+    const names = listOf(options);
+    for (const tool of [...fileTools, ...offered]) {
+      expect(names).toContain(tool);
+    }
+    for (const tool of withheld) {
+      expect(names).not.toContain(tool);
+    }
+  });
 
   it('withholds test_model when the testing gate is closed even with a GeoSpec client', () => {
     expect(listOf({ geospec: { runTests: vi.fn() }, testingEnabled: false })).not.toContain('test_model');
@@ -136,6 +150,47 @@ describe('createChatToolRegistry listing', () => {
     );
   });
 
+  /* Review a1 R15: the read-only history tool is listed exactly where a client
+   * for it is attached — a disk host today, the browser when W11 wires its
+   * worker — and silently absent elsewhere, which is the right degradation and
+   * the thing nothing asserted. */
+  it('lists the revisions tool only where a revisions client is attached', () => {
+    expect(listOf({})).not.toContain('revisions');
+    expect(listOf({ revisions: { log: vi.fn(), diff: vi.fn(), describe: vi.fn() } })).toContain('revisions');
+  });
+
+  it('lists and dispatches both parameter tools only with one semantic client', async () => {
+    const parameters: RpcParameterClient = {
+      getParameters: vi.fn<RpcParameterClient['getParameters']>(async () => ({
+        success: true,
+        status: 'unresolved',
+        diagnostics: [],
+      })),
+      applyParameterOperation: vi.fn<RpcParameterClient['applyParameterOperation']>(async (input) => ({
+        success: true,
+        outcome: {
+          status: 'cancelled-before-apply',
+          requestId: input.requestId,
+        },
+      })),
+    };
+    expect(listOf({})).not.toContain('get_parameters');
+    expect(listOf({ parameters })).toEqual(expect.arrayContaining(['get_parameters', 'apply_parameter_operation']));
+
+    const result = await invoke(build({ parameters }), 'get_parameters', {
+      input: { targetFile: 'main.py' },
+    });
+    expect(result).toMatchObject({
+      isError: false,
+      content: { success: true, status: 'unresolved' },
+    });
+    expect(parameters.getParameters).toHaveBeenCalledWith(
+      { targetFile: 'main.py' },
+      // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest asymmetric matcher is intentionally untyped.
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('publishes a draft-7 input schema with no $schema key', () => {
     const definition = build()
       .list()
@@ -160,21 +215,86 @@ describe('createChatToolRegistry invocation', () => {
   });
 
   it('answers invalid tool input with a validation refusal', async () => {
-    const result = await invoke(build(), 'read_file', { input: { nope: true } });
-    expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    const result = await invoke(build(), 'read_file', {
+      input: { nope: true },
+    });
+    expect(result).toMatchObject({
+      isError: true,
+      content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' },
+    });
   });
 
   it('dispatches a validated call to the RPC handler', async () => {
-    const result = await invoke(build(), 'read_file', { input: { targetFile: 'main.ts' } });
+    const result = await invoke(build(), 'read_file', {
+      input: { targetFile: 'main.ts' },
+    });
     expect(result.isError).toBe(false);
     expect(JSON.stringify(result.content)).toContain('export const main');
+  });
+
+  it('uses the trusted invocation ID for exported artifact paths', async () => {
+    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+      success: true,
+      files: [
+        {
+          name: 'model.stl',
+          mimeType: 'model/stl',
+          bytes: new Uint8Array([1]),
+        },
+      ],
+    }));
+    const result = await invoke(build({ graphics: { exportGeometry } }), 'export_geometry', {
+      input: {
+        targetFile: 'main.ts',
+        format: 'stl',
+        toolCallId: 'untrusted',
+      },
+    });
+
+    expect(result).toMatchObject({
+      isError: false,
+      content: {
+        success: true,
+        files: [{ artifactPath: '.tau/artifacts/call-1__main.ts-stl/model.stl' }],
+      },
+    });
+  });
+
+  it('persists export artifacts through the invocation record filesystem only', async () => {
+    const agentWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
+      throw Object.assign(new Error('Agent records are read-only.'), { code: 'EROFS' });
+    });
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+      success: true,
+      files: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
+    }));
+    const registry = build({
+      fileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: agentWrite }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      graphics: { exportGeometry },
+    });
+
+    const result = await invoke(registry, 'export_geometry', {
+      input: { targetFile: 'main.ts', format: 'stl' },
+    });
+
+    expect(result).toMatchObject({ isError: false, content: { success: true } });
+    expect(recordWrite).toHaveBeenCalledExactlyOnceWith(
+      '.tau/artifacts/call-1__main.ts-stl/model.stl',
+      new Uint8Array([1]),
+    );
+    expect(agentWrite).not.toHaveBeenCalled();
   });
 
   it('throws the abort reason when the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort(new Error('cancelled by operator'));
     await expect(
-      invoke(build(), 'read_file', { input: { targetFile: 'main.ts' }, signal: controller.signal }),
+      invoke(build(), 'read_file', {
+        input: { targetFile: 'main.ts' },
+        signal: controller.signal,
+      }),
     ).rejects.toThrow('cancelled by operator');
   });
 
@@ -196,5 +316,100 @@ describe('createChatToolRegistry invocation', () => {
     });
     controller.abort(new Error('interrupted mid-read'));
     await expect(pending).rejects.toThrow('interrupted mid-read');
+  });
+
+  it('preserves a checked parameter outcome when its reply signal aborts after admission', async () => {
+    const controller = new AbortController();
+    const expected = { manifestRevision: 'manifest' };
+    const parameters: RpcParameterClient = {
+      getParameters: vi.fn(),
+      applyParameterOperation: vi.fn<RpcParameterClient['applyParameterOperation']>(async (input) => {
+        controller.abort(new Error('transport reply lost'));
+        return {
+          success: true,
+          outcome: {
+            status: 'committed',
+            requestId: input.requestId,
+            revision: expected,
+            write: 'applied',
+          },
+        };
+      }),
+    };
+
+    await expect(
+      invoke(build({ parameters }), 'apply_parameter_operation', {
+        signal: controller.signal,
+        input: {
+          action: 'propose',
+          targetFile: 'main.py',
+          requestId: 'agent:applied',
+          expected,
+          pressure: 'final',
+          operation: {
+            kind: 'native-value',
+            group: 'default',
+            parameterId: 'width',
+            resource: 'urn:test',
+            pointer: '/width',
+            value: 5,
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ isError: false, content: { outcome: { status: 'committed' } } });
+  });
+
+  it('forwards local cancellation context without serializing it into RPC input', async () => {
+    const controller = new AbortController();
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => ({
+      success: true,
+      status: 'ready',
+      kernelIssues: [],
+    }));
+    const result = await invoke(build({ kernelClient: { getKernelResult } }), 'get_kernel_result', {
+      input: { targetFile: 'main.ts' },
+      signal: controller.signal,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(getKernelResult).toHaveBeenCalledExactlyOnceWith('main.ts', {
+      signal: controller.signal,
+    });
+    expect(JSON.stringify(result.content)).not.toContain('signal');
+  });
+
+  it('isolates an aborted non-cooperative CAD call from its sibling', async () => {
+    const first = new AbortController();
+    const second = new AbortController();
+    const seenSignals: AbortSignal[] = [];
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(
+      async (targetFile: string, context?: RpcInvocationContext) => {
+        if (context?.signal) {
+          seenSignals.push(context.signal);
+        }
+        if (targetFile === 'a.ts') {
+          return new Promise<never>(() => {
+            // Deliberately non-cooperative: the registry race must still settle the wait.
+          });
+        }
+        return { success: true, status: 'ready', kernelIssues: [] };
+      },
+    );
+    const registry = build({ kernelClient: { getKernelResult } });
+    const interrupted = invoke(registry, 'get_kernel_result', {
+      input: { targetFile: 'a.ts' },
+      signal: first.signal,
+    });
+    const sibling = invoke(registry, 'get_kernel_result', {
+      input: { targetFile: 'b.ts' },
+      signal: second.signal,
+    });
+
+    first.abort(new Error('only a stopped'));
+
+    await expect(interrupted).rejects.toThrow('only a stopped');
+    await expect(sibling).resolves.toMatchObject({ isError: false });
+    expect(seenSignals).toEqual([first.signal, second.signal]);
+    expect(second.signal.aborted).toBe(false);
   });
 });

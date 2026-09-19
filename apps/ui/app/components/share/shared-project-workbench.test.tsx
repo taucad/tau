@@ -140,6 +140,8 @@ describe('SharedProjectHydrator', () => {
     expect(fileManager.mount).toHaveBeenCalledWith('/previews/shared-test', {
       backend: 'memory',
       storageRootKey: 'memory:preview:shared-test',
+      // RC6: the shared project's own files, hydrated into a throwaway root.
+      class: 'authored',
     });
     expect(fileManager.writeFiles).toHaveBeenCalledWith(sharedFiles);
     expect(fileManager.clientWriteFiles).not.toHaveBeenCalled();

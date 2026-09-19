@@ -28,6 +28,7 @@ const host = webSocketHost({
   worker: () => createRuntimeWorker({ runtime: webSocketRuntime }),
   fileSystem: process.env['TAU_WS_MODE'] === 'bridged' ? undefined : fromNodeFs(serverRoot),
   allowedOrigins,
+  allowPrivateComputePairing: true,
   host: '127.0.0.1',
   port: Number(process.env['PORT'] ?? '0'),
 });

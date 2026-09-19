@@ -8,12 +8,62 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { registry } from '#lib/monaco-language-registry.js';
-import { useGeometryUnitKernelPrefetch } from '#hooks/use-monaco-model-service.js';
+import { MonacoModelServiceProvider, useGeometryUnitKernelPrefetch } from '#hooks/use-monaco-model-service.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
+
+const configuration = vi.hoisted(() => {
+  type Snapshot = { readonly status: 'idle' | 'pending' } | { readonly status: 'ready'; readonly monaco: unknown };
+  const listeners = new Set<() => void>();
+  let snapshot: Snapshot = { status: 'idle' };
+  return {
+    subscribe: vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      snapshot = snapshot.status === 'idle' ? { status: 'pending' } : snapshot;
+      return () => listeners.delete(listener);
+    }),
+    get: () => snapshot,
+    resolve(monaco: unknown) {
+      snapshot = { status: 'ready', monaco };
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
+});
+const useMonaco = vi.hoisted(() => vi.fn(() => undefined));
+vi.mock('@monaco-editor/react', () => ({ useMonaco }));
+vi.mock('#lib/monaco.lib.client.js', () => ({
+  getMonacoConfiguration: configuration.get,
+  subscribeMonacoConfiguration: configuration.subscribe,
+}));
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => ({ projectId: 'proj_one', editorRef: { send: vi.fn() }, geometryUnits: new Map() }),
+}));
+vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({}) }));
+
+/* The workspace never waits for Monaco (blueprint D3), and nothing reaches the
+ * loader before configuration (I1): the provider reads the configured instance
+ * and never calls `useMonaco`, which would run `loader.init()`. */
+it('renders the workspace at once and reads Monaco only from its configuration', async () => {
+  render(
+    <MonacoModelServiceProvider>
+      <span>Workspace</span>
+    </MonacoModelServiceProvider>,
+  );
+  expect(screen.getByText('Workspace')).toBeInTheDocument();
+  expect(screen.queryByText(/Loading editor/u)).not.toBeInTheDocument();
+  expect(configuration.subscribe).toHaveBeenCalled();
+  await act(async () => {
+    configuration.resolve({ editor: {} });
+  });
+  expect(screen.getByText('Workspace')).toBeInTheDocument();
+  expect(useMonaco).not.toHaveBeenCalled();
+});
 
 type GeometryUnits = Map<string, ActorRefFrom<typeof cadMachine>>;
 
@@ -24,6 +74,8 @@ const capabilities: AppCapabilitiesManifest = {
   ],
   routes: [],
   renderCapabilities: {},
+  autonomousRenderLoop: true,
+  transport: createMockRuntimeClient().transport,
 };
 
 type Snapshot = { context: { activeKernelId?: string; capabilities?: AppCapabilitiesManifest } };
@@ -135,7 +187,7 @@ describe('useGeometryUnitKernelPrefetch', () => {
   it('should read extensions from each live capabilities snapshot', () => {
     const actor = createStubActor();
     const units = unitsOf(['main.ts', actor]);
-    const unavailable: AppCapabilitiesManifest = { registrations: [], routes: [], renderCapabilities: {} };
+    const unavailable: AppCapabilitiesManifest = { ...capabilities, registrations: [], routes: [] };
 
     renderHook(() => {
       useGeometryUnitKernelPrefetch(units, true);

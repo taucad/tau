@@ -19,10 +19,14 @@ remap UIDs — they must already exist on the target Grafana instance.
 
 ## Rule groups
 
-| File                | Severity                   | Rules                                                                                                                                                        |
-| ------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tau-critical.json` | P0 — page on-call          | `redis-connection-lost` (Prometheus), `database-startup-failure` (Loki LogQL — fires on `Database connectivity probe failed` / `Database migration failed`). |
-| `tau-warning.json`  | P1 — notify Slack, no page | `rpc-failure-rate`, `ws-disconnect-storm`, `llm-error-rate`, `high-5xx-rate` (all Prometheus).                                                               |
+| File                | Severity                   | Rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tau-critical.json` | P0 — page on-call          | `redis-connection-lost` (Prometheus), `database-startup-failure` (Loki LogQL — fires on `Database connectivity probe failed` / `Database migration failed`), `billing-ledger-drift` (C12 money invariant — non-zero drift pages).                                                                                                                                                                                                                                                               |
+| `tau-warning.json`  | P1 — notify Slack, no page | `rpc-failure-rate`, `ws-disconnect-storm`, `llm-error-rate`, `high-5xx-rate`, `gen-ai-prompt-cache-hit-rate-low`, plus the funded-LLM recovery pack (B9 W4): `billing-funded-operation-occupancy`, `billing-funded-operation-limit`, `billing-funded-operation-recovery-failed`, `billing-funded-operation-due-age`, `billing-funded-operation-recovery-provider-execution` (all Prometheus). The B2-era reservation/commit/negative-balance/clawback rules were removed with the Redis ledger. |
+
+Webhook **settlement lag** (top-up created → settled) has no first-party metric;
+monitor it via Stripe Dashboard → Developers → Webhooks (delivery latency +
+failure rate on the Tau endpoint) — part of the launch-checklist click-ops.
 
 ## Adding a new alert
 

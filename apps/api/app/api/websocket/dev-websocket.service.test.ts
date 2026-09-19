@@ -145,11 +145,13 @@ vi.mock('ws', () => {
   };
 });
 
-function createMockDuplicateClient() {
+function createMockDuplicateClient(status: 'ready' | 'end' = 'ready') {
   return {
+    status,
     on: vi.fn(),
     connect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     quit: vi.fn<() => Promise<string>>().mockResolvedValue('OK'),
+    disconnect: vi.fn(),
   };
 }
 
@@ -291,6 +293,19 @@ describe('DevWebSocketService', () => {
       await service.onModuleDestroy();
 
       expect(duplicateClient.quit).toHaveBeenCalledOnce();
+      expect(duplicateClient.disconnect).not.toHaveBeenCalled();
+    });
+
+    it('should disconnect instead of quitting when the adapter client is not ready', async () => {
+      const duplicateClient = createMockDuplicateClient('end');
+      const { service } = await createService({ duplicateClient });
+
+      await service.onModuleInit();
+      await service.ensureSocketIoServer();
+      await service.onModuleDestroy();
+
+      expect(duplicateClient.quit).not.toHaveBeenCalled();
+      expect(duplicateClient.disconnect).toHaveBeenCalledOnce();
     });
 
     it('should not fail if adapter was never initialized', async () => {

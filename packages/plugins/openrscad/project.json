@@ -3,5 +3,15 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/plugins/openrscad",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "e2e": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config packages/plugins/openrscad/e2e/vitest.config.ts"
+      }
+    }
+  }
 }

@@ -3,7 +3,13 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { SearchIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#components/dialog.js';
-import { menuItemVariants, menuSeparatorVariants, menuShortcutClass } from '#components/menu.variants.js';
+import {
+  menuGroupHeadingSelectorClass,
+  menuItemVariants,
+  menuSearchWrapperClass,
+  menuSeparatorVariants,
+  menuShortcutClass,
+} from '#components/menu.variants.js';
 
 type PrimitiveDivProps = React.ComponentPropsWithRef<'div'> & { readonly asChild?: boolean };
 type CommandProps = PrimitiveDivProps &
@@ -74,11 +80,13 @@ function Command({ className, ...properties }: CommandProps): React.JSX.Element 
 function CommandDialog({
   title = 'Command Palette',
   description = 'Search for a command to run...',
+  contentClassName,
   children,
   ...properties
 }: React.ComponentProps<typeof Dialog> & {
   readonly title?: string;
   readonly description?: string;
+  readonly contentClassName?: string;
 }): React.JSX.Element {
   return (
     <Dialog {...properties}>
@@ -86,7 +94,12 @@ function CommandDialog({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
-      <DialogContent className='overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5'>
+      <DialogContent
+        className={cn(
+          'overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5',
+          contentClassName,
+        )}
+      >
         <Command className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'>
           {children}
         </Command>
@@ -109,13 +122,13 @@ function CommandDialog({
  */
 function CommandInput({ className, ...properties }: CommandInputProps): React.JSX.Element {
   return (
-    <div data-slot='command-input-wrapper' className='relative flex items-center p-2'>
-      <SearchIcon className='pointer-events-none absolute top-1/2 left-4 size-4 shrink-0 -translate-y-1/2 opacity-50' />
+    <div data-slot='command-input-wrapper' className={menuSearchWrapperClass}>
+      <SearchIcon className='pointer-events-none absolute top-1/2 left-3 size-4 shrink-0 -translate-y-1/2 opacity-50' />
       <CommandPrimitive.Input
         data-slot='command-input'
         className={cn(
           'flex h-7 w-full min-w-0 rounded-md border border-input bg-background py-1 pr-2 pl-8 text-sm shadow-xs transition-[box-shadow] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
-          'focus-visible:ring-2 focus-visible:ring-ring',
+          'focus-visible:focus-outline',
           className,
         )}
         {...properties}
@@ -163,7 +176,7 @@ function CommandEmpty({ className, ...properties }: PrimitiveDivProps): React.JS
     <CommandPrimitive.Empty
       data-slot='command-empty'
       className={cn(
-        'm-2 flex h-full flex-col items-center justify-center rounded-xs border border-dashed px-2 py-4 text-center text-sm text-muted-foreground',
+        'm-1 flex h-full flex-col items-center justify-center rounded-xs border border-dashed px-2 py-4 text-center text-sm text-muted-foreground',
         className,
       )}
       {...properties}
@@ -188,7 +201,8 @@ function CommandGroup({ className, ...properties }: CommandGroupProps): React.JS
     <CommandPrimitive.Group
       data-slot='command-group'
       className={cn(
-        'overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-items]]:flex [&_[cmdk-group-items]]:flex-col [&_[cmdk-group-items]]:gap-0.5',
+        'overflow-hidden p-1 text-foreground [&_[cmdk-group-items]]:flex [&_[cmdk-group-items]]:flex-col [&_[cmdk-group-items]]:gap-0.5',
+        menuGroupHeadingSelectorClass,
         className,
       )}
       {...properties}

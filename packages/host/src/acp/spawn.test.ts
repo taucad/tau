@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 /**
  * The credential fence (X6) and the stdio wire, proved against the fake agent.
  *
@@ -20,6 +21,7 @@ import type { AcpAdapter, AcpWireFrame } from '#acp/index.js';
 
 const fakeAgent: AcpAdapter = {
   id: 'codex',
+  displayName: 'Codex',
   package: 'fixture',
   version: '0.0.0',
   configEnv: [],
@@ -43,6 +45,17 @@ const branch = async (): Promise<string> => {
 };
 
 describe('acpAdapterEnvironment', () => {
+  it('tells an Electron host binary to run the adapter as Node, and adds nothing under plain Node', () => {
+    const base: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
+    expect(acpAdapterEnvironment(base, { configEnv: [] })).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
+    Object.defineProperty(process.versions, 'electron', { value: '43.5.1', configurable: true });
+    try {
+      expect(acpAdapterEnvironment(base, { configEnv: [] })).toHaveProperty('ELECTRON_RUN_AS_NODE', '1');
+    } finally {
+      delete (process.versions as { electron?: string }).electron;
+    }
+  });
+
   it('passes only allowlisted names and the adapter’s own config directory', () => {
     const environment = acpAdapterEnvironment(
       {

@@ -3,7 +3,7 @@
  *
  * Single app-shell flush guard that fans out a `{ type: 'flushNow' }`
  * event to every live chat session's persistence + draft actor when the
- * page is about to unload (or becomes hidden). Replaces the per-route
+ * page becomes hidden. Replaces the per-route
  * `FlushOnCloseGuard` (project) and `HomepageChatFlushOnCloseGuard`
  * (homepage) — those guards each subscribed to a single chat, which
  * doesn't compose once concurrent chats live in `ChatSessionStore`.
@@ -14,8 +14,11 @@
  * - Reads `useChatSessionStore()` (no subscription needed —
  *   `useFlushOnClose` stores the callback by ref, so the latest store
  *   snapshot is read at flush time, not at registration time).
- * - On flush, iterates `store.list()` and calls `flushNow` on the
- *   `persistenceActorRef` and `draftActorRef` of every session.
+ * - On hidden preparation, calls `flushNow` on every session's
+ *   `persistenceActorRef` and asks the store to flush every composer record
+ *   (`flushComposerRecords`, R9). The producer stage resolves only once the
+ *   persistence actors are idle and no record write is on the wire, so
+ *   revision preparation cannot cut ahead of their bytes.
  *   Disposed chats (e.g. a focused chat closed mid-session) are not
  *   touched because they are no longer in the store's snapshot.
  *
@@ -24,22 +27,30 @@
  */
 
 import type { ReactNode } from 'react';
+import { waitFor } from 'xstate';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 export function GlobalChatFlushGuard(): ReactNode {
   const store = useChatSessionStore();
 
-  useFlushOnClose(() => {
-    for (const chatId of store.list()) {
-      const session = store.get(chatId);
-      if (!session) {
-        continue;
+  useFlushOnClose(
+    async () => {
+      const acknowledgements: Array<Promise<unknown>> = [store.flushComposerRecords()];
+      for (const chatId of store.list()) {
+        const session = store.get(chatId);
+        if (!session) {
+          continue;
+        }
+        session.persistenceActorRef.send({ type: 'flushNow' });
+        acknowledgements.push(
+          waitFor(session.persistenceActorRef, (state) => state.matches({ messagePersistence: 'idle' })),
+        );
       }
-      session.persistenceActorRef.send({ type: 'flushNow' });
-      session.draftActorRef.send({ type: 'flushNow' });
-    }
-  });
+      await Promise.all(acknowledgements);
+    },
+    { stage: 'producer' },
+  );
 
   return null;
 }

@@ -17,7 +17,7 @@
       "description": "Runtime capability roles supplied by this toolkit",
       "items": {
         "type": "string",
-        "enum": ["kernel", "transcoder", "middleware", "bundler"]
+        "enum": ["kernel", "transcoder", "middleware", "bundler", "job", "machine"]
       },
       "minItems": 1,
       "uniqueItems": true,

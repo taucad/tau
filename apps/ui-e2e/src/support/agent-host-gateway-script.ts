@@ -22,8 +22,16 @@ export type GatewayScriptToolCall = {
 export type GatewayScriptTurn = {
   /** Emitted as a `thinking` block ahead of the text. */
   readonly reasoning?: string;
+  /** Reasoning deltas emitted in order; each can be held by `gateChunks`. */
+  readonly reasoningChunks?: readonly string[];
+  /** Separate adjacent reasoning blocks, used to verify one shared UI disclosure. */
+  readonly reasoningBlocks?: readonly string[];
   /** Emitted as a `text` block. */
   readonly text?: string;
+  /** Prose deltas emitted in order; each can be held by `gateChunks`. */
+  readonly textChunks?: readonly string[];
+  /** Pause after every scripted reasoning/text delta until the test releases it. */
+  readonly gateChunks?: boolean;
   /**
    * Park the response after the text and before the tool calls until
    * `releaseAgentHostGatewayFixture()`, so a spec can act on a run that is

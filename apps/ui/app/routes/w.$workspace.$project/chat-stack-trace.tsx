@@ -1,8 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ChevronRight, Sparkles } from 'lucide-react';
 import type { KernelProvider, KernelIssue, KernelStackFrame, IssueSeverity } from '@taucad/runtime';
 import { idPrefix, languageFromKernel } from '@taucad/types/constants';
-import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -17,11 +16,11 @@ import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { useModifiers } from '#hooks/use-keyboard.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { createMessage } from '#utils/chat.utils.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
+import { selectCadEntryIssues, selectCadFailureIssues } from '#machines/cad.machine.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -177,7 +176,7 @@ function StackTraceSection({
         {hasInternalFrames ? (
           <button
             type='button'
-            className='mt-1 cursor-pointer font-mono text-[0.625rem] text-muted-foreground/60 transition-colors hover:text-muted-foreground'
+            className='mt-1 font-mono text-[0.625rem] text-muted-foreground/60 transition-colors hover:text-muted-foreground'
             onClick={() => {
               setShowInternal(!showInternal);
             }}
@@ -452,7 +451,8 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
   const isCadActorStale = cadRef ? !cadRef.id.includes(projectId) : true;
 
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const entryIssues = useCadSelector((state) => state.context.kernelIssues.get(entryPath), undefined);
+  const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);
+  const entryIssues = useCadSelector(selectEntryIssues, undefined);
   const errors = isCadActorStale ? undefined : (failureIssues ?? entryIssues);
 
   // The chat-client composes the per-request `agent` payload (model, kernel,
@@ -491,13 +491,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
         // Persist the pending user message with an explicit one-shot startup
         // request so hydration can fire this intentional Fix-with-AI turn
         // without treating every pending user tail as command state.
-        const message = createMessage({
-          content: errorPrompt,
-          role: messageRole.user,
-          metadata: {
-            status: messageStatus.pending,
-          },
-        });
+        const message = buildUserMessage({ text: errorPrompt });
         const newChat = await createChat({
           name: 'New chat',
           messages: [message],
@@ -513,7 +507,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
         });
         setFocusedChatId(newChat.id);
       } else {
-        cadChat.submit({ text: errorPrompt });
+        void cadChat.submit({ text: errorPrompt });
       }
     },
     [

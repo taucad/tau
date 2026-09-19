@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
@@ -31,6 +32,7 @@ const createUseProjectsResult = () => ({
   conflicts: [] as ProjectDiscoveryConflict[],
   recoveries: [] as PendingProjectRecovery[],
   workspaceBindingRepairs: [] as WorkspaceBindingRepairGroup[],
+  isLoading: false,
   error: undefined as Error | undefined,
   retry: vi.fn(),
   deleteProject: vi.fn(async () => true),
@@ -42,8 +44,13 @@ const createUseProjectsResult = () => ({
 });
 let mockUseProjectsResult = createUseProjectsResult();
 
+/** What `useProjects` was last asked for, so the trashed view is observable. */
+const useProjectsOptions: Array<{ includeDeleted: boolean }> = [];
 vi.mock('#hooks/use-projects.js', () => ({
-  useProjects: () => mockUseProjectsResult,
+  useProjects: (options: { includeDeleted: boolean }) => {
+    useProjectsOptions.push(options);
+    return mockUseProjectsResult;
+  },
 }));
 
 const { mockDiscardRecovery, mockRepairWorkspaceBindings } = vi.hoisted(() => ({
@@ -62,9 +69,14 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-const { mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+const { mockCloseProject, mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+  mockCloseProject: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
+}));
+
+vi.mock('#hooks/use-sidebar-status.js', () => ({
+  useSidebarCommands: () => ({ closeProject: mockCloseProject }),
 }));
 vi.mock('#components/ui/sonner.js', () => ({
   toast: { success: mockToastSuccess, error: mockToastError },
@@ -74,8 +86,21 @@ vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({ kernel: 'replicad', setKernel: vi.fn() }),
 }));
 
+const mockSetCookie = vi.fn();
+let mockCookieValues: Record<string, unknown> = {};
 vi.mock('#hooks/use-cookie.js', () => ({
-  useCookie: () => ['grid', vi.fn()],
+  // Stateful like the real hook: each cookie keeps its own value, and a write re-renders.
+  useCookie: (name: string, defaultValue: unknown) => {
+    const [value, setValue] = useState(() => mockCookieValues[name] ?? defaultValue);
+    return [
+      value,
+      (next: unknown) => {
+        mockCookieValues[name] = next;
+        mockSetCookie(name, next);
+        setValue(next);
+      },
+    ];
+  },
 }));
 
 vi.mock('#components/chat/chat-textarea.js', () => ({
@@ -137,6 +162,7 @@ vi.mock('#components/cad-preview.js', () => ({
 describe('ProjectLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
   });
 
@@ -341,6 +367,21 @@ describe('ProjectLibrary', () => {
     expect(screen.getByTestId('new-project-chat-composer')).toBeInTheDocument();
   });
 
+  it('shows the project skeleton instead of the empty state while the listing is loading', () => {
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('status', { name: 'Loading projects' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+  });
+
   it('names the directory a failed recovery is stuck on and offers to discard it', async () => {
     mockUseProjectsResult = {
       ...createUseProjectsResult(),
@@ -430,5 +471,118 @@ describe('ProjectLibrary', () => {
       expect(mockToastError).toHaveBeenCalled();
     });
     expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('paginates by the remembered page size', () => {
+    mockCookieValues = { 'project-page-size': 50 };
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: Array.from({ length: 60 }, (_, index) =>
+        makeProject(`proj_${String(index).padStart(21, 'p')}`, `Project ${index}`, `/project-${index}`),
+      ),
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Location: Home in this browser')).toHaveLength(50);
+  });
+
+  it('remembers a newly chosen page size', async () => {
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.scrollIntoView = vi.fn();
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: Array.from({ length: 60 }, (_, index) =>
+        makeProject(`proj_${String(index).padStart(21, 'p')}`, `Project ${index}`, `/project-${index}`),
+      ),
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Items per page' }), { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('option', { name: '100' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
+    });
+    expect(mockCookieValues['project-page-size']).toBe(100);
+  });
+
+  /*
+   * D1: the Trash is a place. `/projects?trash=1` is the address the trashed
+   * project's notice sends people to, so it has to render the trashed view on
+   * arrival rather than after a click nobody knows to make.
+   */
+  describe('the trashed view lives in the URL', () => {
+    const renderAt = (entry: string): { search: () => string } => {
+      let currentSearch = '';
+      const SearchProbe = (): undefined => {
+        currentSearch = useLocation().search;
+        return undefined;
+      };
+      render(
+        <MemoryRouter initialEntries={[entry]}>
+          <TooltipProvider>
+            <ProjectLibrary />
+            <SearchProbe />
+          </TooltipProvider>
+        </MemoryRouter>,
+      );
+      return { search: () => currentSearch };
+    };
+
+    it('lists trashed projects on arrival at /projects?trash=1', () => {
+      useProjectsOptions.length = 0;
+      renderAt('/projects?trash=1');
+
+      expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+    });
+
+    it('hides trashed projects at /projects', () => {
+      useProjectsOptions.length = 0;
+      renderAt('/projects');
+
+      expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: false });
+    });
+
+    it('writes and clears the parameter from the Settings checkbox', async () => {
+      Element.prototype.hasPointerCapture = vi.fn(() => false);
+      Element.prototype.scrollIntoView = vi.fn();
+      useProjectsOptions.length = 0;
+      const route = renderAt('/projects?page=2');
+
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Settings' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show trashed projects' }));
+
+      await waitFor(() => {
+        expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+      });
+      /* The write merges: an unrelated parameter is not collateral damage. */
+      expect(route.search()).toContain('trash=1');
+      expect(route.search()).toContain('page=2');
+
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Settings' }), { key: 'Enter' });
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show trashed projects' }));
+
+      await waitFor(() => {
+        expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: false });
+      });
+      /* The fallback deletes the parameter, so the default view has a clean URL. */
+      expect(route.search()).not.toContain('trash');
+    });
   });
 });

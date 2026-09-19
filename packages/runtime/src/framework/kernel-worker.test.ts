@@ -13,11 +13,12 @@ import type {
   CapabilitiesManifest,
   CreateGeometryResult,
   ExportGeometryResult,
-  GetParametersResult,
+  GetParameterDeclarationsResult,
   HashedGeometryResult,
   KernelIssue,
 } from '#types/runtime.types.js';
 import type {
+  KernelFileSystem,
   KernelRuntime,
   CreateGeometryInput,
   GetDependenciesInput,
@@ -33,6 +34,7 @@ import {
   MockKernelWorker,
   createMockFileSystem,
   createGeometryFile,
+  createParameterDeclaration,
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
@@ -40,6 +42,7 @@ import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definitio
 import { checkAbort } from '#framework/cooperative-abort.js';
 import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
+import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import { signalBufferByteLength } from '#framework/runtime-framework.constants.js';
 
 const tessellationSchema = z.object({
@@ -143,9 +146,9 @@ const observePreview = (
 
 function createConfiguredWorker(overrides?: Partial<MockKernelWorkerOptions>) {
   const filesystem = createMockFileSystem();
-  filesystem.mocks.readFiles.mockResolvedValue({
-    'main.ts': new Uint8Array([1, 2, 3]),
-  });
+  filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+    Object.fromEntries(paths.map((path) => [path, new Uint8Array([1, 2, 3])])),
+  );
 
   return new MockKernelWorker({
     middleware: [],
@@ -234,20 +237,54 @@ class DisposingKernelWorker extends MockKernelWorker {
 // =============================================================================
 
 describe('KernelWorker lifecycle', () => {
+  it('should stop direct, interactive, and export renders when parameter discovery fails', async () => {
+    const issue: KernelIssue = {
+      message: 'Workspace changed while reading current schema.',
+      code: 'RUNTIME',
+      type: 'runtime',
+      severity: 'error',
+    };
+    const builds = vi.fn();
+    class FailedParameterWorker extends MockKernelWorker {
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+        return { success: false, issues: [issue] };
+      }
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        builds();
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+    const worker = new FailedParameterWorker({ middleware: [], onLog: noopLog });
+    const file = createGeometryFile('main.ts');
+    const parameters = { RadiusMm: 16 };
+    try {
+      expect(await worker.render({ file, parameters })).toMatchObject({ success: false, issues: [issue] });
+      expect(await worker.exportModel({ file, parameters, format: 'gltf' })).toMatchObject({
+        success: false,
+        issues: [issue],
+      });
+      const results: HashedGeometryResult[] = [];
+      worker.onGeometryComputed = ({ result }) => {
+        results.push(result);
+      };
+      await openAndWaitForRender(worker, file, parameters);
+      expect(results).toEqual([{ success: false, issues: [issue] }]);
+      expect(builds).not.toHaveBeenCalled();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('should replace parameter arrays across direct, interactive, and export merges', async () => {
     const capturedParameters: Array<Record<string, unknown>> = [];
     class ArrayParameterWorker extends MockKernelWorker {
-      protected override async onGetParameters(): Promise<GetParametersResult> {
-        return {
-          success: true,
-          data: {
-            defaultParameters: {
-              sections: { planes: [{ point: [0, 0, 0] }], clipLines: true },
-            },
-            jsonSchema: { type: 'object', properties: {} },
-          },
-          issues: [],
-        };
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+        return createParameterDeclaration({
+          sections: { planes: [{ point: [0, 0, 0] }], clipLines: true },
+        });
       }
 
       protected override async onCreateGeometry(
@@ -276,13 +313,127 @@ describe('KernelWorker lifecycle', () => {
     );
   });
 
+  it('drops stale values that a changed closed parameter schema no longer declares', async () => {
+    const capturedParameters: Array<Record<string, unknown>> = [];
+    class ClosedParameterWorker extends MockKernelWorker {
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+        return createParameterDeclaration(
+          {},
+          {
+            properties: { accepted: { type: 'string' } },
+            additionalProperties: false,
+          },
+        );
+      }
+
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        capturedParameters.push(input.parameters);
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+
+    const restorePersistedParameters = defineMiddleware({
+      id: 'restorePersistedParameters',
+      name: 'RestorePersistedParameters',
+      async wrapCreateGeometry(input, handler) {
+        return handler({ ...input, parameters: { ...input.parameters, RadiusMm: 16 } });
+      },
+    });
+    const worker = new ClosedParameterWorker({ middleware: [restorePersistedParameters()], onLog: noopLog });
+    const file = createGeometryFile('main.cs');
+    const parameters = { RadiusMm: 16 };
+    await worker.render({ file, parameters });
+    await openAndWaitForRender(worker, file, parameters);
+    await worker.exportModel({ file, parameters, format: 'gltf' });
+
+    expect(capturedParameters).toEqual([{}, {}, {}]);
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
+  describe('host-compiled wasm modules', () => {
+    /* A host and a kernel derive the same asset's URL through different bundles; when they
+     * disagree the supply is silently dead weight (D20). */
+    it('hands a kernel the module supplied for its url and reports a miss against a supplied set', async () => {
+      const onLog = vi.fn();
+      const worker = createConfiguredWorker({ onLog });
+      const module = await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      worker.setCompiledWasmModules([{ url: 'https://example.test/occt-multi.wasm', module }]);
+      const runtime = (worker as unknown as { createRuntime(): KernelRuntime }).createRuntime();
+
+      expect(runtime.getCompiledWasmModule('https://example.test/occt-multi.wasm')).toBe(module);
+      expect(onLog).not.toHaveBeenCalled();
+
+      expect(runtime.getCompiledWasmModule('https://example.test/occt-single.wasm')).toBeUndefined();
+      expect(onLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: 'warn',
+          // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
+          message: expect.stringContaining('occt-single.wasm'),
+          data: {
+            requested: 'https://example.test/occt-single.wasm',
+            supplied: ['https://example.test/occt-multi.wasm'],
+          },
+        }),
+      );
+    });
+
+    it('stays silent when no host supplied anything', () => {
+      const onLog = vi.fn();
+      const worker = createConfiguredWorker({ onLog });
+      const runtime = (worker as unknown as { createRuntime(): KernelRuntime }).createRuntime();
+
+      expect(runtime.getCompiledWasmModule('https://example.test/occt-multi.wasm')).toBeUndefined();
+      expect(onLog).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('bundler filesystem', () => {
+    /* `detect` and `bundle` traverse the same graph, and a module imported by ten others was
+     * probed once per edge: 146 filesystem operations for a 7-module cold open (D15). */
+    it('serves the bundler one probe and one read per path, and releases both at the operation boundary', async () => {
+      const filesystem = createMockFileSystem({ existsResult: true, readFileResult: 'export const a = 1;' });
+      const worker = createConfiguredWorker({ filesystem });
+      const view = (worker as unknown as { bundlerFilesystem: KernelFileSystem }).bundlerFilesystem;
+
+      await view.exists('lib/a.ts');
+      await view.exists('lib/a.ts');
+      expect(await view.readFile('lib/a.ts', 'utf8')).toBe('export const a = 1;');
+      await view.readFile('lib/a.ts');
+
+      expect(filesystem.mocks.exists).toHaveBeenCalledOnce();
+      expect(filesystem.mocks.readFile).toHaveBeenCalledOnce();
+
+      // A changed path drops its content, and the next operation re-probes.
+      await worker.notifyFileChanged(['lib/a.ts']);
+      await view.exists('lib/a.ts');
+      await view.readFile('lib/a.ts');
+
+      expect(filesystem.mocks.exists).toHaveBeenCalledTimes(2);
+      expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('source snapshots', () => {
+    it('rejects pre-aborted request-scoped parameter resolution before reading source', async () => {
+      const filesystem = createMockFileSystem();
+      const worker = createConfiguredWorker({ filesystem });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        worker.getParameters(createGeometryFile('main.ts'), { mode: 'declared-only' }, { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(filesystem.mocks.readFiles).not.toHaveBeenCalled();
+    });
+
     it('returns the coherent relevant closure with owned bytes without evaluating geometry', async () => {
       const contents = {
         'main.ts': new Uint8Array([1, 2]),
@@ -512,6 +663,10 @@ describe('KernelWorker lifecycle', () => {
       expect(onGeometry).not.toHaveBeenCalled();
       expect(worker.getWatchedPaths()).toEqual(new Set(['main.ts']));
       expect(unsubscriptions[0]).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(onGeometry).toHaveBeenCalledOnce();
+      });
+      expect(onGeometry.mock.calls[0]?.[0].renderId).not.toBe(previewId(203));
       await worker.cleanup();
     });
   });
@@ -859,6 +1014,162 @@ describe('KernelWorker lifecycle', () => {
       expect(observed.geometries.map((entry) => entry.renderId)).toEqual([renderId]);
       await worker.cleanup();
     });
+
+    it('publishes the arming render when a newly watched path replays identical content', async () => {
+      const entryBytes = new Uint8Array([1, 2, 3]);
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': entryBytes, 'dep.ts': entryBytes });
+      filesystem.mocks.readFile.mockResolvedValue(entryBytes);
+      let watchCount = 0;
+      const inlineFileSystem = Object.assign(filesystem, {
+        watch: vi.fn(() => vi.fn()),
+        watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchCount += 1;
+          if (watchCount === 2) {
+            handler({ type: 'change', path: 'dep.ts' });
+          }
+          return {
+            unsubscribe: vi.fn(),
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              // This synthetic watch stays open for the duration of the test.
+            }),
+          };
+        }),
+      });
+      class DependencyKernelWorker extends MockKernelWorker {
+        protected override async onGetDependencies({
+          entryPath,
+        }: GetDependenciesInput): Promise<GetDependenciesResult> {
+          return { resolved: [entryPath, 'dep.ts'], unresolved: [] };
+        }
+      }
+      const worker = new DependencyKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      const observed = observePreview(worker);
+      const renderId = previewId(205);
+
+      worker.handleOpenFile({ renderId, file: createGeometryFile('main.ts'), parameters: {} });
+
+      const terminal = await observed.waitForState(({ state }) => state === 'idle' || state === 'error');
+      expect(terminal.renderId).toBe(renderId);
+      expect(observed.geometries.map((entry) => entry.renderId)).toEqual([renderId]);
+      await worker.cleanup();
+    });
+
+    it('stops replacement validation when cleanup closes admission during an identical replay', async () => {
+      const entryBytes = new Uint8Array([1, 2, 3]);
+      const filesystem = createMockFileSystem();
+      const validationStarted = Promise.withResolvers<void>();
+      const unsubscribe = vi.fn();
+      let deliverWatchEvent!: (event: WatchEvent) => void;
+      const inlineFileSystem = Object.assign(filesystem, {
+        watch: vi.fn(() => unsubscribe),
+        watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          deliverWatchEvent = handler;
+          return {
+            unsubscribe,
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              // This synthetic watch stays open until cleanup rejects its replacement.
+            }),
+          };
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      // @ts-expect-error - seed the already-hashed dependency at the private watch handoff seam
+      worker.fileHashCache.set('dep.ts', await worker.hashContent(entryBytes));
+      filesystem.mocks.readFile.mockImplementation(async () => {
+        deliverWatchEvent({ type: 'change', path: 'dep.ts' });
+        validationStarted.resolve();
+        return entryBytes;
+      });
+
+      // @ts-expect-error - exercise replacement validation independently of render setup
+      const reconciliation = worker.reconcileWatchSet(new Map([['dep.ts', 50]]));
+      await validationStarted.promise;
+      const cleanup = worker.cleanup();
+
+      await expect(reconciliation).resolves.toBe(false);
+      await cleanup;
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      expect(worker.getWatchedPaths()).toEqual(new Set());
+    });
+
+    it.each([
+      {
+        event: { type: 'change', path: 'dep.ts' } satisfies WatchEvent,
+        nextBytes: new Uint8Array([1, 2, 3]),
+        commits: true,
+      },
+      {
+        event: { type: 'change', path: 'dep.ts' } satisfies WatchEvent,
+        nextBytes: new Uint8Array([4, 5, 6]),
+        commits: false,
+      },
+      { event: { type: 'reset' } satisfies WatchEvent, nextBytes: new Uint8Array([1, 2, 3]), commits: false },
+    ])(
+      'revalidates an arming event delivered during hashing before commit ($event.type)',
+      async ({ event, nextBytes, commits }) => {
+        const entryBytes = new Uint8Array([1, 2, 3]);
+        let currentBytes = entryBytes;
+        const filesystem = createMockFileSystem();
+        filesystem.mocks.readFile.mockImplementation(async () => currentBytes);
+        const unsubscribe = vi.fn();
+        let deliverWatchEvent!: (event: WatchEvent) => void;
+        const inlineFileSystem = Object.assign(filesystem, {
+          watch: vi.fn(() => unsubscribe),
+          watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+            deliverWatchEvent = handler;
+            return {
+              unsubscribe,
+              ready: Promise.resolve(),
+              closed: new Promise<void>(() => {
+                // This synthetic watch stays open for the duration of the test.
+              }),
+            };
+          }),
+        });
+        const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+        await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+        // @ts-expect-error - seed and gate the private hash boundary used by replacement validation
+        const originalHashContent = worker.hashContent.bind(worker);
+        // @ts-expect-error - seed the already-hashed dependency at the private watch handoff seam
+        worker.fileHashCache.set('dep.ts', await originalHashContent(entryBytes));
+        // @ts-expect-error - isolate replacement coherence from the independently covered watch-routing queue
+        worker.routeWatchEvent = async () => {
+          // Watch routing has independent coverage; this test owns only replacement coherence.
+        };
+        const hashStarted = Promise.withResolvers<void>();
+        const releaseHash = Promise.withResolvers<void>();
+        let hashCalls = 0;
+        // @ts-expect-error - hold the first validation hash to deliver an event after its bytes were read
+        worker.hashContent = async (content: Uint8Array<ArrayBuffer>) => {
+          hashCalls += 1;
+          if (hashCalls === 1) {
+            hashStarted.resolve();
+            await releaseHash.promise;
+          }
+          return originalHashContent(content);
+        };
+
+        // @ts-expect-error - exercise replacement validation independently of render setup
+        const reconciliation = worker.reconcileWatchSet(new Map([['dep.ts', 50]]));
+        await hashStarted.promise;
+        currentBytes = nextBytes;
+        deliverWatchEvent(event);
+        releaseHash.resolve();
+
+        await expect(reconciliation).resolves.toBe(commits);
+        expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(event.type === 'reset' ? 1 : 2);
+        expect(worker.getWatchedPaths()).toEqual(commits ? new Set(['dep.ts']) : new Set());
+        if (!commits) {
+          expect(unsubscribe).toHaveBeenCalledOnce();
+        }
+        await worker.cleanup();
+      },
+    );
   });
 
   describe('exact and loss invalidation routing', () => {
@@ -875,6 +1186,28 @@ describe('KernelWorker lifecycle', () => {
 
         await worker.notifyFileChanged(['main.ts']);
         expect(states).toEqual(['buffering']);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
+    it('lets a pending open retarget the preview before a change to the replaced file is routed', async () => {
+      const worker = createConfiguredWorker();
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        const preview = observePreview(worker);
+        const settled = preview.waitForState(
+          ({ renderId, state }) => renderId === previewId(101) && (state === 'idle' || state === 'error'),
+        );
+
+        // A rename opens the moved file while the watcher reports the old path as gone.
+        worker.handleOpenFile({ renderId: previewId(101), file: createGeometryFile('renamed.ts'), parameters: {} });
+        await worker.notifyFileChanged(['main.ts']);
+        await settled;
+        await flushMicrotasks();
+
+        expect(preview.geometries.map(({ renderId }) => renderId)).toEqual([previewId(101)]);
+        expect(preview.states.every(({ renderId }) => renderId === previewId(101))).toBe(true);
       } finally {
         await worker.cleanup();
       }
@@ -1259,7 +1592,7 @@ describe('KernelWorker lifecycle', () => {
       expect(worker.onProgress).toBeUndefined();
     });
 
-    it('should reconcile observed paths when render() throws', async () => {
+    it('keeps request-scoped render failures out of the preview watch set', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
         'main.ts': new Uint8Array([1, 2, 3]),
@@ -1278,7 +1611,7 @@ describe('KernelWorker lifecycle', () => {
         }),
       ).rejects.toThrow();
 
-      expect(worker.getWatchedPaths()).toContain('main.ts');
+      expect(worker.getWatchedPaths()).not.toContain('main.ts');
     });
 
     it('should refresh filesystem watches after request-scoped exportModel()', async () => {
@@ -1426,7 +1759,7 @@ describe('KernelWorker lifecycle', () => {
       protected override async onGetParameters(
         input: GetParametersInput,
         runtime: KernelRuntime,
-      ): Promise<GetParametersResult> {
+      ): Promise<GetParameterDeclarationsResult> {
         this.parameterCalls += 1;
         if (this.failParameters) {
           return { success: false, issues: [{ code: 'RUNTIME', message: 'failed', severity: 'error' }] };
@@ -2574,6 +2907,48 @@ describe('preview admission invariants', () => {
     expect(worker.renderCancellationRecords.size).toBe(0);
   });
 
+  it('cancels only the selected evaluateModel call and leaves the next preview admissible', async () => {
+    const evaluationEntered = Promise.withResolvers<void>();
+    class AbortableEvaluationWorker extends MockKernelWorker {
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        if (input.parameters['request'] === true) {
+          evaluationEntered.resolve();
+          await new Promise<void>((resolve) => {
+            runtime.signal.addEventListener(
+              'abort',
+              () => {
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          runtime.signal.throwIfAborted();
+        }
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+    const filesystem = createMockFileSystem();
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
+    const worker = new AbortableEvaluationWorker({ middleware: [], onLog: noopLog, filesystem });
+    const observed = observePreview(worker);
+    const controller = new AbortController();
+    const evaluation = worker.evaluateModel(
+      { file: createGeometryFile('main.ts'), parameters: { request: true } },
+      controller.signal,
+    );
+    await evaluationEntered.promise;
+    controller.abort(new Error('stop evaluation'));
+    await expect(evaluation).rejects.toThrow('stop evaluation');
+
+    const previewRenderId = previewId(3602);
+    worker.handleOpenFile({ renderId: previewRenderId, file: createGeometryFile('main.ts'), parameters: {} });
+    await observed.waitForState((event) => event.renderId === previewRenderId && event.state === 'idle');
+    expect(observed.geometries.map(({ renderId }) => renderId)).toEqual([previewRenderId]);
+  });
+
   it('does not admit a preview for an unrelated worker-local file change (T17)', async () => {
     const worker = createConfiguredWorker();
     const observed = observePreview(worker);
@@ -2921,6 +3296,33 @@ describe('preview admission invariants', () => {
     await worker.cleanup();
     // @ts-expect-error - accessing private for test verification
     expect(worker.renderCancellationRecords.size).toBe(0);
+  });
+
+  it('schedules a committed parameter edit without a zero-delay timer (W1/D18)', async () => {
+    const worker = createConfiguredWorker();
+    const observed = observePreview(worker);
+    const openedId = previewId(3810);
+    worker.handleOpenFile({ renderId: openedId, file: createGeometryFile('main.ts'), parameters: {} });
+    await observed.waitForState((event) => event.renderId === openedId && event.state === 'idle');
+
+    /* `parameterDebounce` is 0, and a zero-delay `setTimeout` is clamped to >= 1 ms in
+     * Node — so `updateParameters` used to pay that clamp twice per render, once here
+     * and once for the render lane's cooperative yield. The buffering turn stays; the
+     * timer does not. */
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    const parametersId = previewId(3811);
+    worker.handleUpdateParameters({ renderId: parametersId, parameters: { size: 2 } });
+    await observed.waitForState((event) => event.renderId === parametersId && event.state === 'idle');
+
+    const zeroDelayTimers = timeoutSpy.mock.calls.filter(([, delay]) => (delay ?? 0) <= 0);
+    expect(zeroDelayTimers).toEqual([]);
+    expect(observed.states.filter((event) => event.renderId === parametersId).map((event) => event.state)).toEqual([
+      'buffering',
+      'rendering',
+      'idle',
+    ]);
+    timeoutSpy.mockRestore();
+    await worker.cleanup();
   });
 
   it('releases a shutdown-window notifyFileChanged admission (T38)', async () => {
@@ -3395,6 +3797,59 @@ describe('abort reason propagation', () => {
     expect(states.at(-1)).toBe('error');
   });
 
+  /**
+   * A thrown value's `.issues` array is not a `KernelIssue[]`.
+   *
+   * `WireValidationError` and `ZodError` both carry one, and the worker used to
+   * hand it to `onError` verbatim: the rows reached the wire without
+   * `severity`, the client's own `kernelIssueSchema` rejected the `errorEvent`
+   * notify, and `handleNotifyFrame` dropped it — leaving the terminal `error`
+   * state, which carried no reason either, to settle the render with the
+   * invented `'Runtime render failed'`. Live proof and chain:
+   * `docs/research/agent-host-transports-and-offline.md` § "Addendum:
+   * FIX-DAEMON-RENDER".
+   */
+  it('should report a foreign issues-bearing failure as kernel issues on a self-describing error state', async () => {
+    const reason =
+      "wire validation failed for client-call-result 'call': __bridgeError.metadata: Invalid input: expected record, received null";
+
+    class ForeignIssuesKernelWorker extends MockKernelWorker {
+      protected override async onCreateGeometry(): Promise<CreateGeometryResult> {
+        throw Object.assign(new Error(reason), {
+          issues: [
+            {
+              path: ['__bridgeError', 'metadata'],
+              message: 'Invalid input: expected record, received null',
+              code: 'custom',
+            },
+          ],
+        });
+      }
+    }
+
+    const filesystem = createMockFileSystem();
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
+    const worker = new ForeignIssuesKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+    const observed = observePreview(worker);
+    const renderId = previewId(2402);
+
+    worker.handleOpenFile({ renderId, file: createGeometryFile('main.ts'), parameters: {} });
+    const terminal = await observed.waitForState(({ state }) => state === 'error' || state === 'idle');
+
+    /* Every emitted row must satisfy the protocol's own `kernelIssueSchema`,
+     * or the notify carrying it is dropped before any consumer sees it. */
+    expect(observed.errors).toHaveLength(1);
+    for (const issue of observed.errors[0]!.issues) {
+      expect(runtimeProtocolSchemas.notifies.errorEvent.safeParse({ issues: [issue], renderId }).success).toBe(true);
+    }
+    expect(observed.errors[0]!.issues.map((issue) => issue.message)).toContain(reason);
+
+    /* And the state transition explains itself, so a lost error event cannot
+     * force `runtime-client-core` to invent one. */
+    expect(terminal.state).toBe('error');
+    expect(terminal.detail).toContain('__bridgeError.metadata');
+  });
+
   it('should transition to idle when abortReason is superseded', async () => {
     const sab = new SharedArrayBuffer(signalBufferByteLength);
     const view = new Int32Array(sab);
@@ -3807,6 +4262,7 @@ describe('transcoder loading', () => {
     if (!result.success) {
       expect(result.issues[0]!.message).toContain('No export route found');
       expect(result.issues[0]!.message).toContain('Register a transcoder');
+      expect(result.issues[0]!.code).toBe('TRANSCODER_CAPABILITY_MISSING');
     }
   });
 
@@ -4486,6 +4942,28 @@ describe('native-handle materialization', () => {
 
     expect(result.success).toBe(true);
     expect(worker.createGeometryCalls).toBeGreaterThan(callsAfterRender);
+  });
+
+  it('keeps the durable snapshot off a display render result (W6b/D12)', async () => {
+    const serializedData = { brep: 'BREP_DATA', meta: { name: 'part' } };
+    const worker = createConfiguredWorker({
+      computeResult: {
+        success: true,
+        data: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
+        issues: [],
+        serializedNativeHandle: serializedData,
+      },
+    });
+
+    await openAndWaitForRender(worker);
+
+    const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
+    expect(artifact).toBeDefined();
+    /* `toTransportResult` spreads this object into `geometryComputed` and the
+     * `evaluateModel` reply, so anything left on it is copied to the client on every
+     * display render. The snapshot belongs to the export path's slot alone. */
+    expect(artifact!.result).not.toHaveProperty('serializedNativeHandle');
+    expect(artifact!.serializedNativeHandleSlot?.serializedNativeHandle).toEqual(serializedData);
   });
 
   it('should fall back to re-running createGeometry when no handle data exists', async () => {

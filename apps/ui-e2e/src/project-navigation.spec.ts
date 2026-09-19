@@ -19,7 +19,8 @@ type PersistedChatActivity = Readonly<{
   createdAt: number;
   updatedAt: number;
   recencyAt?: number;
-  hasUnreadTurn?: boolean;
+  /** From the project's composer unread record, not the chat record (D9). */
+  unread: boolean;
   activeExecution?: unknown;
   activeKernel?: string;
   draft?: unknown;
@@ -52,7 +53,7 @@ const readActivityChatOrder = async (): Promise<string[]> =>
   target.evaluate(
     (names) =>
       [...document.querySelectorAll<HTMLElement>('[data-slot="chat-trigger"]')]
-        .map((row) => row.textContent.trim())
+        .map((row) => row.querySelector('a')?.textContent.trim())
         .filter((name): name is string => name === names.older || name === names.newer),
     chatNames,
   );
@@ -65,6 +66,7 @@ const openActivityChat = async (name: string): Promise<void> => {
         (expected) =>
           [...document.querySelectorAll<HTMLElement>('[data-slot="chat-trigger"]')]
             .find((row) => row.dataset['active'] === 'true')
+            ?.querySelector('a')
             ?.textContent.trim() === expected,
         name,
       ),
@@ -262,17 +264,103 @@ async function stopObservingProjectShell(): Promise<string | undefined> {
   });
 }
 
+type SectionViewInput = Readonly<{
+  plane: 'xy' | 'xz' | 'yz';
+  direction?: 1 | -1;
+  rotationRadians?: readonly [number, number, number];
+  pivot?: readonly [number, number, number];
+}>;
+
+type SectionViewEvidence = Readonly<{
+  isSectionViewActive: boolean;
+  selectedSectionViewId: string | undefined;
+  sectionViewDirection: 1 | -1;
+  sectionViewPivot: readonly [number, number, number];
+  sectionViewRotation: readonly [number, number, number];
+  enableClippingLines: boolean;
+  enableClippingMesh: boolean;
+}>;
+
+type DurableViewSettings = Readonly<{
+  cameraFovAngle: number;
+  upDirection: 'x' | 'y' | 'z';
+  enableGrid: boolean;
+  sectionView?: Readonly<{
+    active: boolean;
+    plane?: 'xy' | 'xz' | 'yz';
+    pivot: readonly [number, number, number];
+    rotation: readonly [number, number, number];
+    direction: 1 | -1;
+  }>;
+  sectionDisplay?: Readonly<{ clipLines: boolean; clipMesh: boolean; planeName: 'cartesian' | 'face' }>;
+}>;
+
+type SectionViewBridge = Readonly<{
+  setSectionView(state: SectionViewInput): void;
+  getPresentation(): SectionViewEvidence;
+  getViewSettings(): (DurableViewSettings & Record<string, unknown>) | undefined;
+}>;
+
+const setSectionView = async (state: SectionViewInput): Promise<void> => {
+  await waitForCameraBridge();
+  await target.evaluate((nextState) => {
+    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
+      .__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is unavailable.');
+    }
+    bridge.setSectionView(nextState);
+  }, state);
+  await waitForTwoFrames();
+};
+
+const readSectionView = async (): Promise<SectionViewEvidence> =>
+  target.evaluate(() => {
+    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
+      .__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is unavailable.');
+    }
+    return bridge.getPresentation();
+  });
+
+/** The persisted record this view owns, narrowed to keys Law 4 calls durable. */
+const readDurableViewSettings = async (): Promise<DurableViewSettings | undefined> =>
+  target.evaluate(() => {
+    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
+      .__TAU_SECTION_VIEW_TEST__;
+    const settings = bridge?.getViewSettings();
+    if (!settings) {
+      return undefined;
+    }
+    return {
+      cameraFovAngle: settings.cameraFovAngle,
+      upDirection: settings.upDirection,
+      enableGrid: settings.enableGrid,
+      sectionView: settings.sectionView,
+      sectionDisplay: settings.sectionDisplay,
+    };
+  });
+
 test('client navigation keeps every project-scoped resource on one logical project ID', async () => {
   await target.addInitScript(() => {
     (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity = crypto.randomUUID();
   });
 
   await target.navigate('/__e2e/project-navigation');
-  await target.delay(5000);
-  const initialState = await target.evaluate(() => ({ href: location.href, text: document.body.textContent }));
-  if (!/\/w\/[^/]+\/[^/]+$/u.test(new URL(initialState.href).pathname)) {
+  /* The seed creates two projects through the file-manager worker before it
+   * navigates, and the worker's own OPFS mount alone costs seconds on a loaded
+   * machine — the two rows below already wait for this URL with a 60 s poll. A
+   * fixed wait raced it; the diagnostics are kept for a seed that truly never
+   * opens. */
+  try {
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  } catch (error) {
+    const initialState = await target.evaluate(() => ({ href: location.href, text: document.body.textContent }));
     const diagnostics = await target.events();
-    throw new Error(`Project-navigation seed did not open: ${JSON.stringify({ ...initialState, diagnostics })}`);
+    throw new Error(`Project-navigation seed did not open: ${JSON.stringify({ ...initialState, diagnostics })}`, {
+      cause: error,
+    });
   }
   const documentIdentity = await target.evaluate(
     () => (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity,
@@ -294,12 +382,14 @@ test('client navigation keeps every project-scoped resource on one logical proje
     });
     await openRecentProject(projectNames.b);
     await expectProject({ name: projectNames.b, entryPath: 'beta.ts' });
+    /* Observe from here, as the orthographic leg does: the sampler only records while alpha is the
+     * active tab, and waiting for B's own camera first hid alpha's first frames behind a race. */
+    await startCameraRestoreObservation('alpha.ts');
     await waitForCameraBridge();
     await waitForTwoFrames();
     const projectBetaCamera = await readCamera();
     expect(projectBetaCamera.projection).toBe('perspective');
     expect(projectBetaCamera.requestedFov).toBe(60);
-    await startCameraRestoreObservation('alpha.ts');
     await openRecentProject(projectNames.a);
     await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
     await waitForCameraBridge();
@@ -352,6 +442,15 @@ test('client navigation keeps every project-scoped resource on one logical proje
 });
 
 test('chat navigation preserves ordering until an accepted user submit advances recency', async () => {
+  /* Recency advances inside `actions.sendMessage`, which runs only after
+   * `admitWorkspace` resolves — and that awaits the model catalog for up to
+   * 20 s. `GET /v1/models` is stubbed only by this fixture, so without it the
+   * submit below cannot advance anything inside any poll. The script is one
+   * closing text turn: the row asserts the ordering the accepted submit
+   * produces, not the reply. */
+  await target.installAgentHostGatewayFixture([
+    { text: 'Recency advanced.', usage: { inputTokens: 20, outputTokens: 8 } },
+  ]);
   await target.navigate('/__e2e/project-navigation?activity=1');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   await target.expectVisible(selectors.getByRole('link', { name: chatNames.older, exact: true }), 60_000);
@@ -361,13 +460,13 @@ test('chat navigation preserves ordering until an accepted user submit advances 
   const beforeNavigation = await readChatActivitySnapshot();
   await openActivityChat(chatNames.newer);
   const afterFirstFocus = await readChatActivitySnapshot();
-  expect(beforeNavigation.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(true);
-  expect(afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(false);
+  expect(beforeNavigation.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(true);
+  expect(afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(false);
   await openActivityChat(chatNames.older);
   await openActivityChat(chatNames.newer);
   const afterRepeatedFocus = await readChatActivitySnapshot();
-  expect(afterRepeatedFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(
-    afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn,
+  expect(afterRepeatedFocus.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(
+    afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.unread,
   );
   await openActivityChat(chatNames.older);
   const afterNavigation = await readChatActivitySnapshot();
@@ -381,7 +480,9 @@ test('chat navigation preserves ordering until an accepted user submit advances 
   const composer = selectors.getByCss('.tiptap[contenteditable="true"]').first();
   await target.fill(composer, 'advance this chat');
   await target.press(composer, 'Enter');
-  await expect.poll(readActivityChatOrder).toEqual([chatNames.older, chatNames.newer]);
+  /* Admission is the gate, not the render: 20 s of model-catalog wait plus a
+   * workspace prepare do not fit vitest's 1 s default poll. */
+  await expect.poll(readActivityChatOrder, { timeout: 60_000 }).toEqual([chatNames.older, chatNames.newer]);
 
   const afterSubmit = await readChatActivitySnapshot();
   const olderBefore = beforeNavigation.chats.find(({ name }) => name === chatNames.older)!;
@@ -399,7 +500,7 @@ test('chat navigation preserves ordering until an accepted user submit advances 
   expect(afterRevisit.projectLastActivityAt).toBe(afterSubmit.projectLastActivityAt);
 });
 
-test('project and chat rows expose full-width Codex-style hover actions', async () => {
+test('project and chat rows reveal their actions over a dissolving name', async () => {
   await target.setViewport({ width: 1024, height: 900 });
   await target.navigate('/__e2e/project-navigation');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
@@ -420,17 +521,24 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     const newProject = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')].find((button) =>
       button.textContent.includes('New Project'),
     );
-    const projects = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find(
-      (label) => label.textContent === 'Projects',
+    /* `ProjectsLabel` appends a `N live` count beside the word whenever a
+     * project is open (`project-navigation.tsx:427-430`), so the label reads
+     * `Projects1 live` here. */
+    const projects = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find((label) =>
+      label.textContent.startsWith('Projects'),
     );
     const platform = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find(
       (label) => label.textContent === 'Platform',
     );
     const project = document.querySelector<HTMLElement>('[data-slot="project-trigger"]');
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')];
-    const projectLibrary = navButtons.find((button) => button.textContent.includes('Project Library'));
-    const files = navButtons.find((button) => button.textContent.includes('Files'));
-    if (!search || !newProject || !projects || !platform || !project || !projectLibrary || !files) {
+    /* Two `navMain` rows (`route.constants.ts`), which is where the sidebar's
+     * standing destinations live: `navSecondary` — and with it the `Files` row
+     * this used to read — moved into the user dropdown in `be3d0eb6e`, and
+     * `Project Library` has never been a committed label. */
+    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
+    const community = navButtons.find((button) => button.textContent.trim() === 'Community');
+    if (!search || !newProject || !projects || !platform || !project || !projectsNav || !community) {
       throw new Error('Sidebar controls were not ready.');
     }
     const searchBounds = search.getBoundingClientRect();
@@ -445,7 +553,7 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     return {
       fontSizes: [getComputedStyle(search).fontSize, getComputedStyle(newProject).fontSize],
       heightDelta: Math.abs(searchBounds.height - newProjectBounds.height),
-      horizontalEdges: [search, newProject, project, projectLibrary, files].map((element) => {
+      horizontalEdges: [search, newProject, project, projectsNav, community].map((element) => {
         const bounds = element.getBoundingClientRect();
         return [bounds.left, bounds.right];
       }),
@@ -477,7 +585,7 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     expect(Math.abs(edges[0]! - headerControlMetrics.horizontalEdges[0]![0]!)).toBeLessThanOrEqual(0.5);
     expect(Math.abs(edges[1]! - headerControlMetrics.horizontalEdges[0]![1]!)).toBeLessThanOrEqual(0.5);
   }
-  await target.expectVisible(selectors.getByRole('link', { name: 'Project Library' }));
+  await target.expectVisible(selectors.getByRole('link', { name: 'Projects', exact: true }));
 
   const paneHeaderHeightDelta = await target.evaluate(() => {
     const chatHeader = document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"]');
@@ -501,6 +609,7 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     const tabStyle = getComputedStyle(tab);
     return {
       background: getComputedStyle(element).backgroundColor,
+      tabBackground: tabStyle.backgroundColor,
       flex: [tabStyle.flexGrow, tabStyle.flexShrink, tabStyle.minWidth, tabStyle.maxWidth],
       inset: [
         closeBounds.top - tabBounds.top,
@@ -509,49 +618,53 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
       ],
     };
   });
-  expect(closeMetrics.background).toBe('rgba(0, 0, 0, 0)');
+  /* An unhovered close action carries the tab's own fill so it masks the title
+   * dissolving beneath it rather than showing a second pill: `dockview.tsx:166`
+   * (`.dv-tab.dv-active-tab … .dv-default-tab-action:not(:hover)` → `!bg-accent`,
+   * committed in `c23b6ed7c`). `dockview-tabs.spec.ts:156` pins the same fact.
+   * The row could not read this until `2cfd558fd` repaired the lookups above. */
+  expect(closeMetrics.background).toBe(closeMetrics.tabBackground);
+  expect(closeMetrics.background).not.toBe('rgba(0, 0, 0, 0)');
   expect(closeMetrics.flex).toEqual(['1', '1', '112px', '160px']);
   expect(Math.max(...closeMetrics.inset) - Math.min(...closeMetrics.inset)).toBeLessThanOrEqual(1);
   await target.hover(closeButton);
   expect(await target.evaluateLocator(closeButton, (element) => getComputedStyle(element).backgroundColor)).not.toBe(
-    'rgba(0, 0, 0, 0)',
+    closeMetrics.background,
   );
 
-  const projectBeforeHover = await target.evaluateLocator(projectTrigger, (element) => {
-    const actionButtons = [...element.querySelectorAll<HTMLButtonElement>('button')].filter((button) =>
-      /^(More actions|New chat)/u.test(button.ariaLabel ?? ''),
-    );
-    return {
-      actionLabels: actionButtons.map((button) => button.ariaLabel),
-      actionOpacity: actionButtons.map((button) => getComputedStyle(button).opacity),
-      disclosureDisplay: getComputedStyle(element.querySelector('[data-slot="project-disclosure-icon"]')!).display,
-      folderDisplay: getComputedStyle(element.querySelector('[data-slot="project-folder-icon"]')!).display,
-    };
-  });
+  /* Sidebar v2 (D7, D13, D15): actions take no width at rest, appear over the
+   * dissolving tail on hover, and never move the name. */
+  const readProjectRow = async () =>
+    target.evaluateLocator(projectTrigger, (element) => {
+      const actions = element.querySelector<HTMLElement>('.fade-action');
+      const label = element.querySelector<HTMLElement>('a .fade-label');
+      if (!actions || !label) {
+        throw new Error('Project row was not ready.');
+      }
+      return {
+        actionLabels: [...actions.querySelectorAll<HTMLButtonElement>('button')].map((button) => button.ariaLabel),
+        actionsDisplay: getComputedStyle(actions).display,
+        fadeSize: getComputedStyle(label).getPropertyValue('--fade-label-size').trim(),
+        height: element.getBoundingClientRect().height,
+        labelWidth: label.getBoundingClientRect().width,
+        truncated: element.querySelector('.truncate') !== null,
+      };
+    });
+  const projectBeforeHover = await readProjectRow();
   expect(projectBeforeHover.actionLabels).toEqual([
     `More actions for ${projectNames.a}`,
     `New chat in ${projectNames.a}`,
   ]);
-  expect(projectBeforeHover.actionOpacity).toEqual(['0', '0']);
-  expect(projectBeforeHover.folderDisplay).not.toBe('none');
-  expect(projectBeforeHover.disclosureDisplay).toBe('none');
+  expect(projectBeforeHover.actionsDisplay).toBe('none');
+  expect(projectBeforeHover.fadeSize).toBe('1.5rem');
+  expect(projectBeforeHover.height).toBe(28);
+  expect(projectBeforeHover.truncated).toBe(false);
 
   await target.hover(projectTrigger);
-  const projectOnHover = await target.evaluateLocator(projectTrigger, (element) => {
-    const actionButtons = [...element.querySelectorAll<HTMLButtonElement>('button')].filter((button) =>
-      /^(More actions|New chat)/u.test(button.ariaLabel ?? ''),
-    );
-    return {
-      actionBackgrounds: actionButtons.map((button) => getComputedStyle(button).backgroundColor),
-      actionOpacity: actionButtons.map((button) => getComputedStyle(button).opacity),
-      disclosureDisplay: getComputedStyle(element.querySelector('[data-slot="project-disclosure-icon"]')!).display,
-      folderDisplay: getComputedStyle(element.querySelector('[data-slot="project-folder-icon"]')!).display,
-    };
-  });
-  expect(projectOnHover.actionOpacity).toEqual(['1', '1']);
-  expect(projectOnHover.actionBackgrounds).toEqual(['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)']);
-  expect(projectOnHover.folderDisplay).toBe('none');
-  expect(projectOnHover.disclosureDisplay).not.toBe('none');
+  const projectOnHover = await readProjectRow();
+  expect(projectOnHover.actionsDisplay).toBe('flex');
+  expect(projectOnHover.fadeSize).toBe('2.625rem');
+  expect(projectOnHover.labelWidth).toBe(projectBeforeHover.labelWidth);
 
   await target.mouseMove(1000, 899);
   const rowMetrics = await target.evaluate(() => {
@@ -560,36 +673,38 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     if (!projects[0] || !projects[1] || !chat) {
       throw new Error('Sidebar project rows were not ready.');
     }
-    const projectBounds = projects[0].getBoundingClientRect();
     const nextProjectBounds = projects[1].getBoundingClientRect();
     const chatBounds = chat.getBoundingClientRect();
     const chatList = chat.closest<HTMLElement>('[data-slot="sidebar-menu-sub"]');
-    const projectLabel = projects[0].querySelector('a span');
-    const chatLabel = chat.querySelector('a span');
-    if (!chatList || !projectLabel || !chatLabel) {
+    const projectLabel = projects[0].querySelector('a .fade-label');
+    const chatLabel = chat.querySelector('a .fade-label');
+    const chatStatus = chat.querySelector('[data-slot="chat-status"]');
+    if (!chatList || !projectLabel || !chatLabel || !chatStatus) {
       throw new Error('Sidebar row labels were not ready.');
     }
+    const sidebar = chat.closest<HTMLElement>('[data-sidebar="content"]');
     return {
-      chatRowGap: Number.parseFloat(getComputedStyle(chatList).rowGap),
       chatHasLeadingIcon: chat.querySelector('a svg') !== null,
+      chatHeight: chatBounds.height,
       chatLabelLeft: chatLabel.getBoundingClientRect().left,
+      chatStatusFirst: chat.firstElementChild === chatStatus,
       chatTooltipState: chat.querySelector<HTMLAnchorElement>('a')?.dataset['state'] ?? null,
-      chatLeft: chatBounds.left,
-      chatRight: chatBounds.right,
       gapToNextProject: nextProjectBounds.top - chatBounds.bottom,
-      projectToChatGap: chatBounds.top - projectBounds.bottom,
+      overflow: sidebar === null ? 0 : sidebar.scrollWidth - sidebar.clientWidth,
       projectLabelLeft: projectLabel.getBoundingClientRect().left,
-      projectLeft: projectBounds.left,
-      projectRight: projectBounds.right,
+      railWidth: Number.parseFloat(getComputedStyle(chatList).borderLeftWidth),
     };
   });
   expect(rowMetrics.chatHasLeadingIcon).toBe(false);
   expect(rowMetrics.chatTooltipState).toBeNull();
-  expect(Math.abs(rowMetrics.chatLabelLeft - rowMetrics.projectLabelLeft)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(rowMetrics.projectToChatGap - rowMetrics.chatRowGap)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(rowMetrics.chatLeft - rowMetrics.projectLeft)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(rowMetrics.chatRight - rowMetrics.projectRight)).toBeLessThanOrEqual(0.5);
-  expect(rowMetrics.gapToNextProject).toBeGreaterThanOrEqual(7.5);
+  expect(rowMetrics.chatStatusFirst).toBe(true);
+  expect(rowMetrics.chatHeight).toBe(28);
+  /* D8: a chat name sits one slot (21 px) in from its project's name, on a rail. */
+  expect(Math.abs(rowMetrics.chatLabelLeft - rowMetrics.projectLabelLeft - 21)).toBeLessThanOrEqual(0.5);
+  expect(rowMetrics.railWidth).toBe(1);
+  /* D10: an expanded project's block is separated from the next project. */
+  expect(rowMetrics.gapToNextProject).toBeGreaterThanOrEqual(4);
+  expect(rowMetrics.overflow).toBe(0);
 
   await target.hover(chatTrigger);
   const chatAction = await target.evaluateLocator(chatTrigger, (element) => {
@@ -600,12 +715,68 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     return {
       background: getComputedStyle(button).backgroundColor,
       label: button.ariaLabel,
-      opacity: getComputedStyle(button).opacity,
+      visible: button.checkVisibility(),
     };
   });
   expect(chatAction).toEqual({
     background: 'rgba(0, 0, 0, 0)',
     label: 'More actions for Initial chat',
-    opacity: '1',
+    visible: true,
   });
+});
+
+/* Law 4: a durable key restores identically whether the person returns to a live project or reloads
+ * the tab. The camera proves the session substrate (W3); the section view proves the v11 seed (W5). */
+test('revisit and reload restore the same durable view settings', async () => {
+  await target.navigate('/__e2e/project-navigation');
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+  await waitForCameraBridge();
+
+  const camera = await setCamera({
+    position: [43, -31, 27],
+    target: [3, -4, 5],
+    fov: 42,
+    zoom: 1,
+    rollRadians: 0.37,
+  });
+  await setSectionView({
+    plane: 'xz',
+    direction: -1,
+    rotationRadians: [0, 0.4, 0],
+    pivot: [0.011, 0.022, 0.033],
+  });
+  const sectionAfterCut = await readSectionView();
+  expect(sectionAfterCut.isSectionViewActive).toBe(true);
+  expect(sectionAfterCut.selectedSectionViewId).toBe('xz');
+  // The write side is debounced, so wait for the cut to reach the durable record.
+  await expect
+    .poll(
+      async () => {
+        const persisted = await readDurableViewSettings();
+        return persisted?.sectionView?.plane;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe('xz');
+  const durableAfterCut = await readDurableViewSettings();
+
+  await openRecentProject(projectNames.b);
+  await expectProject({ name: projectNames.b, entryPath: 'beta.ts' });
+  await openRecentProject(projectNames.a);
+  await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+  await waitForCameraBridge();
+  await waitForTwoFrames();
+  expectCameraRestored(await readCamera(), camera);
+  expect(await readSectionView()).toEqual(sectionAfterCut);
+  expect(await readDurableViewSettings()).toEqual(durableAfterCut);
+
+  await target.reload();
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+  await waitForCameraBridge();
+  await waitForTwoFrames();
+  expectCameraFrameRestored(await readCamera(), camera);
+  expect(await readSectionView()).toEqual(sectionAfterCut);
+  expect(await readDurableViewSettings()).toEqual(durableAfterCut);
 });

@@ -40,7 +40,7 @@
 
 import type { Chat as AiSdkChat } from '@ai-sdk/react';
 import { useSelector } from '@xstate/react';
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
@@ -50,7 +50,13 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import type { draftMachine } from '#hooks/draft.machine.js';
+import type {
+  DraftAttachment,
+  DraftAttachmentModel,
+  DraftAttachmentSource,
+  draftMachine,
+} from '#hooks/draft.machine.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
 type ChatInstance = AiSdkChat<MyUIMessage>;
@@ -62,6 +68,13 @@ const emptyMessageOrder: readonly string[] = Object.freeze([]);
 const emptyMessagesById: ReadonlyMap<string, MyUIMessage> = new Map();
 
 const messagesByIdCache = new WeakMap<readonly MyUIMessage[], Map<string, MyUIMessage>>();
+const messageOrderCache = new WeakMap<
+  ChatInstance,
+  {
+    readonly length: number;
+    readonly order: readonly string[];
+  }
+>();
 
 function getMessagesById(messages: readonly MyUIMessage[]): ReadonlyMap<string, MyUIMessage> {
   if (messages === emptyMessages) {
@@ -76,6 +89,23 @@ function getMessagesById(messages: readonly MyUIMessage[]): ReadonlyMap<string, 
     messagesByIdCache.set(messages, cached);
   }
   return cached;
+}
+
+function getMessageOrder(chat: ChatInstance | undefined, messages: readonly MyUIMessage[]): readonly string[] {
+  if (!chat || messages.length === 0) {
+    return emptyMessageOrder;
+  }
+  const cached = messageOrderCache.get(chat);
+  if (
+    cached &&
+    cached.length === messages.length &&
+    messages.every((message, index) => cached.order[index] === message.id)
+  ) {
+    return cached.order;
+  }
+  const order = messages.map((message) => message.id);
+  messageOrderCache.set(chat, { length: messages.length, order });
+  return order;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,17 +144,11 @@ export type ChatContextValue = {
 type SessionSnapshotFields = {
   chat: ChatInstance | undefined;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine> | undefined;
-  messages: readonly MyUIMessage[];
-  status: ChatInstance['status'];
-  error: Error | undefined;
 };
 
 const emptySessionSnapshot: SessionSnapshotFields = {
   chat: undefined,
   persistenceActorRef: undefined,
-  messages: emptyMessages,
-  status: 'ready',
-  error: undefined,
 };
 
 function selectSessionSnapshot(session: ChatSession | undefined): SessionSnapshotFields {
@@ -134,9 +158,6 @@ function selectSessionSnapshot(session: ChatSession | undefined): SessionSnapsho
   return {
     chat: session.chat,
     persistenceActorRef: session.persistenceActorRef,
-    messages: session.chat.messages,
-    status: session.chat.status,
-    error: session.chat.error,
   };
 }
 
@@ -183,78 +204,40 @@ export type CombinedChatState = {
    */
   activeKernel: KernelId | undefined;
   draftText: string;
-  draftImages: string[];
+  draftAttachments: readonly DraftAttachment[];
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId: string | undefined;
   editDraftText: string;
-  editDraftImages: string[];
+  editDraftAttachments: readonly DraftAttachment[];
 };
 
-type PersistenceSliceFields = {
-  persistedError: ChatError | undefined;
-  activeExecution: CadAgentExecution | undefined;
-  activeKernel: KernelId | undefined;
-};
-
-const emptyPersistenceSlice: PersistenceSliceFields = {
-  persistedError: undefined,
-  activeExecution: undefined,
-  activeKernel: undefined,
-};
-
-const persistenceSliceCache = new WeakMap<
-  ActorRefFrom<typeof chatPersistenceMachine>,
-  { context: unknown; slice: PersistenceSliceFields }
->();
-
-/**
- * Subscribe to a possibly-undefined persistence actor's chat-scoped fields
- * (`persistedError`, `activeExecution`, `activeKernel`) without violating the
- * rules of hooks when the actor is not yet present. Slices are cached per
- * actor + context reference so `useSyncExternalStore` returns the same
- * object reference across notifications that did not change the slice.
- */
-function usePersistenceSlice(
-  persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine> | undefined,
-): PersistenceSliceFields {
-  const subscribe = useCallback(
-    (callback: () => void) => {
-      if (!persistenceActorRef) {
-        return () => undefined;
-      }
-      const sub = persistenceActorRef.subscribe(callback);
-      return () => {
-        sub.unsubscribe();
-      };
-    },
-    [persistenceActorRef],
-  );
-  const getSnapshot = useCallback((): PersistenceSliceFields => {
-    if (!persistenceActorRef) {
-      return emptyPersistenceSlice;
-    }
-    const { context } = persistenceActorRef.getSnapshot();
-    const cached = persistenceSliceCache.get(persistenceActorRef);
-    if (
-      cached &&
-      cached.context === context &&
-      cached.slice.persistedError === context.persistedError &&
-      cached.slice.activeExecution === context.activeExecution &&
-      cached.slice.activeKernel === context.activeKernel
-    ) {
-      return cached.slice;
-    }
-    const slice: PersistenceSliceFields = {
-      persistedError: context.persistedError,
-      activeExecution: context.activeExecution,
-      activeKernel: context.activeKernel,
-    };
-    persistenceSliceCache.set(persistenceActorRef, { context, slice });
-    return slice;
-  }, [persistenceActorRef]);
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+function shallowEqual<T>(a: T, b: T): boolean {
+  if (Object.is(a, b)) {
+    return true;
+  }
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((value, index) => Object.is(value, b[index]))
+    );
+  }
+  if (Object.getPrototypeOf(a) !== Object.prototype || Object.getPrototypeOf(b) !== Object.prototype) {
+    return false;
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  if (aKeys.length !== Object.keys(bRecord).length) {
+    return false;
+  }
+  return aKeys.every((key) => Object.is(aRecord[key], bRecord[key]));
 }
 
 /**
@@ -263,51 +246,67 @@ function usePersistenceSlice(
  * Session-required — composer-only subtrees should call
  * {@link useDraftSelector} instead.
  *
- * Selectors run on every notification — the `messagesById` and
- * `messageOrder` derivations are memoised on the message array reference
- * so equivalent reads are O(1).
+ * The combined external-store subscription caches the selected value, so a
+ * token update only re-renders consumers whose selected data changed.
  */
 export function useChatSelector<T>(selector: (state: CombinedChatState) => T, chatId?: string): T {
-  const { chat, persistenceActorRef, draftActorRef } = useChatContext(chatId);
-  const draftContext = useSelector(draftActorRef, (state) => state.context);
-  const persistenceSlice = usePersistenceSlice(persistenceActorRef);
+  const { activeChatId, persistenceActorRef, draftActorRef } = useChatContext(chatId);
+  const store = useChatSessionStore();
+  const cacheRef = useRef<{ readonly value: T } | undefined>(undefined);
 
-  const messages = chat?.messages ?? emptyMessages;
-  const status = chat?.status ?? 'ready';
-  const error = chat?.error;
-  const isLoading = status === 'streaming';
-
-  const messagesById = getMessagesById(messages);
-  const messageOrder = useMemo<readonly string[]>(
-    () => (messages === emptyMessages ? emptyMessageOrder : messages.map((m) => m.id)),
-    [messages],
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribeChat = store.subscribeChat(activeChatId, listener);
+      const draftSubscription = draftActorRef.subscribe(listener);
+      const persistenceSubscription = persistenceActorRef?.subscribe(listener);
+      return () => {
+        unsubscribeChat();
+        draftSubscription.unsubscribe();
+        persistenceSubscription?.unsubscribe();
+      };
+    },
+    [activeChatId, draftActorRef, persistenceActorRef, store],
   );
-
-  const combinedState = useMemo<CombinedChatState>(
-    () => ({
+  const getSnapshot = useCallback((): T => {
+    const chat = store.get(activeChatId)?.chat;
+    const messages = chat?.messages ?? emptyMessages;
+    const status = chat?.status ?? 'ready';
+    const draftContext = draftActorRef.getSnapshot().context;
+    const persistenceContext = persistenceActorRef?.getSnapshot().context;
+    const state: CombinedChatState = {
       messages,
-      messagesById,
-      messageOrder,
+      get messagesById() {
+        return getMessagesById(messages);
+      },
+      get messageOrder() {
+        return getMessageOrder(chat, messages);
+      },
       status,
-      error,
-      persistedError: persistenceSlice.persistedError,
-      isLoading,
-      activeExecution: persistenceSlice.activeExecution,
-      activeKernel: persistenceSlice.activeKernel,
+      error: chat?.error,
+      persistedError: persistenceContext?.persistedError,
+      isLoading: status === 'streaming',
+      activeExecution: persistenceContext?.activeExecution,
+      activeKernel: persistenceContext?.activeKernel,
       draftText: draftContext.draftText,
-      draftImages: draftContext.draftImages,
+      draftAttachments: draftContext.draftAttachments,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
       messageEdits: draftContext.messageEdits,
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
-      editDraftImages: draftContext.editDraftImages,
-    }),
-    [messages, messagesById, messageOrder, status, error, persistenceSlice, isLoading, draftContext],
-  );
+      editDraftAttachments: draftContext.editDraftAttachments,
+    };
+    const next = selector(state);
+    const cached = cacheRef.current;
+    if (cached && shallowEqual(cached.value, next)) {
+      return cached.value;
+    }
+    cacheRef.current = { value: next };
+    return next;
+  }, [activeChatId, draftActorRef, persistenceActorRef, selector, store]);
 
-  return selector(combinedState);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 /**
@@ -363,17 +362,22 @@ export function useChatRetrySnapshot(chatId?: string): ChatRetrySnapshot {
 
 /**
  * Draft-only state shape. Strict subset of {@link CombinedChatState} that
- * doesn't depend on a live `Chat` session.
+ * doesn't depend on a live `Chat` session. A composer derives its send gate
+ * from `draftAttachments` with `attachmentSendBlockReason` (`#utils/chat.utils.js`).
  */
 export type DraftState = {
   draftText: string;
-  draftImages: string[];
+  draftAttachments: readonly DraftAttachment[];
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId: string | undefined;
   editDraftText: string;
-  editDraftImages: string[];
+  editDraftAttachments: readonly DraftAttachment[];
+  /** An attachment for the main draft is still resizing or storing, so it is not in `draftAttachments` yet. */
+  attachingMain: boolean;
+  /** The same for the open edit. */
+  attachingEdit: boolean;
 };
 
 /**
@@ -387,14 +391,16 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
   const draftState = useMemo<DraftState>(
     () => ({
       draftText: draftContext.draftText,
-      draftImages: draftContext.draftImages,
+      draftAttachments: draftContext.draftAttachments,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
       messageEdits: draftContext.messageEdits,
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
-      editDraftImages: draftContext.editDraftImages,
+      editDraftAttachments: draftContext.editDraftAttachments,
+      attachingMain: draftContext.attachmentQueue.some((entry) => entry.target === 'main'),
+      attachingEdit: draftContext.attachmentQueue.some((entry) => entry.target === 'edit'),
     }),
     [draftContext],
   );
@@ -407,27 +413,34 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
  * the session-required {@link ChatActions} so marketing-route composers can
  * write to the draft without a session.
  */
-export type DraftImageOptions = {
+export type DraftAttachmentOptions = {
+  /** The selected model; an attachment kind it cannot read is refused before any byte is stored (D20). */
+  readonly model: DraftAttachmentModel;
+  /** Shown on a document chip and sent to the provider. */
+  readonly filename?: string;
   /** Keep a generated lossless artifact byte-for-byte instead of applying the upload compression policy. */
   readonly preserveOriginal?: boolean;
 };
 
+const sourceFields = (
+  source: DraftAttachmentSource,
+): { dataUrl: string } | { bytes: Uint8Array<ArrayBuffer>; mediaType: string } =>
+  typeof source === 'string' ? { dataUrl: source } : source;
+
 export type DraftActions = {
   setDraftText: (text: string) => void;
   /**
-   * Add a raw image data URL to the new-message draft. Synchronous: the
-   * `draftMachine` enqueues the URL and processes it through the single
-   * `imageProcessing` chokepoint (see `apps/ui/app/hooks/draft.machine.ts`).
-   * Pass the original (un-resized) data URL — the machine handles
-   * dimension/compression caps via `resizeImageForChat()`. Generated captures
-   * pass `preserveOriginal` so their lossless bytes bypass upload compression.
-   * Failures surface
-   * as a single global `toast.error` from the provider's
-   * `useDraftImageErrorToast` subscriber, so callers MUST NOT wrap this in
-   * try/catch or await any resize step.
+   * Add a raw image or PDF data URL to the new-message draft. Synchronous: the
+   * `draftMachine` enqueues it through its single `attachmentProcessing`
+   * chokepoint (see `apps/ui/app/hooks/draft.machine.ts`), which resizes
+   * images and stores the bytes before the draft references them. Pass the
+   * original data URL. Generated captures pass `preserveOriginal` so their
+   * lossless bytes bypass upload compression. Failures and refusals are
+   * emitted by the machine for one toast subscriber, so callers MUST NOT wrap
+   * this in try/catch.
    */
-  addDraftImage: (image: string, options?: DraftImageOptions) => void;
-  removeDraftImage: (index: number) => void;
+  addDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
+  removeDraftAttachment: (index: number) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
   setDraftMode: (mode: string) => void;
   clearDraft: () => void;
@@ -435,11 +448,11 @@ export type DraftActions = {
   exitEditMode: () => void;
   setEditDraftText: (text: string) => void;
   /**
-   * Add a raw image data URL to the message-edit draft. Same contract as
-   * {@link DraftActions.addDraftImage}.
+   * Add a raw data URL (or a document's bytes) to the message-edit draft. Same contract as
+   * {@link DraftActions.addDraftAttachment}.
    */
-  addEditDraftImage: (image: string, options?: DraftImageOptions) => void;
-  removeEditDraftImage: (index: number) => void;
+  addEditDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
+  removeEditDraftAttachment: (index: number) => void;
   clearMessageEdit: (messageId: string) => void;
 };
 
@@ -451,11 +464,11 @@ export function useDraftActions(): DraftActions {
       setDraftText(text: string) {
         draftActorRef.send({ type: 'setDraftText', text });
       },
-      addDraftImage(image: string, options?: DraftImageOptions) {
-        draftActorRef.send({ type: 'addDraftImage', image, preserveOriginal: options?.preserveOriginal });
+      addDraftAttachment(source: DraftAttachmentSource, options: DraftAttachmentOptions) {
+        draftActorRef.send({ type: 'addDraftAttachment', ...sourceFields(source), ...options });
       },
-      removeDraftImage(index: number) {
-        draftActorRef.send({ type: 'removeDraftImage', index });
+      removeDraftAttachment(index: number) {
+        draftActorRef.send({ type: 'removeDraftAttachment', index });
       },
       setDraftToolChoice(toolChoice: string | string[]) {
         draftActorRef.send({ type: 'setDraftToolChoice', toolChoice });
@@ -476,11 +489,11 @@ export function useDraftActions(): DraftActions {
       setEditDraftText(text: string) {
         draftActorRef.send({ type: 'setEditDraftText', text });
       },
-      addEditDraftImage(image: string, options?: DraftImageOptions) {
-        draftActorRef.send({ type: 'addEditDraftImage', image, preserveOriginal: options?.preserveOriginal });
+      addEditDraftAttachment(source: DraftAttachmentSource, options: DraftAttachmentOptions) {
+        draftActorRef.send({ type: 'addEditDraftAttachment', ...sourceFields(source), ...options });
       },
-      removeEditDraftImage(index: number) {
-        draftActorRef.send({ type: 'removeEditDraftImage', index });
+      removeEditDraftAttachment(index: number) {
+        draftActorRef.send({ type: 'removeEditDraftAttachment', index });
       },
       clearMessageEdit(messageId: string) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
@@ -494,24 +507,28 @@ export function useDraftActions(): DraftActions {
 // Session action surface
 // ---------------------------------------------------------------------------
 
+/*
+ * The verbs are gestures, not dispatches (C3).
+ *
+ * None of them carries a `body` any more: the chat's session actor owns the
+ * turn, so it is the actor's admission that derives the rewind point, leases
+ * the checkout and composes the wire body. A verb that composed its own body
+ * was a second admission policy, and the two disagreed (F10).
+ */
 export type ChatActions = DraftActions & {
-  sendMessage: (message: SendMessageInput, options?: { body?: Readonly<Record<string, unknown>> }) => void;
-  regenerate: (options?: { body?: Readonly<Record<string, unknown>> }) => void;
+  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly AttachmentReference[] }) => Promise<void>;
+  regenerate: () => void;
   /**
-   * Resume an interrupted stream WITHOUT re-running the trailing user
-   * message or slicing any assistant parts that already landed. Use this
-   * for resumable recovery banners such as network drops and account-state
-   * interruptions -- `regenerate()` would destroy partial assistant content.
+   * Re-run the chat's last turn after a failure the person chose to retry.
+   *
+   * A stream the host can still continue is resumed rather than re-run, so
+   * assistant parts that already landed survive; the admission decides which,
+   * because only it knows whether the run is resumable.
    */
   continueChat: () => void;
   stop: () => void;
   setMessages: (messages: MyUIMessage[]) => void;
-  editMessage: (
-    messageId: string,
-    content: string,
-    options?: { imageUrls?: string[]; body?: Readonly<Record<string, unknown>> },
-  ) => void;
-  retryMessage: (messageId: string, options?: { body?: Readonly<Record<string, unknown>> }) => void;
+  editMessage: (messageId: string, content: string, options?: { attachments?: readonly AttachmentReference[] }) => void;
 };
 
 function warnNoCrossChatSession(action: string, chatId: string): void {
@@ -559,40 +576,46 @@ export function useChatActions(chatId?: string): ChatActions {
       return session;
     };
 
+    // The draft no longer references what a send promoted; its draft-stage copies go.
+    const releaseDraftAttachments = async (): Promise<void> => {
+      try {
+        await store.releaseDraftAttachments(resolvedChatId);
+      } catch (error) {
+        // An unreleased blob is reclaimed by the next `retainOnly`; nothing the person sent is affected.
+        console.warn('[useChatActions] draft attachments could not be released', error);
+      }
+    };
+
     return {
       ...draftActions,
-      sendMessage(message: SendMessageInput, options) {
+      async sendMessage(message: SendMessageInput, options) {
         draftActorRef.send({ type: 'clearDraft' });
-        const session = requireSession('sendMessage');
-        if (!session) {
+        void releaseDraftAttachments();
+        if (!requireSession('sendMessage')) {
           return;
         }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
         const outgoingMessage = message as MyUIMessage;
         void store.touchChatRecency(resolvedChatId, outgoingMessage.metadata?.createdAt ?? Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'send', message: outgoingMessage, body: options?.body },
+        await store.requestTurn(resolvedChatId, {
+          kind: 'send',
+          message: outgoingMessage,
+          ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
         });
       },
-      regenerate(options) {
-        const session = requireSession('regenerate');
-        if (!session) {
+      regenerate() {
+        if (!requireSession('regenerate')) {
           return;
         }
         void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'regenerate', body: options?.body },
-        });
+        void store.requestTurn(resolvedChatId, { kind: 'regenerate' });
       },
       continueChat() {
-        const session = requireSession('continueChat');
-        if (!session) {
+        if (!requireSession('continueChat')) {
           return;
         }
         void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+        void store.requestTurn(resolvedChatId, { kind: 'continue' });
       },
       stop() {
         const session = requireSession('stop');
@@ -617,6 +640,7 @@ export function useChatActions(chatId?: string): ChatActions {
 
       editMessage(messageId: string, content: string, options?) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
+        void releaseDraftAttachments();
         const session = requireSession('editMessage');
         if (!session) {
           return;
@@ -625,24 +649,11 @@ export function useChatActions(chatId?: string): ChatActions {
           return;
         }
         void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'edit', messageId, content, imageUrls: options?.imageUrls, body: options?.body },
-        });
-      },
-
-      retryMessage(messageId: string, options?) {
-        const session = requireSession('retryMessage');
-        if (!session) {
-          return;
-        }
-        if (!session.chat.messages.some((m) => m.id === messageId)) {
-          return;
-        }
-        void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'retry', messageId, body: options?.body },
+        void store.requestTurn(resolvedChatId, {
+          kind: 'edit',
+          messageId,
+          text: content,
+          ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
         });
       },
     };

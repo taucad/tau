@@ -53,10 +53,6 @@ vi.mock('@taucad/kcl-wasm-lib', () => ({
   Context: vi.fn().mockImplementation(() => ({ executeMock: vi.fn(async () => ({ variables: {}, errors: [] })) })),
 }));
 vi.mock('@taucad/kcl-wasm-lib/kcl.wasm?url', () => ({ default: 'mock://wasm' }));
-vi.mock('@taucad/zoo/engine-connection', () => ({
-  MockEngineConnection: vi.fn().mockImplementation(() => ({})),
-}));
-
 /* eslint-enable @typescript-eslint/naming-convention -- end of mock declarations */
 
 function createMockContext(stub: MonacoTestStub): ActivationContext {

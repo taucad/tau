@@ -87,12 +87,52 @@ describe('handleGrep', () => {
     });
   });
 
+  it('should skip explicit-only system resources unless the search is scoped to skills', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockImplementation(async (path) => {
+      if (path === '') {
+        return [
+          {
+            name: '.agents',
+            type: 'dir',
+            size: 0,
+            traverseOnImplicitSearch: false,
+          },
+          textEntry('main.ts', 12),
+        ];
+      }
+      if (path === '.agents/skills/cad-demo') {
+        return [textEntry('api-index.md', 20, 2)];
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    fileSystem.stat.mockResolvedValue({
+      size: 0,
+      isDirectory: true,
+      createdAt: '1970-01-01T00:00:00.000Z',
+      modifiedAt: '1970-01-01T00:00:00.000Z',
+    });
+    fileSystem.readFile.mockImplementation(async (path) => (path === 'main.ts' ? 'project needle' : 'system needle'));
+
+    const unscoped = await handleGrep({ pattern: 'needle', path: '' }, fileSystem);
+    expect(unscoped.success && unscoped.matches.map(({ file }) => file)).toEqual(['main.ts']);
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(1);
+
+    fileSystem.readFile.mockClear();
+    const scoped = await handleGrep({ pattern: 'needle', path: '.agents/skills/cad-demo' }, fileSystem);
+    expect(scoped.success && scoped.matches.map(({ file }) => file)).toEqual(['.agents/skills/cad-demo/api-index.md']);
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['.', './', '/'] as const)('should reject noncanonical root alias %j', async (path) => {
     const fileSystem = mock<RpcFileSystem>();
 
     const result = await handleGrep({ pattern: 'retain', path }, fileSystem);
 
-    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: rpcClientErrorCode.validationError,
+    });
     expect(fileSystem.stat).not.toHaveBeenCalled();
   });
 
@@ -101,7 +141,10 @@ describe('handleGrep', () => {
 
     const result = await handleGrep({ pattern: 'x', path: '../secret' }, fileSystem);
 
-    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: rpcClientErrorCode.validationError,
+    });
     expect(fileSystem.stat).not.toHaveBeenCalled();
     expect(fileSystem.readdir).not.toHaveBeenCalled();
     expect(fileSystem.readFile).not.toHaveBeenCalled();
@@ -115,7 +158,10 @@ describe('handleGrep', () => {
 
     const result = await handleGrep({ pattern: 'foo', path: 'missing-dir' }, fileSystem);
 
-    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.fileNotFound });
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: rpcClientErrorCode.fileNotFound,
+    });
   });
 
   // ===========================================================================
@@ -146,7 +192,11 @@ describe('handleGrep', () => {
         totalMatches: 1,
       });
       expect(result.success && result.matches[0]).toEqual(
-        expect.objectContaining({ file: 'src/app.ts', line: 2, content: 'foo bar' }),
+        expect.objectContaining({
+          file: 'src/app.ts',
+          line: 2,
+          content: 'foo bar',
+        }),
       );
       expect(fileSystem.readdir).not.toHaveBeenCalled();
     });

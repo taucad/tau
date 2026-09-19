@@ -16,6 +16,10 @@ export const runtimeCopyTargets = (outDirectory: string): Array<{ from: string; 
     rename: 'THIRD_PARTY_LICENSES.md',
   },
   {
+    from: 'NOTICE',
+    to: outDirectory,
+  },
+  {
     from: 'src/nextjs/package-assets-loader.mjs',
     to: `${outDirectory}/nextjs`,
   },
@@ -25,6 +29,11 @@ const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
     'src/client/index.ts',
+    'src/configuration/index.ts',
+    'src/configuration/zod.ts',
+    'src/jobs/index.ts',
+    'src/machines/index.ts',
+    'src/host/index.ts',
     'src/types/index.ts',
     'src/plugins/plugin-entry.ts',
     'src/plugins/kernel-plugin-entry.ts',
@@ -59,7 +68,7 @@ const baseConfig: UserConfig = {
   ],
   sourcemap: true,
   clean: ['dist'],
-  dts: true,
+  dts: { eager: true },
   minify: true,
   copy: ({ outDir }) => runtimeCopyTargets(outDir),
   hooks: {

@@ -15,7 +15,15 @@ const mockCadRef = {
 const mockGraphicsRef = {
   getSnapshot: () => ({ context: { cameraState: { position: [1, 2, 3] } } }),
 };
-const mockEditorRef = { getSnapshot: () => ({ context: { viewSettings: {} } }) };
+const secondaryGraphicsRef = {
+  getSnapshot: () => ({ context: { cameraState: { position: [4, 5, 6] } } }),
+};
+const secondaryCadRef = mockCadRef;
+let cameraRegistryVersion = 0;
+const registeredGraphics = new Set<Record<string, unknown>>();
+let viewGraphics = new Map<string, typeof mockGraphicsRef>();
+let viewSettings: Record<string, { entryPath?: string }> = {};
+const mockEditorRef = { getSnapshot: () => ({ context: { viewSettings } }) };
 const mockImageService = { export: vi.fn() };
 const runtimeFileSystem = {};
 
@@ -26,17 +34,23 @@ vi.mock('@xstate/react', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   useMainGraphics: () => mockGraphicsRef,
   useProject: () => ({
-    geometryUnits: new Map([['main.ts', mockCadRef]]),
+    geometryUnits: new Map([
+      ['main.ts', mockCadRef],
+      ['secondary.ts', secondaryCadRef],
+    ]),
     mainEntryPath: 'main.ts',
-    viewGraphics: new Map(),
+    viewGraphics,
     editorRef: mockEditorRef,
   }),
 }));
 vi.mock('#hooks/use-graphics.js', () => ({
-  useCameraRegistryVersion: () => 1,
+  useGraphicsCameraRigQuery: () => {
+    const _version = cameraRegistryVersion;
+    return (graphicsRef: Record<string, unknown>) => registeredGraphics.has(graphicsRef) && _version >= 0;
+  },
 }));
 vi.mock('#services/graphics-camera-registry.js', () => ({
-  hasGraphicsCameraRig: () => true,
+  hasGraphicsCameraRig: (graphicsRef: Record<string, unknown>) => registeredGraphics.has(graphicsRef),
   getGraphicsCameraState: () => ({ position: [1, 2, 3] }),
 }));
 vi.mock('#services/headless-capture.js', () => ({
@@ -52,6 +66,11 @@ const { ChatContextActions } = await import('#components/chat/chat-context-actio
 describe('ChatContextActions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    cameraRegistryVersion = 0;
+    registeredGraphics.clear();
+    registeredGraphics.add(mockGraphicsRef);
+    viewGraphics = new Map();
+    viewSettings = {};
   });
 
   it('uses shared menu-item geometry for inline popover actions', () => {
@@ -86,5 +105,33 @@ describe('ChatContextActions', () => {
     await waitFor(() => {
       expect(mockAddImage).toHaveBeenCalledWith('data:image/webp;base64,AQID', { preserveOriginal: true });
     });
+  });
+
+  it('reacts to camera registration for main and non-main stable graphics actors', () => {
+    registeredGraphics.clear();
+    viewGraphics = new Map([
+      ['main', mockGraphicsRef],
+      ['secondary', secondaryGraphicsRef],
+    ]);
+    viewSettings = {
+      main: { entryPath: 'main.ts' },
+      secondary: { entryPath: 'secondary.ts' },
+    };
+    const view = render(<ChatContextActions asPopoverMenu addImage={mockAddImage} addText={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Current view' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'secondary.ts' })).toBeDisabled();
+
+    registeredGraphics.add(mockGraphicsRef);
+    registeredGraphics.add(secondaryGraphicsRef);
+    cameraRegistryVersion += 1;
+    view.rerender(<ChatContextActions asPopoverMenu addImage={mockAddImage} addText={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Current view' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'secondary.ts' })).toBeEnabled();
+
+    registeredGraphics.clear();
+    cameraRegistryVersion += 1;
+    view.rerender(<ChatContextActions asPopoverMenu addImage={mockAddImage} addText={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Current view' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'secondary.ts' })).toBeDisabled();
   });
 });

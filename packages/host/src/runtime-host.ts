@@ -50,6 +50,7 @@ export const serveHostRuntime = async (options: {
     port: 0,
     worker: () => createRuntimeWorker({ runtime: options.runtime }),
     authorize: (request) => tokenMatches(request.headers.authorization, options.authorizationToken),
+    allowPrivateComputePairing: true,
   });
   await host.ready;
   const address = host.address();

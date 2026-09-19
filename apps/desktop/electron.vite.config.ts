@@ -2,6 +2,12 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
 
+const cloudValue = process.env['TAU_CLOUD_ENABLED'];
+if (cloudValue !== undefined && cloudValue !== 'true' && cloudValue !== 'false') {
+  throw new Error('TAU_CLOUD_ENABLED must be exactly true or false.');
+}
+const define = { tauCloudBuildEnabled: JSON.stringify(cloudValue === 'true') } as const;
+
 const bundledWorkspaceDependencies = [
   '@taucad/agent-host',
   '@taucad/agent-tools',
@@ -10,7 +16,9 @@ const bundledWorkspaceDependencies = [
   '@taucad/build123d',
   '@taucad/esbuild',
   '@taucad/filesystem',
+  '@taucad/geospec-engine',
   '@taucad/gltf',
+  '@taucad/host',
   '@taucad/image',
   '@taucad/jscad',
   '@taucad/manifold',
@@ -21,7 +29,9 @@ const bundledWorkspaceDependencies = [
   '@taucad/replicad',
   '@taucad/rhino',
   '@taucad/runtime',
+  '@taucad/skills',
   '@taucad/zoo',
+  'pino-pretty',
   'zod',
 ] as const;
 
@@ -37,18 +47,38 @@ const bundledWorkspaceDependencies = [
  * its optional platform package from `node_modules` at runtime, and `libassimp`
  * likewise, so their `.node` binaries remain discoverable.
  */
+/**
+ * Packages the main/utility bundles load from `node_modules` at run time.
+ *
+ * Each must also be a declared `apps/desktop` dependency: the unpackaged build
+ * resolves them from `apps/desktop/node_modules`, and the packaging script
+ * copies them into the app. `electron-vite-externalization.test.ts` pins that.
+ */
+export const desktopExternalizedDependencies = [
+  '@agentclientprotocol/claude-agent-acp',
+  '@agentclientprotocol/codex-acp',
+  /* Resolves its vendored seccomp/srt-win helpers relative to its own module file. */
+  '@anthropic-ai/sandbox-runtime',
+  '@taulabs/openrscad-engine',
+  'esbuild',
+  'libassimp',
+  'nanoraster',
+] as const;
+
 export default defineConfig(
   electronRuntimeConfig({
     main: {
+      define,
       build: {
         externalizeDeps: {
           exclude: [...bundledWorkspaceDependencies],
-          include: ['@taulabs/openrscad-engine', 'libassimp'],
+          include: [...desktopExternalizedDependencies],
         },
         outDir: 'dist/main',
       },
     },
     preload: {
+      define,
       build: {
         outDir: 'dist/preload',
         lib: {

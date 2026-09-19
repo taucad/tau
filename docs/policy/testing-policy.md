@@ -401,7 +401,13 @@ A change that crosses a public operation, plugin authoring contract, worker RPC,
 
 Omitting a layer requires an explicit reason tied to the change's observable boundary. `bytes.length > 0` is insufficient when semantic, round-trip, byte-equality, or pixel evidence is available.
 
-## 14. Preserve Meaningful Regression Evidence
+## 14. Re-Home Provider Coverage Before Deleting Its Owner
+
+Replacing an execution plane, provider adapter, or transport deletes the tests that lived there. Before that deletion lands, inventory the checks that protect opaque provider replay metadata — signatures, continuation tokens, cache handles, any value the provider requires back byte-exactly — and name their successor in the new plane. A generic codec that compiles against the new plane does not prove it carries a provider-specific field the old adapter handled deliberately.
+
+Credentialed provider coverage and deterministic simulated coverage are separate claims. Completion evidence states which one it has. A simulated fixture proves the field survives Tau's own boundaries; only a credentialed run against the provider proves the provider accepts the replay.
+
+## 15. Preserve Meaningful Regression Evidence
 
 For a non-trivial behavior fix, establish the smallest failing semantic check before its correction. Preserve applicable existing regression tests; remove tests only when their behavior is deliberately retired, not to hide a failure. Tests for a non-shipping feature are deleted or completed with that feature rather than permanently skipped. A reversible prose-only change does not need a new test.
 

@@ -117,16 +117,16 @@ afterEach(() => {
 });
 
 describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
-  it('should render "Compiled <filename>" with a ViewerLink on success and an untoned leading icon', () => {
+  it('should render "Rendered <filename>" with a ViewerLink on success and an untoned leading icon', () => {
     const part = buildOutputPart('lib/skids.ts', { status: 'ready' });
 
     render(<ChatMessageToolGetKernelResult part={part} />);
 
     const title = screen.getByTestId('chat-tool-card-title');
-    expect(title.textContent).toContain('Compiled');
+    expect(title.textContent).toContain('Rendered');
     expect(title.textContent).toContain('lib/skids.ts');
 
-    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Compiled');
+    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Rendered');
     expect(screen.getByTestId('chat-tool-description').textContent).toContain('lib/skids.ts');
 
     const link = screen.getByTestId('viewer-link');
@@ -139,7 +139,7 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     expect(screen.getByTestId('chat-tool-card-icon').dataset['tone']).toBe('');
   });
 
-  it('should render "Failed to compile <filename>" with the icon toned destructive (not the header)', () => {
+  it('should render "Failed to render <filename>" with the icon toned destructive (not the header)', () => {
     const issues: KernelIssue[] = [
       {
         severity: 'error',
@@ -153,10 +153,10 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     render(<ChatMessageToolGetKernelResult part={part} />);
 
     const title = screen.getByTestId('chat-tool-card-title');
-    expect(title.textContent).toContain('Failed to compile');
+    expect(title.textContent).toContain('Failed to render');
     expect(title.textContent).toContain('lib/skids.ts');
 
-    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Failed to compile');
+    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Failed to render');
     expect(screen.getByTestId('chat-tool-description').textContent).toContain('lib/skids.ts');
 
     const headerLinks = screen.getAllByTestId('viewer-link').filter((link) => link.dataset['path'] === 'lib/skids.ts');
@@ -169,7 +169,7 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     expect(icons[0]?.dataset['tone']).toBe('destructive');
   });
 
-  it('should render "Compiled <filename> with N warning(s)" with an untoned leading icon (warnings are not failures)', () => {
+  it('should render "Rendered <filename> with N warning(s)" with an untoned leading icon (warnings are not failures)', () => {
     const issues: KernelIssue[] = [
       {
         severity: 'warning',
@@ -183,12 +183,12 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     render(<ChatMessageToolGetKernelResult part={part} />);
 
     const title = screen.getByTestId('chat-tool-card-title');
-    expect(title.textContent).toContain('Compiled');
+    expect(title.textContent).toContain('Rendered');
     expect(title.textContent).toContain('lib/skids.ts');
     expect(title.textContent).toContain('with 1 warning');
     expect(title.textContent).not.toContain('warnings');
 
-    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Compiled');
+    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Rendered');
     const description = screen.getByTestId('chat-tool-description');
     expect(description.textContent).toContain('lib/skids.ts');
     expect(description.textContent).toContain('with 1 warning');
@@ -199,7 +199,7 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     expect(icons[0]?.dataset['tone']).toBe('');
   });
 
-  it('should render "Compiled <filename> with N warnings" when multiple warnings are present', () => {
+  it('should render "Rendered <filename> with N warnings" when multiple warnings are present', () => {
     const issues: KernelIssue[] = [
       {
         severity: 'warning',
@@ -222,13 +222,13 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     expect(title.textContent).toContain('with 2 warnings');
   });
 
-  it('should render "Compiling <filename>..." while loading when targetFile is known', () => {
+  it('should render "Rendering <filename>..." while loading when targetFile is known', () => {
     const part = buildInputPart('lib/skids.ts');
 
     render(<ChatMessageToolGetKernelResult part={part} />);
 
     const title = screen.getByTestId('chat-tool-card-title');
-    expect(title.textContent).toContain('Compiling');
+    expect(title.textContent).toContain('Rendering');
     expect(title.textContent).toContain('lib/skids.ts');
 
     const link = screen.getByTestId('viewer-link');

@@ -1,4 +1,7 @@
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
+import type { JobProviderRegistration } from '#jobs/job-provider.js';
+import type { MachineProvider } from '#machines/machine.js';
+import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import {
   expandedPluginCapabilitiesSymbol,
   pluginFactorySymbol,
@@ -14,6 +17,10 @@ type KernelCapabilityFactory = (...args: never[]) => AnyKernelPlugin;
 type MiddlewareCapabilityFactory = (...args: never[]) => MiddlewarePlugin;
 type BundlerCapabilityFactory = (...args: never[]) => BundlerPlugin;
 type TranscoderCapabilityFactory = (...args: never[]) => AnyTranscoderPlugin;
+type JobCapability = JobProviderRegistration & RuntimePluginDefinitionCarrier<unknown>;
+type JobCapabilityFactory = (...args: never[]) => JobCapability;
+type MachineCapability = MachineProvider & RuntimePluginDefinitionCarrier<unknown>;
+type MachineCapabilityFactory = (...args: never[]) => MachineCapability;
 type AnyCapabilityFactory = (...args: never[]) => unknown;
 
 type CapabilityFactoryMap<Factory extends AnyCapabilityFactory> = Readonly<Record<string, Factory>>;
@@ -28,11 +35,15 @@ type PluginCapabilityPath<
   Middleware extends CapabilityFactoryMap<MiddlewareCapabilityFactory>,
   Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory>,
   Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory>,
+  Jobs extends CapabilityFactoryMap<JobCapabilityFactory>,
+  Machines extends CapabilityFactoryMap<MachineCapabilityFactory>,
 > =
   | `kernels.${Extract<keyof Kernels, string>}`
   | `middleware.${Extract<keyof Middleware, string>}`
   | `bundlers.${Extract<keyof Bundlers, string>}`
-  | `transcoders.${Extract<keyof Transcoders, string>}`;
+  | `transcoders.${Extract<keyof Transcoders, string>}`
+  | `jobs.${Extract<keyof Jobs, string>}`
+  | `machines.${Extract<keyof Machines, string>}`;
 
 type ValidatedPresets<Presets extends Readonly<Record<string, readonly string[]>>, Path extends string> = {
   readonly [Name in keyof Presets]: readonly Path[];
@@ -93,23 +104,31 @@ type CapabilityInvocationOptions<
   Middleware extends CapabilityFactoryMap<MiddlewareCapabilityFactory>,
   Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory>,
   Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory>,
+  Jobs extends CapabilityFactoryMap<JobCapabilityFactory>,
+  Machines extends CapabilityFactoryMap<MachineCapabilityFactory>,
   Entries extends readonly string[],
 > = RoleInvocationOptions<'kernels', Kernels, SelectedCapabilityNames<Entries, 'kernels', Kernels>> &
   RoleInvocationOptions<'middleware', Middleware, SelectedCapabilityNames<Entries, 'middleware', Middleware>> &
   RoleInvocationOptions<'bundlers', Bundlers, SelectedCapabilityNames<Entries, 'bundlers', Bundlers>> &
-  RoleInvocationOptions<'transcoders', Transcoders, SelectedCapabilityNames<Entries, 'transcoders', Transcoders>>;
+  RoleInvocationOptions<'transcoders', Transcoders, SelectedCapabilityNames<Entries, 'transcoders', Transcoders>> &
+  RoleInvocationOptions<'jobs', Jobs, SelectedCapabilityNames<Entries, 'jobs', Jobs>> &
+  RoleInvocationOptions<'machines', Machines, SelectedCapabilityNames<Entries, 'machines', Machines>>;
 
 type RequiredCapabilityOptionNames<
   Kernels extends CapabilityFactoryMap<KernelCapabilityFactory>,
   Middleware extends CapabilityFactoryMap<MiddlewareCapabilityFactory>,
   Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory>,
   Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory>,
+  Jobs extends CapabilityFactoryMap<JobCapabilityFactory>,
+  Machines extends CapabilityFactoryMap<MachineCapabilityFactory>,
   Entries extends readonly string[],
 > =
   | RequiredCapabilityNames<Kernels, SelectedCapabilityNames<Entries, 'kernels', Kernels>>
   | RequiredCapabilityNames<Middleware, SelectedCapabilityNames<Entries, 'middleware', Middleware>>
   | RequiredCapabilityNames<Bundlers, SelectedCapabilityNames<Entries, 'bundlers', Bundlers>>
-  | RequiredCapabilityNames<Transcoders, SelectedCapabilityNames<Entries, 'transcoders', Transcoders>>;
+  | RequiredCapabilityNames<Transcoders, SelectedCapabilityNames<Entries, 'transcoders', Transcoders>>
+  | RequiredCapabilityNames<Jobs, SelectedCapabilityNames<Entries, 'jobs', Jobs>>
+  | RequiredCapabilityNames<Machines, SelectedCapabilityNames<Entries, 'machines', Machines>>;
 
 type ExpandPresetEntries<
   Entries extends readonly string[],
@@ -137,6 +156,8 @@ type CapabilitiesForPreset<
   Middleware extends CapabilityFactoryMap<MiddlewareCapabilityFactory>,
   Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory>,
   Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory>,
+  Jobs extends CapabilityFactoryMap<JobCapabilityFactory>,
+  Machines extends CapabilityFactoryMap<MachineCapabilityFactory>,
   Presets extends Readonly<Record<string, readonly string[]>>,
   Preset extends string,
 > = string extends Preset
@@ -145,6 +166,8 @@ type CapabilitiesForPreset<
       readonly middleware: CapabilitiesAcrossPresets<Presets, 'middleware', Middleware>;
       readonly bundlers: CapabilitiesAcrossPresets<Presets, 'bundlers', Bundlers>;
       readonly transcoders: CapabilitiesAcrossPresets<Presets, 'transcoders', Transcoders>;
+      readonly jobs: CapabilitiesAcrossPresets<Presets, 'jobs', Jobs>;
+      readonly machines: CapabilitiesAcrossPresets<Presets, 'machines', Machines>;
     }
   : Preset extends keyof Presets
     ? {
@@ -152,6 +175,8 @@ type CapabilitiesForPreset<
         readonly middleware: ExpandPresetEntries<Presets[Preset], 'middleware', Middleware>;
         readonly bundlers: ExpandPresetEntries<Presets[Preset], 'bundlers', Bundlers>;
         readonly transcoders: ExpandPresetEntries<Presets[Preset], 'transcoders', Transcoders>;
+        readonly jobs: ExpandPresetEntries<Presets[Preset], 'jobs', Jobs>;
+        readonly machines: ExpandPresetEntries<Presets[Preset], 'machines', Machines>;
       }
     : EmptyPluginCapabilities;
 
@@ -174,13 +199,15 @@ type PluginInvocationOptions<
   Middleware extends CapabilityFactoryMap<MiddlewareCapabilityFactory>,
   Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory>,
   Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory>,
+  Jobs extends CapabilityFactoryMap<JobCapabilityFactory>,
+  Machines extends CapabilityFactoryMap<MachineCapabilityFactory>,
   Presets extends Readonly<Record<string, readonly string[]>>,
   Preset extends string,
 > = PresetInvocationOptions<Preset, Presets> &
   (string extends Preset
     ? Record<never, never>
     : Preset extends keyof Presets
-      ? CapabilityInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Presets[Preset]>
+      ? CapabilityInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets[Preset]>
       : Record<never, never>);
 
 type PluginInvocationArguments<
@@ -188,23 +215,51 @@ type PluginInvocationArguments<
   Middleware extends CapabilityFactoryMap<MiddlewareCapabilityFactory>,
   Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory>,
   Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory>,
+  Jobs extends CapabilityFactoryMap<JobCapabilityFactory>,
+  Machines extends CapabilityFactoryMap<MachineCapabilityFactory>,
   Presets extends Readonly<Record<string, readonly string[]>>,
   Preset extends string,
 > = string extends Preset
-  ? [options: PluginInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Presets, Preset>]
+  ? [options: PluginInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets, Preset>]
   : Preset extends 'default'
     ? Preset extends keyof Presets
-      ? [RequiredCapabilityOptionNames<Kernels, Middleware, Bundlers, Transcoders, Presets[Preset]>] extends [never]
-        ? [options?: PluginInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Presets, Preset>]
-        : [options: PluginInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Presets, Preset>]
+      ? [
+          RequiredCapabilityOptionNames<Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets[Preset]>,
+        ] extends [never]
+        ? [
+            options?: PluginInvocationOptions<
+              Kernels,
+              Middleware,
+              Bundlers,
+              Transcoders,
+              Jobs,
+              Machines,
+              Presets,
+              Preset
+            >,
+          ]
+        : [
+            options: PluginInvocationOptions<
+              Kernels,
+              Middleware,
+              Bundlers,
+              Transcoders,
+              Jobs,
+              Machines,
+              Presets,
+              Preset
+            >,
+          ]
       : never
-    : [options: PluginInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Presets, Preset>];
+    : [options: PluginInvocationOptions<Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets, Preset>];
 
 type EmptyPluginCapabilities = {
   readonly kernels: EmptyTuple;
   readonly middleware: EmptyTuple;
   readonly bundlers: EmptyTuple;
   readonly transcoders: EmptyTuple;
+  readonly jobs: EmptyTuple;
+  readonly machines: EmptyTuple;
 };
 
 /** Package identity for a Tau plugin toolkit. @public */
@@ -218,6 +273,8 @@ export type PluginCapabilities = {
   readonly middleware: readonly MiddlewarePlugin[];
   readonly bundlers: readonly BundlerPlugin[];
   readonly transcoders: readonly AnyTranscoderPlugin[];
+  readonly jobs: readonly JobCapability[];
+  readonly machines: readonly MachineCapability[];
 };
 
 /** An invoked plugin toolkit ready for expansion by {@link defineRuntime}. @public */
@@ -236,11 +293,13 @@ export type PluginFactory<
   Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory> = CapabilityFactoryMap<BundlerCapabilityFactory>,
   Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory> =
     CapabilityFactoryMap<TranscoderCapabilityFactory>,
+  Jobs extends CapabilityFactoryMap<JobCapabilityFactory> = CapabilityFactoryMap<JobCapabilityFactory>,
+  Machines extends CapabilityFactoryMap<MachineCapabilityFactory> = CapabilityFactoryMap<MachineCapabilityFactory>,
   Presets extends Readonly<Record<string, readonly string[]>> = Readonly<Record<string, readonly string[]>>,
 > = {
   <const Preset extends string = 'default'>(
-    ...options: PluginInvocationArguments<Kernels, Middleware, Bundlers, Transcoders, Presets, Preset>
-  ): PluginInstance<CapabilitiesForPreset<Kernels, Middleware, Bundlers, Transcoders, Presets, Preset>>;
+    ...options: PluginInvocationArguments<Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets, Preset>
+  ): PluginInstance<CapabilitiesForPreset<Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets, Preset>>;
   readonly meta: Meta;
 };
 
@@ -289,6 +348,18 @@ export type ExpandPluginTranscoders<Plugins extends readonly AnyPluginInstance[]
   'transcoders'
 >;
 
+/** Ordered job-provider tuple selected by invoked plugins. @public */
+export type ExpandPluginJobs<Plugins extends readonly AnyPluginInstance[]> = ExpandPluginCapabilityTuples<
+  Plugins,
+  'jobs'
+>;
+
+/** Ordered machine-provider tuple selected by invoked plugins. @public */
+export type ExpandPluginMachines<Plugins extends readonly AnyPluginInstance[]> = ExpandPluginCapabilityTuples<
+  Plugins,
+  'machines'
+>;
+
 type RuntimePluginKind = keyof PluginCapabilities;
 
 /** Expanded capability plus its package-owned diagnostic origin. @public */
@@ -312,22 +383,84 @@ type PluginDefinition = {
   readonly middleware?: CapabilityFactoryMap<MiddlewareCapabilityFactory>;
   readonly bundlers?: CapabilityFactoryMap<BundlerCapabilityFactory>;
   readonly transcoders?: CapabilityFactoryMap<TranscoderCapabilityFactory>;
+  readonly jobs?: CapabilityFactoryMap<JobCapabilityFactory>;
+  readonly machines?: CapabilityFactoryMap<MachineCapabilityFactory>;
   readonly presets: Readonly<Record<string, readonly string[]>>;
 };
 
 type RuntimeCapabilityOptions = Readonly<Partial<Record<RuntimePluginKind, Readonly<Record<string, unknown>>>>>;
 
-const runtimePluginKinds = ['kernels', 'middleware', 'bundlers', 'transcoders'] as const;
+const runtimePluginKinds = ['kernels', 'middleware', 'bundlers', 'transcoders', 'jobs', 'machines'] as const;
 const pluginInvocationOptionKeys = ['preset', ...runtimePluginKinds] as const;
 
 const isRecordObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const hasOwnCallableProperty = <Key extends PropertyKey>(
-  value: unknown,
-  key: Key,
-): value is ((...args: never[]) => unknown) & Record<Key, unknown> =>
-  typeof value === 'function' && Object.hasOwn(value, key);
+const ownDataValue = (value: Record<PropertyKey, unknown>, key: PropertyKey): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor !== undefined && 'value' in descriptor ? descriptor.value : undefined;
+};
+
+const isDenseDataArray = (value: unknown): value is readonly unknown[] => {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined || !('value' in descriptor)) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const capabilityBuckets = (value: unknown): Readonly<Record<RuntimePluginKind, readonly unknown[]>> | undefined => {
+  if (!isRecordObject(value)) {
+    return undefined;
+  }
+  const buckets: Partial<Record<RuntimePluginKind, readonly unknown[]>> = {};
+  for (const kind of runtimePluginKinds) {
+    const bucket = ownDataValue(value, kind);
+    if (
+      !isDenseDataArray(bucket) ||
+      !bucket.every((capability) => isRecordObject(capability) && typeof ownDataValue(capability, 'id') === 'string')
+    ) {
+      return undefined;
+    }
+    buckets[kind] = bucket;
+  }
+  return buckets as Readonly<Record<RuntimePluginKind, readonly unknown[]>>;
+};
+
+const isExpandedCapabilityEntry = (value: unknown): boolean => {
+  if (!isRecordObject(value)) {
+    return false;
+  }
+  const kind = ownDataValue(value, 'kind');
+  const capability = ownDataValue(value, 'capability');
+  return (
+    typeof kind === 'string' &&
+    runtimePluginKinds.includes(kind as RuntimePluginKind) &&
+    isRecordObject(capability) &&
+    typeof ownDataValue(capability, 'id') === 'string' &&
+    typeof ownDataValue(value, 'path') === 'string' &&
+    typeof ownDataValue(value, 'packageName') === 'string'
+  );
+};
+
+const capabilitiesCorrespond = (
+  buckets: Readonly<Record<RuntimePluginKind, readonly unknown[]>>,
+  expanded: readonly unknown[],
+): boolean =>
+  runtimePluginKinds.every((kind) => {
+    const selected = expanded.filter((entry) => isRecordObject(entry) && ownDataValue(entry, 'kind') === kind);
+    return (
+      selected.length === buckets[kind].length &&
+      selected.every(
+        (entry, index) => ownDataValue(entry as Record<PropertyKey, unknown>, 'capability') === buckets[kind][index],
+      )
+    );
+  });
 
 const parseCapabilityPath = (
   definition: PluginDefinition,
@@ -362,7 +495,10 @@ const requireCapabilityFactory = <Factory extends AnyCapabilityFactory>(
 const parsePluginInvocation = (
   definition: PluginDefinition,
   options: unknown,
-): { readonly preset: string; readonly capabilityOptions: RuntimeCapabilityOptions } => {
+): {
+  readonly preset: string;
+  readonly capabilityOptions: RuntimeCapabilityOptions;
+} => {
   if (options !== undefined && !isRecordObject(options)) {
     throw new TypeError(`${definition.meta.name} plugin options must be an object.`);
   }
@@ -443,7 +579,10 @@ const expandPreset = (
         return {
           // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generic factory ReturnType is materialised at this single invocation boundary
           capability: invokeCapabilityFactory(
-            requireCapabilityFactory(definition.kernels?.[name], { definition, path }),
+            requireCapabilityFactory(definition.kernels?.[name], {
+              definition,
+              path,
+            }),
             configured,
             options,
           ),
@@ -455,7 +594,10 @@ const expandPreset = (
         return {
           // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generic factory ReturnType is materialised at this single invocation boundary
           capability: invokeCapabilityFactory(
-            requireCapabilityFactory(definition.middleware?.[name], { definition, path }),
+            requireCapabilityFactory(definition.middleware?.[name], {
+              definition,
+              path,
+            }),
             configured,
             options,
           ),
@@ -467,7 +609,10 @@ const expandPreset = (
         return {
           // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generic factory ReturnType is materialised at this single invocation boundary
           capability: invokeCapabilityFactory(
-            requireCapabilityFactory(definition.bundlers?.[name], { definition, path }),
+            requireCapabilityFactory(definition.bundlers?.[name], {
+              definition,
+              path,
+            }),
             configured,
             options,
           ),
@@ -479,7 +624,40 @@ const expandPreset = (
         return {
           // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generic factory ReturnType is materialised at this single invocation boundary
           capability: invokeCapabilityFactory(
-            requireCapabilityFactory(definition.transcoders?.[name], { definition, path }),
+            requireCapabilityFactory(definition.transcoders?.[name], {
+              definition,
+              path,
+            }),
+            configured,
+            options,
+          ),
+          kind,
+          ...origin,
+        };
+      }
+      case 'jobs': {
+        return {
+          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generic factory ReturnType is materialised at this single invocation boundary
+          capability: invokeCapabilityFactory(
+            requireCapabilityFactory(definition.jobs?.[name], {
+              definition,
+              path,
+            }),
+            configured,
+            options,
+          ),
+          kind,
+          ...origin,
+        };
+      }
+      case 'machines': {
+        return {
+          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generic factory ReturnType is materialised at this single invocation boundary
+          capability: invokeCapabilityFactory(
+            requireCapabilityFactory(definition.machines?.[name], {
+              definition,
+              path,
+            }),
             configured,
             options,
           ),
@@ -505,6 +683,8 @@ export function definePlugin<
   const Middleware extends CapabilityFactoryMap<MiddlewareCapabilityFactory> = EmptyCapabilityFactoryMap,
   const Bundlers extends CapabilityFactoryMap<BundlerCapabilityFactory> = EmptyCapabilityFactoryMap,
   const Transcoders extends CapabilityFactoryMap<TranscoderCapabilityFactory> = EmptyCapabilityFactoryMap,
+  const Jobs extends CapabilityFactoryMap<JobCapabilityFactory> = EmptyCapabilityFactoryMap,
+  const Machines extends CapabilityFactoryMap<MachineCapabilityFactory> = EmptyCapabilityFactoryMap,
   const Presets extends Readonly<Record<string, readonly string[]>> = Readonly<Record<string, readonly string[]>>,
 >(definition: {
   readonly meta: Meta;
@@ -512,9 +692,11 @@ export function definePlugin<
   readonly middleware?: Middleware;
   readonly bundlers?: Bundlers;
   readonly transcoders?: Transcoders;
+  readonly jobs?: Jobs;
+  readonly machines?: Machines;
   readonly presets: Presets &
-    ValidatedPresets<Presets, PluginCapabilityPath<Kernels, Middleware, Bundlers, Transcoders>>;
-}): PluginFactory<Meta, Kernels, Middleware, Bundlers, Transcoders, Presets> {
+    ValidatedPresets<Presets, PluginCapabilityPath<Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines>>;
+}): PluginFactory<Meta, Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets> {
   const factory = ((options?: unknown) => {
     const { preset, capabilityOptions } = parsePluginInvocation(definition, options);
     const expanded = expandPreset(definition, preset, capabilityOptions);
@@ -523,11 +705,15 @@ export function definePlugin<
       middleware: MiddlewarePlugin[];
       bundlers: BundlerPlugin[];
       transcoders: AnyTranscoderPlugin[];
+      jobs: JobCapability[];
+      machines: MachineCapability[];
     } = {
       kernels: [],
       middleware: [],
       bundlers: [],
       transcoders: [],
+      jobs: [],
+      machines: [],
     };
     for (const entry of expanded) {
       switch (entry.kind) {
@@ -547,6 +733,14 @@ export function definePlugin<
           capabilities.transcoders.push(entry.capability);
           break;
         }
+        case 'jobs': {
+          capabilities.jobs.push(entry.capability);
+          break;
+        }
+        case 'machines': {
+          capabilities.machines.push(entry.capability);
+          break;
+        }
       }
     }
     const instance = { meta: definition.meta, preset, capabilities };
@@ -555,7 +749,7 @@ export function definePlugin<
       [expandedPluginCapabilitiesSymbol]: { value: expanded },
     });
     return instance;
-  }) as unknown as PluginFactory<Meta, Kernels, Middleware, Bundlers, Transcoders, Presets>;
+  }) as unknown as PluginFactory<Meta, Kernels, Middleware, Bundlers, Transcoders, Jobs, Machines, Presets>;
 
   Object.defineProperties(factory, {
     meta: { value: definition.meta, enumerable: true },
@@ -565,31 +759,47 @@ export function definePlugin<
 }
 
 /** Test whether an unknown value is an invoked Tau plugin instance for the current ABI. @public */
-export const isPluginInstance = (value: unknown): value is PluginInstance & PluginInstanceInternals =>
-  typeof value === 'object' &&
-  value !== null &&
-  (value as Partial<Record<PropertyKey, unknown>>)[pluginInstanceSymbol] === runtimePluginAbiVersion;
+export const isPluginInstance = (value: unknown): value is PluginInstance & PluginInstanceInternals => {
+  if (!isRecordObject(value)) {
+    return false;
+  }
+  const expanded = ownDataValue(value, expandedPluginCapabilitiesSymbol);
+  const meta = ownDataValue(value, 'meta');
+  const buckets = capabilityBuckets(ownDataValue(value, 'capabilities'));
+  return (
+    ownDataValue(value, pluginInstanceSymbol) === runtimePluginAbiVersion &&
+    isRecordObject(meta) &&
+    typeof ownDataValue(meta, 'name') === 'string' &&
+    typeof ownDataValue(value, 'preset') === 'string' &&
+    buckets !== undefined &&
+    isDenseDataArray(expanded) &&
+    expanded.every((entry) => isExpandedCapabilityEntry(entry)) &&
+    capabilitiesCorrespond(buckets, expanded)
+  );
+};
 
 /** Read a factory or instance construction ABI without validating the rest of its shape. @public */
 export const runtimePluginAbiVersionOf = (value: unknown): number | undefined => {
   if ((typeof value !== 'object' || value === null) && typeof value !== 'function') {
     return undefined;
   }
-  const branded = value as Partial<Record<PropertyKey, unknown>>;
-  const version = branded[pluginFactorySymbol] ?? branded[pluginInstanceSymbol];
+  const branded = value as unknown as Record<PropertyKey, unknown>;
+  const version = ownDataValue(branded, pluginFactorySymbol) ?? ownDataValue(branded, pluginInstanceSymbol);
   return typeof version === 'number' ? version : undefined;
 };
 
 /** Test whether an unknown dynamic export is a Tau plugin factory. @public */
 export const isPluginFactory = (value: unknown): value is PluginFactory => {
-  if (
-    !hasOwnCallableProperty(value, 'meta') ||
-    (value as unknown as Partial<Record<PropertyKey, unknown>>)[pluginFactorySymbol] !== runtimePluginAbiVersion
-  ) {
+  if (typeof value !== 'function') {
     return false;
   }
-  const { meta } = value;
-  return isRecordObject(meta) && typeof meta['name'] === 'string';
+  const callable = value as unknown as Record<PropertyKey, unknown>;
+  const meta = ownDataValue(callable, 'meta');
+  return (
+    ownDataValue(callable, pluginFactorySymbol) === runtimePluginAbiVersion &&
+    isRecordObject(meta) &&
+    typeof ownDataValue(meta, 'name') === 'string'
+  );
 };
 
 export const expandedPluginCapabilities = (

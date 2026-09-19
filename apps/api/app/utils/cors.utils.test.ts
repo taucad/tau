@@ -7,9 +7,40 @@ import {
   desktopAppOrigin,
 } from '#utils/cors.utils.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
+import { httpHeader } from '#constants/http-header.constant.js';
 
 it('should expose the durable chat run identity and bearer session token to cross-origin clients', () => {
-  expect(corsBaseConfiguration.exposedHeaders).toEqual(['x-tau-chat-run-id', 'set-auth-token']);
+  expect(corsBaseConfiguration.exposedHeaders).toEqual(['x-tau-chat-run-id', 'x-tau-operation-id', 'set-auth-token']);
+  expect(corsBaseConfiguration.allowedHeaders).toContain('x-tau-attempt-id');
+});
+
+/**
+ * The same preflight trap as `git-protocol` below, for the gateway's optional
+ * attribution headers: a browser that sends `x-tau-project-id` against an
+ * allow-list missing it gets a `204` and a dropped request, with no API log line.
+ * The names are derived from `httpHeader`, so this asserts the derivation and not
+ * just the literals.
+ */
+it('should allow the gateway attribution headers a browser host sends', () => {
+  expect(corsBaseConfiguration.allowedHeaders).toEqual(
+    expect.arrayContaining([httpHeader.xTauProjectId, httpHeader.xTauChatId, httpHeader.xTauActivity]),
+  );
+  expect(corsBaseConfiguration.allowedHeaders).toEqual(
+    expect.arrayContaining(['x-tau-project-id', 'x-tau-chat-id', 'x-tau-activity']),
+  );
+});
+
+/**
+ * W18 DEF-5. `isomorphic-git` asks for protocol v2 with a `git-protocol` header
+ * on every smart-HTTP request, and posts its packs as `application/x-git-*`,
+ * which is not one of CORS's three safelisted `content-type` values. A missing
+ * name here is invisible: the preflight answers `204` and the browser then
+ * drops the request without an error the page can see.
+ */
+it('should allow every header a browser git client sends', () => {
+  expect(corsBaseConfiguration.allowedHeaders).toEqual(
+    expect.arrayContaining(['git-protocol', 'content-type', 'authorization', 'x-tau-proxy-authorization']),
+  );
 });
 
 describe('separateOriginsAndPatterns', () => {

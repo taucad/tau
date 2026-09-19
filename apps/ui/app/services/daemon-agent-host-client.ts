@@ -1,16 +1,11 @@
-import type {
-  AgentChannelAdmissionConfig,
-  AgentChannelClient,
-  AgentChannelCommand,
-  AgentChannelResponse,
-} from '@taucad/agent-host';
+import type { AgentChannelAdmissionConfig, AgentChannelClient, AgentChannelCommand } from '@taucad/agent-host';
+import { Topic } from '@taucad/events';
 import type { AgentHostAdmissionConfig, AgentHostWorkerStartRequest } from '#workers/agent-host.contract.js';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type {
   AgentHostTransport,
   AgentHostTransportCloseReason,
   AgentHostTransportRequest,
-  AgentHostTransportResponse,
   AgentHostTransportStreams,
 } from '#services/agent-host-transport.js';
 
@@ -38,10 +33,14 @@ const daemonAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAd
    * mutable. Same values, opposite variance — copied in, asserted once. */
   ...(config.contextPayload === undefined
     ? {}
-    : { contextPayload: config.contextPayload as AgentChannelAdmissionConfig['contextPayload'] }),
+    : {
+        contextPayload: config.contextPayload as AgentChannelAdmissionConfig['contextPayload'],
+      }),
   ...(config.contextMessages === undefined
     ? {}
-    : { contextMessages: [...config.contextMessages] as AgentChannelAdmissionConfig['contextMessages'] }),
+    : {
+        contextMessages: [...config.contextMessages] as AgentChannelAdmissionConfig['contextMessages'],
+      }),
 });
 
 /**
@@ -54,25 +53,34 @@ const daemonAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAd
 /**
  * The admission an external-agent turn carries (W4-ACP).
  *
- * Nothing a Tau turn negotiates travels: the daemon routes on `agent` *before*
+ * Nothing a Tau turn *negotiates* travels: the daemon routes on `agent` before
  * it composes a Tau admission, so the model, prompt blocks and tool grant would
- * be read by nobody. `systemPrompt` and `toolChoice` are still required by the
- * T0 schema, so they are sent empty rather than fabricated from a model this
- * run will never use.
+ * be read by nobody, and they are never fabricated from a model this run will
+ * never use. What the client *composed* does travel (V12): the CAD system
+ * prompt, the skill index and the editor snapshot become embedded resources on
+ * the agent session's first prompt. `toolChoice` is required by the T0 schema
+ * and inert here.
  */
 const externalAdmissionConfig = (
   agent: NonNullable<AgentHostWorkerStartRequest['agent']>,
-): AgentChannelAdmissionConfig => {
-  if (agent.kind !== 'acp') {
-    /* A Paseo session is held by the page, not by a daemon: there is no channel
-     * command that would make one run there, and silently sending it as an ACP
-     * agent would ask the daemon to spawn an adapter that does not exist. */
-    throw new Error(`A ${agent.kind} agent cannot run on a Tau Host.`);
-  }
-  return { agent, systemPrompt: '', toolChoice: 'auto' };
-};
+  context: AgentHostWorkerStartRequest['context'],
+): AgentChannelAdmissionConfig => ({
+  agent,
+  systemPrompt: context?.systemPrompt ?? '',
+  toolChoice: 'auto',
+  /* Same values, opposite variance — see {@link daemonAdmissionConfig}. */
+  ...(context?.contextPayload === undefined
+    ? {}
+    : {
+        contextPayload: context.contextPayload as AgentChannelAdmissionConfig['contextPayload'],
+      }),
+  ...(context?.snapshot === undefined ? {} : { snapshot: context.snapshot }),
+});
 
 const daemonCommand = (request: Exclude<AgentHostTransportRequest, { type: 'close' }>): AgentChannelCommand => {
+  if (request.type === 'record-settlement') {
+    throw new Error('Revision settlements are recorded by the browser host that owns their log.');
+  }
   if (request.type !== 'start') {
     return request;
   }
@@ -82,31 +90,23 @@ const daemonCommand = (request: Exclude<AgentHostTransportRequest, { type: 'clos
     runId: request.runId,
     message: request.message,
     ...(request.agent
-      ? { config: externalAdmissionConfig(request.agent) }
+      ? { config: externalAdmissionConfig(request.agent, request.context) }
       : request.config
         ? { config: daemonAdmissionConfig(request.config) }
         : {}),
+    /* Beside `config`, exactly as `agent-wire.ts` carries it: the mode governs
+     * the host's revision, not the model admission, so a Tau turn and an
+     * external one send the same two fields (V19, G-REV-MODE). */
+    ...(request.mode === undefined ? {} : { mode: request.mode }),
+    ...(request.baseRevisionId === undefined ? {} : { baseRevisionId: request.baseRevisionId }),
   };
   return request.trigger === 'submit'
     ? { ...base, trigger: 'submit' }
-    : { ...base, trigger: request.trigger, retainedMessageIds: request.retainedMessageIds };
-};
-
-/**
- * A daemon's answers already carry the shapes the projection reads; the only
- * widening is the `interrupt` operation, which a browser client never provokes
- * but a daemon may report on a run it raised itself.
- *
- * `mcp-capability` is the one answer that is *not* a transport response: it
- * answers a command this client never sends (the Paseo runner asks a paired
- * daemon directly), so seeing one here means the daemon answered something
- * else than what was asked.
- */
-const daemonResponse = (response: AgentChannelResponse): AgentHostTransportResponse => {
-  if (response.type === 'mcp-capability') {
-    throw new Error(`A Tau Host answered ${response.type} to a transport command.`);
-  }
-  return response;
+    : {
+        ...base,
+        trigger: request.trigger,
+        retainedMessageIds: request.retainedMessageIds,
+      };
 };
 
 /** How a dead wire is replaced. See {@link createDaemonAgentHostTransport}. */
@@ -127,7 +127,11 @@ export type DaemonAgentHostTransportOptions = {
 };
 
 /** One dialled channel, and the promise that settles when it dies. */
-type ChannelRecord = { readonly client: AgentChannelClient; readonly gone: Promise<void>; dead: boolean };
+type ChannelRecord = {
+  readonly client: AgentChannelClient;
+  readonly gone: Promise<void>;
+  dead: boolean;
+};
 
 const sleep = async (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
@@ -168,7 +172,7 @@ export const createDaemonAgentHostTransport = (
   const alreadyOpen = typeof source === 'function' ? undefined : source;
   const attemptLimit = options.redialAttempts ?? 3;
   const backoff = options.redialBackoff ?? 250;
-  const closeHandlers = new Set<(reason: AgentHostTransportCloseReason) => void>();
+  const closeEvents = new Topic<AgentHostTransportCloseReason>({ name: 'DaemonAgentHostTransport.close' });
   let death: AgentHostTransportCloseReason | undefined;
   let disposed = false;
   let redials = 0;
@@ -180,10 +184,8 @@ export const createDaemonAgentHostTransport = (
       return;
     }
     death = reason;
-    for (const handler of closeHandlers) {
-      handler(reason);
-    }
-    closeHandlers.clear();
+    closeEvents.emit(reason);
+    closeEvents.dispose();
   };
 
   const adopt = (client: AgentChannelClient): ChannelRecord => {
@@ -305,7 +307,11 @@ export const createDaemonAgentHostTransport = (
       const command = daemonCommand(request);
       const record = await connect();
       try {
-        return daemonResponse(await record.client.execute(command, signal));
+        const response = await record.client.execute(command, signal);
+        if (response.type === 'revision') {
+          throw new AgentHostWorkerError('INVALID_HOST_RESPONSE', 'The agent host returned a revision response.');
+        }
+        return response;
       } catch (error) {
         const died = record.dead || (error as { readonly code?: unknown }).code === 'CHANNEL_CLOSED';
         if (!died || !dial || (signal?.aborted ?? false) || !replayable(request)) {
@@ -315,7 +321,11 @@ export const createDaemonAgentHostTransport = (
           throw error;
         }
         const healed = await connect(record);
-        return daemonResponse(await healed.client.execute(command, signal));
+        const response = await healed.client.execute(command, signal);
+        if (response.type === 'revision') {
+          throw new AgentHostWorkerError('INVALID_HOST_RESPONSE', 'The agent host returned a revision response.');
+        }
+        return response;
       }
     },
     listen: async function* listen<Name extends keyof AgentHostTransportStreams>(
@@ -354,13 +364,13 @@ export const createDaemonAgentHostTransport = (
         handler(death);
         return (): void => undefined;
       }
-      closeHandlers.add(handler);
-      return () => closeHandlers.delete(handler);
+      return closeEvents.subscribe(handler);
     },
     close: () => {
       disposed = true;
       current?.client.close();
       current = undefined;
+      closeEvents.dispose();
     },
   };
 };

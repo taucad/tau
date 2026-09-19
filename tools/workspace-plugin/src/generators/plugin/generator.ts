@@ -19,7 +19,7 @@ import {
 } from '#generators/package/generator.js';
 import { assertProjectCreationAvailable, writeProjectInstructions } from '#generators/write-project-instructions.js';
 
-const capabilityRoles = ['kernel', 'middleware', 'bundler', 'transcoder'] as const;
+const capabilityRoles = ['kernel', 'middleware', 'bundler', 'transcoder', 'job', 'machine'] as const;
 type CapabilityRole = (typeof capabilityRoles)[number];
 
 type PluginGeneratorSchema = {
@@ -32,7 +32,7 @@ type PluginGeneratorSchema = {
 
 type CapabilityTemplate = {
   role: CapabilityRole;
-  bucket: 'kernels' | 'middleware' | 'bundlers' | 'transcoders';
+  bucket: 'kernels' | 'middleware' | 'bundlers' | 'transcoders' | 'jobs' | 'machines';
   factoryName: string;
   fileName: string;
 };
@@ -66,7 +66,11 @@ const capabilityTemplate = (role: CapabilityRole, propertyName: string, sourceNa
         ? 'transcoders'
         : role === 'bundler'
           ? 'bundlers'
-          : 'middleware',
+          : role === 'job'
+            ? 'jobs'
+            : role === 'machine'
+              ? 'machines'
+              : 'middleware',
   factoryName: `${propertyName}${role[0]?.toUpperCase() ?? ''}${role.slice(1)}`,
   fileName: `${sourceName}.${role}`,
 });
@@ -86,6 +90,7 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     capabilityTemplate(role, propertyName, sourceName),
   );
   const selectedRoles = new Set(capabilities.map(({ role }) => role));
+  const usesZod = selectedRoles.has('job') || selectedRoles.has('machine');
   const { private: isPrivate } = placementMetadata.packages;
   const tags = ['scope:shared', 'type:package'];
 
@@ -108,6 +113,8 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     alias: propertyName,
     hostTarget,
     capabilities,
+    hasHostRoles: usesZod,
+    usesZod,
     tags: JSON.stringify(tags),
     private: String(isPrivate),
     license: apacheLicenseId,

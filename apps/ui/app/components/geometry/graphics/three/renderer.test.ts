@@ -129,3 +129,52 @@ describe('createRenderer', () => {
     );
   });
 });
+
+describe('createRenderer showcase preset', () => {
+  beforeEach(() => {
+    hoisted.createdRenderers.length = 0;
+  });
+
+  it('should build the node renderer on the WebGPU backend without forcing WebGL', async () => {
+    const { createRenderer } = await import('#components/geometry/graphics/three/renderer.js');
+
+    const canvas = document.createElement('canvas');
+    await createRenderer('showcase', 'webgpu', canvas);
+
+    expect(hoisted.createdRenderers).toHaveLength(1);
+    const created = hoisted.createdRenderers.at(0);
+    expect(created?.kind).toBe('webgpu');
+    expect(created?.init).toHaveBeenCalledTimes(1);
+    expect(created?.options).toMatchObject({
+      alpha: true,
+      antialias: true,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- three.js constructor option name
+      forceWebGL: false,
+      reversedDepthBuffer: false,
+      stencil: false,
+    });
+    expect(created?.setTransparentSort).not.toHaveBeenCalled();
+  });
+
+  it('should pin the WebGL 2 backend of the node renderer for the webgl backend', async () => {
+    const { createRenderer } = await import('#components/geometry/graphics/three/renderer.js');
+
+    const canvas = document.createElement('canvas');
+    await createRenderer('showcase', 'webgl', canvas);
+
+    expect(hoisted.createdRenderers).toHaveLength(1);
+    const created = hoisted.createdRenderers.at(0);
+    expect(created?.kind).toBe('webgpu');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- three.js constructor option name
+    expect(created?.options).toMatchObject({ forceWebGL: true, alpha: true, antialias: true });
+  });
+
+  it('should forward the adapter power preference for spinners', async () => {
+    const { createRenderer } = await import('#components/geometry/graphics/three/renderer.js');
+
+    const canvas = document.createElement('canvas');
+    await createRenderer('showcase', 'webgpu', { canvas, powerPreference: 'low-power' });
+
+    expect(hoisted.createdRenderers.at(0)?.options).toMatchObject({ powerPreference: 'low-power' });
+  });
+});

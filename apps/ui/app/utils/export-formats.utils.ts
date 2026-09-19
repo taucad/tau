@@ -1,10 +1,10 @@
 import type { ExportResult, ExportRoute, RuntimeContentInput } from '@taucad/runtime';
 import type { FileExtension } from '@taucad/types';
 import { formatConfigurations } from '@taucad/types/constants';
-import type { AppRuntimeClient, AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
+import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 
 export type FormatEntry = {
-  format: AppRuntimeExportFormat;
+  format: FileExtension;
   fidelity: ExportRoute['fidelity'];
   direct: boolean;
 };
@@ -41,12 +41,9 @@ export async function exportWithRuntimeValidatedInput(
   route: AppRuntimeExportRoute,
   input: RuntimeValidatedExportInput = {},
 ): Promise<ExportResult> {
-  const dynamicClient = client as unknown as {
-    export(format: AppRuntimeExportFormat, options?: RuntimeValidatedExportInput): Promise<ExportResult>;
-  };
   return input.content !== undefined || input.exportOptions !== undefined
-    ? dynamicClient.export(route.targetFormat, input)
-    : dynamicClient.export(route.targetFormat);
+    ? client.export(route.targetFormat, input)
+    : client.export(route.targetFormat);
 }
 
 /**
@@ -66,7 +63,7 @@ export function deriveAvailableFormats(
     return [];
   }
 
-  const targetFormats = new Set<AppRuntimeExportFormat>();
+  const targetFormats = new Set<FileExtension>();
   for (const route of manifest.routes) {
     targetFormats.add(route.targetFormat);
   }

@@ -3,8 +3,8 @@
 /**
  * Purpose: Assemble the pinned self-contained PicoGK C# worker for Electron.
  * Why: Runtime model execution must not discover system .NET or restore packages.
- * Environment: Node 24+, tar, and network access on macOS arm64.
- * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts [--target darwin-arm64]
+ * Environment: Node 24+, tar, and network access on macOS arm64 or Linux x64.
+ * Usage: node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts [--target darwin-arm64|linux-x64]
  * Exit codes: 0 for an integrity-verified resource; non-zero for unsupported targets or build/integrity failure.
  */
 
@@ -19,6 +19,8 @@ type Target = {
   readonly dotnetSha512: string;
   readonly dotnetUrl: string;
   readonly rid: string;
+  /** PicoGK's native subdirectory, when upstream ships one for this target. */
+  readonly nativeDirectory?: string;
 };
 
 const dotnetVersion = '10.0.400';
@@ -33,6 +35,20 @@ const targets: Readonly<Record<string, Target>> = {
       'e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde',
     dotnetUrl: `https://builds.dotnet.microsoft.com/dotnet/Sdk/${dotnetVersion}/dotnet-sdk-${dotnetVersion}-osx-arm64.tar.gz`,
     rid: 'osx-arm64',
+    nativeDirectory: 'osx-arm64',
+  },
+  // SHA512 from Microsoft's release metadata for SDK 10.0.400:
+  // https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json
+  'linux-x64': {
+    dotnetArchive: `dotnet-sdk-${dotnetVersion}-linux-x64.tar.gz`,
+    dotnetSha512:
+      '1033977dd837150e0814cf0c5d5b17ceb63925fda7ba2158b47258a4bd7c048cf82eac3bc1166f3146f53124a3f5fba09db1de1260d2ce96399860303b404b48',
+    dotnetUrl: `https://builds.dotnet.microsoft.com/dotnet/Sdk/${dotnetVersion}/dotnet-sdk-${dotnetVersion}-linux-x64.tar.gz`,
+    rid: 'linux-x64',
+    // Ponytail: upstream PicoGK ships natives for osx-arm64 and win-x64 only, so a
+    // Linux payload carries the managed worker without the voxel library. That is
+    // enough for CI and for regenerating the C# API corpus, which is Roslyn-only;
+    // it is not a runnable kernel until upstream publishes Linux natives.
   },
 };
 
@@ -40,7 +56,6 @@ const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const desktopRoot = resolve(workspaceRoot, 'apps/desktop');
 const resourceRoot = resolve(desktopRoot, 'resources/picogk');
 const cacheRoot = resolve(workspaceRoot, 'out/cache/picogk');
-const dotnetRoot = resolve(cacheRoot, `dotnet-${dotnetVersion}-darwin-arm64`);
 const picoGkSourceRoot = resolve(cacheRoot, `PicoGK-${picoGkCommit}`);
 const dotnetProjectRoot = resolve(workspaceRoot, 'packages/plugins/picogk/dotnet');
 const workerProject = resolve(dotnetProjectRoot, 'Tau.PicoGK.Worker/Tau.PicoGK.Worker.csproj');
@@ -58,7 +73,7 @@ const parseTargets = (): string[] => {
   const selected: string[] = [];
   for (let index = 0; index < arguments_.length; index += 1) {
     if (arguments_[index] !== '--target' || !arguments_[index + 1]) {
-      throw new TypeError('Usage: prepare-picogk-dotnet.mts [--target darwin-arm64]');
+      throw new TypeError('Usage: prepare-picogk-dotnet.mts [--target darwin-arm64|linux-x64]');
     }
     selected.push(arguments_[index + 1]!);
     index += 1;
@@ -138,6 +153,7 @@ const ensurePatchedPicoGk = async (options: {
   execFileSync('tar', ['-xzf', options.archive, '-C', temporary, '--strip-components=1'], { stdio: 'inherit' });
   execFileSync('git', ['apply', '--whitespace=error-all', picoGkHostedPatch], {
     cwd: temporary,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase
     env: { ...process.env, GIT_CEILING_DIRECTORIES: cacheRoot },
     stdio: 'inherit',
   });
@@ -175,22 +191,23 @@ const sourceDigest = async (): Promise<string> => {
   return hash.digest('hex');
 };
 
-const manifestIsCurrent = async (
-  output: string,
-  expectedSourceDigest: string,
-  picoGkHostedPatchSha256: string,
-): Promise<boolean> => {
+const manifestIsCurrent = async (options: {
+  readonly targetName: string;
+  readonly output: string;
+  readonly expectedSourceDigest: string;
+  readonly picoGkHostedPatchSha256: string;
+}): Promise<boolean> => {
+  const { output } = options;
   try {
     const manifest = picogkRuntimeManifestSchema.parse(
       JSON.parse(await readFile(resolve(output, 'tau-runtime-manifest.json'), 'utf8')),
     );
     if (
-      manifest.schemaVersion !== 2 ||
-      manifest.target !== 'darwin-arm64' ||
-      manifest.sourceFilesSha256 !== expectedSourceDigest ||
+      manifest.target !== options.targetName ||
+      manifest.sourceFilesSha256 !== options.expectedSourceDigest ||
       manifest.picoGkCommit !== picoGkCommit ||
       manifest.picoGkArchiveSha256 !== picoGkArchiveSha256 ||
-      manifest.picoGkHostedPatchSha256 !== picoGkHostedPatchSha256 ||
+      manifest.picoGkHostedPatchSha256 !== options.picoGkHostedPatchSha256 ||
       manifest.workerSha256 !== (await digest(resolve(output, manifest.workerPath)))
     ) {
       return false;
@@ -215,7 +232,8 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   const expectedSourceDigest = await sourceDigest();
   const picoGkHostedPatchSha256 = await digest(picoGkHostedPatch);
   const output = resolve(resourceRoot, targetName);
-  if (await manifestIsCurrent(output, expectedSourceDigest, picoGkHostedPatchSha256)) {
+  const dotnetRoot = resolve(cacheRoot, `dotnet-${dotnetVersion}-${targetName}`);
+  if (await manifestIsCurrent({ targetName, output, expectedSourceDigest, picoGkHostedPatchSha256 })) {
     console.log(`PicoGK .NET is current: ${targetName}`);
     return;
   }
@@ -285,12 +303,11 @@ const prepareTarget = async (targetName: string): Promise<void> => {
       await rm(path, { force: true });
     }
   }
-  const nativeLibraries = await readdir(resolve(picoGkSourceRoot, 'native/osx-arm64'));
-  await Promise.all(
-    nativeLibraries.map(async (name) =>
-      cp(resolve(picoGkSourceRoot, 'native/osx-arm64', name), resolve(temporary, name)),
-    ),
-  );
+  if (target.nativeDirectory !== undefined) {
+    const nativeRoot = resolve(picoGkSourceRoot, 'native', target.nativeDirectory);
+    const nativeLibraries = await readdir(nativeRoot);
+    await Promise.all(nativeLibraries.map(async (name) => cp(resolve(nativeRoot, name), resolve(temporary, name))));
+  }
   await Promise.all([
     cp(resolve(picoGkSourceRoot, 'LICENSE'), resolve(temporary, 'PicoGK-LICENSE')),
     cp(resolve(workspaceRoot, 'packages/plugins/picogk/LICENSE'), resolve(temporary, 'Tau-PicoGK-LICENSE')),

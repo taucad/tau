@@ -1,10 +1,36 @@
-import { HttpStatus } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
+import { BadRequestException, HttpStatus } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import type { ZodType } from 'zod';
+import { financialIdentitySchema } from '@taucad/billing';
+import type { FinancialActivityKind } from '@taucad/billing';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
+import { httpHeader } from '#constants/http-header.constant.js';
 
 const allowedAnthropicVersions = new Set(['2023-06-01']);
 const allowedAnthropicBetas = new Set(['fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14']);
+
+/** Rejects query inputs that are absent from the funded request identity. */
+export const assertNoQuery = (request: FastifyRequest): void => {
+  if (request.query === null || typeof request.query !== 'object' || Object.keys(request.query).length > 0) {
+    throw new BadRequestException('Query parameters are not supported');
+  }
+};
+
+/** Cancels provider work when either side of the caller transport closes prematurely. */
+export const invocationSignal = (request: FastifyRequest, reply: FastifyReply): AbortSignal => {
+  const controller = new AbortController();
+  request.raw.once('aborted', () => {
+    controller.abort(new DOMException('Request aborted', 'AbortError'));
+  });
+  reply.raw.once('close', () => {
+    if (!reply.raw.writableFinished) {
+      controller.abort(new DOMException('Response closed', 'AbortError'));
+    }
+  });
+  return controller.signal;
+};
 
 export const readSingleHeader = (
   request: FastifyRequest,
@@ -12,7 +38,7 @@ export const readSingleHeader = (
   duplicateErrorType: LlmGatewayErrorType = 'INVALID_REQUEST',
 ): string | undefined => {
   const values: string[] = [];
-  const rawHeaders = request.raw.rawHeaders;
+  const { rawHeaders } = request.raw;
   for (let index = 0; index < rawHeaders.length; index += 2) {
     if (rawHeaders[index]?.toLowerCase() === name) {
       values.push(rawHeaders[index + 1] ?? '');
@@ -36,7 +62,7 @@ export const validateAnthropicHeaders = (input: {
   readonly version?: string;
   readonly beta?: string;
 }): { readonly version: string; readonly beta?: string } => {
-  const version = input.version?.trim() || '2023-06-01';
+  const version = input.version?.trim() ?? '2023-06-01';
   if (!allowedAnthropicVersions.has(version)) {
     throw new LlmGatewayError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'Unsupported anthropic-version header.');
   }
@@ -51,4 +77,83 @@ export const validateAnthropicHeaders = (input: {
     throw new LlmGatewayError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', 'Unsupported anthropic-beta header.');
   }
   return { version, beta: betas.join(',') };
+};
+
+/**
+ * Reads an optional header against its contract, keeping only a value that
+ * satisfies it. Unlike `validateAttemptId` this never refuses: the members it
+ * feeds are nullable at every layer, and a malformed one must not refuse a turn
+ * the caller is paying for. A *duplicated* header is still a 400 — that is
+ * `readSingleHeader`'s contract, shared with `x-tau-attempt-id`.
+ *
+ * @param value - The single header value, or undefined when it was not sent.
+ * @param contract - What the value must satisfy to be kept.
+ * @returns The parsed value, or undefined when it was absent or malformed.
+ */
+export const readOptionalHeader = <T>(value: string | undefined, contract: ZodType<T>): T | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = contract.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+};
+
+/**
+ * Best-effort attribution: the opaque owner-scoped id a project or chat hint
+ * carries, held to the same bound the ledger admits it under so a hint can never
+ * reach `admissionHistorySchema` as a 500.
+ *
+ * @param value - The header value, or undefined when it was not sent.
+ * @returns The id, or undefined when it was absent or not an admissible identity.
+ */
+export const readHint = (value: string | undefined): string | undefined =>
+  readOptionalHeader(value, financialIdentitySchema);
+
+/**
+ * The only activity kind a gateway client may assert about its own turn.
+ *
+ * Every other kind is either server-produced or changes how the turn is
+ * admitted. `title` and `commit` are the ones that matter: they are the `helper`
+ * capacity pool (`helperActivityKinds`, `credit-ledger.service.ts:79-90`), which
+ * `admitOperation` counts and limits *separately* from `primary`
+ * (`credit-ledger.service.ts:550-556`), so a caller that labelled its turns with
+ * them would admit past the primary pool's limit. `summary`, `completion` and
+ * `other` share the primary pool and so cost nothing to admit, but they are
+ * produced by surfaces a gateway client does not speak for, and asserting them
+ * would only misfile the receipt. `compaction` is the one kind a client alone
+ * knows and that shares `agent`'s pool, so honouring it changes what the receipt
+ * says and nothing the caller could profit from.
+ */
+const clientAssertableActivity = z.literal('compaction');
+
+/**
+ * The optional attribution every gateway route reads the same way, as members
+ * ready to spread into a relay input.
+ *
+ * @param request - The incoming gateway request.
+ * @returns What the caller asserted, each member present only when it parsed.
+ */
+export const readAttribution = (
+  request: FastifyRequest,
+): { readonly projectHint?: string; readonly chatHint?: string; readonly activity?: FinancialActivityKind } => {
+  const projectHint = readHint(readSingleHeader(request, httpHeader.xTauProjectId));
+  const chatHint = readHint(readSingleHeader(request, httpHeader.xTauChatId));
+  const activity = readOptionalHeader(readSingleHeader(request, httpHeader.xTauActivity), clientAssertableActivity);
+  return {
+    ...(projectHint === undefined ? {} : { projectHint }),
+    ...(chatHint === undefined ? {} : { chatHint }),
+    ...(activity === undefined ? {} : { activity }),
+  };
+};
+
+/** Validates the required opaque version-1 invocation identity. */
+export const validateAttemptId = (value: string | undefined): string => {
+  if (value === undefined || !/^[\u0021-\u007E]{1,128}$/u.test(value)) {
+    throw new LlmGatewayError(
+      HttpStatus.BAD_REQUEST,
+      'INVALID_REQUEST',
+      'A valid x-tau-attempt-id header is required.',
+    );
+  }
+  return value;
 };

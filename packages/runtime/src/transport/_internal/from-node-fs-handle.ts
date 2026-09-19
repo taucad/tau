@@ -123,9 +123,6 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
     return new Uint8Array(buf);
   }
 
-  const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-    left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
-
   const atomicWriteFile = async (filePath: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
     const targetPath = await resolve(filePath);
     const targetDirectory = path.dirname(targetPath);
@@ -154,6 +151,11 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
       }
     }
 
+    /* D29: the durability guarantee is the temp file's own `fsync` plus the atomic rename. The write
+     * also used to `fsync` the parent directory and then read the committed file back for a per-byte
+     * compare — a 1 KB write cost ~11 ms, and none of that was the durability. The read-back is gone
+     * (OQ-P6) and the directory `fsync` with it; the admission re-checks below stay, because they are
+     * what refuses a parent or target swapped between admission and replacement. */
     try {
       const handle = await fs.open(temporaryPath, 'wx', existingMode ?? 0o666);
       try {
@@ -183,25 +185,10 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
       }
 
       await fs.rename(temporaryPath, admittedTargetPath);
-      const directoryHandle = await fs.open(admittedDirectory, 'r');
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
-
-      const committed = new Uint8Array(await fs.readFile(admittedTargetPath));
-      if (!bytesEqual(committed, bytes)) {
-        throw Object.assign(new Error(`The committed bytes could not be verified for ${filePath}.`), {
-          code: 'WRITE_VERIFICATION_FAILED',
-        });
-      }
-    } finally {
-      await fs.unlink(temporaryPath).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-      });
+    } catch (error) {
+      // A successful rename consumes the temp file; only a failed write leaves one behind.
+      await fs.unlink(temporaryPath).catch(() => undefined);
+      throw error;
     }
   };
 

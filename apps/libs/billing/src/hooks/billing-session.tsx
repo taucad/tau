@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 
 export type BillingSession = {
+  readonly environment?: 'development' | 'staging' | 'prod-us' | 'prod-eu';
   readonly apiBaseUrl: string | undefined;
   readonly userId: string | undefined;
 };

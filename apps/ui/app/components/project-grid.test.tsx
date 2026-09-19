@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -154,7 +154,9 @@ describe('CommunityProjectGrid', () => {
       },
       files,
     });
-    expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/remixed-project');
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/remixed-project');
+    });
   });
 
   it('retains the card and resets Remix after a creation-location failure', async () => {

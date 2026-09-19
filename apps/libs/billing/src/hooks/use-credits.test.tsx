@@ -1,88 +1,111 @@
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- test wrapper targets the adjacent TSX provider.
 import { BillingSessionProvider } from './billing-session.js';
-import { billingQueryClient } from '#hooks/query-client.js';
 import { useCredits } from '#hooks/use-credits.js';
 
-const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
-  <BillingSessionProvider value={{ apiBaseUrl: 'https://api.example', userId: 'user' }}>
-    {children}
-  </BillingSessionProvider>
-);
-
-const wireAccount = {
-  balanceMicro: '10',
-  grantBalanceMicro: '8',
-  topupBalanceMicro: '2',
-  reservedMicro: '0',
-  monthlyGrantMicro: '8',
-  rolloverCeilingMicro: '16',
-  notifications: [],
-  transactions: [
-    {
-      id: 'null-metadata',
-      deltaMicro: '10',
-      balanceAfterMicro: '10',
-      reason: 'grant',
-      category: null,
-      modelId: null,
-      note: null,
-      createdAt: '2026-01-01T00:00:00.000Z',
-    },
-    {
-      id: 'metadata',
-      deltaMicro: '-1',
-      balanceAfterMicro: '9',
-      reason: 'usage',
-      category: 'chat',
-      modelId: 'model',
-      note: 'turn',
-      createdAt: '2026-01-02T00:00:00.000Z',
-    },
-  ],
+const balance = {
+  schemaVersion: 1,
+  environment: 'development',
+  subjectId: 'account',
+  revision: '4',
+  asOf: '2026-09-05T00:00:00.000Z',
+  promoGrantCreditAtoms: '0',
+  planGrantCreditAtoms: '0',
+  purchasedCreditAtoms: '25000000',
+  debtCreditAtoms: '0',
+  promoHeldCreditAtoms: '0',
+  planHeldCreditAtoms: '0',
+  purchasedHeldCreditAtoms: '0',
+  pendingIssuanceCreditAtoms: '0',
+  eligibleAvailableCreditAtoms: '25000000',
+  netBalanceCreditAtoms: '25000000',
+};
+const explanation = {
+  schemaVersion: 1,
+  environment: 'development',
+  ownerId: 'user',
+  subjectId: 'account',
+  snapshotRevision: '4',
+  asOf: balance.asOf,
+  availability: { state: 'available', reason: null },
+  balance,
+  journalTotals: { accountDeltaCreditAtoms: '0', byKind: [] },
+  history: { items: [], nextCursor: null, complete: true },
 };
 
+function setup(userId: string | undefined = 'user') {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { readonly children: ReactNode }) => (
+    <QueryClientProvider client={client}>
+      <BillingSessionProvider value={{ apiBaseUrl: 'https://api.example', userId, environment: 'development' }}>
+        {children}
+      </BillingSessionProvider>
+    </QueryClientProvider>
+  );
+  return { client, wrapper };
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
 describe('useCredits', () => {
-  beforeEach(() => {
-    billingQueryClient.clear();
-    billingQueryClient.setDefaultOptions({ queries: { retry: false } });
-  });
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-  });
-
-  it('stays undefined without a signed-in billing session', () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const { result } = renderHook(() => useCredits());
-    expect(result.current).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('fetches and parses the signed-in credit account', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => wireAccount }));
-    const { result } = renderHook(() => useCredits(), { wrapper });
+  it('reads the owned authoritative balance at or after the receipt revision', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => explanation }));
+    const { wrapper } = setup();
+    const { result } = renderHook(
+      () => useCredits({ environment: 'development', subjectId: 'account', revision: '4' }),
+      { wrapper },
+    );
     await waitFor(() => {
-      expect(result.current?.balanceMicro).toBe(10n);
+      expect(result.current).toEqual(explanation);
     });
-    expect(result.current?.transactions).toEqual([
-      expect.objectContaining({ id: 'null-metadata', category: undefined, modelId: undefined, note: undefined }),
-      expect.objectContaining({ id: 'metadata', category: 'chat', modelId: 'model', note: 'turn' }),
-    ]);
-    expect(fetch).toHaveBeenCalledWith('https://api.example/v1/billing/credits', { credentials: 'include' });
+    expect(fetch).toHaveBeenCalledWith('https://api.example/v1/billing/credits?minRevision=4', {
+      credentials: 'include',
+      signal: expect.any(AbortSignal) as AbortSignal,
+    });
   });
 
-  it('stays undefined when the request fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503 });
-    vi.stubGlobal('fetch', fetchMock);
+  it.each([
+    { ...explanation, ownerId: 'other' },
+    { ...explanation, environment: 'staging', balance: { ...balance, environment: 'staging' } },
+    { ...explanation, subjectId: 'other', balance: { ...balance, subjectId: 'other' } },
+    { ...explanation, snapshotRevision: '3', balance: { ...balance, revision: '3' } },
+  ])('rejects a foreign or stale receipt balance', async (wire) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => wire }));
+    const { client, wrapper } = setup();
+    const { result } = renderHook(
+      () => useCredits({ environment: 'development', subjectId: 'account', revision: '4' }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(client.getQueryCache().getAll()[0]?.state.status).toBe('error');
+    });
+    expect(result.current).toBeUndefined();
+  });
+
+  it('does not fetch while signed out', () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const signedOut = ({ children }: { readonly children: ReactNode }) => (
+      <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useCredits(), { wrapper: signedOut });
+    expect(result.current).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps failed reads unavailable rather than inventing a zero balance', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    const { client, wrapper } = setup();
     const { result } = renderHook(() => useCredits(), { wrapper });
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(client.getQueryCache().getAll()[0]?.state.status).toBe('error');
     });
     expect(result.current).toBeUndefined();
   });

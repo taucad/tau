@@ -75,7 +75,14 @@
   "dependencies": {
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "ai": "catalog:",
+    "diff": "^8.0.4",
+    "minimatch": "^10.2.5",
+    "safe-regex": "^2.1.1",
     "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*"
   },
   "imports": {
     "#*.js": "./src/*.ts",

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Share2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
-import { getActiveGroupValues, parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { ProjectSharePanel } from '#components/publish/project-share-panel.js';
 import type { ShareMethod } from '#components/publish/project-share-panel.js';
@@ -14,8 +14,6 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { parseGithubGistAuthorizationReturn } from '#lib/share-providers.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { encodeTextFile } from '#utils/filesystem.utils.js';
-import { serializeParameterEntry } from '#utils/parameter-config.utils.js';
 
 type ProjectShareNavigationIntent = {
   readonly shouldOpen: boolean;
@@ -75,10 +73,13 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const [navigationIntent] = useState(() => parseProjectShareNavigationIntent(location.search));
-  const { parameterEntries, projectId, projectRef } = useProject();
-  const { client: fileClient } = useFileManager();
+  const { parameterService, projectId, projectRef, editorRef } = useProject();
+  const { files: fileClient } = useFileManager();
   const { projects } = useProjects();
   const project = useSelector(projectRef, (state) => state.context.project);
+  /* The entry's CAD actor owns its render timeout; a unit spawned for the thumbnail is seeded from
+   * the durable per-entry record rather than left on the default (E1). */
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   const projectUpdatedAt = projects.find((candidate) => candidate.id === projectId)?.lastActivityAt;
 
   useEffect(() => {
@@ -97,7 +98,11 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       const { entryPath, thumbnail } = project.assets.main;
       let geometryUnit = projectRef.getSnapshot().context.geometryUnits.get(entryPath);
       if (!geometryUnit) {
-        projectRef.send({ type: 'createGeometryUnit', entryPath });
+        projectRef.send({
+          type: 'createGeometryUnit',
+          entryPath,
+          renderTimeout: unitSettings[entryPath]?.renderTimeout,
+        });
         const projectState = await waitFor(
           projectRef,
           (candidate) => candidate.context.geometryUnits.has(entryPath) || candidate.matches('error'),
@@ -138,8 +143,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       const role = (value: (typeof result.data.files)[number]['role']): ShareSnapshotFileRole =>
         value === 'additional' ? 'project-metadata' : value;
       const manifestContent = serializeProjectManifest(projectToManifest(project));
-      const parameterEntry = parameterEntries.get(entryPath);
-      const parameterContent = parameterEntry ? encodeTextFile(serializeParameterEntry(parameterEntry)) : undefined;
+      const parameterContent = await parameterService.readSettled(entryPath);
       const files = result.data.files
         .filter(
           ({ path }) =>
@@ -152,7 +156,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         sha256: await hashBytes(manifestContent),
         role: 'project-metadata',
       });
-      if (parameterContent) {
+      if (parameterContent !== undefined) {
         files.push({
           path: parameterEntryPath(entryPath),
           content: parameterContent,
@@ -169,14 +173,10 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         })),
       };
     },
-    [fileClient, parameterEntries, project, projectId, projectRef],
+    [fileClient, parameterService, project, projectId, projectRef, unitSettings],
   );
 
   const entryPath = project?.assets.main.entryPath ?? '';
-  const parameters = useMemo(
-    () => getActiveGroupValues(parameterEntries.get(entryPath)),
-    [entryPath, parameterEntries],
-  );
 
   return (
     <ProjectSharePanel
@@ -186,7 +186,6 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       projectDescription={project?.description ?? ''}
       projectUpdatedAt={projectUpdatedAt}
       entryPath={entryPath}
-      parameters={parameters}
       collectSnapshot={collectSnapshot}
       initialMethod={navigationIntent.initialMethod}
       githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
@@ -203,7 +202,7 @@ export function ProjectShareAction(): React.JSX.Element {
         <Button
           variant='ghost'
           size='xs'
-          className='max-md:size-8'
+          className='h-7 px-2 max-md:size-8'
           onClick={() => {
             openPanel('share');
           }}

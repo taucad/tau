@@ -9,15 +9,23 @@ import {
 describe('file-tree-download-policy', () => {
   describe('getFileTreeDownloadPolicy', () => {
     it('should allow ordinary project paths', () => {
-      expect(getFileTreeDownloadPolicy('public/models/honeycomb.js')).toEqual({ allowed: true });
+      expect(getFileTreeDownloadPolicy({ source: 'project', versioned: true, agentAccess: 'read-write' })).toEqual({
+        allowed: true,
+      });
+    });
+
+    it('should allow a row no view stamped', () => {
+      expect(getFileTreeDownloadPolicy(undefined)).toEqual({ allowed: true });
     });
 
     it('should block dependency-backed read-only paths', () => {
-      expect(getFileTreeDownloadPolicy('node_modules/@types/replicad/index.d.ts')).toEqual({
-        allowed: false,
-        code: 'dependency-read-only',
-        message: 'Read-only dependency paths cannot be downloaded.',
-      });
+      expect(getFileTreeDownloadPolicy({ source: 'dependencies', versioned: false, agentAccess: 'read-only' })).toEqual(
+        {
+          allowed: false,
+          code: 'dependency-read-only',
+          message: 'Read-only dependency paths cannot be downloaded.',
+        },
+      );
     });
   });
 

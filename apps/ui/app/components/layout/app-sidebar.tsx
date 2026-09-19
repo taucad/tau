@@ -16,9 +16,11 @@ import { NavChat } from '#components/nav/nav-chat.js';
 import { navRoutes } from '#constants/route.constants.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
 import { Commands } from '#components/layout/command-palette.js';
+import { ProjectNavigationCommandItems } from '#components/nav/project-navigation-command-items.js';
 import { NavUser } from '#components/nav/nav-user.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { billingNavRoutes } from '#cloud/nav-billing.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   const { state, isMobile } = useSidebar();
@@ -26,7 +28,10 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   const desktopTarget = isDesktopTarget();
   const isNonMobileCollapsed = !isMobile && state === 'collapsed';
   const navMainItems = React.useMemo(
-    () => navRoutes.navMain.filter((item) => item.featureFlag === undefined || flags[item.featureFlag]),
+    () =>
+      [...navRoutes.navMain, ...billingNavRoutes].filter(
+        (item) => item.featureFlag === undefined || flags[item.featureFlag],
+      ),
     [flags],
   );
 
@@ -66,6 +71,8 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
       </SidebarHeader>
       <SidebarContent className='gap-0'>
         <div className='sticky top-0 z-10 space-y-1 bg-sidebar px-2 pb-1'>
+          {/* Global search entries; the routes register their own from inside their providers. */}
+          <ProjectNavigationCommandItems />
           <Commands />
           <NavChat />
         </div>
@@ -74,9 +81,6 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
             <ProjectNavigation />
             <NavMain items={navMainItems} groupLabel='Platform' />
           </div>
-        </div>
-        <div className='sticky bottom-0 z-10'>
-          <NavMain items={navRoutes.navSecondary} />
         </div>
       </SidebarContent>
       <SidebarFooter className='border-t p-1'>

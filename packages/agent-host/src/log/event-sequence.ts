@@ -1,6 +1,4 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { EventLogError } from '#log/event-log-error.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
 
 const canonicalJson = (value: JsonValue): string => {

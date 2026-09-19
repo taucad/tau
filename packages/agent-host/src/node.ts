@@ -1,12 +1,33 @@
-import { mkdir, open, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, realpath, stat, unlink } from 'node:fs/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { dirname } from 'node:path';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import { basename, dirname, join } from 'node:path';
 import { EventLogError } from '#log/event-log-error.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createEventLogAppender } from '#log/event-log-appender.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
+import { chatAttachmentPath } from '#harness/session-record.js';
+import type { AttachmentReader } from '#harness/session-record.js';
+
+/**
+ * Read chat attachments from a workspace on the Node filesystem (D15).
+ *
+ * @param workspaceRoot - Absolute root whose `.tau/chats` holds each chat.
+ * @returns A reader answering `undefined` for bytes not on this machine; any other I/O failure rejects.
+ * @public
+ */
+export const createNodeAttachmentReader = (workspaceRoot: string): AttachmentReader => ({
+  read: async (chatId, path) => {
+    try {
+      // A copy: a Node `Buffer` may be a view over a shared pool, and a reader answers owned bytes.
+      return new Uint8Array(await readFile(join(workspaceRoot, chatAttachmentPath(chatId, path))));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+  },
+});
 
 /** Node event-log options. @public */
 export type NodeEventLogOptions = {
@@ -14,35 +35,95 @@ export type NodeEventLogOptions = {
   readonly filePath: string;
 };
 
-const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
-  const path = `${filePath}.lock`;
-  let handle: FileHandle;
+// The log a lock was taken on, resolved through symlinks so two spellings of one log compare equal.
+const resolveLogPath = async (filePath: string): Promise<string> =>
+  join(await realpath(dirname(filePath)).catch(() => dirname(filePath)), basename(filePath));
+
+// A lock whose recorded writer pid no longer exists was left behind by a crashed or killed host;
+// nothing will ever release it, so it may be taken over. Unreadable or non-numeric content counts as held.
+// ponytail: pid liveness only; a reused pid after reboot keeps a dead lock alive until that process exits — add a boot id if that bites.
+const isStaleLock = async (path: string, logPath: string): Promise<boolean> => {
+  const contents = await readFile(path, 'utf8').catch(() => '');
+  const [pidLine = '', recordedPath] = contents.split('\n');
+  const pid = Number.parseInt(pidLine, 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  // A directory copied while Tau runs (duplicate project, restore from a copy) brings the lock with it,
+  // naming a live pid that writes the original log, not this one. Locks written before this line record
+  // no path and are still judged by pid alone.
+  if (recordedPath !== undefined && recordedPath !== '' && recordedPath !== logPath) {
+    return true;
+  }
   try {
-    handle = await open(path, 'wx');
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+};
+
+const openLock = async (path: string): Promise<FileHandle | undefined> => {
+  try {
+    return await open(path, 'wx');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      throw new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active Node writer.`, {
-        cause: error,
-      });
+      return undefined;
     }
     throw error;
   }
+};
+
+const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
+  const path = `${filePath}.lock`;
+  const logPath = await resolveLogPath(filePath);
+  const locked = (): EventLogError =>
+    new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active Node writer.`);
+  let handle = await openLock(path);
+  let tookOver = false;
+  if (handle === undefined && (await isStaleLock(path, logPath))) {
+    await unlink(path).catch(() => undefined);
+    handle = await openLock(path);
+    tookOver = true;
+  }
+  // A lock released between the EEXIST and the pid read reads as held; one more try before refusing.
+  handle ??= await openLock(path);
+  if (handle === undefined) {
+    throw locked();
+  }
   try {
-    await handle.writeFile(`${process.pid}\n`);
+    await handle.writeFile(`${process.pid}\n${logPath}\n`);
     await handle.sync();
-    return { handle, path };
   } catch (error) {
     await handle.close().catch(() => undefined);
     await unlink(path).catch(() => undefined);
     throw error;
   }
+  if (tookOver) {
+    // Two takers can both unlink one stale lock, so both `wx` creates succeed and the earlier file is
+    // gone. Only the handle whose inode the path still names holds the lock; the other must stand
+    // down without unlinking (the path is the winner's now).
+    // ponytail: verify-after-settle narrows the race to sub-millisecond straggling (0/40 measured), not a proof — an OS advisory lock (flock) is the sound upgrade.
+    await sleep(200);
+    const [mine, onDisk] = await Promise.all([handle.stat(), stat(path).catch(() => undefined)]);
+    if (onDisk?.ino !== mine.ino) {
+      await handle.close().catch(() => undefined);
+      throw locked();
+    }
+  }
+  return { handle, path };
 };
 
 const releaseWriterLock = async (lock: { readonly handle: FileHandle; readonly path: string }): Promise<void> => {
+  // A straggling taker past the settle window may already own the path; unlinking it would admit a
+  // third writer, so only the lock the path still names is removed (6-review C1).
+  const [mine, onDisk] = await Promise.all([lock.handle.stat(), stat(lock.path).catch(() => undefined)]);
   try {
     await lock.handle.close();
   } finally {
-    await unlink(lock.path).catch(() => undefined);
+    if (onDisk?.ino === mine.ino) {
+      await unlink(lock.path).catch(() => undefined);
+    }
   }
 };
 

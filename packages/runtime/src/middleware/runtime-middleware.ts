@@ -12,6 +12,7 @@ import type {
   MiddlewareState,
 } from '#types/runtime-middleware.types.js';
 import type { RuntimeLogger, KernelFileSystem } from '#types/runtime-kernel.types.js';
+import type { KernelComputeCapability } from '#types/runtime-compute.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { MiddlewarePlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
 import {
@@ -407,6 +408,8 @@ export type CreateMiddlewareRuntimeOptions = {
   middlewareName: string;
   /** Filesystem for all file operations */
   filesystem: KernelFileSystem;
+  /** Shared deterministic compute reuse service. */
+  compute: KernelComputeCapability;
   /** Array of dependencies for cache key computation */
   dependencies: readonly Dependency[];
   /** Pre-computed SHA-256 hash of all dependencies */
@@ -436,6 +439,7 @@ export function createMiddlewareRuntime<
     onLog,
     middlewareName,
     filesystem,
+    compute,
     dependencies,
     dependencyHash,
     stateSchema,
@@ -448,6 +452,7 @@ export function createMiddlewareRuntime<
     tracer,
     logger: logger ?? createMiddlewareLogger(onLog, middlewareName),
     filesystem,
+    compute,
     state: createMiddlewareState<State>(stateSchema),
     options: (options ?? {}) as Options,
     dependencies,

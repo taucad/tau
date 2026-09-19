@@ -18,13 +18,12 @@ export class EmailService {
 
   public async send(message: EmailMessage): Promise<void> {
     const templateKind = message.template.kind;
-    assertEmailTemplateUrlAllowed({
-      template: message.template,
-      frontendURL: this.configService.get('TAU_FRONTEND_URL', { infer: true }),
-    });
+    const frontendURL = this.configService.get('TAU_FRONTEND_URL', { infer: true });
+    assertEmailTemplateUrlAllowed({ template: message.template, frontendURL });
 
-    const rendered = await renderEmailTemplate(message.template);
-    const subject = message.subject || subjectForEmailTemplate(message.template);
+    // The frontend origin serves the wordmark and the Geist files the templates reference.
+    const rendered = await renderEmailTemplate(message.template, { siteUrl: frontendURL, assetBase: frontendURL });
+    const subject = message.subject ?? subjectForEmailTemplate(message.template);
 
     if (!this.resend) {
       this.logger.log(
@@ -54,36 +53,44 @@ export class EmailService {
     );
   }
 
-  public async sendMagicLink(args: { readonly email: string; readonly url: string }): Promise<void> {
-    await this.send({
-      to: args.email,
-      subject: 'Sign in to Tau',
-      template: { kind: 'magic-link', email: args.email, url: args.url },
-    });
+  public async sendMagicLink(args: {
+    readonly email: string;
+    readonly url: string;
+    readonly device?: string;
+  }): Promise<void> {
+    await this.send({ to: args.email, template: { kind: 'magic-link', ...args } });
   }
 
-  public async sendResetPassword(args: { readonly email: string; readonly url: string }): Promise<void> {
-    await this.send({
-      to: args.email,
-      subject: 'Reset your Tau password',
-      template: { kind: 'reset-password', email: args.email, url: args.url },
-    });
+  public async sendResetPassword(args: {
+    readonly email: string;
+    readonly url: string;
+    readonly device?: string;
+  }): Promise<void> {
+    await this.send({ to: args.email, template: { kind: 'reset-password', ...args } });
+  }
+
+  public async sendPasswordChanged(args: {
+    readonly email: string;
+    readonly changedAt: string;
+    readonly url: string;
+    readonly device?: string;
+  }): Promise<void> {
+    await this.send({ to: args.email, template: { kind: 'password-changed', ...args } });
   }
 
   public async sendVerification(args: { readonly email: string; readonly url: string }): Promise<void> {
-    await this.send({
-      to: args.email,
-      subject: 'Verify your Tau email',
-      template: { kind: 'verify-email', email: args.email, url: args.url },
-    });
+    await this.send({ to: args.email, template: { kind: 'verify-email', ...args } });
   }
 
-  public async sendPaymentFailed(args: { readonly email: string; readonly billingUrl: string }): Promise<void> {
-    await this.send({
-      to: args.email,
-      subject: 'Action needed: your Tau payment failed',
-      template: { kind: 'payment-failed', ...args },
-    });
+  public async sendPaymentFailed(args: {
+    readonly email: string;
+    readonly billingUrl: string;
+    readonly plan?: string;
+    readonly amount?: string;
+    readonly nextAttemptAt?: string;
+    readonly paymentMethodSummary?: string;
+  }): Promise<void> {
+    await this.send({ to: args.email, template: { kind: 'payment-failed', ...args } });
   }
 
   public async sendPublicationInvite(args: {
@@ -92,11 +99,7 @@ export class EmailService {
     readonly publicationTitle: string;
     readonly url: string;
   }): Promise<void> {
-    await this.send({
-      to: args.recipientEmail,
-      subject: `${args.ownerName} shared a Tau design with you`,
-      template: { kind: 'publication-invite', ...args },
-    });
+    await this.send({ to: args.recipientEmail, template: { kind: 'publication-invite', ...args } });
   }
 
   private describeRecipient(email: string): string {

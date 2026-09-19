@@ -1,6 +1,8 @@
 import {
   Activity,
   Clipboard,
+  Cloud,
+  CloudOff,
   Download,
   FileBox,
   Files,
@@ -9,6 +11,7 @@ import {
   ImageDown,
   Info,
   RotateCcw,
+  Save,
   Share2,
   SlidersHorizontal,
   Terminal,
@@ -24,16 +27,25 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
-import { useVisibleRevisions } from '#hooks/use-revisions.js';
+import { useRevisions } from '#hooks/use-revisions.js';
+import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
+import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages } from '#services/headless-capture.js';
-import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
-import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
+import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
+import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
-export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
+export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
+  const project = useProject({ enableNoContext: true });
+  return project === undefined ? undefined : <ProjectCommandPaletteItemsReady match={match} />;
+}
+
+function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch }): undefined {
   const { projectRef, geometryUnits, mainEntryPath } = useProject();
   const { openPanel } = useProjectWorkspace();
   const isTauDebugEnabled = useFeature('tauDebug');
@@ -47,8 +59,8 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
 
   const mainCadRef = geometryUnits.get(mainEntryPath);
   const geometryFormat = useSelector(mainCadRef, (state) => state?.context.geometry?.format);
-  useCameraRegistryVersion();
-  const cameraReady = hasGraphicsCameraRig(mainGraphicsRef);
+  const hasCameraRig = useGraphicsCameraRigQuery();
+  const cameraReady = hasCameraRig(mainGraphicsRef);
   const canCapturePng = Boolean(
     geometryFormat && geometryFormat !== 'webrtc' && (geometryFormat !== 'gltf' || cameraReady),
   );
@@ -56,7 +68,24 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
 
   // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
   const { returnToLatest } = useRestoreToPoint();
-  const { canReturnToLatest } = useVisibleRevisions();
+  const { canReturnToLatest } = useRevisions();
+
+  /* The Sync region is the surface; the palette is the keyboard path to it
+   * (DESIGN: a feature that only exists behind a pointer gesture is
+   * unfinished). Where Tau Cloud is comes from `useRevisionCommands`, the one
+   * page-side place that knows (S34). */
+  const revisionStatus = useRevisionStatus();
+  const projectRole = useProjectRole();
+  /* F1: the palette offers exactly what the Sync region offers. `fetchOnly`
+     alone left an enabled *Sync now* for a read collaborator, whose push the
+     API refuses — one shared predicate rather than two conditions. */
+  const syncReadOnly = isSyncReadOnly(revisionStatus?.remote, projectRole);
+  const { syncNow } = useRevisionCommands();
+  const saveRevision = useSaveRevisionRequest();
+  const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
+  const handleOpenSync = useCallback(() => {
+    openPanel('revisions');
+  }, [openPanel]);
 
   const handleOpenExporter = useCallback(() => {
     openPanel('export');
@@ -68,18 +97,19 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
     }
 
     toast.promise(
-      async () => {
-        // Get mechanical asset files
-        const zipBlob = await fileManager.getZippedDirectory(`/projects/${project.id}`);
-        return zipBlob;
-      },
+      /* `''` is the file manager's own root, which follows the selected
+       * checkout: an absolute `/projects/<id>` is a foreign key to this
+       * workspace-relative facade, not an alias of its root. */
+      async () => fileManager.getZippedDirectory('', { versionedOnly: true }),
       {
         loading: 'Creating ZIP archive...',
         success(blob) {
           downloadBlob(blob, `${projectName}.zip`);
           return 'ZIP downloaded successfully';
         },
-        error: 'Failed to create ZIP archive',
+        error(error: unknown) {
+          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error)}`;
+        },
       },
     );
   }, [project, projectName, fileManager]);
@@ -160,6 +190,51 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   useCommandPaletteItems(
     match.id,
     (): CommandPaletteItem[] => [
+      ...(isRemoteConnected
+        ? [
+            {
+              id: 'change-backup',
+              label: 'Change backup',
+              group: 'Sync',
+              icon: <Cloud />,
+              action: handleOpenSync,
+            },
+            /* R29 names two verbs, not one wearing the other's id: *Change* and
+               *Disconnect* are different intents and both open the pane, which
+               is where the confirmation lives (C47). */
+            {
+              id: 'disconnect-remote',
+              label: 'Disconnect backup',
+              group: 'Sync',
+              icon: <CloudOff />,
+              action: handleOpenSync,
+            },
+          ]
+        : [
+            {
+              id: 'connect-tau-cloud',
+              label: 'Connect Tau Cloud',
+              group: 'Sync',
+              icon: <Cloud />,
+              action: handleOpenSync,
+            },
+          ]),
+      {
+        id: 'sync-now',
+        label: 'Sync now',
+        group: 'Sync',
+        icon: <Cloud />,
+        action: syncNow,
+        visible: isRemoteConnected,
+        disabled: revisionStatus?.remote.phase !== 'connected' || syncReadOnly,
+      },
+      {
+        id: 'save-revision',
+        label: 'Save revision',
+        group: 'Revisions',
+        icon: <Save />,
+        action: saveRevision,
+      },
       {
         id: 'share-project',
         label: 'Share project',
@@ -295,6 +370,12 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       handleOpenExporter,
       handleDownloadZip,
       fileCount,
+      isRemoteConnected,
+      handleOpenSync,
+      syncReadOnly,
+      revisionStatus?.remote.phase,
+      saveRevision,
+      syncNow,
     ],
   );
 

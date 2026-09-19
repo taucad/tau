@@ -6,6 +6,8 @@ type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;
 
 const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies ModelModalities;
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
+/** Vision models on an Anthropic or OpenAI codec; providers rasterise PDF pages, so `pdf` never appears without `image`. */
+const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] } satisfies ModelModalities;
 
 /** Catalog row; omit {@link ModelListEntry.enabled} or set `true` to expose via GET `/v1/models`. */
 export type ModelListEntry = Model & { readonly enabled?: boolean };
@@ -36,7 +38,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-fable-5-1',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -82,7 +84,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-fable-5',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -127,7 +129,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-opus-5',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -172,7 +174,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-opus-4-8',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -216,7 +218,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-sonnet-5',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -260,7 +262,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-sonnet-4-6',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -303,7 +305,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-haiku-4-5-20251001',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -348,7 +350,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-astra',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -387,7 +389,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-sol',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -395,6 +397,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
         maxTokens: 128_000,
         knowledgeCutoff: '2026-02',
+        // OpenAI's standard price; billing charges its promotional rate while that lasts.
         cost: {
           inputTokens: 5,
           outputTokens: 30,
@@ -425,7 +428,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-terra',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -434,10 +437,10 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         maxTokens: 128_000,
         knowledgeCutoff: '2026-02',
         cost: {
-          inputTokens: 2.5,
-          outputTokens: 15,
-          cacheReadTokens: 0.25,
-          cacheWriteTokens: 3.125,
+          inputTokens: 2,
+          outputTokens: 12,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 2.5,
         },
       },
       configuration: {
@@ -463,7 +466,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-luna',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -502,7 +505,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.5',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -574,7 +577,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-3.1-pro-preview',
+      model: 'gemini-3.1-pro-preview-customtools',
       support: {
         modalities: imageInputModalities,
       },
@@ -597,28 +600,28 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         thinkingLevel: 'HIGH',
       },
     },
-    'gemini-3.7-flash': {
-      id: 'google-gemini-3.7-flash',
+    'gemini-3.8-flash': {
+      id: 'google-gemini-3.8-flash',
       providerKind: 'tau-hosted',
-      name: 'Gemini 3.7 Flash',
-      slug: 'gemini-3.7-flash',
+      name: 'Gemini 3.8 Flash',
+      slug: 'gemini-3.8-flash',
       recommended: true,
       description:
-        "Google's most capable Flash model for complex agentic CAD workflows, coding, and spatial reasoning.",
+        "Google's fastest strong model for everyday CAD edits, agentic tool loops, and multi-step geometry reasoning.",
       provider: {
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-3.7-flash',
+      model: 'gemini-3.8-flash',
       support: {
         modalities: imageInputModalities,
       },
       details: {
         family: 'gemini',
         families: ['gemini'],
-        contextWindow: 200_000,
+        contextWindow: 200_000, // Provider supports 1,048,576 tokens; Tau caps the effective chat budget.
         maxTokens: 65_536,
-        knowledgeCutoff: '2025-01',
+        // Google's standard price; billing charges its promotional rate while that lasts.
         cost: {
           inputTokens: 1.5,
           outputTokens: 7.5,
@@ -628,6 +631,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
+        // Google's own default for this model; it rejects MINIMAL outright.
         thinkingLevel: 'MEDIUM',
       },
     },

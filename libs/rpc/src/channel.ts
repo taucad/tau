@@ -164,7 +164,10 @@ export type StreamFlowControlOptions = {
  * @public
  */
 export type Channel<P extends RpcProtocol = EmptyRpcProtocol> = {
-  /** Resolves once the server's `lh` (hello) frame has been received. Pre-ready calls queue. */
+  /**
+   * Resolves once the server's `lh` (hello) frame has been received, and rejects
+   * when no hello arrives within the client's hello deadline. Pre-ready calls queue.
+   */
   readonly ready: Promise<void>;
   /** Resolves once the channel is fully closed (remote ack or timeout fallback). */
   readonly closed: Promise<void>;
@@ -391,6 +394,20 @@ const resolveListenIterable = async (result: unknown): Promise<AsyncIterable<unk
 };
 
 const defaultCloseTimeout = 5000;
+/**
+ * A client whose server never sends its hello has no wire, and every caller
+ * awaiting `ready` — or queued behind it — waits forever. Matches the bridge's
+ * own call deadline so a dead peer fails the same way at both layers.
+ */
+const defaultHelloTimeout = 30_000;
+/** Keep a pending deadline from holding a Node process open; browsers have no `unref`. */
+const unrefTimer = (timer: ReturnType<typeof setTimeout>): void => {
+  const maybeUnref = (timer as { unref?: () => void }).unref;
+  if (typeof maybeUnref === 'function') {
+    maybeUnref.call(timer);
+  }
+};
+
 const defaultInitialStreamCredits = 16;
 const defaultMaxStreamFrameBytes = 16 * 1024 * 1024;
 const defaultMaxStreamOwnedBytes = 64 * 1024 * 1024;
@@ -579,10 +596,7 @@ const createCloseController = (options: {
     timer = setTimeout(() => {
       finalize('timeout');
     }, closeHandshakeTimeout);
-    const maybeUnref = (timer as { unref?: () => void }).unref;
-    if (typeof maybeUnref === 'function') {
-      maybeUnref.call(timer);
-    }
+    unrefTimer(timer);
   };
 
   return {
@@ -730,7 +744,8 @@ export const createChannelServerOptions = <P extends RpcProtocol, T extends Chan
 
 /**
  * Create an RPC client over a {@link Port}. Resolves {@link Channel.ready} after the server's
- * hello frame is observed; calls made before `ready` are queued.
+ * hello frame is observed; calls made before `ready` are queued. A server that sends no hello
+ * rejects `ready` and closes the channel rather than leaving its callers pending.
  *
  * @param options - Channel client construction options (port, sessionKey, optional schemas, ...).
  * @returns A typed {@link Channel} bound to the supplied port.
@@ -764,10 +779,51 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   let isReady = false;
   let resolveReady: () => void = (): void => undefined;
   let rejectReady: (reason: Error) => void = (): void => undefined;
+  /* A server that never sends its hello closes the channel instead of leaving
+   * `ready` — and every call queued behind it — pending for the session. The
+   * deadline is the *server's* to meet: a port that connects reports when its
+   * wire is carrying (`Port.opened`), and arming before that spent the budget
+   * on DNS, TCP, TLS and the upgrade instead — a false expiry no reconnect
+   * undoes. A hello that beat the arming clears nothing: `helloSettled` keeps
+   * the timer from being armed at all. */
+  let helloTimer: ReturnType<typeof setTimeout> | undefined;
+  let helloSettled = false;
+  const armHelloDeadline = (): void => {
+    if (helloSettled) {
+      return;
+    }
+    helloTimer = setTimeout(() => {
+      rejectReady(new Error(`Channel server sent no hello within ${defaultHelloTimeout}ms.`));
+      closeController.initiateLocal('hello-timeout');
+    }, defaultHelloTimeout);
+    unrefTimer(helloTimer);
+  };
   const ready = new Promise<void>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
+    resolveReady = (): void => {
+      helloSettled = true;
+      clearTimeout(helloTimer);
+      resolve();
+    };
+    rejectReady = (reason): void => {
+      helloSettled = true;
+      clearTimeout(helloTimer);
+      reject(reason);
+    };
   });
+  if (port.opened === undefined) {
+    armHelloDeadline();
+  } else {
+    /* async-iife: bootstrap — the deadline starts when the wire is carrying. A
+     * wire that dies before it opens is reported by `onClose`, not by this. */
+    void (async (): Promise<void> => {
+      try {
+        await port.opened;
+      } catch {
+        // A port that cannot report its open still gets the deadline.
+      }
+      armHelloDeadline();
+    })();
+  }
   // async-iife: bootstrap — silence unhandledrejection when consumers never await ready;
   // the public `ready` promise itself remains unwrapped so consumers can handle errors.
   void (async (): Promise<void> => {
@@ -955,14 +1011,22 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
 
   let off: () => void = (): void => undefined;
 
+  /** Set when the port reported its own death, which is never a graceful bye. */
+  let portDied = false;
+
   const cleanupPendingState = (origin: CloseOrigin): void => {
     for (const [, p] of callPending) {
       p.reject(new Error('Channel closed'));
     }
     callPending.clear();
     callPendingNames.clear();
+    /* A peer that said goodbye ends its listens gracefully; a wire that died
+     * under them never finished them. Ending a truncated stream normally told
+     * the consumer a short read was the whole answer (RC8 collision 2: `ws`
+     * kills the socket over an oversized frame, and every in-flight iterator
+     * completed empty instead of rejecting). */
     for (const [sid, s] of listenSinks) {
-      if (origin === 'local') {
+      if (origin === 'local' || portDied) {
         s.fail(new Error('Channel closed'));
       } else {
         s.accept(listenEnd, 0);
@@ -992,8 +1056,10 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   const offWire = port.onMessage(onWire);
   /* A port that can report its own death is the only thing standing between a
    * killed peer and permanently pending calls: treat the death as the bye
-   * frame the peer never got to send. */
+   * frame the peer never got to send. Unlike a bye, it truncates in-flight
+   * listens rather than ending them. */
   const offPortClose = port.onClose?.(() => {
+    portDied = true;
     closeController.acceptRemote('port-closed');
   });
   off = (): void => {

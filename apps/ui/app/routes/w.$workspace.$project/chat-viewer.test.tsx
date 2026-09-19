@@ -5,18 +5,12 @@ import type { RefObject } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
 import type { Geometry, GeometryComponentManifest } from '@taucad/types';
-import type { KernelIssue, ProgressiveSceneUpdate, ResolvedSceneAsset, SceneNodeId } from '@taucad/runtime';
+import type { KernelIssue } from '@taucad/runtime';
 import { defaultGraphicsSettings, defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
-import {
-  appendSceneTimelineUpdate,
-  createSceneTimeline,
-  selectSceneTimelineSequence,
-} from '#machines/scene-timeline.js';
-import { createProgressiveSceneProjection } from '#machines/progressive-scene-projection.js';
 
 // =============================================================================
 // xstate/react: lightweight mock that mirrors selector(undefined) when actor is
@@ -41,8 +35,12 @@ const mockEditorSend = vi.fn();
 const mockGraphicsSend = vi.fn();
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<string, { entryPath: string; graphicsSettings: GraphicsViewSettings }> = {};
-let mockCameraViewRestore: unknown;
-const mockUseViewSettingsSync = vi.fn();
+let mockCameraSeed: unknown;
+/** A mounted provider is what acquires the view's camera session (R8). */
+let mockGraphicsProviderMounts = 0;
+let mockUnitSettings: Record<string, { renderTimeout: number }> = {};
+let mockFileTree: Map<string, { type: 'file' | 'dir'; name: string }>;
+let mockFileContent: { kind: string; text?: string };
 let mockHoveredComponentId: string | undefined;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
 let mockCadViewerProps:
@@ -62,28 +60,6 @@ const mockGeometry = {
   content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
   hash: 'test-geometry',
 } satisfies Geometry;
-const sceneTransform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
-
-const createProgressiveReset = (sequence: number): ProgressiveSceneUpdate => ({
-  type: 'reset',
-  renderId: 'render-progressive',
-  sequence,
-  revision: sequence,
-  sceneDigest: `scene-${sequence}` as Extract<ProgressiveSceneUpdate, { readonly type: 'reset' }>['sceneDigest'],
-  skippedBefore: 0,
-  snapshot: {
-    manifest: {
-      schemaVersion: 1,
-      rootNodeIds: ['root' as SceneNodeId],
-      nodes: {
-        root: { id: 'root' as SceneNodeId, childIds: [], transform: sceneTransform, visible: true },
-      },
-      presentation: {},
-    },
-    assets: [],
-  },
-});
-
 const componentCapabilities = {
   canHide: true,
   canIsolate: true,
@@ -158,8 +134,6 @@ type MockCadActorOptions = {
   readonly latestGeometryOutcome?: 'success' | 'failure';
   readonly kernelIssues?: Map<string, KernelIssue[]>;
   readonly tags?: ReadonlyArray<'cad-loading' | 'cad-runtime-error'>;
-  readonly sceneTimeline?: ReturnType<typeof createSceneTimeline>;
-  readonly progressiveSupported?: boolean;
   readonly fileManagerReady?: boolean;
 };
 
@@ -178,25 +152,8 @@ function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typ
         kernelClient: undefined,
         fileManagerRef: options.fileManagerReady ? {} : undefined,
         renderTimeout: defaultRenderTimeout,
-        sceneTimeline: options.sceneTimeline ?? createSceneTimeline(),
-        activeKernelId: options.progressiveSupported ? 'picogk' : undefined,
-        capabilities: options.progressiveSupported
-          ? {
-              routes: [],
-              registrations: [],
-              renderCapabilities: {
-                picogk: {
-                  renderOptions: { schema: {}, defaults: {} },
-                  progressiveScene: {
-                    type: 'supported',
-                    deliveries: ['reset'],
-                    bookmarks: ['explicit'],
-                    replay: ['live', 'retained'],
-                  },
-                },
-              },
-            }
-          : undefined,
+        activeKernelId: undefined,
+        capabilities: undefined,
       },
       hasTag: (tag: string) => tags.has(tag as 'cad-loading' | 'cad-runtime-error'),
     })),
@@ -265,10 +222,8 @@ const mockGraphicsActor = {
       enablePostProcessing: false,
       upDirection: 'z',
       cameraFovAngle: 45,
-      environmentPreset: 'studio',
       measurements: [],
       units: undefined,
-      progressiveScene: createProgressiveSceneProjection(),
     },
   })),
   send: mockGraphicsSend,
@@ -287,7 +242,7 @@ vi.mock('#hooks/use-project.js', () => ({
       send: mockProjectSend,
     },
     editorRef: {
-      getSnapshot: vi.fn(() => ({ context: { viewSettings: mockViewSettings } })),
+      getSnapshot: vi.fn(() => ({ context: { viewSettings: mockViewSettings, unitSettings: mockUnitSettings } })),
       subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
       on: vi.fn(() => ({ unsubscribe: vi.fn() })),
       send: mockEditorSend,
@@ -304,14 +259,11 @@ vi.mock('#hooks/use-project.js', () => ({
 // =============================================================================
 
 vi.mock('#hooks/use-file-tree.js', () => ({
-  useFileTreeMap: () =>
-    new Map<string, { type: 'file' | 'dir'; name: string }>([
-      [helperEntryPath, { type: 'file', name: helperEntryPath }],
-    ]),
+  useFileTreeMap: () => mockFileTree,
 }));
 
 vi.mock('#hooks/use-file-content.js', () => ({
-  useFileContent: () => ({ kind: 'text', text: 'cube();' }),
+  useFileContent: () => mockFileContent,
 }));
 
 // =============================================================================
@@ -393,17 +345,12 @@ vi.mock('#components/cad/ar-button.js', () => ({
   ArButton: () => null,
 }));
 
-vi.mock('#hooks/use-view-settings-sync.js', () => ({
-  useViewSettingsSync: (options: unknown) => {
-    mockUseViewSettingsSync(options);
-  },
-}));
-
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
 // stub the provider/hooks to avoid loading three under jsdom.
 vi.mock('#hooks/use-graphics.js', () => ({
-  GraphicsProvider: ({ children, cameraViewRestore }: { children: React.ReactNode; cameraViewRestore?: unknown }) => {
-    mockCameraViewRestore = cameraViewRestore;
+  GraphicsProvider: ({ children, seed }: { children: React.ReactNode; seed?: unknown }) => {
+    mockCameraSeed = seed;
+    mockGraphicsProviderMounts += 1;
     return <div>{children}</div>;
   },
   useGraphics: () => mockGraphicsActor,
@@ -417,7 +364,6 @@ vi.mock('#hooks/use-graphics.js', () => ({
         enableAxes: true,
         enableMatcap: false,
         upDirection: 'z',
-        progressiveScene: createProgressiveSceneProjection(),
       },
     }),
   useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
@@ -440,8 +386,11 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGraphicsSend.mockClear();
     mockGeometryUnits = new Map();
     mockViewSettings = {};
-    mockCameraViewRestore = undefined;
-    mockUseViewSettingsSync.mockClear();
+    mockCameraSeed = undefined;
+    mockGraphicsProviderMounts = 0;
+    mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
+    mockUnitSettings = {};
     mockHoveredComponentId = undefined;
     mockCadViewerSecondaryPointerMode = 'component-hit';
     mockCadViewerProps = undefined;
@@ -595,7 +544,9 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(screen.getByRole('status', { name: 'Loading geometry' })).toHaveAttribute('aria-busy', 'true');
   });
 
-  it('passes the persisted camera view to the provider for the current entry', () => {
+  /* Law 1: one create-only seed carries every camera-owned key. A project that is navigated away
+   * from keeps its graphics actor, so the seed is what a cold load uses and revisit ignores. */
+  it('passes one camera seed built from the persisted settings and the current entry', () => {
     const cameraView = {
       frameId: 'tau:root',
       target: [3, 4, 5],
@@ -614,8 +565,59 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(mockCameraViewRestore).toEqual({ identity: helperEntryPath, cameraView });
-    expect(mockUseViewSettingsSync).toHaveBeenCalledWith(expect.objectContaining({ persistCameraView: true }));
+    expect(mockCameraSeed).toEqual({ identity: helperEntryPath, camera: { cameraFovAngle: 42, cameraView } });
+  });
+
+  /* R8: a branch with no canvas has nothing to drive a camera, and building one there would latch
+   * the persisted pose against an entry the person never rendered. */
+  it('builds no camera session on the branches that render no canvas', () => {
+    mockViewSettings = {
+      'view-1': { entryPath: helperEntryPath, graphicsSettings: { ...defaultGraphicsSettings } },
+    };
+
+    const noFile = render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
+    expect(mockGraphicsProviderMounts).toBe(0);
+    noFile.unmount();
+
+    mockFileTree = new Map([['src/parts/gear.scad', { type: 'file', name: 'gear.scad' }]]);
+    const directory = render(<ChatViewer viewId='view-1' entryPath='src/parts' panelApi={mockPanelApi} />);
+    expect(mockGraphicsProviderMounts).toBe(0);
+    directory.unmount();
+
+    mockFileTree = new Map();
+    mockFileContent = { kind: 'orphaned' };
+    render(<ChatViewer viewId='view-1' entryPath='gone.scad' panelApi={mockPanelApi} />);
+    expect(mockGraphicsProviderMounts).toBe(0);
+    expect(mockCameraSeed).toBeUndefined();
+  });
+
+  /* Finding 4 / E1: the render timeout is owned per file by the entry's CAD actor and seeded at
+   * spawn. A mount-scoped push would rewrite a live owner from a stale record on every revisit. */
+  it('sends no render timeout from a mount effect and seeds a reopened unit instead', () => {
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: { ...defaultGraphicsSettings },
+      },
+    };
+    mockUnitSettings = { [helperEntryPath]: { renderTimeout: 30_000 } };
+    const cadActor = createMockCadActor();
+    mockGeometryUnits.set(helperEntryPath, cadActor);
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(cadActor.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setRenderTimeout' }));
+
+    mockGeometryUnits.delete(helperEntryPath);
+    mockProjectSend.mockClear();
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    fireEvent.click(screen.getAllByRole('button', { name: /reopen renderer/i })[0]!);
+
+    expect(mockProjectSend).toHaveBeenCalledWith({
+      type: 'createGeometryUnit',
+      entryPath: helperEntryPath,
+      renderTimeout: 30_000,
+    });
   });
 
   it('clears geometry-dependent camera state when the pane switches files', () => {
@@ -630,7 +632,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockViewSettings = {
       'view-1': {
         entryPath: helperEntryPath,
-        graphicsSettings: { ...defaultGraphicsSettings, cameraFovAngle: 42, cameraView },
+        graphicsSettings: {
+          ...defaultGraphicsSettings,
+          cameraFovAngle: 42,
+          cameraView,
+          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0, 0], direction: -1 },
+        },
       },
     };
     render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
@@ -646,10 +653,15 @@ describe('ChatViewer reopen-renderer overlay', () => {
           ...defaultGraphicsSettings,
           cameraFovAngle: 42,
           cameraView: undefined,
+          // The cut belongs to the file that was open (E2).
+          sectionView: undefined,
           pinnedMeasurements: undefined,
         },
       },
     });
+    /* Without this the retained actor keeps the cut, and the next publish writes it -- pivoted on
+     * geometry that is no longer open -- straight back into the record the clear just emptied. */
+    expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'setSectionViewActive', payload: false });
   });
 
   it('lets empty bottom-control overlay space pass pointer events through to the canvas', () => {
@@ -672,78 +684,6 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(canvasRegion).toHaveClass('relative', 'overflow-hidden');
   });
 
-  it('bridges accepted scene frames and timeline controls to the owning actors', () => {
-    const first = createProgressiveReset(0);
-    const second = createProgressiveReset(1);
-    let timeline = appendSceneTimelineUpdate(createSceneTimeline(), first);
-    timeline = appendSceneTimelineUpdate(timeline, second);
-    timeline = selectSceneTimelineSequence(timeline, 0);
-    const cadActor = createMockCadActor({
-      sceneTimeline: timeline,
-      progressiveSupported: true,
-      fileManagerReady: true,
-    });
-    mockGeometryUnits = new Map([[helperEntryPath, cadActor]]);
-
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
-
-    expect(screen.getByRole('slider', { name: 'Scene timeline' })).toBeInTheDocument();
-    expect(mockGraphicsSend).toHaveBeenCalledWith({
-      type: 'syncProgressiveScene',
-      updates: [first, second],
-      selectedSequence: 0,
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Return to live scene' }));
-    expect(cadActor.send).toHaveBeenCalledWith({ type: 'followLiveScene' });
-  });
-
-  it('routes the explicit preview-stage save action to the owning CAD actor', () => {
-    const first = createProgressiveReset(0);
-    if (first.type !== 'reset') {
-      throw new TypeError('Expected reset fixture');
-    }
-    const asset: ResolvedSceneAsset = {
-      contentDigest: 'asset-stage' as (typeof first.snapshot.assets)[number]['contentDigest'],
-      mediaType: 'model/gltf-binary',
-      byteLength: 4,
-      geometry: { format: 'gltf', content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) },
-    };
-    const portableFirst: ProgressiveSceneUpdate = {
-      ...first,
-      snapshot: {
-        manifest: {
-          ...first.snapshot.manifest,
-          nodes: {
-            root: {
-              ...first.snapshot.manifest.nodes['root']!,
-              geometry: {
-                contentDigest: asset.contentDigest,
-                mediaType: asset.mediaType,
-                byteLength: asset.byteLength,
-              },
-            },
-          },
-        },
-        assets: [asset],
-      },
-    };
-    let timeline = appendSceneTimelineUpdate(createSceneTimeline(), portableFirst);
-    timeline = appendSceneTimelineUpdate(timeline, createProgressiveReset(1));
-    timeline = selectSceneTimelineSequence(timeline, 0);
-    const cadActor = createMockCadActor({
-      sceneTimeline: timeline,
-      progressiveSupported: true,
-      fileManagerReady: true,
-    });
-    mockGeometryUnits = new Map([[helperEntryPath, cadActor]]);
-
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Save selected preview stage to project' }));
-
-    expect(cadActor.send).toHaveBeenCalledWith({ type: 'saveSelectedSceneStage' });
-  });
-
   it('should show the hovered component name under the pointer when the canvas has a hovered component', () => {
     mockHoveredComponentId = rightRimComponentId;
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
@@ -756,11 +696,38 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(label).toHaveTextContent('Right Rim');
     expect(label).toHaveAttribute('aria-hidden', 'true');
     expect(label.className).toContain('pointer-events-none');
-    expect(label).toHaveStyle({
-      left: '64px',
-      top: '72px',
+    // The badge is placed from custom properties written straight to the
+    // layout element, so a pointer move never re-renders the viewer subtree.
+    expect(screen.getByTestId('chat-viewer-layout')).toHaveStyle({
       '--viewer-hover-label-x': '64px',
       '--viewer-hover-label-y': '72px',
+    });
+    expect(label).toHaveStyle({
+      left: 'var(--viewer-hover-label-x, 0px)',
+      top: 'var(--viewer-hover-label-y, 0px)',
+    });
+  });
+
+  it('should place the hover badge on later pointer moves without re-rendering the viewer', () => {
+    mockHoveredComponentId = rightRimComponentId;
+    const cadActor = createMockCadActor();
+    mockGeometryUnits.set(helperEntryPath, cadActor);
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
+    fireCanvasPointerMove(canvasRegion, { clientX: 74, clientY: 92 });
+
+    // Each render of the viewer reads every cad subscription's snapshot, so a
+    // flat read count across pointer moves means no React commit happened.
+    const readsAfterFirstMove = vi.mocked(cadActor.getSnapshot).mock.calls.length;
+    fireCanvasPointerMove(canvasRegion, { clientX: 120, clientY: 140 });
+    fireCanvasPointerMove(canvasRegion, { clientX: 160, clientY: 180 });
+
+    expect(vi.mocked(cadActor.getSnapshot).mock.calls.length).toBe(readsAfterFirstMove);
+    expect(screen.getByTestId('chat-viewer-layout')).toHaveStyle({
+      '--viewer-hover-label-x': '150px',
+      '--viewer-hover-label-y': '160px',
     });
   });
 

@@ -1,9 +1,10 @@
 /* oxlint-disable eslint-plugin-promise/prefer-await-to-then, eslint-plugin-promise/valid-params -- filter.catch() is a method name, not Promise.catch() */
 /* oxlint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-confusing-void-expression -- test mock casts */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, Logger } from '@nestjs/common';
 import * as otelApi from '@opentelemetry/api';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 
 function createMockArgumentsHost(url = '/test') {
   const mockResponse = {
@@ -102,6 +103,95 @@ describe('HttpExceptionFilter OTEL integration', () => {
     const exception = new Error('server crash');
 
     expect(() => filter.catch(exception, host as any)).not.toThrow();
+  });
+
+  it('should not reply again once the response has already been sent', () => {
+    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+
+    const host = createMockArgumentsHost();
+    (host.response as unknown as { sent: boolean }).sent = true;
+    const error = new Error('settlement failed after the stream');
+
+    filter.catch(error, host as any);
+
+    expect(host.response.send).not.toHaveBeenCalled();
+    expect(host.response.status).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledWith(
+      { err: error, requestId: 'req_test_123' },
+      'Request failed after its response was already sent',
+    );
+  });
+
+  it.each([
+    ['FUNDED_OPERATION_LIMIT', HttpStatus.TOO_MANY_REQUESTS, '30'],
+    ['FUNDED_HELPER_LIMIT', HttpStatus.TOO_MANY_REQUESTS, '30'],
+    ['BILLING_RECOVERY_UNAVAILABLE', HttpStatus.SERVICE_UNAVAILABLE, '60'],
+  ] as const)('should return a bounded Retry-After with the %s envelope', (type, status, seconds) => {
+    const host = createMockArgumentsHost();
+
+    filter.catch(new LlmGatewayError(status, type, 'refused'), host as any);
+
+    expect(host.response.header).toHaveBeenCalledWith('retry-after', seconds);
+    expect(host.response.status).toHaveBeenCalledWith(status);
+    expect(host.response.send).toHaveBeenCalledWith({ type: 'error', error: { type, message: 'refused' } });
+  });
+
+  it('should prefer the envelope own retry estimate over the static funded map', () => {
+    const host = createMockArgumentsHost();
+
+    filter.catch(
+      new LlmGatewayError(HttpStatus.TOO_MANY_REQUESTS, 'RATE_LIMITED', 'upstream rate limit', {
+        retryAfterSeconds: 7,
+      }),
+      host as any,
+    );
+
+    expect(host.response.header).toHaveBeenCalledWith('retry-after', '7');
+  });
+
+  /* The interpolated string was eaten by pino-pretty: every `{…}` in a message is read as
+   * a format token, so the envelope logged as `{"type":"error","error":}`. */
+  it('should log the gateway refusal as a structured object rather than an interpolated envelope', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const host = createMockArgumentsHost();
+    const exception = new LlmGatewayError(
+      HttpStatus.BAD_GATEWAY,
+      'UPSTREAM_REJECTED',
+      'Configured provider returned HTTP 400.',
+    );
+
+    filter.catch(exception, host as any);
+
+    expect(warn).toHaveBeenCalledWith(
+      { gatewayResponse: exception.getResponse(), requestId: 'req_test_123' },
+      'Model gateway refusal',
+    );
+  });
+
+  it('should not offer a retry estimate for a funded refusal that retrying cannot clear, and keep its shortfall', () => {
+    const host = createMockArgumentsHost();
+    const details = {
+      requiredCreditAtoms: '4244000',
+      availableCreditAtoms: '300000',
+      routeId: 'anthropic-claude-astra-5',
+    };
+
+    filter.catch(
+      new LlmGatewayError(HttpStatus.PAYMENT_REQUIRED, 'INSUFFICIENT_CREDIT', 'no credit', details),
+      host as any,
+    );
+
+    expect(host.response.header).not.toHaveBeenCalledWith('retry-after', expect.anything());
+    expect(host.response.status).toHaveBeenCalledWith(HttpStatus.PAYMENT_REQUIRED);
+    expect(host.response.send).toHaveBeenCalledWith({
+      type: 'error',
+      error: { type: 'INSUFFICIENT_CREDIT', message: 'no credit', details },
+    });
   });
 
   it('should not call recordException for non-Error 5xx exceptions', () => {

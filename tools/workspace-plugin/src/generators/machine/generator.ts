@@ -38,6 +38,21 @@ type MachineTarget = {
 };
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
+const tsdownEntryPattern = /entry: \[([^\]]*)\],/u;
+
+/**
+ * The single-quoted paths of the one `entry: [...]` array a package tsdown config declares.
+ *
+ * A package accumulates one entry per machine subpath, so the array is read
+ * and appended rather than matched against a fixed single-entry literal.
+ */
+const tsdownEntries = (source: string): string[] | undefined => {
+  const match = tsdownEntryPattern.exec(source);
+  if (match?.[1] === undefined) {
+    return undefined;
+  }
+  return [...match[1].matchAll(/'([^']+)'/gu)].map((entry) => entry[1]!);
+};
 const directSubpathPattern = /^[\da-z]+(?:-[\da-z]+)*$/;
 
 const readText = (tree: Tree, path: string): string => {
@@ -136,9 +151,12 @@ const resolvePublishableTarget = ({
 
   const tsdownPath = join(identity.projectRoot, 'tsdown.config.ts');
   const tsdownSource = readText(tree, tsdownPath);
-  const canonicalEntry = "entry: ['src/index.ts'],";
-  if (tsdownSource.split(canonicalEntry).length !== 2) {
-    throw new Error(`Expected the canonical single-entry tsdown shape in ${tsdownPath}.`);
+  const entries = tsdownEntries(tsdownSource);
+  if (entries === undefined || !entries.includes('src/index.ts')) {
+    throw new Error(`Expected the canonical tsdown entry array starting at src/index.ts in ${tsdownPath}.`);
+  }
+  if (entries.includes(`src/${identity.fileName}.machine.ts`)) {
+    throw new Error(`Machine entry already exists in ${tsdownPath}.`);
   }
 
   return {
@@ -257,8 +275,9 @@ export const machineGenerator = async (tree: Tree, schema: MachineGeneratorSchem
   }
 
   if (target.publishable && target.tsdownPath && target.tsdownSource) {
-    const machineEntry = `entry: ['src/index.ts', 'src/${target.fileName}.machine.ts'],`;
-    tree.write(target.tsdownPath, target.tsdownSource.replace("entry: ['src/index.ts'],", machineEntry));
+    const entries = [...(tsdownEntries(target.tsdownSource) ?? []), `src/${target.fileName}.machine.ts`];
+    const machineEntry = `entry: [${entries.map((entry) => `'${entry}'`).join(', ')}],`;
+    tree.write(target.tsdownPath, target.tsdownSource.replace(tsdownEntryPattern, machineEntry));
   }
 
   await formatFiles(tree);

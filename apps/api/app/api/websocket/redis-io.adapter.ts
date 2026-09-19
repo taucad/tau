@@ -72,4 +72,15 @@ export class RedisIoAdapter extends IoAdapter {
 
     return server;
   }
+
+  /**
+   * Nest calls this on application shutdown. `server.close()` closes every
+   * namespace adapter, which aborts the stream adapter's own read/sub clients;
+   * the parent duplicate this adapter created is released here.
+   */
+  public override async close(server: Server): Promise<void> {
+    await super.close(server);
+    this.adapterClient?.disconnect();
+    this.adapterClient = undefined;
+  }
 }

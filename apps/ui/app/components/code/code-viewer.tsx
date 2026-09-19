@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { useShikiHighlighter } from 'react-shiki/core';
+import { useState, useEffect, useRef } from 'react';
 import type { HighlighterCore } from 'shiki/core';
 import type { ClassValue } from 'clsx';
 import { cn } from '@taucad/ui/utils/cn';
@@ -16,6 +15,8 @@ type CodeViewerProps = {
 
 const codeViewerClassName =
   'not-fumadocs-codeblock text-sm [&_pre]:m-0 [&_pre]:my-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:leading-[1.45]';
+/** Milliseconds. */
+const highlightThrottle = 150;
 
 export function CodeViewer({ text, language, className }: CodeViewerProps): React.JSX.Element {
   const { theme, isHighContrast } = useTheme();
@@ -64,7 +65,42 @@ function HighlightedCode({
   highlighter: HighlighterCore;
   className?: ClassValue;
 }): React.JSX.Element {
-  const highlightedCode = useShikiHighlighter(text, language, theme, { delay: 150, highlighter });
+  const [html, setHtml] = useState<string>();
+  const nextAllowedHighlightTime = useRef(0);
 
-  return <div className={cn(codeViewerClassName, className)}>{highlightedCode}</div>;
+  useEffect(() => {
+    const now = Date.now();
+    /** Milliseconds. */
+    const highlightDelay = Math.max(0, nextAllowedHighlightTime.current - now);
+    const highlightTimeout = setTimeout(() => {
+      try {
+        setHtml(highlighter.codeToHtml(text, { lang: language, theme }));
+        nextAllowedHighlightTime.current = now + highlightThrottle;
+      } catch (error) {
+        console.error('Failed to highlight code', error);
+      }
+    }, highlightDelay);
+
+    return () => {
+      clearTimeout(highlightTimeout);
+    };
+  }, [highlighter, language, text, theme]);
+
+  if (html === undefined) {
+    return (
+      <div className={cn(codeViewerClassName, className)}>
+        <pre className='m-0 bg-transparent p-0 leading-[1.45]'>
+          <code>{text}</code>
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(codeViewerClassName, className)}
+      // oxlint-disable-next-line react/no-danger -- Shiki returns trusted HTML.
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }

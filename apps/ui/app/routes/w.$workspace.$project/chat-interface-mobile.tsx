@@ -6,6 +6,7 @@ import { ChatEditorLayout } from '#routes/w.$workspace.$project/chat-editor-layo
 import { ChatDetails } from '#routes/w.$workspace.$project/chat-details.js';
 import { ChatConverter } from '#routes/w.$workspace.$project/chat-converter.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
+import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatInterfaceNav } from '#routes/w.$workspace.$project/chat-interface-nav.js';
@@ -14,6 +15,7 @@ import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-in
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
+import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
@@ -22,13 +24,15 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const isViewerTab = activeTab === 'viewer';
 
   return (
-    <ChatInterfaceSessionGate fallback={<div className='absolute inset-0 size-full md:hidden' />}>
+    <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
       <div
         className={cn(
           // --nav-height is the height of the navigation tabs
           'absolute inset-0 size-full',
           '[--nav-height:calc(var(--spacing)*11)]', // 10 units of spacing
           'md:hidden', // Hidden on desktop
+          // The workspace lands over the skeleton's background rather than snapping in.
+          'animate-in duration-200 fade-in-50 motion-reduce:animate-none',
         )}
       >
         {/* Main viewer - always visible */}
@@ -40,7 +44,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
         >
           <ViewerDockview />
 
-          {/* Renders ProjectLoadError / WorkspaceUnavailableRecovery
+          {/* Renders the shared failure notice or WorkspaceUnavailableRecovery
             depending on which gate has failed. See Audit R8 for rationale. */}
           <ProjectUnavailableOverlay />
         </div>
@@ -107,6 +111,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
               </TabsContent>
               <TabsContent enableAnimation={false} value='share' className='flex h-full flex-col'>
                 <ProjectShareWorkbenchPanel />
+              </TabsContent>
+              <TabsContent enableAnimation={false} value='revisions' className='flex h-full flex-col'>
+                <RevisionsPanelBody />
               </TabsContent>
             </Tabs>
           </DrawerContent>

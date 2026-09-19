@@ -2,7 +2,7 @@ import process from 'node:process';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
 import {
-  createMessage,
+  buildUserMessage,
   finalizeInterruptedToolParts,
   serializeMessage,
   serializeTranscript,
@@ -129,18 +129,37 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0,
           },
         },
       ]);
       expect(serializeMessage(message)).toBe('Model: gpt-4 | Tokens: 10 in / 20 out');
     });
 
-    it('includes cost when totalCost > 0', () => {
+    /* V6: an external turn's tokens are the vendor's own report, and Tau quotes
+     * no price for them — it did not sell them. The agent is named instead. */
+    it('names the external agent and quotes no Tau price for its usage', () => {
+      const message = baseMessage([
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u1',
+            agent: 'codex',
+            model: 'gpt-5.3-codex',
+            inputTokens: 1200,
+            outputTokens: 300,
+            reasoningTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe('Agent: codex | Model: gpt-5.3-codex | Tokens: 1200 in / 300 out');
+    });
+
+    /* B4 R2: an export names the funded operations whose receipts hold the
+     * charge; it never quotes a locally multiplied amount. */
+    it('names the funded Tau operations instead of quoting a price', () => {
       const message = baseMessage([
         {
           type: 'data-usage',
@@ -153,18 +172,31 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0.002,
+            operationId: 'op_b',
+            attemptId: 'att_1',
+            billingStatus: 'terminal',
+          },
+        },
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u2',
+            model: 'claude-3',
+            inputTokens: 1,
+            outputTokens: 2,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            operationId: 'op_a',
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 5 in / 15 out | Cost: $0.0020');
+      const serialized = serializeMessage(message);
+      expect(serialized).toBe('Model: claude-3 | Tokens: 6 in / 17 out | Tau operations: op_a, op_b');
+      expect(serialized).not.toContain('$');
     });
 
-    it('aggregates multiple data-usage parts into one line with summed tokens and cost', () => {
+    it('aggregates multiple data-usage parts into one line with summed tokens', () => {
       const message = baseMessage([
         {
           type: 'data-usage',
@@ -177,11 +209,6 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0.001,
           },
         },
         {
@@ -195,15 +222,10 @@ describe('serializeMessage', () => {
             reasoningTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            inputTokensCost: 0,
-            outputTokensCost: 0,
-            cacheReadTokensCost: 0,
-            cacheWriteTokensCost: 0,
-            totalCost: 0.002,
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 35 out | Cost: $0.0030');
+      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 35 out');
     });
   });
 
@@ -767,25 +789,63 @@ describe('finalizeInterruptedToolParts', () => {
   });
 });
 
-describe('createMessage', () => {
-  it('creates a message with text and optional images', () => {
-    const message = createMessage({
-      content: 'Hello',
-      role: 'user',
-      metadata: {},
-    });
-    expect(message.role).toBe('user');
-    expect(message.parts).toHaveLength(1);
-    expect(message.parts[0]).toEqual({ type: 'text', text: 'Hello' });
+describe('buildUserMessage', () => {
+  // P38: the one user-message builder; the data-URL builders it replaced are gone.
+  it('should be the only user-message builder the module exports', async () => {
+    const exported = Object.keys(await import('#utils/chat.utils.js'));
+    expect(exported).toContain('buildUserMessage');
+    expect(exported).not.toContain('createMessage');
+    expect(exported).not.toContain('extractMimeTypeFromDataUrl');
   });
 
-  it('trims content', () => {
-    const message = createMessage({
-      content: '  trimmed  ',
-      role: 'user',
-      metadata: {},
+  const imageHash = 'a'.repeat(64);
+  const documentHash = 'b'.repeat(64);
+
+  it('should put each attachment reference ahead of the trimmed text', () => {
+    const message = buildUserMessage({
+      text: '  model the bracket  ',
+      attachments: [
+        { hash: imageHash, mediaType: 'image/jpeg' },
+        { hash: documentHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' },
+      ],
     });
-    expect((message.parts[0] as { type: 'text'; text: string }).text).toBe('trimmed');
+
+    expect(message).toMatchObject({ id: expect.stringMatching(/^msg_/u) as unknown, role: 'user' });
+    expect(message.metadata).toMatchObject({ status: 'pending', createdAt: expect.any(Number) as unknown });
+    expect(message.parts).toEqual([
+      { type: 'file', mediaType: 'image/jpeg', url: `attachments/${imageHash}.jpg` },
+      {
+        type: 'file',
+        mediaType: 'application/pdf',
+        filename: 'bracket-spec.pdf',
+        url: `attachments/${documentHash}.pdf`,
+      },
+      { type: 'text', text: 'model the bracket' },
+    ]);
+  });
+
+  it('should carry the byte length only when the reference knows it (P29)', () => {
+    const message = buildUserMessage({
+      text: '',
+      attachments: [{ hash: imageHash, mediaType: 'image/png', byteLength: 42 }],
+    });
+
+    expect(message.parts).toEqual([
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        url: `attachments/${imageHash}.png`,
+        providerMetadata: { common: { byteLength: 42 } },
+      },
+    ]);
+  });
+
+  it('should omit an empty text part and give every message its own id', () => {
+    const first = buildUserMessage({ text: '   ' });
+    const second = buildUserMessage({ text: 'x' });
+
+    expect(first.parts).toEqual([]);
+    expect(first.id).not.toBe(second.id);
   });
 });
 

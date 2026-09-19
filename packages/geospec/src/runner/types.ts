@@ -22,10 +22,10 @@ export type GeoSpecAxisExpectation = {
  * @public
  */
 export type GeoSpecBoundingBoxExpectation = {
-  min?: Vec3 | GeoSpecAxisExpectation;
-  max?: Vec3 | GeoSpecAxisExpectation;
-  size?: Vec3 | GeoSpecAxisExpectation;
-  center?: Vec3 | GeoSpecAxisExpectation;
+  min?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>;
+  max?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>;
+  size?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>;
+  center?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>;
   tolerance?: number;
 };
 

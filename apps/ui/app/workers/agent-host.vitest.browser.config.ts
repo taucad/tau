@@ -1,9 +1,11 @@
 /* oxlint-disable import/extensions -- The composed source fixture is replaced by the package export when FIX-PROJ adds the UI dependency. */
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { defineConfig } from 'vitest/config';
+import type { BrowserProviderOption } from 'vitest/node';
 import { tauRuntime } from '@taucad/runtime/vite';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This composed browser contract fixture exercises the package wire through the UI worker until FIX-PROJ adds the UI package dependency.
 import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-host/src/transport/gateway-wire.fixture.js';
@@ -36,12 +38,44 @@ export default defineConfig({
       },
     },
     {
+      /*
+       * `tauRuntime()`'s asset plugin rewrites package-owned
+       * `new URL(import.meta.resolve('<pkg>/<asset>'))` to a `/@fs/` URL the dev
+       * server can serve, but it no-ops whenever `config.mode === 'test'` — a
+       * guard for node/jsdom runs, where a served URL would be meaningless.
+       * Browser mode *is* served, so without this mirror the page's own
+       * `import.meta.resolve` throws on the first bare specifier (the resvg
+       * wasm the headless image service resolves at worker boot) and every test
+       * in this file fails on `initialize`.
+       */
+      name: 'agent-host-package-asset-urls',
+      enforce: 'pre',
+      transform(code: string, id: string) {
+        if (!code.includes('import.meta.resolve')) {
+          return null;
+        }
+        const require_ = createRequire(id.replace(/[#?].*$/, ''));
+        const rewritten = code.replaceAll(
+          /new\s+URL\(\s*import\.meta\.resolve\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*\)\s*,?\s*\)/g,
+          (match: string, _quote: string, specifier: string) => {
+            try {
+              return `new URL(${JSON.stringify(`/@fs/${require_.resolve(specifier).replaceAll('\\', '/')}`)}, import.meta.url)`;
+            } catch {
+              return match;
+            }
+          },
+        );
+        return rewritten === code ? null : { code: rewritten, map: null };
+      },
+    },
+    {
       name: 'agent-host-gateway-fixture',
       configureServer(server) {
         server.middlewares.use('/v1/llm/openai/v1/chat/completions', (_request, response) => {
           response.writeHead(200, {
             'content-type': 'text/event-stream',
             'cache-control': 'no-cache',
+            'x-tau-operation-id': 'operation-browser-fixture',
           });
           for (const frame of authoritativeGatewayWireFixtures.browserTurn) {
             response.write(frame);
@@ -64,7 +98,9 @@ export default defineConfig({
       'app/workers/agent-host.browser.test.ts',
       'app/workers/gltf-codec.browser.test.ts',
       'app/workers/headless-capture-in-worker.browser.test.ts',
+      'app/workers/skill-resources.browser.test.ts',
       'app/machines/file-manager.browser.test.ts',
+      'app/components/geometry/loader/metal-morph-spinner.browser.test.tsx',
     ],
     fileParallelism: false,
     browser: {
@@ -72,7 +108,17 @@ export default defineConfig({
       headless: true,
       // `--enable-unsafe-webgpu` is what `apps/ui-e2e` launches with; the
       // headless capture probe needs a real adapter or its answer is vacuous.
-      provider: playwright({ launchOptions: { channel: 'chromium', args: ['--enable-unsafe-webgpu'] } }),
+      // `@vitest/browser-playwright` resolves a second `vitest` peer variant (its jsdom lacks
+      // the optional `supports-color` peer), so the option it returns is nominally — not
+      // structurally — distinct from this program's own `vitest/node` declaration. This is the
+      // only vitest config inside a typecheck program, so no other config surfaces the split.
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- duplicated `vitest` declarations leave no narrower bridge
+      provider: playwright({
+        launchOptions: {
+          channel: 'chromium',
+          args: ['--enable-unsafe-webgpu'],
+        },
+      }) as unknown as BrowserProviderOption,
       instances: [{ browser: 'chromium' }],
     },
   },

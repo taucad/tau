@@ -23,6 +23,8 @@ import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
+import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
+import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
 
 /**
  * Main chat textarea component that conditionally renders either the
@@ -93,7 +95,14 @@ export const ChatTextarea = memo(function ({
   const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
   const { chats } = useChats(projectContext?.projectId ?? '');
-  const { session } = useChatComposer();
+  const {
+    session,
+    execution: { execution },
+  } = useChatComposer();
+  const acpAgentId = execution.kind === 'acp' ? execution.agentId : undefined;
+  const acpSessionData = useChatSessionSnapshot(session?.activeChatId ?? '', (active) =>
+    acpAgentId === undefined ? undefined : latestAcpSessionData(active?.chat.messages ?? [], acpAgentId),
+  );
   const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
 
   const setDraftText = useCallback(
@@ -367,7 +376,7 @@ export const ChatTextarea = memo(function ({
           enableContextActions={enableContextActions}
           enableKernelSelector={enableKernelSelector}
           creationLocationControl={creationLocationControls?.field}
-          isSubmitDisabled={isSubmitDisabled}
+          isSubmitDisabled={logic.isSubmitDisabled}
           // State
           dragKind={logic.dragKind}
           showContextMenu={logic.showContextMenu}
@@ -375,7 +384,11 @@ export const ChatTextarea = memo(function ({
           selectedMenuIndex={logic.selectedMenuIndex}
           isSubmitting={logic.isSubmitting}
           inputText={logic.inputText}
-          images={logic.images}
+          attachments={logic.attachments}
+          attachmentDirectory={logic.attachmentDirectory}
+          sendBlockReason={logic.sendBlockReason}
+          attachmentAccept={logic.attachmentAccept}
+          attachmentInputSupported={logic.attachmentInputSupported}
           selectedToolChoice={logic.selectedToolChoice}
           status={logic.status}
           selectedModel={logic.selectedModel}
@@ -404,7 +417,7 @@ export const ChatTextarea = memo(function ({
           handleTextareaBlur={logic.handleTextareaBlur}
           handlePointerDown={logic.handlePointerDown}
           focusInput={logic.focusInput}
-          removeImage={logic.removeImage}
+          removeAttachment={logic.removeAttachment}
           setShowContextMenu={logic.setShowContextMenu}
           setAtSymbolPosition={logic.setAtSymbolPosition}
           setContextSearchQuery={logic.setContextSearchQuery}
@@ -424,12 +437,16 @@ export const ChatTextarea = memo(function ({
         enableContextActions={enableContextActions}
         enableKernelSelector={enableKernelSelector}
         creationLocationControl={creationLocationControls?.toolbar}
-        isSubmitDisabled={isSubmitDisabled}
+        isSubmitDisabled={logic.isSubmitDisabled}
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}
         inputText={logic.inputText}
-        images={logic.images}
+        attachments={logic.attachments}
+        attachmentDirectory={logic.attachmentDirectory}
+        sendBlockReason={logic.sendBlockReason}
+        attachmentAccept={logic.attachmentAccept}
+        attachmentInputSupported={logic.attachmentInputSupported}
         selectedToolChoice={logic.selectedToolChoice}
         status={logic.status}
         selectedModel={logic.selectedModel}
@@ -440,6 +457,8 @@ export const ChatTextarea = memo(function ({
         chats={chats}
         actionItems={screenshotActionItems}
         setDraftText={setDraftText}
+        acpAgentId={acpAgentId}
+        acpSessionData={acpSessionData}
         // Refs
         fileInputReference={logic.fileInputReference}
         containerReference={logic.containerReference}
@@ -459,7 +478,7 @@ export const ChatTextarea = memo(function ({
         onScreenshotAction={handleScreenshotAction}
         onEscapePressed={onEscapePressed}
         handleTextareaBlur={logic.handleTextareaBlur}
-        removeImage={logic.removeImage}
+        removeAttachment={logic.removeAttachment}
         setDraftToolChoice={logic.setDraftToolChoice}
       />
     </ClientOnly>

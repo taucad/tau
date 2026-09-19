@@ -8,7 +8,7 @@ const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
 
 describe('<%= machineName %>', () => {
-  it('starts headlessly and exports exactly one machine value', () => {
+  it('should start headlessly and export exactly one machine value', () => {
     const actor = createActor(<%= machineName %>, { input: {} });
 
     actor.start();

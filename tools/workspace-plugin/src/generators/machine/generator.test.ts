@@ -143,14 +143,37 @@ describe('machine generator', () => {
       'packages/camera/tsdown.config.ts',
       readText(driftedTree, 'packages/camera/tsdown.config.ts').replace(
         "entry: ['src/index.ts'],",
-        "entry: ['src/index.ts', 'src/other.ts'],",
+        "entry: 'src/index.ts',",
       ),
     );
     const beforeDriftFailure = snapshotChanges(driftedTree);
 
     await expect(
       machineGenerator(driftedTree, { name: 'camera', project: 'camera', subpath: 'machine' }),
-    ).rejects.toThrow('canonical single-entry tsdown shape');
+    ).rejects.toThrow('canonical tsdown entry array');
     expect(snapshotChanges(driftedTree)).toEqual(beforeDriftFailure);
+  });
+
+  it('should append a second machine to a package that already has several tsdown entries', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+    await packageGenerator(tree, { name: 'camera' });
+    tree.write(
+      'packages/camera/tsdown.config.ts',
+      readText(tree, 'packages/camera/tsdown.config.ts').replace(
+        "entry: ['src/index.ts'],",
+        "entry: ['src/index.ts', 'src/node/index.ts'],",
+      ),
+    );
+
+    await machineGenerator(tree, { name: 'orbit', project: 'camera', subpath: 'orbit-machine' });
+    await machineGenerator(tree, { name: 'dolly', project: 'camera', subpath: 'dolly-machine' });
+
+    const entries = [...readText(tree, 'packages/camera/tsdown.config.ts').matchAll(/'(src\/[^']+)'/gu)].map(
+      (match) => match[1],
+    );
+    expect(entries).toEqual(['src/index.ts', 'src/node/index.ts', 'src/orbit.machine.ts', 'src/dolly.machine.ts']);
+    const manifest = readJson<{ exports: Record<string, string> }>(tree, 'packages/camera/package.json');
+    expect(manifest.exports['./orbit-machine']).toBe('./src/orbit.machine.ts');
+    expect(manifest.exports['./dolly-machine']).toBe('./src/dolly.machine.ts');
   });
 });

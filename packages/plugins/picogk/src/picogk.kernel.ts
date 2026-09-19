@@ -1,13 +1,18 @@
 import { transformGltfExportBytes } from '@taucad/geometry-core';
 import { createWorkspaceMirror } from '@taucad/native-process-core';
-import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
+import {
+  asBuffer,
+  createKernelError,
+  createKernelParameterDeclaration,
+  createKernelSuccess,
+  defineKernel,
+} from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 
-import { picogkArtifactToComponentGlbs, picogkArtifactToGlb } from '#picogk-mesh.js';
-import { preparePicogkCompute } from '#picogk-compute.js';
+import { picogkArtifactToGlb } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema } from '#picogk.protocol.js';
-import { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
+import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
 
 /** Immutable mesh evidence retained by the runtime for display and export. @public */
@@ -51,18 +56,10 @@ export const picogkKernel = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.3.0+dotnet10.roslyn5.9.host2.protocol3.topology1.scene3',
+  version: '2.3.0+dotnet10.roslyn5.9.host2.protocol4.topology1',
   optionsSchema: picogkOptionsSchema,
-  createOptionsSchema: picogkRenderSchema,
-  render: {
-    optionsSchema: picogkRenderSchema,
-    progressiveScene: {
-      type: 'supported',
-      deliveries: ['reset', 'delta'],
-      bookmarks: ['explicit', 'viewer-update', 'viewer-operation'],
-      replay: ['live', 'retained'],
-    },
-  },
+  // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
+  liveEdit: true,
   exportFormats: { glb: { optionsSchema: picogkExportSchemas.glb } },
 
   async initialize(options, runtime) {
@@ -73,198 +70,105 @@ export const picogkKernel = defineKernel({
       excludedFileSuffixes: ['.dll', '.exe', '.pdb'],
       excludedPaths: ['thumbnail.webp'],
     });
-    const session = new PicogkSession({ ...options, ...mirror, logger: runtime.logger });
-    return {
-      mirror,
-      session,
-      computeAssets: {
-        workerSha256: options.workerSha256,
-        resourceSha256: options.resourceFiles.map(({ sha256 }) => sha256),
-      },
-    };
+    const session = new PicogkSession({
+      ...options,
+      ...mirror,
+      logger: runtime.logger,
+    });
+    return { mirror, session };
   },
 
   async getDependencies({ entryPath }, runtime, context) {
     try {
-      const paths = await context.mirror.sync(runtime.filesystem);
-      return { resolved: paths.filter((path) => !tauSystemArtifacts.has(path)), unresolved: [] };
+      const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+      return {
+        resolved: paths.filter((path) => !tauSystemArtifacts.has(path)),
+        unresolved: [],
+      };
     } catch (error) {
       throw new PicogkKernelError(issuesFrom(error, entryPath));
     }
   },
 
   async getParameters({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    /* D8: the worker's own stage timings are attributes on the span that measured the request. The
+     * span's duration is the total, so nothing here times the call a second time. */
+    const span = runtime.tracer.startSpan('picogk.analyze', { entryPath });
     try {
-      const started = performance.now();
       const analysis = await context.session.request({
         method: 'analyze',
         params: { entryPath },
         schema: picogkAnalysisSchema,
         signal: runtime.signal,
       });
-      runtime.logger.debug('PicoGK C# analysis performance', {
-        data: { ...analysis.timings, total: performance.now() - started },
-      });
-      return createKernelSuccess({
-        defaultParameters: analysis.defaultParameters,
-        jsonSchema: analysis.jsonSchema,
-      });
+      span.end({ ...analysis.timings });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(analysis.defaultParameters, analysis.jsonSchema, {
+          id: 'urn:taucad:picogk:parameters',
+          name: 'PicoGkParameters',
+        }),
+      );
     } catch (error) {
       return createKernelError(issuesFrom(error, entryPath));
+    } finally {
+      /* Idempotent: the success path already ended it with its attributes. A failed request must
+       * still close it, or the tracer keeps parenting later spans under a span that never ended. */
+      span.end();
     }
   },
 
-  async createGeometry({ entryPath, parameters, options }, runtime, context) {
-    const mirroredPaths = await context.mirror.sync(runtime.filesystem);
-    let publications = Promise.resolve();
-    let publicationError: unknown;
-    const streamScene = runtime.scene.requested;
+  async createGeometry({ entryPath, parameters }, runtime, context) {
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    const span = runtime.tracer.startSpan('picogk.build', { entryPath });
     try {
-      let compute: Awaited<ReturnType<typeof preparePicogkCompute>> | undefined;
-      try {
-        compute = await preparePicogkCompute({
-          entryPath,
-          parameters,
-          paths: mirroredPaths.filter((path) => !tauSystemArtifacts.has(path)),
-          runtime,
-          session: context.session,
-          ...context.computeAssets,
-        });
-      } catch (error) {
-        runtime.signal.throwIfAborted();
-        runtime.logger.warn('PicoGK component cache preparation failed.', { data: error });
-      }
-      const started = performance.now();
       const result = await context.session.request({
         method: 'build',
-        params: {
-          entryPath,
-          parameters,
-          capture: options.capture,
-          streamScene,
-          ...(compute ? { compute: compute.request } : {}),
-        },
+        params: { entryPath, parameters },
         schema: picogkBuildSchema,
         signal: runtime.signal,
-        ...(streamScene
-          ? {
-              events: {
-                onEvent: (event) => {
-                  publications = publications
-                    .then(async () => {
-                      const components = event.artifact
-                        ? picogkArtifactToComponentGlbs(
-                            await context.session.readArtifact(event.artifact),
-                            event.artifact,
-                          )
-                        : [];
-                      const upserts = components.map(
-                        ({ id, name, content }) =>
-                          ({
-                            id,
-                            name,
-                            geometry: { format: 'gltf', content },
-                          }) as const,
-                      );
-                      const hasSceneMutation =
-                        event.operation === 'reset' ||
-                        upserts.length > 0 ||
-                        event.removedComponentIds.length > 0 ||
-                        event.presentation !== null;
-                      if (hasSceneMutation) {
-                        await runtime.scene.publishUpdate(
-                          event.operation === 'reset'
-                            ? {
-                                operation: 'reset',
-                                sceneGeneration: event.sceneGeneration,
-                                upserts,
-                                removedComponentIds: [],
-                                presentation: event.presentation,
-                              }
-                            : {
-                                operation: 'delta',
-                                baseSceneGeneration: event.baseSceneGeneration,
-                                sceneGeneration: event.sceneGeneration,
-                                upserts,
-                                removedComponentIds: event.removedComponentIds,
-                                ...(event.presentation ? { presentation: event.presentation } : {}),
-                              },
-                        );
-                      }
-                      if (event.bookmark) {
-                        await runtime.scene.bookmark({
-                          label: event.bookmark.path,
-                          source:
-                            event.mode === 'explicit'
-                              ? 'explicit'
-                              : event.mode === 'update'
-                                ? 'viewer-update'
-                                : 'viewer-operation',
-                        });
-                      }
-                    })
-                    .catch((error: unknown) => {
-                      publicationError ??= error;
-                    });
-                },
-              },
-            }
-          : {}),
+        // W17: an abort stops the build cooperatively rather than ending the worker generation.
+        cancelMethod: 'cancel',
       });
       try {
-        await publications;
-        const readStarted = performance.now();
-        const artifact = await context.session.readArtifact(result);
-        const artifactRead = performance.now() - readStarted;
-        if (streamScene) {
-          try {
-            await runtime.scene.flush();
-          } catch (error) {
-            publicationError ??= error;
-          }
-        }
-        if (publicationError) {
-          runtime.logger.warn(
-            'PicoGK progressive scene publication failed; using the authoritative terminal geometry.',
-            {
-              data: publicationError,
-            },
-          );
-        }
-        const transformStarted = performance.now();
-        const glb = picogkArtifactToGlb(artifact, result);
-        runtime.signal.throwIfAborted();
+        const readSpan = runtime.tracer.startSpan('picogk.artifact-read');
+        let artifact;
         try {
-          await compute?.publish(result.computePublications ?? []);
-        } catch (error) {
-          runtime.signal.throwIfAborted();
-          runtime.logger.warn('PicoGK component cache publication failed.', { data: error });
+          artifact = await context.session.readArtifact(result);
+        } finally {
+          readSpan.end();
         }
-        runtime.logger.debug('PicoGK C# build performance', {
-          data: {
-            ...result.timings,
-            metrics: result.metrics,
-            artifactRead,
-            glbTransform: performance.now() - transformStarted,
-            total: performance.now() - started,
-          },
-        });
-        return { geometry: { format: 'gltf', content: glb }, nativeHandle: { glb } };
+        const transformSpan = runtime.tracer.startSpan('picogk.glb-transform');
+        let glb;
+        try {
+          glb = picogkArtifactToGlb(artifact, result);
+        } finally {
+          transformSpan.end();
+        }
+        runtime.signal.throwIfAborted();
+        span.end({ ...result.timings, ...result.metrics });
+        return {
+          geometry: { format: 'gltf', content: glb },
+          nativeHandle: { glb },
+        };
       } finally {
         if (result.recycleAfterResponse) {
           await context.session.recycle();
         }
       }
     } catch (error) {
-      await publications;
       throw new PicogkKernelError(issuesFrom(error, entryPath));
+    } finally {
+      span.end();
     }
   },
 
   async exportGeometry(input) {
     try {
-      const bytes = await transformGltfExportBytes(input.nativeHandle.glb, { format: 'glb', ...input.options });
+      const bytes = await transformGltfExportBytes(input.nativeHandle.glb, {
+        format: 'glb',
+        ...input.options,
+      });
       return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(bytes))]);
     } catch (error) {
       return createKernelError(issuesFrom(error));
@@ -272,7 +176,9 @@ export const picogkKernel = defineKernel({
   },
 
   serializeNativeHandle: ({ nativeHandle }) => new Uint8Array(nativeHandle.glb),
-  deserializeNativeHandle: ({ serializedNativeHandle }) => ({ glb: new Uint8Array(serializedNativeHandle) }),
+  deserializeNativeHandle: ({ serializedNativeHandle }) => ({
+    glb: new Uint8Array(serializedNativeHandle),
+  }),
 
   async cleanup(context) {
     try {

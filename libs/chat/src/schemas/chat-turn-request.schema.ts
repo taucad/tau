@@ -22,12 +22,35 @@ export const chatRunAdmissionSchema = z
   .strict()
   .meta({ id: 'ChatRunAdmission' });
 
-/** Immutable browser execution target for one detached CAD turn. @public */
+/**
+ * Immutable execution target for one CAD turn: which host writes it.
+ *
+ * There is no revision *mode*: placement is non-branching by default (north
+ * star D7/I18) — a turn lands on its chat's checkout, and the host that owns
+ * that tree records the revision. `workspaceId` names the checkout a *browser*
+ * turn was placed on and `baseRevisionId` what it descends from; both are
+ * absent for a host-placed turn, which resolves its own.
+ *
+ * `conflict` is present only for a turn started by *Ask chat to resolve*: the
+ * conflicted revision it descends from and the paths still without a side. It
+ * rides here rather than in the message text because it is a fact about where
+ * the turn lands, and the agent must be able to read the three terms back from
+ * the graph (A22) rather than parse them out of a prompt.
+ *
+ * @public
+ */
 export const chatExecutionTargetSchema = z
   .object({
-    workspaceId: z.string().min(1).max(128),
-    baseRevisionId: z.string().min(1).max(256),
     hostId: z.string().min(1).max(128),
+    workspaceId: z.string().min(1).max(128).optional(),
+    baseRevisionId: z.string().min(1).max(256).optional(),
+    conflict: z
+      .object({
+        revisionId: z.string().min(1).max(256),
+        paths: z.array(z.string().min(1).max(1024)).min(1).max(1000),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .meta({ id: 'ChatExecutionTarget' });
@@ -82,7 +105,7 @@ export type ChatRunAdmission = z.infer<typeof chatRunAdmissionSchema>;
 /** Wire-shape admission metadata. @public */
 export type ChatRunAdmissionInput = z.input<typeof chatRunAdmissionSchema>;
 
-/** Immutable browser execution target for one detached CAD turn. @public */
+/** Immutable execution target for one CAD turn. @public */
 export type ChatExecutionTarget = z.infer<typeof chatExecutionTargetSchema>;
 
 /** Wire-shape (input) of a chat-turn request. @public */

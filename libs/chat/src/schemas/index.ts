@@ -1,4 +1,5 @@
 export * from '#schemas/agent-config.schema.js';
+export * from '#schemas/chat-record.schema.js';
 export * from '#schemas/chat-turn-request.schema.js';
 export * from '#schemas/context-payload.schema.js';
 export * from '#schemas/file-metadata.schema.js';
@@ -9,6 +10,7 @@ export * from '#schemas/message-data.schema.js';
 export * from '#schemas/common-reasoning-metadata.schema.js';
 export * from '#schemas/tool-input.registry.js';
 export * from '#schemas/provider-tool-schemas.js';
+export * from '#schemas/tools/parameter.tool.schema.js';
 export * from '#schemas/tools/use-skill.tool.schema.js';
 export type * from '#schemas/tool-schemas-registry.js';
 export * from '#schemas/rpc.schema.js';

@@ -22,10 +22,21 @@ export type SearchInputProperties = {
    * Optional keyboard shortcut to display when input is not focused
    */
   readonly keyboardShortcut?: string;
+  /** Visual treatment for the input surface. */
+  readonly variant?: 'default' | 'transparent';
 } & Omit<React.ComponentProps<typeof Input>, 'type'>;
 
 export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProperties>(function (
-  { value = '', containerClassName, className, placeholder = 'Search...', onClear, keyboardShortcut, ...properties },
+  {
+    value = '',
+    containerClassName,
+    className,
+    placeholder = 'Search...',
+    onClear,
+    keyboardShortcut,
+    variant = 'default',
+    ...properties
+  },
   reference,
 ) {
   const handlePointerDown = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -37,12 +48,13 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputPropert
       <Input
         ref={reference}
         autoComplete='off'
-        type='text'
+        type='search'
         placeholder={placeholder}
         value={value}
         className={cn(
-          'peer/search-input pr-2 pl-8 not-placeholder-shown:pr-6 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0',
+          'peer/search-input pr-2 pl-8 not-placeholder-shown:pr-6 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0 [&::-webkit-search-cancel-button]:appearance-none',
           keyboardShortcut && 'placeholder-shown:pr-14',
+          variant === 'transparent' && 'bg-transparent dark:bg-transparent',
           className,
         )}
         {...properties}

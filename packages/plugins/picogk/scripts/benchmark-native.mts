@@ -21,7 +21,6 @@ import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
 import { picogkArtifactToGlb } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema } from '#picogk.protocol.js';
-import type { PicogkBuild, PicogkComputePublication, PicogkPreparedCompute } from '#picogk.protocol.js';
 import { PicogkSession } from '#picogk-session.js';
 
 type ResourceManifest = {
@@ -60,24 +59,6 @@ const logger: RuntimeLogger = {
   warn: () => undefined,
   error: () => undefined,
   custom: () => undefined,
-};
-
-const singlePublication = (result: PicogkBuild): PicogkComputePublication => {
-  const publications = result.computePublications ?? [];
-  if (publications.length !== 1) {
-    throw new Error('Changed geometry must publish exactly one new component materialization.');
-  }
-  return publications[0]!;
-};
-
-const assertMaterializationHit = (result: PicogkBuild): void => {
-  if (
-    result.computePublications?.length !== 0 ||
-    result.timings.meshConstruction !== 0 ||
-    result.timings.meshExtraction !== 0
-  ) {
-    throw new Error('Unchanged geometry repeated component materialization.');
-  }
 };
 
 const percentile = (values: readonly number[], fraction: number): number => {
@@ -190,10 +171,8 @@ const main = async (): Promise<void> => {
   const privateRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-picogk-soak-')));
   const workspacePath = join(privateRoot, 'workspace');
   const artifactPath = join(privateRoot, 'artifacts');
-  const trustFile = join(privateRoot, 'trust.json');
   mkdirSync(workspacePath);
   mkdirSync(artifactPath);
-  writeFileSync(trustFile, '{"version":1,"trusted":true}\n', { mode: 0o600 });
   const sourcePath = join(workspacePath, 'main.cs');
   writeFileSync(sourcePath, source(0));
   const session = new PicogkSession({
@@ -201,7 +180,6 @@ const main = async (): Promise<void> => {
     workerSha256: manifest.workerSha256,
     workspacePath,
     artifactPath,
-    trustFile,
     resourceFiles: manifest.resourceFiles.map(({ path, ...resource }) => ({
       ...resource,
       path: join(resourceRoot, path),
@@ -225,12 +203,6 @@ const main = async (): Promise<void> => {
   let coldHandshakeMilliseconds = 0;
   let firstWorkerTimings: unknown;
   let warmWorkerTimings: unknown;
-  let prepared: readonly PicogkPreparedCompute[] = [];
-  const prepare = async (publication: PicogkComputePublication): Promise<readonly PicogkPreparedCompute[]> => {
-    const bytes = await session.readArtifact(publication);
-    return session.prehydrateCompute([{ identity: publication, bytes, contentDigest: await digestContent({ bytes }) }]);
-  };
-
   try {
     for (let index = 0; index < iterations + steadyStateRuns; index += 1) {
       const settledStarted = performance.now();
@@ -239,7 +211,6 @@ const main = async (): Promise<void> => {
       // model-run cleanup without attributing compiler-cache warm-up to a leak.
       const content = source(Math.min(index + 1, iterations));
       writeFileSync(sourcePath, content);
-      const modelDigest = await digestContent({ bytes: new TextEncoder().encode(content) });
       const analyzed = await measure(async () => {
         const result = await session.request({
           method: 'analyze',
@@ -256,11 +227,10 @@ const main = async (): Promise<void> => {
         coldHandshakeMilliseconds = analyzed.milliseconds;
       }
       analyze.push(analyzed.milliseconds);
-      const preparedForBuild = prepared;
       const built = await measure(async () => {
         const result = await session.request({
           method: 'build',
-          params: { entryPath: 'main.cs', parameters: {}, compute: { modelDigest, prepared: preparedForBuild } },
+          params: { entryPath: 'main.cs', parameters: {} },
           schema: picogkBuildSchema,
           signal,
         });
@@ -272,11 +242,6 @@ const main = async (): Promise<void> => {
       build.push(built.milliseconds);
       firstWorkerTimings ??= built.value.timings;
       warmWorkerTimings = built.value.timings;
-      if (index === 0) {
-        prepared = await prepare(singlePublication(built.value));
-      } else {
-        assertMaterializationHit(built.value);
-      }
       const read = await measure(async () => {
         const result = await session.readArtifact(built.value);
         return result;
@@ -303,7 +268,6 @@ const main = async (): Promise<void> => {
 
     const highResolutionSource = source(iterations + 1, 0.25, 20);
     writeFileSync(sourcePath, highResolutionSource);
-    const highResolutionDigest = await digestContent({ bytes: new TextEncoder().encode(highResolutionSource) });
     const highResolution = await measure(async () => {
       await session.request({
         method: 'analyze',
@@ -313,18 +277,13 @@ const main = async (): Promise<void> => {
       });
       const built = await session.request({
         method: 'build',
-        params: {
-          entryPath: 'main.cs',
-          parameters: {},
-          compute: { modelDigest: highResolutionDigest, prepared },
-        },
+        params: { entryPath: 'main.cs', parameters: {} },
         schema: picogkBuildSchema,
         signal,
       });
       const artifact = await session.readArtifact(built);
       const glb = picogkArtifactToGlb(artifact, built);
       validateGlb(glb);
-      prepared = await prepare(singlePublication(built));
       return {
         digest: await digestContent({ bytes: glb }),
         bytes: glb.byteLength,
@@ -335,15 +294,10 @@ const main = async (): Promise<void> => {
     const highResolutionWarm = await measure(async () => {
       const built = await session.request({
         method: 'build',
-        params: {
-          entryPath: 'main.cs',
-          parameters: {},
-          compute: { modelDigest: highResolutionDigest, prepared },
-        },
+        params: { entryPath: 'main.cs', parameters: {} },
         schema: picogkBuildSchema,
         signal,
       });
-      assertMaterializationHit(built);
       const glb = picogkArtifactToGlb(await session.readArtifact(built), built);
       validateGlb(glb);
       return {

@@ -1,4 +1,6 @@
 import { ResourceQueue } from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -9,7 +11,11 @@ const decoder = new TextDecoder();
 let provider: MemoryProvider;
 
 const fileSystemFor = (signal?: AbortSignal) =>
-  createProviderRpcFileSystem({ provider, mutations: new ResourceQueue(), ...(signal ? { signal } : {}) });
+  createProviderRpcFileSystem({
+    provider: composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy }),
+    mutations: new ResourceQueue(),
+    ...(signal ? { signal } : {}),
+  });
 
 beforeEach(async () => {
   provider = new MemoryProvider();
@@ -33,6 +39,51 @@ describe('createProviderRpcFileSystem', () => {
     await fileSystem.appendFile('log.txt', 'first\n');
     await fileSystem.appendFile('log.txt', 'second\n');
     expect(await fileSystem.readFile('log.txt')).toBe('first\nsecond\n');
+  });
+
+  /* Rule 16 / VI11: the fence is the composed view both launchers build — the
+   * Node host over a `NodeFsProvider`, the browser worker over its relayed
+   * provider — and an unfenced provider cannot construct this filesystem at all
+   * (it does not answer `provenance`). These cases prove the refusals survive
+   * the RPC adapter. */
+  it('refuses every write under Tau\u2019s own control metadata and still serves the read', async () => {
+    await provider.mkdir('.tau/chats/chat-1', { recursive: true });
+    await provider.writeFile('.tau/chats/chat-1/events.jsonl', '{"type":"run.lifecycle"}\n');
+    const fileSystem = fileSystemFor();
+
+    await expect(fileSystem.writeFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
+      code: 'EROFS',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* The append-only transcript is the most attractive target for the one
+     * mutation a fence forgets, so it is guarded too (3-review S5). */
+    await expect(fileSystem.appendFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
+      code: 'EROFS',
+    });
+    /* A turn's lease is a *record*: the agent may read the account of its own
+     * run and may never write it (the retired `.tau/workspaces` claim file was
+     * hidden; `.tau/runs` is read-only, W3d). */
+    await expect(fileSystem.writeFile('.tau/runs/trun-1.json', '{}')).rejects.toMatchObject({
+      code: 'EROFS',
+    });
+    /* The browser port's object store is revision evidence (RC6 S5 gate 15):
+     * an agent that could write it could forge the account of its own turn. */
+    await expect(fileSystem.writeFile('.git/objects/ab/cdef', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* The engine stores are the same evidence on a disk host (8-review S3). */
+    await expect(fileSystem.writeFile('.jj/repo/store/forged', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    await expect(fileSystem.writeFile('.git/refs/heads/main', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* Reads stay open: an agent may read back the account of its own turn. */
+    expect(await fileSystem.readFile('.tau/chats/chat-1/events.jsonl')).toBe('{"type":"run.lifecycle"}\n');
+    expect(await provider.readFile('.tau/chats/chat-1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
   });
 
   it('writes binary bytes verbatim', async () => {

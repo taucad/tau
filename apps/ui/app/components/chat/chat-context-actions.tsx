@@ -12,15 +12,15 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
+import { menuGroupHeadingClass, menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
+import type { ChatAttachmentAddOptions } from '#components/chat/chat-textarea-types.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
-import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
-import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
+import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
+import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
 type ChatContextActionsProperties = {
-  readonly addImage: (image: string, options?: DraftImageOptions) => void;
+  readonly addImage: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly addText: (text: string) => void;
   readonly isImageInputSupported?: boolean;
   readonly asPopoverMenu?: boolean;
@@ -58,8 +58,8 @@ export function ChatContextActions({
   const mainGraphicsRef = useMainGraphics();
   const cadActor = geometryUnits.get(mainEntryPath);
 
-  useCameraRegistryVersion();
-  const mainCameraReady = hasGraphicsCameraRig(mainGraphicsRef);
+  const hasCameraRig = useGraphicsCameraRigQuery();
+  const mainCameraReady = hasCameraRig(mainGraphicsRef);
   const mainGeometryFormat = useSelector(cadActor, (state) => state?.context.geometry?.format);
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
 
@@ -209,7 +209,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
           action() {
             handleViewScreenshot(graphicsRef, settings?.entryPath);
           },
-          disabled: !format || format === 'webrtc' || (format === 'gltf' && !hasGraphicsCameraRig(graphicsRef)),
+          disabled: !format || format === 'webrtc' || (format === 'gltf' && !hasCameraRig(graphicsRef)),
         });
       }
     }
@@ -248,6 +248,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     viewSettings,
     mainEntryPath,
     handleViewScreenshot,
+    hasCameraRig,
   ]);
 
   const groupedContextItems = useMemo(() => {
@@ -364,7 +365,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
       <div className={cn('max-h-64 overflow-y-auto', className)}>
         {filteredGroupedItems.map((group) => (
           <div key={group.name}>
-            <div className='px-2 py-1.5 text-xs font-medium text-muted-foreground'>{group.name}</div>
+            <div className={menuGroupHeadingClass}>{group.name}</div>
             {group.items.map((item) => {
               const isSelected = selectedIndex === currentFlatIndex && !item.disabled;
               const itemFlatIndex = currentFlatIndex;

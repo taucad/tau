@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Cpu, RefreshCw, Trash2 } from 'lucide-react';
-import { useSearchParams } from 'react-router';
-
 import { Button } from '@taucad/ui/components/button';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { SettingsSectionCard } from '#components/settings/settings-item.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { stringParameter } from '#utils/search-parameter.codecs.js';
 import { approveRemoteHostPairing, listRemoteHosts, revokeRemoteHost } from '#lib/remote-host-client.js';
 import type { RemoteHostDevice } from '#lib/remote-host-client.js';
 import {
@@ -21,9 +23,10 @@ const placementCopy = {
   disconnected: 'The remote runtime disconnected',
 } as const;
 
+const pairParameter = stringParameter();
+
 export function RemoteComputeSettings(): React.JSX.Element {
-  const [searchParameters, setSearchParameters] = useSearchParams();
-  const pairingCode = searchParameters.get('pair');
+  const [pairingCode, setPairingCode] = useSearchParameter('pair', pairParameter);
   const placement = useRemoteComputePlacement();
   const [devices, setDevices] = useState<RemoteHostDevice[]>([]);
   const [error, setError] = useState<string>();
@@ -39,7 +42,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    queueMicrotask(() => void refresh());
+    queueMicrotask(refresh);
   }, [refresh]);
 
   const approve = async (): Promise<void> => {
@@ -49,11 +52,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
     setBusy(true);
     try {
       await approveRemoteHostPairing(pairingCode);
-      setSearchParameters((previous) => {
-        const next = new URLSearchParams(previous);
-        next.delete('pair');
-        return next;
-      });
+      setPairingCode('');
       await refresh();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not pair this device');
@@ -78,49 +77,50 @@ export function RemoteComputeSettings(): React.JSX.Element {
   };
 
   return (
-    <section className='flex flex-col gap-6' aria-labelledby='remote-compute-title'>
-      <div>
-        <h2 id='remote-compute-title' className='text-lg font-semibold'>
-          Tau Host
-        </h2>
-        <p className='text-sm text-muted-foreground'>
-          Run CAD kernels on a paired Tau Host while this browser remains the project filesystem authority.
-        </p>
-      </div>
+    <SettingsSectionCard aria-labelledby='remote-compute-title'>
+      <CardHeader>
+        <CardTitle id='remote-compute-title'>Tau Host</CardTitle>
+      </CardHeader>
+      <CardContent className='flex flex-col gap-4'>
+        {pairingCode ? (
+          <div className='rounded-md border border-primary/40 p-3'>
+            <p className='text-sm font-medium'>Pair Tau Host {pairingCode}</p>
+            <p className='mb-3 text-xs text-muted-foreground'>Approve only if this code is visible in your Tau CLI.</p>
+            <Button
+              size='sm'
+              disabled={busy}
+              onClick={async () => {
+                await approve();
+              }}
+            >
+              Approve device
+            </Button>
+          </div>
+        ) : null}
 
-      {pairingCode ? (
-        <div className='rounded-md border border-primary/40 p-4'>
-          <p className='font-medium'>Pair Tau Host {pairingCode}</p>
-          <p className='mb-3 text-sm text-muted-foreground'>Approve only if this code is visible in your Tau CLI.</p>
-          <Button disabled={busy} onClick={() => void approve()}>
-            Approve device
+        <div className='flex items-center justify-between gap-4 rounded-md border p-3'>
+          <div>
+            <p className='text-sm font-medium'>{placementCopy[placement.state]}</p>
+            {placement.state !== 'local' && placement.message ? (
+              <p className='text-xs text-destructive'>{placement.message}</p>
+            ) : null}
+          </div>
+          <Button size='sm' variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
+            Use local
           </Button>
         </div>
-      ) : null}
 
-      <div className='flex items-center justify-between gap-4 rounded-md border p-4'>
-        <div>
-          <p className='font-medium'>{placementCopy[placement.state]}</p>
-          {placement.state !== 'local' && placement.message ? (
-            <p className='text-sm text-destructive'>{placement.message}</p>
-          ) : null}
-        </div>
-        <Button variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
-          Use local
-        </Button>
-      </div>
-
-      <div className='flex flex-col gap-3'>
         {devices.map((device) => (
-          <div key={device.id} className='flex items-center justify-between gap-4 rounded-md border p-4'>
+          <div key={device.id} className='flex items-center justify-between gap-4 rounded-md border p-3'>
             <div>
-              <p className='font-medium'>{device.label}</p>
-              <p className='text-sm text-muted-foreground'>
+              <p className='text-sm font-medium'>{device.label}</p>
+              <p className='text-xs text-muted-foreground'>
                 {device.online ? `Online · ${device.runtimeVersion ?? 'runtime unknown'}` : 'Offline'}
               </p>
             </div>
             <div className='flex gap-2'>
               <Button
+                size='sm'
                 disabled={busy || !device.online}
                 onClick={() => {
                   selectRemoteComputeDevice(device.id);
@@ -133,27 +133,37 @@ export function RemoteComputeSettings(): React.JSX.Element {
                 size='icon'
                 aria-label={`Revoke ${device.label}`}
                 disabled={busy}
-                onClick={() => void revoke(device.id)}
+                onClick={async () => {
+                  await revoke(device.id);
+                }}
               >
                 <Trash2 className='size-4' aria-hidden='true' />
               </Button>
             </div>
           </div>
         ))}
-      </div>
 
-      {error ? (
-        <p role='alert' className='text-sm text-destructive'>
-          {error}
-        </p>
-      ) : null}
-      <Button variant='ghost' className='self-start' disabled={busy} onClick={() => void refresh()}>
-        <RefreshCw className='size-4' aria-hidden='true' /> Refresh devices
-      </Button>
-
-      <p className='text-xs text-muted-foreground'>
-        Experimental: paired project code executes on the remote computer. Use only with projects you trust.
-      </p>
-    </section>
+        {error ? (
+          <p role='alert' className='text-sm text-destructive'>
+            {error}
+          </p>
+        ) : null}
+        <div className='flex flex-wrap items-center justify-between gap-3 border-t pt-4'>
+          <p className='text-xs text-muted-foreground'>
+            Paired project code executes on the remote computer. Use only with projects you trust.
+          </p>
+          <Button
+            size='sm'
+            variant='ghost'
+            disabled={busy}
+            onClick={async () => {
+              await refresh();
+            }}
+          >
+            <RefreshCw className='size-4' aria-hidden='true' /> Refresh devices
+          </Button>
+        </div>
+      </CardContent>
+    </SettingsSectionCard>
   );
 }

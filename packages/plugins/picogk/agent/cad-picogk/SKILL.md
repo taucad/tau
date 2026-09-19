@@ -1,0 +1,74 @@
+---
+name: cad-picogk
+description: Guides trusted, upstream-compatible PicoGK C# voxel authoring in main.cs. Use when creating or editing PicoGK projects in Tau Desktop.
+---
+
+# PicoGK C# authoring
+
+## Contract
+
+1. Author an ordinary C# console program in `main.cs`, with optional project-local `.cs` helpers and assets.
+2. Use the public `PicoGK` API directly. Do not import a Tau authoring namespace or return a Tau-specific model wrapper.
+3. Call `Library.Go(voxelSizeMm, task)` from the program entry point. Create geometry inside `task` using normal PicoGK APIs.
+4. Publish display geometry with `Library.oViewer().Add(...)`. Set appearance with `SetGroupMaterial`; meshes, voxels, and polylines are supported.
+5. Treat the final viewer state as the model result. `Remove`, `SetGroupVisible`, and `RemoveAllObjects` affect what Tau renders after the task completes.
+6. Keep final displayed geometry alive until the task returns. Dispose temporary operands normally.
+
+## Canonical pattern
+
+```csharp
+using System.Numerics;
+using PicoGK;
+
+Library.Go(1.0f, () =>
+{
+    var sphere = Voxels.voxSphere(Vector3.Zero, 20.0f);
+    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0.2f, 0.7f);
+    Library.oViewer().Add(sphere);
+});
+```
+
+Tau hosts the viewer without opening a second native window and renders the captured final scene after each completed run. Smaller voxels increase fidelity and memory/runtime cost sharply. Prefer voxel booleans and fields, use project-relative assets, and treat output as mesh topology rather than precise BRep.
+
+## Interactive parameters
+
+The optional `Params` convention keeps source runnable as a normal PicoGK console program: its property initializers are the standalone defaults, and Tau sets selected values before invoking the same entry point. Supported property types are `bool`, `int`, `float`, `double`, `string`, and project-local enums. Use standard `System.ComponentModel.DataAnnotations.Range` for numeric limits and `Display` for labels, descriptions, and order. Defaults must be finite, non-null compile-time constants; do not add an explicit static constructor.
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+using System.Numerics;
+using PicoGK;
+
+Library.Go(Params.VoxelSizeMm, () =>
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, Params.RadiusMm)));
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    [Display(Name = "Voxel size", Order = 0)]
+    public static float VoxelSizeMm { get; set; } = 0.5f;
+
+    [Range(1.0, 100.0)]
+    [Display(Name = "Radius", Order = 1)]
+    public static float RadiusMm { get; set; } = 20f;
+}
+```
+
+## API reference
+
+All 2083 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+
+- `api-picogk.md` — PicoGK
+- `api-picogk-2.md` — PicoGK (2)
+- `api-picogk-3.md` — PicoGK (3)
+- `api-picogk-4.md` — PicoGK (4)
+- `api-picogk-diagnostics.md` — PicoGK.Diagnostics
+- `api-picogk-numerics.md` — PicoGK.Numerics
+- `api-picogk-shapes.md` — PicoGK.Shapes
+- `api-system.md` — System
+- `api-system-2.md` — System (2)
+- `api-system-collections-generic.md` — System.Collections.Generic
+- `api-system-numerics.md` — System.Numerics
+- `api-system-numerics-2.md` — System.Numerics (2)
+
+Read ranges, not whole files. Never copy a reference into a source file.

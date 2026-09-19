@@ -356,7 +356,7 @@ describe('jscadToGltf', () => {
   it('should export a 50 mm cuboid as z-up millimeter GLB evidence', async () => {
     const shape = primitives.cuboid({ size: [50, 50, 50] });
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -373,7 +373,7 @@ describe('jscadToGltf', () => {
   it('should emit owner-local line primitives on the same mesh as JSCAD surfaces', async () => {
     const shape = primitives.cuboid({ size: [10, 10, 10] });
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -414,7 +414,7 @@ describe('jscadToGltf', () => {
 
   it('should omit line primitives unless edges are requested', async () => {
     const shape = primitives.cuboid({ size: [10, 10, 10] });
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -438,7 +438,7 @@ describe('jscadToGltf', () => {
     );
     const unnamedCarrier = transforms.translate([40, 0, 0], primitives.cuboid({ size: [4, 4, 4] }));
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       [[housing, [firstPlanet, secondPlanet]], unnamedCarrier],
       {
         coordinateSystem: 'z-up',
@@ -510,7 +510,7 @@ describe('jscadToGltf', () => {
       ],
     ]);
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -537,7 +537,7 @@ describe('jscadToGltf', () => {
     ];
     const shape = extrusions.extrudeLinear({ height: 5 }, geometries.geom2.fromPoints(outline));
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -587,7 +587,7 @@ describe('jscadToGltf', () => {
   it('should suppress planet gear split-chain cap chords while preserving real rim and side edges', async () => {
     const shape = createPlanetGearWithSplitCapChains();
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -625,7 +625,7 @@ describe('jscadToGltf', () => {
     const profileWithCenterHole = booleans.subtract(gear2d, primitives.circle({ radius: 3.1, segments: 24 }));
     const shape = extrusions.extrudeLinear({ height: 10 }, profileWithCenterHole);
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -651,7 +651,7 @@ describe('jscadToGltf', () => {
     const originalColor = [...(originalShape.color ?? [])];
     const originalRetessellationFlag = originalShape.isRetesselated;
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       originalShape,
       {
         coordinateSystem: 'z-up',
@@ -689,7 +689,7 @@ describe('jscadToGltf', () => {
       ],
     ]);
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -753,7 +753,7 @@ describe('jscadToGltf', () => {
       ],
     ]);
 
-    const firstGlb = jscadToGltf(
+    const { content: firstGlb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',
@@ -762,7 +762,7 @@ describe('jscadToGltf', () => {
       },
       testModeling,
     );
-    const secondGlb = jscadToGltf(
+    const { content: secondGlb } = jscadToGltf(
       shape,
       {
         coordinateSystem: 'z-up',

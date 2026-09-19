@@ -121,6 +121,12 @@ export type RegisterAppProtocolOptions = {
    * `onHeadersReceived` over `protocol.handle` responses.
    */
   readonly contentSecurityPolicy?: string | undefined;
+  /**
+   * Offer `Document-Policy: js-profiling` on the document, so a developer can
+   * take a real sampling profile of the renderer. Unpackaged builds only
+   * (OQ-P11): a shipped app hands nobody a profiler.
+   */
+  readonly jsProfiling?: boolean | undefined;
 };
 
 /**
@@ -162,6 +168,9 @@ export const registerAppProtocol = (options: RegisterAppProtocolOptions): void =
     const pinned = pinnedContentTypes[extname(filePath).toLowerCase()];
     if (pinned) {
       headers.set('content-type', pinned);
+    }
+    if (options.jsProfiling === true && pinned === pinnedContentTypes['.html']) {
+      headers.set('document-policy', 'js-profiling');
     }
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   });

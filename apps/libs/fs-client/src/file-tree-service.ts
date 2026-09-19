@@ -1,9 +1,9 @@
-import type { FileContentMetadata, FileEntry, FileStatEntry, FileStat } from '@taucad/types';
+import type { FileContentMetadata, FileEntry, FileProvenance, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
-import type { FileSystemClient } from '#file-system-client.js';
+import type { ComposedViewClient } from '#composed-view-client.js';
 import type {
   WorkerChangeChannel,
   WorkerRelativeDirectoryRenameEvent,
@@ -37,6 +37,19 @@ const globalReconcileTickInterval = 5;
 
 type FileTreeFileNode = Extract<FileTreeNode, { contentKind: FileContentMetadata['contentKind'] }>;
 type CachedFileEntry = Extract<FileEntry, { type: 'file' }>;
+
+/**
+ * Provenance is data, so a row is stale when *any* of it moved — `versioned`
+ * dims the row, `overrides` names the overlay unit a project file replaced, and
+ * `identity` is the serving source. Comparing only `source` and `agentAccess`
+ * left those three frozen on screen while size and mtime stood still.
+ */
+const sameProvenance = (current?: FileProvenance, next?: FileProvenance): boolean =>
+  current?.source === next?.source &&
+  current?.versioned === next?.versioned &&
+  current?.agentAccess === next?.agentAccess &&
+  current?.identity === next?.identity &&
+  current?.overrides === next?.overrides;
 
 /**
  * Content-free aggregate for the existing external-filesystem polling loop.
@@ -82,7 +95,7 @@ export type FileItem = {
 } & FileContentMetadata;
 
 type FileTreeServiceInit = {
-  proxy: FileSystemClient;
+  proxy: ComposedViewClient;
   paths: WorkspacePathResolver;
   channel: WorkerChangeChannel;
   visibility: VisibilityProvider;
@@ -104,10 +117,10 @@ type FileTreeServiceInit = {
  * import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
  * import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
  * import { headlessVisibilityProvider } from '@taucad/fs-client/visibility-provider';
- * import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+ * import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
  * import type { WorkerChangeChannelTransport } from '@taucad/fs-client/worker-change-channel';
  * export function createExampleFileTreeService(
- *   proxy: FileSystemClient,
+ *   proxy: ComposedViewClient,
  *   listen: WorkerChangeChannelTransport['listen'],
  * ): FileTreeService {
  *   const paths = new WorkspacePathResolver('/project');
@@ -123,7 +136,7 @@ type FileTreeServiceInit = {
  */
 export class FileTreeService {
   private _tree: Map<string, FileEntry>;
-  private readonly proxy: FileSystemClient;
+  private readonly proxy: ComposedViewClient;
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -415,8 +428,9 @@ export class FileTreeService {
   }
 
   /**
-   * Search files on the worker's InMemoryFileTree. Returns only matching results.
-   * The main thread never holds the full file index for interactive filtering.
+   * Search the project through the worker's index for this root. Returns only
+   * matching results: the main thread never holds the full file index for
+   * interactive filtering.
    * @param query - Free-text search string understood by the worker search index.
    * @param options - Optional cap / directory inclusion flags forwarded to the proxy.
    * @returns Matching {@link FileStatEntry} records from the worker.
@@ -1241,7 +1255,8 @@ export class FileTreeService {
         if (
           existing.size !== nextDirectory.size ||
           existing.mtimeMs !== nextDirectory.mtimeMs ||
-          existing.isDirectoryResolved !== nextDirectory.isDirectoryResolved
+          existing.isDirectoryResolved !== nextDirectory.isDirectoryResolved ||
+          !sameProvenance(existing.provenance, nextDirectory.provenance)
         ) {
           newTree.set(entryPath, nextDirectory);
         }
@@ -1266,6 +1281,7 @@ export class FileTreeService {
       mtimeMs: entry.mtimeMs,
       isLoaded,
       ...fileMetadataFields(entry),
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     };
   }
 
@@ -1282,6 +1298,7 @@ export class FileTreeService {
       mtimeMs: entry.mtimeMs,
       isLoaded: existing?.type === 'dir' ? existing.isLoaded : false,
       isDirectoryResolved: existing?.type === 'dir' ? existing.isDirectoryResolved : false,
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     };
   }
 
@@ -1290,6 +1307,7 @@ export class FileTreeService {
       current.size !== next.size ||
       current.mtimeMs !== next.mtimeMs ||
       current.contentKind !== next.contentKind ||
+      !sameProvenance(current.provenance, next.provenance) ||
       (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
     );
   }

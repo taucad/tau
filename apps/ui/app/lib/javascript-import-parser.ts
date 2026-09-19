@@ -1,33 +1,13 @@
 /**
  * JavaScript/TypeScript Import Parser
  *
- * Uses es-module-lexer for production-ready parsing with parse result caching.
+ * Uses the pure-JavaScript es-module-lexer parser with parse result caching.
  * This module is used by the DefinitionProvider for Cmd+Click navigation.
  */
 
-import { init, parse } from 'es-module-lexer';
-import type { ImportSpecifier } from 'es-module-lexer';
+import { parse } from 'es-module-lexer/js';
+import type { ImportSpecifier } from 'es-module-lexer/js';
 import type * as Monaco from 'monaco-editor';
-
-// Initialize WASM once
-let initialized = false;
-let initPromise: Promise<void> | undefined;
-
-async function ensureInitialized(): Promise<void> {
-  if (initialized) {
-    return;
-  }
-
-  if (initPromise) {
-    return initPromise;
-  }
-
-  initPromise = (async (): Promise<void> => {
-    await init;
-    initialized = true;
-  })();
-  return initPromise;
-}
 
 // Cache parse results per model (WeakMap for auto cleanup when model is disposed)
 const parseCache = new WeakMap<
@@ -56,9 +36,7 @@ export type ImportAtPosition = {
 /**
  * Get cached or fresh parse results for a model.
  */
-async function getImportsForModel(model: Monaco.editor.ITextModel): Promise<readonly ImportSpecifier[]> {
-  await ensureInitialized();
-
+function getImportsForModel(model: Monaco.editor.ITextModel): readonly ImportSpecifier[] {
   const cached = parseCache.get(model);
   const currentVersion = model.getVersionId();
 
@@ -80,12 +58,12 @@ async function getImportsForModel(model: Monaco.editor.ITextModel): Promise<read
  * @param position - The cursor position
  * @returns The import at that position, or undefined if not on an import
  */
-export async function getImportAtPosition(
+export function getImportAtPosition(
   model: Monaco.editor.ITextModel,
   position: Monaco.Position,
-): Promise<ImportAtPosition | undefined> {
+): ImportAtPosition | undefined {
   const offset = model.getOffsetAt(position);
-  const imports = await getImportsForModel(model);
+  const imports = getImportsForModel(model);
   const code = model.getValue();
 
   for (const imp of imports) {
@@ -111,8 +89,8 @@ export async function getImportAtPosition(
  * @param model - The Monaco text model
  * @returns Array of all imports with their positions
  */
-export async function getAllImports(model: Monaco.editor.ITextModel): Promise<ImportAtPosition[]> {
-  const imports = await getImportsForModel(model);
+export function getAllImports(model: Monaco.editor.ITextModel): ImportAtPosition[] {
+  const imports = getImportsForModel(model);
   const code = model.getValue();
 
   return imports.map((imp) => ({
@@ -134,9 +112,7 @@ export async function getAllImports(model: Monaco.editor.ITextModel): Promise<Im
  * @param code - Raw JavaScript module source
  * @returns Array of exported names (e.g., ['addGrid', 'addHoneycomb', 'default'])
  */
-export async function parseExportNames(code: string): Promise<string[]> {
-  await ensureInitialized();
-
+export function parseExportNames(code: string): string[] {
   const [, exports] = parse(code);
 
   return exports.map((exp) => code.slice(exp.s, exp.e));

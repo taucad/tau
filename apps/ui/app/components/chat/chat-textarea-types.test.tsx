@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import {
@@ -9,7 +10,9 @@ import {
 } from '@taucad/types/constants';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
+import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
+import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
+import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
 
 // ---------------------------------------------------------------------------
 // Unified composer-context mock — `useChatTextareaLogic` is a single
@@ -24,7 +27,7 @@ import type { DraftImageOptions } from '#hooks/use-chat.js';
 
 const makeResolvedModel = (
   id = 'chat-scoped-model',
-  input: Array<'text' | 'image'> = ['text', 'image'],
+  input: Array<'text' | 'image' | 'pdf'> = ['text', 'image'],
 ): ResolvedModel =>
   ({
     id,
@@ -48,25 +51,31 @@ let mockActiveModel: ResolvedModel = stableModel;
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
   setDraftText: vi.fn<(text: string) => void>(),
-  addDraftImage: vi.fn<(image: string, options?: DraftImageOptions) => void>(),
-  removeDraftImage: vi.fn<(index: number) => void>(),
+  addDraftAttachment: vi.fn<(source: DraftAttachmentSource, options: DraftAttachmentOptions) => void>(),
+  removeDraftAttachment: vi.fn<(index: number) => void>(),
   setDraftToolChoice: vi.fn<(choice: string | string[]) => void>(),
   setEditDraftText: vi.fn<(text: string) => void>(),
-  addEditDraftImage: vi.fn<(image: string, options?: DraftImageOptions) => void>(),
-  removeEditDraftImage: vi.fn<(index: number) => void>(),
+  addEditDraftAttachment: vi.fn<(source: DraftAttachmentSource, options: DraftAttachmentOptions) => void>(),
+  removeEditDraftAttachment: vi.fn<(index: number) => void>(),
 };
 
 const defaultDraftState = {
   status: 'idle',
   draftText: 'hello world',
-  draftImages: [] as string[],
+  draftAttachments: [] as DraftAttachment[],
   draftToolChoice: 'auto',
   draftMode: 'agent',
   editDraftText: '',
-  editDraftImages: [] as string[],
+  editDraftAttachments: [] as DraftAttachment[],
+  attachingMain: false,
+  attachingEdit: false,
 };
 
-const mockUseChatSelector = vi.fn((selector: (state: unknown) => unknown) => selector(defaultDraftState));
+let draftState = defaultDraftState;
+
+const mockUseChatSelector = vi.fn((selector: (state: unknown) => unknown) => selector(draftState));
+
+const storedPdf: DraftAttachment = { hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' };
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => chatActionsMock,
@@ -114,6 +123,7 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockActiveModel = stableModel;
+    draftState = defaultDraftState;
   });
 
   it('should expose the chat-scoped model on selectedModel (UI display)', () => {
@@ -127,8 +137,8 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     expect(result.current.selectedModel.id).toBe('chat-scoped-model');
   });
 
-  it('should invoke onSubmit with ONLY content and imageUrls when handleSubmit fires (no model / no metadata)', async () => {
-    const onSubmit = vi.fn<(payload: { content: string; imageUrls: string[] }) => Promise<void>>(async () => undefined);
+  it('should invoke onSubmit with ONLY content and attachments when handleSubmit fires (no model / no metadata)', async () => {
+    const onSubmit = vi.fn<(payload: ChatTextareaSubmitPayload) => Promise<void>>(async () => undefined);
     const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
 
     await act(async () => {
@@ -137,11 +147,49 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
 
     expect(onSubmit).toHaveBeenCalledOnce();
     const submittedPayload = onSubmit.mock.calls[0]?.[0];
-    expect(submittedPayload).toEqual({ content: 'hello world', imageUrls: [] });
+    expect(submittedPayload).toEqual({ content: 'hello world', attachments: [] });
+  });
+
+  it('should admit only one submit before React commits the submitting state', async () => {
+    let resolveSubmit: (() => void) | undefined;
+    const onSubmit = vi.fn(
+      async () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    let first: Promise<void> | undefined;
+    let second: Promise<void> | undefined;
+    act(() => {
+      first = result.current.handleSubmit();
+      second = result.current.handleSubmit();
+    });
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    await act(async () => {
+      resolveSubmit?.();
+      await Promise.all([first, second]);
+    });
+  });
+
+  it('should release the synchronous submit guard after rejection', async () => {
+    const onSubmit = vi.fn().mockRejectedValueOnce(new Error('failed')).mockResolvedValueOnce(undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    await act(async () => {
+      await expect(result.current.handleSubmit()).rejects.toThrow('failed');
+    });
+    await act(async () => {
+      await result.current.handleSubmit();
+    });
+
+    expect(onSubmit).toHaveBeenCalledTimes(2);
   });
 
   it('should never thread model or metadata to onSubmit even when the chat-scoped model changes between submits', async () => {
-    const onSubmit = vi.fn<(payload: { content: string; imageUrls: string[] }) => Promise<void>>(async () => undefined);
+    const onSubmit = vi.fn<(payload: ChatTextareaSubmitPayload) => Promise<void>>(async () => undefined);
     const { result, rerender } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
 
     await act(async () => {
@@ -159,7 +207,7 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
       const submittedPayload = call[0] as Record<string, unknown>;
       expect(submittedPayload).not.toHaveProperty('model');
       expect(submittedPayload).not.toHaveProperty('metadata');
-      expect(Object.keys(submittedPayload).sort()).toEqual(['content', 'imageUrls']);
+      expect(Object.keys(submittedPayload).sort()).toEqual(['attachments', 'content']);
     }
   });
 
@@ -177,6 +225,40 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     });
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('should block Send with the reason when a PDF is in the draft and the model reads only text and images', async () => {
+    draftState = { ...defaultDraftState, draftAttachments: [storedPdf] };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.sendBlockReason).toBe(
+      "chat-scoped-model can't read PDFs. Remove the PDF or pick another model.",
+    );
+    await act(async () => result.current.handleSubmit());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('should hold Send while an attachment is still being stored, so it is not left behind (F4)', async () => {
+    draftState = { ...defaultDraftState, attachingMain: true };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.isAttaching).toBe(true);
+    await act(async () => result.current.handleSubmit());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('should send the stored PDF reference when the model reads PDFs', async () => {
+    mockActiveModel = makeResolvedModel('pdf-model', ['text', 'image', 'pdf']);
+    draftState = { ...defaultDraftState, draftAttachments: [storedPdf] };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.sendBlockReason).toBeUndefined();
+    expect(result.current.attachmentAccept).toBe('image/jpeg,image/png,image/webp,image/gif,application/pdf');
+    await act(async () => result.current.handleSubmit());
+    expect(onSubmit).toHaveBeenCalledWith({ content: 'hello world', attachments: [storedPdf] });
   });
 });
 
@@ -364,7 +446,7 @@ describe('useChatTextareaLogic — dragKind detection + drop routing', () => {
 /**
  * Multi-image OS drag-drop integration. Locks the call sequence and arguments
  * observable from the hook's perspective: each dropped image is read
- * sequentially and dispatched synchronously into `addDraftImage` with the
+ * sequentially and dispatched synchronously into `addDraftAttachment` with the
  * **raw** (un-resized) data URL. The downstream `draftMachine.imageProcessing`
  * chokepoint is responsible for resizing — these tests make sure the hook
  * never re-introduces an inline `resizeImageForChat` step that would silently
@@ -391,8 +473,14 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     };
   };
 
+  const stubBytes = new TextEncoder().encode('stub');
+
   const makeFile = (name: string, type = 'image/png'): File => {
-    return Object.assign(new File([new Blob(['stub'])], name, { type }), { __taggedAs: name });
+    // The jsdom File has no `arrayBuffer`; every browser the app supports does.
+    return Object.assign(new File([new Blob(['stub'])], name, { type }), {
+      __taggedAs: name,
+      arrayBuffer: async () => new Uint8Array(stubBytes).buffer,
+    });
   };
 
   let originalFileReader: typeof FileReader;
@@ -400,8 +488,8 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    chatActionsMock.addDraftImage.mockReset();
-    chatActionsMock.addEditDraftImage.mockReset();
+    chatActionsMock.addDraftAttachment.mockReset();
+    chatActionsMock.addEditDraftAttachment.mockReset();
     toastErrorMock.mockReset();
     mockActiveModel = stableModel;
     originalFileReader = globalThis.FileReader;
@@ -426,7 +514,7 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
             }
             return;
           }
-          this.result = `data:image/png;base64,RAW_${name}`;
+          this.result = `data:${file.type};base64,RAW_${name}`;
           for (const listener of this.listeners.get('load') ?? []) {
             listener({ target: { result: this.result } });
           }
@@ -441,7 +529,7 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     globalThis.FileReader = originalFileReader;
   });
 
-  it('should dispatch addDraftImage once per dropped image, in drop order, with raw data URLs', async () => {
+  it('should dispatch addDraftAttachment once per dropped image, in drop order, with raw data URLs', async () => {
     const { result } = renderHook(() =>
       useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
     );
@@ -452,8 +540,8 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
       await result.current.handleDrop(buildDragEvent(files));
     });
 
-    expect(chatActionsMock.addDraftImage).toHaveBeenCalledTimes(5);
-    const args = chatActionsMock.addDraftImage.mock.calls.map((c) => c[0]);
+    expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledTimes(5);
+    const args = chatActionsMock.addDraftAttachment.mock.calls.map((c) => c[0]);
     expect(args).toEqual([
       'data:image/png;base64,RAW_A.png',
       'data:image/png;base64,RAW_B.png',
@@ -477,8 +565,8 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
       await result.current.handleDrop(buildDragEvent(files));
     });
 
-    expect(chatActionsMock.addDraftImage).toHaveBeenCalledTimes(4);
-    const args = chatActionsMock.addDraftImage.mock.calls.map((c) => c[0]);
+    expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledTimes(4);
+    const args = chatActionsMock.addDraftAttachment.mock.calls.map((c) => c[0]);
     expect(args).toEqual([
       'data:image/png;base64,RAW_A.png',
       'data:image/png;base64,RAW_C.png',
@@ -489,22 +577,91 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to read image');
   });
 
-  it("should toast 'Only images are supported' for non-image files in a mixed batch but still dispatch the images", async () => {
+  it("should dispatch images and PDFs in drop order with the selected model, and toast 'Only images and PDFs are supported' for the rest", async () => {
     const { result } = renderHook(() =>
       useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
     );
 
-    const files = [makeFile('A.png'), makeFile('doc.pdf', 'application/pdf'), makeFile('C.png')];
+    const files = [
+      makeFile('A.png'),
+      makeFile('doc.pdf', 'application/pdf'),
+      makeFile('notes.txt', 'text/plain'),
+      makeFile('C.png'),
+    ];
 
     await act(async () => {
       await result.current.handleDrop(buildDragEvent(files));
     });
 
-    expect(chatActionsMock.addDraftImage).toHaveBeenCalledTimes(2);
-    const args = chatActionsMock.addDraftImage.mock.calls.map((c) => c[0]);
-    expect(args).toEqual(['data:image/png;base64,RAW_A.png', 'data:image/png;base64,RAW_C.png']);
+    const model = { name: 'chat-scoped-model', support: stableModel.model?.support };
+    expect(chatActionsMock.addDraftAttachment.mock.calls).toEqual([
+      ['data:image/png;base64,RAW_A.png', { filename: 'A.png', model }],
+      [
+        { bytes: stubBytes, mediaType: 'application/pdf' },
+        { filename: 'doc.pdf', model },
+      ],
+      ['data:image/png;base64,RAW_C.png', { filename: 'C.png', model }],
+    ]);
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
-    expect(toastErrorMock).toHaveBeenCalledWith('Only images are supported');
+    expect(toastErrorMock).toHaveBeenCalledWith('Only images and PDFs are supported');
+  });
+
+  it('should resolve a project chat rail against its composer directory, then its transcript (F5)', () => {
+    const directories = chatAttachmentDirectories('p1', 'c1');
+    const { result } = renderHook(
+      () => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+      {
+        wrapper: ({ children }: { readonly children: React.ReactNode }) => (
+          <ChatAttachmentDirectoriesContext.Provider value={directories}>
+            {children}
+          </ChatAttachmentDirectoriesContext.Provider>
+        ),
+      },
+    );
+
+    expect(result.current.attachmentDirectory).toEqual([directories.composer, directories.transcript]);
+  });
+
+  it('should add the PDF of a mixed drop on a model that reads no images (S13)', async () => {
+    mockActiveModel = makeResolvedModel('pdf-reader', ['text', 'pdf']);
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    await act(async () => {
+      await result.current.handleDrop(buildDragEvent([makeFile('A.png'), makeFile('doc.pdf', 'application/pdf')]));
+    });
+
+    // The image is refused on its own; the PDF still lands.
+    expect(chatActionsMock.addDraftAttachment.mock.calls.map(([source]) => source)).toEqual([
+      { bytes: stubBytes, mediaType: 'application/pdf' },
+    ]);
+  });
+
+  it('should hand a picked PDF to the draft machine, which owns the refusal for a model without PDF input', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+    const input = { files: [makeFile('doc.pdf', 'application/pdf')], value: 'C:\\fakepath\\doc.pdf' };
+
+    expect(result.current.attachmentAccept).toBe('image/jpeg,image/png,image/webp,image/gif');
+    act(() => {
+      result.current.handleFileChange({ target: input } as unknown as React.ChangeEvent<HTMLInputElement>);
+    });
+
+    await waitFor(() => {
+      expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledOnce();
+    });
+    // A document is handed over as its bytes, never re-encoded as a data URL (S7).
+    expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledWith(
+      { bytes: stubBytes, mediaType: 'application/pdf' },
+      {
+        filename: 'doc.pdf',
+        model: { name: 'chat-scoped-model', support: stableModel.model?.support },
+      },
+    );
+    expect(input.value).toBe('');
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it('should never pre-resize: dispatched URLs are exactly the FileReader-returned data URLs (no shrink)', async () => {
@@ -518,12 +675,12 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
       await result.current.handleDrop(buildDragEvent(files));
     });
 
-    const dispatched = chatActionsMock.addDraftImage.mock.calls[0]?.[0];
+    const dispatched = chatActionsMock.addDraftAttachment.mock.calls[0]?.[0];
     expect(dispatched).toBe('data:image/png;base64,RAW_A.png');
-    expect(dispatched?.startsWith('data:image/png;base64,RAW_')).toBe(true);
+    expect(typeof dispatched === 'string' && dispatched.startsWith('data:image/png;base64,RAW_')).toBe(true);
   });
 
-  it('should dispatch addDraftImage once per pasted image, in paste order, with raw data URLs', async () => {
+  it('should dispatch addDraftAttachment once per pasted image, in paste order, with raw data URLs', async () => {
     const { result } = renderHook(() =>
       useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
     );
@@ -536,9 +693,9 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     });
 
     await waitFor(() => {
-      expect(chatActionsMock.addDraftImage).toHaveBeenCalledTimes(5);
+      expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledTimes(5);
     });
-    const args = chatActionsMock.addDraftImage.mock.calls.map((c) => c[0]);
+    const args = chatActionsMock.addDraftAttachment.mock.calls.map((c) => c[0]);
     expect(args).toEqual([
       'data:image/png;base64,RAW_A.png',
       'data:image/png;base64,RAW_B.png',
@@ -561,7 +718,7 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
       result.current.handleAddImage('data:image/png;base64,AAA');
     });
 
-    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(chatActionsMock.addDraftAttachment).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
       description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
     });
@@ -579,7 +736,7 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     });
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
-    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(chatActionsMock.addDraftAttachment).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
       description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
     });
@@ -595,7 +752,7 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
       await result.current.handleDrop(buildDragEvent([makeFile('A.png')]));
     });
 
-    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(chatActionsMock.addDraftAttachment).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
       description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
     });

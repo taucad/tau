@@ -1,11 +1,13 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "outDir": "./out-tsc/spec",
     "types": ["node"],
     "paths": {
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "vitest.server-modes.config.ts"]
+  "include": ["src/**/*.ts", "vitest.server-modes.config.ts", "vitest.git.config.ts"]
 }

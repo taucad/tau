@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createNodeEventLog } from '#node.js';
 import { parseEventLog, serializeLogEvent } from '#log/serialization.js';
@@ -84,5 +84,61 @@ describe('Node event log', () => {
 
     const reopened = await createNodeEventLog({ filePath });
     await reopened.close();
+  });
+  it('should take over a lock whose writer process is gone and still fence a live one', async () => {
+    const filePath = await temporaryLogPath();
+    await mkdir(dirname(filePath), { recursive: true });
+    // A daemon killed with SIGKILL never runs its release; only its pid survives in the lock.
+    await writeFile(`${filePath}.lock`, '2147483647\n');
+    const recovered = await createNodeEventLog({ filePath });
+    await recovered.close();
+
+    await writeFile(`${filePath}.lock`, `${process.pid}\n`);
+    try {
+      await expect(createNodeEventLog({ filePath })).rejects.toMatchObject({
+        name: 'EventLogError',
+        code: 'WRITER_LOCKED',
+      });
+    } finally {
+      await rm(`${filePath}.lock`, { force: true });
+    }
+  });
+
+  it('should take over a lock copied from another log path even when its writer pid is alive', async () => {
+    const filePath = await temporaryLogPath();
+    await mkdir(dirname(filePath), { recursive: true });
+    // A project duplicated while Tau runs copies `events.jsonl.lock` naming the live services process,
+    // but that process holds the original log, not this copy.
+    await writeFile(`${filePath}.lock`, `${process.pid}\n/elsewhere/.tau/chats/chat-a/events.jsonl\n`);
+    const copied = await createNodeEventLog({ filePath });
+    const recorded = await readFile(`${filePath}.lock`, 'utf8');
+    await copied.close();
+    expect(recorded.split('\n')[0]).toBe(String(process.pid));
+
+    // The same live pid naming this very log is a genuine writer and still fences.
+    await writeFile(`${filePath}.lock`, recorded);
+    try {
+      await expect(createNodeEventLog({ filePath })).rejects.toMatchObject({
+        name: 'EventLogError',
+        code: 'WRITER_LOCKED',
+      });
+    } finally {
+      await rm(`${filePath}.lock`, { force: true });
+    }
+  });
+
+  it('should not release a lock another writer has taken over since', async () => {
+    const filePath = await temporaryLogPath();
+    await mkdir(dirname(filePath), { recursive: true });
+    const first = await createNodeEventLog({ filePath });
+    // A straggling taker past the settle window: the path now names a different inode.
+    await rm(`${filePath}.lock`, { force: true });
+    await writeFile(`${filePath}.lock`, '424242\n');
+    try {
+      await first.close();
+      expect(await readFile(`${filePath}.lock`, 'utf8')).toBe('424242\n');
+    } finally {
+      await rm(`${filePath}.lock`, { force: true });
+    }
   });
 });

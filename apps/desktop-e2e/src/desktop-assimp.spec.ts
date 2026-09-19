@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import process from 'node:process';
 import type { Page } from 'playwright';
 import { afterEach, expect, test } from 'vitest';
@@ -21,19 +21,19 @@ import { getBoundingBoxFromInspect, getInspectReport, glbToDocument, validateGlb
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
+import { desktopE2EPackagedExecutable } from '#support/config.js';
+import { gatewayFixtureFinalText, gatewayFixtureModelName, startGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
-  declineCookieBanner,
   ensureFilesPane,
   expectCount,
+  expectRenderCycleSince,
   expectSignedIn,
   expectVisible,
   fileTreeItemOf,
-  geometryCacheEntries,
-  geometryCacheSnapshot,
+  renderCycleCount,
   selectChatModel,
   selectKernel,
   submitPrompt,
@@ -42,6 +42,8 @@ import {
 
 const modelEntry = 'model.obj';
 const blockedMaterialEntry = 'materials/blocked.mtl';
+const lifecycleModelEntry = 'lifecycle.obj';
+const lifecycleBlockedMaterialEntry = 'materials/lifecycle-blocked.mtl';
 const recoveredMaterialEntry = 'materials/recovered.mtl';
 const finalMaterialEntry = 'materials/final.mtl';
 const nativeBackendLog = 'libassimp backend=native addon=darwin-arm64-napi8';
@@ -63,14 +65,6 @@ v 0 ${String(size)} 0
 vn 0 0 1
 f 1//1 2//1 3//1
 `;
-
-const waitForNewGeometry = async (sourcePath: string, before: ReadonlySet<string>): Promise<void> => {
-  await expect
-    .poll(() => geometryCacheEntries(sourcePath).some(({ actionDigest }) => !before.has(actionDigest)), {
-      timeout: 120_000,
-    })
-    .toBe(true);
-};
 
 const openInViewer = async (page: Page, entryPath: string): Promise<void> => {
   await ensureFilesPane(page);
@@ -237,6 +231,28 @@ const expectLiveRuntime = async (page: Page): Promise<void> => {
   await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0, 120_000);
 };
 
+const utilityProcesses = async (desktopSession: DesktopSession): Promise<ReadonlySet<number>> =>
+  new Set(
+    await desktopSession.application.evaluate(({ app }) =>
+      app
+        .getAppMetrics()
+        .filter((metric) => metric.type === 'Utility' && metric.name === 'tau-kernel-host')
+        .map((metric) => metric.pid),
+    ),
+  );
+
+const packagedRendererChunkUrl = (app: string, prefix: string, diagnostic: string): string => {
+  const assets = join(app, 'Contents/Resources/ui/client/assets');
+  const matches = readdirSync(assets).filter(
+    (entry) =>
+      entry.startsWith(prefix) &&
+      entry.endsWith('.js') &&
+      readFileSync(join(assets, entry), 'utf8').includes(diagnostic),
+  );
+  expect(matches, `unique packaged ${prefix} chunk containing ${diagnostic}`).toHaveLength(1);
+  return `app://tau/assets/${matches[0]!}`;
+};
+
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
 let seededEmail: string | undefined;
@@ -263,26 +279,27 @@ afterEach(async () => {
 });
 
 test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
-  'should keep packaged Assimp alive across async sidecar cancellation, native exports, and reconnect',
+  '[completed-artifact] should keep packaged Assimp alive across async sidecar cancellation, native exports, and reconnect',
   async () => {
     const account = tauTestAccount('assimp');
     seededEmail = account.email;
     const token = await seedTauTestUser(account);
+    fixture = await startGatewayFixture();
     session = await launchDesktopApp({
       token,
       packaged: true,
       env: {
         PATH: '/usr/bin:/bin',
+        TAU_E2E_KEEP_PATH: '1',
         TAU_DEBUG: 'true',
         TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
       },
     });
     const { page } = session;
-    fixture = await installGatewayFixture(page);
+    await fixture.routeThrough(page);
 
     try {
       await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-      await declineCookieBanner(page);
       await authenticatePackagedDesktop(session, token);
       await expectSignedIn(page);
       await selectKernel(page, 'OpenSCAD');
@@ -297,23 +314,192 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       const materialsRoot = join(projectRoot, 'materials');
       const modelPath = join(projectRoot, modelEntry);
       const blockedMaterialPath = join(projectRoot, blockedMaterialEntry);
+      const lifecycleModelPath = join(projectRoot, lifecycleModelEntry);
+      const lifecycleBlockedMaterialPath = join(projectRoot, lifecycleBlockedMaterialEntry);
       mkdirSync(materialsRoot);
       writeFileSync(join(projectRoot, recoveredMaterialEntry), materialSource, 'utf8');
       writeFileSync(join(projectRoot, finalMaterialEntry), materialSource, 'utf8');
       const fifo = spawnSync('/usr/bin/mkfifo', [blockedMaterialPath], { encoding: 'utf8' });
       expect(fifo.status, fifo.stderr).toBe(0);
       writeFileSync(modelPath, objectSource(1, blockedMaterialEntry), 'utf8');
+      const lifecycleFifo = spawnSync('/usr/bin/mkfifo', [lifecycleBlockedMaterialPath], { encoding: 'utf8' });
+      expect(lifecycleFifo.status, lifecycleFifo.stderr).toBe(0);
+      writeFileSync(lifecycleModelPath, objectSource(1, lifecycleBlockedMaterialEntry), 'utf8');
+
+      // Retain the original public render Promise in the packaged renderer.
+      // Its preload bridge reaches main's registered broker and a separate
+      // kernel utility, so the page remains responsive while Assimp blocks.
+      const app = resolvePath(dirname(desktopE2EPackagedExecutable()), '../..');
+      const clientUrl = packagedRendererChunkUrl(app, 'client-', 'createRuntimeClient: `transport` is required');
+      const rendererUrl = packagedRendererChunkUrl(
+        app,
+        'renderer-',
+        'requestElectronRuntimePort: preload relay omitted the runtime host ID',
+      );
+      const utilitiesBefore = await utilityProcesses(session);
+      await page.evaluate(
+        async ({ clientUrl, entryPath, projectRoot, rendererUrl }) => {
+          type Callable = (...arguments_: unknown[]) => unknown;
+          type RuntimeClient = {
+            render(input: { source: { path: string } }): Promise<unknown>;
+            terminate(): void;
+          };
+          // Keep this import page-native: Vitest rewrites syntactic dynamic imports
+          // to its SSR helper, which does not exist in the packaged renderer.
+          // oxlint-disable-next-line eslint/no-new-func -- The string keeps import() native to the packaged page.
+          const importModule = new Function('specifier', 'return import(specifier)') as (
+            specifier: string,
+          ) => Promise<Record<string, unknown>>;
+          const clientModule = await importModule(clientUrl);
+          const rendererModule = await importModule(rendererUrl);
+          const callables = (module: Record<string, unknown>): Callable[] =>
+            Object.values(module).filter((value): value is Callable => typeof value === 'function');
+          const unique = (values: Callable[], label: string): Callable => {
+            if (values.length !== 1) {
+              throw new Error(`Expected one packaged ${label} export, received ${String(values.length)}`);
+            }
+            return values[0]!;
+          };
+          const createRuntimeClient = unique(
+            callables(clientModule).filter((value) =>
+              value.toString().includes('createRuntimeClient: `transport` is required'),
+            ),
+            'createRuntimeClient',
+          );
+          const requestRuntimePort = unique(
+            callables(rendererModule).filter((value) =>
+              value.toString().includes('requestElectronRuntimePort: preload relay omitted the runtime host ID'),
+            ),
+            'requestElectronRuntimePort',
+          );
+          const transportFactories = callables(rendererModule).filter((value) => {
+            const source = value.toString();
+            return source.includes('materialize') && source.includes('describe');
+          });
+          const port = await requestRuntimePort({ context: { definition: 'default', projectRoot } });
+          const transport = unique(
+            transportFactories.filter((value) => {
+              try {
+                const candidate = value({ port }) as { id?: unknown; materialize?: unknown };
+                return candidate.id === 'electron-utility' && typeof candidate.materialize === 'function';
+              } catch {
+                return false;
+              }
+            }),
+            'electron-utility transport',
+          )({ port });
+          const environment = (globalThis as typeof globalThis & { ENV: Record<string, string> }).ENV;
+          const client = createRuntimeClient({
+            config: {
+              tauApiUrl: environment['TAU_API_URL'],
+              tauWebSocketUrl: environment['TAU_WEBSOCKET_URL'],
+            },
+            transport,
+          }) as RuntimeClient;
+          const state = globalThis as typeof globalThis & {
+            __tauAssimpLifecycle?: { client: RuntimeClient; first: Promise<unknown>; second?: Promise<unknown> };
+          };
+          state.__tauAssimpLifecycle = { client, first: client.render({ source: { path: entryPath } }) };
+        },
+        { clientUrl, entryPath: lifecycleModelEntry, projectRoot, rendererUrl },
+      );
+      let lifecyclePid: number | undefined;
+      await expect
+        .poll(async () => {
+          const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
+          lifecyclePid = added.length === 1 ? added[0] : undefined;
+          return added.length;
+        })
+        .toBe(1);
+
+      fifoWriter = await openPendingFifoWriter(lifecycleBlockedMaterialPath);
+      writeFileSync(lifecycleModelPath, objectSource(2, recoveredMaterialEntry), 'utf8');
+      const first = await page.evaluate(async (entryPath) => {
+        const state = (
+          globalThis as typeof globalThis & {
+            __tauAssimpLifecycle?: {
+              client: { render(input: { source: { path: string } }): Promise<unknown> };
+              first: Promise<unknown>;
+              second?: Promise<unknown>;
+            };
+          }
+        ).__tauAssimpLifecycle;
+        if (!state) {
+          throw new Error('Packaged Assimp lifecycle client is unavailable');
+        }
+        state.second = state.client.render({ source: { path: entryPath } });
+        return Promise.race([
+          state.first,
+          new Promise((_resolve, reject) => {
+            setTimeout(() => {
+              reject(new Error('Superseded render did not settle'));
+            }, 10_000);
+          }),
+        ]);
+      }, lifecycleModelEntry);
+      expect(first).toEqual({ superseded: true });
+
+      closeFifoWriter();
+      unlinkSync(lifecycleBlockedMaterialPath);
+      const second = await page.evaluate(async () => {
+        const state = (
+          globalThis as typeof globalThis & {
+            __tauAssimpLifecycle?: {
+              client: { terminate(): void };
+              second?: Promise<{
+                superseded: boolean;
+                geometry?: {
+                  success: boolean;
+                  data?: { content?: { byteLength?: number }; format?: string; hash?: string };
+                };
+              }>;
+            };
+          }
+        ).__tauAssimpLifecycle;
+        if (!state?.second) {
+          throw new Error('Packaged Assimp successor render is unavailable');
+        }
+        const outcome = await Promise.race([
+          state.second,
+          new Promise<never>((_resolve, reject) => {
+            setTimeout(() => {
+              reject(new Error('Successor render did not settle'));
+            }, 120_000);
+          }),
+        ]);
+        const { geometry } = outcome;
+        state.client.terminate();
+        return {
+          format: geometry?.success ? geometry.data?.format : undefined,
+          hash: geometry?.success ? geometry.data?.hash : undefined,
+          byteLength: geometry?.success ? geometry.data?.content?.byteLength : undefined,
+          success: !outcome.superseded && geometry?.success === true,
+        };
+      });
+      expect(second).toMatchObject({ format: 'gltf', success: true });
+      expect(second.hash).toMatch(/^[a-f0-9]{64}$/u);
+      expect(second.byteLength).toBeGreaterThan(0);
+      expect(lifecyclePid).toBeDefined();
+      await expect
+        .poll(
+          async () => {
+            const processes = await utilityProcesses(session!);
+            return processes.has(lifecyclePid!);
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(false);
 
       await openInViewer(page, modelEntry);
       // A nonblocking FIFO writer succeeds only after Tau's Node filesystem has
       // opened the read side. Keeping it open with no bytes holds that Promise.
       fifoWriter = await openPendingFifoWriter(blockedMaterialPath);
 
-      const beforeRecovery = geometryCacheSnapshot(modelPath);
+      const beforeRecovery = await renderCycleCount(page);
       // Watcher supersession aborts the held conversion. The new render and
       // export must complete while the cancelled filesystem read is still held.
       writeFileSync(modelPath, objectSource(2, recoveredMaterialEntry), 'utf8');
-      await waitForNewGeometry(modelPath, beforeRecovery);
+      await expectRenderCycleSince(page, beforeRecovery);
 
       const recoveredGlbPath = await exportToProject(page, projectRoot, {
         sourceEntry: modelEntry,
@@ -332,9 +518,9 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       // that settlement neither resumes stale work nor poisons the client.
       closeFifoWriter();
       unlinkSync(blockedMaterialPath);
-      const beforeRepeat = geometryCacheSnapshot(modelPath);
+      const beforeRepeat = await renderCycleCount(page);
       writeFileSync(modelPath, objectSource(3, finalMaterialEntry), 'utf8');
-      await waitForNewGeometry(modelPath, beforeRepeat);
+      await expectRenderCycleSince(page, beforeRepeat);
       const repeatedPlyPath = await exportToProject(page, projectRoot, {
         sourceEntry: modelEntry,
         extension: 'ply',
@@ -355,10 +541,10 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       await expectCount(modelLog.getByText('Transcoding glb -> ply', { exact: true }), 2);
       await expectCount(modelLog.getByText('Successfully transcoded to ply', { exact: true }), 2);
 
-      // The cache is project-wide; nested exports do not own an exports/.tau cache.
-      const beforePlyOpen = geometryCacheSnapshot(modelPath);
+      // A nested export renders through the same project runtime as its source.
+      const beforePlyOpen = await renderCycleCount(page);
       await openInViewer(page, 'exports/result.ply');
-      await waitForNewGeometry(modelPath, beforePlyOpen);
+      await expectRenderCycleSince(page, beforePlyOpen);
       await page.reload();
       await expectVisible(page.locator('.dv-tab[aria-label="exports/result.ply"]'), 60_000);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas').first(), 120_000);

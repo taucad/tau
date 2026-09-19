@@ -1,14 +1,12 @@
 import { NavLink } from 'react-router';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { Loader } from '#components/ui/loader.js';
+import { DesignStory } from '#components/geometry/splash/design-story.js';
 import { MarketingComposer } from '#routes/_index/marketing-composer.js';
-import { HeroVisual } from '#routes/_index/hero-visual.js';
 
 /**
  * Marketing hero: verification-led headline, the live chat composer as the
- * primary CTA, and the signature point-cloud visual. Per OQ1 the homepage never
- * names "GeoSpec" — verification reads as a plain outcome ("measured, not
- * guessed").
+ * primary CTA, and the shared specification-to-print illustration.
  */
 export function HeroSection(): React.JSX.Element {
   return (
@@ -45,7 +43,9 @@ export function HeroSection(): React.JSX.Element {
           </div>
         </div>
 
-        <HeroVisual className='aspect-square w-full lg:aspect-auto lg:h-[520px]' />
+        <div className='h-[420px] w-full overflow-hidden rounded-2xl sm:h-[480px] lg:h-[520px]'>
+          <DesignStory />
+        </div>
       </div>
     </section>
   );

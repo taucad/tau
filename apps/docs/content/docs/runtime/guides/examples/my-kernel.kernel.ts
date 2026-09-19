@@ -1,4 +1,10 @@
-import { createKernelError, createKernelSuccess, defineKernel, finalizeRenderOutput } from '@taucad/runtime/kernel';
+import {
+  createKernelError,
+  createKernelParameterDeclaration,
+  createKernelSuccess,
+  defineKernel,
+  finalizeRenderOutput,
+} from '@taucad/runtime/kernel';
 import type { GeometryResponse } from '@taucad/runtime/types';
 import { z } from 'zod';
 
@@ -26,14 +32,17 @@ export const myKernel = defineKernel({
   },
 
   async getParameters() {
-    return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: {
-        type: 'object',
-        properties: {},
-        additionalProperties: false,
-      },
-    });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(
+        {},
+        {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+        { id: 'urn:taucad:docs:my-kernel', name: 'MyKernelParameters' },
+      ),
+    );
   },
 
   async createGeometry({ entryPath }, { filesystem }, _context) {

@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import type { BrowserProviderOption } from 'vitest/node';
 import { playwright } from '@vitest/browser-playwright';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config bootstraps this server-side command before test aliases exist.
 import { uiBrowserCommands } from './src/support/browser-command.ts';
@@ -11,10 +12,15 @@ const isCi = Boolean(process.env['CI']);
 const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
 const chromiumArguments = webGpuLaunchArguments(requiredWebGpuProfile);
 const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
+/** The opt-in specs that spend real provider credit; excluded from every default run. */
+const liveProviderSpecs = ['src/gemini-browser-agent-host.live.spec.ts', 'src/provider-switch.live.spec.ts'];
+const liveProvidersEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
+const playwrightProvider = (options?: Parameters<typeof playwright>[0]): BrowserProviderOption =>
+  playwright(options) as unknown as BrowserProviderOption;
 
 export default defineConfig({
   root: import.meta.dirname,
-  optimizeDeps: { include: ['zod'] },
+  optimizeDeps: { include: ['axe-core', 'jszip', 'zod'] },
   resolve: {
     alias: [
       {
@@ -41,7 +47,7 @@ export default defineConfig({
       headless: true,
       // Artifact requirement: browser-side evidence writes and child-context trace attachments need Vitest write access.
       api: { allowWrite: true },
-      provider: playwright({ actionTimeout: 10_000 }),
+      provider: playwrightProvider({ actionTimeout: 10_000 }),
       commands: uiBrowserCommands,
       screenshotFailures: false,
       screenshotDirectory: resolve(
@@ -52,32 +58,53 @@ export default defineConfig({
         {
           browser: 'chromium',
           name: 'chromium',
-          exclude: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
-          provider: playwright({
+          exclude: [
+            'src/headless-chat-image-capture.no-webgpu.spec.ts',
+            ...(liveProvidersEnabled ? [] : liveProviderSpecs),
+          ],
+          provider: playwrightProvider({
             actionTimeout: 10_000,
-            launchOptions: { args: [...chromiumArguments], channel: 'chromium' },
+            launchOptions: {
+              args: [...chromiumArguments],
+              channel: 'chromium',
+            },
           }),
-          provide: { webGpuProfile: requiredWebGpuProfile },
+          provide: {
+            webGpuProfile: requiredWebGpuProfile,
+            acpLiveEnabled: process.env['TAU_ACP_LIVE_TESTS'] === 'true',
+          },
         },
         {
           browser: 'chromium',
           name: 'chromium-no-webgpu',
           include: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
-          provider: playwright({
+          provider: playwrightProvider({
             actionTimeout: 10_000,
-            launchOptions: { args: [...chromiumDisabledArguments], channel: 'chromium' },
+            launchOptions: {
+              args: [...chromiumDisabledArguments],
+              channel: 'chromium',
+            },
           }),
           provide: { webGpuProfile: 'disabled' },
         },
         {
+          browser: 'chromium',
+          name: 'chromium-touch',
+          include: ['src/revision-ux-visual-matrix.spec.ts'],
+          provider: playwrightProvider({
+            actionTimeout: 10_000,
+            contextOptions: { hasTouch: true, isMobile: true },
+            launchOptions: {
+              args: [...chromiumArguments],
+              channel: 'chromium',
+            },
+          }),
+          provide: { webGpuProfile: requiredWebGpuProfile },
+        },
+        {
           browser: 'firefox',
           name: 'firefox',
-          include: [
-            'src/browser-agent-host.spec.ts',
-            'src/chat-isolated-workspace.spec.ts',
-            'src/paseo-connection.spec.ts',
-            'src/remote-host.spec.ts',
-          ],
+          include: ['src/browser-agent-host.spec.ts', 'src/chat-isolated-workspace.spec.ts', 'src/remote-host.spec.ts'],
         },
         {
           browser: 'webkit',
@@ -88,7 +115,6 @@ export default defineConfig({
             'src/browser-agent-host.spec.ts',
             'src/project-creation-location-unsupported.spec.ts',
             'src/chat-isolated-workspace.spec.ts',
-            'src/paseo-connection.spec.ts',
             'src/remote-host.spec.ts',
           ],
         },

@@ -4,11 +4,11 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
+import { createConverterSource } from '@taucad/converter/contracts';
 import {
   converterExportFormats,
   converterImportFormats,
   converterRuntime,
-  createConverterSource,
   type ConverterRuntimeClient,
 } from '#routes/convert/converter-runtime.definition.js';
 import cubeGlbBase64 from '#routes/_index/assets/gear-8.glb?base64';

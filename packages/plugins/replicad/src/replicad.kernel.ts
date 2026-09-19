@@ -11,7 +11,8 @@
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { AnyShape } from 'replicad';
 import type * as ReplicadModule from 'replicad';
-import { digestContent } from '@taucad/cache-core';
+import { contentDigest, digestContent } from '@taucad/cache-core';
+import type { CacheValue, ComputeAction, ContentDigest } from '@taucad/cache-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type {
   GeometryGltf,
@@ -37,6 +38,7 @@ import {
   defineLibraryTracePolicy,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   RenderArtifactFinalizationError,
   finalizeMeshOutput,
   finalizeRenderOutput,
@@ -109,6 +111,15 @@ const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href
 const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.url).href;
 const replicadSingleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')).href;
 const replicadMultiWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/multi/wasm')).href;
+
+// Content digests of the two shipped OCCT binaries. The digest of a shipped asset is a
+// build-time constant, so reading and SHA-256ing 23 MB again at every init (~20 ms of cold
+// start) only recovers these values. `asset-ownership.test.ts` recomputes both from the
+// installed binaries and fails when the dependency moves.
+const replicadWasmDigests = {
+  single: 'sha256:ca354769b158aa38479e6fa59bc7511d0fa896059ce755a0cff85261a637ee6a',
+  multi: 'sha256:31b1fdd375d8257218bdeb155f7aeaf34e074f8ddb01a815ea7ebfa85d4e6444',
+} as const;
 
 // =============================================================================
 // WASM variant selection
@@ -194,6 +205,34 @@ async function resolveWasm(wasm: WasmOption, logger: RuntimeLogger, tracer?: Run
   }
 }
 
+/**
+ * Identify the implementation assets that participate in compute-reuse identity.
+ *
+ * A built-in variant resolves to its constant digest; only a caller-supplied pair has no
+ * build-time identity, so it alone is read and hashed. Returns undefined when a supplied
+ * asset cannot be read, which leaves compute reuse without an implementation identity.
+ *
+ * @param variant - Concrete variant chosen by {@link resolveWasm}.
+ * @param customUrls - Caller-supplied asset URLs, empty for the built-in variants.
+ * @returns The asset digests, or undefined when they could not be identified.
+ */
+async function identifyImplementationAssets(
+  variant: ResolvedWasm['variant'],
+  customUrls: readonly string[],
+): Promise<readonly ContentDigest[] | undefined> {
+  if (variant !== 'custom') {
+    return [contentDigest({ value: replicadWasmDigests[variant] })];
+  }
+
+  const loaded = await Promise.all(customUrls.map(async (url) => loadBinaryFile(url)));
+  const present = loaded.filter((bytes): bytes is ArrayBuffer => bytes !== undefined);
+  if (loaded.length === 0 || present.length !== loaded.length) {
+    return undefined;
+  }
+
+  return Promise.all(present.map(async (bytes) => digestContent({ bytes: new Uint8Array(bytes) })));
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -208,7 +247,9 @@ type ReplicadContext = {
   libraryExportNames: Set<string>;
   tracingSummary?: OcTracingSummary;
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
-  computeReuse: ReplicadComputeReuseAdapter;
+  computeReuse: ReplicadComputeReuseAdapter<ReplicadLibrary> | undefined;
+  computeProducer: ComputeAction['producer'];
+  computeEnvironment: CacheValue;
 };
 
 type ReplicadLibrary = typeof ReplicadModule;
@@ -407,18 +448,33 @@ export const replicadKernel = defineKernel({
     optionsSchema: replicadRenderSchema,
     content: ['includeEdges', 'includeTopology'],
   },
+  // D2: in-worker OpenCascade yields cooperatively, so a superseded drag render is abandoned, not killed.
+  liveEdit: true,
   exportFormats: {
     stl: { optionsSchema: replicadExportSchemas.stl },
     step: { optionsSchema: replicadExportSchemas.step },
-    glb: { optionsSchema: replicadExportSchemas.glb, content: ['includeEdges', 'includeTopology'] },
-    gltf: { optionsSchema: replicadExportSchemas.gltf, content: ['includeEdges', 'includeTopology'] },
+    glb: {
+      optionsSchema: replicadExportSchemas.glb,
+      content: ['includeEdges', 'includeTopology'],
+    },
+    gltf: {
+      optionsSchema: replicadExportSchemas.gltf,
+      content: ['includeEdges', 'includeTopology'],
+    },
   },
-  async initialize(options, runtime) {
+  async initialize(options, runtime): Promise<ReplicadContext> {
     const replicadLibrary = await import('replicad');
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadLibrary);
 
     const { logger, tracer } = runtime;
-    const { ocTracing, libraryTracing, withSourceMapping, tessellationInstancing, wasm } = options;
+    const {
+      ocTracing,
+      libraryTracing,
+      withSourceMapping,
+      tessellationInstancing,
+      wasm,
+      computeReuse: computeReuseOption,
+    } = options;
 
     const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
     logger.debug(
@@ -462,7 +518,8 @@ export const replicadKernel = defineKernel({
 
     try {
       const fontSpan = tracer.startSpan('replicad.font-load');
-      if (!(replicadLibrary.getFont as (fontFamily?: string) => unknown)('default')) {
+      // The dependency declaration says this is always present, but its registry lookup returns undefined before load.
+      if (Object.is(replicadLibrary.getFont('default'), undefined)) {
         logger.debug('Loading default font for text rendering');
         const fontData = await loadBinaryFile(geistRegularUrl);
         if (!fontData) {
@@ -475,36 +532,40 @@ export const replicadKernel = defineKernel({
       logger.warn('Failed to load default font', { data: error });
     }
 
-    const implementationUrls = [
-      ...(resolved.wasmUrl ? [resolved.wasmUrl] : []),
-      ...(typeof wasm === 'string' ? [] : [wasm.wasmBindingsUrl]),
-    ];
-    const implementationBytes = await Promise.all(implementationUrls.map(async (url) => loadBinaryFile(url)));
-    const resolvedImplementationBytes = implementationBytes.filter(
-      (bytes): bytes is ArrayBuffer => bytes !== undefined,
-    );
-    const computeReuseEnabled =
-      implementationUrls.length > 0 && resolvedImplementationBytes.length === implementationBytes.length;
-    const implementationAssets = computeReuseEnabled
-      ? await Promise.all(
-          resolvedImplementationBytes.map(async (bytes) => digestContent({ bytes: new Uint8Array(bytes) })),
-        )
-      : [];
-    if (!computeReuseEnabled) {
+    // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
+    const identifiedAssets =
+      computeReuseOption === false
+        ? undefined
+        : await identifyImplementationAssets(
+            resolved.variant,
+            typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
+          );
+    const assetsIdentified = identifiedAssets !== undefined;
+    // Explicit off wins; omission keeps the historical asset-derived default (C2).
+    const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
+    const implementationAssets = identifiedAssets ?? [];
+    if (!assetsIdentified && computeReuseOption !== false) {
       logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
     }
-    const computeReuse = createReplicadComputeReuse({
-      library: replicadLibrary,
-      enabled: computeReuseEnabled,
-      producer: {
-        id: '@taucad/replicad',
-        version: 'replicad@0.23.4-beta.2|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
-        implementationAssets,
-      },
-      environment: { wasmVariant: resolved.variant, lengthUnit: 'millimeter' },
-    });
+    const computeProducer = {
+      id: '@taucad/replicad',
+      version: 'replicad@0.23.4-beta.2|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
+      implementationAssets,
+    };
+    const computeEnvironment = {
+      wasmVariant: resolved.variant,
+      lengthUnit: 'millimeter',
+    };
+    const computeReuse = computeReuseEnabled
+      ? createReplicadComputeReuse({
+          library: replicadLibrary,
+          enabled: true,
+          producer: computeProducer,
+          environment: computeEnvironment,
+        })
+      : undefined;
     const libraryTrace = createKernelLibraryTracer({
-      library: computeReuse.library as unknown as ReplicadLibrary,
+      library: computeReuse?.library ?? replicadLibrary,
       tracer,
       mode: libraryTracing,
       policy: replicadLibraryTracePolicy,
@@ -541,6 +602,8 @@ export const replicadKernel = defineKernel({
       tracingSummary,
       libraryTrace,
       computeReuse,
+      computeProducer,
+      computeEnvironment,
     };
   },
 
@@ -568,7 +631,12 @@ export const replicadKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(executeResult.value);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:replicad:parameters',
+          name: 'ReplicadParameters',
+        }),
+      );
     } catch (error) {
       const issue = formatOcRuntimeError(
         error,
@@ -579,7 +647,7 @@ export const replicadKernel = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters }, runtime, context) {
+  async createGeometry({ entryPath, parameters }, runtime, context: ReplicadContext) {
     const { tracer } = runtime;
     const relativeFilePath = toVmEntryPath(entryPath);
     let bundleSourceMap: string | undefined;
@@ -592,83 +660,101 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
-      const computeSession = await runtime.compute.openSession({
-        namespace: replicadComputeNamespace,
-        scope: { entryPath },
-        policy: 'best-effort',
-      });
-      return await context.computeReuse.run(
-        computeSession,
-        named('Object.createGeometry', async () => {
-          const executeResult = await runtime.execute(bundleResult.code);
-          if (!executeResult.success) {
-            throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
-          }
-          entryUrl = executeResult.entryUrl;
+      const buildGeometry = named('Object.createGeometry', async () => {
+        const executeResult = await runtime.execute(bundleResult.code);
+        if (!executeResult.success) {
+          throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
+        }
+        entryUrl = executeResult.entryUrl;
 
-          const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
-            const mainSpan = tracer.startSpan('replicad.run-main', {
-              phase: 'computingGeometry',
-              stage: 'brep',
-            });
-            try {
-              return await context.libraryTrace.runInScope({
-                scope: 'user-main',
-                operation: async () =>
-                  runOcMain({
-                    module: executeResult.value,
-                    parameters,
-                    ocInstance: context.openCascade,
-                    errorContext: buildErrorContext(context, { bundleSourceMap, entryUrl }),
-                    firstArg: getReplicadFirstArgument(),
+        const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
+          const mainSpan = tracer.startSpan('replicad.run-main', {
+            phase: 'computingGeometry',
+            stage: 'brep',
+          });
+          try {
+            return await context.libraryTrace.runInScope({
+              scope: 'user-main',
+              operation: async () =>
+                runOcMain({
+                  module: executeResult.value,
+                  parameters,
+                  ocInstance: context.openCascade,
+                  errorContext: buildErrorContext(context, {
+                    bundleSourceMap,
+                    entryUrl,
                   }),
-              });
-            } finally {
-              context.libraryTrace.emitSummary();
-              context.tracingSummary?.flush();
-              mainSpan.end();
-            }
-          });
-
-          if (!mainResult.success) {
-            throw new ReplicadBuildError(mainResult.issues);
-          }
-
-          const shapes = context.computeReuse.unwrap(context.libraryTrace.unwrap(mainResult.value));
-
-          if (shapes === undefined) {
-            runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
-              data: { filePath: relativeFilePath },
+                  firstArg: getReplicadFirstArgument(),
+                }),
             });
-            await computeSession.flush();
-            return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+          } finally {
+            context.libraryTrace.emitSummary();
+            context.tracingSummary?.flush();
+            mainSpan.end();
           }
+        });
 
-          const defaultName = extractDefaultName(executeResult.value);
+        if (!mainResult.success) {
+          throw new ReplicadBuildError(mainResult.issues);
+        }
 
-          // Build phase ends here: normalize main() output and resolve GeoSpec
-          // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
-          // all export-facing evidence — tessellation is deferred to meshGeometry
-          // and never runs on a BRep-only export path.
-          const nativeHandle: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
-            const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
-              phase: 'computingGeometry',
-              stage: 'brep',
-            });
-            try {
-              return normalizeRenderShapes(shapes, defaultName).map((entry) =>
-                resolveEntryInterfaces(entry, context.replicadLibrary),
-              );
-            } finally {
-              interfaceSpan.end();
-            }
+        const traced = context.libraryTrace.unwrap(mainResult.value);
+        const shapes = context.computeReuse ? context.computeReuse.unwrap(traced) : traced;
+
+        if (shapes === undefined) {
+          runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
+            data: { filePath: relativeFilePath },
           });
+          return finalizeRenderOutput({
+            artifacts: [createEmptyGltfGeometry()],
+            nativeHandle: [],
+          });
+        }
 
-          runtime.signal.throwIfAborted();
-          await computeSession.flush();
-          return { nativeHandle };
-        }),
-      );
+        const defaultName = extractDefaultName(executeResult.value);
+
+        // Build phase ends here: normalize main() output and resolve GeoSpec
+        // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
+        // all export-facing evidence — tessellation is deferred to meshGeometry
+        // and never runs on a BRep-only export path.
+        const nativeHandle: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
+          const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
+            phase: 'computingGeometry',
+            stage: 'brep',
+          });
+          try {
+            return normalizeRenderShapes(shapes, defaultName).map((entry) =>
+              resolveEntryInterfaces(entry, context.replicadLibrary),
+            );
+          } finally {
+            interfaceSpan.end();
+          }
+        });
+
+        runtime.signal.throwIfAborted();
+        return { nativeHandle };
+      });
+
+      if (runtime.compute.status !== 'on' || !context.computeReuse) {
+        // Off arm: no scope, no recipe, no announcement, no publication tail.
+        return await buildGeometry();
+      }
+      const computeScope = runtime.compute.openScope({
+        namespace: replicadComputeNamespace,
+        producer: context.computeProducer,
+        environment: context.computeEnvironment,
+        discovery: { entryPath },
+        resident: context.computeReuse.resident,
+      });
+      let outcome: 'delivered' | 'failed' = 'failed';
+      try {
+        const built = await context.computeReuse.run(computeScope, buildGeometry);
+        outcome = 'delivered';
+        return built;
+      } finally {
+        // Seals metadata only; the runtime permits the tail after actual delivery.
+        computeScope.close({ outcome });
+      }
     } catch (error) {
       if (error instanceof ReplicadBuildError || error instanceof RenderArtifactFinalizationError) {
         throw error;
@@ -749,7 +835,10 @@ export const replicadKernel = defineKernel({
             return convertReplicadGeometriesToGltf({
               geometries: includeEdges
                 ? shapes3d
-                : shapes3d.map((geometry) => ({ ...geometry, edges: { ...geometry.edges, lines: [] } })),
+                : shapes3d.map((geometry) => ({
+                    ...geometry,
+                    edges: { ...geometry.edges, lines: [] },
+                  })),
               format: 'glb',
               includeTauTopology: includeTopology,
               logger: runtime.logger,
@@ -817,7 +906,11 @@ export const replicadKernel = defineKernel({
             const { coordinateSystem, unit } = options;
             const namedShapes = nativeHandle.map((shapeConfig, index) => ({
               ...shapeConfig,
-              name: resolveShapeName({ index, name: shapeConfig.name, source: 'generated' }),
+              name: resolveShapeName({
+                index,
+                name: shapeConfig.name,
+                source: 'generated',
+              }),
             }));
             const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
               render(namedShapes, {
@@ -904,7 +997,10 @@ export const replicadKernel = defineKernel({
 
             const shapes =
               coordinateSystem === 'y-up'
-                ? nativeHandle.map((s) => ({ ...s, shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]) }))
+                ? nativeHandle.map((s) => ({
+                    ...s,
+                    shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
+                  }))
                 : nativeHandle;
 
             const result = await Promise.all(
@@ -964,7 +1060,11 @@ const serializeReplicadHandle = (nativeHandle: NativeHandleEntry[]) =>
 
 async function buildExportBytes(
   shape: AnyShape,
-  tessellation: { tolerance: number; angularTolerance: number; binary?: boolean },
+  tessellation: {
+    tolerance: number;
+    angularTolerance: number;
+    binary?: boolean;
+  },
 ): Promise<Uint8Array<ArrayBuffer>> {
   const blob = shape.blobSTL(tessellation.binary ? { ...tessellation, binary: true } : tessellation);
   return new Uint8Array(await blob.arrayBuffer());

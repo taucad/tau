@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
 import type * as FileUtilsModuleType from '@taucad/utils/file';
@@ -152,6 +154,34 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
 const { ExportSelector } = await import('./export-selector.js');
 const { groupExportFormatsByFidelity } = await import('./export-format-groups.js');
 
+const compiledSelector = await (async () => {
+  const { transformSync } = await import('oxc-transform-react');
+  const source = await readFile(new URL('export-selector.tsx', pathToFileURL(import.meta.filename)), 'utf8');
+  const compiled = transformSync('export-selector.tsx', source, {
+    lang: 'tsx',
+    reactCompiler: { target: '19' },
+  });
+  if (compiled.fatal || compiled.errors.length > 0) {
+    throw new Error(`React Compiler refused ExportSelector: ${JSON.stringify(compiled.errors)}`);
+  }
+  const specifiers = [...compiled.code.matchAll(/^import {[^}]*} from "([^"]+)";$/gm)].map((match) => match[1]!);
+  const modules = Object.fromEntries(
+    await Promise.all(specifiers.map(async (specifier) => [specifier, await import(specifier)] as const)),
+  );
+  const linked = compiled.code
+    .replaceAll(
+      /^import {([^}]*)} from "([^"]+)";$/gm,
+      (_match, names: string, specifier: string) =>
+        `const { ${names.replaceAll(' as ', ': ')} } = __modules[${JSON.stringify(specifier)}];`,
+    )
+    .replaceAll(/^export /gm, '');
+  // oxlint-disable-next-line no-new-func -- this pin executes the app's compiler output.
+  const factory = new Function('__modules', `${linked}\nreturn { ExportSelector };`) as (
+    dependencies: Record<string, unknown>,
+  ) => { ExportSelector: typeof ExportSelector };
+  return { code: compiled.code, ExportSelector: factory(modules).ExportSelector };
+})();
+
 function createCapabilities(overrides?: Partial<CapabilitiesManifest>): CapabilitiesManifest {
   return {
     routes: [
@@ -210,6 +240,22 @@ describe('ExportSelector', () => {
     expect(screen.getByRole('button', { name: /glb/i })).toBeDefined();
     expect(screen.getByRole('button', { name: /stl/i })).toBeDefined();
     expect(screen.getByRole('button', { name: /step/i })).toBeDefined();
+  });
+
+  it('should refresh compiled formats when a stable client publishes new capabilities', () => {
+    expect(compiledSelector.code).toContain('from "react/compiler-runtime"');
+    const view = render(
+      <compiledSelector.ExportSelector cadActor={mockCadRef} filenameBase='test-project' variant='inline' />,
+    );
+    expect(screen.getByRole('button', { name: /step/i })).toBeDefined();
+
+    mockCapabilities = createCapabilities({ routes: [] });
+    view.rerender(
+      <compiledSelector.ExportSelector cadActor={mockCadRef} filenameBase='test-project-next' variant='inline' />,
+    );
+
+    expect(screen.queryByRole('button', { name: /step/i })).toBeNull();
+    expect(screen.getByText(/No export formats available/)).toBeDefined();
   });
 
   it('should hide the geometry unit picker in single-geometry-unit mode', () => {

@@ -5,7 +5,7 @@ import { createComputeReuseService } from '#compute-reuse.js';
 import { contentDigest, digestAction, digestContent } from '#digest.js';
 import { createMemoryActionStore, createMemoryContentStore } from '#memory-store.js';
 import { unsupportedCacheMaintenance } from '#store.js';
-import type { CacheCodec, ComputeAction } from '#types.js';
+import type { CacheCodec, CacheRetention, ComputeAction } from '#types.js';
 import type { ActionStore, ContentStore } from '#store.js';
 
 const textCodec: CacheCodec<string> = {
@@ -27,18 +27,22 @@ const action: ComputeAction = {
   codec: { id: textCodec.id, version: textCodec.version },
 };
 
+/** Test-only authorized retention owner; production owners are minted by the runtime. */
+const retention = { name: 'test-job' } as unknown as CacheRetention;
+const promote = vi.fn(async () => ({ status: 'promoted' }) as const);
+
 const createService = () => {
   const contentStore = createMemoryContentStore({ maxBytes: 4096 });
   const actionStore = createMemoryActionStore({ maxBytes: 4096 });
-  return { contentStore, actionStore, service: createComputeReuseService({ contentStore, actionStore }) };
+  return { contentStore, actionStore, service: createComputeReuseService({ contentStore, actionStore, promote }) };
 };
 
 describe('ComputeReuseService', () => {
   it('publishes content before the action and reuses the completed result', async () => {
     const { actionStore, contentStore, service } = createService();
     const compute = vi.fn(async () => 'solved');
-    const first = await service.evaluate({ action, codec: textCodec, policy: 'required', compute });
-    const second = await service.evaluate({ action, codec: textCodec, policy: 'required', compute });
+    const first = await service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute });
+    const second = await service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute });
 
     expect(first).toMatchObject({ source: 'computed', publication: { status: 'stored' } });
     expect(second).toMatchObject({ source: 'cache', value: 'solved' });
@@ -67,6 +71,7 @@ describe('ComputeReuseService', () => {
         },
         codec: textCodec,
         policy: 'required',
+        retention,
         compute: async () => {
           invocations.repair += 1;
           return 'repaired-brep';
@@ -85,6 +90,7 @@ describe('ComputeReuseService', () => {
         },
         codec: textCodec,
         policy: 'required',
+        retention,
         compute: async () => {
           invocations.tessellate += 1;
           return `${repair.value}:mesh:${String(options.linearTolerance)}`;
@@ -103,6 +109,7 @@ describe('ComputeReuseService', () => {
         },
         codec: textCodec,
         policy: 'required',
+        retention,
         compute: async () => {
           invocations.package += 1;
           return `${tessellation.value}:glb-v2`;
@@ -166,7 +173,7 @@ describe('ComputeReuseService', () => {
     expect(published).not.toHaveBeenCalled();
 
     await expect(
-      service.evaluate({ action, codec: textCodec, policy: 'required', compute: async () => 'ok' }),
+      service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: async () => 'ok' }),
     ).rejects.toBeInstanceOf(CacheRequiredError);
     expect(published).not.toHaveBeenCalled();
   });
@@ -197,6 +204,7 @@ describe('ComputeReuseService', () => {
         action,
         codec: textCodec,
         policy: 'required',
+        retention,
         compute: async () => {
           throw new Error('solve failed');
         },
@@ -235,9 +243,9 @@ describe('ComputeReuseService', () => {
     );
     expect(compute).toHaveBeenCalledOnce();
 
-    await expect(service.evaluate({ action, codec: textCodec, policy: 'required', compute })).rejects.toBeInstanceOf(
-      CacheCorruptionError,
-    );
+    await expect(
+      service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute }),
+    ).rejects.toBeInstanceOf(CacheCorruptionError);
     expect(compute).toHaveBeenCalledOnce();
   });
 
@@ -254,6 +262,7 @@ describe('ComputeReuseService', () => {
       action,
       codec: textCodec,
       policy: 'required',
+      retention,
       signal: firstController.signal,
       compute,
     });
@@ -261,6 +270,7 @@ describe('ComputeReuseService', () => {
       action,
       codec: textCodec,
       policy: 'required',
+      retention,
       signal: secondController.signal,
       compute,
     });
@@ -299,6 +309,7 @@ describe('ComputeReuseService', () => {
       action,
       codec: textCodec,
       policy: 'required',
+      retention,
       signal: firstController.signal,
       compute,
     });
@@ -306,6 +317,7 @@ describe('ComputeReuseService', () => {
       action,
       codec: textCodec,
       policy: 'required',
+      retention,
       signal: secondController.signal,
       compute,
     });
@@ -319,6 +331,43 @@ describe('ComputeReuseService', () => {
     await expect(second).rejects.toMatchObject({ name: 'AbortError' });
     expect(producerSignal?.aborted).toBe(true);
     expect(compute).toHaveBeenCalledOnce();
+  });
+
+  it('refuses required durability when the store has no durable barrier', async () => {
+    const contentStore = createMemoryContentStore({ maxBytes: 4096 });
+    const actionStore = createMemoryActionStore({ maxBytes: 4096 });
+    const service = createComputeReuseService({ contentStore, actionStore });
+    await expect(
+      service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: async () => 'solved' }),
+    ).rejects.toBeInstanceOf(CacheRequiredError);
+  });
+
+  it('promotes a required hit past the durable barrier, not only a required miss', async () => {
+    const { service } = createService();
+    promote.mockClear();
+    await service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: async () => 'solved' });
+    const hit = await service.evaluate({
+      action,
+      codec: textCodec,
+      policy: 'required',
+      retention,
+      compute: async () => 'solved',
+    });
+    expect(hit).toMatchObject({ source: 'cache', retention });
+    expect(promote, 'the hit path pins and awaits the barrier too').toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a required caller when the backend declines the barrier', async () => {
+    const contentStore = createMemoryContentStore({ maxBytes: 4096 });
+    const actionStore = createMemoryActionStore({ maxBytes: 4096 });
+    const service = createComputeReuseService({
+      contentStore,
+      actionStore,
+      promote: async () => ({ status: 'no-durable-storage' }),
+    });
+    await expect(
+      service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: async () => 'solved' }),
+    ).rejects.toBeInstanceOf(CacheRequiredError);
   });
 
   it('rejects a codec whose identity differs from the action key', async () => {

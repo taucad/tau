@@ -5,11 +5,12 @@ import type { UIMatch } from 'react-router';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { data: authData } = useSession(authClient);
   const { signIn, signOut } = useAuthLinks();
+  const { open: openSettings } = useSettingsDialog();
 
   useCommandPaletteItems(
     match.id,
@@ -42,7 +43,7 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
         group: 'Settings',
         icon: <Cog />,
         action() {
-          openSettingsDialog();
+          openSettings();
         },
         shortcut: '⌘,',
       },

@@ -1,1 +1,1 @@
-export * from '@taucad/converter';
+export * from '@taucad/converter/runtime';

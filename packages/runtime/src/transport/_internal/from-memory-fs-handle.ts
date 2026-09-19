@@ -19,7 +19,7 @@
  * @internal
  */
 
-import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
+import type { RuntimeFileSystemBase, RuntimeWatchEvent, RuntimeWatchRequest } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
 import { fileStatFromBytes } from '@taucad/filesystem';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -73,22 +73,71 @@ function buildMemoryFsBase(
 ): RuntimeFileSystemBase {
   const store = new Map<string, Uint8Array<ArrayBuffer> | string>();
   const directories = new Set<string>();
+  const fileMtimes = new Map<string, number>();
+  const directoryMtimes = new Map<string, number>();
+  const initializedAt = Date.now();
 
   if (seedFiles) {
     for (const [filePath, content] of Object.entries(seedFiles)) {
       const canonicalPath = assertRootedPath(filePath);
       store.set(canonicalPath, content);
+      fileMtimes.set(canonicalPath, initializedAt);
       const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
-        directories.add(parts.slice(0, i).join('/'));
+        const directory = parts.slice(0, i).join('/');
+        directories.add(directory);
+        directoryMtimes.set(directory, initializedAt);
       }
     }
   }
 
   directories.add('');
+  directoryMtimes.set('', initializedAt);
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
+
+  /**
+   * Watch subscriptions over this store (D15).
+   *
+   * Without a watch channel the kernel takes its watcherless freshness path and clears every
+   * volatile cache on each operation, so every consumer of an in-memory filesystem — the desktop
+   * ephemeral kernel, the demo and headless-image clients, the benchmark runner — re-read and
+   * re-bundled the whole graph per render. This store owns its only mutation path, so it can say
+   * precisely what changed. Arming is synchronous, so no read can outrun the subscription.
+   */
+  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- the adapter's watch channel is the fan-out this rule is about; there is no shared bus below it.
+  const subscriptions = new Set<{
+    readonly request: RuntimeWatchRequest;
+    readonly handler: (event: RuntimeWatchEvent) => void;
+  }>();
+
+  /**
+   * The kernel sends exactly one pattern, `.tau/cache/**` — prefix matching, as `fromNodeFs` does.
+   */
+  const isExcluded = (path: string, excludes: readonly string[]): boolean =>
+    excludes.some((pattern) => {
+      if (!pattern.endsWith('/**')) {
+        return pattern === path;
+      }
+      const prefix = pattern.slice(0, -3);
+      return path === prefix || path.startsWith(`${prefix}/`);
+    });
+
+  const isWatched = (request: RuntimeWatchRequest, path: string): boolean =>
+    !isExcluded(path, request.excludes ?? []) &&
+    request.paths.some(
+      (watched) =>
+        watched === path || (request.recursive === true && (watched === '' || path.startsWith(`${watched}/`))),
+    );
+
+  const notify = (event: RuntimeWatchEvent, paths: readonly string[]): void => {
+    for (const subscription of subscriptions) {
+      if (paths.some((path) => isWatched(subscription.request, path))) {
+        subscription.handler(event);
+      }
+    }
+  };
 
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -115,15 +164,30 @@ function buildMemoryFsBase(
     dispose() {
       store.clear();
       directories.clear();
+      fileMtimes.clear();
+      directoryMtimes.clear();
+      subscriptions.clear();
+    },
+    watch(request, handler) {
+      const subscription = { request, handler };
+      subscriptions.add(subscription);
+      return () => {
+        subscriptions.delete(subscription);
+      };
     },
     readFile,
     async writeFile(filePath, data) {
       const canonicalPath = assertRootedPath(filePath);
+      const writtenAt = Date.now();
       store.set(canonicalPath, data);
+      fileMtimes.set(canonicalPath, writtenAt);
       const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
-        directories.add(parts.slice(0, i).join('/'));
+        const directory = parts.slice(0, i).join('/');
+        directories.add(directory);
+        directoryMtimes.set(directory, writtenAt);
       }
+      notify({ type: 'change', path: canonicalPath }, [canonicalPath]);
     },
     async mkdir(directoryPath, options) {
       const canonicalPath = assertRootedPath(directoryPath);
@@ -136,6 +200,7 @@ function buildMemoryFsBase(
         throw errno('EEXIST', `EEXIST: file already exists: ${canonicalPath}`);
       }
       const parts = canonicalPath.split('/');
+      const createdAt = Date.now();
       if (options?.recursive !== true) {
         const parent = parts.slice(0, -1).join('/');
         if (!directories.has(parent)) {
@@ -143,8 +208,11 @@ function buildMemoryFsBase(
         }
       }
       directories.add(canonicalPath);
+      directoryMtimes.set(canonicalPath, createdAt);
       for (let i = 1; i < parts.length; i++) {
-        directories.add(parts.slice(0, i).join('/'));
+        const directory = parts.slice(0, i).join('/');
+        directories.add(directory);
+        directoryMtimes.set(directory, createdAt);
       }
     },
     async readdir(directoryPath) {
@@ -175,17 +243,19 @@ function buildMemoryFsBase(
         throw errno('EISDIR', `EISDIR: illegal operation on a directory: ${canonicalPath}`);
       }
       store.delete(canonicalPath);
+      fileMtimes.delete(canonicalPath);
+      notify({ type: 'delete', path: canonicalPath }, [canonicalPath]);
     },
     async stat(filePath) {
       const canonicalPath = assertRootedPath(filePath);
       if (store.has(canonicalPath)) {
         const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
-        return fileStatFromBytes(bytes, Date.now());
+        return fileStatFromBytes(bytes, fileMtimes.get(canonicalPath) ?? 0);
       }
 
       if (directories.has(canonicalPath)) {
-        return { type: 'dir', size: 0, mtimeMs: Date.now() };
+        return { type: 'dir', size: 0, mtimeMs: directoryMtimes.get(canonicalPath) ?? 0 };
       }
 
       throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
@@ -206,6 +276,7 @@ function buildMemoryFsBase(
         throw errno('ENOTEMPTY', `ENOTEMPTY: directory not empty: ${canonicalPath}`);
       }
       directories.delete(canonicalPath);
+      directoryMtimes.delete(canonicalPath);
     },
     async rename(oldPath, newPath) {
       const canonicalOldPath = assertRootedPath(oldPath);
@@ -214,24 +285,40 @@ function buildMemoryFsBase(
       if (content !== undefined) {
         store.set(canonicalNewPath, content);
         store.delete(canonicalOldPath);
+        fileMtimes.set(canonicalNewPath, fileMtimes.get(canonicalOldPath) ?? 0);
+        fileMtimes.delete(canonicalOldPath);
+        notify({ type: 'rename', oldPath: canonicalOldPath, newPath: canonicalNewPath }, [
+          canonicalOldPath,
+          canonicalNewPath,
+        ]);
       } else if (directories.has(canonicalOldPath)) {
         const oldPrefix = `${canonicalOldPath}/`;
         const newPrefix = `${canonicalNewPath}/`;
         for (const [filePath, fileContent] of new Map(store)) {
           if (filePath.startsWith(oldPrefix)) {
+            const renamedPath = `${newPrefix}${filePath.slice(oldPrefix.length)}`;
             store.delete(filePath);
-            store.set(`${newPrefix}${filePath.slice(oldPrefix.length)}`, fileContent);
+            store.set(renamedPath, fileContent);
+            fileMtimes.set(renamedPath, fileMtimes.get(filePath) ?? 0);
+            fileMtimes.delete(filePath);
           }
         }
         for (const directoryPath of new Set(directories)) {
           if (directoryPath === canonicalOldPath || directoryPath.startsWith(oldPrefix)) {
-            directories.delete(directoryPath);
-            directories.add(
+            const renamedPath =
               directoryPath === canonicalOldPath
                 ? canonicalNewPath
-                : `${newPrefix}${directoryPath.slice(oldPrefix.length)}`,
-            );
+                : `${newPrefix}${directoryPath.slice(oldPrefix.length)}`;
+            directories.delete(directoryPath);
+            directories.add(renamedPath);
+            directoryMtimes.set(renamedPath, directoryMtimes.get(directoryPath) ?? 0);
+            directoryMtimes.delete(directoryPath);
           }
+        }
+        // A directory rename moves an unbounded set of watched paths; `reset` is the contract's
+        // own "resync, I cannot enumerate this for you".
+        for (const subscription of subscriptions) {
+          subscription.handler({ type: 'reset' });
         }
       } else {
         throw enoent(`ENOENT: no such file or directory: ${canonicalOldPath}`);
@@ -242,11 +329,11 @@ function buildMemoryFsBase(
       if (store.has(canonicalPath)) {
         const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
-        return fileStatFromBytes(bytes, Date.now());
+        return fileStatFromBytes(bytes, fileMtimes.get(canonicalPath) ?? 0);
       }
 
       if (directories.has(canonicalPath)) {
-        return { type: 'dir', size: 0, mtimeMs: Date.now() };
+        return { type: 'dir', size: 0, mtimeMs: directoryMtimes.get(canonicalPath) ?? 0 };
       }
 
       throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);

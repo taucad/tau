@@ -52,8 +52,10 @@ describe('routeOf', () => {
   it.each([
     ['/runtime', '/', 'runtime'],
     ['/fs', '/', 'fs'],
+    ['/compute', '/', 'compute'],
     ['/rt/runtime', '/rt', 'runtime'],
     ['/rt/fs', '/rt', 'fs'],
+    ['/rt/compute', '/rt', 'compute'],
     ['/rt/fs', 'rt/', 'fs'],
     ['/api/v1/runtime', '/api/v1', 'runtime'],
   ] as const)('classifies %s under prefix %s', (pathname, prefix, route) => {
@@ -98,7 +100,7 @@ describe('isOriginAllowed', () => {
 
 describe('closeCauseFor', () => {
   it.each([webSocketCloseCode.normal, webSocketCloseCode.goingAway])('maps %i to host-exit', (code) => {
-    expect(closeCauseFor(code)).toEqual({ cause: 'host-exit' });
+    expect(closeCauseFor(code)).toEqual({ cause: 'host-exit', phase: 'session' });
   });
 
   it('maps 1006 to wire-failure with a described error', () => {

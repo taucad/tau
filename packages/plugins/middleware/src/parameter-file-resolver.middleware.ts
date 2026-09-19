@@ -1,8 +1,31 @@
 import deepmerge from 'deepmerge';
 import { z } from 'zod';
-import { fileParameterEntrySchema, getActiveGroupValues, parametersDirectory } from '@taucad/runtime/types';
+import { getActiveGroupValues, parametersDirectory } from '@taucad/runtime/types';
+import type { KernelIssue } from '@taucad/runtime/types';
 import { assertRootedPath, isNotFoundError } from '@taucad/runtime/kernel';
 import { defineMiddleware } from '@taucad/runtime/middleware';
+import { requireParameterRecord } from '@taucad/parameters';
+
+const encoder = new TextEncoder();
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** The kernel issue for a record `requireParameterRecord` refused. */
+const recordIssue = (error: unknown): KernelIssue => ({
+  code: 'INVALID_RECORD',
+  message: errorMessage(error),
+  type: 'runtime',
+  severity: 'error',
+});
+
+/** Decode a stored record, reporting an unusable one as the typed kernel issue every reader shares. */
+const recordFrom = (content: string): ReturnType<typeof requireParameterRecord> => {
+  try {
+    return requireParameterRecord(encoder.encode(content));
+  } catch (error) {
+    throw Object.assign(new Error(errorMessage(error)), { issues: [recordIssue(error)] });
+  }
+};
 
 const resolveParameterFilePath = (entryPath: string, parametersDirectoryPath: string): string => {
   const localEntryPath = assertRootedPath(entryPath);
@@ -19,9 +42,10 @@ const resolveParameterFilePath = (entryPath: string, parametersDirectoryPath: st
  * rather than concatenated.
  *
  * The parameter file is included in dependency hashing and registered for watching.
- * Missing, malformed, or incomplete files leave the request unchanged. Other
- * read failures propagate so stale handles, permission errors, and provider
- * failures cannot be mistaken for an absent optional parameter file.
+ * Missing files leave the request unchanged. Invalid or unsupported records
+ * surface a stable diagnostic, and other read failures propagate so stale
+ * handles, permission errors, and provider failures cannot be mistaken for an
+ * absent optional parameter file.
  *
  * @public
  */
@@ -55,24 +79,11 @@ export const parameterFileResolver = defineMiddleware({
       throw error;
     }
 
-    let decoded: unknown;
-    try {
-      decoded = JSON.parse(content);
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) {
-        throw error;
-      }
-      return handler(input);
-    }
-
-    const entry = fileParameterEntrySchema.safeParse(decoded);
-    if (!entry.success) {
-      return handler(input);
-    }
+    const entry = recordFrom(content);
 
     return handler({
       ...input,
-      parameters: deepmerge(input.parameters, getActiveGroupValues(entry.data), {
+      parameters: deepmerge(input.parameters, getActiveGroupValues(entry), {
         arrayMerge: (_target: unknown[], source: unknown[]) => source,
       }),
     });

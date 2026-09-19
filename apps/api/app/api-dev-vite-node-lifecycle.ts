@@ -69,6 +69,10 @@ const asApiUnhandledRejectionHandlerModule = (module: Record<string, unknown>): 
 
 export const createApiDevViteNodeLifecycle = (): ApiDevViteNodeLifecycle => {
   const state: ApiDevViteNodeLifecycleState = {};
+  // Nest registers routes before its init hooks run, so retrying init() on an
+  // app whose init failed reports duplicate routes instead of the real error.
+  // A reloaded module graph produces a new app, which gets a fresh attempt.
+  const failedApps = new WeakMap<NestFastifyApplication, Error>();
   let removeUnhandledRejectionHandler: (() => void) | undefined;
   let unhandledRejectionHandlerQueue = Promise.resolve();
   let viteServer: ViteDevServer | undefined;
@@ -168,7 +172,12 @@ export const createApiDevViteNodeLifecycle = (): ApiDevViteNodeLifecycle => {
       await closeCurrentActiveApp();
     }
 
-    await app.init();
+    try {
+      await app.init();
+    } catch (error) {
+      failedApps.set(app, toError(error));
+      throw error;
+    }
 
     const instance = getRouteHandler(app);
     if (typeof instance !== 'function') {
@@ -184,6 +193,11 @@ export const createApiDevViteNodeLifecycle = (): ApiDevViteNodeLifecycle => {
   const ensureAppReady = async (app: NestFastifyApplication): Promise<NestFastifyApplication> => {
     if (state.activeApp === app) {
       return app;
+    }
+
+    const initFailure = failedApps.get(app);
+    if (initFailure) {
+      throw initFailure;
     }
 
     const { transitionPromise } = state;

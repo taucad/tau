@@ -29,6 +29,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
 const probePath = resolve(here, 'fixtures/render-child-probe.ts');
+const tsxCliPath = fileURLToPath(import.meta.resolve('tsx/cli'));
 
 /** The `main.scad` the live daemon refused to render. */
 const hexNut = 'difference(){ cylinder(d=34,h=14,$fn=6); cylinder(d=8,h=16,$fn=32); }\n';
@@ -42,7 +43,7 @@ afterEach(async () => {
 type ProbeOutcome = { readonly isError: boolean; readonly content: unknown };
 
 const probe = async (workspaceRoot: string, targetFile: string): Promise<ProbeOutcome> => {
-  const child = spawn(process.execPath, ['--import', 'tsx', probePath, workspaceRoot, targetFile], {
+  const child = spawn(process.execPath, [tsxCliPath, probePath, workspaceRoot, targetFile], {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

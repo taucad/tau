@@ -121,6 +121,8 @@ export type WebSocketHostOptions = {
   readonly host?: string;
   /** How long a `/runtime` socket waits for its `/fs` peer. Milliseconds; defaults to 10 s. */
   readonly pairingTimeout?: number;
+  /** Accept a reverse compute authority paired by trusted loopback composition. Defaults to false. */
+  readonly allowPrivateComputePairing?: boolean;
   /** Ping interval used to detect silently dead peers. Milliseconds; defaults to 25 s. */
   readonly heartbeat?: number;
 };
@@ -179,6 +181,7 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
   const allowedOrigins = options.allowedOrigins ?? [];
   const pairingTimeout = options.pairingTimeout ?? 10_000;
   const pairing = createSessionPairing<PairedFileSystemSocket>(pairingTimeout);
+  const computePairing = createSessionPairing<PairedFileSystemSocket>(pairingTimeout, '/compute');
 
   /** Live sockets and their heartbeat liveness flag. */
   const liveness = new Map<WebSocket, { alive: boolean }>();
@@ -277,8 +280,20 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
     pairing.offer(session, { socket, port: wrapWebSocket<unknown>(socket, msgpackCodec) });
   };
 
+  const serveComputeSocket = (session: string, socket: WebSocket): void => {
+    track(socket);
+    if (options.allowPrivateComputePairing !== true) {
+      socket.close(webSocketCloseCode.policyViolation, 'private compute pairing is disabled');
+      return;
+    }
+    socket.on('close', () => {
+      computePairing.revoke(session);
+    });
+    computePairing.offer(session, { socket, port: wrapWebSocket<unknown>(socket, msgpackCodec) });
+  };
+
   /** Never rejects: every failure closes this one connection, never the host. */
-  const serveRuntimeSocket = async (session: string, socket: WebSocket): Promise<void> => {
+  const serveRuntimeSocket = async (session: string, socket: WebSocket, durableCompute: boolean): Promise<void> => {
     track(socket);
     /* Checked after every await. A socket that dies while we are pairing must
      * not leave a worker and dispatcher behind on a dead wire; `readyState` is
@@ -288,6 +303,8 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
 
     let fileSystemProxy: WorkerFileSystemProxy | undefined;
     let pairedSocket: WebSocket | undefined;
+    let pairedComputeSocket: WebSocket | undefined;
+    let computeStorePort: Port<unknown> | undefined;
 
     /** Give up on this connection before any worker exists. */
     const abandon = (code: number, reason: string): void => {
@@ -297,6 +314,7 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
         /* Best-effort */
       }
       pairedSocket?.close(webSocketCloseCode.goingAway, reason);
+      pairedComputeSocket?.close(webSocketCloseCode.goingAway, reason);
       if (!isDead()) {
         socket.close(code, reason);
       }
@@ -370,9 +388,26 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
         return;
       }
 
+      if (durableCompute) {
+        let pairedCompute: PairedFileSystemSocket;
+        try {
+          pairedCompute = await computePairing.claim(session);
+        } catch {
+          abandon(webSocketCloseCode.policyViolation, 'no /compute socket paired for this session');
+          return;
+        }
+        pairedComputeSocket = pairedCompute.socket;
+        computeStorePort = pairedCompute.port;
+        if (isDead() || pairedComputeSocket.readyState !== pairedComputeSocket.OPEN) {
+          abandon(webSocketCloseCode.goingAway, 'private compute socket closed');
+          return;
+        }
+      }
+
       const worker = options.worker();
       const dispatcher = createWorkerDispatcher(worker, port, {
         inlineFileSystem,
+        ...(computeStorePort ? { computeStorePort } : {}),
         encodeGeometry: encodeGeometryAsOwnedCopy,
       });
       dispatchers.add(dispatcher);
@@ -392,6 +427,11 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
         }
         try {
           pairedSocket?.close(webSocketCloseCode.goingAway, 'runtime socket closed');
+        } catch {
+          /* Best-effort */
+        }
+        try {
+          pairedComputeSocket?.close(webSocketCloseCode.goingAway, 'runtime socket closed');
         } catch {
           /* Best-effort */
         }
@@ -423,16 +463,21 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
     readonly head: Parameters<WebSocketServer['handleUpgrade']>[2];
     readonly route: WebSocketRoute;
     readonly session: string;
+    readonly durableCompute: boolean;
   };
 
   /** Hand a routed upgrade to `ws` and serve whichever route it named. */
-  const acceptUpgrade = ({ request, socket, head, route, session }: RoutedUpgrade): void => {
+  const acceptUpgrade = ({ request, socket, head, route, session, durableCompute }: RoutedUpgrade): void => {
     socketServer.handleUpgrade(request, socket, head, (accepted) => {
       if (route === 'fs') {
         serveFileSystemSocket(session, accepted);
         return;
       }
-      void serveRuntimeSocket(session, accepted);
+      if (route === 'compute') {
+        serveComputeSocket(session, accepted);
+        return;
+      }
+      void serveRuntimeSocket(session, accepted, durableCompute);
     });
   };
 
@@ -489,18 +534,30 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
       return;
     }
     const session = url.searchParams.get('session') ?? '';
+    const compute = url.searchParams.get('compute');
+    if (route === 'runtime' && compute !== null && compute !== 'durable') {
+      refuseUpgrade(socket, '400 Bad Request');
+      return;
+    }
+    if (route === 'compute' && options.allowPrivateComputePairing !== true) {
+      refuseUpgrade(socket, '404 Not Found');
+      return;
+    }
     /* Every socket that will be paired needs an id. A `/runtime` socket on a
      * host that owns its filesystem never pairs, so it may omit one. */
-    if (session === '' && (route === 'fs' || !options.fileSystem)) {
+    if (session === '' && (route === 'fs' || route === 'compute' || !options.fileSystem)) {
       refuseUpgrade(socket, '400 Bad Request');
       return;
     }
     const { authorize } = options;
     if (authorize) {
-      void authorizeUpgrade({ request, socket, head, route, session }, authorize);
+      void authorizeUpgrade(
+        { request, socket, head, route, session, durableCompute: compute === 'durable' },
+        authorize,
+      );
       return;
     }
-    acceptUpgrade({ request, socket, head, route, session });
+    acceptUpgrade({ request, socket, head, route, session, durableCompute: compute === 'durable' });
   };
 
   httpServer.on('upgrade', onUpgrade);
@@ -558,6 +615,7 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
         clearInterval(heartbeatTimer);
         removeCrashTrap();
         pairing.dispose();
+        computePairing.dispose();
         httpServer.off('upgrade', onUpgrade);
         await Promise.all([...liveness.keys()].map(async (socket) => closeSocket(socket)));
         /* Each socket close queues its connection's teardown; drain them so

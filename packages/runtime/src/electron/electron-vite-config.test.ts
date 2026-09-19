@@ -17,11 +17,11 @@ describe('electronRuntimeConfig', () => {
 
     expect(config).not.toBe(input);
     expect(input).toEqual({ main: {}, preload: {}, renderer: {} });
-    expect(pluginNames(config.main?.plugins)).toEqual(['taucad-runtime:ssr-assets', 'taucad-runtime:invariants']);
+    expect(pluginNames(config.main?.plugins)).toEqual(['taucad-runtime:assets', 'taucad-runtime:invariants']);
     expect(pluginNames(config.preload?.plugins)).toEqual([]);
     expect(pluginNames(config.renderer?.plugins)).toEqual([
       'taucad-runtime:cross-origin-isolation',
-      'taucad-runtime:ssr-assets',
+      'taucad-runtime:assets',
       'taucad-runtime:invariants',
     ]);
   });

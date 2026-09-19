@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
+import type { MyUIMessage } from '@taucad/chat';
+import { getReasoningEndedAtMs } from '@taucad/chat';
+import { readUIMessageStream } from 'ai';
+import type { ReasoningUIPart, UIMessageChunk } from 'ai';
 import { isRecord } from '@taucad/utils/schema';
 import {
   agentApprovalToolName,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
+  projectAgentHostUserMessage,
   projectAgentHostUserTurn,
+  projectTurnFinalized,
+  latestAcpSessionData,
 } from '#services/agent-host-event-projection.js';
+import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -18,6 +26,130 @@ const base = {
   recordedAt: '2026-09-01T00:00:00.000Z',
   runId: 'run-1',
 } as const;
+
+it('should keep external reasoning open across an interleaved tool result', async () => {
+  const blocks = new Map();
+  const live = { chatId: 'chat', runId: base.runId, messageId: 'thought', contentIndex: 0 };
+  const chunks: UIMessageChunk[] = [
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-start' }, blocks),
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-delta', delta: 'checking' }, blocks),
+    ...projectAgentHostEvent(
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'input',
+          role: 'tool-input',
+          toolCallId: 'call',
+          toolName: 'read',
+          content: {},
+          metadata: { tauInternal: { origin: 'external' } },
+        },
+      },
+      blocks,
+    ),
+    ...projectAgentHostEvent(
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'output',
+          role: 'tool-output',
+          toolCallId: 'call',
+          toolName: 'read',
+          isError: false,
+          content: 'done',
+          metadata: { tauInternal: { origin: 'external' } },
+        },
+      },
+      blocks,
+    ),
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-delta', delta: ' complete' }, blocks),
+    ...projectAgentHostLiveEvent({ ...live, type: 'thinking-end', content: 'checking complete' }, blocks),
+  ];
+  const errors: unknown[] = [];
+  let parts: MyUIMessage['parts'] = [];
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+  for await (const message of readUIMessageStream<MyUIMessage>({
+    stream,
+    onError: (error) => {
+      errors.push(error);
+    },
+  })) {
+    parts = message.parts;
+  }
+  expect(errors).toEqual([]);
+  expect(parts.filter((part) => part.type === 'reasoning').map((part) => part.text)).toEqual(['checking complete']);
+});
+
+it.each(['text', 'thinking'] as const)(
+  'should reconcile %s checkpoints and live frames in either delivery order',
+  async (kind) => {
+    const identity = { chatId: 'chat', runId: base.runId, messageId: 'block', contentIndex: 0 };
+    const live: AgentLiveEvent[] = [
+      { ...identity, type: kind === 'text' ? 'text-start' : 'thinking-start' },
+      { ...identity, type: kind === 'text' ? 'text-delta' : 'thinking-delta', delta: 'hello', offset: 0 },
+      { ...identity, type: kind === 'text' ? 'text-delta' : 'thinking-delta', delta: ' world', offset: 5 },
+      { ...identity, type: kind === 'text' ? 'text-end' : 'thinking-end', content: 'hello world' },
+    ];
+    const durable = (text: string, final = false): AgentLogEvent => ({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'block',
+        role: 'assistant',
+        content: [kind === 'text' ? { type: 'text', text } : { type: 'thinking', thinking: text }],
+        metadata: { tauInternal: { origin: 'external', streamState: final ? 'final' : 'checkpoint' } },
+      },
+    });
+    // The daemon delivers durable and live frames on independent subscriptions.
+    for (const events of [
+      [live[0], durable('hello'), live[1], live[2], durable('hello world', true), live[3]],
+      [live[0], live[1], live[2], durable('hello'), durable('hello world', true), live[3]],
+      [durable('hello world', true), ...live],
+      [...live, durable('hello world', true), durable('hello world', true)],
+    ]) {
+      const blocks = new Map();
+      const chunks = events.flatMap((event) => {
+        if (!event) {
+          throw new Error('Missing fixture frame');
+        }
+        return 'leaderEpoch' in event ? projectAgentHostEvent(event, blocks) : projectAgentHostLiveEvent(event, blocks);
+      });
+      const errors: unknown[] = [];
+      let parts: MyUIMessage['parts'] = [];
+      const stream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      });
+      // oxlint-disable-next-line no-await-in-loop -- consume each independent arrival-order fixture to its terminal SDK state.
+      for await (const message of readUIMessageStream<MyUIMessage>({
+        stream,
+        onError: (error) => errors.push(error),
+      })) {
+        parts = message.parts;
+      }
+      expect(errors).toEqual([]);
+      const text = parts.flatMap((part) =>
+        (part.type === 'text' && kind === 'text') || (part.type === 'reasoning' && kind === 'thinking')
+          ? [part.text]
+          : [],
+      );
+      expect(text).toEqual(['hello world']);
+    }
+  },
+);
 
 describe('projectAgentHostEvent', () => {
   it('reconstructs the durable user turn from append and history-commit events', () => {
@@ -52,7 +184,7 @@ describe('projectAgentHostEvent', () => {
   });
 
   it('streams each block once and lets its matching durable message close it without replay', () => {
-    const streamedBlocks = new Set<string>();
+    const streamedBlocks = new Map();
     const live = {
       type: 'text-delta',
       chatId: 'chat-1',
@@ -99,7 +231,181 @@ describe('projectAgentHostEvent', () => {
       { type: 'reasoning-end', id: 'assistant-live:thinking:1' },
       { type: 'finish-step' },
     ]);
-    expect(streamedBlocks).toEqual(new Set());
+    expect([...streamedBlocks.values()]).toEqual([
+      { type: 'text', content: 'Browser host started the change.', closed: true },
+      { type: 'thinking', content: 'Inspecting the workspace.', closed: true },
+    ]);
+  });
+
+  it('keeps an ACP checkpoint open and continues one block after an unseen prefix', () => {
+    const streamedBlocks = new Map();
+    const checkpoint = {
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-acp',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'prefix ' }],
+        metadata: { tauInternal: { origin: 'external', agentId: 'codex', streamState: 'checkpoint' } },
+      },
+    } as const satisfies AgentLogEvent;
+
+    expect(projectAgentHostEvent(checkpoint, streamedBlocks)).toEqual([
+      { type: 'text-start', id: 'assistant-acp:text:0' },
+      { type: 'text-delta', id: 'assistant-acp:text:0', delta: 'prefix ' },
+    ]);
+    expect(
+      projectAgentHostLiveEvent(
+        {
+          type: 'text-delta',
+          chatId: 'chat-1',
+          runId: 'run-1',
+          messageId: 'assistant-acp',
+          contentIndex: 0,
+          delta: 'suffix',
+        },
+        streamedBlocks,
+      ),
+    ).toEqual([{ type: 'text-delta', id: 'assistant-acp:text:0', delta: 'suffix' }]);
+  });
+
+  it('projects explicit reasoning, text, and partial tool lifecycle events', () => {
+    const streamedBlocks = new Map();
+    const event = {
+      chatId: 'chat-1',
+      runId: 'run-1',
+      messageId: 'assistant-live',
+      contentIndex: 0,
+    } as const;
+
+    expect(
+      [
+        { ...event, type: 'thinking-start', timestamp: 100 },
+        { ...event, type: 'thinking-delta', delta: 'Inspecting' },
+        { ...event, type: 'thinking-end', content: 'Inspecting.', timestamp: 2100 },
+        {
+          ...event,
+          type: 'tool-input-start',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+        },
+        {
+          ...event,
+          type: 'tool-input-delta',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+          delta: '{"target',
+        },
+        {
+          ...event,
+          type: 'tool-input-end',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+          input: { targetFile: 'main.ts' },
+        },
+        {
+          ...event,
+          type: 'tool-output-update',
+          contentIndex: 1,
+          toolCallId: 'call-live',
+          toolName: 'read_file',
+          output: { progress: 0.5 },
+          isError: false,
+        },
+      ].flatMap((live) => projectAgentHostLiveEvent(live as AgentLiveEvent, streamedBlocks)),
+    ).toEqual([
+      {
+        type: 'reasoning-start',
+        id: 'assistant-live:thinking:0',
+        providerMetadata: { common: { reasoningStartedAtMs: 100 } },
+      },
+      { type: 'reasoning-delta', id: 'assistant-live:thinking:0', delta: 'Inspecting' },
+      { type: 'reasoning-delta', id: 'assistant-live:thinking:0', delta: '.' },
+      {
+        type: 'reasoning-end',
+        id: 'assistant-live:thinking:0',
+        providerMetadata: { common: { reasoningStartedAtMs: 100, reasoningEndedAtMs: 2100 } },
+      },
+      { type: 'tool-input-start', toolCallId: 'call-live', toolName: 'read_file' },
+      { type: 'tool-input-delta', toolCallId: 'call-live', inputTextDelta: '{"target' },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call-live',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
+      { type: 'tool-output-available', toolCallId: 'call-live', output: { progress: 0.5 }, preliminary: true },
+    ]);
+  });
+
+  it('retains both reasoning timestamps through the AI SDK reducer', async () => {
+    const streamedBlocks = new Map();
+    const identity = {
+      chatId: 'chat-1',
+      runId: 'run-1',
+      messageId: 'assistant-live',
+      contentIndex: 0,
+    } as const;
+    const chunks = [
+      ...projectAgentHostLiveEvent({ ...identity, type: 'thinking-start', timestamp: 100 }, streamedBlocks),
+      ...projectAgentHostLiveEvent({ ...identity, type: 'thinking-delta', delta: 'Inspecting' }, streamedBlocks),
+      ...projectAgentHostLiveEvent(
+        { ...identity, type: 'thinking-end', content: 'Inspecting.', timestamp: 2100 },
+        streamedBlocks,
+      ),
+    ];
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    let part: ReasoningUIPart | undefined;
+    for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
+      part = message.parts.find((candidate): candidate is ReasoningUIPart => candidate.type === 'reasoning');
+    }
+
+    expect(part).toEqual({
+      type: 'reasoning',
+      text: 'Inspecting.',
+      state: 'done',
+      providerMetadata: { common: { reasoningStartedAtMs: 100, reasoningEndedAtMs: 2100 } },
+    });
+  });
+
+  it('projects rich external assistant content through native file and source parts', () => {
+    const message = {
+      id: 'assistant-rich',
+      role: 'assistant',
+      content: [
+        { type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' },
+        { type: 'audio', mimeType: 'audio/wav', data: 'YXVkaW8=' },
+        { type: 'resource_link', uri: 'tau://result', name: 'Kernel result' },
+        {
+          type: 'resource',
+          resource: { uri: 'tau://report', mimeType: 'text/markdown', text: '# Report' },
+        },
+      ],
+    } as const;
+
+    expect(projectAgentHostEvent({ ...base, type: 'message.appended', message })).toEqual([
+      { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,aW1hZ2U=' },
+      { type: 'file', mediaType: 'audio/wav', url: 'data:audio/wav;base64,YXVkaW8=' },
+      { type: 'source-url', sourceId: 'assistant-rich:source:2', url: 'tau://result', title: 'Kernel result' },
+      {
+        type: 'source-document',
+        sourceId: 'assistant-rich:source:3',
+        mediaType: 'text/markdown',
+        title: 'tau://report',
+        filename: 'tau://report',
+      },
+      { type: 'finish-step' },
+    ]);
   });
 
   it('projects text, thinking, usage, and tool calls from an assistant message', () => {
@@ -115,7 +421,7 @@ describe('projectAgentHostEvent', () => {
           { type: 'toolCall', id: 'call-1', name: 'create_file', arguments: { targetFile: 'proof.txt' } },
         ],
         metadata: {
-          model: 'openai/gpt-5.5',
+          model: 'openai-gpt-5.5',
           usage: {
             input: 12,
             output: 7,
@@ -125,6 +431,7 @@ describe('projectAgentHostEvent', () => {
             cost: { input: 0.12, output: 0.07, cacheRead: 0.03, cacheWrite: 0.02, total: 0.24 },
           },
           stopReason: 'toolUse',
+          tauInternal: { kind: 'billing-invocation', attemptId: 'att_1', operationId: 'op_1', status: 'terminal' },
         },
       },
     });
@@ -150,19 +457,61 @@ describe('projectAgentHostEvent', () => {
       data: {
         type: 'usage',
         id: 'assistant-1:usage',
-        model: 'openai/gpt-5.5',
+        model: 'openai-gpt-5.5',
         inputTokens: 12,
         outputTokens: 7,
-        reasoningTokens: 0,
         cacheReadTokens: 3,
         cacheWriteTokens: 2,
-        inputTokensCost: 0.12,
-        outputTokensCost: 0.07,
-        cacheReadTokensCost: 0.03,
-        cacheWriteTokensCost: 0.02,
-        totalCost: 0.24,
+        operationId: 'op_1',
+        attemptId: 'att_1',
+        billingStatus: 'terminal',
       },
     });
+  });
+
+  it('projects the latest ACP session presentation as a typed data part without a false step boundary', () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'acp-session-1',
+        role: 'assistant',
+        content: [
+          {
+            type: 'acp-session',
+            agentId: 'codex',
+            sessionId: 'vendor-session-1',
+            commands: [{ name: '$brep-design', description: 'Design native BRep geometry' }],
+            configOptions: [],
+            plan: {
+              type: 'items',
+              planId: 'plan-1',
+              entries: [{ content: 'Inspect the model', priority: 'high', status: 'in_progress' }],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(chunks).toEqual([
+      {
+        type: 'data-acp-session',
+        id: 'acp-session-1:acp-session:0',
+        data: {
+          type: 'acp-session',
+          id: 'acp-session-1:acp-session:0',
+          agentId: 'codex',
+          sessionId: 'vendor-session-1',
+          commands: [{ name: '$brep-design', description: 'Design native BRep geometry' }],
+          configOptions: [],
+          plan: {
+            type: 'items',
+            planId: 'plan-1',
+            entries: [{ content: 'Inspect the model', priority: 'high', status: 'in_progress' }],
+          },
+        },
+      },
+    ]);
   });
 
   it('projects one complete tool interaction in stream order', () => {
@@ -228,6 +577,37 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it('projects a replaced tool envelope onto the existing part identity', () => {
+    expect(
+      projectAgentHostEvent({
+        ...base,
+        type: 'message.envelope-replaced',
+        messageId: 'input-1',
+        replacement: {
+          id: 'input-1',
+          role: 'tool-input',
+          toolCallId: 'call-1',
+          toolName: 'applyPatch',
+          content: { patch: 'updated' },
+          call: { toolCallId: 'vendor-1', status: 'in_progress', title: 'Editing main.ts' },
+          metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+        },
+      }),
+    ).toEqual([
+      {
+        type: 'tool-input-available',
+        toolCallId: 'call-1',
+        toolName: 'applyPatch',
+        input: { patch: 'updated' },
+        dynamic: true,
+        title: 'Editing main.ts',
+        toolMetadata: {
+          tau: { toolCallId: 'vendor-1', title: 'Editing main.ts', origin: 'external', agentId: 'codex' },
+        },
+      },
+    ]);
+  });
+
   it('projects tool errors', () => {
     expect(
       projectAgentHostEvent({
@@ -287,6 +667,38 @@ describe('projectAgentHostEvent', () => {
       },
       { type: 'tool-approval-request', approvalId: 'approval-1', toolCallId: 'approval-1' },
     ]);
+  });
+
+  it('projects a login an external agent is waiting on as facts, not a decision', () => {
+    expect(
+      projectAgentHostEvent({
+        ...base,
+        type: 'interrupt.recorded',
+        interruptId: 'login-1',
+        phase: 'requested',
+        reason: 'Open the verification page and enter FAKE-CODE.',
+        payload: {
+          kind: 'external-agent-login',
+          agentId: 'codex',
+          authMethods: [{ id: 'codex-login', name: 'Log in with Codex', terminalCommand: 'codex login' }],
+          url: 'https://example.invalid/device',
+          code: 'FAKE-CODE',
+        },
+      })[0],
+    ).toMatchObject({
+      type: 'tool-input-available',
+      input: {
+        interruptId: 'login-1',
+        prompt: 'Open the verification page and enter FAKE-CODE.',
+        options: [],
+        login: {
+          agentId: 'codex',
+          methods: [{ id: 'codex-login', name: 'Log in with Codex', terminalCommand: 'codex login' }],
+          url: 'https://example.invalid/device',
+          code: 'FAKE-CODE',
+        },
+      },
+    });
   });
 
   it('falls back to the durable reason when a host records no structured payload', () => {
@@ -358,19 +770,215 @@ describe('projectAgentHostEvent', () => {
     ).toEqual(expected);
   });
 
-  it('renders the typed gateway reason rather than a generic host failure', () => {
-    expect(
-      projectAgentHostEvent({
-        ...base,
-        type: 'run.lifecycle',
-        state: 'failed',
-        detail: {
-          code: 'UPSTREAM_REJECTED',
-          message: 'The model provider rejected the request (HTTP 400).',
-          status: 502,
-        },
-      }),
-    ).toEqual([{ type: 'error', errorText: 'The model provider rejected the request (HTTP 400).' }]);
+  it.each([
+    {
+      code: 'FUNDED_OPERATION_LIMIT',
+      status: 429,
+      message: 'The funded-operation failsafe is active.',
+      category: 'rate_limit',
+    },
+    {
+      code: 'BILLING_RECOVERY_UNAVAILABLE',
+      status: 503,
+      message: 'Tau is finalizing earlier funded work.',
+      category: 'overloaded',
+    },
+    {
+      code: 'PROVIDER_UNAVAILABLE',
+      status: 503,
+      message: 'The model provider is unavailable.',
+      category: 'overloaded',
+    },
+  ] as const)('projects typed $code failure as a persistent ChatError', ({ code, status, message, category }) => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code, message, status },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category,
+      title: category === 'rate_limit' ? 'Rate Limit Exceeded' : 'Service Temporarily Unavailable',
+      message,
+      code,
+      httpStatus: status,
+    });
+  });
+
+  it('carries a credit denial shortfall through to the persisted ChatError', () => {
+    const details = {
+      requiredCreditAtoms: '4244000',
+      availableCreditAtoms: '300000',
+      routeId: 'anthropic-claude-astra-5',
+    };
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: {
+        code: 'INSUFFICIENT_CREDIT',
+        status: 402,
+        message: 'Insufficient Tau credit for this model request.',
+        details,
+      },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'credits',
+      title: 'Credit Limit Reached',
+      message: 'Insufficient Tau credit for this model request.',
+      code: 'INSUFFICIENT_CREDIT',
+      httpStatus: 402,
+      details,
+    });
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
+      category: 'credits',
+      code: 'INSUFFICIENT_CREDIT',
+      httpStatus: 402,
+      details,
+    });
+  });
+
+  /* The gateway rewrites the provider's in-stream error frame, so the relayed
+   * response is still HTTP 200: only the code can say the provider account
+   * refused, and the card is keyed on that code. */
+  it('should project a provider-account refusal as overloaded with its details, whatever the status', () => {
+    const details = { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' };
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: {
+        code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+        status: 200,
+        message: "The model provider's account is unavailable.",
+        details,
+      },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'overloaded',
+      title: 'Service Temporarily Unavailable',
+      message: "The model provider's account is unavailable.",
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      httpStatus: 200,
+      details,
+    });
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
+      category: 'overloaded',
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      details,
+    });
+  });
+
+  /* The same rewrite carries every classified provider failure now, not only an
+   * exhausted account: a live stream Vertex cuts on quota arrives as
+   * `RATE_LIMITED` behind the relayed 200. Both halves of the table matter —
+   * the 200 rows are the cards a mid-stream frame must reach, and the failure
+   * statuses beside them are the pre-stream cards this must leave alone. */
+  it.each([
+    { code: 'RATE_LIMITED', status: 200, category: 'rate_limit' },
+    { code: 'RATE_LIMITED', status: 429, category: 'rate_limit' },
+    { code: 'UPSTREAM_REJECTED', status: 200, category: 'server' },
+    { code: 'UPSTREAM_REJECTED', status: 502, category: 'server' },
+    { code: 'PROVIDER_UNAVAILABLE', status: 503, category: 'overloaded' },
+    /* The gateway answers this code 503 when it classified the refusal and 502
+     * for a body-less provider response; the code names the same card for both,
+     * so a 499 or 5xx cut mid-stream reaches it too. */
+    { code: 'PROVIDER_UNAVAILABLE', status: 502, category: 'overloaded' },
+    { code: 'PROVIDER_UNAVAILABLE', status: 200, category: 'overloaded' },
+  ])('should project $code behind HTTP $status as the $category card', ({ code, status, category }) => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code, status, message: 'Resource exhausted. Please try again later.' },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toMatchObject({ category, code, httpStatus: status });
+  });
+
+  it("should carry an external agent's stop details through to the persisted ChatError without a status", () => {
+    const details = {
+      agentId: 'codex',
+      failure: { category: 'limit', title: "You've hit your usage limit.", actions: [] },
+    };
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit.", details },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toEqual({
+      category: 'rate_limit',
+      title: 'Rate Limit Exceeded',
+      message: "You've hit your usage limit.",
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+      details,
+    });
+  });
+
+  /*
+   * The same code, refused before the adapter classified anything — an
+   * admission-time limit carries the code and nothing else. `rateLimit` is the
+   * agent-stop card's category, and that card is keyed on the stop details:
+   * without them the surface falls through to the bare rate-limit card, which
+   * has no "Try again" (R3-F4). A category a card cannot honour is not this
+   * projection's to claim.
+   */
+  it('should project a detail-less agent limit as a generic card', () => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit." },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'generic',
+      title: 'Error',
+      message: "You've hit your usage limit.",
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+    });
+  });
+
+  it('should carry a host failure code that has no status or details', () => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'NO_EVICTABLE_HISTORY', message: 'Context is oversized but has no safe history to evict.' },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'generic',
+      title: 'Error',
+      message: 'Context is oversized but has no safe history to evict.',
+      code: 'NO_EVICTABLE_HISTORY',
+    });
+    /* The code is the only thing that reaches the card's copy: without it the
+     * person reads the host's own sentence about evicting history. */
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
+      code: 'NO_EVICTABLE_HISTORY',
+      message: "This chat's first message is too large to continue. Start a new chat and attach less.",
+      raw: chunk.errorText,
+    });
   });
 
   it('falls back to the generic host failure only when the run recorded no reason', () => {
@@ -379,7 +987,7 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
-  it('handles every durable event type and rejects unknown ones', () => {
+  it('handles every durable event type and projects unknown ones to nothing', () => {
     const events = [
       {
         ...base,
@@ -432,9 +1040,7 @@ describe('projectAgentHostEvent', () => {
     const projected = events.map((event) => projectAgentHostEvent(event));
     expect(projected).toHaveLength(9);
     expect(projected[1]).toEqual([]);
-    expect(() => projectAgentHostEvent({ ...base, type: 'future.event' } as unknown as AgentLogEvent)).toThrow(
-      'Unmapped agent-host event: future.event',
-    );
+    expect(projectAgentHostEvent({ ...base, type: 'future.event' } as unknown as AgentLogEvent)).toEqual([]);
   });
 
   /*
@@ -494,5 +1100,665 @@ describe('projectAgentHostEvent', () => {
     );
     expect(occurrences).toHaveLength(47);
     expect(new Set(events.map((event) => event.runId)).size).toBe(4);
+  });
+});
+
+describe('latestAcpSessionData', () => {
+  it('returns only the newest session record for the active agent', () => {
+    const messages: MyUIMessage[] = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'data-acp-session',
+            data: { type: 'acp-session', id: 's1', agentId: 'codex', commands: [], configOptions: [] },
+          },
+        ],
+      },
+      {
+        id: 'a2',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'data-acp-session',
+            data: {
+              type: 'acp-session',
+              id: 's2',
+              agentId: 'codex',
+              commands: [{ name: '$brep-design', description: 'BRep' }],
+              configOptions: [],
+            },
+          },
+        ],
+      },
+      {
+        id: 'a3',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'data-acp-session',
+            data: { type: 'acp-session', id: 's3', agentId: 'claude', commands: [], configOptions: [] },
+          },
+        ],
+      },
+    ];
+
+    expect(latestAcpSessionData(messages, 'codex')?.id).toBe('s2');
+    expect(latestAcpSessionData(messages, 'missing')).toBeUndefined();
+  });
+});
+
+describe('projectTurnFinalized', () => {
+  /* Exactly what a host writes: `packages/host/src/revisions.ts` appends this
+     record to the chat's own log from its settlement, and `parseLogEvent` is
+     what the client's log reader validates it with — so the fixture goes
+     through it. The browser's worker root emits the same shape from the same
+     machines, which is what makes one projection serve both hosts (S9). */
+  const record = parseLogEvent({
+    ...base,
+    type: 'turn.finalized',
+    turnId: 'user-turn-1',
+    runId: 'run-1',
+    chatId: 'chat-1',
+    projectId: 'project-1',
+    checkoutId: 'live',
+    revisionId: 'rev-1',
+    branch: 'main',
+    changedPaths: ['main.scad'],
+    treeId: 'tree-1',
+    trigger: 'turn',
+    runIds: ['run-1', 'run-2'],
+  });
+
+  it('becomes the card the turn on screen carries, in the one schema every host publishes', () => {
+    expect(projectTurnFinalized(record)).toEqual({
+      type: 'turn.finalized',
+      turnId: 'user-turn-1',
+      runId: 'run-1',
+      chatId: 'chat-1',
+      projectId: 'project-1',
+      checkoutId: 'live',
+      revisionId: 'rev-1',
+      branch: 'main',
+      changedPaths: ['main.scad'],
+      treeId: 'tree-1',
+      trigger: 'turn',
+      runIds: ['run-1', 'run-2'],
+    });
+  });
+
+  it('carries a turn that changed nothing without inventing a revision for it', () => {
+    const nothing = parseLogEvent({
+      ...base,
+      type: 'turn.finalized',
+      turnId: 'user-turn-2',
+      runId: 'run-3',
+      chatId: 'chat-1',
+      projectId: 'project-1',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: ['run-3'],
+    });
+    const card = projectTurnFinalized(nothing);
+    expect(card?.revisionId).toBeUndefined();
+    expect(card?.changedPaths).toEqual([]);
+  });
+
+  it('renders no transcript chunk of its own, and reads nothing out of another record', () => {
+    expect(projectAgentHostEvent(record)).toEqual([]);
+    expect(projectTurnFinalized({ ...base, type: 'run.lifecycle', state: 'completed' })).toBe(undefined);
+  });
+
+  it('renders no chunk for the two sibling outcomes either', () => {
+    const conflicted = parseLogEvent({
+      ...base,
+      type: 'turn.conflicted',
+      turnId: 'user-turn-3',
+      runId: 'run-4',
+      chatId: 'chat-1',
+    });
+    const failed = parseLogEvent({
+      ...base,
+      type: 'turn.failed',
+      turnId: 'user-turn-4',
+      runId: 'run-5',
+      chatId: 'chat-1',
+      reason: 'The turn ended before it recorded a revision.',
+    });
+    expect(projectAgentHostEvent(conflicted)).toEqual([]);
+    expect(projectAgentHostEvent(failed)).toEqual([]);
+  });
+});
+
+describe('external tool-call chunks', () => {
+  const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } } as const;
+  const chunksOf = (message: unknown): readonly UIMessageChunk[] =>
+    projectAgentHostEvent({ ...base, type: 'message.appended', message } as AgentLogEvent);
+
+  it("marks every external call dynamic, and carries the emitter's own facts", () => {
+    const [chunk] = chunksOf({
+      id: 'external-input',
+      role: 'tool-input',
+      toolCallId: 'call-1',
+      toolName: 'listFiles',
+      call: { toolCallId: 'list-1', kind: 'read', title: 'List files', status: 'pending', nativeName: 'listFiles' },
+      content: { path: '.' },
+      metadata: externalMetadata,
+    });
+
+    expect(chunk).toMatchObject({
+      type: 'tool-input-available',
+      toolName: 'listFiles',
+      dynamic: true,
+      title: 'List files',
+      toolMetadata: { tau: { kind: 'read', nativeName: 'listFiles', origin: 'external', agentId: 'codex' } },
+    });
+  });
+
+  it('leaves no external tool chunk static, whatever the row carries', () => {
+    const rows = [
+      { role: 'tool-input', toolCallId: 'a', toolName: 'shell', content: {}, metadata: externalMetadata },
+      {
+        role: 'tool-input',
+        toolCallId: 'b',
+        toolName: 'ls -la',
+        call: { toolCallId: 'b' },
+        content: {},
+        metadata: externalMetadata,
+      },
+      {
+        role: 'tool-output',
+        toolCallId: 'a',
+        toolName: 'shell',
+        content: {},
+        isError: false,
+        metadata: externalMetadata,
+      },
+      {
+        role: 'tool-output',
+        toolCallId: 'b',
+        toolName: 'ls -la',
+        content: 'boom',
+        isError: true,
+        metadata: externalMetadata,
+      },
+    ];
+    const chunks = rows.flatMap((row, index) => [...chunksOf({ id: `external-${String(index)}`, ...row })]);
+    const toolChunks = chunks.filter((chunk) => chunk.type.startsWith('tool-'));
+
+    expect(toolChunks).toHaveLength(4);
+    /* This is what makes the red unknown-part card unreachable by construction:
+     * with `dynamic` set, no `tool-${title}` part type can ever be minted. */
+    expect(toolChunks.every((chunk) => 'dynamic' in chunk && chunk.dynamic === true)).toBe(true);
+  });
+
+  it("keeps Tau's own call static, and still carries its kind", () => {
+    const [chunk] = chunksOf({
+      id: 'tau-input',
+      role: 'tool-input',
+      toolCallId: 'call-2',
+      toolName: 'list_directory',
+      call: { toolCallId: 'call-2', kind: 'read', nativeName: 'list_directory' },
+      content: { path: '.' },
+    });
+
+    expect(chunk).toMatchObject({ type: 'tool-input-available', toolName: 'list_directory' });
+    expect(chunk).not.toHaveProperty('dynamic');
+    expect(chunk).toMatchObject({ toolMetadata: { tau: { kind: 'read', nativeName: 'list_directory' } } });
+  });
+
+  it('keeps a normalized external Tau MCP call on one dynamic SDK identity', async () => {
+    const metadata = {
+      tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex', presentation: 'tau-mcp' },
+    } as const;
+    const [input] = chunksOf({
+      id: 'tau-mcp-input',
+      role: 'tool-input',
+      toolCallId: 'call-mcp',
+      toolName: 'screenshot',
+      call: {
+        toolCallId: 'vendor-call',
+        kind: 'execute',
+        nativeName: 'screenshot',
+        content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+      },
+      content: { targetFile: 'main.ts', mode: 'single' },
+      metadata,
+    });
+    const [output] = chunksOf({
+      id: 'tau-mcp-output',
+      role: 'tool-output',
+      toolCallId: 'call-mcp',
+      toolName: 'screenshot',
+      content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+      isError: false,
+      call: { toolCallId: 'vendor-call', kind: 'execute', nativeName: 'screenshot' },
+      metadata,
+    });
+
+    expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
+    expect(input).toHaveProperty('dynamic', true);
+    expect(input).toMatchObject({
+      toolMetadata: { tau: { origin: 'external', agentId: 'codex', presentation: 'tau-mcp' } },
+    });
+    expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
+    expect(output).toHaveProperty('dynamic', true);
+    let parts: MyUIMessage['parts'] = [];
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        controller.enqueue(input);
+        controller.enqueue(output);
+        controller.close();
+      },
+    });
+    for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
+      parts = message.parts;
+    }
+    expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
+      type: 'dynamic-tool',
+      state: 'output-available',
+      toolMetadata: {
+        tau: {
+          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+        },
+      },
+    });
+  });
+});
+
+describe('external attribution', () => {
+  const base = {
+    version: 1,
+    leaderEpoch: 'epoch-1',
+    sequence: 1,
+    recordedAt: '2026-01-01T00:00:00.000Z',
+    runId: 'run-1',
+  } as const;
+
+  /*
+   * V6. The vendor's own token report reaches the same `data-usage` part a Tau
+   * turn produces, with no Tau operation — Tau did not sell this turn — and the
+   * agent named so the reader knows the missing charge is a fact.
+   */
+  it('carries the external agent and the model it ran on, with no Tau operation', () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-ext',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        metadata: {
+          model: 'gpt-5.3-codex',
+          responseModel: 'gpt-5.3-codex',
+          usage: {
+            input: 1200,
+            output: 300,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 1500,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          tauInternal: {
+            kind: 'external-tool',
+            origin: 'external',
+            agentId: 'codex',
+            vendorCost: { amount: 0.01, currency: 'USD', reportedBy: 'codex' },
+          },
+        },
+      },
+    });
+
+    expect(chunks).toContainEqual({
+      type: 'data-usage',
+      id: 'assistant-ext:usage',
+      data: {
+        type: 'usage',
+        id: 'assistant-ext:usage',
+        agent: 'codex',
+        model: 'gpt-5.3-codex',
+        inputTokens: 1200,
+        outputTokens: 300,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    });
+  });
+
+  /* B4 R2: the catalog price the model row quotes never becomes a charge, so
+   * the projection drops `usage.cost.*` entirely and carries the operation the
+   * account's own receipt answers for instead. */
+  it('carries the funded operation identity and no priced field', () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-funded',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        metadata: {
+          model: 'openai-gpt-5.5',
+          usage: {
+            input: 10,
+            output: 4,
+            reasoning: 3,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 14,
+            cost: { input: 9.99, output: 9.99, cacheRead: 0, cacheWrite: 0, total: 19.98 },
+          },
+          tauInternal: {
+            kind: 'billing-invocation',
+            attemptId: 'att_funded',
+            operationId: 'op_funded',
+            status: 'pending',
+          },
+        },
+      },
+    });
+
+    expect(chunks).toContainEqual({
+      type: 'data-usage',
+      id: 'assistant-funded:usage',
+      data: {
+        type: 'usage',
+        id: 'assistant-funded:usage',
+        model: 'openai-gpt-5.5',
+        inputTokens: 10,
+        outputTokens: 4,
+        reasoningTokens: 3,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        operationId: 'op_funded',
+        attemptId: 'att_funded',
+        billingStatus: 'pending',
+      },
+    });
+    expect(JSON.stringify(chunks)).not.toContain('9.99');
+  });
+
+  it("leaves a Tau turn's usage unattributed", () => {
+    const chunks = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'assistant-tau',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        metadata: {
+          model: 'openai-gpt-5.5',
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+          },
+        },
+      },
+    });
+
+    const usage = chunks.find((chunk) => chunk.type === 'data-usage');
+    expect(usage).toBeDefined();
+    expect(usage && 'data' in usage ? usage.data : {}).not.toHaveProperty('agent');
+  });
+
+  /* The banner reads the requester from the record, so the projection has to
+   * carry it out of the durable interrupt payload. */
+  it('projects the agent that raised a durable interrupt', () => {
+    const [request] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'interrupt-1',
+      phase: 'requested',
+      reason: 'write hello.txt',
+      payload: {
+        kind: 'approval',
+        prompt: 'write hello.txt',
+        agentId: 'claude',
+        context: { options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }] },
+      },
+    });
+
+    expect(request).toMatchObject({
+      type: 'tool-input-available',
+      input: { agentId: 'claude', options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }] },
+    });
+  });
+});
+
+/* W9: a transcript rebuilt from the log has to render the same attachment the
+   composer sent, whether the row references the bytes (`file-ref`) or still
+   inlines them (the legacy `image` arm, D14). */
+describe('projectAgentHostUserMessage attachments', () => {
+  const attachmentHash = 'd'.repeat(64);
+
+  it('should round-trip a file-ref image block to its attachment file part', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-image-ref',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Match this.' },
+        { type: 'file-ref', path: `attachments/${attachmentHash}.png`, mimeType: 'image/png', byteLength: 1234 },
+      ],
+    });
+
+    expect(message.parts).toEqual([
+      { type: 'text', text: 'Match this.' },
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        url: `attachments/${attachmentHash}.png`,
+        providerMetadata: { common: { byteLength: 1234 } },
+      },
+    ]);
+  });
+
+  it('should round-trip a file-ref document block with its filename', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-document-ref',
+      role: 'user',
+      content: [
+        {
+          type: 'file-ref',
+          path: `attachments/${attachmentHash}.pdf`,
+          mimeType: 'application/pdf',
+          byteLength: 20_480,
+          filename: 'bracket-spec.pdf',
+        },
+      ],
+    });
+
+    expect(message.parts).toEqual([
+      {
+        type: 'file',
+        mediaType: 'application/pdf',
+        url: `attachments/${attachmentHash}.pdf`,
+        filename: 'bracket-spec.pdf',
+        providerMetadata: { common: { byteLength: 20_480 } },
+      },
+    ]);
+  });
+
+  /* P29: the size is optional in the durable row, so the part it projects to
+     carries no `providerMetadata` at all rather than a fabricated zero. W13
+     renders that as an unknown size. */
+  it('should round-trip a file-ref block that names no byte length, without provider metadata', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-sizeless-ref',
+      role: 'user',
+      content: [{ type: 'file-ref', path: `attachments/${attachmentHash}.pdf`, mimeType: 'application/pdf' }],
+    });
+
+    expect(message.parts).toEqual([
+      { type: 'file', mediaType: 'application/pdf', url: `attachments/${attachmentHash}.pdf` },
+    ]);
+  });
+
+  it('should still re-synthesize a data URL from a legacy inline image block', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-legacy-image',
+      role: 'user',
+      content: [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }],
+    });
+
+    expect(message.parts).toEqual([{ type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA' }]);
+  });
+
+  it('should drop a file-ref block whose path is not a resolvable attachment', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-bad-ref',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Still readable.' },
+        { type: 'file-ref', path: '../escape.png', mimeType: 'image/png', byteLength: 1 },
+      ],
+    });
+
+    expect(message.parts).toEqual([{ type: 'text', text: 'Still readable.' }]);
+  });
+});
+
+describe('chat activity indicator closeout: projection seams', () => {
+  type AnyEvent = AgentLogEvent | AgentLiveEvent;
+  const external = { tauInternal: { origin: 'external', agentId: 'codex' } } as const;
+  const checkpoint = { tauInternal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } } as const;
+
+  const reduce = async (events: readonly AnyEvent[]): Promise<{ message?: MyUIMessage; error?: unknown }> => {
+    const blocks = new Map();
+    const chunks = events.flatMap((event) =>
+      'leaderEpoch' in event ? projectAgentHostEvent(event, blocks) : projectAgentHostLiveEvent(event, blocks),
+    );
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    let message: MyUIMessage | undefined;
+    let error: unknown;
+    for await (const next of readUIMessageStream<MyUIMessage>({
+      stream,
+      onError: (reason) => {
+        error ??= reason;
+      },
+    })) {
+      message = next;
+    }
+    return { message, error };
+  };
+
+  const live = (event: Record<string, unknown>): AgentLiveEvent =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- compact live-event fixtures
+    ({ chatId: 'chat', runId: base.runId, ...event }) as AgentLiveEvent;
+  const lifecycle = (state: 'admitted' | 'running' | 'paused'): AgentLogEvent => ({
+    ...base,
+    type: 'run.lifecycle',
+    state,
+  });
+  const interrupt = (phase: 'requested' | 'resolved'): AgentLogEvent =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- compact interrupt fixture
+    ({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'int-1',
+      phase,
+      reason: phase === 'requested' ? 'Run npm test?' : 'approved',
+      payload:
+        phase === 'requested'
+          ? { kind: 'approval', prompt: 'Run npm test?', agentId: 'codex' }
+          : { outcome: 'approved' },
+    }) as AgentLogEvent;
+  const acpThought = (thinking: string, streamState: 'checkpoint' | 'final'): AgentLogEvent => ({
+    ...base,
+    type: 'message.appended',
+    message: {
+      id: 'thought-1',
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking }],
+      metadata: { tauInternal: { ...external.tauInternal, streamState } },
+    },
+  });
+  const states = (message: MyUIMessage | undefined): string[] =>
+    (message?.parts ?? []).map((part) => `${part.type}:${String(Reflect.get(part, 'state') ?? '-')}`);
+
+  it('should resume a checkpointed ACP thought after an approval pause without a reducer error', async () => {
+    const thought = { messageId: 'thought-1', contentIndex: 0 };
+    const result = await reduce([
+      lifecycle('admitted'),
+      lifecycle('running'),
+      live({ ...thought, type: 'thinking-start' }),
+      live({ ...thought, type: 'thinking-delta', delta: 'Plan' }),
+      acpThought('Plan', 'checkpoint'),
+      interrupt('requested'),
+      lifecycle('paused'),
+      interrupt('resolved'),
+      lifecycle('running'),
+      live({ ...thought, type: 'thinking-delta', delta: ' more', offset: 4 }),
+      acpThought('Plan more', 'final'),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    const reasoning = result.message?.parts.filter((part) => part.type === 'reasoning');
+    expect(reasoning?.map((part) => [part.text, part.state])).toEqual([['Plan more', 'done']]);
+  });
+
+  it('should keep a native thought open through a checkpoint prestart row and close it on its live end', async () => {
+    const thought = { messageId: 'run-1', contentIndex: 0 };
+    const result = await reduce([
+      lifecycle('admitted'),
+      lifecycle('running'),
+      live({ ...thought, type: 'thinking-start', timestamp: 1000 }),
+      live({ ...thought, type: 'thinking-delta', delta: 'Plan' }),
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'run-1',
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Plan' },
+            { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { path: 'a.ts' } },
+          ],
+          metadata: { ...checkpoint, reasoningTimings: [{ contentIndex: 0, startedAtMs: 1000 }] },
+        },
+      },
+      live({ ...thought, type: 'thinking-end', content: 'Plan', timestamp: 9000 }),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    const reasoning = result.message?.parts.find((part) => part.type === 'reasoning');
+    expect(reasoning?.state).toBe('done');
+    expect(reasoning && getReasoningEndedAtMs(reasoning)).toBe(9000);
+    expect(states(result.message)).toContain('reasoning:done');
+  });
+
+  it('should keep later text of a checkpoint prestart row on reattach', async () => {
+    const assistant = (
+      text: string,
+      metadata?: typeof checkpoint,
+    ): Extract<AgentLogEvent, { type: 'message.appended' }>['message'] => ({
+      id: 'run-1',
+      role: 'assistant',
+      content: [
+        { type: 'text', text },
+        { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { path: 'a.ts' } },
+      ],
+      ...(metadata ? { metadata } : {}),
+    });
+    const result = await reduce([
+      lifecycle('admitted'),
+      lifecycle('running'),
+      { ...base, type: 'message.appended', message: assistant('Hello', checkpoint) },
+      live({ messageId: 'run-1', contentIndex: 0, type: 'text-delta', delta: ' world', offset: 5 }),
+      { ...base, type: 'message.envelope-replaced', messageId: 'run-1', replacement: assistant('Hello world') },
+    ]);
+
+    const text = result.message?.parts.find((part) => part.type === 'text');
+    expect(text?.type === 'text' ? [text.text, text.state] : undefined).toEqual(['Hello world', 'done']);
   });
 });

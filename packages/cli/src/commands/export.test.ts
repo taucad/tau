@@ -1,18 +1,35 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExportResult } from '@taucad/runtime';
+import type { ExportResult, GetParametersResult } from '@taucad/runtime';
 import type * as RuntimeNode from '@taucad/runtime/node';
+import type * as RuntimeParameter from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
+import { exitCodes } from '#output.js';
 
 vi.mock('@taucad/runtime/node', async (importOriginal) => ({
   ...(await importOriginal<typeof RuntimeNode>()),
   createNodeClient: vi.fn(),
 }));
-vi.mock('#cli-runtime.js', () => ({ createCliRuntime: vi.fn(async () => ({ plugins: [] })) }));
+vi.mock('@taucad/parameters', async (importOriginal) => ({
+  ...(await importOriginal<typeof RuntimeParameter>()),
+  resolveParameterInputValues: vi.fn((_manifest: unknown, values: Record<string, unknown>) =>
+    values['width'] === '1/2 in' ? { ...values, width: Number('12.700000000000001') } : values,
+  ),
+}));
+vi.mock('#cli-runtime.js', () => ({
+  createCliRuntime: vi.fn(async () => ({ plugins: [] })),
+}));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
+const resolveParametersFunction = vi.fn<() => Promise<GetParametersResult>>(async () => ({
+  success: true,
+  data: { fixture: true } as unknown as ParameterManifest,
+  issues: [],
+}));
 const terminate = vi.fn<() => void>();
 const shutdown = vi.fn<(_options?: { drain?: boolean }) => Promise<void>>(async () => undefined);
 const onFunction = vi.fn<(event: string, listener: (entry: unknown) => void) => void>();
@@ -25,6 +42,11 @@ const importExportCommand = async () => {
 const importedRuntime = async () =>
   (await import('@taucad/runtime/node')) as unknown as {
     createNodeClient: ReturnType<typeof vi.fn>;
+  };
+
+const importedCliRuntime = async () =>
+  (await import('#cli-runtime.js')) as unknown as {
+    createCliRuntime: ReturnType<typeof vi.fn>;
   };
 
 const buildSuccessResult = (bytes: Uint8Array<ArrayBuffer>): ExportResult => ({
@@ -41,7 +63,11 @@ const buildSuccessResult = (bytes: Uint8Array<ArrayBuffer>): ExportResult => ({
 
 const buildFailureResult = (messages: readonly string[]): ExportResult => ({
   success: false,
-  issues: messages.map((message) => ({ message, code: 'RUNTIME', severity: 'error' })),
+  issues: messages.map((message) => ({
+    message,
+    code: 'RUNTIME',
+    severity: 'error',
+  })),
 });
 
 describe('exportCommand', () => {
@@ -50,7 +76,8 @@ describe('exportCommand', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    workspace = await mkdtemp(join(tmpdir(), 'taucad-cli-export-'));
+    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', '');
+    workspace = await mkdtemp(join(tmpdir(), 'tau-cli-export-'));
     inputPath = join(workspace, 'model.ts');
     await writeFile(inputPath, '/* fixture */', 'utf8');
 
@@ -58,6 +85,7 @@ describe('exportCommand', () => {
     runtime.createNodeClient.mockResolvedValue({
       on: onFunction,
       export: exportFunction,
+      resolveParameters: resolveParametersFunction,
       terminate,
       shutdown,
     });
@@ -67,6 +95,7 @@ describe('exportCommand', () => {
     try {
       await rm(workspace, { recursive: true, force: true });
     } finally {
+      vi.unstubAllEnvs();
       vi.restoreAllMocks();
     }
   });
@@ -79,32 +108,56 @@ describe('exportCommand', () => {
       'ext',
       'output',
       'params',
+      'resolutionMode',
       'exportOptions',
       'content',
       'plugin',
       'config',
       'telemetry',
+      'json',
     ]);
   });
 
-  it('should reject an unrecognized target extension without invoking the runtime', async () => {
+  it('should reject an unrecognized target extension as a usage error without invoking the runtime', async () => {
     const command = await importExportCommand();
 
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=totally-bogus'] })).rejects.toThrow(
       /Unrecognized target extension: "totally-bogus"/,
     );
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=totally-bogus'] })).rejects.toMatchObject({
+      code: 'EXT_UNRECOGNIZED',
+      exit: exitCodes.usage,
+    });
 
     const runtime = await importedRuntime();
     expect(runtime.createNodeClient).not.toHaveBeenCalled();
     expect(exportFunction).not.toHaveBeenCalled();
   });
 
+  it('should refuse a missing input file before starting the runtime', async () => {
+    const command = await importExportCommand();
+
+    await expect(
+      runCommand(command, {
+        rawArgs: [join(workspace, 'absent.ts'), '--ext=glb'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'INPUT_NOT_FOUND',
+      exit: exitCodes.refused,
+    });
+
+    const runtime = await importedRuntime();
+    expect(runtime.createNodeClient).not.toHaveBeenCalled();
+  });
+
   it.each(['--params', '--export-options', '--content'])('should report malformed JSON for %s', async (flag) => {
     const command = await importExportCommand();
 
-    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb', `${flag}=not-json{`] })).rejects.toThrow(
-      new RegExp(`Invalid JSON in ${flag}:`),
-    );
+    await expect(
+      runCommand(command, {
+        rawArgs: [inputPath, '--ext=glb', `${flag}=not-json{`],
+      }),
+    ).rejects.toThrow(new RegExp(`Invalid JSON in ${flag}:`));
   });
 
   it.each([
@@ -118,9 +171,11 @@ describe('exportCommand', () => {
 
     for (const flag of ['--params', '--export-options', '--content']) {
       // oxlint-disable-next-line no-await-in-loop -- Each assertion exercises the same command boundary independently.
-      await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb', `${flag}=${value}`] })).rejects.toThrow(
-        `${flag} must be a JSON object`,
-      );
+      await expect(
+        runCommand(command, {
+          rawArgs: [inputPath, '--ext=glb', `${flag}=${value}`],
+        }),
+      ).rejects.toThrow(`${flag} must be a JSON object`);
     }
   });
 
@@ -135,7 +190,14 @@ describe('exportCommand', () => {
       rawArgs: [inputPath, '--ext=glb', `--output=${outputPath}`, '--params={"width":150}'],
     });
 
-    expect(exportFunction).toHaveBeenCalledWith('glb', { source: { path: 'model.ts' }, parameters: { width: 150 } });
+    expect(exportFunction).toHaveBeenCalledWith('glb', {
+      source: { path: 'model.ts' },
+      parameters: { width: 150 },
+    });
+    expect(resolveParametersFunction).toHaveBeenCalledWith({
+      source: { path: 'model.ts' },
+      resolution: { mode: 'default' },
+    });
     const written = await readFile(outputPath);
     expect(new Uint8Array(written)).toEqual(bytes);
     expect(shutdown).toHaveBeenCalledOnce();
@@ -143,20 +205,121 @@ describe('exportCommand', () => {
     expect(terminate).not.toHaveBeenCalled();
   });
 
+  it('converts unit-bearing parameters before request-scoped export', async () => {
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'unit.glb')}`, '--params={"width":"1/2 in"}'],
+    });
+
+    expect(exportFunction).toHaveBeenCalledWith('glb', {
+      source: { path: 'model.ts' },
+      parameters: { width: Number('12.700000000000001') },
+    });
+  });
+
+  it('preserves declared-only manifest diagnostics and refuses export', async () => {
+    resolveParametersFunction.mockResolvedValueOnce({
+      success: false,
+      issues: [
+        {
+          code: 'SEMANTICS_UNRESOLVED',
+          message: 'cameraAngle has no declared unit',
+          severity: 'error',
+          details: [{ code: 'SEMANTICS_UNRESOLVED', instancePointer: '/cameraAngle' }],
+        },
+      ],
+    });
+    const command = await importExportCommand();
+
+    await expect(
+      runCommand(command, {
+        rawArgs: [inputPath, '--ext=glb', '--resolution-mode=declared-only', '--params={"cameraAngle":"90 deg"}'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'SEMANTICS_UNRESOLVED',
+      exit: exitCodes.refused,
+      details: {
+        diagnostics: [
+          {
+            code: 'SEMANTICS_UNRESOLVED',
+            instancePointer: '/cameraAngle',
+          },
+        ],
+      },
+    });
+    expect(resolveParametersFunction).toHaveBeenCalledWith({
+      source: { path: 'model.ts' },
+      resolution: { mode: 'declared-only' },
+    });
+    expect(exportFunction).not.toHaveBeenCalled();
+  });
+
+  it('loads PicoGK resources for an explicit CLI export', async () => {
+    const target = `${process.platform}-${process.arch}`;
+    const targetRoot = join(workspace, target);
+    const digest = 'a'.repeat(64);
+    await mkdir(targetRoot);
+    await writeFile(
+      join(targetRoot, 'tau-runtime-manifest.json'),
+      JSON.stringify({
+        schemaVersion: 2,
+        target,
+        rid: 'test-rid',
+        dotnetSdkVersion: '10.0.400',
+        dotnetRuntimeVersion: '10.0.11',
+        roslynVersion: '5.9.0',
+        picoGkCommit: 'commit',
+        picoGkArchiveSha256: digest,
+        picoGkHostedPatchSha256: digest,
+        hostApiVersion: 1,
+        protocolVersion: 3,
+        sceneArtifactVersion: 3,
+        topologySchemaVersion: 1,
+        sourceFilesSha256: digest,
+        workerPath: 'Tau.PicoGK.Worker',
+        workerSha256: digest,
+        resourceFiles: [{ path: 'PicoGK.dll', sha256: digest, label: 'PicoGK' }],
+      }),
+    );
+    vi.stubEnv('TAU_PICOGK_RESOURCE_ROOT', workspace);
+    let workerExecutable: string | undefined;
+    exportFunction.mockImplementationOnce(async () => {
+      const { createCliRuntime } = await importedCliRuntime();
+      const options = createCliRuntime.mock.calls.at(-1)?.[0] as {
+        picogk: { workerExecutable: string };
+      };
+      workerExecutable = options.picogk.workerExecutable;
+      return buildSuccessResult(new Uint8Array([1]));
+    });
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'picogk.glb')}`],
+    });
+
+    expect(workerExecutable?.endsWith(`${target}/Tau.PicoGK.Worker`)).toBe(true);
+  });
+
   it('should write a gap-free CLI ledger and normalized runtime telemetry profile', async () => {
     const bytes = new Uint8Array([1, 2, 3]);
     const telemetryPath = join(workspace, 'profile.json');
     exportFunction.mockImplementationOnce(async () => {
       const telemetryListener = onFunction.mock.calls.find(([event]) => event === 'telemetry')?.[1];
-      telemetryListener?.([
-        {
-          name: 'kernel.export-model',
-          startTime: performance.now(),
-          duration: 0,
-          workerTimeOrigin: performance.timeOrigin,
-          detail: { spanId: 'root', format: 'glb' },
-        },
-      ]);
+      telemetryListener?.({
+        origin: { label: 'cli', instance: 'test-producer' },
+        epoch: Date.now() - performance.now(),
+        entries: [
+          {
+            name: 'kernel.export-model',
+            startTime: performance.now(),
+            duration: 0,
+            workerTimeOrigin: performance.timeOrigin,
+            detail: { spanId: 'root', format: 'glb' },
+          },
+        ],
+      });
       return buildSuccessResult(bytes);
     });
     const command = await importExportCommand();
@@ -167,10 +330,14 @@ describe('exportCommand', () => {
 
     const profile = JSON.parse(await readFile(telemetryPath, 'utf8')) as {
       schema: string;
-      accounting: { profiledDuration: number; phaseDurationSum: number; unaccounted: number };
+      accounting: {
+        profiledDuration: number;
+        phaseDurationSum: number;
+        unaccounted: number;
+      };
       runtime: { spans: Array<{ name: string; selfDuration: number }> };
     };
-    expect(profile.schema).toBe('taucad.cli-export-profile.v1');
+    expect(profile.schema).toBe('tau.cli-export-profile.v1');
     expect(profile.accounting.phaseDurationSum).toBeCloseTo(profile.accounting.profiledDuration, 10);
     expect(profile.accounting.unaccounted).toBe(0);
     expect(profile.runtime.spans).toEqual([expect.objectContaining({ name: 'kernel.export-model', selfDuration: 0 })]);
@@ -212,7 +379,9 @@ describe('exportCommand', () => {
         label: '',
         nested: { values: [1, 'two', false] },
       },
-      exportOptions: { futurePluginOption: { enabled: false, values: [0, '', true] } },
+      exportOptions: {
+        futurePluginOption: { enabled: false, values: [0, '', true] },
+      },
       content: { futureSemantic: { required: false }, labels: ['one', 'two'] },
     });
   });
@@ -243,7 +412,11 @@ describe('exportCommand', () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
       data: [
-        { name: 'model.gltf', bytes: new Uint8Array([1]), mimeType: 'model/gltf+json' },
+        {
+          name: 'model.gltf',
+          bytes: new Uint8Array([1]),
+          mimeType: 'model/gltf+json',
+        },
         {
           name: 'buffers/model.bin',
           bytes: new Uint8Array([2, 3]),
@@ -255,7 +428,9 @@ describe('exportCommand', () => {
     const command = await importExportCommand();
     const outputPath = join(workspace, 'renamed.gltf');
 
-    await runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] });
+    await runCommand(command, {
+      rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`],
+    });
 
     await expect(readFile(outputPath)).resolves.toEqual(Buffer.from([1]));
     await expect(readFile(join(workspace, 'buffers/model.bin'))).resolves.toEqual(Buffer.from([2, 3]));
@@ -265,36 +440,60 @@ describe('exportCommand', () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
       data: [
-        { name: 'model.gltf', bytes: new Uint8Array([1]), mimeType: 'model/gltf+json' },
-        { name: '../model.bin', bytes: new Uint8Array([2]), mimeType: 'application/octet-stream' },
+        {
+          name: 'model.gltf',
+          bytes: new Uint8Array([1]),
+          mimeType: 'model/gltf+json',
+        },
+        {
+          name: '../model.bin',
+          bytes: new Uint8Array([2]),
+          mimeType: 'application/octet-stream',
+        },
       ],
       issues: [],
     });
     const command = await importExportCommand();
     const outputPath = join(workspace, 'safe.gltf');
 
-    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] })).rejects.toThrow(
-      'Export returned an unsafe relative artifact path: ../model.bin',
-    );
-    await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      runCommand(command, {
+        rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`],
+      }),
+    ).rejects.toThrow('Export returned an unsafe relative artifact path: ../model.bin');
+    await expect(readFile(outputPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 
   it('should reject resolved path collisions before writing any artifact', async () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
       data: [
-        { name: 'model.gltf', bytes: new Uint8Array([1]), mimeType: 'model/gltf+json' },
-        { name: 'model.bin', bytes: new Uint8Array([2]), mimeType: 'application/octet-stream' },
+        {
+          name: 'model.gltf',
+          bytes: new Uint8Array([1]),
+          mimeType: 'model/gltf+json',
+        },
+        {
+          name: 'model.bin',
+          bytes: new Uint8Array([2]),
+          mimeType: 'application/octet-stream',
+        },
       ],
       issues: [],
     });
     const command = await importExportCommand();
     const outputPath = join(workspace, 'model.bin');
 
-    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`] })).rejects.toThrow(
-      `Export artifact paths collide under ${workspace}`,
-    );
-    await expect(readFile(outputPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      runCommand(command, {
+        rawArgs: [inputPath, '--ext=gltf', `--output=${outputPath}`],
+      }),
+    ).rejects.toThrow(`Export artifact paths collide under ${workspace}`);
+    await expect(readFile(outputPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 
   it('should aggregate every issue message when the export result is a failure', async () => {
@@ -304,8 +503,154 @@ describe('exportCommand', () => {
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toThrow(
       /Export failed:\n {2}boom\n {2}kaboom/,
     );
-
     expect(shutdown).toHaveBeenCalledWith({ drain: true });
+  });
+
+  it('should separate a capability refusal from a model failure by exit code', async () => {
+    exportFunction.mockResolvedValueOnce({
+      success: false,
+      issues: [
+        {
+          message: 'No export route found',
+          code: 'KERNEL_CAPABILITY_MISSING',
+          severity: 'error',
+        },
+      ],
+    });
+    const command = await importExportCommand();
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toMatchObject({
+      code: 'KERNEL_CAPABILITY_MISSING',
+      exit: exitCodes.refused,
+    });
+
+    exportFunction.mockResolvedValueOnce(buildFailureResult(['the model threw']));
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toMatchObject({
+      code: 'RUNTIME',
+      exit: exitCodes.error,
+    });
+  });
+
+  it('should stream a single artifact to stdout for --output - without writing a file', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(bytes));
+    const written: Array<string | Uint8Array<ArrayBuffer>> = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      chunk: string | Uint8Array<ArrayBuffer>,
+      ...rest: readonly unknown[]
+    ): boolean => {
+      written.push(chunk);
+      const callback = rest.at(-1);
+      if (typeof callback === 'function') {
+        (callback as () => void)();
+      }
+      return true;
+    }) as typeof process.stdout.write);
+
+    const command = await importExportCommand();
+    try {
+      await runCommand(command, {
+        rawArgs: [inputPath, '--ext=glb', '--output=-'],
+      });
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(written).toEqual([bytes]);
+    await expect(readFile(join(workspace, '-'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(readFile(join(workspace, 'model.glb'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('should refuse --output - when the export produced more than one artifact', async () => {
+    exportFunction.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          name: 'model.gltf',
+          bytes: new Uint8Array([1]),
+          mimeType: 'model/gltf+json',
+        },
+        {
+          name: 'model.bin',
+          bytes: new Uint8Array([2]),
+          mimeType: 'application/octet-stream',
+        },
+      ],
+      issues: [],
+    });
+    const command = await importExportCommand();
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=gltf', '--output=-'] })).rejects.toMatchObject({
+      code: 'OUTPUT_STREAM_AMBIGUOUS',
+      exit: exitCodes.usage,
+    });
+  });
+
+  it('should refuse --output - combined with --json before invoking the runtime', async () => {
+    const command = await importExportCommand();
+
+    await expect(
+      runCommand(command, {
+        rawArgs: [inputPath, '--ext=glb', '--output=-', '--json'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'OUTPUT_STREAM_CONFLICT',
+      exit: exitCodes.usage,
+    });
+
+    expect(exportFunction).not.toHaveBeenCalled();
+  });
+
+  it('should write one versioned JSON record naming each artifact digest, size, and extension', async () => {
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1, 2, 3])));
+    const command = await importExportCommand();
+    const outputPath = join(workspace, 'record.glb');
+    const lines: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      chunk: string | Uint8Array<ArrayBuffer>,
+      ...rest: readonly unknown[]
+    ): boolean => {
+      lines.push(String(chunk));
+      const callback = rest.at(-1);
+      if (typeof callback === 'function') {
+        (callback as () => void)();
+      }
+      return true;
+    }) as typeof process.stdout.write);
+
+    try {
+      await runCommand(command, {
+        rawArgs: [inputPath, '--ext=glb', `--output=${outputPath}`, '--json'],
+      });
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!)).toEqual({
+      v: 1,
+      kind: 'export',
+      ok: true,
+      input: inputPath,
+      format: 'glb',
+      artifacts: [
+        {
+          name: 'model.glb',
+          path: outputPath,
+          bytes: 3,
+          ext: 'glb',
+          // The digest is taken over the exact bytes the export produced.
+          sha256: createHash('sha256')
+            .update(new Uint8Array([1, 2, 3]))
+            .digest('hex'),
+        },
+      ],
+    });
   });
 
   it('should leave recognized but unroutable targets to the runtime', async () => {
@@ -330,6 +675,28 @@ describe('exportCommand', () => {
     expect(shutdown).toHaveBeenCalledOnce();
     expect(shutdown).toHaveBeenCalledWith({ drain: true });
     expect(terminate).not.toHaveBeenCalled();
+  });
+
+  it('should drain the runtime and report the signal exit code when interrupted mid-export', async () => {
+    const neverSettles = Promise.withResolvers<ExportResult>();
+    exportFunction.mockImplementationOnce(async () => {
+      process.emit('SIGINT', 'SIGINT');
+      // The signal, not the export, has to decide this run's outcome.
+      return neverSettles.promise;
+    });
+    const command = await importExportCommand();
+    const interruptListeners = process.listenerCount('SIGINT');
+
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toMatchObject({
+      code: 'EXPORT_CANCELLED',
+      exit: exitCodes.interrupted,
+    });
+
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    await expect(readFile(join(workspace, 'model.glb'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect(process.listenerCount('SIGINT')).toBe(interruptListeners);
   });
 
   it('should subscribe to the log event so client output streams through consola', async () => {

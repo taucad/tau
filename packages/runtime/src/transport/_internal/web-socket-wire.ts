@@ -22,7 +22,7 @@ export const webSocketId = 'web-socket';
 export type WebSocketId = typeof webSocketId;
 
 /** The two routes the host serves and the client dials. */
-export type WebSocketRoute = 'runtime' | 'fs';
+export type WebSocketRoute = 'runtime' | 'fs' | 'compute';
 
 /** RFC 6455 close codes this transport produces or interprets. */
 export const webSocketCloseCode = {
@@ -82,7 +82,7 @@ export const routeOf = (pathname: string, pathPrefix = '/'): WebSocketRoute | un
   const trimmed = pathPrefix.replaceAll(/^\/+|\/+$/gu, '');
   const base = trimmed === '' ? '/' : `/${trimmed}/`;
   const segment = pathname.startsWith(base) ? pathname.slice(base.length) : '';
-  return segment === 'runtime' || segment === 'fs' ? segment : undefined;
+  return segment === 'runtime' || segment === 'fs' || segment === 'compute' ? segment : undefined;
 };
 
 /**
@@ -111,12 +111,18 @@ export const isOriginAllowed = (origin: string | undefined, allowedOrigins: read
  *
  * @param code - Close code, if the socket reported one.
  * @param reason - Close reason, if the socket reported one.
+ * @param phase - Lifecycle phase the socket died in; `'session'` (the default)
+ * once the wire reached ready, `'boot'` while it is still handshaking.
  * @returns The close result to settle `closed` with.
  * @public
  */
-export const closeCauseFor = (code: number | undefined, reason?: string): RuntimeTransportCloseResult => {
+export const closeCauseFor = (
+  code: number | undefined,
+  reason?: string,
+  phase: 'boot' | 'session' = 'session',
+): RuntimeTransportCloseResult => {
   if (code === webSocketCloseCode.normal || code === webSocketCloseCode.goingAway) {
-    return { cause: 'host-exit' };
+    return { cause: 'host-exit', phase };
   }
   const detail = reason ? `${String(code)}: ${reason}` : String(code);
   return { cause: 'wire-failure', error: new Error(`web-socket closed (${detail})`) };
@@ -144,7 +150,7 @@ export type SessionPairing<T> = {
  * @param pairingTimeout - How long a `/runtime` connection waits for its peer. Milliseconds.
  * @returns The pairing slot.
  */
-export const createSessionPairing = <T>(pairingTimeout: number): SessionPairing<T> => {
+export const createSessionPairing = <T>(pairingTimeout: number, peer = '/fs'): SessionPairing<T> => {
   const offered = new Map<string, T>();
   const waiting = new Map<string, { resolve: (value: T) => void; reject: (error: Error) => void; timer: unknown }>();
 
@@ -168,7 +174,7 @@ export const createSessionPairing = <T>(pairingTimeout: number): SessionPairing<
       return new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => {
           waiting.delete(session);
-          reject(new Error(pairingTimeoutCloseReason));
+          reject(new Error(peer === '/fs' ? pairingTimeoutCloseReason : `no ${peer} socket paired for this session`));
         }, pairingTimeout);
         waiting.set(session, { resolve, reject, timer });
       });
@@ -179,7 +185,7 @@ export const createSessionPairing = <T>(pairingTimeout: number): SessionPairing<
     dispose() {
       for (const waiter of waiting.values()) {
         clearTimeout(waiter.timer as Parameters<typeof clearTimeout>[0]);
-        waiter.reject(new Error('webSocketHost: closed while waiting for a /fs socket'));
+        waiter.reject(new Error(`webSocketHost: closed while waiting for a ${peer} socket`));
       }
       waiting.clear();
       offered.clear();

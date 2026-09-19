@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import type { ApiData, ApiEntry, ApiEntryKind } from '#api-extraction.types.js';
@@ -492,35 +492,7 @@ function main(): void {
     const entries = transformRustSchema(rawData);
     console.log(`Transformed ${entries.length} API entries`);
 
-    // Generate full documentation
-    console.log('\nGenerating full API documentation...');
-    const fullDocumentation = generateMarkdown(entries);
-    const fullDocumentationPath = join(outputDirectory, 'kcl-stdlib-api.md');
-    writeFileSync(fullDocumentationPath, fullDocumentation);
-    console.log(`Full docs saved to ${fullDocumentationPath}`);
-
-    // Generate compact version for LLM context
-    console.log('Generating compact LLM reference...');
-    const compactDocumentation = generateCompactMarkdown(entries);
-    const compactDocumentationPath = join(outputDirectory, 'kcl-stdlib-compact.md');
-    writeFileSync(compactDocumentationPath, compactDocumentation);
-    console.log(`Compact reference saved to ${compactDocumentationPath}`);
-
-    // Generate structured JSON data (shared schema)
-    console.log('Generating JSON data...');
-    const apiData = buildApiData(entries, rawData.metadata.version);
-    const jsonPath = join(outputDirectory, 'kcl-stdlib-data.json');
-    writeFileSync(jsonPath, JSON.stringify(apiData, null, 2));
-    console.log(`JSON data saved to ${jsonPath}`);
-
-    // Summary
-    console.log('\nKCL API extraction completed successfully!');
-    console.log(`\nSummary:`);
-    console.log(
-      `  ${apiData.metadata.totalEntries} entries: ${Object.entries(apiData.metadata.breakdown)
-        .map(([k, v]) => `${v} ${k}s`)
-        .join(', ')}`,
-    );
+    console.log(`\nKCL API extraction completed successfully: ${entries.length} entries.`);
   } catch (error) {
     console.error('Error during KCL API extraction:', error);
     process.exit(1);

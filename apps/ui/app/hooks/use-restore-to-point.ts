@@ -1,10 +1,9 @@
-import { useCallback } from 'react';
-import { useSelector } from '@xstate/react';
-import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
-import type { RestoreTarget } from '#machines/revision.machine.js';
+import { useMemo } from 'react';
+import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 
 export type UseRestoreToPoint = {
-  restore: (target: RestoreTarget) => void;
+  /** Restore one recorded revision by id; a risky plan asks first (S19). */
+  restore: (revisionId: string) => void;
   returnToLatest: () => void;
   undo: () => void;
   isDirty: boolean;
@@ -12,35 +11,28 @@ export type UseRestoreToPoint = {
 };
 
 /**
- * Thin read/dispatch surface over the per-project `revisionMachine` (mirrors
- * `useChatActions`). Components call `restore`/`returnToLatest`/`undo` and read
- * the derived selectors. `headRevision` / `revisions` (which need the chat
- * timeline) live in `useRevisions`.
+ * The restore verbs, and the two facts a control needs to render them.
+ *
+ * **One writer.** `restore.machine` in the file-manager worker owns the plan and
+ * applies it over the port; the page holds no revision actor and writes no
+ * files of its own (A38). The verbs here are that machine's own events.
+ *
+ * @returns The verbs plus `isDirty` / `isBusy` from the projection.
+ * @public
  */
 export function useRestoreToPoint(): UseRestoreToPoint {
-  const actor = useRevisionActor();
-
-  const isDirty = useSelector(actor, (state) => state.context.dirty);
-  const isBusy = useSelector(actor, (state) => !state.matches('idle'));
-
-  const restore = useCallback(
-    (target: RestoreTarget) => {
-      actor.send({ type: 'RESTORE', target });
-    },
-    [actor],
+  const status = useRevisionStatus();
+  const commands = useRevisionCommands();
+  const isDirty = status?.dirty ?? false;
+  const isBusy = (status?.restore.busy ?? false) || (status?.restore.asking ?? false);
+  return useMemo(
+    () => ({
+      restore: commands.restore,
+      returnToLatest: commands.returnToLatest,
+      undo: commands.undo,
+      isDirty,
+      isBusy,
+    }),
+    [commands, isBusy, isDirty],
   );
-  const returnToLatest = useCallback(() => {
-    actor.send({ type: 'RETURN_TO_LATEST' });
-  }, [actor]);
-  const undo = useCallback(() => {
-    actor.send({ type: 'UNDO' });
-  }, [actor]);
-
-  return {
-    restore,
-    returnToLatest,
-    undo,
-    isDirty,
-    isBusy,
-  };
 }

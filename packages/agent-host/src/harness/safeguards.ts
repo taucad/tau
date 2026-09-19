@@ -1,7 +1,7 @@
 import type { AgentMessage, StreamFn } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { AssistantMessage, ToolResultMessage } from '@earendil-works/pi-ai';
-import { util as zodUtil } from 'zod';
+import { util as zodUtility } from 'zod';
 
 /** Stable safeguard pattern identifiers shared with the transitional agent. @public */
 export const anomalyPattern = {
@@ -124,7 +124,7 @@ const oneLine = (input: string, max: number): string => {
 
 const toolResultValue = (message: ToolResultMessage<unknown>): unknown => {
   const { details } = message;
-  if (zodUtil.isObject(details) && 'content' in details) {
+  if (zodUtility.isObject(details) && 'content' in details) {
     return details['content'];
   }
   const text = message.content.map((block) => (block.type === 'text' ? block.text : '')).join('');
@@ -136,7 +136,7 @@ const toolResultValue = (message: ToolResultMessage<unknown>): unknown => {
 };
 
 const extractTargetFile = (args: unknown): string | undefined => {
-  if (!zodUtil.isObject(args)) {
+  if (!zodUtility.isObject(args)) {
     return undefined;
   }
   const candidate =
@@ -151,7 +151,7 @@ const emptyResult = (toolName: string, value: unknown): boolean => {
   if (toolName === 'web_search') {
     return Array.isArray(value) && value.length === 0;
   }
-  if (!zodUtil.isObject(value)) {
+  if (!zodUtility.isObject(value)) {
     return false;
   }
   return (
@@ -170,7 +170,7 @@ const verification = ({
   readonly value: unknown;
   readonly isError: boolean;
 }): ToolEventSummary['verification'] => {
-  if (toolName !== 'test_model' || isError || !zodUtil.isObject(args) || !zodUtil.isObject(value)) {
+  if (toolName !== 'test_model' || isError || !zodUtility.isObject(args) || !zodUtility.isObject(value)) {
     return undefined;
   }
   const failures = Array.isArray(value['failures']) ? value['failures'] : undefined;
@@ -229,7 +229,7 @@ export const summarizeToolEvents = async (
     const call = calls.get(message.toolCallId);
     const value = toolResultValue(message);
     const content = typeof value === 'string' ? value : canonicalJson(value);
-    const parsedError = zodUtil.isObject(value) && typeof value['errorCode'] === 'string' ? value : undefined;
+    const parsedError = zodUtility.isObject(value) && typeof value['errorCode'] === 'string' ? value : undefined;
     const parsedErrorCode = parsedError?.['errorCode'];
     const parsedMessage = parsedError?.['message'];
     pending.push({

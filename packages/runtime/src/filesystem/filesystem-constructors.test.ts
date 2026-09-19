@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
@@ -19,10 +19,21 @@ function makeFs(files?: Record<string, string | Uint8Array<ArrayBuffer>>): Runti
 
 describe('filesystem constructors', () => {
   describe('fromMemoryFS', () => {
-    it('should not fabricate watch support', () => {
-      const fileSystem = makeFs();
+    /* The store owns its only mutation path, so it reports changes precisely rather than
+     * forcing every consumer onto the kernel's watcherless re-read path (D15). */
+    it('reports its own mutations through the watch channel', async () => {
+      const fileSystem = makeFs({ 'main.ts': 'export const a = 1;' });
+      const events: unknown[] = [];
+      const unsubscribe = fileSystem.watch!({ paths: ['main.ts'], recursive: false }, (event) => {
+        events.push(event);
+      });
 
-      expect(fileSystem.watch).toBeUndefined();
+      await fileSystem.writeFile('main.ts', 'export const a = 2;');
+      await fileSystem.writeFile('other.ts', 'export const b = 1;');
+      unsubscribe();
+      await fileSystem.writeFile('main.ts', 'export const a = 3;');
+
+      expect(events).toEqual([{ type: 'change', path: 'main.ts' }]);
     });
 
     it('should mkdir and create all parent directories', async () => {
@@ -155,6 +166,22 @@ describe('filesystem constructors', () => {
       expect(stat.type).toBe('file');
       expect(stat.size).toBe(5);
       expect(stat.mtimeMs).toBeTypeOf('number');
+    });
+
+    it('should preserve file modification time until the file is written again', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(1000);
+        const fileSystem = makeFs({ 'stat.txt': 'initial' });
+        const initial = await fileSystem.stat('stat.txt');
+
+        vi.setSystemTime(2000);
+        expect(await fileSystem.stat('stat.txt')).toMatchObject({ mtimeMs: initial.mtimeMs });
+        await fileSystem.writeFile('stat.txt', 'updated');
+        expect(await fileSystem.stat('stat.txt')).toMatchObject({ mtimeMs: 2000 });
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should stat a directory', async () => {

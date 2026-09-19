@@ -21,10 +21,26 @@ export type RendererInstance = WebGlRenderer | WebGpuRenderer;
  *   `frameloop='demand'` (see `docs/policy/graphics-backend-policy.md`) and temporal effects cannot
  *   converge while the scene is idle, so static frames must be AA-clean from a single render.
  * - **`offscreen`** — Shared/doc bitmap path: MSAA + log-depth + stencil; WebGL omits preserve-buffer (bitmap transfer).
+ * - **`showcase`** — Brand surfaces built on TSL node materials (the metal morph loader): always Three's node
+ *   renderer so one TSL graph serves both GPU APIs. `backend: 'webgpu'` uses the WebGPU backend and lets Three
+ *   fall back to its WebGL 2 backend when no adapter exists; `backend: 'webgl'` pins the WebGL 2 backend through
+ *   `forceWebGL`. MSAA and a transparent framebuffer are on; reversed-Z, stencil and log-depth are off because
+ *   a single continuously animated object has no depth-fighting risk. `powerPreference` forwards the adapter
+ *   hint: spinners ask for the low-power adapter, hero surfaces for the high-performance one.
  *
  * @see `docs/policy/graphics-backend-policy.md`
  */
-export type RendererUseCase = 'viewport' | 'offscreen';
+export type RendererUseCase = 'viewport' | 'offscreen' | 'showcase';
+
+/** A showcase canvas together with its adapter hint. */
+export type ShowcaseRendererTarget = Readonly<{
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  powerPreference?: 'high-performance' | 'low-power';
+}>;
+
+const isShowcaseTarget = (
+  surface: HTMLCanvasElement | OffscreenCanvas | ShowcaseRendererTarget,
+): surface is ShowcaseRendererTarget => 'canvas' in surface;
 
 async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
   await renderer.init();
@@ -33,17 +49,46 @@ async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
 /**
  * Instantiate a Tau-normalised Three.js renderer for the given GPU backend and UI surface.
  *
- * @param useCase - Viewport or offscreen preset (see {@link RendererUseCase}).
+ * @param useCase - Viewport, offscreen or showcase preset (see {@link RendererUseCase}).
  * @param backend - `'webgl'` or `'webgpu'`.
- * @param canvas - Backing canvas (`OffscreenCanvas` callers rely on the same cast path as upstream Three.js typings).
+ * @param surface - Backing canvas (`OffscreenCanvas` callers rely on the same cast path as upstream Three.js typings),
+ *   or, for the showcase preset, the canvas together with its adapter power hint.
  */
+export async function createRenderer(
+  useCase: 'showcase',
+  backend: ResolvedGraphicsBackend,
+  surface: HTMLCanvasElement | OffscreenCanvas | ShowcaseRendererTarget,
+): Promise<WebGpuRenderer>;
 export async function createRenderer(
   useCase: RendererUseCase,
   backend: ResolvedGraphicsBackend,
-  canvas: HTMLCanvasElement | OffscreenCanvas,
+  surface: HTMLCanvasElement | OffscreenCanvas | ShowcaseRendererTarget,
+): Promise<RendererInstance>;
+export async function createRenderer(
+  useCase: RendererUseCase,
+  backend: ResolvedGraphicsBackend,
+  surface: HTMLCanvasElement | OffscreenCanvas | ShowcaseRendererTarget,
 ): Promise<RendererInstance> {
+  const target = isShowcaseTarget(surface) ? surface : { canvas: surface };
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Offscreen-backed bitmap path matches upstream typing
-  const backingCanvas = canvas as HTMLCanvasElement;
+  const backingCanvas = target.canvas as HTMLCanvasElement;
+
+  if (useCase === 'showcase') {
+    const renderer = new ThreeWebGPURenderer({
+      canvas: backingCanvas,
+      alpha: true,
+      antialias: true,
+      depth: true,
+      stencil: false,
+      logarithmicDepthBuffer: false,
+      reversedDepthBuffer: false,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- three.js constructor option name
+      forceWebGL: backend === 'webgl',
+      powerPreference: isShowcaseTarget(surface) ? surface.powerPreference : undefined,
+    });
+    await initWebGpuIfNeeded(renderer);
+    return renderer;
+  }
 
   if (backend === 'webgpu') {
     const options: ConstructorParameters<typeof ThreeWebGPURenderer>[0] = {

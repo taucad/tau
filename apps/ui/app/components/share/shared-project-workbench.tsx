@@ -8,11 +8,10 @@ import { Loader } from '#components/ui/loader.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
-import { ProjectProvider, useProject } from '#hooks/use-project.js';
+import { ProjectProvider, useParameterSetActor } from '#hooks/use-project.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
-import { RevisionProvider } from '#routes/w.$workspace.$project/revision-provider.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
@@ -40,7 +39,11 @@ export const SharedProjectHydrator = ({
     const mounted = { current: false };
     const hydrate = async (): Promise<void> => {
       try {
-        await workspace.mount(rootDirectory, { backend: 'memory', storageRootKey });
+        await workspace.mount(rootDirectory, {
+          backend: 'memory',
+          storageRootKey,
+          class: 'authored',
+        });
         mounted.current = true;
         await writeFiles(files);
         const { treeService } = await whenServicesReady();
@@ -96,11 +99,9 @@ const SharedProjectTopbar = ({
   readonly sourceLabel?: string;
   readonly managementActions?: React.ReactNode;
 }): React.JSX.Element => {
-  const { projectRef } = useProject();
-  const parameters = useSelector(projectRef, (state) => {
-    const entry = state.context.parameterEntries.get(publication.entryPath);
-    return entry ? getActiveGroupValues(entry) : {};
-  });
+  const parameterActor = useParameterSetActor(publication.entryPath);
+  const entry = useSelector(parameterActor, (state) => state?.context.current?.entry);
+  const parameters = entry ? getActiveGroupValues(entry) : {};
 
   return (
     <PublicationTopbar
@@ -220,18 +221,16 @@ export const SharedProjectWorkbench = ({
         <WebglContextTrackerProvider>
           <ProjectProvider projectId={projectId} profile='shared'>
             <MonacoModelServiceProvider>
-              <RevisionProvider>
-                <ProjectWorkspaceProvider>
-                  <SharedProjectLayout
-                    publication={publication}
-                    files={files}
-                    archive={archive}
-                    shareUrl={shareUrl}
-                    sourceLabel={sourceLabel}
-                    managementActions={managementActions}
-                  />
-                </ProjectWorkspaceProvider>
-              </RevisionProvider>
+              <ProjectWorkspaceProvider>
+                <SharedProjectLayout
+                  publication={publication}
+                  files={files}
+                  archive={archive}
+                  shareUrl={shareUrl}
+                  sourceLabel={sourceLabel}
+                  managementActions={managementActions}
+                />
+              </ProjectWorkspaceProvider>
             </MonacoModelServiceProvider>
           </ProjectProvider>
         </WebglContextTrackerProvider>

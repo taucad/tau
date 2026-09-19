@@ -80,15 +80,17 @@ function buildNodeFromReplicadGeometry({
   const nodeName = uniqueShapeName(resolvedName, usedNames);
   const componentId = formatNamedComponentId(nodeName, nodeIndex) ?? formatComponentId(nodeIndex);
   const selector = formatNodeSelector(nodeIndex);
-
+  const faceOccurrences = faces.faceGroups.map((group, faceId) => ({ ...group, faceId }));
   const compactedFaces =
     faces.vertices.length > 0 && faces.triangles.length > 0
       ? compactTriangleIndices({
           positions: faces.vertices,
           indices: faces.triangles,
-          groups: faces.faceGroups,
+          groups: faceOccurrences,
         })
       : undefined;
+  const faceGroups = compactedFaces?.groups ?? [];
+  const edgeGroups = edges.edgeGroups.map((group, edgeId) => ({ ...group, edgeId }));
 
   if (compactedFaces && compactedFaces.indices.length > 0) {
     const positions = transformVertexArray(faces.vertices, transformOptions);
@@ -123,7 +125,7 @@ function buildNodeFromReplicadGeometry({
               tauComponentId: componentId,
               tauComponentKind: 'body',
               tauComponentSelector: formatPrimitiveSelector(nodeIndex, 'surface'),
-              faceGroups: compactedFaces.groups,
+              faceGroups,
             },
           }
         : {}),
@@ -139,22 +141,19 @@ function buildNodeFromReplicadGeometry({
 
   if (edges.lines.length > 0) {
     const linePositions = transformVertexArray(edges.lines, transformOptions);
-    const lineIndices = new Uint32Array(linePositions.length / 3);
-    for (let index = 0; index < lineIndices.length; index++) {
-      lineIndices[index] = index;
-    }
 
     primitives.push({
+      /* No index buffer: the edge overlay is already a de-indexed segment soup, and glTF draws
+       * arrays when `indices` is absent. */
       mode: Primitive.Mode['LINES']!,
       positions: linePositions,
-      indices: lineIndices,
       ...(includeTauTopology
         ? {
             extras: {
               tauComponentId: componentId,
               tauComponentKind: 'line',
               tauComponentSelector: formatPrimitiveSelector(nodeIndex, 'edges'),
-              edgeGroups: geometry.edges.edgeGroups,
+              edgeGroups,
             },
           }
         : {}),
@@ -191,8 +190,8 @@ function buildNodeFromReplicadGeometry({
       name: nodeName,
       kind: 'part',
       selector,
-      faceGroups: compactedFaces?.groups ?? [],
-      edgeGroups: geometry.edges.edgeGroups,
+      faceGroups,
+      edgeGroups,
       capabilities: {
         exports: [
           { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },

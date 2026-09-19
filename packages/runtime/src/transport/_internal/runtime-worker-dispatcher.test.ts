@@ -16,6 +16,12 @@ import type { CapabilitiesManifest, ExportGeometryResult } from '#types/runtime.
 import type { GeometryEncoder } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { EncodedGeometry } from '#transport/runtime-transport.types.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
+import { contentDigest } from '@taucad/cache-core';
+import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
+import { compileParameterManifest } from '@taucad/parameters';
+import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
+import { exposeComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
+import type { ComputeBinding } from '#types/runtime-compute.types.js';
 
 type DispatcherFixture = {
   client: Channel<RuntimeProtocol>;
@@ -66,6 +72,15 @@ function createMockWorker(overrides?: Partial<KernelWorker>): KernelWorker {
     exportModel: vi
       .fn<() => Promise<{ success: true; data: unknown[] }>>()
       .mockResolvedValue({ success: true, data: [] }),
+    evaluateModel: vi
+      .fn<() => Promise<{ success: true; data: typeof testGeometry; issues: never[] }>>()
+      .mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
+    getParameters: vi
+      .fn<() => Promise<{ success: false; issues: never[] }>>()
+      .mockResolvedValue({ success: false, issues: [] }),
+    transcode: vi
+      .fn<() => Promise<{ success: true; data: unknown[] }>>()
+      .mockResolvedValue({ success: true, data: [] }),
     cleanup: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     notifyFileChanged: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     handleOpenFile: vi.fn(),
@@ -79,6 +94,8 @@ function createMockWorker(overrides?: Partial<KernelWorker>): KernelWorker {
     flushTelemetry: vi.fn(),
     setSignalBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
+    permitComputePublication: vi.fn(),
+    setComputeBinding: vi.fn(),
     capabilitiesManifest: { routes: [], renderCapabilities: {} },
     ...overrides,
   };
@@ -129,6 +146,91 @@ describe('createWorkerDispatcher', () => {
       expect(result).toEqual({ capabilities: manifest });
     });
 
+    it('forwards request-scoped parameter resolution, staging, mode, and abort signal', async () => {
+      const getParameters = vi.fn<KernelWorker['getParameters']>();
+      getParameters.mockResolvedValue({ success: false, issues: [] });
+      const worker = createMockWorker({ getParameters });
+      fixture = await buildFixture(worker);
+      const stage = { 'main.ts': new Uint8Array([1]) };
+
+      await expect(
+        fixture.client.call('resolveParameters', {
+          stage,
+          file: { path: '', filename: 'main.ts' },
+          resolution: { mode: 'declared-only' },
+        }),
+      ).resolves.toEqual({ success: false, issues: [] });
+      expect(getParameters).toHaveBeenCalledOnce();
+      const [file, resolution, operation] = getParameters.mock.calls[0]!;
+      expect(file).toEqual({ path: '', filename: 'main.ts' });
+      expect(resolution).toEqual({ mode: 'declared-only' });
+      expect(operation?.stage).toStrictEqual(stage);
+      expect(operation?.stage?.['main.ts']).toStrictEqual(new Uint8Array([1]));
+      expect(operation?.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('registers a host-minted compute authority before worker initialization', async () => {
+      const store = createMemoryComputeEngine();
+      const computeChannel = new MessageChannel();
+      const authority = exposeComputeStoreChannel({
+        port: computeChannel.port1,
+        engine: store.engine,
+        workspace: 'trusted-workspace',
+        control: store.control({ workspace: 'trusted-workspace' }),
+      });
+      let binding: ComputeBinding | undefined;
+      const initialize = vi.fn(async () => {
+        if (binding?.mode !== 'durable') {
+          throw new Error('compute binding missing');
+        }
+        const host = createComputeCapabilityHost({ binding, workspace: 'forged-workspace' });
+        expect(host.capability(new AbortController().signal).status).toBe('on');
+        expect(host.control).toBeDefined();
+        await host.dispose();
+      });
+      const worker = createMockWorker({
+        setComputeBinding: vi.fn((next: ComputeBinding) => {
+          binding = next;
+        }),
+        initialize,
+      });
+      fixture = await buildFixture(worker);
+
+      await fixture.client.call('initialize', {
+        value: { memoryHandle: { computeStorePort: computeChannel.port2 } },
+        transferables: [computeChannel.port2],
+      });
+      expect(worker.setComputeBinding).toHaveBeenCalledOnce();
+      expect(initialize).toHaveBeenCalledOnce();
+      authority.dispose();
+    });
+
+    it('binds explicit off, while a host-minted port takes durable precedence', async () => {
+      const offWorker = createMockWorker();
+      fixture = await buildFixture(offWorker);
+      await fixture.client.call('initialize', { memoryHandle: { computeBindingMode: 'off' } });
+      expect(offWorker.setComputeBinding).toHaveBeenCalledWith({ mode: 'off' });
+      await tearDown(fixture);
+      fixture = undefined;
+
+      const store = createMemoryComputeEngine();
+      const computeChannel = new MessageChannel();
+      const authority = exposeComputeStoreChannel({
+        port: computeChannel.port1,
+        engine: store.engine,
+        workspace: 'trusted',
+        control: store.control({ workspace: 'trusted' }),
+      });
+      const durableWorker = createMockWorker();
+      fixture = await buildFixture(durableWorker);
+      await fixture.client.call('initialize', {
+        value: { memoryHandle: { computeBindingMode: 'off', computeStorePort: computeChannel.port2 } },
+        transferables: [computeChannel.port2],
+      });
+      expect(durableWorker.setComputeBinding).toHaveBeenCalledWith(expect.objectContaining({ mode: 'durable' }));
+      authority.dispose();
+    });
+
     it('rejects a second initialize call without reinitializing the worker', async () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
@@ -147,6 +249,30 @@ describe('createWorkerDispatcher', () => {
       fixture = await buildFixture(worker);
 
       await expect(fixture.client.call('initialize', {})).rejects.toThrow('WASM load failed');
+    });
+
+    it('permits the compute publication tail once a call has produced its result', async () => {
+      const permit = vi.fn();
+      const worker = createMockWorker({
+        permitComputePublication: permit,
+        exportGeometry: vi.fn().mockResolvedValue({ success: true, data: [], issues: [] }),
+      });
+      fixture = await buildFixture(worker);
+
+      expect(permit, 'nothing is delivered before the call').not.toHaveBeenCalled();
+      const postMessage = vi.spyOn(fixture.serverPort, 'postMessage');
+      await fixture.client.call('export', { format: 'stl' });
+      // A non-render operation's tail must not wait for the next render (D2, I2, N6).
+      expect(permit).toHaveBeenCalled();
+      const responseIndex = postMessage.mock.calls.findIndex(
+        ([message]) => typeof message === 'object' && message !== null && 'k' in message && message.k === 'rs',
+      );
+      const responseOrder = postMessage.mock.invocationCallOrder[responseIndex];
+      const permitOrder = permit.mock.invocationCallOrder[0];
+      if (responseOrder === undefined || permitOrder === undefined) {
+        throw new Error('Expected one response frame followed by a publication permit.');
+      }
+      expect(responseOrder).toBeLessThan(permitOrder);
     });
 
     it('settles `export` with the worker export result', async () => {
@@ -228,6 +354,42 @@ describe('createWorkerDispatcher', () => {
       expect(data[0]?.bytes.bytes).toEqual(expectedSnapshot);
       expect(data[1]?.bytes.bytes).toEqual(companionSnapshot);
       expect(data.map(({ name }) => name)).toEqual(['model.gltf', 'buffer.bin']);
+      expect(worker.flushTelemetry).toHaveBeenCalledOnce();
+    });
+
+    it('encodes acknowledged evaluateModel geometry without preview publication', async () => {
+      const evaluateModel = vi.fn().mockResolvedValue({ success: true, data: testGeometry, issues: [] });
+      const encodeGeometry = vi.fn<GeometryEncoder>((geometry) => {
+        if (geometry.format !== 'gltf') {
+          throw new Error('Expected GLTF geometry');
+        }
+        return {
+          value: {
+            ...geometry,
+            content: { delivery: 'inline', bytes: geometry.content },
+          },
+          transferables: [],
+          tier: 'copy',
+        };
+      });
+      const worker = createMockWorker({ evaluateModel });
+      fixture = await buildFixture(worker, { encodeGeometry });
+      const request = {
+        stage: { 'nested/model.ts': new Uint8Array([1, 2, 3]) },
+        file: { path: 'nested', filename: 'model.ts' },
+        parameters: { height: 10 },
+        options: { quality: 'fine' },
+        content: { includeEdges: true },
+      };
+
+      const result = await fixture.client.call('evaluateModel', request);
+
+      expect(evaluateModel).toHaveBeenCalledWith(request, expect.any(AbortSignal));
+      expect(encodeGeometry).toHaveBeenCalledWith(testGeometry);
+      expect(result).toMatchObject({
+        success: true,
+        data: { format: 'gltf', content: { delivery: 'inline', bytes: new Uint8Array([1]) }, hash: 'mock' },
+      });
       expect(worker.flushTelemetry).toHaveBeenCalledOnce();
     });
 
@@ -346,6 +508,148 @@ describe('createWorkerDispatcher', () => {
       // The client rejects synchronously; the `rc` cancel frame reaches the server one turn later.
       await flushMicrotasks();
       expect(observed?.aborted).toBe(true);
+    });
+
+    it('dispatches transcode once, copies caller input, and hoists every output binary', async () => {
+      const inputBytes = new Uint8Array([1, 2, 3]);
+      const pngBytes = new Uint8Array([4, 5]);
+      const svgBytes = new TextEncoder().encode('<svg/>');
+      const transcode = vi.fn().mockResolvedValue({
+        success: true,
+        data: [
+          { name: 'capture.png', bytes: pngBytes, mimeType: 'image/png' },
+          { name: 'capture.svg', bytes: svgBytes, mimeType: 'image/svg+xml' },
+        ],
+        issues: [],
+      });
+      const worker = createMockWorker({ transcode });
+      fixture = await buildFixture(worker);
+
+      const result = await fixture.client.call('transcode', {
+        from: 'glb',
+        to: 'png',
+        files: [{ name: 'model.glb', bytes: inputBytes, mimeType: 'model/gltf-binary' }],
+        options: { width: 640 },
+      });
+
+      expect(transcode).toHaveBeenCalledOnce();
+      const dispatched = transcode.mock.calls[0]?.[0] as RuntimeProtocol['calls']['transcode']['args'];
+      expect(dispatched.files[0]?.bytes).toEqual(inputBytes);
+      expect(dispatched.files[0]?.bytes).not.toBe(inputBytes);
+      expect(inputBytes.byteLength).toBe(3);
+      expect(result).toMatchObject({ success: true });
+      if (!result.success) {
+        throw new Error('Expected successful transcode');
+      }
+      expect(result.data.map(({ name, mimeType }) => ({ name, mimeType }))).toEqual([
+        { name: 'capture.png', mimeType: 'image/png' },
+        { name: 'capture.svg', mimeType: 'image/svg+xml' },
+      ]);
+      const wireData = result.data as unknown as Array<{ bytes: { delivery: string } }>;
+      expect(wireData.every(({ bytes }) => bytes.delivery === 'inline')).toBe(true);
+      expect(worker.flushTelemetry).toHaveBeenCalledOnce();
+    });
+
+    it('does not dispatch a pre-aborted transcode', async () => {
+      const transcode = vi.fn();
+      fixture = await buildFixture(createMockWorker({ transcode }));
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        fixture.client.call(
+          'transcode',
+          {
+            from: 'glb',
+            to: 'webp',
+            files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+            options: {},
+          },
+          controller.signal,
+        ),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      await flushMicrotasks();
+      expect(transcode).not.toHaveBeenCalled();
+    });
+
+    it('forwards active transcode cancellation to the worker', async () => {
+      let observed: AbortSignal | undefined;
+      const transcode = vi.fn(
+        async (_request: unknown, signal?: AbortSignal) =>
+          new Promise<ExportGeometryResult>((_resolve, reject) => {
+            observed = signal;
+            signal?.addEventListener(
+              'abort',
+              () => {
+                reject(signal.reason instanceof Error ? signal.reason : new Error('Transcode aborted.'));
+              },
+              { once: true },
+            );
+          }),
+      );
+      fixture = await buildFixture(createMockWorker({ transcode }));
+      const controller = new AbortController();
+      const call = fixture.client.call(
+        'transcode',
+        {
+          from: 'glb',
+          to: 'webp',
+          files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+          options: {},
+        },
+        controller.signal,
+      );
+      await flushMicrotasks();
+      controller.abort();
+
+      await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+      await flushMicrotasks();
+      expect(observed?.aborted).toBe(true);
+    });
+
+    it.each([
+      ['empty inputs', []],
+      ['unsafe inputs', [{ name: '../model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }]],
+      [
+        'duplicate inputs',
+        [
+          { name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' },
+          { name: 'model.glb', bytes: new Uint8Array([2]), mimeType: 'model/gltf-binary' },
+        ],
+      ],
+    ])('rejects malformed transcode wire args with %s before worker dispatch', async (_label, files) => {
+      const transcode = vi.fn();
+      fixture = await buildFixture(createMockWorker({ transcode }));
+
+      await expect(
+        fixture.client.call('transcode', {
+          from: 'glb',
+          to: 'webp',
+          files: files as RuntimeProtocol['calls']['transcode']['args']['files'],
+          options: {},
+        }),
+      ).rejects.toThrow("wire validation failed for server-call-args 'transcode'");
+      expect(transcode).not.toHaveBeenCalled();
+    });
+
+    it('executes repeated transcode calls without replay or deduplication', async () => {
+      const transcode = vi.fn().mockResolvedValue({
+        success: true,
+        data: [{ name: 'capture.webp', bytes: new Uint8Array([1]), mimeType: 'image/webp' }],
+        issues: [],
+      });
+      fixture = await buildFixture(createMockWorker({ transcode }));
+      const request = {
+        from: 'glb',
+        to: 'webp',
+        files: [{ name: 'model.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }],
+        options: {},
+      } satisfies RuntimeProtocol['calls']['transcode']['args'];
+
+      await fixture.client.call('transcode', request);
+      await fixture.client.call('transcode', request);
+
+      expect(transcode).toHaveBeenCalledTimes(2);
     });
 
     it('forwards worker-owned memory handles to the worker setters', async () => {
@@ -659,8 +963,26 @@ describe('createWorkerDispatcher', () => {
       // Wire callbacks via initialize.
       await fixture.client.call('initialize', {});
 
+      const digest = contentDigest({ value: `sha256:${'1'.repeat(64)}` });
+      const manifest = await compileParameterManifest({
+        declaration: {
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:dispatcher-parameters',
+            $uses: ['JSONSchemaUnits'],
+            name: 'DispatcherParameters',
+            type: 'object',
+          },
+          defaults: {},
+        },
+        scope: { kind: 'source', authority: 'test', root: '', entry: 'main.ts' },
+        source: { id: 'test', version: '1', revision: digest, capability: 'json-structure' },
+        dependency: digest,
+        middleware: digest,
+      });
+
       onParametersResolved!({
-        result: { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] },
+        result: { success: true, data: manifest, issues: [] },
         renderId,
       });
       onProgressUpdate!({ phase: 'bundling', renderId });
@@ -1117,14 +1439,14 @@ describe('createWorkerDispatcher', () => {
         expect(wireHelloPayload?.server).toBe('kernel-runtime-worker');
         expect(typeof wireHelloPayload?.runtimeVersion).toBe('string');
         expect(wireHelloPayload?.runtimeVersion.length).toBeGreaterThan(0);
-        expect(wireHelloPayload?.protocolVersion).toBe(1);
+        expect(wireHelloPayload?.protocolVersion).toBe(3);
         const clientHelloPayload = client.hello.payload as
           | { server: string; runtimeVersion: string; protocolVersion: number }
           | undefined;
         expect(clientHelloPayload?.server).toBe('kernel-runtime-worker');
         expect(typeof clientHelloPayload?.runtimeVersion).toBe('string');
         expect(clientHelloPayload?.runtimeVersion.length).toBeGreaterThan(0);
-        expect(clientHelloPayload?.protocolVersion).toBe(1);
+        expect(clientHelloPayload?.protocolVersion).toBe(3);
       } finally {
         server.dispose('test');
         client.close('test');
@@ -1145,15 +1467,44 @@ describe('createWorkerDispatcher', () => {
       });
       fixture = await buildFixture(worker);
 
-      const seen: Array<{ entries: unknown[] }> = [];
-      fixture.client.onNotify('telemetry', (args) => seen.push(args as { entries: unknown[] }));
+      const seen: Array<{
+        entries: readonly unknown[];
+        origin?: { label?: string; instance?: string };
+        epoch?: number;
+      }> = [];
+      fixture.client.onNotify('telemetry', (args) => seen.push(args));
 
       expect(setTelemetrySend).toHaveBeenCalledTimes(1);
+      const before = Date.now();
       telemetryFn!([{ name: 't', startTime: 0, duration: 1, workerTimeOrigin: 0 }]);
       await flushMicrotasks();
 
       expect(seen).toHaveLength(1);
       expect(seen[0]!.entries).toHaveLength(1);
+      // Every exported batch names its producer and anchors its clock (I5): without
+      // the nonce two producers both emit spanId "0" and consumers mis-parent them.
+      expect(seen[0]!.origin?.label).toEqual(expect.any(String));
+      expect(seen[0]!.origin?.instance).toEqual(expect.any(String));
+      expect(seen[0]!.epoch).toBeGreaterThan(0);
+      expect(seen[0]!.epoch! + performance.now()).toBeGreaterThanOrEqual(before - 1);
+    });
+
+    it('mints one origin instance per dispatcher, not one per batch', async () => {
+      let telemetryFn: ((entries: unknown[]) => void) | undefined;
+      const setTelemetrySend = vi.fn((fn: (entries: unknown[]) => void): void => {
+        telemetryFn = fn;
+      }) as unknown as KernelWorker['setTelemetrySend'];
+      fixture = await buildFixture(createMockWorker({ setTelemetrySend }));
+
+      const seen: Array<{ origin?: { instance?: string } }> = [];
+      fixture.client.onNotify('telemetry', (args) => seen.push(args));
+
+      telemetryFn!([{ name: 'a', startTime: 0, duration: 1, workerTimeOrigin: 0 }]);
+      telemetryFn!([{ name: 'b', startTime: 1, duration: 1, workerTimeOrigin: 0 }]);
+      await flushMicrotasks();
+
+      expect(seen).toHaveLength(2);
+      expect(seen[0]!.origin?.instance).toBe(seen[1]!.origin?.instance);
     });
   });
 });

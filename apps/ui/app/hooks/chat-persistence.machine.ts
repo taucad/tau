@@ -14,6 +14,7 @@ import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { getRetryDelay } from '#utils/backoff.utils.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { ChatRequest } from '#machines/chat-session.machine.js';
 
 // Input types
 export type ChatPersistenceMachineInput = {
@@ -42,33 +43,6 @@ export type ChatPersistenceMachineInput = {
  *   this into AI SDK's private `Chat.makeRequest({ trigger: 'submit-message' })`
  *   so `chat.messages` stays untouched.
  */
-/**
- * Per-request body the chat-client composes from `useCadAgentConfig` and
- * forwards through the persistence machine to the chat-session-store
- * `dispatchRequest` listener. The listener merges this object into the
- * `chat.sendMessage` / `chat.regenerate` call so the wire body always carries
- * an `agent` block — never the cookie-bleed-prone per-message metadata path.
- *
- * Optional because startup-request hydration can still run before the
- * chat-client mounts; `ChatSessionStore` falls back to the latest published
- * agent body when no explicit body is attached.
- *
- * @public
- */
-export type ChatRequestBody = Readonly<Record<string, unknown>>;
-
-export type ChatRequest =
-  | { kind: 'send'; message: MyUIMessage; body?: ChatRequestBody }
-  | { kind: 'regenerate'; body?: ChatRequestBody }
-  | {
-      kind: 'edit';
-      messageId: string;
-      content: string;
-      imageUrls?: string[];
-      body?: ChatRequestBody;
-    }
-  | { kind: 'retry'; messageId: string; body?: ChatRequestBody }
-  | { kind: 'continue'; body?: ChatRequestBody };
 
 /**
  * Why the in-flight chat request ended, forwarded to `finalizeInterruptedToolParts`
@@ -124,8 +98,8 @@ export type ChatPersistenceMachineContext = {
   // Request queued while a previous request is being stopped; consumed on requestFinished
   pendingRequest?: ChatRequest;
   /**
-   * Chat-scoped execution target. Paseo selections contain opaque connection
-   * and agent ids only; pairing credentials never enter durable chat state.
+   * Chat-scoped execution target. Selections contain opaque host and agent
+   * ids only; credentials never enter durable chat state.
    */
   activeExecution?: CadAgentExecution;
   /**
@@ -145,6 +119,8 @@ export type ChatPersistenceMachineContext = {
    * banner. Reads from machine input; defaults to {@link defaultRetryMaxAttempts}.
    */
   retryMaxAttempts: number;
+  /** The in-flight request is being ended to make room for a queued turn. */
+  preempting: boolean;
 };
 
 export type ChatRetrievedEvent = { type: 'chatRetrieved'; chat: Chat | undefined };
@@ -160,6 +136,24 @@ type ChatPersistenceMachineEvents =
   | { type: 'flushNow' }
   // Request lifecycle
   | { type: 'startRequest'; request: ChatRequest }
+  /**
+   * The person asked the chat's session actor for a turn.
+   *
+   * The dispatch that follows is one admission away — a lease, a model resolve
+   * and a credit pre-flight — so the banner can no longer be cleared by
+   * `startRequest` arriving in the same frame as the gesture. This says the
+   * gesture was accepted, which is what the no-flicker contract is about.
+   */
+  | { type: 'turnRequested' }
+  /**
+   * End the in-flight request because another turn is queued behind it.
+   *
+   * Distinct from `stopRequest`, which is the person stopping: a pre-empted
+   * turn keeps its transcript, where a stopped one hands its trailing prompt
+   * back to the composer. The queued turn itself is the chat session actor's,
+   * and it dispatches once the pre-empted one has settled.
+   */
+  | { type: 'preemptRequest' }
   | { type: 'stopRequest' }
   | {
       type: 'requestFinished';
@@ -369,6 +363,7 @@ export const chatPersistenceMachine = setup({
       activeKernel: undefined,
       retryAttempt: 0,
       retryMaxAttempts: input.retryMaxAttempts ?? defaultRetryMaxAttempts,
+      preempting: false,
     };
   },
   type: 'parallel',
@@ -546,6 +541,10 @@ export const chatPersistenceMachine = setup({
               target: 'stopping',
               actions: emit({ type: 'dispatchStop' }),
             },
+            preemptRequest: {
+              target: 'stopping',
+              actions: [assign({ preempting: true, retryAttempt: 0 }), emit({ type: 'dispatchStop' })],
+            },
             streamResumed: {
               actions: [assign({ retryAttempt: 0, persistedError: undefined }), raise({ type: 'clearPersistedError' })],
             },
@@ -630,9 +629,24 @@ export const chatPersistenceMachine = setup({
               actions: assign({
                 persistedError: undefined,
                 pendingRequest: ({ event }) => event.request,
+                preempting: false,
               }),
             },
             requestFinished: [
+              {
+                /* Pre-empted, not stopped: the transcript stays exactly as it
+                 * is and the queued turn dispatches from its own owner. */
+                guard: ({ context }) => context.preempting,
+                target: 'idle',
+                actions: [
+                  assign({ preempting: false }),
+                  emit(({ event }) => ({
+                    type: 'applyFinishedRequest',
+                    messages: event.messages,
+                    cause: 'preempt',
+                  })),
+                ],
+              },
               {
                 guard: ({ context }) => context.pendingRequest !== undefined,
                 target: 'invoking',
@@ -838,6 +852,9 @@ export const chatPersistenceMachine = setup({
     },
   },
   on: {
+    turnRequested: {
+      actions: assign({ persistedError: undefined, retryAttempt: 0 }),
+    },
     handleError: {
       actions({ event }) {
         console.error('Chat persistence error:', event.error);

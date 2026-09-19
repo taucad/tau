@@ -19,6 +19,7 @@ import { PreviewFiles } from '#routes/w.$workspace.$project_.preview/preview-fil
 import { PreviewParameters } from '#routes/w.$workspace.$project_.preview/preview-parameters.js';
 import { usePreviewFileList } from '#routes/w.$workspace.$project_.preview/use-preview-file-list.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
+import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 
 export const PreviewDesktop = memo(function (): React.JSX.Element {
   const navigate = useNavigate();
@@ -40,17 +41,17 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
     }
 
     toast.promise(
-      async () => {
-        const zipBlob = await fileManager.getZippedDirectory(`/projects/${project.id}`);
-        return zipBlob;
-      },
+      // The preview's file manager is rooted at this project; `''` is that root.
+      async () => fileManager.getZippedDirectory('', { versionedOnly: true }),
       {
         loading: 'Creating ZIP archive...',
         success(blob) {
           downloadBlob(blob, `${project.name}.zip`);
           return 'ZIP downloaded successfully';
         },
-        error: 'Failed to create ZIP archive',
+        error(error: unknown) {
+          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error)}`;
+        },
       },
     );
   }, [project, fileManager]);

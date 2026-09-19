@@ -1,0 +1,27 @@
+import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineJobProvider } from '@taucad/runtime/job';
+import { z } from 'zod';
+
+const configuration = defineConfiguration({
+  id: '<%= name %>.job.configuration',
+  version: '1.0.0',
+  schema: z.object({ enabled: z.boolean().default(true) }),
+  ui: { version: 1, rjsf: {} },
+});
+
+const resultSchema = z.object({ status: z.string() });
+
+/** `<%= name %>` durable job capability. @public */
+export const <%= alias %>Job = defineJobProvider({
+  id: '<%= name %>',
+  kind: '<%= name %>',
+  version: '1.0.0',
+  kindVersion: 1,
+  configuration,
+  resultSchema,
+  recovery: { type: 'restart-from-input' },
+  async execute(input) {
+    void input.configuration.enabled;
+    throw new Error('TODO: implement <%= name %> job execution');
+  },
+});

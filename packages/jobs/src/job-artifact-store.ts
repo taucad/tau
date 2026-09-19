@@ -6,7 +6,7 @@ import {
   createMemoryContentStore,
   digestContent,
 } from '@taucad/cache-core';
-import type { ActionDigest, ComputeActionRecord, ContentDigest } from '@taucad/cache-core';
+import type { ActionDigest, CacheRejectionReason, ComputeActionRecord, ContentDigest } from '@taucad/cache-core';
 
 /** Maximum immutable artifact size accepted by Tau job data planes. @public */
 export const maximumJobArtifactBytes = 1024 * 1024 * 1024;
@@ -57,7 +57,7 @@ export type JobArtifactComputeReuseCapability =
         input: JobActionPublishInput,
       ) => Promise<
         | { readonly status: 'published' | 'existing' }
-        | { readonly status: 'rejected'; readonly reason: 'entry-too-large' }
+        | { readonly status: 'rejected'; readonly reason: CacheRejectionReason }
       >;
     }
   | { readonly status: 'unsupported'; readonly reason: string };

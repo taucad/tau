@@ -3,7 +3,7 @@ title: 'NAPI Architecture Policy'
 description: 'Rules for configuring, building, packaging, testing, and publishing first-party Node-API addons with NAPI-RS.'
 status: active
 created: '2026-08-22'
-updated: '2026-09-04'
+updated: '2026-09-05'
 related:
   - docs/policy/npm-policy.md
   - docs/policy/release-policy.md
@@ -11,6 +11,7 @@ related:
   - docs/policy/compatibility-policy.md
   - docs/research/libassimp-native-node-addon-overhaul-blueprint.md
   - docs/research/nanoraster-native-architecture-publishing-blueprint.md
+  - docs/research/openrscad-native-colocation-closeout-blueprint.md
 ---
 
 # NAPI Architecture Policy
@@ -24,6 +25,8 @@ A native Node package is a coordinated release of one JavaScript root package an
 ## Scope
 
 This policy applies when a Tau-managed repository publishes one or more Node-API `.node` addons and uses `@napi-rs/cli` to generate their loader and platform-package release set. Rust `cdylib` and externally compiled addons share the packaging, evidence, and publication rules below. Language-specific compiler, linker, sanitizer, and lint rules apply only to producers that use that language.
+
+A package may colocate a Wasm build with its addon (`nanoraster`, `@taulabs/openrscad-engine`): the `node` export condition is the only path that reaches the generated loader, the default entry names neither the loader nor a Node builtin, and a fallback to the in-package Wasm build must preserve the loader's `cause` chain and report which backend bound.
 
 It does not turn other artifact classes into N-API targets. Browser Wasm, WASI components, iOS frameworks, Electron universal applications, and standalone CLI binaries have different loaders or deployment contracts and require separate release paths.
 

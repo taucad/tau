@@ -17,23 +17,25 @@ import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '#comp
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Compose } from '#components/ui/utils/compose.js';
-import { PageFooter } from '#components/layout/page-footer.js';
-import { CookieConsent } from '#components/cookie-consent.js';
+import { CommandPaletteProvider, RouteCommandPaletteItems } from '#components/layout/command-palette.js';
+import { RouteFooter } from '#components/layout/route-footer.js';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
 import { DesktopTitlebarControls } from '#components/layout/desktop-titlebar-controls.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
+import { sidebarPreferredWidth } from '#constants/sidebar.constants.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
 
-const desktopTitlebarControlsWidth = 'calc(var(--spacing) * 47)';
-const webTitlebarControlsWidth = 'calc(var(--spacing) * 28)';
+/* The width each control row fills, minus 4 px: the chat header's own first control then
+ * lands one row-gap after the last of these, so the two read as one row. */
+const desktopTitlebarControlsWidth = 'calc(var(--spacing) * 44)';
+const webTitlebarControlsWidth = 'calc(var(--spacing) * 26)';
 
 const sidebarMinimumWidth = 192;
-const sidebarPreferredWidth = 224;
 const sidebarMaximumWidth = 480;
 const sidebarKeyboardResizeStep = 16;
 
@@ -59,7 +61,7 @@ function SectionContent({ error, enablePageFooter }: SectionContentProps): React
     return (
       <div className='flex min-h-full flex-col overflow-clip'>
         <div className='flex flex-1 flex-col'>{content}</div>
-        <PageFooter />
+        <RouteFooter />
       </div>
     );
   }
@@ -76,12 +78,12 @@ const WebTitlebarControls = ({
 }): React.JSX.Element => (
   <div
     data-slot='web-titlebar-controls'
-    className='fixed top-0 left-0 z-50 hidden h-9 w-(--titlebar-controls-width) items-center gap-2 bg-transparent px-2 md:flex'
+    className='fixed top-0 left-0 z-50 hidden h-9 w-(--titlebar-controls-width) items-center gap-1 bg-transparent pr-1 pl-2 md:flex'
   >
     <Link
       to='/'
       aria-label='Home'
-      className='flex h-7 items-center rounded-sm px-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+      className='flex h-7 items-center rounded-sm px-1 outline-none focus-visible:focus-outline'
     >
       <TauWordmark aria-hidden className='h-5 w-auto text-primary' />
     </Link>
@@ -168,8 +170,6 @@ const ApplicationShell = ({
           {children}
         </Allotment.Pane>
       </Allotment>
-      <CookieConsent />
-      <SettingsDialog />
     </div>
   );
 };
@@ -213,6 +213,24 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   // value is `false`, or when its function form returns `false` for the current
   // viewer (see `Handle.enablePageWrapper`). The wrapper stays on unless some
   // match opts out.
+  /*
+   * `titleBarStyle: 'hiddenInset'` gives macOS no implicit drag area, so the
+   * window's grab band has to be declared in CSS. It belongs to the shell, not
+   * to a route: every route renders through `Page`, including the ones that opt
+   * out of the wrapper below (auth, share links), and a per-route handle leaves
+   * each new route to remember one. Chromium unions the `drag` rects and
+   * subtracts the `no-drag` ones, so interactive chrome sitting in the band —
+   * the header children here, the dockview tabs, the titlebar controls — opts
+   * itself back out.
+   */
+  const desktopDragBand = desktopTarget ? (
+    <span
+      aria-hidden
+      data-slot='desktop-drag-band'
+      className='pointer-events-none fixed inset-x-0 top-0 z-0 h-9 [app-region:drag]'
+    />
+  ) : null;
+
   const chromeContext = { authState: resolvedAuth, flags };
   const enablePageWrapper = !pageWrapperMatches.some((match) => {
     const value = match.handle.enablePageWrapper;
@@ -238,6 +256,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     // and keep the bare outlet.
     return (
       <Compose components={Providers}>
+        {desktopDragBand}
         {enableOverflowY ? (
           <div className='h-dvh overflow-y-auto'>
             <Outlet />
@@ -249,8 +268,20 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     );
   }
 
+  /*
+   * W5/Finding 5b: the shell is above the composed route providers, not below
+   * them. A route that contributes a provider changes the length of this list,
+   * and anything nested inside it changes tree depth — which React implements
+   * by unmounting and re-creating the subtree. Only the route's own content
+   * needs those providers, so only the route's own content sits inside them.
+   *
+   * The command palette is the one piece of shell chrome fed by the routes: its
+   * registry therefore sits above both, the sidebar keeps the trigger, and the
+   * routes register from inside their own providers.
+   */
   return (
-    <Compose components={Providers}>
+    <CommandPaletteProvider>
+      {desktopDragBand}
       <SidebarProvider className='h-dvh min-h-0 overflow-hidden'>
         <ApplicationShell isDesktopTarget={desktopTarget}>
           <SidebarInset className={cn('size-full min-w-0', headerHeightClass)}>
@@ -265,6 +296,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   className={cn(
                     'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
                     !hasBreadcrumbItems && 'md:hidden',
+                    desktopTarget && '[app-region:no-drag]',
                   )}
                 >
                   {desktopTarget ? null : <SidebarTrigger className='md:hidden' />}
@@ -305,7 +337,12 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   </Breadcrumb>
                 </div>
 
-                <div className='pointer-events-auto flex items-center gap-2 px-2'>
+                <div
+                  className={cn(
+                    'pointer-events-auto flex items-center gap-2 px-2',
+                    desktopTarget && '[app-region:no-drag]',
+                  )}
+                >
                   {hasActionItems
                     ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
                     : null}
@@ -315,11 +352,17 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             <section
               className={cn('h-dvh', enableOverflowY && 'overflow-y-auto', enablePageHeader && headerOffsetClasses)}
             >
-              <SectionContent error={error} enablePageFooter={enablePageFooter} />
+              <Compose components={Providers}>
+                <RouteCommandPaletteItems />
+                {/* Its compute section reads the active project; the dialog is a
+                    portal, so only its place in the React tree matters. */}
+                <SettingsDialog />
+                <SectionContent error={error} enablePageFooter={enablePageFooter} />
+              </Compose>
             </section>
           </SidebarInset>
         </ApplicationShell>
       </SidebarProvider>
-    </Compose>
+    </CommandPaletteProvider>
   );
 }

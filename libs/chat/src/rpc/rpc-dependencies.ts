@@ -7,6 +7,7 @@
  * - Node.js headless (via enhanced RuntimeFileSystem in the worker, runtime kernel)
  * - Workers or other JS runtimes
  */
+import type { RevisionChangeOutput, RevisionRowOutput } from '#schemas/tools/revisions.tool.schema.js';
 import type {
   CaptureImagesRpcResult,
   CaptureImagesRpcInput,
@@ -16,9 +17,19 @@ import type {
   RunGeoSpecTestsRpcInput,
   RunGeoSpecTestsRpcResult,
   ResolveSkillRpcResult,
+  ApplyParameterOperationRpcInput,
+  ApplyParameterOperationRpcResult,
+  GetParametersRpcInput,
+  GetParametersRpcResult,
 } from '#schemas/rpc.schema.js';
 import type { DiffStatsWithContent } from '#schemas/tools/diff.schema.js';
-import type { ExportFile, FileContentMetadata } from '@taucad/types';
+import type { ExportFile, FileContentMetadata, FileProvenance } from '@taucad/types';
+
+/** Local execution metadata that never enters an RPC payload or durable record. @public */
+export type RpcInvocationContext = Readonly<{
+  /** Cancels only the active wait and its cooperative operation. */
+  signal?: AbortSignal;
+}>;
 /**
  * One direct child returned by {@link RpcFileSystem.readdir}.
  * `name` is a basename, never a path.
@@ -31,12 +42,18 @@ export type RpcDirectoryEntry =
       type: 'dir';
       size: number;
       modifiedAt?: string;
+      /** False for virtual directories that recursive project-wide search must skip. */
+      traverseOnImplicitSearch?: boolean;
+      /** What the composed view says about this entry. */
+      provenance?: FileProvenance;
     }
   | ({
       name: string;
       type: 'file';
       size: number;
       modifiedAt?: string;
+      /** What the composed view says about this entry. */
+      provenance?: FileProvenance;
     } & FileContentMetadata);
 
 /**
@@ -101,12 +118,16 @@ export type RpcFileStat =
       isDirectory: true;
       createdAt: string;
       modifiedAt: string;
+      /** What the composed view says about this path. */
+      provenance?: FileProvenance;
     }
   | ({
       size: number;
       isDirectory: false;
       createdAt: string;
       modifiedAt: string;
+      /** What the composed view says about this path. */
+      provenance?: FileProvenance;
     } & FileContentMetadata);
 
 /**
@@ -115,7 +136,16 @@ export type RpcFileStat =
  * @public
  */
 export type RpcRuntimeClient = {
-  getKernelResult(targetFile: string): Promise<GetKernelResultRpcResult>;
+  getKernelResult(targetFile: string, context?: RpcInvocationContext): Promise<GetKernelResultRpcResult>;
+};
+
+/** Shared semantic parameter client attached by a host with checked authority. @public */
+export type RpcParameterClient = {
+  getParameters(input: GetParametersRpcInput, context?: RpcInvocationContext): Promise<GetParametersRpcResult>;
+  applyParameterOperation(
+    input: ApplyParameterOperationRpcInput,
+    context?: RpcInvocationContext,
+  ): Promise<ApplyParameterOperationRpcResult>;
 };
 
 /**
@@ -140,12 +170,15 @@ export type RpcGraphicsExportGeometryResult =
  * @public
  */
 export type RpcGraphicsClient = {
-  exportGeometry(args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>): Promise<RpcGraphicsExportGeometryResult>;
+  exportGeometry(
+    args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>,
+    context?: RpcInvocationContext,
+  ): Promise<RpcGraphicsExportGeometryResult>;
 };
 
 /** Browser/headless image capture client independent of a mounted viewport. @public */
 export type RpcImageClient = {
-  captureImages(args: CaptureImagesRpcInput): Promise<CaptureImagesRpcResult>;
+  captureImages(args: CaptureImagesRpcInput, context?: RpcInvocationContext): Promise<CaptureImagesRpcResult>;
 };
 
 /**
@@ -174,6 +207,35 @@ export type RpcSkillResolver = {
 };
 
 /**
+ * The read half of a project's revision graph (S28).
+ *
+ * Read-only on purpose: an agent sees where it is and what changed, and every
+ * verb that *moves* anything — branch, merge, restore, discard, sync — belongs
+ * to a person (I10). The host satisfies this with the same functions the
+ * Revisions pane and `tau revisions` call, so the three cannot disagree.
+ *
+ * @public
+ */
+export type RpcRevisionsClient = {
+  log(
+    request: Readonly<{
+      branch?: string | undefined;
+      limit?: number | undefined;
+    }>,
+  ): Promise<readonly RevisionRowOutput[]>;
+  diff(from: string | undefined, to: string): Promise<readonly RevisionChangeOutput[]>;
+  describe(): Promise<
+    Readonly<{
+      branch: string | undefined;
+      revisionNumber: number | undefined;
+      revisionId: string | undefined;
+      branches: ReadonlyArray<Readonly<{ name: string; revisionNumber: number; revisionId: string }>>;
+      line: string;
+    }>
+  >;
+};
+
+/**
  * Dependencies required by RPC handlers.
  * `graphics` is optional -- headless mode omits it, and handlers
  * return an error if a graphics operation is requested without it.
@@ -186,6 +248,8 @@ export type RpcDependencies = {
   images?: RpcImageClient;
   geospec?: RpcGeoSpecClient;
   skillResolver?: RpcSkillResolver;
+  revisions?: RpcRevisionsClient;
+  parameters?: RpcParameterClient;
 };
 
 /**

@@ -41,6 +41,8 @@ import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { nodeWorkerId } from '#transport/_internal/node-worker-id.js';
 import type { NodeWorkerId } from '#transport/_internal/node-worker-id.js';
+import type { ComputeBinding } from '#types/runtime-compute.types.js';
+import { buildComputeStoreBridge } from '#transport/_internal/compute-store-bridge.js';
 
 /**
  * Subset of `node:worker_threads.Worker` the transport depends on.
@@ -72,6 +74,7 @@ export type NodeWorkerClientOptions = {
   readonly devtoolsTelemetry?: boolean;
   /** Host-compiled WASM modules cloned into the worker during initialization. */
   readonly compiledWasmModules?: RuntimeInitializeMemoryHandle['compiledWasmModules'];
+  readonly compute?: ComputeBinding;
 };
 
 const wrapNodeWorkerAsPort = (worker: NodeWorkerLike): Port<unknown> => {
@@ -167,12 +170,16 @@ export const nodeWorkerClient = (
   };
 
   let bridge: ReturnType<typeof buildFileSystemBridge>;
+  let computeBridge: ReturnType<typeof buildComputeStoreBridge> | undefined;
   let openPromise: Promise<TransportClientReady> | undefined;
   let worker: NodeWorkerLike | undefined;
   let port: Port<unknown> | undefined;
   let channel: Channel<RuntimeProtocol> | undefined;
   let removeWorkerFailureListeners: (() => void) | undefined;
   let isClosed = false;
+  /* A worker that dies before its hello failed to start; one that dies after it
+   * died mid-session. Readiness is the only thing that separates them. */
+  let phase: 'boot' | 'session' = 'boot';
 
   let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
   const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
@@ -206,6 +213,11 @@ export const nodeWorkerClient = (
     } catch {
       /* Best-effort */
     }
+    try {
+      computeBridge?.dispose();
+    } catch {
+      /* Best-effort */
+    }
     resolveClosed?.(result);
   };
 
@@ -229,7 +241,7 @@ export const nodeWorkerClient = (
         void finish({ cause: 'wire-failure', error });
       };
       const onWorkerExit = (exitCode: number): void => {
-        void finish({ cause: 'host-exit', exitCode });
+        void finish({ cause: 'host-exit', exitCode, phase });
       };
       eventWorker.on('error', onWorkerError);
       eventWorker.on('exit', onWorkerExit);
@@ -243,6 +255,17 @@ export const nodeWorkerClient = (
         sessionKey: runtimeChannelSessionKey,
         protocolSchemas: runtimeProtocolSchemas,
       });
+      /* `open()` hands the channel back before hello lands, so readiness is
+       * observed separately; a host that never became ready died in boot. */
+      const observeReadiness = async (ready: Promise<unknown>): Promise<void> => {
+        try {
+          await ready;
+          phase = 'session';
+        } catch {
+          /* The phase stays `'boot'`. */
+        }
+      };
+      void observeReadiness(channel.ready);
       return { channel };
     })();
     return openPromise;
@@ -276,15 +299,17 @@ export const nodeWorkerClient = (
         throw new Error('nodeWorkerTransport: channel unavailable after open()');
       }
       bridge ??= buildFileSystemBridge(options.fileSystem);
+      computeBridge ??= buildComputeStoreBridge(options.compute);
       const pooled = ensurePools();
       const memoryHandle: RuntimeInitializeMemoryHandle = {
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
         ...(bridge ? { fileSystemPort: bridge.port } : {}),
+        ...computeBridge.memoryHandle,
         ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
         ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
       };
-      const transferables: Transferable[] = bridge ? [bridge.port] : [];
+      const transferables: Transferable[] = [...(bridge ? [bridge.port] : []), ...computeBridge.transfer];
       const args = { ...input, memoryHandle };
       try {
         const result = await channel.call(
@@ -300,6 +325,8 @@ export const nodeWorkerClient = (
             bridge = undefined;
           }
         }
+        computeBridge.dispose();
+        computeBridge = undefined;
         throw error;
       }
     },

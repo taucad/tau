@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { parseChatTurnRequest } from '@taucad/chat/schemas';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
-import type { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
+import { NameGeneratorRequestError } from '#chat-clients/_internal/name-generator-client.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- ENV/TAU_API_URL mirror the SCREAMING_SNAKE_CASE keys exported by the real environment.config module
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test.local' } }));
@@ -139,6 +139,32 @@ describe('useProjectNameClient', () => {
     }
   });
 
+  it('should retain the helper funded-limit code without failing the primary chat', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          category: 'rate_limit',
+          title: 'Rate Limit Exceeded',
+          message: 'The naming helper is at its funded-operation failsafe.',
+          code: 'FUNDED_HELPER_LIMIT',
+          httpStatus: 429,
+        }),
+        { status: 429, statusText: 'Too Many Requests' },
+      ),
+    );
+    const { result } = renderHook(() => useProjectNameClient());
+
+    try {
+      await act(async () => result.current.generate({ projectId: 'proj_test', text: 'Hi' }));
+      expect.fail('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(NameGeneratorRequestError);
+      expect((error as NameGeneratorRequestError).status).toBe(429);
+      expect((error as NameGeneratorRequestError).code).toBe('FUNDED_HELPER_LIMIT');
+      expect((error as Error).message).toContain('The naming helper is at its funded-operation failsafe.');
+    }
+  });
+
   it('should reject with a NameGeneratorRequestError when the response body stream is missing', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
 
@@ -170,6 +196,27 @@ describe('useProjectNameClient', () => {
     expect(parsed.messages[0]?.parts).toEqual([
       { type: 'file', url: first, mediaType: 'image/png' },
       { type: 'file', url: second, mediaType: 'image/webp' },
+    ]);
+  });
+
+  it('should send only image data URLs to the naming profile, never a document or a stored reference', async () => {
+    mountStreamingResponse([{ type: 'start' }, { type: 'finish' }]);
+    const { result } = renderHook(() => useProjectNameClient());
+    const image = 'data:image/png;base64,iVBORw0KGgo=';
+
+    await act(async () => {
+      await result.current.generate({
+        projectId: 'proj_test',
+        text: 'Bracket',
+        imageUrls: ['data:application/pdf;base64,JVBERi0=', `attachments/${'a'.repeat(64)}.png`, image],
+      });
+    });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const parsed = await parseChatTurnRequest(JSON.parse(init.body as string));
+    expect(parsed.messages[0]?.parts).toEqual([
+      { type: 'file', url: image, mediaType: 'image/png' },
+      { type: 'text', text: 'Bracket' },
     ]);
   });
 });

@@ -3,7 +3,7 @@ title: 'UX Policy'
 description: 'Interaction design rules: inline editing, progressive disclosure, confirmation patterns, and keyboard conventions for all Tau UI surfaces.'
 status: active
 created: '2026-04-08'
-updated: '2026-04-08'
+updated: '2026-09-16'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/accessibility-policy.md
@@ -116,25 +116,14 @@ For low-stakes deletions in dense lists (e.g., deleting a parameter set where "d
 
 ### 5. Progressive Disclosure in Dense Panels
 
-In space-constrained panels (parameters, file tree, chat sidebar), reveal editing controls on hover or via overflow menus — not always visible.
+Follow [DESIGN.md — People and progressive disclosure](../../DESIGN.md#people-and-progressive-disclosure)
+and [Composition and visible affordances](../../DESIGN.md#composition-and-visible-affordances).
+Primary contextual actions remain visible; infrequent row actions may use a
+persistently reachable named overflow menu. Hover shortcuts require an equivalent
+visible route plus keyboard and coarse-pointer access.
 
-**Why**: Persistent edit/delete buttons on every row create visual noise and reduce content density. The hover-reveal pattern (already used in chat history items) balances discoverability with cleanliness.
-
-CORRECT:
-
-```tsx
-<div className='group flex items-center justify-between'>
-  <span>{name}</span>
-  <div className='flex gap-1 opacity-0 group-hover:opacity-100'>
-    <Button size='icon' variant='ghost'>
-      <Pencil />
-    </Button>
-    <Button size='icon' variant='ghost'>
-      <Trash />
-    </Button>
-  </div>
-</div>
-```
+**Why**: Folding detail reduces noise only when users can still discover actions
+and understand current work, consequences and recovery.
 
 ### 6. ComboBoxResponsive for Searchable Selection
 
@@ -169,7 +158,7 @@ Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-sele
 - Nesting `Dialog` inside `Dialog` (e.g., delete confirm inside settings)
 - Building custom `isEditing` + `Input` state when `InlineTextEditor` exists
 - Using `setTimeout` to focus an input inside a Dialog (symptom of fighting the modal lifecycle)
-- Persistent edit/delete buttons in dense lists (use hover-reveal)
+- Important actions discoverable only on hover, with no visible alternate route
 - Plain `<Select>` for unbounded or searchable lists
 
 ## Summary Checklist
@@ -179,7 +168,7 @@ Features: display/edit toggle, Enter/Escape/blur handling, auto-focus, auto-sele
 - [ ] Inline inputs support Enter, Escape, blur, auto-focus, auto-select
 - [ ] Destructive actions use AlertDialog (irrecoverable) or undo toast (recoverable)
 - [ ] No nested Dialogs
-- [ ] Dense list actions use hover-reveal pattern
+- [ ] Dense list actions follow DESIGN's visible-action and disclosure contracts
 - [ ] Searchable/dynamic lists use ComboBoxResponsive
 - [ ] New interaction patterns reviewed against this policy
 

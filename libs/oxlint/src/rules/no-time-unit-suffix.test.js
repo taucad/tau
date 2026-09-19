@@ -67,6 +67,10 @@ describe('no-time-unit-suffix', () => {
           code: 'function useStopwatch(startedAtMs: number) { return startedAtMs; }',
         },
         {
+          name: 'chat schema endedAtMs is allowlisted',
+          code: 'type Meta = { endedAtMs?: number };',
+        },
+        {
           name: 'chat schema firstTokenAtMs is allowlisted',
           code: 'type Telemetry = { firstTokenAtMs?: number };',
         },

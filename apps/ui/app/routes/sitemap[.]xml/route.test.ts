@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalProductionUrl } from '#lib/canonical-url.js';
+import { listSitemapPaths } from '#lib/static-paths.js';
 import { buildSitemapXml } from '#routes/sitemap[.]xml/route.js';
 
 const productionOrigin = canonicalProductionUrl.origin;
@@ -85,5 +86,13 @@ describe('buildSitemapXml', () => {
     expect(() => buildSitemapXml({ frontendUrl: 'not-a-url', paths: samplePaths, lastmod: fixedLastmod })).toThrow(
       TypeError,
     );
+  });
+
+  it('never advertises the prerendered account shell (B5 R2)', () => {
+    const xml = buildSitemapXml({ frontendUrl: productionOrigin, paths: listSitemapPaths(), lastmod: fixedLastmod });
+
+    expect(listSitemapPaths()).not.toContain('/usage');
+    expect(xml).not.toContain('/usage');
+    expect(xml).toContain(`<loc>${productionOrigin}/legal/terms</loc>`);
   });
 });

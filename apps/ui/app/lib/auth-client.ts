@@ -1,6 +1,5 @@
 import { createAuthClient } from 'better-auth/react';
 import { apiKeyClient } from '@better-auth/api-key/client';
-import { stripeClient } from '@better-auth/stripe/client';
 import { magicLinkClient } from 'better-auth/client/plugins';
 import { requireClientEnvironment } from '#environment.config.js';
 
@@ -17,10 +16,7 @@ export const authClient = createAuthClient({
   // every real request to runtimeAuthFetch where the injected host is resolved.
   baseURL: 'https://window-env.invalid/v1/auth',
   fetchOptions: { customFetchImpl: runtimeAuthFetch },
-  // The stripeClient plugin drives subscription.upgrade()/billingPortal()/list():
-  // upgrade + portal surfaces are plugin-owned; Tau only adds the credit
-  // ledger endpoints under /v1/billing (blueprint AD1/AD5, deviation 1).
-  plugins: [magicLinkClient(), apiKeyClient(), stripeClient({ subscription: true })],
+  plugins: [magicLinkClient(), apiKeyClient()],
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,

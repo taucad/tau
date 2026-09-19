@@ -1,0 +1,46 @@
+import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineMachine } from '@taucad/runtime/machine';
+import { z } from 'zod';
+
+const bindingConfiguration = defineConfiguration({
+  id: '<%= name %>.machine.binding',
+  version: '1.0.0',
+  schema: z.object({ logicalId: z.string() }),
+  ui: { version: 1, rjsf: {} },
+});
+
+const submissionConfiguration = defineConfiguration({
+  id: '<%= name %>.machine.submission',
+  version: '1.0.0',
+  schema: z.object({ copies: z.number().int().positive().default(1) }),
+  ui: { version: 1, rjsf: {} },
+});
+
+/** `<%= name %>` physical-machine capability. @public */
+export const <%= alias %>Machine = defineMachine({
+  id: '<%= name %>',
+  name: '<%= alias %>Machine',
+  version: '1.0.0',
+  protocolVersion: 1,
+  vendor: '<%= name %>',
+  technologies: ['custom'],
+  accepts: [
+    {
+      contract: { id: 'manufacturing.toolpath.custom', version: 1 },
+      mediaType: 'application/octet-stream',
+      requiredMembers: [],
+      payloadSelection: 'single',
+      technology: 'custom',
+    },
+  ],
+  bindingConfiguration,
+  submissionConfiguration,
+  async *discover(input) {
+    void input.configuration.logicalId;
+    yield* [];
+  },
+  async connect(input) {
+    void input.configuration.logicalId;
+    throw new Error('TODO: implement <%= name %> machine connection');
+  },
+});

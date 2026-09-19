@@ -43,6 +43,24 @@ const selectFormat = async (format: string): Promise<void> => {
 const optionsDisclosure = (format: string): Locator =>
   selectors.getByRole('button', { name: new RegExp(`^${format} options (Defaults|Modified)$`, 'iu') });
 
+const openOptions = async (format: string): Promise<Locator> => {
+  const disclosure = optionsDisclosure(format);
+  await target.expectVisible(disclosure, 15_000);
+  if ((await target.getAttribute(disclosure, 'aria-expanded')) !== 'true') {
+    await target.click(disclosure);
+  }
+  await target.expectAttribute(disclosure, 'aria-expanded', 'true');
+  return disclosure;
+};
+
+const fieldUnit = async (input: Locator): Promise<string> =>
+  target.evaluateLocator(input, (element) => {
+    const adornment = element
+      .closest<HTMLElement>('[data-slot="slider-input"]')
+      ?.querySelector<HTMLElement>('[data-slot="slider-input-adornment"]');
+    return adornment?.textContent.trim() ?? '';
+  });
+
 test('keeps export option roots flat, disclosures independent, and the action reachable', async () => {
   await target.emulateColorScheme('light');
   await target.setViewport({ width: 1440, height: 900 });
@@ -53,15 +71,13 @@ test('keeps export option roots flat, disclosures independent, and the action re
   await target.expectVisible(panel, 15_000);
   await selectFormat('STL');
 
-  const stlOptions = optionsDisclosure('STL');
-  await target.expectAttribute(stlOptions, 'aria-expanded', 'true');
+  const stlOptions = await openOptions('STL');
   await target.expectVisible(selectors.getByRole('button', { name: 'Group: Tessellation' }), 15_000);
   await target.expectCount(panel.getByCss('[data-slot="parameter-catalog"]'), 0);
   await target.expectCount(panel.getByCss('[data-slot="embedded-form-root"]'), 1);
 
   await selectFormat('STEP');
-  const stepOptions = optionsDisclosure('STEP');
-  await target.expectAttribute(stepOptions, 'aria-expanded', 'true');
+  const stepOptions = await openOptions('STEP');
   await target.expectCount(panel.getByCss('[data-slot="embedded-form-root"]'), 2);
 
   await target.click(stlOptions);
@@ -112,9 +128,14 @@ test('keeps PNG composite options semantic, valid, and independently editable', 
   const panel = selectors.getByCss('[data-slot="export-panel-body"]');
   await target.expectVisible(panel, 15_000);
   await selectFormat('PNG');
-  await target.expectVisible(optionsDisclosure('PNG'), 15_000);
+  await openOptions('PNG');
   await target.expectCount(panel.getByText(/must be|is a required property/iu), 0);
   await target.expectCount(panel.getByText(/^Option \d+$/u), 0);
+
+  const declaredWidth = panel.getByLabelText('Input for Width').first();
+  await target.expectVisible(declaredWidth);
+  expect(await fieldUnit(declaredWidth)).toBe('px');
+  await target.expectCount(panel.getByRole('button', { name: 'Inferred unit for Width' }), 0);
 
   await target.click(panel.getByRole('button', { name: 'Group: Camera' }));
   const framing = panel.getByRole('combobox', { name: 'Select for Framing' });

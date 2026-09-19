@@ -50,26 +50,7 @@ Library.Go(0.5f, () =>
 });
 ```
 
-The packaged desktop host compiles the project as a standard C# console program and JIT-runs its entry point in the trusted native worker. When a runtime client subscribes to progressive scene updates, the host publishes one reset followed by component upserts and removals while the model is still running; unchanged component assets are retained rather than retransmitted. The normal render still settles exactly once with the authoritative final GLB. Helper `.cs` files and project assets participate in the existing filesystem live-update loop.
-
-### Progressive capture
-
-Capture defaults to native-style viewer-update batches with a 16 ms minimum interval and a bounded 256-command pump. Render options can select `explicit` (only `RequestScreenShot` bookmarks), `update` (one coalesced snapshot per viewer-pump batch), or `operation` (one rate-limited snapshot per effective scene operation):
-
-```typescript
-await client.render({
-  source: { path: 'main.cs' },
-  renderOptions: {
-    capture: {
-      mode: 'operation',
-      minimumIntervalMilliseconds: 16,
-      maximumPendingCommands: 256,
-    },
-  },
-});
-```
-
-Each native viewer object receives a render-local stable component id. Its immutable GLB asset is transferred on first appearance and again only when that component changes; removals contain ids without geometry bytes. The runtime reconstructs every revision from the initial reset and ordered deltas. `RequestScreenShot` remains ordinary PicoGK source and becomes a retained timeline bookmark in the hosted runtime; an unchanged scene creates a bookmark without a redundant geometry update, and no framebuffer image is synthesized by the headless worker.
+The packaged desktop host compiles the project as a standard C# console program and JIT-runs its entry point in the trusted native worker. Each render settles exactly once with the authoritative final GLB. Helper `.cs` files and project assets participate in the existing filesystem live-update loop.
 
 ### Interactive parameters
 

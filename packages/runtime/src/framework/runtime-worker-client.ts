@@ -37,6 +37,8 @@ import type {
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   HashedGeometryResultTransport,
+  RuntimeEvaluateModelArgs,
+  RuntimeResolveParametersArgs,
   RuntimeExportModelArgs,
   RuntimeSourceSnapshotArgs,
   RuntimeTranscodeArgs,
@@ -45,14 +47,18 @@ import type {
   RenderPhase,
   RuntimeProtocol,
   RuntimeStateChangedArgs,
-  TelemetryEntry,
+  TelemetryBatch,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
-import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
+import { admitParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
+import {
+  defaultTranscodeTimeout,
+  renderTimeoutRecoveryGrace,
+  transcodeTimeoutRecoveryGrace,
+} from '#framework/runtime-framework.constants.js';
 import { validateProtocolHeader } from '#types/protocol-header.types.js';
-
 /** Unsubscribe handle for {@link RuntimeWorkerClient} subscription helpers. */
 export type Unsubscribe = () => void;
 
@@ -133,6 +139,23 @@ export function isRenderTimeoutError(error: unknown): error is RenderTimeoutErro
   return error instanceof Error && error.name === 'RenderTimeoutError';
 }
 
+/** Error thrown when a direct transcode exceeds its wall-clock deadline. @public */
+export class TranscodeTimeoutError extends Error {
+  public constructor(transcodeTimeout: number) {
+    super(`Transcode timed out after ${transcodeTimeout / 1000} seconds.`);
+    this.name = 'TranscodeTimeoutError';
+  }
+
+  /** Stable public error discriminator. */
+  public get code(): 'RUNTIME_TRANSCODE_TIMEOUT' {
+    return 'RUNTIME_TRANSCODE_TIMEOUT';
+  }
+}
+
+/** Realm-safe guard for {@link TranscodeTimeoutError}. @public */
+export const isTranscodeTimeoutError = (error: unknown): error is TranscodeTimeoutError =>
+  error instanceof Error && error.name === 'TranscodeTimeoutError';
+
 /**
  * Construction options for {@link RuntimeWorkerClient}.
  *
@@ -148,8 +171,7 @@ export type RuntimeWorkerClientOptions = {
   transport: RuntimeTransportClient;
 };
 
-/**
- */
+/** Initialization options for {@link RuntimeWorkerClient}. @public */
 export type RuntimeWorkerClientInitializeOptions = {
   readonly config?: unknown;
 };
@@ -197,6 +219,12 @@ export const assertValidRenderTimeout = (renderTimeout: number): void => {
   }
 };
 
+export const assertValidTranscodeTimeout = (transcodeTimeout: number): void => {
+  if (!Number.isFinite(transcodeTimeout) || transcodeTimeout < 0) {
+    throw new TypeError('transcodeTimeout must be a finite, non-negative number of milliseconds.');
+  }
+};
+
 /**
  * Main-thread orchestrator over a {@link RuntimeTransportClient}.
  *
@@ -229,9 +257,11 @@ export class RuntimeWorkerClient {
 
   /** Wall-clock render timeout enforced via `setTimeout`. Milliseconds. */
   private renderTimeout = 0;
+  private transcodeTimeout = defaultTranscodeTimeout;
   private selectedPreview: ActivePreviewAdmission | undefined;
   private recoveringRenderId: string | undefined;
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private transcodeRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private queuedPreview: QueuedPreview | undefined;
   private readonly localTimeouts = new Topic<{
     readonly renderId: string;
@@ -305,6 +335,7 @@ export class RuntimeWorkerClient {
       readonly parameters?: Record<string, unknown>;
       readonly options?: Record<string, unknown>;
       readonly content?: RuntimeContentInput;
+      readonly transient?: boolean;
     },
     admission: RuntimePreviewIdentity,
   ): void {
@@ -318,6 +349,7 @@ export class RuntimeWorkerClient {
         parameters: input.parameters ?? {},
         ...(input.options === undefined ? {} : { options: input.options }),
         ...(input.content === undefined ? {} : { content: input.content }),
+        ...(input.transient === true ? { transient: true } : {}),
       });
     });
   }
@@ -387,6 +419,13 @@ export class RuntimeWorkerClient {
     this.renderTimeout = renderTimeout;
   }
 
+  /** Set the wall-clock deadline captured by subsequent direct transcodes. */
+  public setTranscodeTimeout(transcodeTimeout: number): void {
+    this.ensureNotTerminated();
+    assertValidTranscodeTimeout(transcodeTimeout);
+    this.transcodeTimeout = transcodeTimeout;
+  }
+
   /**
    * Send the `export` RPC and return the result.
    *
@@ -433,6 +472,30 @@ export class RuntimeWorkerClient {
       : result;
   }
 
+  /**
+   * Evaluate an exact model request without publishing autonomous preview state.
+   *
+   * @param request - source file, parameters, render options, and optional caller-owned staged source bytes
+   * @param signal - per-call cancellation; the channel carries it as an `rc` frame
+   * @returns The evaluated geometry after transport-owned pooled delivery has been resolved
+   */
+  public async evaluateModel(request: RuntimeEvaluateModelArgs, signal?: AbortSignal): Promise<HashedGeometryResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    const result = await this.channel!.call('evaluateModel', request, signal);
+    return result.success ? { ...result, data: await this.transport.resolveGeometry(result.data) } : result;
+  }
+
+  /** Resolve parameters for one request without selecting autonomous preview state. */
+  public async resolveParameters(
+    request: RuntimeResolveParametersArgs,
+    signal?: AbortSignal,
+  ): Promise<GetParametersResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    return this.admitParametersResult(await this.channel!.call('resolveParameters', request, signal));
+  }
+
   /** Collect a request-scoped source closure without rendering geometry. */
   public async snapshotSource(
     request: RuntimeSourceSnapshotArgs,
@@ -447,10 +510,34 @@ export class RuntimeWorkerClient {
   public async transcode(request: RuntimeTranscodeArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
     this.ensureChannel();
-    const result = await this.channel!.call('transcode', request, signal);
-    return this.transport.resolveExport
-      ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
-      : result;
+    const { transcodeTimeout } = this;
+    const timeoutController = new AbortController();
+    const callSignal = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+    let timeoutError: TranscodeTimeoutError | undefined;
+    const timer =
+      transcodeTimeout > 0
+        ? setTimeout(() => {
+            timeoutError = new TranscodeTimeoutError(transcodeTimeout);
+            timeoutController.abort(timeoutError);
+            this.armTranscodeTimeoutRecovery();
+          }, transcodeTimeout)
+        : undefined;
+    try {
+      const result = await this.channel!.call('transcode', request, callSignal);
+      if (this.transport.resolveExport) {
+        return await this.transport.resolveExport(result as unknown as RuntimeExportResultTransport);
+      }
+      return result;
+    } catch (error) {
+      if (timeoutError) {
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    }
   }
 
   /** Cleanup any worker-side state without tearing down the channel. */
@@ -472,7 +559,10 @@ export class RuntimeWorkerClient {
   ): Unsubscribe {
     return this.deferNotify('stateChanged', (args) => {
       if (this.isSelectedPreviewPublishable(args.renderId)) {
-        handler({ ...args, geometryObserved: this.selectedPreview?.geometryObserved === true });
+        handler({
+          ...args,
+          geometryObserved: this.selectedPreview?.geometryObserved === true,
+        });
       }
     });
   }
@@ -489,12 +579,34 @@ export class RuntimeWorkerClient {
   }
 
   /** Subscribe to autonomous parameter resolution events. */
-  public onParametersResolved(handler: (args: { result: GetParametersResult; renderId: string }) => void): Unsubscribe {
-    return this.deferNotify('parametersResolved', (args) => {
-      if (this.isSelectedPreviewPublishable(args.renderId)) {
-        handler(args);
-      }
+  public onParametersResolved(
+    handler: (args: { result: GetParametersResult; renderId: string }) => void | Promise<void>,
+  ): Unsubscribe {
+    const subscription = new AbortController();
+    const isActive = (): boolean => !subscription.signal.aborted;
+    let admissionQueue = Promise.resolve();
+    const off = this.deferNotify('parametersResolved', (args) => {
+      const precedingAdmission = admissionQueue;
+      const processNotification = async (): Promise<void> => {
+        try {
+          await precedingAdmission;
+          if (!isActive() || !this.isSelectedPreviewPublishable(args.renderId)) {
+            return;
+          }
+          const result = await this.admitParametersResult(args.result);
+          if (isActive() && this.isSelectedPreviewPublishable(args.renderId)) {
+            await handler({ ...args, result });
+          }
+        } catch {
+          // Keep admission and subscriber failures contained within this ordered subscription queue.
+        }
+      };
+      admissionQueue = processNotification();
     });
+    return () => {
+      subscription.abort();
+      off();
+    };
   }
 
   /**
@@ -561,10 +673,10 @@ export class RuntimeWorkerClient {
     };
   }
 
-  /** Subscribe to telemetry batches. */
-  public onTelemetry(handler: (entries: readonly TelemetryEntry[]) => void): Unsubscribe {
-    return this.deferNotify('telemetry', ({ entries }) => {
-      handler(entries);
+  /** Subscribe to telemetry batches, each with the producer identity and clock anchor (I5). */
+  public onTelemetry(handler: (batch: TelemetryBatch) => void): Unsubscribe {
+    return this.deferNotify('telemetry', (batch) => {
+      handler(batch);
     });
   }
 
@@ -608,6 +720,10 @@ export class RuntimeWorkerClient {
     if (this.recoveryTimer !== undefined) {
       clearTimeout(this.recoveryTimer);
       this.recoveryTimer = undefined;
+    }
+    if (this.transcodeRecoveryTimer !== undefined) {
+      clearTimeout(this.transcodeRecoveryTimer);
+      this.transcodeRecoveryTimer = undefined;
     }
     this.localTimeouts.dispose();
     for (const off of this.disposers) {
@@ -688,6 +804,29 @@ export class RuntimeWorkerClient {
     return this.selectedPreview?.renderId === renderId && !this.selectedPreview.timedOut;
   }
 
+  private async admitParametersResult(result: GetParametersResult): Promise<GetParametersResult> {
+    if (!result.success) {
+      return result;
+    }
+    try {
+      return { ...result, data: await admitParameterManifest(result.data) };
+    } catch (error) {
+      const diagnostics = error instanceof ParameterAdmissionError ? error.diagnostics : undefined;
+      return {
+        success: false,
+        issues: [
+          {
+            message: error instanceof Error ? error.message : 'Parameter manifest admission failed',
+            code: diagnostics?.[0]?.code ?? 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+            details: diagnostics,
+          },
+        ],
+      };
+    }
+  }
+
   private dispatchPreview(admission: RuntimePreviewIdentity, send: () => void): void {
     if (this.selectedPreview?.renderId !== admission.renderId) {
       return;
@@ -766,6 +905,17 @@ export class RuntimeWorkerClient {
     } catch {
       // The transport's typed `closed` result remains the authoritative terminal signal.
     }
+  }
+
+  private armTranscodeTimeoutRecovery(): void {
+    const recovery = this.transport.renderTimeoutRecovery;
+    if (recovery.kind !== 'terminable' || this.transcodeRecoveryTimer !== undefined) {
+      return;
+    }
+    this.transcodeRecoveryTimer = setTimeout(() => {
+      this.transcodeRecoveryTimer = undefined;
+      void this.terminateTimedOutHost(recovery);
+    }, transcodeTimeoutRecoveryGrace);
   }
 
   private async resolveGeometryNotification(

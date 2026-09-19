@@ -5,13 +5,14 @@
  * provided to the draft machine via `.provide({ actors: { resizeImageActor } })`
  * by both ownership sites:
  *
- * - `EphemeralActiveChatProvider` (marketing / homepage routes — no real chat)
+ * - `active-chat-provider.tsx` (the marketing and Home composers)
  * - `ChatSessionStore` (session-backed real chats)
  *
  * Tests override this actor via `draftMachine.provide(...)` with a fake
  * resize implementation. The actor returns an `imageResized` event whose
- * `resized` payload is appended to `draftImages` / `editDraftImages` by the
- * `imageProcessing.resizing` state.
+ * `resized` data URL the `attachmentProcessing.resizing` state decodes and
+ * hands to `storing`; only the stored attachment reaches the draft. Documents
+ * never enter this actor.
  *
  * See `apps/ui/app/hooks/draft.machine.ts` for the consumer state machine.
  */

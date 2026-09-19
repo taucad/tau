@@ -31,6 +31,7 @@ out-tsc
 *.tsbuildinfo
 
 packages/geospec-engine/e2e/dist-fixture
+packages/plugins/openrscad/e2e/dist-fixture
 
 # Python bytecode (skills scripts, build123d plugin, tau-examples kernels)
 __pycache__/
@@ -49,6 +50,9 @@ apps/api/app/testing/harness-bench/results/
 
 # Environment variables
 .env
+
+# Local API bare Git repositories
+/apps/api/.tau-git/
 
 # Bundler stats
 stats.html

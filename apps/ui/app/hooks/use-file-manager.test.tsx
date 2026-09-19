@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, render, screen, act } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectRootConfiguration } from '@taucad/filesystem';
@@ -56,6 +56,12 @@ const mockProxyRmdir = vi.fn<(path: string, options?: { recursive?: boolean }) =
 const mockProxyWriteFile = vi.fn<(path: string, data: unknown, options?: unknown) => Promise<void>>(
   async () => undefined,
 );
+const mockProxyCanDelete = vi.fn<(path: string) => Promise<unknown>>(async () => true);
+const mockProxyMove = vi.fn<(source: string, target: string) => Promise<unknown>>(async () => ({
+  type: 'file',
+  size: 0,
+  mtimeMs: 0,
+}));
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
 const mockListProjectManifests = vi.fn<() => Promise<{ roots: readonly unknown[]; entries: readonly unknown[] }>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
@@ -83,6 +89,16 @@ vi.mock('@taucad/fs-bridge', () => ({
     getDirectoryStat: vi.fn(async () => []),
     readShallowDirectory: vi.fn(async () => []),
     readDirectory: vi.fn(async () => []),
+    readdirWithStats: vi.fn(async () => []),
+    canDelete: mockProxyCanDelete,
+    move: mockProxyMove,
+    /* The rooted half of the same proxy: the file services read the project
+       through its composed view, and a mutation asks it who owns the path. */
+    provenance: vi.fn(async (path: string) =>
+      path.startsWith('.agents/skills/')
+        ? { source: 'system-skills', versioned: false, agentAccess: 'read-only', identity: 'skill:demo@1.0.0#f' }
+        : { source: 'project', versioned: true, agentAccess: 'read-write' },
+    ),
     listProjectManifests: mockListProjectManifests,
     mkdir: mockProxyMkdir,
     rmdir: mockProxyRmdir,
@@ -146,6 +162,7 @@ const {
   HomeFileManagerProvider,
   useFileManager,
   useHomeStorageBackend,
+  SharedWorkerGate,
 } = await import('#hooks/use-file-manager.js');
 
 describe('waitForFileManagerServices', () => {
@@ -272,6 +289,68 @@ describe('HomeFileManagerProvider', () => {
       expect(result.current).toBe('opfs');
     });
     expect(mockGetHomeStorageBackend).toHaveBeenCalledOnce();
+  });
+});
+
+describe('SharedWorkerGate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workerTestState.instances.length = 0;
+    mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+  });
+
+  /* R7: a machine that gave up used to leave the gate's whole subtree blank. */
+  it('explains a failed worker connection instead of rendering nothing', async () => {
+    mockWaitForWorkerReady.mockRejectedValue(new Error('worker never became ready'));
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <SharedWorkerGate>
+          <div>subtree</div>
+        </SharedWorkerGate>
+      </HomeFileManagerProvider>,
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('heading', { name: "Couldn't start the file service" })).toBeInTheDocument();
+    });
+    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  /* Connecting is progress, and a route that knows what it is opening says so instead of a blank. */
+  it('shows the caller\u2019s placeholder while the worker connects', async () => {
+    /* `Once`, so the pending promise does not leak into the suites below (`clearAllMocks` keeps implementations). */
+    mockWaitForWorkerReady.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <SharedWorkerGate placeholder={<div>opening</div>}>
+          <div>subtree</div>
+        </SharedWorkerGate>
+      </HomeFileManagerProvider>,
+    );
+
+    expect(await screen.findByText('opening')).toBeInTheDocument();
+    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+  });
+
+  /* Home's own wait gates the whole app, so it takes the same placeholder. */
+  it('shows the placeholder while Home\u2019s storage engine resolves', async () => {
+    mockGetHomeStorageBackend.mockReturnValueOnce(Promise.withResolvers<'indexeddb' | 'opfs'>().promise);
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/' placeholder={<div>opening</div>}>
+        <div>subtree</div>
+      </HomeFileManagerProvider>,
+    );
+
+    expect(await screen.findByText('opening')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Opening Home' })).not.toBeInTheDocument();
+    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
   });
 });
 
@@ -429,14 +508,14 @@ describe('FileManagerProvider — client + workspace facades', () => {
     return renderHook(() => useFileManager(), { wrapper });
   };
 
-  it('exposes a typed client facade whose methods route through the worker proxy', async () => {
+  it('exposes a scope-required storage facade whose reads route through the worker proxy', async () => {
     const { result } = renderProvider();
 
     expect(result.current.client).toBeDefined();
-    // Spot-check method shape: `client.readShallowDirectory` is gated on
-    // proxy readiness and forwards to the worker.
+    // Spot-check method shape: a physical scope the mount table does not route
+    // is gated on proxy readiness and forwards to the authority (charter D5).
     await act(async () => {
-      const nodes = await result.current.client.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
+      const nodes = await result.current.scopedStorage.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
       expect(nodes).toEqual([]);
     });
   });
@@ -445,9 +524,14 @@ describe('FileManagerProvider — client + workspace facades', () => {
     const { result } = renderProvider();
 
     await act(async () => {
-      await result.current.workspace.mount('/scratch', { backend: 'memory', storageRootKey: 'memory:0' });
+      await result.current.workspace.mount('/scratch', {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: 'memory:0',
+      });
     });
     expect(mockMount).toHaveBeenCalledExactlyOnceWith('/scratch', {
+      class: 'authored',
       backend: 'memory',
       storageRootKey: 'memory:0',
     });
@@ -527,25 +611,54 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(startPolling).toHaveBeenCalledOnce();
   });
 
-  it('routes createDirectory through the project content facade with an absolute project path', async () => {
+  /* Charter D12: the project content facade writes on the project's own rooted
+   * connection, so the call arrives in the view's namespace, not the
+   * authority's. */
+  it('routes createDirectory through the project content facade in the view namespace', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
       await result.current.createDirectory('newfolder', { recursive: true });
     });
 
-    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('/projects/root/newfolder', { recursive: true });
+    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('newfolder', { recursive: true });
     expect(mockProxyWriteFile).not.toHaveBeenCalled();
   });
 
-  it('routes deleteDirectory through the project content facade with an absolute project path', async () => {
+  it('routes deleteDirectory through the project content facade in the view namespace', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
       await result.current.deleteDirectory('subtree', { recursive: true });
     });
 
-    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('/projects/root/subtree', { recursive: true });
+    /* `{ recursive: true }` has to survive the view too, or a folder delete from
+     * the Files pane answers ENOTEMPTY. */
+    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('subtree', { recursive: true });
+  });
+
+  /*
+   * A1 review R1: the Files pane's own facade must get the view's answer. The
+   * authority has never heard of an overlay path, so asking it yields
+   * `NOT_FOUND` where the row is really read-only, and a move onto a bundle
+   * silently shadows the whole unit (V8).
+   */
+  it('refuses a Files-pane delete of a system skill file as read-only, without asking the authority', async () => {
+    const { result } = renderProvider();
+
+    await expect(result.current.canDelete('.agents/skills/demo/SKILL.md')).resolves.toMatchObject({
+      code: 'READ_ONLY_MOUNT',
+    });
+    expect(mockProxyCanDelete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a Files-pane move of a project file onto a system skill path', async () => {
+    const { result } = renderProvider();
+
+    await expect(result.current.moveFile('main.ts', '.agents/skills/demo/SKILL.md')).rejects.toMatchObject({
+      code: 'EROFS',
+    });
+    expect(mockProxyMove).not.toHaveBeenCalled();
   });
 
   it('rotates the opaque runtime filesystem when replacement services become authoritative', async () => {

@@ -14,7 +14,7 @@ export type PendingProjectStorage =
       /**
        * Absolute host directory of the node root, absent for Home — the same
        * optional discriminator the durable `ProjectFileSystemConfig` node arm
-       * carries, so `pendingStorageToConfig` stays a spread.
+       * carries.
        */
       readonly backend: 'node';
       readonly path?: string;
@@ -31,8 +31,15 @@ export type PendingCreateProjectOperation = PendingProjectStorage & {
   readonly kind: 'create';
   readonly manifest: ProjectManifest;
   readonly library: ProjectLibraryState;
-  readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
-  readonly chat: Chat;
+  readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>;
+  /** Absent when the project is created without one (W18 DEF-2, review R5). */
+  readonly chat?: Chat;
+  /**
+   * The composer directory the chat's attachment references are copied from
+   * on resume. Absent means the Home composer's, which is what every
+   * operation persisted before this field existed referenced.
+   */
+  readonly attachmentSource?: string;
   readonly editorState: EditorState;
 };
 
@@ -43,7 +50,7 @@ export type PendingDuplicateProjectOperation = PendingProjectStorage & {
   readonly manifest: ProjectManifest;
   readonly library: ProjectLibraryState;
   /** Stable source snapshot captured before the durable operation is created. */
-  readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
+  readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>;
   readonly chats: readonly Chat[];
   readonly editorState?: EditorState;
 };

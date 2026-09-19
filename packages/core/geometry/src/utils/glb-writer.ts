@@ -43,7 +43,11 @@ export type GlbPrimitive = {
   mode: number;
   positions: Float32Array;
   normals?: Float32Array;
-  indices: Uint32Array;
+  /**
+   * Triangle or line indices. Omit them for a de-indexed soup: glTF draws arrays when a primitive
+   * has no `indices`, so an identity buffer only costs four bytes per vertex and an accessor.
+   */
+  indices?: Uint32Array;
   material: GlbMaterial;
   extras?: JSONObject;
   extensions?: Record<string, JSONObject>;
@@ -170,7 +174,7 @@ type GltfJsonPrimitive = {
   attributes: Record<string, number>;
   mode: number;
   material: number;
-  indices: number;
+  indices?: number;
   extras?: JSONObject;
   extensions?: Record<string, JSONObject>;
 };
@@ -225,6 +229,18 @@ const arraysEqual = (left: Float32Array | undefined, right: Float32Array | undef
   left === right ||
   (left?.length === right?.length && left?.every((value, index) => value === right?.[index]) === true);
 
+/**
+ * The indices a manifold node's primitive contributes to the shared render stream.
+ *
+ * The manifold extension needs one contiguous index buffer covering every primitive, so a
+ * de-indexed primitive is materialised here — the one place the identity buffer earns its bytes.
+ *
+ * @param primitive - The primitive to read.
+ * @returns Its indices, or the identity permutation over its vertices.
+ */
+const manifoldIndices = (primitive: GlbPrimitive): Uint32Array =>
+  primitive.indices ?? Uint32Array.from({ length: primitive.positions.length / 3 }, (_unused, index) => index);
+
 const validateManifoldTopology = (node: GlbNode): ValidatedManifoldTopology => {
   const topology = node.manifoldTopology!;
   const first = node.primitives[0];
@@ -236,7 +252,7 @@ const validateManifoldTopology = (node: GlbNode): ValidatedManifoldTopology => {
     first.positions.length % 3 !== 0 ||
     first.positions.some((value) => !Number.isFinite(value)) ||
     (first.normals?.length ?? first.positions.length) !== first.positions.length ||
-    node.primitives.some((primitive) => primitive.indices.length % 3 !== 0)
+    node.primitives.some((primitive) => manifoldIndices(primitive).length % 3 !== 0)
   ) {
     throw new Error('manifoldTopology requires complete finite triangle attributes and indices');
   }
@@ -250,12 +266,13 @@ const validateManifoldTopology = (node: GlbNode): ValidatedManifoldTopology => {
   }
 
   const renderIndices = new Uint32Array(
-    node.primitives.reduce((count, primitive) => count + primitive.indices.length, 0),
+    node.primitives.reduce((count, primitive) => count + manifoldIndices(primitive).length, 0),
   );
   let offset = 0;
   for (const primitive of node.primitives) {
-    renderIndices.set(primitive.indices, offset);
-    offset += primitive.indices.length;
+    const indices = manifoldIndices(primitive);
+    renderIndices.set(indices, offset);
+    offset += indices.length;
   }
   if (topology.indices.length !== renderIndices.length || topology.indices.length % 3 !== 0) {
     throw new Error('manifoldTopology and render index streams must contain the same complete triangles');
@@ -476,14 +493,15 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
       let indexOffset = 0;
       for (const primitive of node.primitives) {
         const indexAccessorIndex = accessors.length;
+        const indexCount = manifoldIndices(primitive).length;
         accessors.push({
           bufferView: indexViewIndex,
           byteOffset: indexOffset * Uint32Array.BYTES_PER_ELEMENT,
           componentType: componentTypeUnsignedInt,
-          count: primitive.indices.length,
+          count: indexCount,
           type: 'SCALAR',
         });
-        indexOffset += primitive.indices.length;
+        indexOffset += indexCount;
         primitiveJsons.push({
           attributes,
           mode: primitive.mode,
@@ -570,21 +588,24 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
         attributes['NORMAL'] = normalAccessorIndex;
       }
 
-      const indexViewIndex = addBufferView(primitive.indices, targetElementArrayBuffer);
-      const indexAccessorIndex = accessors.length;
-      accessors.push({
-        bufferView: indexViewIndex,
-        byteOffset: 0,
-        componentType: componentTypeUnsignedInt,
-        count: primitive.indices.length,
-        type: 'SCALAR',
-      });
+      let indexAccessorIndex: number | undefined;
+      if (primitive.indices !== undefined && primitive.indices.length > 0) {
+        const indexViewIndex = addBufferView(primitive.indices, targetElementArrayBuffer);
+        indexAccessorIndex = accessors.length;
+        accessors.push({
+          bufferView: indexViewIndex,
+          byteOffset: 0,
+          componentType: componentTypeUnsignedInt,
+          count: primitive.indices.length,
+          type: 'SCALAR',
+        });
+      }
 
       primitiveJsons.push({
         attributes,
         mode: primitive.mode,
         material: materialIndex,
-        indices: indexAccessorIndex,
+        ...(indexAccessorIndex === undefined ? {} : { indices: indexAccessorIndex }),
         ...(primitive.extras ? { extras: primitive.extras } : {}),
         ...(primitive.extensions ? { extensions: primitive.extensions } : {}),
       });

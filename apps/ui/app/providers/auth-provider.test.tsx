@@ -1,19 +1,30 @@
 // @vitest-environment jsdom
 
+// oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthConfigLink, DesktopAuthBridge, desktopAuthAction } from '#providers/auth-provider.js';
+import {
+  AnonymousSessionPurge,
+  AuthConfigLink,
+  DesktopAuthBridge,
+  desktopAuthAction,
+} from '#providers/auth-provider.js';
 import type { TauDesktopAuthBridge } from '#providers/auth-provider.js';
+import { FinancialSessionProvider } from '#providers/financial-session-provider.js';
 
 const mocks = vi.hoisted(() => ({
-  notify: vi.fn(),
   routerLink: vi.fn(),
+  resolvedAuth: vi.fn(() => 'indeterminate' as 'authed' | 'anonymous' | 'indeterminate'),
+  purgeSavedUsage: vi.fn(async () => undefined),
 }));
 const { routerLink } = mocks;
+
+vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: mocks.resolvedAuth }));
+vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: mocks.purgeSavedUsage }));
 
 vi.mock('react-router', () => ({
   Link: ({ to, children, ...rest }: { readonly to: string } & React.ComponentProps<'a'>) => {
@@ -28,7 +39,7 @@ vi.mock('react-router', () => ({
 }));
 
 vi.mock('#lib/auth-client.js', () => ({
-  authClient: { $store: { notify: mocks.notify } },
+  authClient: {},
 }));
 
 const createBridge = () => {
@@ -53,7 +64,9 @@ const createBridge = () => {
 const renderBridge = (queryClient: QueryClient): ReturnType<typeof render> =>
   render(
     <QueryClientProvider client={queryClient}>
-      <DesktopAuthBridge />
+      <FinancialSessionProvider>
+        <DesktopAuthBridge />
+      </FinancialSessionProvider>
     </QueryClientProvider>,
   );
 
@@ -72,16 +85,17 @@ describe('DesktopAuthBridge', () => {
     delete globalThis.window.tauAuth;
   });
 
-  it('invalidates both session caches when the desktop shell reports an auth change', () => {
+  it('invalidates the shared session cache when the desktop shell reports an auth change', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { bridge, emit } = createBridge();
     globalThis.window.tauAuth = bridge;
+    queryClient.setQueryData(['billing', 'credits'], { stale: true });
 
     renderBridge(queryClient);
     emit();
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['auth'] });
-    expect(mocks.notify).toHaveBeenCalledWith('$sessionSignal');
+    expect(queryClient.getQueryData(['billing', 'credits'])).toBeUndefined();
   });
 
   it('unsubscribes from the shell on unmount', () => {
@@ -110,15 +124,53 @@ describe('DesktopAuthBridge', () => {
     expect(() => renderBridge(queryClient)).not.toThrow();
   });
 
-  it('still refreshes the nanostore when mounted outside a QueryClientProvider', () => {
+  it('tolerates a focused mount outside a QueryClientProvider', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { bridge, emit } = createBridge();
     globalThis.window.tauAuth = bridge;
 
-    render(<DesktopAuthBridge />);
-    emit();
+    expect(() => {
+      render(<DesktopAuthBridge />);
+      emit();
+    }).not.toThrow();
+  });
+});
 
-    expect(mocks.notify).toHaveBeenCalledWith('$sessionSignal');
+describe('AnonymousSessionPurge', () => {
+  const renderPurge = (queryClient: QueryClient): void => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <FinancialSessionProvider>
+          <AnonymousSessionPurge />
+        </FinancialSessionProvider>
+      </QueryClientProvider>,
+    );
+  };
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('clears the local billing selection on a confirmed anonymous session', () => {
+    mocks.resolvedAuth.mockReturnValue('anonymous');
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['billing', 'usage'], { snapshot: 'old' });
+
+    renderPurge(queryClient);
+
+    expect(queryClient.getQueryData(['billing', 'usage'])).toBeUndefined();
+    expect(mocks.purgeSavedUsage).toHaveBeenCalledWith(undefined);
+  });
+
+  it.each(['indeterminate', 'authed'] as const)('keeps saved usage while the session is %s', (resolved) => {
+    mocks.resolvedAuth.mockReturnValue(resolved);
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(['billing', 'usage'], { snapshot: 'kept' });
+
+    renderPurge(queryClient);
+
+    expect(queryClient.getQueryData(['billing', 'usage'])).toEqual({ snapshot: 'kept' });
+    expect(mocks.purgeSavedUsage).not.toHaveBeenCalled();
   });
 });
 
@@ -189,6 +241,15 @@ describe('AuthConfigLink', () => {
     await userEvent.click(screen.getByText('Sign out'));
 
     expect(bridge.signOut).toHaveBeenCalled();
+  });
+
+  it('never routes a shell-owned destination in-app when the desktop bridge is missing', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+
+    render(<AuthConfigLink href='/auth/sign-in'>Sign in</AuthConfigLink>);
+    await userEvent.click(screen.getByText('Sign in'));
+
+    expect(routerLink).not.toHaveBeenCalled();
   });
 
   it('renders an ordinary router link in the web build', () => {

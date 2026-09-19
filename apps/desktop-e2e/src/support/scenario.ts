@@ -1,6 +1,7 @@
 /* oxlint-disable no-await-in-loop -- UI steps are intentionally sequential. */
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import process from 'node:process';
+import { setTimeout } from 'node:timers/promises';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { expect } from 'vitest';
 import type { Locator, Page } from 'playwright';
@@ -12,17 +13,15 @@ import type { DesktopSession } from '#support/desktop-app.js';
  * Both tiers drive the same path — connect a folder, pick a kernel, pick a
  * model, submit a prompt — and differ only in which model runs and how tight
  * the assertions are afterwards. It is written against the desktop shell's own
- * affordances rather than `ui-e2e`'s cookie seeding, because `app://` is not a
- * cookieable scheme: `document.cookie` is refused
- * (`EXCLUDE_NONCOOKIEABLE_SCHEME`), so every `useCookie` preference — kernel,
- * chat model, cookie consent — has to be set by clicking.
+ * affordances rather than `ui-e2e`'s cookie seeding. Desktop product
+ * preferences are localStorage-backed and its renderer is cookie-free.
  */
 
 const composerSelector = '[aria-label="Ask Tau to build anything..."]';
 
 /**
  * Vitest's `expect` carries no Playwright matchers (`toBeVisible` and friends
- * ship with `@playwright/test`, which this suite does not use). Two helpers
+ * ship with the separate Playwright test runner, which this suite does not use). Two helpers
  * over `locator.waitFor` and `expect.poll` cover everything the specs assert.
  */
 export const expectVisible = async (locator: Locator, timeout = 30_000): Promise<void> => {
@@ -46,15 +45,20 @@ const filesPaneOf = (page: Page): Locator => page.getByRole('region', { name: /^
 export const fileTreeItemOf = (page: Page, path: string): Locator =>
   filesPaneOf(page).locator(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
 
-/** Dismiss the cookie banner if it is up. Declining is the privacy-preserving option. */
-export const declineCookieBanner = async (page: Page): Promise<void> => {
-  const decline = page.getByRole('button', { name: /^Decline$/iu });
-  try {
-    await decline.first().waitFor({ state: 'visible', timeout: 3000 });
-    await decline.first().click();
-  } catch {
-    // Consent was already recorded or Global Privacy Control dismissed it.
-  }
+/** Proves a fresh Electron profile contains no website privacy or footer surface. */
+export const expectDesktopSurfaceBoundary = async (session: DesktopSession): Promise<void> => {
+  const { page } = session;
+  await expectCount(page.getByRole('button', { name: /^Decline$/iu }), 0);
+  await expectCount(page.locator('footer'), 0);
+  await expectCount(page.getByRole('link', { name: /^(?:Cookies|Legal)$/iu }), 0);
+  expect(await page.evaluate(() => document.cookie)).toBe('');
+  expect(await page.context().cookies()).toEqual([]);
+  expectNoDesktopAnalytics(session);
+};
+
+/** Desktop never sends analytics; the recorder has run since launch. Call again at scenario end. */
+export const expectNoDesktopAnalytics = (session: DesktopSession): void => {
+  expect(session.analyticsRequests).toEqual([]);
 };
 
 /** Assert the shell resolved the seeded credential into a real session. */
@@ -104,6 +108,23 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
   await parkPointer(page);
   await composerOf(page).click();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Slash' : 'Control+Slash');
+  /* A cloud-enabled build renders the credit estimate inside the option, so
+   * its accessible name is "Haiku 4.5 ≈ 30.84 credits": match the name as a
+   * whole leading word, not the exact string. */
+  const escaped = modelName.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+  await page
+    .getByRole('option', { name: new RegExp(String.raw`^${escaped}(?:\s|$)`, 'u') })
+    .first()
+    .click();
+};
+
+/** Select a model from the active external agent's own model namespace. */
+export const selectAgentModel = async (page: Page, modelName: string): Promise<void> => {
+  await parkPointer(page);
+  await page
+    .getByRole('button', { name: /^Select model \(/u })
+    .first()
+    .click();
   await page.getByRole('option', { name: modelName, exact: true }).first().click();
 };
 
@@ -117,12 +138,16 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
 export const parkPointer = async (page: Page): Promise<void> => {
   await page.mouse.move(4, 4);
   await page.keyboard.press('Escape');
-  await expectCount(page.locator('[data-radix-popper-content-wrapper]'), 0, 15_000);
+  await expectCount(
+    page.locator('[data-radix-popper-content-wrapper]:not(:has([data-slot="tooltip-content"]))'),
+    0,
+    15_000,
+  );
 };
 
 /** Choose the CAD kernel from the home page's kernel row. */
 export const selectKernel = async (page: Page, kernelName: string): Promise<void> => {
-  await page.getByRole('button', { name: kernelName, exact: true }).click();
+  await page.getByRole('button', { name: kernelName, exact: true }).first().click();
   await parkPointer(page);
 };
 
@@ -137,6 +162,11 @@ export const selectKernel = async (page: Page, kernelName: string): Promise<void
  */
 export const sendPrompt = async (page: Page, prompt: string): Promise<void> => {
   await parkPointer(page);
+  /* A chat refuses a message while its run is in flight ("Stop it before
+   * sending another message"), and a run stays in flight until the host has
+   * recorded its revision — longer than the bytes its tools wrote take to land
+   * on disk, which is what most callers just waited for. */
+  await expectCount(stopButtonOf(page), 0, 120_000);
   const composer = composerOf(page);
   await composer.click();
   await composer.fill(prompt);
@@ -162,14 +192,18 @@ export const submitPrompt = async (page: Page, prompt: string): Promise<string> 
  * and only paid latency for it — 60 s per home-composer submit, since the home
  * page never renders a stop button at all.
  */
-export const cancelRun = async (page: Page): Promise<void> => {
-  await stopButtonOf(page)
-    .waitFor({ state: 'visible', timeout: 15_000 })
-    .catch(() => undefined);
-  if ((await stopButtonOf(page).count()) > 0) {
-    await stopButtonOf(page).click();
+export const cancelRun = async (page: Page, settled?: () => boolean): Promise<void> => {
+  /* Strict where it can be: a live run must render its stop button, so a moved
+   * selector fails here instead of turning this cancel and `sendPrompt`'s
+   * idle-wait into silent no-ops (6-review C3). A turn this short can also
+   * settle before the button ever renders (desktop-chat-in-project.spec.ts),
+   * so the caller's own completion signal is the other way out (7-review M1). */
+  const stop = stopButtonOf(page);
+  await expect.poll(async () => settled?.() === true || (await stop.count()) > 0, { timeout: 15_000 }).toBe(true);
+  if (settled?.() !== true && (await stop.count()) > 0) {
+    await stop.click();
   }
-  await expectCount(stopButtonOf(page), 0, 120_000);
+  await expectCount(stop, 0, 120_000);
 };
 
 /**
@@ -185,7 +219,7 @@ export const cancelRun = async (page: Page): Promise<void> => {
  * here rather than passing quietly.
  *
  * @param logPath - `<userData>/logs/desktop.log`.
- * @returns The resolved engine version, e.g. `0.11.0-beta.3`.
+ * @returns The resolved engine version, e.g. `0.11.0-beta.4`.
  */
 export const expectNativeKernelEngine = async (logPath: string): Promise<string> => {
   let engine: { readonly native?: boolean; readonly backend?: string; readonly version?: string } | undefined;
@@ -276,9 +310,137 @@ export const expectGeometryFramed = async (page: Page): Promise<void> => {
   }
 };
 
+/**
+ * One page-wide render-lifecycle sample: whether any viewer is busy, and how
+ * many busy → idle transitions the counter has recorded since it was installed.
+ */
+const renderCycleState = async (page: Page): Promise<{ readonly busy: boolean; readonly completed: number }> =>
+  page.evaluate(() => {
+    const scope = globalThis as typeof globalThis & {
+      __tauRenderCycles?: { busy: boolean; completed: number };
+    };
+    const installed = scope.__tauRenderCycles;
+    if (installed) {
+      return { busy: installed.busy, completed: installed.completed };
+    }
+
+    /* `ChatViewerStatus` renders the CAD machine's own loading phase — and
+     * nothing else — as `<span>{phase}...</span>`, one per open viewer pane. */
+    const isBusy = (): boolean =>
+      [...document.querySelectorAll('span')].some((element) =>
+        /^(?:buffering|connecting|rendering)\.\.\.$/u.test(element.textContent.trim().toLowerCase()),
+      );
+    const state = { busy: isBusy(), completed: 0 };
+    const observer = new MutationObserver(() => {
+      const busy = isBusy();
+      if (busy === state.busy) {
+        return;
+      }
+      state.busy = busy;
+      if (!busy) {
+        state.completed += 1;
+      }
+    });
+    observer.observe(document.body, { characterData: true, childList: true, subtree: true });
+    scope.__tauRenderCycles = state;
+    return { busy: state.busy, completed: state.completed };
+  });
+
+/**
+ * Snapshot the viewer's completed render count, once nothing is rendering.
+ *
+ * Pair it with {@link expectRenderCycleSince} around a write: the pair replaces
+ * the `.tau/cache/compute/v1` action-digest snapshot both packaged specs used
+ * to poll. 5608f5051 deleted that CAS along with `createRetainedSceneStore`,
+ * and `createProjectComputeStores` has had no product caller since, so those
+ * polls could only ever run out their timeout.
+ *
+ * The surviving witness is the CAD machine's own lifecycle: `buffering`,
+ * `connecting` and `rendering` are tagged `cad-loading`
+ * (`apps/ui/app/machines/cad.machine.ts:675`, `:793`, `:841`), and
+ * `ChatViewerStatus` paints that phase into the DOM
+ * (`apps/ui/app/routes/w.$workspace.$project/chat-viewer-status.tsx:22-34`). A
+ * watcher-driven re-render therefore takes the page busy and back to idle
+ * exactly once. A `MutationObserver` records that transition even when it is
+ * shorter than a poll interval, which a plain locator poll cannot do — the same
+ * technique `desktop-build123d.spec.ts` already uses for PicoGK's multi-step
+ * lifecycle row.
+ *
+ * @param page - The renderer.
+ * @param timeout - How long the viewer may stay busy before the snapshot fails.
+ * @returns The completed render count to pass to {@link expectRenderCycleSince}.
+ */
+export const renderCycleCount = async (page: Page, timeout = 120_000): Promise<number> => {
+  let completed = 0;
+  await expect
+    .poll(
+      async () => {
+        const state = await renderCycleState(page);
+        completed = state.completed;
+        return state.busy;
+      },
+      { timeout },
+    )
+    .toBe(false);
+  return completed;
+};
+
+/**
+ * Wait until the viewer has completed a further render cycle.
+ *
+ * A barrier, not a content assertion: it proves the bytes the caller just wrote
+ * reached the kernel and settled, so the row's own witness — an export's
+ * geometry, the Parameters pane, the absence of a runtime error — reads the new
+ * render rather than the previous one.
+ *
+ * @param page - The renderer.
+ * @param before - The count {@link renderCycleCount} returned before the write.
+ * @param timeout - How long the render may take.
+ * @returns Nothing.
+ */
+export const expectRenderCycleSince = async (page: Page, before: number, timeout = 120_000): Promise<void> => {
+  await expect
+    .poll(
+      async () => {
+        const state = await renderCycleState(page);
+        return state.completed;
+      },
+      { timeout },
+    )
+    .toBeGreaterThan(before);
+};
+
 /** Wait for the run to finish — the stop button is the liveness signal. */
 export const waitForRunToSettle = async (page: Page, settleTimeout: number): Promise<void> => {
   await expectCount(stopButtonOf(page), 0, settleTimeout);
+};
+
+/** How long a source file may take to appear before the wait is a failure. */
+const waitForProjectTimeout = 180_000;
+/**
+ * How long the route is allowed to settle before an empty transcript counts as
+ * evidence. The shell renders the seeded turn's own user message within a
+ * second or two of the navigation; anything still empty this late is not
+ * mid-render.
+ */
+const lostSeedGrace = 30_000;
+
+/**
+ * Whether the composer holds a prompt that no message in the transcript answers.
+ *
+ * The signature of a seeded first turn the shell dropped: the loader restored
+ * the prompt as a draft and no run was ever dispatched, so waiting out the full
+ * {@link waitForProjectTimeout} only delays the same failure.
+ *
+ * @param page - The renderer.
+ * @returns True when the transcript is empty and the composer is not.
+ */
+const seedIsBackInComposer = async (page: Page): Promise<boolean> => {
+  const composer = composerOf(page);
+  if ((await page.locator('article').count()) > 0 || (await composer.count()) === 0) {
+    return false;
+  }
+  return ((await composer.textContent({ timeout: 5000 })) ?? '').trim() !== '';
 };
 
 /**
@@ -291,6 +453,9 @@ export const waitForRunToSettle = async (page: Page, settleTimeout: number): Pro
  * @param slug - The project slug taken from the URL.
  * @param options - What counts as the source.
  * @param options.extension - The source extension the kernel owns.
+ * @param options.page - The renderer, when the caller drives a seeded first
+ * turn. With it, a turn the shell dropped is reported the moment it is
+ * diagnosable instead of at the 180 s timeout.
  * @param options.writtenAfter - Milliseconds (`mtimeMs`). Only a source last
  * written after this instant counts. Pass the seed's mtime when the turn
  * under test follows a seeded one, so the seed's own bytes cannot satisfy the
@@ -301,9 +466,9 @@ export const waitForRunToSettle = async (page: Page, settleTimeout: number): Pro
 export const waitForProjectOnDisk = async (
   directory: string,
   slug: string,
-  options: { readonly extension: string; readonly writtenAfter?: number },
+  options: { readonly extension: string; readonly page?: Page; readonly writtenAfter?: number },
 ): Promise<string> => {
-  const { extension, writtenAfter = Number.NEGATIVE_INFINITY } = options;
+  const { extension, page, writtenAfter = Number.NEGATIVE_INFINITY } = options;
   const projectRoot = join(directory, slug);
   const isFreshSource = (entry: string): boolean => {
     if (!entry.endsWith(extension)) {
@@ -312,21 +477,33 @@ export const waitForProjectOnDisk = async (
     const stat = statSync(join(projectRoot, entry));
     return stat.size > 0 && stat.mtimeMs > writtenAfter;
   };
-  let found: string | undefined;
-  await expect
-    .poll(
-      () => {
-        /* Non-empty, not merely present: project creation scaffolds a
-         * zero-byte source file and the chat's `create_file` tool fills it
-         * afterwards, so an existence check passes ~2 s after submit and
-         * proves nothing about the run. */
-        found = existsSync(projectRoot) ? readdirSync(projectRoot).find((entry) => isFreshSource(entry)) : undefined;
-        return found;
-      },
-      { timeout: 180_000 },
-    )
-    .toBeDefined();
-  return join(projectRoot, found!);
+  /* Non-empty, not merely present: project creation scaffolds a zero-byte
+   * source file and the chat's `create_file` tool fills it afterwards, so an
+   * existence check passes ~2 s after submit and proves nothing about the run. */
+  const freshSource = (): string | undefined =>
+    existsSync(projectRoot) ? readdirSync(projectRoot).find((entry) => isFreshSource(entry)) : undefined;
+  /* Hand-rolled rather than `expect.poll`: the poll retries a callback that
+   * throws until its own timeout, so the diagnosis below could never cut the
+   * wait short from inside one. */
+  const deadline = Date.now() + waitForProjectTimeout;
+  const diagnoseAfter = Date.now() + lostSeedGrace;
+  for (;;) {
+    const found = freshSource();
+    if (found !== undefined) {
+      return join(projectRoot, found);
+    }
+    if (page !== undefined && Date.now() > diagnoseAfter && (await seedIsBackInComposer(page))) {
+      throw new Error(
+        `The seeded turn was lost: the transcript is empty and the prompt is back in the composer, so no ${extension} source will ever reach ${projectRoot}.`,
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `No non-empty ${extension} source appeared in ${projectRoot} within ${String(waitForProjectTimeout / 1000)} s.`,
+      );
+    }
+    await setTimeout(250);
+  }
 };
 
 /**
@@ -370,7 +547,14 @@ export const expectModelBuilt = async (options: {
    * render ride on top of that here. */
   await expectVisible(page.getByText(finalText, { exact: true }), 420_000);
 
-  await expectCount(page.getByText('Current', { exact: true }), 1, 60_000);
+  /* The turn's own revision marker, not `Current`: 75b24eef3 replaced the full
+   * `RevisionMarker` in the transcript with the compact `ChatRevisionMarker`,
+   * whose only "Current" lives inside a `CollapsibleContent` that is closed —
+   * and therefore unmounted — by default. The live region is the part that is
+   * always rendered (`chat-revision-marker.tsx:246-253`). */
+  const turnMarker = page.getByRole('status', { name: 'Turn revision status' }).last();
+  await expectVisible(turnMarker, 60_000);
+  await expect.poll(async () => (await turnMarker.textContent()) ?? '', { timeout: 60_000 }).toMatch(/^Rev \d+ saved/u);
   await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
   await expectCount(page.getByText('File not found', { exact: true }), 0);
   await expectCount(page.getByRole('status', { name: 'Waiting for geometry' }), 0, 120_000);
@@ -385,136 +569,98 @@ export const expectModelBuilt = async (options: {
   console.info(`[desktop-e2e] kernel engine: ${engineVersion}`);
 };
 
-type ComputeCacheEntry = {
-  readonly actionDigest: string;
-  readonly codecId: string;
-  readonly contentDigest: string;
-};
-
-const computeCacheEntries = (sourcePath: string): readonly ComputeCacheEntry[] => {
-  const root = join(dirname(sourcePath), '.tau/cache/compute/v1/actions/sha256');
-  if (!existsSync(root)) {
-    return [];
-  }
-
-  const entries: ComputeCacheEntry[] = [];
-  const pending = [root];
-  while (pending.length > 0) {
-    const directory = pending.pop();
-    if (!directory) {
-      continue;
-    }
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        pending.push(path);
-        continue;
-      }
-      if (!entry.name.endsWith('.json')) {
-        continue;
-      }
-      try {
-        const record: unknown = JSON.parse(readFileSync(path, 'utf8'));
-        if (
-          typeof record === 'object' &&
-          record !== null &&
-          'actionDigest' in record &&
-          typeof record.actionDigest === 'string' &&
-          'codec' in record &&
-          typeof record.codec === 'object' &&
-          record.codec !== null &&
-          'id' in record.codec &&
-          typeof record.codec.id === 'string' &&
-          'output' in record &&
-          typeof record.output === 'object' &&
-          record.output !== null &&
-          'digest' in record.output &&
-          typeof record.output.digest === 'string'
-        ) {
-          entries.push({
-            actionDigest: record.actionDigest,
-            codecId: record.codec.id,
-            contentDigest: record.output.digest,
-          });
-        }
-      } catch {
-        // Atomic CAS publication can leave a temporary file visible for one poll.
-      }
-    }
-  }
-  return entries;
-};
-
-/** Read the immutable geometry action records published by the project compute CAS. */
-export const geometryCacheEntries = (sourcePath: string): readonly ComputeCacheEntry[] =>
-  computeCacheEntries(sourcePath).filter(({ codecId }) => codecId.startsWith('@taucad/middleware/geometry-'));
-
-const computeContentPath = (sourcePath: string, digest: string): string => {
-  const hexadecimal = digest.slice('sha256:'.length);
-  return join(dirname(sourcePath), '.tau/cache/compute/v1/blobs/sha256', hexadecimal.slice(0, 2), hexadecimal.slice(2));
-};
-
-/** Read validated parameter-result blobs published by the project compute CAS. */
-export const parameterCacheContents = (sourcePath: string): readonly string[] =>
-  computeCacheEntries(sourcePath)
-    .filter(({ codecId }) => codecId === '@taucad/middleware/parameters')
-    .flatMap(({ contentDigest }) => {
-      const path = computeContentPath(sourcePath, contentDigest);
-      return existsSync(path) ? [readFileSync(path, 'utf8')] : [];
-    });
-
 /**
- * Snapshot the kernel's geometry cache before an external write.
+ * Assert the kernel re-parsed the bytes an external writer just put on disk.
  *
- * A re-render is only provable against a "before": the viewer can be framed
- * from the *previous* geometry, so framing alone does not witness that the new
- * bytes were rendered.
+ * The witness is the Parameters pane. Its inputs are built from the kernel's own
+ * customizer parse of the file the utility watches through
+ * `fromNodeFs(projectRoot)`, so a declaration that exists *only* in the new
+ * bytes cannot be listed unless that write crossed the shell's second watcher
+ * and reached the kernel (charter acceptance 5, "two authorities, one disk").
+ * Pair it with {@link expectGeometryFramed}, which covers the render half — the
+ * viewer can be framed from the previous geometry, so framing alone proves
+ * nothing about the new bytes.
  *
- * @param sourcePath - The project source about to be rewritten.
- * @returns The immutable geometry action digests present before the write.
- */
-export const geometryCacheSnapshot = (sourcePath: string): ReadonlySet<string> =>
-  new Set(geometryCacheEntries(sourcePath).map(({ actionDigest }) => actionDigest));
-
-/**
- * Assert the kernel utility re-parsed **and** re-rendered the bytes an
- * external writer just put on disk.
- *
- * Both witnesses are the kernel's own disk artifacts, written by the utility
- * process through `fromNodeFs(projectRoot)` — so they exist only if the write
- * crossed the shell's second watcher and reached the kernel (charter
- * acceptance 5, "two authorities, one disk"):
- *
- * - `parameterCache()` publishes the resolved parse into the compute CAS, so
- *   a referenced content blob naming a declaration that exists only in the
- *   new bytes cannot come from the old ones.
- * - `geometryCache()` publishes a validated geometry action record into
- *   `.tau/cache/compute/v1`, so an action digest absent from `before` proves
- *   that the new dependency identity reached the render pipeline.
+ * The two previous witnesses read `.tau/cache/compute/v1`. 5608f5051 deleted
+ * that CAS from the product along with `createRetainedSceneStore`, and
+ * `createProjectComputeStores` has had no product caller since, so both polls
+ * could only ever run out their timeout.
  *
  * `.tau/parameters/<source>.json` is deliberately **not** the witness: that
  * file is the renderer's parameter *value* store (`{activeGroup, groups}`),
  * written only when a user changes a value, and never carries the source's
  * declarations.
  *
- * @param sourcePath - The project source that was rewritten.
- * @param token - A declaration present only in the new bytes.
- * @param before - The geometry cache snapshot taken before the write.
+ * @param page - The renderer.
+ * @param parameterLabel - The pane's label for a declaration present only in the
+ *   new bytes, in `formatDisplayLabel` casing (`tauSmokeDepth` reads as
+ *   `Tau Smoke Depth`).
  * @returns Nothing.
  */
-export const expectKernelReparsed = async (
-  sourcePath: string,
-  token: string,
-  before: ReadonlySet<string>,
-): Promise<void> => {
+export const expectKernelReparsed = async (page: Page, parameterLabel: string): Promise<void> => {
+  await page
+    .getByRole('button', { name: /Search/u })
+    .first()
+    .click();
+  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open parameters');
+  await page.getByText('Open parameters', { exact: true }).first().click();
+  /* 60 s, not the usual 180: a watched re-parse either lands within a few
+   * seconds or the write never reached the kernel at all. */
+  await expectVisible(page.getByLabel(`Input for ${parameterLabel}`).first(), 60_000);
+};
+
+/** The chat id the project route carries, which names the durable log's directory. */
+export const activeChatId = (page: Page): string => {
+  const url = page.url();
+  const chatId = new URL(url).searchParams.get('chat');
+  expect(chatId, `the project route carries no chat id: ${url}`).toBeTruthy();
+  return chatId!;
+};
+
+/**
+ * The two witnesses that a turn ran in launcher 2 — the services utility.
+ *
+ * Every desktop turn is launcher 2 since D18 removed the browser placement row,
+ * so every chat spec is entitled to this, not just the launcher spec:
+ *
+ * - `services.agent-host-served` is written inside the process that ran the
+ *   agent, so the renderer cannot produce it.
+ * - the durable log is on real disk under the project root; a browser-host turn
+ *   would leave its runs in OPFS or IndexedDB instead.
+ *
+ * @param logPath - The shell's rotating diagnostics log.
+ * @param projectRoot - The project's absolute directory.
+ * @param chatId - The chat whose durable log must exist.
+ * @returns Nothing.
+ */
+export const expectLauncher2Turn = async (logPath: string, projectRoot: string, chatId: string): Promise<void> => {
   await expect
-    /* 60 s, not the usual 180: a watched re-parse either lands within a few
-     * seconds or the write never reached the kernel at all. */
-    .poll(() => parameterCacheContents(sourcePath).some((content) => content.includes(token)), { timeout: 60_000 })
-    .toBe(true);
-  await expect
-    .poll(() => geometryCacheEntries(sourcePath).some(({ actionDigest }) => !before.has(actionDigest)), {
-      timeout: 60_000,
-    })
-    .toBe(true);
+    .poll(() => (existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''), { timeout: 180_000 })
+    .toContain('services.agent-host-served');
+  const eventsPath = join(projectRoot, '.tau/chats', chatId, 'events.jsonl');
+  await expect.poll(() => existsSync(eventsPath), { timeout: 180_000 }).toBe(true);
+  expect(readFileSync(eventsPath, 'utf8').trim().length).toBeGreaterThan(0);
+};
+
+/**
+ * Open the chat's execution picker and read back the rows it offers.
+ *
+ * {@link selectChatModel} picks a Tau model row by name; this one exists for the
+ * rows a *host* contributes — the external ACP agents, whose presence is the
+ * assertion rather than a step on the way to one.
+ *
+ * @param page - The desktop page.
+ * @returns Every option label the picker rendered, in order.
+ */
+export const openExecutionPicker = async (page: Page): Promise<readonly string[]> => {
+  await parkPointer(page);
+  /* The agent picker has its own trigger beside the composer; `Meta+Slash`
+   * opens the *model* picker, which only exists for a Tau execution. */
+  await page
+    .getByRole('button', { name: /^Select agent: /u })
+    .first()
+    .click();
+  const options = page.getByRole('option');
+  await expectVisible(options.first());
+  return options.allTextContents();
 };

@@ -6,7 +6,7 @@ import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { SearchInput } from '#components/search-input.js';
 import { HighlightText } from '#components/highlight-text.js';
 import {
@@ -30,6 +30,7 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import {
   PaneviewHeader,
@@ -390,7 +391,7 @@ function LiveComponentTree({
       (candidate) => candidate.dataset['modelComponentId'] === params.revealTarget?.componentId,
     );
     row?.scrollIntoView({ block: 'center' });
-  }, [params.query, params.revealTarget, unitId]);
+  }, [params.revealTarget, unitId]);
 
   if (!manifest || !root || childCount === 0) {
     return <ModelPaneviewPanelSurface />;
@@ -693,12 +694,15 @@ export function ComponentRow({
   const visibilityAction = getVisibilityAction({ isHidden, nodeName: node.name, unitId, componentId: node.id });
   const isolationAction = getIsolationAction({ isIsolated, nodeName: node.name, unitId, componentId: node.id });
   const VisibilityIcon = visibilityAction.Icon;
-  const actionButtonClassName = cn(
-    'flex size-5 items-center justify-center rounded-md opacity-0 transition-[opacity,color,background-color] duration-150',
-    'hover:bg-muted-foreground/10 hover:text-foreground focus-visible:bg-muted-foreground/10 focus-visible:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-    'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:bg-muted-foreground/10 data-[state=open]:text-foreground data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none',
-    (isHovered || isIsolated) && 'opacity-100',
-  );
+  /* The sidebar row's action: 24 px with the nested-action tone (nested-action surfaces R5). */
+  const actionButtonClassName = nestedActionVariants({
+    className: cn(
+      'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color,background-color] duration-150',
+      'focus-visible:bg-nested-action-hover focus-visible:text-foreground focus-visible:opacity-100 focus-visible:focus-outline',
+      'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none',
+      (isHovered || isIsolated) && 'opacity-100',
+    ),
+  });
   const guideCount = Math.max(0, node.depth - rootDepth - 1);
 
   const onHover = (componentId: string | undefined): void => {
@@ -721,14 +725,15 @@ export function ComponentRow({
           data-model-component-unit-id={unitId}
           data-model-component-id={node.id}
           className={cn(
-            'group/part relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
-            'focus-within:bg-sidebar-accent/50 focus-within:text-sidebar-accent-foreground',
+            // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
+            'group/part relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5 transition-colors',
+            'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
             isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
             !isSelected && isFocused
               ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30'
               : undefined,
             !isSelected && !isFocused && isIsolated ? 'text-primary' : undefined,
-            !isSelected && !isFocused ? 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground' : undefined,
+            !isSelected && !isFocused ? 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground' : undefined,
             isHovered && !isSelected ? 'text-foreground' : undefined,
             isHidden ? 'opacity-45' : undefined,
           )}
@@ -754,7 +759,7 @@ export function ComponentRow({
           ))}
           <button
             type='button'
-            className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+            className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
             aria-label={node.name}
             aria-pressed={isSelected}
             onClick={toggleSelection}
@@ -832,15 +837,17 @@ export function ComponentRow({
 }
 
 function ExplorerEmptyState(): React.JSX.Element {
-  return <CollectionEmptyState>No model components available</CollectionEmptyState>;
-}
-
-function ExplorerUnavailableState(): React.JSX.Element {
   return (
-    <CollectionEmptyState className='min-h-16 break-all'>Open renderer to inspect components</CollectionEmptyState>
+    <div className='size-full p-2'>
+      <PanelEmptyState icon={Box} title='No model components available' className='rounded-xl border bg-card' />
+    </div>
   );
 }
 
+function ExplorerUnavailableState(): React.JSX.Element {
+  return <PanelEmptyState icon={Box} title='Open renderer to inspect components' className='min-h-16 break-all' />;
+}
+
 function ExplorerNoMatchesState(): React.JSX.Element {
-  return <CollectionEmptyState className='min-h-16 break-all'>No matching parts</CollectionEmptyState>;
+  return <PanelEmptyState icon={Box} title='No matching parts' className='min-h-16 break-all' />;
 }

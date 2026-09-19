@@ -3,8 +3,8 @@ import type { FileEntry } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import {
   parseAtReferences,
-  isTranscriptPath,
-  extractChatIdFromTranscriptPath,
+  isChatLogPath,
+  extractChatIdFromChatLogPath,
   resolveAtReference,
   buildPastedContent,
   parseSlashCommands,
@@ -70,11 +70,11 @@ describe('parseAtReferences', () => {
   });
 
   it('should handle transcript paths', () => {
-    const result = parseAtReferences('see @.tau/transcripts/abc-123.jsonl');
+    const result = parseAtReferences('see @.tau/chats/abc-123/events.jsonl');
 
     expect(result).toEqual([
       { type: 'text', value: 'see ' },
-      { type: 'reference', path: '.tau/transcripts/abc-123.jsonl' },
+      { type: 'reference', path: '.tau/chats/abc-123/events.jsonl' },
     ]);
   });
 
@@ -101,41 +101,41 @@ describe('parseAtReferences', () => {
   });
 });
 
-describe('isTranscriptPath', () => {
+describe('isChatLogPath', () => {
   it('should return true for valid transcript path', () => {
-    expect(isTranscriptPath('.tau/transcripts/abc-123.jsonl')).toBe(true);
+    expect(isChatLogPath('.tau/chats/abc-123/events.jsonl')).toBe(true);
   });
 
   it('should return true for UUID transcript path', () => {
-    expect(isTranscriptPath('.tau/transcripts/f16fe8d6-97a1-4246-bad2-ef9e55e86888.jsonl')).toBe(true);
+    expect(isChatLogPath('.tau/chats/f16fe8d6-97a1-4246-bad2-ef9e55e86888/events.jsonl')).toBe(true);
   });
 
   it('should return false for non-transcript path', () => {
-    expect(isTranscriptPath('src/app.ts')).toBe(false);
+    expect(isChatLogPath('src/app.ts')).toBe(false);
   });
 
   it('should return false for wrong extension', () => {
-    expect(isTranscriptPath('.tau/transcripts/abc-123.json')).toBe(false);
+    expect(isChatLogPath('.tau/chats/abc-123/events.json')).toBe(false);
   });
 
   it('should return false for wrong directory', () => {
-    expect(isTranscriptPath('.tau/skills/abc-123.jsonl')).toBe(false);
+    expect(isChatLogPath('.tau/skills/abc-123.jsonl')).toBe(false);
   });
 });
 
-describe('extractChatIdFromTranscriptPath', () => {
+describe('extractChatIdFromChatLogPath', () => {
   it('should extract chat ID from valid transcript path', () => {
-    expect(extractChatIdFromTranscriptPath('.tau/transcripts/abc-123.jsonl')).toBe('abc-123');
+    expect(extractChatIdFromChatLogPath('.tau/chats/abc-123/events.jsonl')).toBe('abc-123');
   });
 
   it('should extract UUID from transcript path', () => {
-    expect(extractChatIdFromTranscriptPath('.tau/transcripts/f16fe8d6-97a1-4246-bad2-ef9e55e86888.jsonl')).toBe(
+    expect(extractChatIdFromChatLogPath('.tau/chats/f16fe8d6-97a1-4246-bad2-ef9e55e86888/events.jsonl')).toBe(
       'f16fe8d6-97a1-4246-bad2-ef9e55e86888',
     );
   });
 
   it('should return undefined for non-transcript path', () => {
-    expect(extractChatIdFromTranscriptPath('src/app.ts')).toBeUndefined();
+    expect(extractChatIdFromChatLogPath('src/app.ts')).toBeUndefined();
   });
 });
 
@@ -201,11 +201,11 @@ describe('resolveAtReference', () => {
     const fileTree = createFileTree([]);
     const chatsById = createChatsById([{ id: 'chat-abc', name: 'My Discussion' }]);
 
-    const result = resolveAtReference('.tau/transcripts/chat-abc.jsonl', fileTree, chatsById);
+    const result = resolveAtReference('.tau/chats/chat-abc/events.jsonl', fileTree, chatsById);
 
     expect(result).toEqual({
       type: 'chat',
-      path: '.tau/transcripts/chat-abc.jsonl',
+      path: '.tau/chats/chat-abc/events.jsonl',
       displayName: 'My Discussion',
       chipType: 'chat',
       chatId: 'chat-abc',
@@ -223,14 +223,14 @@ describe('resolveAtReference', () => {
     const fileTree = createFileTree([]);
     const chatsById = createChatsById([]);
 
-    expect(resolveAtReference('.tau/transcripts/missing-id.jsonl', fileTree, chatsById)).toBeUndefined();
+    expect(resolveAtReference('.tau/chats/missing-id/events.jsonl', fileTree, chatsById)).toBeUndefined();
   });
 
   it('should prioritize transcript resolution over file tree for transcript paths', () => {
-    const fileTree = createFileTree([['.tau/transcripts/chat-1.jsonl', { name: 'chat-1.jsonl', type: 'file' }]]);
+    const fileTree = createFileTree([['.tau/chats/chat-1/events.jsonl', { name: 'chat-1.jsonl', type: 'file' }]]);
     const chatsById = createChatsById([{ id: 'chat-1', name: 'My Chat' }]);
 
-    const result = resolveAtReference('.tau/transcripts/chat-1.jsonl', fileTree, chatsById);
+    const result = resolveAtReference('.tau/chats/chat-1/events.jsonl', fileTree, chatsById);
 
     expect(result?.type).toBe('chat');
     expect(result?.displayName).toBe('My Chat');
@@ -292,11 +292,11 @@ describe('buildPastedContent', () => {
 
   it('should create chat chip for valid transcript reference', () => {
     const chats = createChats([{ id: 'c1', name: 'Design Review' }]);
-    const result = buildPastedContent('see @.tau/transcripts/c1.jsonl', { fileTree: new Map(), chats });
+    const result = buildPastedContent('see @.tau/chats/c1/events.jsonl', { fileTree: new Map(), chats });
 
     expect(result).toEqual([
       { type: 'text', value: 'see ' },
-      { type: 'chip', id: 'c1', label: 'Design Review', chipType: 'chat', path: '.tau/transcripts/c1.jsonl' },
+      { type: 'chip', id: 'c1', label: 'Design Review', chipType: 'chat', path: '.tau/chats/c1/events.jsonl' },
     ]);
   });
 

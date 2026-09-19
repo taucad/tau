@@ -7,6 +7,7 @@ import { PanelLeft } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { sidebarDefaultOpen } from '#constants/sidebar.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
@@ -38,7 +39,6 @@ const {
   useSidebar: useDesignSystemSidebar,
 } = DesignSystemSidebar;
 
-const sidebarDefaultOpen = true;
 const sidebarToggleKeyCombo = {
   key: 'b',
   modKey: true,
@@ -46,22 +46,27 @@ const sidebarToggleKeyCombo = {
 
 const useSidebar = useDesignSystemSidebar;
 
+const MobileSidebarRouteReset = () => {
+  const { isMobile, setOpenMobile } = useSidebar();
+  React.useEffect(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+
+  return null;
+};
+
 const SidebarBehavior = () => {
-  const { isMobile, setOpenMobile, toggleSidebar } = useSidebar();
-  const location = useLocation();
+  const { toggleSidebar } = useSidebar();
+  const { key } = useLocation();
 
   useKeybinding(sidebarToggleKeyCombo, toggleSidebar, {
     preventDefault: true,
     stopPropagation: true,
   });
 
-  React.useEffect(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-  }, [location, isMobile, setOpenMobile]);
-
-  return null;
+  return <MobileSidebarRouteReset key={key} />;
 };
 
 const SidebarProvider = ({

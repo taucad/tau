@@ -1,5 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
+import { CrossTabCoordinator, withCrossTabLocks } from '#cross-tab-coordinator.js';
+
+it('shares sorted unique lock tokens without creating a notification channel', async () => {
+  const channel = vi.fn();
+  const acquired: string[] = [];
+  const request = vi.fn(async (name: string, options: LockOptions, run: () => Promise<unknown>) => {
+    expect(options).toEqual({ mode: 'exclusive' });
+    acquired.push(name);
+    return run();
+  });
+  vi.stubGlobal('navigator', { locks: { request } });
+  vi.stubGlobal('BroadcastChannel', channel);
+  try {
+    await expect(withCrossTabLocks(['/b', '/a', '/b'], async () => 'written')).resolves.toBe('written');
+    expect(acquired).toEqual(['tau-fs-write:/a', 'tau-fs-write:/b']);
+    expect(channel).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 describe('CrossTabCoordinator', () => {
   let coordinator: CrossTabCoordinator;

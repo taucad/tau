@@ -11,11 +11,19 @@ import {
   opencascadeTypes,
   replicadTypes,
 } from '#kernel-types.js';
-import { kclStdlibReference } from '#kcl-reference.js';
 
 describe('@taucad/api-extractor runtime subpaths', () => {
   it('should expose raw declaration maps and package-shaped projections for all kernels', () => {
-    expect(Object.keys(opencascadeTypes)).toEqual(['libcascade']);
+    /* Sharded by W15/R14: one 10 MB declaration is now a root plus one module
+     * per OpenCascade package, so the map is 290 keys rather than 1. The root
+     * still has to be there and still has to be the entry point. */
+    expect(Object.keys(opencascadeTypes)).toContain('libcascade');
+    expect(Object.keys(opencascadeTypes).length).toBeGreaterThan(200);
+    expect(
+      Object.keys(opencascadeTypes)
+        .filter((key) => key !== 'libcascade')
+        .every((key) => key.startsWith('libcascade/')),
+    ).toBe(true);
     expect(Object.keys(replicadTypes).length).toBeGreaterThan(0);
     expect(Object.keys(jscadModelingTypes).length).toBeGreaterThan(0);
     expect(Object.keys(manifoldTypes).length).toBeGreaterThan(0);
@@ -45,14 +53,17 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(manifoldPackage?.content).toBe(manifoldTypes['manifold-3d']);
     expect(manifoldPackage?.files?.['manifoldCAD/index.d.ts']).toBe(manifoldTypes['manifold-3d/manifoldCAD']);
     expect(opencascadePackage?.content).toBe(opencascadeTypes['libcascade']);
-    expect(Object.keys(opencascadePackage?.files ?? {})).toEqual([]);
+    /* Every shard is projected as a file, and every file is a shard: a shard the
+     * projection drops is a type the editor cannot resolve, which is exactly the
+     * dangling-pointer failure sharding exists to avoid. */
+    expect(Object.keys(opencascadePackage?.files ?? {}).sort()).toEqual(
+      Object.keys(opencascadeTypes)
+        .filter((specifier) => specifier !== 'libcascade')
+        .map((specifier) => `${specifier.slice('libcascade/'.length)}/index.d.ts`)
+        .sort(),
+    );
     expect(replicadPackage?.content).toBe(replicadTypes['replicad']);
     expect(Object.keys(replicadPackage?.files ?? {})).toEqual([]);
-  });
-
-  it('should expose bundled KCL markdown text', () => {
-    expect(typeof kclStdlibReference).toBe('string');
-    expect(kclStdlibReference.length).toBeGreaterThan(100);
   });
 
   it('should keep KCL markdown assets out of the kernel-types module', () => {
@@ -65,7 +76,6 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     const indexSource = readFileSync(fileURLToPath(new URL('index.ts', import.meta.url)), 'utf8');
     expect(indexSource).not.toMatch(/\?raw/);
     expect(indexSource).not.toContain('kernelTypePackageMaps');
-    expect(indexSource).not.toContain('kclStdlibReference');
     expect(indexSource).not.toContain('authoringTypeMaps');
   });
 

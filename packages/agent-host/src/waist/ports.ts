@@ -1,10 +1,9 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   JsonObject,
   JsonValue,
+  ModelReasoningConfig,
   ModelProviderKind,
   ModelSystemPromptBlock,
   ProviderMessage,
@@ -27,54 +26,181 @@ export type HostToolDefinition = {
 
 /** One normalized streaming event from the model transport. @public */
 export type ModelStreamEvent =
-  | { readonly type: 'text-delta'; readonly text: string }
-  | { readonly type: 'thinking-delta'; readonly text: string; readonly signature?: string | undefined }
-  | { readonly type: 'message-metadata'; readonly metadata: NonNullable<ProviderMessage['metadata']> }
+  | { readonly type: 'text-start'; readonly contentIndex: number }
+  | { readonly type: 'text-delta'; readonly contentIndex?: number | undefined; readonly text: string }
+  | { readonly type: 'text-end'; readonly contentIndex: number; readonly content: string }
+  | { readonly type: 'thinking-start'; readonly contentIndex: number }
+  | {
+      readonly type: 'thinking-delta';
+      readonly contentIndex?: number | undefined;
+      readonly text: string;
+    }
+  | { readonly type: 'thinking-end'; readonly contentIndex: number; readonly content: string }
+  | { readonly type: 'thinking-signature'; readonly contentIndex: number; readonly signature: string }
+  | {
+      readonly type: 'message-metadata';
+      readonly metadata: NonNullable<ProviderMessage['metadata']>;
+    }
+  | {
+      readonly type: 'tool-input-start';
+      readonly contentIndex?: number | undefined;
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }
+  | {
+      readonly type: 'tool-input-delta';
+      readonly contentIndex: number;
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly delta: string;
+    }
   | {
       readonly type: 'tool-input';
+      readonly contentIndex?: number | undefined;
       readonly toolCallId: string;
       readonly toolName: string;
       readonly input: JsonValue;
+      readonly thoughtSignature?: string | undefined;
     }
   | { readonly type: 'usage'; readonly usage: Usage }
   | { readonly type: 'completed'; readonly stopReason: StopReason };
 
 /** Non-durable model output projected only while its run is live. @public */
-export type AgentLiveEvent = {
-  readonly type: 'text-delta' | 'thinking-delta';
+type AgentLiveEventBase = {
   readonly chatId: string;
   readonly runId: string;
   readonly messageId: string;
   readonly contentIndex: number;
-  readonly delta: string;
 };
+
+/** Non-durable model output projected only while its run is live. @public */
+export type AgentLiveEvent =
+  | (AgentLiveEventBase & { readonly type: 'text-start' })
+  | (AgentLiveEventBase & {
+      readonly type: 'text-delta';
+      readonly delta: string;
+      /** UTF-16 offset in this block, for reconciliation with durable checkpoints. */
+      readonly offset?: number | undefined;
+    })
+  | (AgentLiveEventBase & { readonly type: 'text-end'; readonly content: string })
+  | (AgentLiveEventBase & { readonly type: 'thinking-start'; readonly timestamp?: number | undefined })
+  | (AgentLiveEventBase & {
+      readonly type: 'thinking-delta';
+      readonly delta: string;
+      /** UTF-16 offset in this block, for reconciliation with durable checkpoints. */
+      readonly offset?: number | undefined;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'thinking-end';
+      readonly content: string;
+      readonly timestamp?: number | undefined;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-input-start';
+      readonly toolCallId: string;
+      readonly toolName: string;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-input-delta';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly delta: string;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-input-end';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly input: JsonValue;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-output-update';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly output: JsonValue;
+      readonly isError: boolean;
+    });
+
+/** One live event before its chat/run identity is attached. @public */
+export type AgentLiveEventPayload = AgentLiveEvent extends infer Event
+  ? Event extends AgentLiveEvent
+    ? Omit<Event, 'chatId' | 'runId'>
+    : never
+  : never;
 
 /** Complete input for one model stream. @public */
 export type ModelStreamRequest = {
+  /** Durable caller identity for this one Tau gateway invocation. */
+  readonly attemptId: string;
+  /**
+   * The chat this invocation belongs to, for the gateway's spend attribution.
+   * Per request rather than per transport: one transport serves every chat in a
+   * worker. Absent when the caller has no chat identity to give.
+   */
+  readonly chatId?: string | undefined;
+  /** Why this distinct provider invocation exists. */
+  readonly invocationPurpose: 'generation' | 'compaction';
+  /** Called after the response header is validated and before its stream is consumed. */
+  readonly onInvocationBound?: ((binding: ModelInvocationBinding) => Promise<void>) | undefined;
   /** Gateway or local-provider model identity. */
   readonly modelId: string;
   /** Catalog pricing in dollars per million tokens. */
   readonly modelCost?: ModelCostRates | undefined;
   /** Catalog-resolved provider identity; transports must reject unsupported wires. */
   readonly providerKind?: ModelProviderKind | undefined;
+  /** Effective catalog reasoning controls frozen at admission. */
+  readonly reasoning?: ModelReasoningConfig | undefined;
   /** Requested output-token ceiling; the gateway clamps it to the catalog and remaining context. */
   readonly maxTokens?: number | undefined;
+  /** Catalog context window of the selected model, in tokens. */
+  readonly contextWindow?: number | undefined;
   /** System instruction supplied before provider history. */
   readonly systemPrompt: string;
   /** Optional cache-aware structure for the same prompt; pi continues to consume `systemPrompt`. */
   readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
   /** Provider-normalized history rebuilt from W1. */
   readonly messages: readonly ProviderMessage[];
+  /**
+   * Documents whose bytes this request carries, keyed by the lowercase hex
+   * SHA-256 each `⟃tau:document:<sha256>⟄` sentinel text block in `messages`
+   * names (D15). A transport replaces every sentinel with its provider's native
+   * document block and must refuse a sentinel it cannot resolve (D21). Absent
+   * when no message references a document.
+   */
+  readonly documents?: ReadonlyMap<string, MaterializedDocument> | undefined;
   /** Canonical tools available for this request. */
   readonly tools: readonly HostToolDefinition[];
   /** Cancels provider work and transport reads. */
   readonly signal: AbortSignal;
 };
 
+/**
+ * One document's bytes, read for a single model request and never persisted (D15).
+ *
+ * @public
+ */
+export type MaterializedDocument = {
+  /** The document's bytes, base64-encoded without a `data:` prefix. */
+  readonly data: string;
+  /** The media type the durable `file-ref` recorded, e.g. `application/pdf`. */
+  readonly mediaType: string;
+  /** The user-facing name the durable `file-ref` recorded, when it recorded one. */
+  readonly filename?: string | undefined;
+};
+
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */
 export type ModelTransport = {
+  /** Whether this provider/model selection uses Tau's funded gateway. */
+  usesBillingAttempt?: ((providerKind: ModelProviderKind | undefined) => boolean) | undefined;
+  /** Resolve an ambiguous prepared attempt without dispatching it again. */
+  lookupAttempt?: ((attemptId: string, signal: AbortSignal) => Promise<ModelInvocationBinding | undefined>) | undefined;
   /** Start one provider stream. */
   stream(request: ModelStreamRequest): AsyncIterable<ModelStreamEvent>;
+};
+
+/** Opaque API-owned operation binding exposed to portable hosts. @public */
+export type ModelInvocationBinding = {
+  readonly operationId: string;
+  readonly status: 'pending' | 'terminal' | 'unavailable';
 };
 
 /** Input for one direct in-host tool dispatch. @public */
@@ -87,6 +213,18 @@ export type HostToolInvocation = {
   readonly input: JsonValue;
   /** Cancels the active tool operation. */
   readonly signal: AbortSignal;
+  /** Forward a genuine partial result produced by the executing registry. */
+  readonly onUpdate?: ((result: HostToolResult) => void) | undefined;
+  /**
+   * The run this call serves, when one owns it.
+   *
+   * A registry that roots a turn somewhere other than the host's own workspace
+   * — a candidate revision's checkout (V19) — has no other way to tell which
+   * turn is calling: one registry serves every concurrent run. Absent for a
+   * dispatch that belongs to no Tau run, such as an MCP call from an external
+   * adapter, which is served at the workspace root.
+   */
+  readonly runId?: string | undefined;
 };
 
 /** Normalized result of one tool dispatch. @public */
@@ -125,6 +263,14 @@ export type InterruptResolution = {
   readonly interruptId: string;
   /** Operator or policy decision. */
   readonly outcome: 'approved' | 'denied' | 'cancelled';
+  /**
+   * The exact option the decider chose, when the request offered a list.
+   *
+   * An outcome is not a choice: an ACP permission request may offer both
+   * "allow once" and "allow always", and re-deriving one from `approved`
+   * substitutes the host's guess for the human's decision.
+   */
+  readonly optionId?: string | undefined;
   /** Optional structured response. */
   readonly payload?: JsonValue | undefined;
 };
@@ -159,6 +305,12 @@ export type HostRunFailure = {
   readonly message: string;
   /** HTTP status when the transport received one. */
   readonly status?: number | undefined;
+  /**
+   * Structured fields the refusal carried, such as an `INSUFFICIENT_CREDIT`
+   * denial's required and available credit atoms. Owned by the code, so it
+   * travels opaquely to whichever surface renders the refusal.
+   */
+  readonly details?: Record<string, unknown> | undefined;
 };
 
 /** Browser-safe snapshot returned by the run host. @public */
@@ -179,7 +331,10 @@ export type RunLifecycleCommands = {
       readonly message: Extract<ProviderMessage, { readonly role: 'user' }>;
     } & (
       | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-      | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
+      | {
+          readonly trigger: Exclude<RunTrigger, 'submit'>;
+          readonly retainedMessageIds: readonly string[];
+        }
     ),
   ): Promise<HostRun>;
   /** Add operator steering to an active run. */

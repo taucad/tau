@@ -52,14 +52,10 @@ export type ChatInputContent = {
  * Rehydrates chip segments as `contextChip` nodes and handles
  * newline boundaries by creating separate paragraphs.
  *
- * Returns `undefined` when no chips are present (caller should use plain text).
+ * Always returns a JSON document so literal HTML-like text is never handed to
+ * Tiptap's string parser as markup.
  */
-export function buildEditorContentJson(segments: PastedContentSegment[]): JSONContent | undefined {
-  const hasChips = segments.some((s) => s.type === 'chip');
-  if (!hasChips) {
-    return undefined;
-  }
-
+export function buildEditorContentJson(segments: PastedContentSegment[]): JSONContent {
   const paragraphs: JSONContent[] = [];
   let currentContent: JSONContent[] = [];
 
@@ -153,7 +149,7 @@ export function extractContent(editor: Editor): ChatInputContent {
 
   walk(editorDocument);
 
-  return { text: textParts.join('').trim(), contextChips };
+  return { text: textParts.join(''), contextChips };
 }
 
 export type UseChatEditorOptions = {
@@ -347,9 +343,6 @@ export function useChatEditor({
           knownSkills: knownSkillIds,
         });
         const json = buildEditorContentJson(segments);
-        if (!json) {
-          return false;
-        }
 
         const { schema } = _view.state;
         if (!schema.nodes['contextChip']) {

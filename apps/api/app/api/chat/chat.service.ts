@@ -1,95 +1,173 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import { streamText } from 'ai';
+import { Inject, Injectable } from '@nestjs/common';
 import type { ModelMessage } from 'ai';
-import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
-import { ModelService } from '#api/models/model.service.js';
-import { computeUserChargedCostMicro } from '#api/billing/credit-estimator.js';
-import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import { MetricsService } from '#telemetry/metrics.js';
 import { commitMessageGenerationSystemPrompt, projectNameGenerationSystemPrompt } from '@taucad/chat/prompts';
+import type {
+  ModelInvocationResult,
+  ModelInvocationService,
+  ModelInvocationSurface,
+} from '#api/llm/model-invocation.types.js';
+import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 
 /**
- * Secondary chat surfaces that still run on the API: the project-name and
- * commit-message generators. The CAD agent itself was deleted with W3-CUT —
- * it runs in the browser agent host (`@taucad/agent-host`).
+ * Best-effort receipt attribution for a helper turn: which project it was
+ * generated for and which chat asked for it. Both are optional — a hint the
+ * billing identity contract refuses is dropped at the boundary rather than
+ * refusing a turn — and they travel as one parameter so adding the second did
+ * not widen three already-long signatures.
  */
+export type ChatGenerationHints = {
+  readonly projectHint?: string | undefined;
+  readonly chatHint?: string | undefined;
+};
+
+/** Runs the two API-hosted secondary generators through funded admission. */
 @Injectable()
 export class ChatService {
-  private readonly logger = new Logger(ChatService.name);
+  public constructor(@Inject(modelInvocationServiceKey) private readonly invocations: ModelInvocationService) {}
 
-  public constructor(
-    private readonly modelService: ModelService,
-    private readonly metricsService: MetricsService,
-    private readonly creditLedgerService: CreditLedgerService,
-    private readonly configService: ConfigService<Environment, true>,
-  ) {}
-
-  public getBuildNameGenerator(coreMessages: ModelMessage[], userId: string): ReturnType<typeof streamText> {
-    return streamText({
-      model: openai('gpt-4o-mini'),
-      messages: coreMessages,
-      system: projectNameGenerationSystemPrompt,
-      onFinish: ({ totalUsage }) => {
-        void this.debitGeneratorUsage(userId, totalUsage, 'name-generator');
-      },
-    });
-  }
-
-  public getCommitMessageGenerator(coreMessages: ModelMessage[], userId: string): ReturnType<typeof streamText> {
-    return streamText({
-      model: openai('gpt-4o-mini'),
-      messages: coreMessages,
-      system: commitMessageGenerationSystemPrompt,
-      onFinish: ({ totalUsage }) => {
-        void this.debitGeneratorUsage(userId, totalUsage, 'commit-generator');
-      },
-    });
-  }
-
-  /**
-   * Secondary-surface metering (AD14): the generators are single bounded
-   * gpt-4o-mini calls (~60 µ$), so they debit actuals post-fact with no
-   * reservation — the hold machinery would cost more than the exposure
-   * (ponytail: reservation-less by design; revisit if generators grow).
-   */
-  private async debitGeneratorUsage(
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- authenticated invocation identity
+  public async getBuildNameGenerator(
+    messages: ModelMessage[],
     userId: string,
-    totalUsage: {
-      inputTokens?: number | undefined;
-      outputTokens?: number | undefined;
-      cachedInputTokens?: number | undefined;
-    },
-    note: string,
-  ): Promise<void> {
-    const model = this.modelService.models.find((entry) => entry.id === 'openai-gpt-4o-mini');
-    if (!model) {
-      this.logger.warn('Generator metering entry openai-gpt-4o-mini missing from the catalog');
-      return;
-    }
-    const cachedInputTokens = totalUsage.cachedInputTokens ?? 0;
-    const amountMicro = computeUserChargedCostMicro({
-      model,
-      usage: {
-        inputTokens: Math.max((totalUsage.inputTokens ?? 0) - cachedInputTokens, 0),
-        outputTokens: totalUsage.outputTokens ?? 0,
-        reasoningTokens: 0,
-        cacheReadTokens: cachedInputTokens,
-        cacheWriteTokens: 0,
+    attemptKey: string,
+    hints: ChatGenerationHints,
+    signal: AbortSignal,
+    onAdmitted?: (operationId: string) => void,
+  ): Promise<ModelInvocationResult> {
+    return this.generate(
+      'project_name',
+      projectNameGenerationSystemPrompt,
+      messages,
+      userId,
+      attemptKey,
+      hints,
+      signal,
+      onAdmitted,
+    );
+  }
+
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- authenticated invocation identity
+  public async getCommitMessageGenerator(
+    messages: ModelMessage[],
+    userId: string,
+    attemptKey: string,
+    hints: ChatGenerationHints,
+    signal: AbortSignal,
+    onAdmitted?: (operationId: string) => void,
+  ): Promise<ModelInvocationResult> {
+    return this.generate(
+      'commit_name',
+      commitMessageGenerationSystemPrompt,
+      messages,
+      userId,
+      attemptKey,
+      hints,
+      signal,
+      onAdmitted,
+    );
+  }
+
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- authenticated invocation identity
+  private async generate(
+    surface: ModelInvocationSurface,
+    system: string,
+    messages: ModelMessage[],
+    authUserId: string,
+    attemptKey: string,
+    hints: ChatGenerationHints,
+    signal: AbortSignal,
+    onAdmitted?: (operationId: string) => void,
+  ): Promise<ModelInvocationResult> {
+    signal.throwIfAborted();
+    const outcome = Promise.withResolvers<ModelInvocationResult>();
+    const replayAbort = new AbortController();
+    const sdkSignal = AbortSignal.any([signal, replayAbort.signal]);
+    const abortBeforeAdmission = (): void => {
+      outcome.reject(signal.reason);
+    };
+    signal.addEventListener('abort', abortBeforeAdmission, { once: true });
+    const model = createOpenAI({
+      // Credentials belong to the billed owner; SDK authorization never leaves this local fetch boundary.
+      apiKey: 'billing-owned',
+      fetch: async (_url, init) => {
+        if (typeof init?.body !== 'string') {
+          throw new TypeError('Expected a native Responses JSON request');
+        }
+        const result = await this.invocations.invoke({
+          authUserId,
+          surface,
+          attempt: { version: 1, key: attemptKey },
+          providerWire: 'openai-responses',
+          body: JSON.parse(init.body) as unknown,
+          priceHeaders: {},
+          activity: surface === 'project_name' ? 'title' : 'commit',
+          ...(hints.projectHint === undefined ? {} : { projectHint: hints.projectHint }),
+          ...(hints.chatHint === undefined ? {} : { chatHint: hints.chatHint }),
+          directPrompt: { system, messages, maximumOutputTokens: 64 },
+          signal: sdkSignal,
+          onAdmitted,
+        });
+        outcome.resolve(result);
+        if (result.state !== 'streaming') {
+          const error = new Error('Billable invocation has no new stream');
+          replayAbort.abort(error);
+          throw error;
+        }
+        return result.response;
       },
-      markupFraction: this.configService.get('TAU_CREDIT_MARKUP_FRACTION', { infer: true }),
-    });
-    if (amountMicro <= 0n) {
-      return;
-    }
-    const billingAttributes = Object.fromEntries([['tau.billing.category', 'llm']]);
+    }).responses('openai-gpt-5.6-luna');
     try {
-      await this.creditLedgerService.debit({ userId, amountMicro, category: 'llm', modelId: model.id, note });
-      this.metricsService.billingCreditCommitted.add(Number(amountMicro), billingAttributes);
-    } catch (error) {
-      this.metricsService.billingCommitFailures.add(1, billingAttributes);
-      this.logger.error(`Generator usage debit failed for ${userId}: ${String(error)}`);
+      const streamed = streamText({
+        model,
+        system,
+        messages,
+        maxOutputTokens: 64,
+        maxRetries: 0,
+        abortSignal: sdkSignal,
+        providerOptions: {
+          openai: { store: false, forceReasoning: true, reasoningEffort: 'none' },
+        },
+        // Leave self-contained URLs to the provider codec and funded validator; no pre-admission downloads.
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- installed SDK option name
+        experimental_download: async (downloads) => downloads.map(() => null),
+        onError: ({ error }) => {
+          outcome.reject(error);
+        },
+        onAbort: () => {
+          outcome.reject(sdkSignal.reason);
+        },
+      });
+      const consumeSdk = async (): Promise<Error | undefined> => {
+        try {
+          await streamed.text;
+          return undefined;
+        } catch (error) {
+          outcome.reject(error);
+          return error instanceof Error ? error : new Error('SDK stream failed', { cause: error });
+        }
+      };
+      const sdkCompletion = consumeSdk();
+      const response = streamed.toUIMessageStreamResponse();
+      const admitted = await outcome.promise;
+      if (admitted.state !== 'streaming') {
+        await response.body?.cancel();
+        return admitted;
+      }
+      const complete = async (): Promise<void> => {
+        const [, sdkError] = await Promise.all([admitted.completion, sdkCompletion]);
+        if (sdkError) {
+          throw sdkError;
+        }
+      };
+      return {
+        ...admitted,
+        response,
+        completion: complete(),
+      };
+    } finally {
+      signal.removeEventListener('abort', abortBeforeAdmission);
     }
   }
 }

@@ -1,24 +1,35 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
-import type Stripe from 'stripe';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
 import type { Environment } from '#config/environment.config.js';
-import type { AuthService } from '#auth/auth.service.js';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '#database/database.service.js';
 import type { EmailService } from '#email/email.service.js';
-import type { BillingService } from '#api/billing/billing.service.js';
-import type { StripeEventRouter } from '#api/billing/stripe-event-router.service.js';
+
+/** Every row `beforeDelete` wrote, and when, so ordering against the closure is observable. */
+type RecordedWrite = { readonly table: unknown; readonly values: Record<string, unknown> };
 
 const createConfig = (authUrl = 'http://localhost:4000') => {
+  const writes: RecordedWrite[] = [];
+  const order: string[] = [];
   const emailService = {
     sendMagicLink: vi.fn<EmailService['sendMagicLink']>().mockResolvedValue(undefined),
     sendResetPassword: vi.fn<EmailService['sendResetPassword']>().mockResolvedValue(undefined),
     sendVerification: vi.fn<EmailService['sendVerification']>().mockResolvedValue(undefined),
   } satisfies Pick<EmailService, 'sendMagicLink' | 'sendResetPassword' | 'sendVerification'>;
-  const databaseService = { database: {} } as unknown as DatabaseService;
+  const databaseService = {
+    database: {
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => ({
+          onConflictDoNothing: async (): Promise<void> => {
+            writes.push({ table, values });
+            order.push('tombstone');
+          },
+        }),
+      }),
+    },
+  } as unknown as DatabaseService;
   const configService = {
     get: vi.fn((key: string) => {
       const values = new Map([
@@ -33,19 +44,20 @@ const createConfig = (authUrl = 'http://localhost:4000') => {
       return values.get(key) ?? '';
     }),
   } satisfies Pick<ConfigService<Environment, true>, 'get'>;
-  const authService = undefined as unknown as AuthService;
 
+  const closure = {
+    prepareForAuthDeletion: vi.fn().mockImplementation(async () => {
+      order.push('closure');
+    }),
+  };
   const config = getBetterAuthConfig({
+    closure,
     databaseService,
     configService: configService as unknown as ConfigService<Environment, true>,
-    authService,
     emailService: emailService as unknown as EmailService,
-    billingService: mock<BillingService>(),
-    stripeEventRouter: mock<StripeEventRouter>(),
-    stripeClient: mock<Stripe>(),
   });
 
-  return { config, emailService };
+  return { config, emailService, closure, writes, order };
 };
 
 type TestEmailCallbackArgs = {
@@ -81,6 +93,96 @@ const sendVerificationEmail = async (
 };
 
 describe('getBetterAuthConfig abuse gates', () => {
+  it('awaits financial closure and propagates its denial before auth deletion', async () => {
+    const { config, closure } = createConfig();
+    const beforeDelete = config.user?.deleteUser?.beforeDelete;
+    if (!beforeDelete) {
+      throw new Error('Financial deletion hook is missing');
+    }
+    const user = {
+      id: 'user_close',
+      email: 'close@example.test',
+      name: 'Closure',
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const request = new Request('http://localhost:4000/v1/auth/delete-user');
+    await beforeDelete(user, request);
+    expect(closure.prepareForAuthDeletion).toHaveBeenCalledWith({ authUserId: user.id, request });
+    closure.prepareForAuthDeletion.mockRejectedValueOnce(new Error('closure not durable'));
+    await expect(beforeDelete(user, request)).rejects.toThrow('closure not durable');
+  });
+
+  it('should write no tombstone when the financial closure refuses the deletion', async () => {
+    const { config, closure, writes } = createConfig();
+    const beforeDelete = config.user?.deleteUser?.beforeDelete;
+    if (!beforeDelete) {
+      throw new Error('Deletion hook is missing');
+    }
+    closure.prepareForAuthDeletion.mockRejectedValueOnce(new Error('account still owes'));
+
+    await expect(
+      beforeDelete(
+        {
+          id: 'user_refused',
+          email: 'refused@example.test',
+          name: 'Refused',
+          emailVerified: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        new Request('http://localhost:4000/v1/auth/delete-user'),
+      ),
+    ).rejects.toThrow('account still owes');
+    expect(writes).toStrictEqual([]);
+  });
+
+  /**
+   * D10: the storage tombstone is what the purge job later finds, and it has to
+   * be written while the account still exists — Better Auth cascades every row
+   * that references the user away, so a tombstone written afterwards would name
+   * bytes nobody could still attribute.
+   */
+  it('should record a storage tombstone with a thirty-day purge date before the financial closure runs', async () => {
+    const { config, writes, order } = createConfig();
+    const beforeDelete = config.user?.deleteUser?.beforeDelete;
+    if (!beforeDelete) {
+      throw new Error('Deletion hook is missing');
+    }
+    const user = {
+      id: 'user_tombstone',
+      email: 'tombstone@example.test',
+      name: 'Tombstone',
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    await beforeDelete(user, new Request('http://localhost:4000/v1/auth/delete-user'));
+
+    /* After the closure, not before it (F4). `prepareForAuthDeletion` can
+       refuse the deletion outright, and a tombstone written first would survive
+       that refusal: `onConflictDoNothing` then keeps the abandoned attempt's
+       `purge_after`, so the real deletion weeks later inherits a window that has
+       already run down. The closure deletes no bytes, so writing first bought
+       nothing. */
+    expect(order).toStrictEqual(['closure', 'tombstone']);
+    expect(writes).toHaveLength(1);
+    const values = writes[0]?.values;
+    expect(values).toMatchObject({ ownerId: user.id });
+    const purgeAfter = values?.['purgeAfter'];
+    if (!(purgeAfter instanceof Date)) {
+      throw new TypeError('purgeAfter is not a date');
+    }
+    const days = (purgeAfter.getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(29.9);
+    expect(days).toBeLessThan(30.1);
+    /* Erasure is the operator's later, verified act; an ordinary deletion is
+       not one, so the row starts without it. */
+    expect(values?.['erasure']).not.toBe(true);
+  });
+
   it.each([
     ['http://localhost:4000', false],
     ['https://api.tau.new', true],
@@ -108,6 +210,38 @@ describe('getBetterAuthConfig abuse gates', () => {
     expect(auth.options.account.encryptOAuthTokens).toBe(true);
   });
 
+  it('caps session reads without reducing the global auth limit', async () => {
+    const { staticAuthConfig } = await import('#config/auth.js');
+    const counts = new Map<string, number>();
+    const appliedLimits: number[] = [];
+    const auth = betterAuth({
+      ...staticAuthConfig,
+      database: memoryAdapter({ user: [], session: [], account: [], verification: [], apikey: [] }),
+      rateLimit: {
+        ...staticAuthConfig.rateLimit,
+        customStorage: {
+          get: async () => null,
+          set: async () => undefined,
+          consume: async (key, rule) => {
+            appliedLimits.push(rule.max);
+            const count = (counts.get(key) ?? 0) + 1;
+            counts.set(key, count);
+            return { allowed: count <= rule.max, retryAfter: count <= rule.max ? null : rule.window };
+          },
+        },
+      },
+    });
+
+    const sessionResponses = await Promise.all(
+      Array.from({ length: 21 }, async () => auth.handler(new Request('http://localhost:4000/v1/auth/get-session'))),
+    );
+    expect(sessionResponses.slice(0, 20).every(({ status }) => status !== 429)).toBe(true);
+    expect(sessionResponses.at(-1)?.status).toBe(429);
+
+    await auth.handler(new Request('http://localhost:4000/v1/auth/sign-out', { method: 'POST' }));
+    expect(appliedLimits.at(-1)).toBe(100);
+  });
+
   it('keeps initial GitHub sign-in limited to identity scopes', () => {
     const { config } = createConfig();
     const github = config.socialProviders?.['github'];
@@ -130,7 +264,7 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('pins the same plugin order in both lockstep plugin lists', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth.js');
-    const expected = ['api-key', 'magic-link', 'stripe', 'one-time-token', 'bearer'];
+    const expected = ['api-key', 'magic-link', 'one-time-token', 'bearer'];
 
     expect(config.plugins?.map((plugin) => plugin.id)).toEqual(expected);
     expect(staticAuthConfig.plugins.map((plugin) => plugin.id)).toEqual(expected);
@@ -139,8 +273,12 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('stores desktop one-time tokens hashed so a leaked verification row cannot be replayed', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth.js');
-    const runtimeOtt = config.plugins?.[3] as unknown as { options?: { storeToken?: string } };
-    const staticOtt = staticAuthConfig.plugins[3] as unknown as { options?: { storeToken?: string } };
+    const runtimeOtt = config.plugins?.find((plugin) => plugin.id === 'one-time-token') as unknown as {
+      options?: { storeToken?: string };
+    };
+    const staticOtt = staticAuthConfig.plugins.find((plugin) => plugin.id === 'one-time-token') as unknown as {
+      options?: { storeToken?: string };
+    };
 
     expect(runtimeOtt.options?.storeToken).toBe('hashed');
     expect(staticOtt.options?.storeToken).toBe('hashed');

@@ -1,0 +1,23 @@
+{
+  "bundles": [
+    {
+      "slug": "cad-replicad",
+      "name": "Replicad authoring",
+      "description": "Guides precise Replicad BRep authoring in main.ts. Use when creating or editing TypeScript geometry imported from replicad.",
+      "version": "0.1.0-beta.0",
+      "whenToUse": "Use when creating or editing TypeScript geometry imported from replicad.",
+      "directory": "cad-replicad",
+      "files": [
+        "SKILL.md",
+        "api-index.md",
+        "api-functions.md",
+        "api-classs.md",
+        "api-classs-2.md",
+        "api-types.md",
+        "api-interfaces.md",
+        "api-constants.md"
+      ],
+      "body": "---\nname: cad-replicad\ndescription: Guides precise Replicad BRep authoring in main.ts. Use when creating or editing TypeScript geometry imported from replicad.\n---\n\n# Replicad authoring\n\n## Workflow\n\n1. Author `main.ts` with ES module imports from `replicad`, camelCase names, exported `defaultParams`, and a default `main(params)` returning `Shape3D` or `ShapeConfig[]`.\n2. Prefer BRep-native construction: holes in the source sketch, revolved wall profiles for round shells, and separate named `ShapeConfig` parts when a fused solid is unnecessary.\n3. Use analytical arcs/circles where they fit. For involutes, airfoils, spirals, or cycloids, sample about eight control points and use `drawPointsInterpolation(points)` instead of chained lines.\n4. Verify the entry point and every renderable library file independently.\n\nFor multiple files, import helpers with explicit ESM paths such as `./lib/widget.js`. Library files export geometry builders; `main.ts` assembles them. A standalone test target must export a default `main` returning geometry.\n\n## Kernel rules\n\n- Prefer `fuseAll`, `cutAll`, and `intersectAll` over long pairwise boolean chains.\n- Build one prototype, then `clone()` before transforming repeated parts.\n- Use the `draw()` pen (`.threePointsArcTo`, `.bezierCurveTo`, `.smoothSplineTo`), `drawCircle`, or `drawPointsInterpolation` instead of polyline approximations.\n- Do not expose export tessellation in `defaultParams`; the runtime owns linear and angular deflection.\n\n## Canonical pattern\n\n```ts\nimport { drawRoundedRectangle, makeCylinder, type Shape3D } from 'replicad';\n\nexport const defaultParams = { width: 80, depth: 30, height: 12, holeRadius: 4 };\n\nexport default function main(p = defaultParams): Shape3D {\n  const body = drawRoundedRectangle(p.width, p.depth, 4).sketchOnPlane('XY').extrude(p.height);\n  const hole = makeCylinder(p.holeRadius, p.height + 2);\n  return body.cutAll([hole.translate([-20, 0, 0]), hole.translate([20, 0, 0])]);\n}\n```\n\nCheck invalid dimensions, open/self-intersecting sketches, coincident boolean faces, and accidental polyline curves first.\n\n## API reference\n\nAll 742 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.\n\n- `api-functions.md` — Functions\n- `api-classs.md` — Classs\n- `api-classs-2.md` — Classs (2)\n- `api-types.md` — Types\n- `api-interfaces.md` — Interfaces\n- `api-constants.md` — Constants\n\nRead ranges, not whole files. Never copy a reference into a source file.\n"
+    }
+  ]
+}

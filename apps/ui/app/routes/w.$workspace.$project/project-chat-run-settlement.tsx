@@ -10,9 +10,9 @@
  * providers (homepage, marketing, library) do not mount it, so chat sessions
  * stay universally creatable while settlement stays a project concern.
  *
- * This was `ProjectChatRpcBindings` until W4-PASEO. Its other half — the
- * API-coordinated run directory, the Socket.IO RPC rooms, and the server-minted
- * run id — went with the API chat plane: a run is now owned by the host that
+ * This was `ProjectChatRpcBindings` until the API chat plane was cut. Its other
+ * half — the API-coordinated run directory, the Socket.IO RPC rooms, and the
+ * server-minted run id — went with that plane: a run is now owned by the host that
  * executes it and lives in `.tau/chats/<chatId>/events.jsonl` (PH19). What
  * survives is the half that was always browser-host work.
  *
@@ -20,20 +20,17 @@
  */
 
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatWorkspaceAuthority, usePreparedChatWorkspace } from '#providers/chat-workspace-authority-provider.js';
-import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
+import { publishChatTurnSettlement } from '#chat-clients/_internal/chat-host-binding.js';
+import type { ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import {
   clearBrowserAgentHostRun,
   getBrowserAgentHostRun,
+  getHostFinalizedTurns,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
-
-const missingAuthoritativeTurn = (chatId: string, runId: string): Error =>
-  Object.assign(new Error(`Durable run ${runId} has no authoritative user turn for chat ${chatId}.`), {
-    code: 'DURABLE_TURN_UNAVAILABLE',
-  });
 
 /**
  * A claim whose fenced run no host log owns can never settle: it stays
@@ -46,21 +43,34 @@ const retireUnsubstantiatedRun = async (input: {
   readonly chatId: string;
   readonly runId: string;
   readonly store: Pick<ChatSessionStore, 'releaseDurableRun'>;
-  readonly retireClaim: (chatId: string) => Promise<void>;
+  readonly retireClaim: (chatId: string, runId: string | undefined) => Promise<void>;
 }): Promise<void> => {
-  await input.retireClaim(input.chatId);
+  await input.retireClaim(input.chatId, input.runId);
   input.store.releaseDurableRun({ chatId: input.chatId, runId: input.runId });
 };
 
 /**
- * A claim admitted before its run id was ever recorded names no run to
- * substantiate, so it can never settle — and it blocks every later submit for
- * that chat behind the bounded admission wait. It is retirable only once its
- * chat is idle: mount discovery can re-run while a submit is still awaiting the
- * run id its admission has yet to deliver.
+ * Whether this chat's claim may be retired at all.
+ *
+ * A claim is retirable only while its chat is idle. Discovery can re-run at any
+ * moment, and a chat that is mid-dispatch holds the claim for the turn being
+ * admitted *right now*: retiring it released the lease the revision root was
+ * holding for that turn, and the root answered the release with a `turn.failed`
+ * recorded under a run the host had not admitted yet — which then made the host
+ * refuse the admission outright. Applied to every retire branch, not just the
+ * claim that names no run.
  */
-const isRetirableUnfencedClaim = (status: ReturnType<ChatSessionStore['getStatus']>): boolean =>
-  status !== 'submitted' && status !== 'streaming';
+const isRetirableClaim = (
+  store: Pick<ChatSessionStore, 'getStatus' | 'getDurableRunState'>,
+  chatId: string,
+): boolean => {
+  const status = store.getStatus(chatId);
+  if (status === 'submitted' || status === 'streaming') {
+    return false;
+  }
+  const durableRunState = store.getDurableRunState(chatId);
+  return durableRunState !== 'active' && durableRunState !== 'reattaching';
+};
 
 export function ProjectChatRunSettlement(): ReactNode {
   const store = useChatSessionStore();
@@ -71,9 +81,24 @@ export function ProjectChatRunSettlement(): ReactNode {
     () => store.list(),
   );
 
+  /* Discovery is mount-time recovery and is keyed on nothing, by construction.
+   * Keying it on the authority value re-ran it on every chats refetch — and a
+   * dispatch persists the user's message, which *is* a chats refetch — so a
+   * turn being admitted was reclaimed mid-flight and its lease abandoned. Both
+   * collaborators are read through refs so no owner can reopen that by
+   * changing what its own hook returns. */
+  const authorityRef = useRef(workspaceAuthority);
+  const storeRef = useRef(store);
+  useEffect(() => {
+    authorityRef.current = workspaceAuthority;
+    storeRef.current = store;
+  }, [store, workspaceAuthority]);
+
   useEffect(() => {
     let cancelled = false;
     const discover = async (): Promise<void> => {
+      const workspaceAuthority = authorityRef.current;
+      const store = storeRef.current;
       const reclaimed = await workspaceAuthority.reclaimAll();
       if (cancelled) {
         return;
@@ -83,14 +108,18 @@ export function ProjectChatRunSettlement(): ReactNode {
           continue;
         }
         if (!workspace.runId) {
-          if (isRetirableUnfencedClaim(store.getStatus(workspace.chatId))) {
+          if (isRetirableClaim(store, workspace.chatId)) {
             // oxlint-disable-next-line no-await-in-loop -- retirement belongs to the exact claim just proven unsubstantiable.
-            await workspaceAuthority.retireClaim(workspace.chatId);
+            await workspaceAuthority.retireClaim(workspace.chatId, undefined);
           }
           continue;
         }
         const browserRun = getBrowserAgentHostRun(workspace.chatId);
-        if (browserRun !== undefined && browserRun.runId !== workspace.runId) {
+        if (
+          browserRun !== undefined &&
+          browserRun.runId !== workspace.runId &&
+          isRetirableClaim(store, workspace.chatId)
+        ) {
           // The claim names a run this tab's host does not own and no other
           // authority can substantiate any more.
           // oxlint-disable-next-line no-await-in-loop -- retirement belongs to the exact run just proven absent.
@@ -125,7 +154,8 @@ export function ProjectChatRunSettlement(): ReactNode {
     return () => {
       cancelled = true;
     };
-  }, [store, workspaceAuthority]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- mount-only by construction; both collaborators are read through refs.
+  }, []);
 
   return (
     <>
@@ -138,255 +168,66 @@ export function ProjectChatRunSettlement(): ReactNode {
 
 function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): ReactNode {
   const store = useChatSessionStore();
-  const isLoadingChat = useIsLoadingChat(store, chatId);
   const status = useSyncExternalStore(
     (listener) => store.subscribeStatus(chatId, listener),
     () => store.getStatus(chatId),
     () => store.getStatus(chatId),
   );
-  const durableRunState = useSyncExternalStore(
-    (listener) => store.subscribeStatus(chatId, listener),
-    () => store.getDurableRunState(chatId),
-    () => store.getDurableRunState(chatId),
-  );
-  const durableRunId = useSyncExternalStore(
-    (listener) => store.subscribeStatus(chatId, listener),
-    () => store.getDurableRunId(chatId),
-    () => store.getDurableRunId(chatId),
-  );
   const workspace = usePreparedChatWorkspace(chatId);
   const workspaceAuthority = useChatWorkspaceAuthority();
-  const revisionActor = useRevisionActor();
-  const mutatingRunActive =
-    status === 'submitted' ||
-    status === 'streaming' ||
-    durableRunState === 'reattaching' ||
-    durableRunState === 'active';
   useEffect(() => {
-    if (workspace?.runId && store.getDurableRunId(chatId) !== workspace.runId) {
-      store.retainDurableRun({ chatId, runId: workspace.runId, state: 'active' });
+    /* Mount-time `reclaimAll` owns recovery. A workspace created by this page
+     * appears one microtask before its explicit send changes `ready` to
+     * `submitted`; retaining it in that gap starts a read-only reattach stream
+     * that serializes the real send behind itself. */
+    if (
+      workspace?.runId &&
+      (status === 'submitted' || status === 'streaming') &&
+      store.getDurableRunId(chatId) !== workspace.runId
+    ) {
+      store.retainDurableRun({
+        chatId,
+        runId: workspace.runId,
+        state: 'active',
+      });
     }
-  }, [chatId, store, workspace?.runId]);
-  useEffect(() => {
-    if (isLoadingChat || !workspace?.admitted || mutatingRunActive || durableRunState !== 'terminal' || !durableRunId) {
-      return;
-    }
-    let completed = false;
-    let inFlight = false;
-    let failures = 0;
-    let retryTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
-    let disposed = false;
-    const lastUserTurnId = (): string | undefined =>
-      store.get(chatId)?.chat.messages.findLast((message) => message.role === 'user')?.id;
-    const discardPendingTurn = (turnId: string | undefined): void => {
-      if (turnId) {
-        revisionActor.send({ type: 'DISCARD_PENDING_TURN', turnId });
-      }
-    };
-    /**
-     * Handles every outcome that ends the run without publishing, and returns
-     * the completed local run when — and only when — one still needs to be
-     * published. Splitting it this way is what keeps the publish path below
-     * from having to re-derive which of five states it is in.
-     */
-    const settleOrTakeCompletedRun = async (
-      authoritativeRunId: string,
-    ): Promise<ReturnType<typeof getBrowserAgentHostRun>> => {
-      if (
-        workspaceAuthority
-          .listFinalized()
-          .some((publication) => publication.workspaceId === workspace.execution.workspaceId)
-      ) {
-        // Finalization already wrote this workspace's publication and only its
-        // discard half failed (see the `.crswap` note in the authority). Never
-        // re-merge an already-published agent tree over newer live edits —
-        // release the claim and let the run go.
-        await workspaceAuthority.discard(chatId);
-        store.releaseDurableRun({ chatId, runId: authoritativeRunId });
-        clearBrowserAgentHostRun(chatId);
-        return undefined;
+  }, [chatId, status, store, workspace?.runId]);
+
+  /**
+   * End this chat's turn (C3).
+   *
+   * Invoked by the chat's session actor from `run.finishing`, once, for the run
+   * that actor holds. What it replaced was an effect that had to re-derive
+   * *whether* to settle from five reads of status, durable state and page
+   * memory, keep its own `completed`/`inFlight`/`failures` locals, and retry on
+   * a timer — because nothing owned the turn and any render could re-run it.
+   * The owner answers all of that: this is called after the request lifecycle
+   * ended, for a turn that took a lease, and never twice.
+   */
+  const settle = useCallback(
+    async ({ runId, outcome }: ChatTurnSettlementInput): Promise<void> => {
+      if (!runId) {
+        return;
       }
       const localRun = getBrowserAgentHostRun(chatId);
-      if (localRun?.runId !== authoritativeRunId) {
-        // No host log owns this run any more: retire the claim rather than
-        // leave the chat wedged behind an admission that can never settle.
-        await retireUnsubstantiatedRun({
-          chatId,
-          runId: authoritativeRunId,
-          store,
-          retireClaim: workspaceAuthority.retireClaim,
-        });
-        discardPendingTurn(lastUserTurnId());
-        return undefined;
-      }
-      if (localRun.state === 'failed' || localRun.state === 'cancelled') {
-        await workspaceAuthority.discard(chatId);
-        discardPendingTurn(localRun.turnId ?? workspace.turnId ?? lastUserTurnId());
-        store.releaseDurableRun({ chatId, runId: authoritativeRunId });
-        clearBrowserAgentHostRun(chatId);
-        return undefined;
-      }
-      if (localRun.state !== 'completed') {
-        store.retainDurableRun({ chatId, runId: authoritativeRunId, state: 'active' });
-        return undefined;
-      }
-      return localRun;
-    };
-    const settleOnce = async (): Promise<void> => {
-      const authoritativeRunId = store.getDurableRunId(chatId);
-      if (!authoritativeRunId) {
-        return;
-      }
-      const localRun = await settleOrTakeCompletedRun(authoritativeRunId);
-      if (!localRun) {
-        return;
-      }
-      if (localRun.userMessage !== undefined) {
-        if (localRun.turnId !== undefined && localRun.userMessage.id !== localRun.turnId) {
-          throw new TypeError('Browser host snapshot user message does not match its authoritative turn id.');
+      const attested = getHostFinalizedTurns().some((settlement) => settlement.runId === runId);
+      /* Publish only a run this page saw complete and the host has not already
+       * attested. Everything else — a refusal, a stop, a run whose host log
+       * this tab does not own, and a settlement the host already recorded —
+       * releases the hold without asking for a revision over newer live edits. */
+      if (!attested && outcome === 'completed' && localRun?.runId === runId && localRun.state === 'completed') {
+        if (localRun.userMessage !== undefined) {
+          store.reconcileDurableUserMessage({ chatId, runId, message: localRun.userMessage });
         }
-        store.reconcileDurableUserMessage({ chatId, runId: authoritativeRunId, message: localRun.userMessage });
+        await workspaceAuthority.finalize(chatId, runId);
+      } else {
+        await workspaceAuthority.discard(chatId, runId);
       }
-      const turnId = localRun.turnId ?? workspace.turnId ?? lastUserTurnId();
-      if (!turnId) {
-        throw missingAuthoritativeTurn(chatId, authoritativeRunId);
-      }
-      const finalization = await workspaceAuthority.finalize(chatId, {
-        actorId: 'tau-browser-agent-host',
-        summary: `Completed chat ${chatId}`,
-        turnId,
-        runId: authoritativeRunId,
-      });
-      if (finalization === undefined) {
-        throw new Error(`Workspace finalization was unavailable for chat ${chatId}.`);
-      }
-      if (finalization.status === 'conflicted') {
-        revisionActor.send({
-          type: 'SET_REVISION_CONFLICT',
-          turnId: finalization.turnId,
-          chatId: finalization.chatId,
-          branchName: finalization.branchName,
-          conflict: finalization.conflict,
-        });
-      }
-      store.releaseDurableRun({ chatId, runId: authoritativeRunId });
+      store.releaseDurableRun({ chatId, runId });
       clearBrowserAgentHostRun(chatId);
-    };
-    const attemptSettlement = async (): Promise<void> => {
-      if (completed || inFlight || disposed) {
-        return;
-      }
-      inFlight = true;
-      try {
-        await settleOnce();
-        completed = true;
-      } catch (error) {
-        console.error('[ProjectChatRunSettlement] exact run settlement failed', error);
-        failures += 1;
-        if (failures < 5) {
-          retryTimer = globalThis.setTimeout(
-            () => {
-              // async-iife: bounded settlement retry remains owned by this effect.
-              void attemptSettlement();
-            },
-            Math.min(2000, 100 * 2 ** (failures - 1)),
-          );
-        }
-      } finally {
-        inFlight = false;
-      }
-    };
-    const retryWhenOnline = (): void => {
-      if (completed) {
-        return;
-      }
-      failures = 0;
-      if (retryTimer) {
-        globalThis.clearTimeout(retryTimer);
-        retryTimer = undefined;
-      }
-      // async-iife: connectivity wake retries authoritative settlement.
-      void attemptSettlement();
-    };
-    globalThis.addEventListener('online', retryWhenOnline);
-    // async-iife: the project-wide settlement owns finalization independently of focus.
-    void attemptSettlement();
-    return () => {
-      disposed = true;
-      globalThis.removeEventListener('online', retryWhenOnline);
-      if (retryTimer) {
-        globalThis.clearTimeout(retryTimer);
-      }
-    };
-  }, [
-    chatId,
-    durableRunId,
-    durableRunState,
-    isLoadingChat,
-    mutatingRunActive,
-    revisionActor,
-    status,
-    store,
-    workspace,
-    workspaceAuthority,
-  ]);
-  return null;
-}
-
-/**
- * Subscribes to the session's persistence actor (when present) so settlement
- * wakes whenever its `isLoadingChat` flag flips. Returns `true` while no
- * session exists for `chatId` so settlement stays disabled until the chat is
- * actually live.
- */
-function useIsLoadingChat(store: ChatSessionStore, chatId: string): boolean {
-  const subscribe = useCallback(
-    (listener: () => void) => {
-      let actorSubscription: { unsubscribe: () => void } | undefined;
-
-      const trySubscribeActor = (): void => {
-        if (actorSubscription) {
-          return;
-        }
-        const session = store.get(chatId);
-        if (!session) {
-          return;
-        }
-        actorSubscription = session.persistenceActorRef.subscribe(listener);
-      };
-
-      trySubscribeActor();
-
-      const unsubscribeMembership = store.subscribeMembership(() => {
-        // Membership changed: the session may have just appeared (so we
-        // now have an actor to subscribe to) or disappeared (existing
-        // subscription is now orphaned and the snapshot getter will
-        // return the no-session default). Refresh the actor sub and
-        // wake the consumer so it re-reads the snapshot.
-        if (store.get(chatId)) {
-          trySubscribeActor();
-        } else {
-          actorSubscription?.unsubscribe();
-          actorSubscription = undefined;
-        }
-        listener();
-      });
-
-      return () => {
-        unsubscribeMembership();
-        actorSubscription?.unsubscribe();
-      };
     },
-    [store, chatId],
+    [chatId, store, workspaceAuthority],
   );
-
-  const getSnapshot = useCallback(() => {
-    const session = store.get(chatId);
-    if (!session) {
-      return true;
-    }
-    return session.persistenceActorRef.getSnapshot().context.isLoadingChat;
-  }, [store, chatId]);
-
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  useEffect(() => publishChatTurnSettlement(chatId, settle), [chatId, settle]);
+  return null;
 }

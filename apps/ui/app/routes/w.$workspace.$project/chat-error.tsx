@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import type React from 'react';
-import { ChevronRight, RefreshCcw } from 'lucide-react';
+import { Bot, ChevronRight, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
@@ -9,12 +9,38 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
+import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
+import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 import { ChatErrorUnauthorized } from '#routes/w.$workspace.$project/chat-error-unauthorized.js';
 import { ChatErrorServiceUnavailable } from '#routes/w.$workspace.$project/chat-error-service-unavailable.js';
 import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
 import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rate-limit.js';
 import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js';
+import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
+import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
+import { externalAgentStopCodes, externalAgentStopSchema, isResumableRunFailure } from '@taucad/agent-host';
+
+/**
+ * Model-call failures that leave the turn whole.
+ *
+ * Every one of these is raised after the run was admitted and before the
+ * provider's reply landed, so no tool ran on the failed call and the history
+ * the host would resume from is complete. The category cannot tell them apart:
+ * the masked in-stream failure arrives on an HTTP 200, which reads as
+ * `generic`, and a 502 reads as `server`.
+ */
+const pausedTurnCodes = new Set([
+  'NETWORK_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'MALFORMED_RESPONSE',
+  'UPSTREAM_REJECTED',
+  'WORKER_CRASHED',
+]);
+
+/** Refusals only a new conversation clears. */
+const chatTooLongCodes = new Set(['NO_EVICTABLE_HISTORY', 'CIRCUIT_BREAKER_OPEN']);
 
 /**
  * Attempts to format a string as pretty-printed JSON.
@@ -26,6 +52,113 @@ function tryFormatJson(text: string): string {
   } catch {
     return text;
   }
+}
+
+/**
+ * The card a coded failure names for itself, or `undefined` when its category
+ * decides instead.
+ *
+ * Kept out of the component because the status a failure carries (200 for an
+ * in-stream provider failure, none at all for a host refusal) says nothing
+ * about whether the turn survived it, so this is a list of codes rather than a
+ * branch of the category switch.
+ *
+ * @param input - The parsed failure, whether the host will resume it, the card
+ * class and the restart gesture a turn that never started is offered.
+ * @returns The card, or `undefined` to fall through to the category switch.
+ */
+function codedErrorCard({
+  error,
+  resumable,
+  className,
+  onTryAgain,
+}: {
+  readonly error: NormalizedChatError;
+  readonly resumable: boolean;
+  readonly className: string;
+  readonly onTryAgain: () => void;
+}): React.ReactNode | undefined {
+  const { code } = error;
+  if (code === undefined) {
+    return undefined;
+  }
+  const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;
+  const raw = rawDetail === undefined ? {} : { raw: rawDetail };
+
+  // The provider account behind Tau's key refused; the deployment's own card
+  // says whose account it is, so the code outranks the category (a 503 relayed
+  // in a 200 stream would otherwise read as a Tau outage).
+  if (code === 'PROVIDER_ACCOUNT_EXHAUSTED') {
+    return <ChatErrorProviderAccount className={className} description={error.message} details={error.details} />;
+  }
+
+  if (pausedTurnCodes.has(code)) {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        reason={error.message}
+        resumable={resumable}
+        icon={code === 'PROVIDER_UNAVAILABLE' || code === 'UPSTREAM_REJECTED' ? WifiOff : CircleAlert}
+        {...raw}
+      />
+    );
+  }
+
+  // A refusal of the request itself resumes once the model or its settings
+  // change; re-issuing it unchanged meets the same refusal, which is honest and
+  // costs nothing.
+  if (code === 'INVALID_REQUEST') {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        title='The model refused this request'
+        reason={error.message}
+        resumable={resumable}
+        guidance='Change the model or its settings, then resume.'
+        canSwitchModel
+        {...raw}
+      />
+    );
+  }
+
+  if (chatTooLongCodes.has(code)) {
+    return <ChatErrorTooLong className={className} />;
+  }
+
+  // Another tab holds this chat's log. Taking it back is a leadership protocol,
+  // not an error action (ruling Q6), and reloading already follows that tab.
+  if (code === 'LEADERSHIP_LOST') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={Bot}
+        title='This chat continued in another tab'
+        description='Keep working there. Reload this page to follow along here.'
+      />
+    );
+  }
+
+  // The one restart that loses nothing: admission refused before a run existed.
+  if (code === chatTurnNotStartedCode) {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='destructive'
+        icon={CircleAlert}
+        title='Tau could not start this turn'
+        description={error.message}
+        actions={
+          <Button variant='outline' size='sm' onClick={onTryAgain}>
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
+
+  return undefined;
 }
 
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
@@ -71,40 +204,42 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
         <Collapsible
           open={genericDetailsOpen}
           className={cn(
-            'group/collapsible flex flex-col justify-center rounded-md border border-destructive/20 bg-destructive/10 text-sm',
+            'group/collapsible flex flex-col justify-center overflow-hidden rounded-md border border-destructive/20 bg-destructive/10 text-sm',
           )}
           onOpenChange={setGenericDetailsOpen}
         >
-          <CollapsibleTrigger asChild>
-            <div className='flex w-full cursor-pointer items-center justify-between gap-2 px-2 py-1.5'>
-              <ChevronRight className='size-4 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
-              <div className='flex w-full items-center justify-between gap-2'>
-                <MarkdownViewer
-                  className={cn(
-                    'inline w-auto! text-sm text-foreground',
-                    // Inline-code styles for error messages
-                    '[&_code]:text-destructive',
-                    '[&_code]:border-destructive/30',
-                    '[&_code]:bg-background/80',
-                    'line-clamp-none',
-                  )}
-                >
-                  {parsedError.message || parsedError.title || 'Unable to send the message.'}
-                </MarkdownViewer>
-                <Button
-                  variant='outline'
-                  className='h-7 shrink-0 hover:border-neutral/50'
-                  size='sm'
-                  onClick={() => {
-                    handleTryAgain();
-                  }}
-                >
-                  <RefreshCcw className='size-3.5' />
-                  Try again
-                </Button>
-              </div>
+          <div className='@container'>
+            <div className='flex w-full flex-col transition-colors hover:bg-destructive/15 @xs:flex-row @xs:items-center @xs:gap-2'>
+              <CollapsibleTrigger className='flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left outline-none focus-visible:focus-outline'>
+                <ChevronRight className='size-4 shrink-0 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
+                <div className='min-w-0 flex-1'>
+                  <MarkdownViewer
+                    className={cn(
+                      'inline w-auto! text-sm text-foreground',
+                      // Inline-code styles for error messages
+                      '[&_code]:text-destructive',
+                      '[&_code]:border-destructive/30',
+                      '[&_code]:bg-background/80',
+                      'line-clamp-none',
+                    )}
+                  >
+                    {parsedError.message || parsedError.title || 'Unable to send the message.'}
+                  </MarkdownViewer>
+                </div>
+              </CollapsibleTrigger>
+              <Button
+                variant='outline'
+                className='mx-2 mb-2 h-auto min-h-7 whitespace-normal hover:border-neutral/50 @xs:mb-0 @xs:ml-0'
+                size='sm'
+                onClick={() => {
+                  handleTryAgain();
+                }}
+              >
+                <RefreshCcw className='size-3.5' />
+                Try again
+              </Button>
             </div>
-          </CollapsibleTrigger>
+          </div>
           <CollapsibleContent className='overflow-x-scroll px-2 pb-2'>
             <CodeViewer text={formattedError} language='json' className='text-xs whitespace-pre-wrap' />
           </CollapsibleContent>
@@ -112,6 +247,34 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       </div>
     );
   };
+
+  /* One decision, taken from the host's own rule rather than a second copy of
+   * its code list: a card may promise the turn and say Resume only where
+   * `continue` will actually resume the run, and every other card keeps *Try
+   * again* and makes no promise. The parsed error carries the same `message`,
+   * `code` and `details` the run's terminal record did, which is all the
+   * predicate reads. */
+  const resumable = isResumableRunFailure(parsedError);
+
+  // An external agent's own stop carries its classification; it outranks the category.
+  const agentStop = (externalAgentStopCodes as readonly string[]).includes(parsedError.code ?? '')
+    ? externalAgentStopSchema.safeParse(parsedError.details)
+    : undefined;
+  if (agentStop?.success) {
+    return <ChatErrorAgentStop className={cn('min-w-0', className)} stop={agentStop.data} resumable={resumable} />;
+  }
+
+  // A coded failure names its own recovery; the category cannot: see
+  // `codedErrorCard`.
+  const codedCard = codedErrorCard({
+    error: parsedError,
+    resumable,
+    className: cn('min-w-0', className),
+    onTryAgain: handleTryAgain,
+  });
+  if (codedCard !== undefined) {
+    return codedCard;
+  }
 
   // Route to specialized error components based on category
   // All cases from ErrorCategory are handled explicitly for exhaustive matching
@@ -122,19 +285,44 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     }
 
     case errorCategory.network: {
-      return <ChatErrorServiceUnavailable className={cn('min-w-0', className)} />;
+      return <ChatErrorServiceUnavailable className={cn('min-w-0', className)} resumable={resumable} />;
     }
 
     case errorCategory.credits: {
-      return <ChatErrorCredits className={cn('min-w-0', className)} description={parsedError.message} />;
+      return (
+        <ChatErrorCredits
+          className={cn('min-w-0', className)}
+          description={parsedError.message}
+          details={parsedError.details}
+        />
+      );
     }
 
     case errorCategory.rateLimit: {
-      return <ChatErrorRateLimit className={cn('min-w-0', className)} />;
+      return (
+        <ChatErrorRateLimit
+          className={cn('min-w-0', className)}
+          resumable={resumable}
+          title={parsedError.code === 'FUNDED_OPERATION_LIMIT' ? 'Funded operation limit reached' : undefined}
+          description={parsedError.message}
+          retryAfterSeconds={
+            typeof parsedError.details?.['retryAfterSeconds'] === 'number'
+              ? parsedError.details['retryAfterSeconds']
+              : undefined
+          }
+        />
+      );
     }
 
     case errorCategory.overloaded: {
-      return <ChatErrorServiceUnavailable className={cn('min-w-0', className)} />;
+      return (
+        <ChatErrorServiceUnavailable
+          className={cn('min-w-0', className)}
+          resumable={resumable}
+          title={parsedError.code === 'BILLING_RECOVERY_UNAVAILABLE' ? 'Finalizing earlier work' : undefined}
+          description={parsedError.message}
+        />
+      );
     }
 
     case errorCategory.toolError: {

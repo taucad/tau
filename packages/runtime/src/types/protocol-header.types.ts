@@ -6,7 +6,7 @@
  * ordering, and version-skew detection without re-parsing the payload
  * itself.
  *
- * The current wire targets `protocolVersion === 1`. Bumping the version is
+ * The current wire targets `protocolVersion === 3`. Bumping the version is
  * a wire-breaking change validated end-to-end by the conformance suite.
  *
  * @public
@@ -20,7 +20,7 @@
  *
  * @public
  */
-export const protocolVersion = 1;
+export const protocolVersion = 3;
 
 /**
  * Header fields stamped on every wire message. The header is structurally

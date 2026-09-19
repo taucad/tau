@@ -1,6 +1,5 @@
-import type { LengthSymbol } from '@taucad/units';
 import type { StandardSchemaV1 } from '#types/schema.types.js';
-import type { engineeringDisciplines } from '#constants/cad.constants.js';
+import type { cadLengthUnits, engineeringDisciplines } from '#constants/cad.constants.js';
 
 /** @public */
 export type CodeIssue = {
@@ -21,9 +20,15 @@ export type CodeIssue = {
  * @public
  */
 export type GeometrySvg = {
-  format: 'svg';
-  content: string;
-  name?: string;
+  readonly format: 'svg';
+  readonly content: string;
+  readonly name?: string;
+  /**
+   * Physical coordinate provenance declared by the producing kernel.
+   * One SVG user-coordinate unit equals one unit of `units.length`.
+   * Absence means the standard SVG has no declared physical CAD scale.
+   */
+  readonly units?: Readonly<CadUnits>;
 };
 
 /**
@@ -107,7 +112,7 @@ export type CadMainFunction = (
 
 /** @public */
 export type CadUnits = {
-  length: LengthSymbol;
+  length: (typeof cadLengthUnits)[number];
 };
 
 /** @public */

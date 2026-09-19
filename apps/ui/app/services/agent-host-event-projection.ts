@@ -27,14 +27,16 @@ type JsonValue = ProviderMessage['content'];
  * `UPSTREAM_REJECTED` 502, the other two 503 — so naming the card from the code
  * leaves every pre-stream failure rendering exactly as it did.
  *
- * `PROVIDER_UNAVAILABLE` is deliberately absent although it rides the same
- * frame: the gateway answers it 503 on every classified path but 502 for a
- * body-less provider response, so its two pre-stream cards disagree and only
- * the status tells them apart. Naming one from the code would change the other.
+ * `PROVIDER_UNAVAILABLE` is the one code the gateway answers with two statuses:
+ * 503 on every classified path, but 502 for a body-less provider response. The
+ * code names the overloaded card for both, which is what a customer whose
+ * provider is unavailable is told either way — and it is the only way a
+ * mid-stream 499 or 5xx cut reaches that card instead of the generic one.
  */
 const gatewayCodeCategories = new Map<string, ErrorCategory>([
   ['INSUFFICIENT_CREDIT', errorCategory.credits],
   ['PROVIDER_ACCOUNT_EXHAUSTED', errorCategory.overloaded],
+  ['PROVIDER_UNAVAILABLE', errorCategory.overloaded],
   ['RATE_LIMITED', errorCategory.rateLimit],
   ['UPSTREAM_REJECTED', errorCategory.server],
 ]);

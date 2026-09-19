@@ -67,7 +67,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ client: harness.client }),
+  useFileManager: () => ({ files: harness.client }),
 }));
 
 const { ChatSessionStore } = await import('#services/chat-session-store.js');

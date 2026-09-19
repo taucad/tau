@@ -3,7 +3,7 @@ import type { FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
-import type { FileSystemClient } from '#file-system-client.js';
+import type { ComposedViewClient } from '#composed-view-client.js';
 import type {
   WorkerChangeChannel,
   WorkerRelativeDirectoryRenameEvent,
@@ -95,7 +95,7 @@ export type FileItem = {
 } & FileContentMetadata;
 
 type FileTreeServiceInit = {
-  proxy: FileSystemClient;
+  proxy: ComposedViewClient;
   paths: WorkspacePathResolver;
   channel: WorkerChangeChannel;
   visibility: VisibilityProvider;
@@ -117,10 +117,10 @@ type FileTreeServiceInit = {
  * import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
  * import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
  * import { headlessVisibilityProvider } from '@taucad/fs-client/visibility-provider';
- * import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+ * import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
  * import type { WorkerChangeChannelTransport } from '@taucad/fs-client/worker-change-channel';
  * export function createExampleFileTreeService(
- *   proxy: FileSystemClient,
+ *   proxy: ComposedViewClient,
  *   listen: WorkerChangeChannelTransport['listen'],
  * ): FileTreeService {
  *   const paths = new WorkspacePathResolver('/project');
@@ -136,7 +136,7 @@ type FileTreeServiceInit = {
  */
 export class FileTreeService {
   private _tree: Map<string, FileEntry>;
-  private readonly proxy: FileSystemClient;
+  private readonly proxy: ComposedViewClient;
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;

@@ -11,6 +11,7 @@ const baseConfig: UserConfig = {
     'src/file-write-source.ts',
     'src/file-system-client.ts',
     'src/composed-view-client.ts',
+    'src/rooted-content-client.ts',
     'src/file-content-errors.ts',
     'src/seems-binary.ts',
     'src/file-content-service.ts',

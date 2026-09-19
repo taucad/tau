@@ -39,6 +39,7 @@ import type {
   FileSystemBridgeHello,
   FileSystemBridgeRuntimeService,
   FileSystemBridgeService,
+  FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
 
@@ -79,12 +80,12 @@ declare const fileSystemBridgePortBrand: unique symbol;
 export type FileSystemBridgePort = MessagePort & { readonly [fileSystemBridgePortBrand]: true };
 
 /**
- * Typed filesystem bridge proxy preserving class/interface-shaped service surfaces.
+ * Lifecycle and transport members every bridge proxy carries, rooted or not.
  *
  * @public
  */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- proxy target types may be class/interface services without string index signatures.
-export type FileSystemBridgeProxy = FileSystemBridgeService & {
+export type FileSystemBridgeProxyTransport = {
   readonly ready: Promise<void>;
   readonly hello: { readonly payload: FileSystemBridgeHello };
   dispose(): void;
@@ -95,6 +96,39 @@ export type FileSystemBridgeProxy = FileSystemBridgeService & {
     handler: (event: WatchEvent) => void,
   ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
 };
+
+/**
+ * A proxy over an **unrooted** connection: the authority's own surface.
+ *
+ * Split from the rooted half at W12(d) (gate G-A F9, G-B G5): the workspace
+ * connection used to promise `search`, `statTree`, `copyTree`, `duplicate`,
+ * `archive`, `contents`, `provenance` and `readdirWithStats`, none of which the
+ * authority serves. A caller that annotates its variable with this type can no
+ * longer take one by accident.
+ *
+ * @public
+ */
+export type FileSystemBridgeWorkspaceProxy = FileSystemBridgeUnrootedCalls & FileSystemBridgeProxyTransport;
+
+/**
+ * A proxy over a **rooted** connection: content, the root's index and the
+ * mutating porcelain, all in the root's own namespace.
+ *
+ * @public
+ */
+export type FileSystemBridgeRootedProxy = FileSystemBridgeService & FileSystemBridgeProxyTransport;
+
+/**
+ * Typed filesystem bridge proxy preserving class/interface-shaped service surfaces.
+ *
+ * The union of both halves, because one factory builds either and the
+ * connection's root is not in its type. Annotate the variable with
+ * {@link FileSystemBridgeWorkspaceProxy} or {@link FileSystemBridgeRootedProxy}
+ * to hold only what that connection serves.
+ *
+ * @public
+ */
+export type FileSystemBridgeProxy = FileSystemBridgeRootedProxy;
 
 const isFileSystemBridgeConnection = (
   bridge: FileSystemBridge | FileSystemBridgeConnection,
@@ -269,8 +303,6 @@ type MutationMethodName =
   | 'bulkMove'
   | 'unlink'
   | 'rmdir'
-  | 'duplicateFile'
-  | 'copyDirectory'
   | 'commitPendingProjectDirectory';
 
 /**
@@ -296,8 +328,6 @@ type WriteFileParameters = Parameters<MutatingMethods['writeFile']>;
 type WriteFileCheckedParameters = Parameters<MutatingMethods['writeFileChecked']>;
 type AppendFileParameters = Parameters<MutatingMethods['appendFile']>;
 type WriteFilesParameters = Parameters<MutatingMethods['writeFiles']>;
-type DuplicateFileParameters = Parameters<MutatingMethods['duplicateFile']>;
-type CopyDirectoryParameters = Parameters<MutatingMethods['copyDirectory']>;
 type CommitPendingProjectDirectoryParameters = Parameters<MutatingMethods['commitPendingProjectDirectory']>;
 type BulkMoveEdit = Readonly<{ source: string; target: string }>;
 type BulkMoveResult = {
@@ -495,14 +525,6 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
     unlink: async (path: string): Promise<void> => mutatingService.unlink(path, context),
     rmdir: async (path: string, options?: { recursive?: boolean }): Promise<void> =>
       mutatingService.rmdir(path, options, context),
-    duplicateFile: async (
-      sourcePath: DuplicateFileParameters[0],
-      destinationPath: DuplicateFileParameters[1],
-    ): Promise<void> => mutatingService.duplicateFile(sourcePath, destinationPath, context),
-    copyDirectory: async (
-      sourcePath: CopyDirectoryParameters[0],
-      destinationPath: CopyDirectoryParameters[1],
-    ): Promise<void> => mutatingService.copyDirectory(sourcePath, destinationPath, context),
     commitPendingProjectDirectory: async (input: CommitPendingProjectDirectoryParameters[0]) =>
       mutatingService.commitPendingProjectDirectory(input, context),
   };

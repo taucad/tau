@@ -44,7 +44,7 @@ export const loader = async (): Promise<Response> => {
 const ProjectNavigationDebugRoute = (): React.JSX.Element => {
   const { createProject, createChat, getChatsForResource, getProjectLibraryState, patchChat, isLoading } =
     useProjectManager();
-  const { client } = useFileManager();
+  const { files } = useFileManager();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const seedActivityChats = searchParams.get('activity') === '1';
@@ -78,7 +78,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
           await wait(25);
           const newerChat = await createChat(projectA.id, { name: 'Newer activity', messages: [] });
           // Unread lives in the project's composer unread record, which the chat-session store restores on bind (D9).
-          const unreadRecord = createComposerRecordStore(client, composerRecordPaths.unread(projectA.id));
+          const unreadRecord = createComposerRecordStore(files, composerRecordPaths.unread(projectA.id));
           await unreadRecord.patch({ unread: { [newerChat.id]: true } });
           await wait(25);
           await patchChat(olderChat.id, 'name', 'Older activity');
@@ -129,7 +129,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
     createChat,
     createProject,
     getChatsForResource,
-    client,
+    files,
     getProjectLibraryState,
     isLoading,
     navigate,

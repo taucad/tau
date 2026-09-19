@@ -40,9 +40,9 @@ export type ComposedViewProxy = {
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   move(source: string, target: string): Promise<FileStat>;
   bulkMove(edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult>;
-  /** The view's name for the authority's `duplicateFile`. */
+  /** Copy one file inside the root; the absolute-path spelling is `duplicateFile`. */
   duplicate(source: string, target: string): Promise<void>;
-  /** The view's name for the authority's `copyDirectory`. */
+  /** Copy one subtree inside the root, with the view's own mask as the entry filter. */
   copyTree(source: string, target: string): Promise<void>;
   canMove(source: string, target: string): Promise<true | WorkspaceMutationError>;
   canRename(source: string, newName: string): Promise<true | WorkspaceMutationError>;
@@ -57,6 +57,27 @@ export type ComposedViewProxy = {
  * @public
  */
 export type ComposedViewClient = FileSystemClient & {
+  /**
+   * Copy one file inside the view, mask-checked by it (charter D4).
+   *
+   * Not on {@link FileSystemClient}: the authority's unmasked `duplicateFile`
+   * went with its last consumer (W12d). This is the rooted `duplicate` in the
+   * absolute paths the file services speak, and a path outside the view's root
+   * has no view to serve it.
+   */
+  duplicateFile(sourcePath: string, destinationPath: string): Promise<void>;
+  /**
+   * Search the view's own root from its index, masked by its policy (charter D3).
+   *
+   * `root` must be the view's root; a wider or narrower one has no index.
+   */
+  searchFiles(
+    root: string,
+    query: string,
+    options?: { maxResults?: number; includeDirectories?: boolean },
+  ): Promise<FileStatEntry[]>;
+  /** Recursive stat of one directory, from the same index and the same mask. */
+  getDirectoryStat(path: string): Promise<FileStatEntry[]>;
   /**
    * Place a whole overlay unit into the project, so the project owns it.
    *
@@ -119,8 +140,14 @@ const guardedMutations = new Map<string, readonly number[]>([
   ['rmdir', [0]],
   ['move', [0, 1]],
   ['duplicateFile', [0, 1]],
-  ['copyDirectory', [0, 1]],
 ]);
+
+/**
+ * Members the view alone serves: the authority's unmasked equivalent is gone
+ * with its last consumer (W12d), so a path outside the root is refused rather
+ * than forwarded.
+ */
+const viewOnlyMutations = new Set(['duplicateFile']);
 
 /** Preflights: they answer with a {@link WorkspaceMutationError}, never a throw. */
 const guardedPreflights = new Map<string, readonly number[]>([
@@ -146,7 +173,6 @@ const viewMutations = new Map<string, keyof ComposedViewProxy>([
   ['move', 'move'],
   ['bulkMove', 'bulkMove'],
   ['duplicateFile', 'duplicate'],
-  ['copyDirectory', 'copyTree'],
   ['canMove', 'canMove'],
   ['canRename', 'canRename'],
   ['canCreate', 'canCreate'],
@@ -409,7 +435,12 @@ export const createComposedViewClient = (input: {
     },
     getDirectoryStat: async (absolutePath: string) => {
       const relative = viewPath(absolutePath);
-      return relative === undefined ? workspace.getDirectoryStat(absolutePath) : view.statTree(relative);
+      if (relative === undefined) {
+        /* The authority's unmasked walk is gone (W12d): a recursive stat is the
+         * root's own index, masked by the view above it (charter D3). */
+        throw new Error(`No rooted view serves ${absolutePath}; a recursive stat is the view's own index`);
+      }
+      return view.statTree(relative);
     },
     searchFiles: async (
       absoluteRoot: string,
@@ -417,11 +448,12 @@ export const createComposedViewClient = (input: {
       options?: { maxResults?: number; includeDirectories?: boolean },
     ) => {
       /* The index is rooted at the checkout, so only the view's own root is
-       * searchable through it; a wider or narrower root has no rooted handle
-       * until W12 and stays on the authority. */
-      return viewPath(absoluteRoot) === ''
-        ? view.search(query, options)
-        : workspace.searchFiles(absoluteRoot, query, options);
+       * searchable through it — and since W12d there is no unmasked authority
+       * search for a wider or narrower one to fall back to. */
+      if (viewPath(absoluteRoot) !== '') {
+        throw new Error(`No rooted view is rooted at ${absoluteRoot}; only this view's own root is searchable`);
+      }
+      return view.search(query, options);
     },
     readDirectory: async (absolutePath: string) => {
       const relative = viewPath(absolutePath);
@@ -481,6 +513,13 @@ export const createComposedViewClient = (input: {
               moved: moved.map((outcome) => absolute(outcome)),
               failed: failed.map((outcome) => absolute(outcome)),
             };
+          }
+          if (viewOnlyMutations.has(property)) {
+            /* The authority has no unmasked equivalent since W12d, so there is
+             * nothing to forward a path outside the root to. */
+            throw new Error(
+              `No rooted view serves ${touchedPaths(property, args).join(', ')}; ${property} is the view's own operation`,
+            );
           }
           return (target[property as 'writeFile'] as (...rest: unknown[]) => Promise<unknown>).apply(target, args);
         };

@@ -754,59 +754,13 @@ export class WorkspaceFileService {
 
   // --- Higher-level operations ---
 
-  /**
-   * Copy a single file to a new location, creating parent directories as needed.
-   *
-   * Kept under I2 while the Files pane's duplicate gesture still reaches it
-   * through `client.duplicateFile`. The rooted surface serves the same
-   * operation as `duplicate`, mask-checked by the view above it (charter D4);
-   * W12 moves the caller and this method goes with it.
-   *
-   * @param sourcePath - Absolute path of the file to copy.
-   * @param destinationPath - Absolute path for the new copy.
-   * @param context - Optional mutation source metadata for change-bus subscribers.
-   * @returns Resolves when the copy completes.
+  /*
+   * No `duplicateFile` and no `copyDirectory` (charter D4, W12d). Both walked or
+   * wrote a project tree unmasked, which is what W0 pin (d) recorded; the
+   * gestures a consumer reaches are `duplicate` and `copyTree` on the rooted
+   * surface, where the composed view above supplies the entry filter before any
+   * provider I/O. Their last consumers went with the client wave.
    */
-  public async duplicateFile(
-    sourcePath: string,
-    destinationPath: string,
-    context?: WorkspaceMutationContext,
-  ): Promise<void> {
-    const destination = resolveAuthorityPath(destinationPath);
-    this._assertGenericMutationPath(destination, resolveAuthorityPath(sourcePath));
-    const data = await this.readFile(sourcePath);
-    await this.writeFile(destination, data, context);
-  }
-
-  /**
-   * Recursively copy an entire directory tree to a new location.
-   *
-   * Unmasked, which is exactly what W0 pin (d) records: the Files pane's folder
-   * copy still reaches it through `client.copyDirectory`. The rooted surface
-   * serves the same batch as `copyTree`, where the view supplies its mask as
-   * the entry filter (charter D4); W12 moves the caller and closes the bypass.
-   *
-   * @param sourcePath - Absolute path of the source directory.
-   * @param destinationPath - Absolute path for the destination directory.
-   * @param context - Optional mutation source metadata for change-bus subscribers.
-   * @returns Resolves when the copy completes.
-   */
-  public async copyDirectory(
-    sourcePath: string,
-    destinationPath: string,
-    context?: WorkspaceMutationContext,
-  ): Promise<void> {
-    const source = resolveAuthorityPath(sourcePath);
-    const target = resolveAuthorityPath(destinationPath);
-    this._assertGenericMutationPath(target, source);
-    return this._pipeline.copyTree({
-      source,
-      target,
-      sourceResolution: this._resolveProvider(source),
-      targetResolution: this._resolveProvider(target),
-      context,
-    });
-  }
 
   /**
    * Package a directory's contents into a ZIP blob, from the standalone
@@ -905,61 +859,14 @@ export class WorkspaceFileService {
     return this._treeEntriesToNodes(entryMap);
   }
 
-  /**
-   * Recursively collect stat information for every file under a directory.
-   *
-   * Unmasked, and therefore not the surface a project consumer reads any more:
-   * a path inside a composed view's root is served by {@link RootedFileSystem.statTree}
-   * through that view (charter D3, W4). What is left here is the paths no rooted
-   * handle covers yet — the global `/node_modules` alias the workspace path
-   * resolver keeps addressable — which W12 retires along with the rest of the
-   * absolute-path client surface (D12).
-   *
-   * @param path - Absolute directory path to walk.
-   * @param options - Optional abort signal for long walks.
-   * @returns Flat array of file stat entries with relative paths.
+  /*
+   * No `getDirectoryStat` and no `searchFiles` (charter D3, W12d). Both answered
+   * from the per-root index with nothing masking the rows on the way out; a
+   * consumer reaches the same index through `statTree` and `search` on the
+   * rooted surface, where the composed view applies its policy before the
+   * descent. The index itself stays — {@link WorkspaceFileService.createRootedFileSystem}
+   * builds it through `_treeIndexFor` and every mutation still invalidates it.
    */
-  public async getDirectoryStat(path: string, options?: { signal?: AbortSignal }): Promise<FileStatEntry[]> {
-    const normalizedPath = resolveAuthorityPath(path);
-
-    const warm = this._treeIndexes.statTree(normalizedPath);
-    if (warm !== undefined) {
-      return warm;
-    }
-
-    const { provider, path: resolvedPath } = this._resolveProvider(normalizedPath);
-    const fileStats = await this._collectDirectoryStatsFromProvider(
-      provider,
-      { walkPath: resolvedPath, basePath: resolvedPath },
-      options,
-    );
-
-    this._treeIndexes.build(normalizedPath, fileStats);
-
-    return fileStats;
-  }
-
-  /**
-   * Search one exact directory root for entries whose paths contain the query substring.
-   *
-   * Unmasked, like {@link getDirectoryStat}: a search inside a composed view's
-   * root is served by {@link RootedFileSystem.search} over that view's index
-   * (charter D3, W4), and this stays only for a root no rooted handle covers
-   * until W12 (D12).
-   *
-   * @param root - Absolute directory root to search.
-   * @param query - Case-insensitive substring to match against relative file paths.
-   * @param options - Search options: `maxResults` (default 100), `includeDirectories` (default false).
-   * @returns Matching entries with paths relative to the tree root.
-   */
-  public async searchFiles(
-    root: string,
-    query: string,
-    options?: { maxResults?: number; includeDirectories?: boolean },
-  ): Promise<FileStatEntry[]> {
-    const index = await this._treeIndexFor(resolveAuthorityPath(root));
-    return index.searchFiles(query, options);
-  }
 
   /**
    * Read a single directory level. Pass `{ scope }` to read via the

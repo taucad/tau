@@ -193,12 +193,25 @@ describe('MountTable integration', () => {
       expect(await rootProvider.readFile('new.ts', 'utf8')).toBe('code');
     });
 
-    it('should duplicate files across mount boundaries', async () => {
+    /*
+     * W12d retired the authority's `duplicateFile`, whose read-then-write routed
+     * through the mount table and therefore copied *across* mounts. The gesture a
+     * consumer reaches is the rooted `duplicate`, and a rooted filesystem is
+     * captured to one exact mount (W5), so the copy stays in that mount's own
+     * provider. Recorded as a behaviour reduction with no consumer: the Files
+     * pane duplicates inside one project, and bundled types took their own rooted
+     * handle in W11.
+     *
+     * Finding for the reviewer: unlike `copyTree`, which refuses a target across
+     * a mount boundary, `duplicate` writes the shadowed path silently. Pre-existing
+     * since W5; noted here because this row is now its only coverage.
+     */
+    it('should keep a rooted duplicate inside the mount it captured', async () => {
       await rootProvider.writeFile('src/util.ts', 'util code');
-      await service.duplicateFile('/src/util.ts', '/previews/deps/util.ts');
+      await service.createRootedFileSystem('/').duplicate!('src/util.ts', 'previews/deps/util.ts');
 
       expect(await rootProvider.readFile('src/util.ts', 'utf8')).toBe('util code');
-      expect(await nodeModulesProvider.readFile('util.ts', 'utf8')).toBe('util code');
+      expect(await nodeModulesProvider.exists('util.ts')).toBe(false);
     });
   });
 
@@ -256,7 +269,8 @@ describe('MountTable integration', () => {
     it('should collect directory stats from mounted provider', async () => {
       await rootProvider.writeFile('src/a.ts', 'aaa');
       await rootProvider.writeFile('src/b.ts', 'bb');
-      const stats = await service.getDirectoryStat('/src');
+      /* The index is read through the rooted surface since W12d (D3). */
+      const stats = await service.createRootedFileSystem('/').statTree!('src');
       expect(stats).toHaveLength(2);
       const paths = stats.map((s) => s.path).sort();
       expect(paths).toEqual(['a.ts', 'b.ts']);

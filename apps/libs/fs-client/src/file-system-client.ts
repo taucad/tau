@@ -1,4 +1,4 @@
-import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, ProjectManifest } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, ProjectManifest } from '@taucad/types';
 import type {
   FileTreeNode,
   MkdirOptions,
@@ -37,6 +37,24 @@ export type BulkMoveResult = Readonly<{
   moved: ReadonlyArray<Readonly<{ edit: BulkMoveEdit; stat: FileStat }>>;
   failed: ReadonlyArray<Readonly<{ edit: BulkMoveEdit; error: WorkspaceMutationError }>>;
 }>;
+
+/**
+ * The physical-scope reads the `/files` workspace browser makes (charter D5).
+ *
+ * Every path here names a {@link WorkspaceScope} the mount table does not route
+ * — a folder the person granted that no project claims — so no composed view
+ * exists to serve it and the authority reads it through a standalone provider.
+ * `scope` is **required** on all three: a *routed* path is content, and content
+ * is the rooted surface's, never the authority's (D5, D12).
+ *
+ * @public
+ */
+export type ScopedStorageClient = {
+  readShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
+  readFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
+  readFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
+  getZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+};
 
 /**
  * Typed filesystem RPC surface consumed by main-thread facades such as
@@ -111,9 +129,14 @@ export type FileSystemClient = {
    */
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   exists(path: string): Promise<boolean>;
-  getDirectoryStat(path: string): Promise<FileStatEntry[]>;
-  duplicateFile(sourcePath: string, destinationPath: string): Promise<void>;
-  copyDirectory(sourcePath: string, destinationPath: string): Promise<void>;
+  /*
+   * `duplicateFile`, `copyDirectory`, `searchFiles` and `getDirectoryStat` are
+   * **not** here (charter D3, D4, W12d). Each walked or indexed the raw provider
+   * unmasked; each is now the rooted surface's — `duplicate`, `copyTree`,
+   * `search`, `statTree` — where the composed view supplies the mask before any
+   * provider I/O. The absolute-path spellings live on {@link ComposedViewClient},
+   * which routes them to the view.
+   */
   /**
    * Package a directory's contents into a ZIP archive, minus whatever the path
    * registry hides.
@@ -171,12 +194,6 @@ export type FileSystemClient = {
   disposeStorageRoot(storageRootKey: string): void;
 
   readDirectory(path: string): Promise<FileTreeNode[]>;
-
-  searchFiles(
-    root: string,
-    query: string,
-    options?: { maxResults?: number; includeDirectories?: boolean },
-  ): Promise<FileStatEntry[]>;
 
   /**
    * Reconcile out-of-band changes under one routed root, or every configured webaccess root when omitted.

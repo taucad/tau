@@ -30,7 +30,7 @@ import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { joinPath } from '@taucad/utils/path';
 import {
   createPreparedWorkspaceFileSystems,
@@ -110,11 +110,11 @@ const createBrowserHarness = async (): Promise<{
     // Text on the wire throughout: jsdom's `MessagePort` clones a `Uint8Array`
     // into its own realm, which the bridge's wire schemas reject. The pin is
     // about event visibility, not binary transport.
-    proxy: mock<FileSystemClient>({
+    proxy: mock<ComposedViewClient>({
       readFile: (async (path: string, options?: unknown) => {
         const text = await uiClient.readFile(path, 'utf8');
         return options === 'utf8' ? text : encoder.encode(text);
-      }) as FileSystemClient['readFile'],
+      }) as ComposedViewClient['readFile'],
       stat: async (path: string) => uiClient.stat(path),
     }),
     paths,

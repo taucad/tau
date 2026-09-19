@@ -59,8 +59,6 @@ const overlay = (): ComposedViewOverlay => {
 const authorityMock = (): FileSystemClient =>
   mock<FileSystemClient>({
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob(['authority'])),
-    getDirectoryStat: vi.fn().mockResolvedValue([]),
-    searchFiles: vi.fn().mockResolvedValue([]),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFileChecked: vi.fn().mockResolvedValue({ status: 'applied', content: new Uint8Array() }),
     writeFiles: vi.fn().mockResolvedValue(undefined),
@@ -69,8 +67,6 @@ const authorityMock = (): FileSystemClient =>
     unlink: vi.fn().mockResolvedValue(undefined),
     move: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
     bulkMove: vi.fn().mockResolvedValue({ moved: [], failed: [] }),
-    duplicateFile: vi.fn().mockResolvedValue(undefined),
-    copyDirectory: vi.fn().mockResolvedValue(undefined),
     canMove: vi.fn().mockResolvedValue(true),
     canRename: vi.fn().mockResolvedValue(true),
     canCreate: vi.fn().mockResolvedValue(true),
@@ -200,17 +196,12 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     await expect(client.duplicateFile(`${root}/main.ts`, `${root}/${skillPath}`)).rejects.toMatchObject({
       code: 'EROFS',
     });
-    await expect(client.copyDirectory(`${root}/src`, `${root}/${skillsRoot}/cad-replicad`)).rejects.toMatchObject({
-      code: 'EROFS',
-    });
     await expect(client.writeFiles({ [`${root}/${skillPath}`]: { content: skillBytes } })).rejects.toMatchObject({
       code: 'EROFS',
     });
     await expect(
       client.bulkMove([{ source: `${root}/main.ts`, target: `${root}/${skillPath}` }]),
     ).rejects.toMatchObject({ code: 'EROFS' });
-    expect(authority.duplicateFile).not.toHaveBeenCalled();
-    expect(authority.copyDirectory).not.toHaveBeenCalled();
     expect(authority.writeFiles).not.toHaveBeenCalled();
     expect(authority.bulkMove).not.toHaveBeenCalled();
   });
@@ -233,7 +224,6 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
       preconditions: [{ path: `${root}/parameters.json`, expected: null }],
     });
     await client.duplicateFile(`${root}/main.ts`, `${root}/copy.ts`);
-    await client.copyDirectory(`${root}/src`, `${root}/src-copy`);
     await client.bulkMove([{ source: `${root}/a.ts`, target: `${root}/b/a.ts` }]);
     await client.writeFile(`${root}/written.ts`, 'export {};\n');
     await client.mkdir(`${root}/made`, { recursive: true });
@@ -248,7 +238,6 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
       preconditions: [{ path: 'parameters.json', expected: null }],
     });
     expect(view.duplicate).toHaveBeenCalledWith('main.ts', 'copy.ts');
-    expect(view.copyTree).toHaveBeenCalledWith('src', 'src-copy');
     expect(view.bulkMove).toHaveBeenCalledWith([{ source: 'a.ts', target: 'b/a.ts' }]);
     /* `writeFile`, `mkdir` and `rmdir` are the view's own, so the bytes are the
      * proof: the composed view wrote through to the checkout. */
@@ -260,8 +249,6 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
       authority.move,
       authority.writeFiles,
       authority.writeFileChecked,
-      authority.duplicateFile,
-      authority.copyDirectory,
       authority.bulkMove,
       authority.writeFile,
       authority.mkdir,
@@ -447,30 +434,30 @@ describe('createComposedViewClient read content operations (north star W3)', () 
    * own index, so the Files pane and the agent see the same masked rows.
    */
   it('should search the project through the view, never the authority', async () => {
-    const { client, authority, view } = await harness();
+    const { client, view } = await harness();
 
     await client.searchFiles(root, 'main', { maxResults: 5 });
 
     expect(view.search).toHaveBeenCalledWith('main', { maxResults: 5 });
-    expect(authority.searchFiles).not.toHaveBeenCalled();
   });
 
   it('should recursively stat a project directory through the view', async () => {
-    const { client, authority, view } = await harness();
+    const { client, view } = await harness();
 
     await client.getDirectoryStat(`${root}/exports`);
 
     expect(view.statTree).toHaveBeenCalledWith('exports');
-    expect(authority.getDirectoryStat).not.toHaveBeenCalled();
   });
 
-  /* The global `/node_modules` alias has no rooted handle until W12 (D12). */
-  it('should leave a recursive stat outside the project root on the authority', async () => {
-    const { client, authority, view } = await harness();
+  /*
+   * W12d removed the authority's unmasked recursive stat with its last consumer,
+   * so a path no rooted view serves — the global `/node_modules` alias — is
+   * refused here instead of walking the raw provider.
+   */
+  it('should refuse a recursive stat outside the project root', async () => {
+    const { client, view } = await harness();
 
-    await client.getDirectoryStat('/node_modules/three');
-
-    expect(authority.getDirectoryStat).toHaveBeenCalledWith('/node_modules/three');
+    await expect(client.getDirectoryStat('/node_modules/three')).rejects.toThrow(/No rooted view serves/u);
     expect(view.statTree).not.toHaveBeenCalled();
   });
 });

@@ -450,7 +450,7 @@ function WorkspaceConnectionStatus({
 
 export default function FilesRoute(): React.JSX.Element {
   const homeBackend = useHomeStorageBackend();
-  const { client, workspace } = useFileManager();
+  const { scopedStorage, workspace } = useFileManager();
   const { projects } = useProjects();
 
   // Per-cache-key (backend | webaccess:<workspaceId>) loaded directories
@@ -533,7 +533,7 @@ export default function FilesRoute(): React.JSX.Element {
 
       try {
         const scope = await resolveScope(backend, workspaceId);
-        const nodes = scope ? await client.readShallowDirectory(directoryPath, { scope }) : [];
+        const nodes = scope ? await scopedStorage.readShallowDirectory(directoryPath, { scope }) : [];
         setLoadedDirectories((previous) => {
           const directories = new Map(previous[cacheKey] ?? []);
           directories.set(directoryPath, nodes);
@@ -549,7 +549,7 @@ export default function FilesRoute(): React.JSX.Element {
         inflightRef.current.delete(inflightKey);
       }
     },
-    [client, resolveScope],
+    [resolveScope, scopedStorage],
   );
 
   const projectTreeForKey = useCallback(
@@ -755,7 +755,7 @@ export default function FilesRoute(): React.JSX.Element {
           toast.error('Workspace is not connected.');
           return;
         }
-        const content = await client.readFile(path, { scope });
+        const content = await scopedStorage.readFile(path, { scope });
         const filename = path.split('/').pop() ?? 'file';
         downloadBlob(new Blob([content]), filename);
       },
@@ -765,12 +765,12 @@ export default function FilesRoute(): React.JSX.Element {
           toast.error('Workspace is not connected.');
           return;
         }
-        const blob = await client.getZippedDirectory(path, { scope });
+        const blob = await scopedStorage.getZippedDirectory(path, { scope });
         const folderName = path.split('/').pop() ?? 'folder';
         downloadBlob(blob, `${folderName}.zip`);
       },
     }),
-    [projects, resolveScope, client],
+    [projects, resolveScope, scopedStorage],
   );
 
   const connectionState = projectManager.workspaceConnection;

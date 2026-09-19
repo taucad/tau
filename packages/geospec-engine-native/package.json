@@ -21,7 +21,12 @@
     "LICENSE",
     "README.md",
     "!dist/**/*.node",
-    "NOTICE"
+    "NOTICE",
+    "trust/canonicalize.mjs",
+    "trust/evaluate-worker.mjs",
+    "trust/index.d.mts",
+    "trust/run.mjs",
+    "trust/verify.py"
   ],
   "keywords": [
     "cad",
@@ -39,7 +44,11 @@
       "types": "./src/node.ts",
       "node": "./src/node.ts"
     },
-    "./wasm": "./src/wasm.ts"
+    "./wasm": "./src/wasm.ts",
+    "./trust": {
+      "types": "./trust/index.d.mts",
+      "node": "./trust/run.mjs"
+    }
   },
   "publishConfig": {
     "access": "public",
@@ -58,6 +67,10 @@
         "types": "./dist/wasm.d.mts",
         "import": "./dist/wasm.mjs",
         "default": "./dist/wasm.mjs"
+      },
+      "./trust": {
+        "types": "./trust/index.d.mts",
+        "node": "./trust/run.mjs"
       }
     },
     "imports": {

@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { desktopE2EFrontendUrl } from '#support/config.js';
@@ -7,12 +5,7 @@ import { deliverDesktopDeepLink, launchDesktopApp } from '#support/desktop-app.j
 import type { DesktopSession } from '#support/desktop-app.js';
 import { expectSignedIn, expectVisible } from '#support/scenario.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
-import {
-  forgetSeededProjects,
-  registerProjectOnRemote,
-  seedProPlan,
-  tauCloudOwnerIds,
-} from '#support/two-client/tau-cloud.js';
+import { forgetSeededProjects, seedProPlan, tauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
 import type { TauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
 
 /**
@@ -62,14 +55,6 @@ const live = (): DesktopSession => {
   return session;
 };
 
-/** The seeded Tau Cloud owner, or a failure that names what went missing. */
-const seededOwner = (): TauCloudOwnerIds => {
-  if (owner === undefined) {
-    throw new Error('The Tau Cloud owner was not seeded.');
-  }
-  return owner;
-};
-
 beforeAll(async () => {
   const bearer = await seedTauTestUser(account);
   owner = await tauCloudOwnerIds(account.email);
@@ -108,20 +93,6 @@ describe('desktop share links', () => {
       .first()
       .click();
     await page.waitForURL(/\/w\/[^/]+\/[^/?]+/u, { timeout: 180_000 });
-
-    /* W18 defect DEF-1, and the reason the two-client tier seeds the same row:
-       nothing in the product writes the `project` row that `GET /v1/projects`
-       lists, so a connected project settles as `revoked` — measured here as
-       "You no longer have access to this project's cloud copy" — and the
-       owner-only invitation card never mounts. Seeded before the listing
-       settles, so the pane reads `owner` the first time. */
-    const slug = new URL(page.url()).pathname.split('/').at(-1) ?? '';
-    const manifestPath = join(desktop.homeRoot, slug, 'tau.json');
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { readonly id?: string };
-    if (manifest.id === undefined) {
-      throw new Error(`The desktop project wrote no id: ${manifestPath}`);
-    }
-    await registerProjectOnRemote(seededOwner(), manifest.id, projectName);
 
     /* The same two steps `two-client.spec.ts` drives: the workbench chip opens
      * the pane, and the region only offers the radio while no remote exists. */

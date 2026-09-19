@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import type { Auth } from 'better-auth';
 import type { HttpAdapterHost } from '@nestjs/core';
 import { WebSocket, WebSocketServer } from 'ws';
+import type { RawData } from 'ws';
 
 import { HostsGateway } from '#api/hosts/hosts.gateway.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
@@ -396,10 +397,10 @@ describe('HostsGateway control message failures', () => {
     return {
       open: async (deviceId: string) => {
         await started;
-        const frames: Array<(raw: Buffer) => void> = [];
+        const frames: Array<(raw: RawData) => void> = [];
         const socket = {
           close: vi.fn(),
-          on: vi.fn((event: string, listener: (raw: Buffer) => void) => {
+          on: vi.fn((event: string, listener: (raw: RawData) => void) => {
             if (event === 'message') {
               frames.push(listener);
             }

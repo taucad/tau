@@ -419,10 +419,13 @@ export const PortableShareSurface = (): React.JSX.Element => {
  * the shell's parser would refuse, so in both of those cases this is an empty
  * box that takes no pointer events and paints nothing.
  *
+ * Hidden at phone widths: there is no desktop app to open there, and the corner
+ * belongs to the workbench's drawer trigger.
+ *
  * @returns The offer's corner.
  */
 const ShareDesktopOffer = (): React.JSX.Element => (
-  <div className='pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-end p-4'>
+  <div className='pointer-events-none fixed inset-x-0 bottom-0 z-50 hidden justify-end p-4 sm:flex'>
     <div className='pointer-events-auto'>
       <OpenInDesktop continueLabel='View in the browser' />
     </div>

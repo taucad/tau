@@ -9,7 +9,13 @@
  * @module
  */
 
-import type { MountConfig, ProjectRootConfig, StorageRootConfig, WorkspaceScope } from '#mount-table.js';
+import type {
+  MountConfig,
+  ProjectLocator,
+  ProjectRootConfig,
+  StorageRootConfig,
+  WorkspaceScope,
+} from '#mount-table.js';
 import { MissingWorkspaceHandleError } from '#workspace-errors.js';
 
 /**
@@ -68,13 +74,45 @@ export function scopeForRouteConfig(
 }
 
 /**
- * Whether a standalone read of this scope can render a cross-mount tree. An
- * ephemeral in-memory root has no persisted namespace to list.
+ * Whether this scope's storage outlives the process. An in-memory root is
+ * ephemeral: it has no persisted namespace to list, to commit a pending project
+ * into, or to permanently delete a project directory from.
+ *
+ * @param scope - The scope an operation named.
+ * @returns Whether the scope names durable storage.
+ */
+export const isDurableScope = (scope: WorkspaceScope): boolean => scope.backend !== 'memory';
+
+/**
+ * Whether a standalone read of this scope can render a cross-mount tree: the
+ * listable namespace is exactly the durable one.
  *
  * @param scope - The standalone scope a read named.
  * @returns Whether the scope has a listable persisted namespace.
  */
-export const hasStandaloneTree = (scope: WorkspaceScope): boolean => scope.backend !== 'memory';
+export const hasStandaloneTree = (scope: WorkspaceScope): boolean => isDurableScope(scope);
+
+/**
+ * The locator one discovered project directory is addressed by: the storage
+ * root's own physical identity plus where the directory sits inside it. One
+ * config union mapped onto another — the backend layer owns the discriminant
+ * both are keyed on (charter D13).
+ *
+ * @param root - Configured storage root the scan is walking.
+ * @param storageRootKey - Resolved storage-root key of that root.
+ * @param relativeDirectory - Project directory relative to the root.
+ * @returns The locator naming that directory.
+ */
+export const projectLocatorFor = (
+  root: StorageRootConfig,
+  storageRootKey: string,
+  relativeDirectory: string,
+): ProjectLocator =>
+  root.backend === 'webaccess'
+    ? { backend: root.backend, storageRootKey, relativeDirectory, workspaceId: root.workspaceId }
+    : root.backend === 'node'
+      ? { backend: root.backend, storageRootKey, relativeDirectory, path: root.path }
+      : { backend: root.backend, storageRootKey, relativeDirectory };
 
 /**
  * Whether a dynamic mount configuration carries exactly the storage scope its

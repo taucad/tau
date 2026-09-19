@@ -62,10 +62,7 @@ const treeRelative = (root: string, absolutePath: string): string | undefined =>
   return undefined;
 };
 
-/**
- * Node in the in-memory file tree.
- * @public
- */
+/** Node in the in-memory file tree. */
 export type TreeNode =
   | ({
       type: 'file';
@@ -89,8 +86,6 @@ export type TreeNode =
  *
  * When used from {@link WorkspaceFileService}, paths are **relative to the first full
  * `getDirectoryStat` scan root** (not host absolute paths like `/projects/id/...`).
- *
- * @public
  */
 export class TreeIndex {
   private _root: TreeNode = { type: 'dir', size: 0, mtimeMs: 0, children: new Map() };
@@ -462,10 +457,24 @@ export class TreeIndex {
  * arrives as an absolute authority path, so this is the one place that
  * converts — each index whose root contains the path is updated, and one whose
  * root does not is left alone.
+ *
+ * One index holds one mount's tree, because one provider walk is all that built
+ * it. So containment alone is not enough: an index only answers for, and is only
+ * updated by, a path no mount boundary separates from its root.
  */
 export class TreeIndexes {
   /** Absolute scan root to its index; in-memory paths are relative to the key. */
   private readonly _byRoot = new Map<string, TreeIndex>();
+
+  /** Live prefixes of the installed mounts, as the boundary check reads them. */
+  private readonly _mountPrefixes: () => Iterable<string>;
+
+  /**
+   * @param mountPrefixes - Live source of the installed mount prefixes. Omitted means the owner declares no boundaries, and containment alone decides.
+   */
+  public constructor(mountPrefixes?: () => Iterable<string>) {
+    this._mountPrefixes = mountPrefixes ?? (() => []);
+  }
 
   /**
    * Replace the index for one root with a freshly scanned tree.
@@ -591,10 +600,17 @@ export class TreeIndexes {
    * @param to - Absolute target path.
    */
   public rename(from: string, to: string): void {
+    const source = normalizePath(from);
+    const target = normalizePath(to);
     for (const [root, index] of this._byRoot) {
-      const relativeFrom = treeRelative(root, normalizePath(from));
-      const relativeTo = treeRelative(root, normalizePath(to));
-      if (relativeFrom !== undefined && relativeTo !== undefined) {
+      const relativeFrom = treeRelative(root, source);
+      const relativeTo = treeRelative(root, target);
+      if (
+        relativeFrom !== undefined &&
+        relativeTo !== undefined &&
+        !this._crossesMount(root, source) &&
+        !this._crossesMount(root, target)
+      ) {
         index.rename(relativeFrom, relativeTo);
       }
     }
@@ -605,23 +621,62 @@ export class TreeIndexes {
     this._byRoot.clear();
   }
 
-  /** The first index whose root is `absolutePath` or an ancestor of it. */
-  private _covering(absolutePath: string): { index: TreeIndex; relative: string } | undefined {
-    for (const [root, index] of this._byRoot) {
-      const relative = treeRelative(root, absolutePath);
-      if (relative !== undefined) {
-        return { index, relative };
+  /**
+   * Drop the index for one root and every index nested under it: the targeted
+   * alternative to {@link TreeIndexes.clear} for a root whose mount went away,
+   * so the other roots stay warm instead of cold-starting with it.
+   *
+   * Not sufficient on its own for an unmount: paths under the removed prefix now
+   * fall through to whichever broader mount covers them, and that mount's index
+   * was scanned while the boundary still hid the subtree, so it is stale too.
+   * Evict the newly covering root as well, or keep clearing.
+   *
+   * @param root - Absolute root whose mount went away.
+   */
+  public evict(root: string): void {
+    const normalizedRoot = normalizePath(root);
+    for (const key of this._byRoot.keys()) {
+      if (treeRelative(normalizedRoot, key) !== undefined) {
+        this._byRoot.delete(key);
       }
+    }
+  }
+
+  /** The first index whose root contains `absolutePath` with no mount boundary between them. */
+  private _covering(absolutePath: string): { index: TreeIndex; relative: string } | undefined {
+    for (const { index, relative } of this._matching(absolutePath)) {
+      return { index, relative };
     }
     return undefined;
   }
 
   private _apply(absolutePath: string, update: (index: TreeIndex, relative: string) => void): void {
+    for (const { index, relative } of this._matching(normalizePath(absolutePath))) {
+      update(index, relative);
+    }
+  }
+
+  /** Every index that may speak for `absolutePath`, with the path relative to its root. */
+  private *_matching(absolutePath: string): Generator<{ index: TreeIndex; relative: string }> {
     for (const [root, index] of this._byRoot) {
-      const relative = treeRelative(root, normalizePath(absolutePath));
-      if (relative !== undefined) {
-        update(index, relative);
+      const relative = treeRelative(root, absolutePath);
+      if (relative !== undefined && !this._crossesMount(root, absolutePath)) {
+        yield { index, relative };
       }
     }
+  }
+
+  /**
+   * Whether a mount begins below `root` and at or above `absolutePath`: the path
+   * is then behind a boundary the walk that built this index never crossed.
+   */
+  private _crossesMount(root: string, absolutePath: string): boolean {
+    for (const prefix of this._mountPrefixes()) {
+      const nested = treeRelative(root, normalizePath(prefix));
+      if (nested !== undefined && nested !== '' && treeRelative(normalizePath(prefix), absolutePath) !== undefined) {
+        return true;
+      }
+    }
+    return false;
   }
 }

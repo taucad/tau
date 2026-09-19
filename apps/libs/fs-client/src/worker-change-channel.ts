@@ -1,7 +1,5 @@
 import { Topic } from '@taucad/events';
 import type { ChangeEvent, FileSystemBackend } from '@taucad/types';
-import { normalizePath } from '@taucad/utils/path';
-import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 
 /**
  * Transport surface required to wire worker push events (typically
@@ -27,8 +25,11 @@ export type WorkerChangeSubscription<T> = {
 };
 
 /**
- * Rename notification with workspace-relative paths (`undefined` when that
- * side of the rename is outside the project root).
+ * Rename notification with workspace-relative paths.
+ *
+ * Both edges arrive on a rooted transport — the bridge degrades a rename with
+ * one end outside the root to an arrival or a disappearance — so an absent edge
+ * is what a consumer must still tolerate, not what it will be handed.
  *
  * @public
  */
@@ -127,15 +128,19 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
  * events to facades. Does not suppress self-writes — the runtime bridge already
  * skips the originator.
  *
+ * The transport is the project's own rooted connection (charter D12), so events
+ * arrive in the workspace-relative namespace the facades speak and this channel
+ * translates nothing: `scopeEventToRoot` in the bridge has already re-spelled
+ * every path and withheld everything outside the root. Re-applying a resolver
+ * here would drop the very events it was meant to deliver.
+ *
  * @public
  * @example <caption>Subscribe to file writes with a path filter</caption>
  * ```typescript
  * import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
- * import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
  * import type { WorkerChangeChannelTransport } from '@taucad/fs-client/worker-change-channel';
  * export function exampleWorkerChannel(listen: WorkerChangeChannelTransport['listen']): WorkerChangeChannel {
- *   const paths = new WorkspacePathResolver('/project');
- *   const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+ *   const channel = new WorkerChangeChannel({ transport: { listen } });
  *   const openPaths = new Set<string>(['a.ts']);
  *   channel.onFileWritten({
  *     interestedIn: (relativePath: string) => openPaths.has(relativePath),
@@ -146,7 +151,6 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
  * ```
  */
 export class WorkerChangeChannel {
-  private readonly paths: WorkspacePathResolver;
   private readonly unlisten: () => void;
   readonly #fileWritten = new Topic<{ type: 'fileWritten'; path: string; backend: FileSystemBackend }>({
     name: 'WorkerChangeChannel.fileWritten',
@@ -175,8 +179,7 @@ export class WorkerChangeChannel {
     name: 'WorkerChangeChannel.backendChanged',
   });
 
-  public constructor(deps: { transport: WorkerChangeChannelTransport; paths: WorkspacePathResolver }) {
-    this.paths = deps.paths;
+  public constructor(deps: { transport: WorkerChangeChannelTransport }) {
     this.unlisten = deps.transport.listen('fileChanged', (data: unknown) => {
       this.#dispatch(data);
     });
@@ -385,81 +388,39 @@ export class WorkerChangeChannel {
     }
     switch (data.type) {
       case 'fileWritten': {
-        const path = this.paths.toRelativePath(data.path);
-        if (path !== undefined) {
-          this.#fileWritten.emit({ type: 'fileWritten', path, backend: data.backend });
-        }
+        this.#fileWritten.emit(data);
         return;
       }
       case 'fileDeleted': {
-        const path = this.paths.toRelativePath(data.path);
-        if (path !== undefined) {
-          this.#fileDeleted.emit({ type: 'fileDeleted', path, backend: data.backend });
-        }
+        this.#fileDeleted.emit(data);
         return;
       }
       case 'fileRenamed': {
-        const oldPath = this.paths.toRelativePath(data.oldPath);
-        const newPath = this.paths.toRelativePath(data.newPath);
-        if (oldPath === undefined && newPath === undefined) {
-          return;
-        }
-        this.#fileRenamed.emit({ type: 'fileRenamed', oldPath, newPath, backend: data.backend });
+        this.#fileRenamed.emit(data);
         return;
       }
       case 'fileCopied': {
-        const sourcePath = this.paths.toRelativePath(data.sourcePath);
-        const targetPath = this.paths.toRelativePath(data.targetPath);
-        if (targetPath === undefined) {
-          return;
-        }
-        this.#fileCopied.emit({ type: 'fileCopied', sourcePath, targetPath, backend: data.backend });
+        this.#fileCopied.emit(data);
         return;
       }
       case 'directoryCreated': {
-        const path = this.paths.toRelativePath(data.path);
-        if (path !== undefined) {
-          this.#directoryCreated.emit({ type: 'directoryCreated', path, backend: data.backend });
-        }
+        this.#directoryCreated.emit(data);
         return;
       }
       case 'directoryDeleted': {
-        const path = this.paths.toRelativePath(data.path);
-        if (path !== undefined) {
-          this.#directoryDeleted.emit({ type: 'directoryDeleted', path, backend: data.backend });
-        }
+        this.#directoryDeleted.emit(data);
         return;
       }
       case 'directoryRenamed': {
-        const oldPath = this.paths.toRelativePath(data.oldPath);
-        const newPath = this.paths.toRelativePath(data.newPath);
-        if (oldPath === undefined && newPath === undefined) {
-          return;
-        }
-        this.#directoryRenamed.emit({ type: 'directoryRenamed', oldPath, newPath, backend: data.backend });
+        this.#directoryRenamed.emit(data);
         return;
       }
       case 'directoryCopied': {
-        const sourcePath = this.paths.toRelativePath(data.sourcePath);
-        const targetPath = this.paths.toRelativePath(data.targetPath);
-        if (targetPath === undefined) {
-          return;
-        }
-        this.#directoryCopied.emit({ type: 'directoryCopied', sourcePath, targetPath, backend: data.backend });
+        this.#directoryCopied.emit(data);
         return;
       }
       case 'directoryChanged': {
-        const directoryAbsolute = data.path;
-        const rootNorm = normalizePath(this.paths.root);
-        const directoryNorm = normalizePath(directoryAbsolute);
-        const relativeDirectory = directoryNorm === rootNorm ? '' : this.paths.toRelativePath(directoryAbsolute);
-        if (relativeDirectory !== undefined) {
-          this.#directoryChanged.emit({
-            type: 'directoryChanged',
-            path: relativeDirectory,
-            backend: data.backend,
-          });
-        }
+        this.#directoryChanged.emit(data);
         return;
       }
       case 'backendChanged': {

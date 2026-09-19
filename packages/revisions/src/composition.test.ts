@@ -18,7 +18,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import { revisionId as toRevisionId } from '@taucad/filesystem/revisions';
+import { revisionId as toRevisionId } from '#algorithms/index.js';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { createActor } from 'xstate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

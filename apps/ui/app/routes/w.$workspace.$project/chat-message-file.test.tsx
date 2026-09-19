@@ -13,7 +13,7 @@ const readFile = vi.fn(async (path: string) => {
   }
   throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 });
-const fileManager = { client: { readFile } };
+const fileManager = { files: { readFile } };
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => fileManager,
 }));

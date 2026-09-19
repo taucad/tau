@@ -74,7 +74,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   const navigate = useNavigate();
   const [navigationIntent] = useState(() => parseProjectShareNavigationIntent(location.search));
   const { parameterService, projectId, projectRef, editorRef } = useProject();
-  const { client: fileClient } = useFileManager();
+  const { files: fileClient } = useFileManager();
   const { projects } = useProjects();
   const project = useSelector(projectRef, (state) => state.context.project);
   /* The entry's CAD actor owns its render timeout; a unit spawned for the thumbnail is seeded from

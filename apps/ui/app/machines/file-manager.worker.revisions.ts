@@ -45,8 +45,8 @@ import type {
   IsomorphicGitCheckoutOptions,
   KeepalivePushOutcome,
 } from '@taucad/revisions';
-import { revisionId } from '@taucad/filesystem/revisions';
-import type { ImmutableRevisionTree } from '@taucad/filesystem/revisions';
+import { revisionId } from '@taucad/revisions/algorithms';
+import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
 

@@ -1,5 +1,6 @@
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -45,7 +46,10 @@ const overlay = () => createSkillBundleOverlay(createSkillBundleRegistry([bundle
 
 const fileSystem = () =>
   createProviderRpcFileSystem({
-    provider: composeView({ filesystem: provider }, { consumer: 'agent', overlays: [overlay()] }),
+    provider: composeView(
+      { filesystem: provider },
+      { consumer: 'agent', policy: tauPathPolicy, overlays: [overlay()] },
+    ),
     mutations: new ResourceQueue(),
   });
 

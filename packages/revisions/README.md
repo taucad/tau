@@ -30,7 +30,7 @@ scripted edits name the same tree — and the same revision — on both legs.
 Every port preserves the `Tau-Metadata` provenance trailer, and `objectFormat`
 travels on every receipt; no caller assumes a 40-character id.
 
-A merge is the caller's: `mergeRevisionTrees` from `@taucad/filesystem/revisions`
+A merge is the caller's: `mergeRevisionTrees` from `@taucad/revisions/algorithms`
 produces the tree, and the terms of an unresolved one are recorded as a value on
 the revision, so a conflict lives in the graph rather than failing an operation.
 

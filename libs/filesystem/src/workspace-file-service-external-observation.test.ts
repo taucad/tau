@@ -8,7 +8,7 @@ import { ResourceQueue } from '#resource-queue.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import type { ProjectRootConfiguration } from '#mount-table.js';
-import type { FileSystemProvider, WatchEvent } from '#types.js';
+import type { ExternalChangeFact, FileSystemProvider, WatchEvent } from '#types.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 
 type ObserverRecord = {
@@ -785,5 +785,92 @@ describe('WorkspaceFileService external webaccess observation', () => {
     await service.pollExternalChanges();
     expect(globalEvents).toHaveLength(3);
     expect(alphaEvents).toHaveLength(1);
+  });
+});
+
+/**
+ * Observation is chosen by declared capability, never by backend name (charter D13).
+ *
+ * Both roots here are backends the authority never observed before this package:
+ * one provider declares `observe()`, its sibling does not. Nothing about the
+ * scope, the route or the storage-root key differs.
+ */
+describe('WorkspaceFileService observation by declared capability', () => {
+  const alphaRoute = `/projects/${alphaProjectId}`;
+  const betaRoute = `/projects/${betaProjectId}`;
+
+  const createCapabilityService = async (): Promise<{
+    service: WorkspaceFileService;
+    deliver: (facts: readonly ExternalChangeFact[]) => void;
+  }> => {
+    const fixtures = new ProviderRegistry();
+    const observing = await fixtures.getProvider({ backend: 'memory', storageRootKey: 'memory:pin-observing' });
+    const silent = await fixtures.getProvider({ backend: 'memory', storageRootKey: 'memory:pin-silent' });
+    const rootProvider = await fixtures.getProvider({ backend: 'memory', storageRootKey: 'memory:pin-root' });
+    await observing.writeFile(`${alphaPhysicalRoot}/main.ts`, 'before');
+    await silent.writeFile(`${betaPhysicalRoot}/main.ts`, 'beta');
+
+    let listener: ((facts: readonly ExternalChangeFact[]) => void) | undefined;
+    Object.assign(observing, {
+      observe: async (facts: (delivered: readonly ExternalChangeFact[]) => void) => {
+        listener = facts;
+        return () => {
+          listener = undefined;
+        };
+      },
+    });
+
+    const providerRegistry = new ProviderRegistry();
+    vi.spyOn(providerRegistry, 'getProvider').mockImplementation(async (scope) =>
+      scope.backend === 'indexeddb' ? observing : silent,
+    );
+    const mountTable = new MountTable();
+    mountTable.mount('/', rootProvider, {
+      class: 'authored',
+      backend: 'memory',
+      storageRootKey: 'memory:pin-root',
+    });
+    const service = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable,
+    });
+    activeServices.push(service);
+    await service.configureProjectRoots({
+      projects: [
+        { backend: 'indexeddb', projectId: alphaProjectId, providerBasePath: alphaPhysicalRoot },
+        { backend: 'opfs', projectId: betaProjectId, providerBasePath: betaPhysicalRoot },
+      ],
+      roots: [{ backend: 'indexeddb' }, { backend: 'opfs' }],
+    });
+    return {
+      service,
+      deliver: (facts) => {
+        if (listener === undefined) {
+          throw new Error('The provider declared observe() but the authority never armed it.');
+        }
+        listener(facts);
+      },
+    };
+  };
+
+  it("ingests a declared observer's facts and reports its root as natively observed", async () => {
+    const { service, deliver } = await createCapabilityService();
+    const events: WatchEvent[] = [];
+    service.createRootedFileSystem(alphaRoute).watch({ paths: ['main.ts'] }, (event) => events.push(event));
+
+    await expect.poll(async () => service.pollExternalChanges(alphaRoute)).toBe(true);
+    deliver([{ kind: 'modified', path: `${alphaPhysicalRoot}/main.ts`, entry: 'file' }]);
+
+    await vi.waitFor(() => {
+      expect(events).toContainEqual({ type: 'change', path: 'main.ts' });
+    });
+  });
+
+  it('leaves a provider without the capability to the polling fallback', async () => {
+    const { service } = await createCapabilityService();
+
+    await expect(service.pollExternalChanges(betaRoute)).resolves.toBe(false);
   });
 });

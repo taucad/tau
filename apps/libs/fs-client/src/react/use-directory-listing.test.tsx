@@ -5,7 +5,7 @@ import { mock } from 'vitest-mock-extended';
 import type { FileTreeNode } from '@taucad/filesystem';
 import { useDirectoryListing } from '#react/use-directory-listing.js';
 import { FileTreeService } from '#file-tree-service.js';
-import type { FileSystemClient } from '#file-system-client.js';
+import type { ComposedViewClient } from '#composed-view-client.js';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
@@ -14,17 +14,17 @@ import type { FileTreeService as FileTreeServiceType } from '#file-tree-service.
 
 const workspaceRoot = '/projects/abc';
 
-function createTreeHarness(overrides?: { proxy?: FileSystemClient }): {
+function createTreeHarness(overrides?: { proxy?: ComposedViewClient }): {
   tree: FileTreeService;
-  proxy: FileSystemClient;
+  proxy: ComposedViewClient;
   disposeChannel: () => void;
 } {
   const listen = vi.fn().mockReturnValue(vi.fn());
   const paths = new WorkspacePathResolver(workspaceRoot);
-  const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+  const channel = new WorkerChangeChannel({ transport: { listen } });
   const proxy =
     overrides?.proxy ??
-    mock<FileSystemClient>({
+    mock<ComposedViewClient>({
       readDirectory: vi.fn().mockResolvedValue([]),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),

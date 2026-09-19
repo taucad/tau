@@ -38,7 +38,7 @@ vi.mock('xstate', async (importOriginal) => {
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     fileManagerRef: { id: 'fmRef' },
-    client: { writeFiles: mockClientWriteFiles },
+    files: { writeFiles: mockClientWriteFiles },
     workspace: {
       mount: mockMount,
       unmount: mockUnmount,
@@ -213,7 +213,7 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
     result.unmount();
   });
 
-  it('still unmounts the preview-owned prefix when client.writeFiles rejects', async () => {
+  it('still unmounts the preview-owned prefix when files.writeFiles rejects', async () => {
     mockClientWriteFiles.mockRejectedValueOnce(new Error('write failed'));
 
     const result = render(

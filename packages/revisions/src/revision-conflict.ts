@@ -19,13 +19,8 @@
  * conformance suite proves it once per row rather than twice per adapter.
  */
 
-import {
-  ImmutableRevisionTree,
-  mergeRevisionTrees,
-  renderConflictMarkers,
-  revisionId,
-} from '@taucad/filesystem/revisions';
-import type { ConflictMarkerLabels, RevisionTreeConflict } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, mergeRevisionTrees, renderConflictMarkers, revisionId } from '#algorithms/index.js';
+import type { ConflictMarkerLabels, RevisionTreeConflict } from '#algorithms/index.js';
 import { mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';

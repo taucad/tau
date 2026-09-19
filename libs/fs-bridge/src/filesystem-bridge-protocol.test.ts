@@ -104,8 +104,10 @@ describe('filesystem bridge Zod schemas', () => {
     const stats = [
       { type: 'file', path: 'main.ts', name: 'main.ts', size: 4, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
     ] as const;
-    const parsedDirectoryStats = fileSystemBridgeSchemas.calls.getDirectoryStat.result.safeParse(stats);
-    const parsedSearchStats = fileSystemBridgeSchemas.calls.searchFiles.result.safeParse(stats);
+    /* Both spellings are the rooted surface's since W12d: `statTree` over the
+     * root's index and `search` over the same one, masked by the view. */
+    const parsedDirectoryStats = fileSystemBridgeSchemas.calls.statTree.result.safeParse(stats);
+    const parsedSearchStats = fileSystemBridgeSchemas.calls.search.result.safeParse(stats);
 
     expect(parsedDirectoryStats.success).toBe(true);
     expect(parsedSearchStats.success).toBe(true);
@@ -115,13 +117,13 @@ describe('filesystem bridge Zod schemas', () => {
     }
   });
 
-  it('preserves getDirectoryContents result references', () => {
+  it('preserves the rooted contents result references', () => {
     const contents = {
       'main.ts': new Uint8Array([1, 2, 3]),
       'nested/model.step': new Uint8Array([4, 5, 6]),
     };
 
-    const parsed = fileSystemBridgeSchemas.calls.getDirectoryContents.result.safeParse(contents);
+    const parsed = fileSystemBridgeSchemas.calls.contents.result.safeParse(contents);
 
     expect(parsed.success).toBe(true);
     if (parsed.success) {

@@ -1,5 +1,5 @@
-import { revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import { revisionId } from '@taucad/revisions/algorithms';
+import type { RevisionId } from '@taucad/revisions/algorithms';
 import { assertRootedPath } from '@taucad/utils/path';
 
 import { canonicalizeCacheValue } from '@taucad/cache-core';

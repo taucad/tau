@@ -19,8 +19,8 @@
  * here knows about a remote.
  */
 
-import { ImmutableRevisionTree } from '@taucad/filesystem/revisions';
-import type { RevisionTreeInput } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree } from '#algorithms/index.js';
+import type { RevisionTreeInput } from '#algorithms/index.js';
 
 import { digestHex } from '#object-hash.js';
 import {

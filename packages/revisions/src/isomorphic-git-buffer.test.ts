@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import { ImmutableRevisionTree } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree } from '#algorithms/index.js';
 
 const roots: string[] = [];
 

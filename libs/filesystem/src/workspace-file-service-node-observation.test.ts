@@ -82,6 +82,16 @@ describe('WorkspaceFileService node root observation', () => {
     await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe('before');
   });
 
+  it('reports a natively observed root as live instead of trying to snapshot it', async () => {
+    const { service } = await createNodeService();
+
+    /* A node root declares `observe()` and carries no snapshot source, so the
+     * safety poll is a no-op that answers "already live" — before W9 it rejected
+     * with "snapshot polling is unavailable", which stalled the file tree's
+     * cadence probe on every desktop project. */
+    await expect.poll(async () => service.pollExternalChanges(`/projects/${projectId}`)).toBe(true);
+  });
+
   it('surfaces an external disk write as a watch change', async () => {
     const { service, root } = await createNodeService();
     const events: WatchEvent[] = [];

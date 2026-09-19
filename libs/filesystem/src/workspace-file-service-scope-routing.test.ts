@@ -133,10 +133,12 @@ describe('WorkspaceFileService — unified scope routing', () => {
       storageRootKey: 'memory:copy-target-boundary',
     });
 
+    const rooted = service.createRootedFileSystem('/');
     await expect(service.move('/source', '/moved')).rejects.toThrow(/cross mount boundary/);
-    await expect(service.copyDirectory('/source', '/copied')).rejects.toThrow(/cross mount boundary/);
+    /* `copyTree` is the tree copy a consumer reaches since W12d (D4). */
+    await expect(rooted.copyTree!('source', 'copied')).rejects.toThrow(/cross mount boundary/);
     await expect(service.move('/plain', '/target')).rejects.toThrow(/cross mount boundary/);
-    await expect(service.copyDirectory('/plain', '/target')).rejects.toThrow(/cross mount boundary/);
+    await expect(rooted.copyTree!('plain', 'target')).rejects.toThrow(/cross mount boundary/);
 
     await expect(service.readFile('/source/file.txt', 'utf8')).resolves.toBe('source');
     await expect(service.readFile('/plain/file.txt', 'utf8')).resolves.toBe('plain');
@@ -523,7 +525,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const replacement = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const replacementEvents: WatchEvent[] = [];
     const stopReplacement = replacement.watch({ paths: ['queued.txt'] }, (event) => replacementEvents.push(event));
-    await service.getDirectoryStat(`/projects/${alphaProjectId}`);
+    await service.createRootedFileSystem(`/projects/${alphaProjectId}`).statTree!('');
     release.resolve();
     await queuedWrite;
     await new Promise((resolve) => {
@@ -533,7 +535,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await expect(oldProvider.readFile(`${alphaProjectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
     await expect(replacement.exists('queued.txt')).resolves.toBe(false);
     expect(replacementEvents).toEqual([]);
-    expect(await service.getDirectoryStat(`/projects/${alphaProjectId}`)).toEqual([]);
+    expect(await service.createRootedFileSystem(`/projects/${alphaProjectId}`).statTree!('')).toEqual([]);
     stopReplacement();
   });
 

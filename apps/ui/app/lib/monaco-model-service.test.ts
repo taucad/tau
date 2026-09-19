@@ -13,7 +13,7 @@ import { createWorkspaceContentBinding, MonacoModelService } from '#lib/monaco-m
 import type { ModelServiceConfig } from '#lib/monaco-model-service.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '@taucad/fs-client/file-content-service';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { WorkspaceScope } from '@taucad/filesystem';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
@@ -777,7 +777,7 @@ describe('Monaco external-content production wiring', () => {
       const data = await readFileMock();
       return options === 'utf8' || options?.encoding === 'utf8' ? new TextDecoder().decode(data) : data;
     }
-    const proxy = mock<FileSystemClient>({ readFile });
+    const proxy = mock<ComposedViewClient>({ readFile });
     let emitWorkerChange: ((event: unknown) => void) | undefined;
     const paths = new WorkspacePathResolver('/project');
     const channel = new WorkerChangeChannel({
@@ -787,7 +787,6 @@ describe('Monaco external-content production wiring', () => {
           return vi.fn();
         },
       },
-      paths,
     });
     const contentService = new FileContentService({
       proxy,
@@ -817,7 +816,7 @@ describe('Monaco external-content production wiring', () => {
       await modelService.acquireModel('main.ts');
       expect(models.get('file:///main.ts')?.getValue()).toBe('before');
       bytes = new TextEncoder().encode('after');
-      emitWorkerChange?.({ type: 'fileWritten', path: '/project/main.ts', backend: 'indexeddb' });
+      emitWorkerChange?.({ type: 'fileWritten', path: 'main.ts', backend: 'indexeddb' });
 
       await vi.waitFor(() => {
         expect(models.get('file:///main.ts')?.getValue()).toBe('after');

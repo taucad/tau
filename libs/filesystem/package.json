@@ -27,10 +27,11 @@
     ".": "./src/index.ts",
     "./backend": "./src/backend/index.ts",
     "./backend/node": "./src/backend/node/index.ts",
-    "./bundled-types-mount": "./src/bundled-types-mount.ts",
     "./composed-view": "./src/composed-view.ts",
+    "./content-metadata": "./src/content-metadata.ts",
     "./path-registry": "./src/path-registry.ts",
-    "./revisions": "./src/revisions/index.ts",
+    "./backend/stream-utils": "./src/backend/stream-utils.ts",
+    "./content-ops": "./src/content-ops/index.ts",
     "./storage-root-key": "./src/storage-root-key.ts"
   },
   "publishConfig": {
@@ -51,25 +52,30 @@
         "import": "./dist/backend/node/index.mjs",
         "default": "./dist/backend/node/index.mjs"
       },
-      "./bundled-types-mount": {
-        "types": "./dist/bundled-types-mount.d.mts",
-        "import": "./dist/bundled-types-mount.mjs",
-        "default": "./dist/bundled-types-mount.mjs"
-      },
       "./composed-view": {
         "types": "./dist/composed-view.d.mts",
         "import": "./dist/composed-view.mjs",
         "default": "./dist/composed-view.mjs"
+      },
+      "./content-metadata": {
+        "types": "./dist/content-metadata.d.mts",
+        "import": "./dist/content-metadata.mjs",
+        "default": "./dist/content-metadata.mjs"
       },
       "./path-registry": {
         "types": "./dist/path-registry.d.mts",
         "import": "./dist/path-registry.mjs",
         "default": "./dist/path-registry.mjs"
       },
-      "./revisions": {
-        "types": "./dist/revisions/index.d.mts",
-        "import": "./dist/revisions/index.mjs",
-        "default": "./dist/revisions/index.mjs"
+      "./backend/stream-utils": {
+        "types": "./dist/backend/stream-utils.d.mts",
+        "import": "./dist/backend/stream-utils.mjs",
+        "default": "./dist/backend/stream-utils.mjs"
+      },
+      "./content-ops": {
+        "types": "./dist/content-ops/index.d.mts",
+        "import": "./dist/content-ops/index.mjs",
+        "default": "./dist/content-ops/index.mjs"
       },
       "./storage-root-key": {
         "types": "./dist/storage-root-key.d.mts",

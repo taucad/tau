@@ -193,12 +193,31 @@ describe('MountTable integration', () => {
       expect(await rootProvider.readFile('new.ts', 'utf8')).toBe('code');
     });
 
-    it('should duplicate files across mount boundaries', async () => {
+    /*
+     * W12d retired the authority's `duplicateFile`, whose read-then-write routed
+     * through the mount table and therefore copied *across* mounts. The gesture a
+     * consumer reaches is the rooted `duplicate`, and a rooted filesystem is
+     * captured to one exact mount (W5) — so a target the mount table would route
+     * somewhere else is not this view's to write, and shadowing it silently in
+     * the captured provider is the wrong answer (gate G-D, H5). `copyTree`
+     * refuses a target that crosses a mount boundary; this is the same refusal
+     * for the one-file copy.
+     */
+    it('should refuse a rooted duplicate whose target the captured mount does not own', async () => {
       await rootProvider.writeFile('src/util.ts', 'util code');
-      await service.duplicateFile('/src/util.ts', '/previews/deps/util.ts');
 
-      expect(await rootProvider.readFile('src/util.ts', 'utf8')).toBe('util code');
-      expect(await nodeModulesProvider.readFile('util.ts', 'utf8')).toBe('util code');
+      await expect(
+        service.createRootedFileSystem('/').duplicate!('src/util.ts', 'previews/deps/util.ts'),
+      ).rejects.toThrow(/cross mount boundary/u);
+      expect(await rootProvider.exists('previews/deps/util.ts')).toBe(false);
+      expect(await nodeModulesProvider.exists('util.ts')).toBe(false);
+    });
+
+    it('should duplicate inside the mount it captured', async () => {
+      await rootProvider.writeFile('src/util.ts', 'util code');
+      await service.createRootedFileSystem('/').duplicate!('src/util.ts', 'src/util.copy.ts');
+
+      expect(await rootProvider.readFile('src/util.copy.ts', 'utf8')).toBe('util code');
     });
   });
 
@@ -256,7 +275,8 @@ describe('MountTable integration', () => {
     it('should collect directory stats from mounted provider', async () => {
       await rootProvider.writeFile('src/a.ts', 'aaa');
       await rootProvider.writeFile('src/b.ts', 'bb');
-      const stats = await service.getDirectoryStat('/src');
+      /* The index is read through the rooted surface since W12d (D3). */
+      const stats = await service.createRootedFileSystem('/').statTree!('src');
       expect(stats).toHaveLength(2);
       const paths = stats.map((s) => s.path).sort();
       expect(paths).toEqual(['a.ts', 'b.ts']);

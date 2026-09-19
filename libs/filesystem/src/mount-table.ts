@@ -8,14 +8,11 @@
  * @public
  */
 
-import type {
-  AdoptableProjectManifest,
-  FileSystemBackend,
-  ProjectManifest,
-  ProjectManifestParseIssue,
-} from '@taucad/types';
+import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
+import type { RouteKind } from '#project-routes.js';
+import { parseRoute } from '#project-routes.js';
 
 /**
  * What the bytes behind one mount are to a revision: `authored` content a
@@ -179,59 +176,6 @@ export type ProjectLocator =
       readonly path: string;
     };
 
-/** Validated or quarantined result from project discovery. @public */
-export type ProjectDiscoveryEntry =
-  | {
-      readonly status: 'valid';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      readonly status: 'duplicate-id';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      /**
-       * The project is discoverable here, but its persisted route still points
-       * at a storage root this pass could not observe, so re-pointing would be
-       * unsafe. Synthesized by the UI reconciliation layer — the worker scan
-       * never emits it.
-       */
-      readonly status: 'route-blocked';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      readonly status: 'adoption-required';
-      readonly manifest: AdoptableProjectManifest;
-      readonly locator: ProjectLocator;
-      readonly issue: ProjectManifestParseIssue;
-    }
-  | {
-      readonly status: 'invalid';
-      readonly locator: ProjectLocator;
-      readonly issue: ProjectManifestParseIssue;
-    };
-
-/** Completeness of one configured physical-root scan. @public */
-export type ProjectRootDiscoveryStatus =
-  | {
-      readonly status: 'complete';
-      readonly root: StorageRootConfig;
-    }
-  | {
-      readonly status: 'inaccessible';
-      readonly root: StorageRootConfig;
-      readonly reason: string;
-    };
-
-/** Complete project-discovery result. Entries never imply an unreported root was empty. @public */
-export type ProjectDiscoveryResult = {
-  readonly entries: readonly ProjectDiscoveryEntry[];
-  readonly roots: readonly ProjectRootDiscoveryStatus[];
-};
-
 /** Exact scoped request for permanently removing one project directory. @public */
 export type PermanentDeleteProjectDirectoryInput = {
   readonly projectId: string;
@@ -294,6 +238,12 @@ export type MountMetadata = {
   readonly providerBasePath?: string;
   /** Required; {@link MountTable.mount} refuses an unclassified mount. */
   readonly class: MountPathClass;
+  /**
+   * What this mount is to the product. Defaults to the route its prefix
+   * spells; declare it to install a mount the route grammar would otherwise
+   * claim (charter D10).
+   */
+  readonly kind?: RouteKind;
 };
 
 /**
@@ -307,6 +257,13 @@ export type MountEntry = {
   readonly storageRootKey?: string;
   readonly providerBasePath: string;
   readonly class: MountPathClass;
+  /**
+   * What this mount is to the product, so a classifier reads the kind instead
+   * of re-parsing the prefix (charter D10).
+   */
+  readonly kind: RouteKind;
+  /** Route identity carried by the prefix: project id, checkout id or preview instance. */
+  readonly routeId?: string;
 };
 
 /**
@@ -368,6 +325,7 @@ export class MountTable {
     }
 
     const providerBasePath = assertRootedPath(config.providerBasePath ?? '');
+    const route = parseRoute(normalized);
     this._mounts.push({
       prefix: normalized,
       provider,
@@ -375,6 +333,8 @@ export class MountTable {
       storageRootKey: config.storageRootKey,
       providerBasePath,
       class: config.class,
+      kind: config.kind ?? route.kind,
+      routeId: route.id,
     });
     this._mounts.sort((a, b) => b.prefix.length - a.prefix.length);
   }

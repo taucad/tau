@@ -25,8 +25,7 @@ import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
-import type { FileReadStreamOptions, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
-import type { RevisionFileMode } from '#revision-tree.js';
+import type { FileMode, FileReadStreamOptions, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
@@ -173,7 +172,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     };
   }
 
-  public async getFileMode(path_: string): Promise<RevisionFileMode> {
+  public async getFileMode(path_: string): Promise<FileMode> {
     this._assertRootedPath(path_);
     const stats = await fs.stat(await this._resolve(path_));
     if (!stats.isFile()) {
@@ -185,7 +184,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     return executable ? '100755' : '100644';
   }
 
-  public async setFileMode(path_: string, mode: RevisionFileMode): Promise<void> {
+  public async setFileMode(path_: string, mode: FileMode): Promise<void> {
     this._assertRootedPath(path_);
     const target = await this._resolve(path_);
     const stats = await fs.stat(target);

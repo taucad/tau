@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./algorithms": "./src/algorithms/index.ts",
     "./node": "./src/node/index.ts",
     "./package.json": "./package.json",
     "./revision-effects": "./src/revision-effects.ts",
@@ -55,6 +56,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./algorithms": {
+        "types": "./dist/algorithms/index.d.mts",
+        "import": "./dist/algorithms/index.mjs",
+        "default": "./dist/algorithms/index.mjs"
       },
       "./node": {
         "types": "./dist/node/index.d.mts",

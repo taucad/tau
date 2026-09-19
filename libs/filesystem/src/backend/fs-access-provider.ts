@@ -8,7 +8,13 @@
  * @see https://developer.mozilla.org/en-US/docs/Web/API/File_System_API
  */
 
-import type { DirectoryEntry, FileReadStreamOptions, FileStat, ProviderCapabilities } from '#types.js';
+import type {
+  DirectoryEntry,
+  ExternalChangeFact,
+  FileReadStreamOptions,
+  FileStat,
+  ProviderCapabilities,
+} from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { fileStatFromFile } from '#content-metadata.js';
 import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
@@ -49,6 +55,46 @@ const directoryEntries = async function* (
       yield entry;
     }
   }
+};
+
+/** One record the platform's `FileSystemObserver` delivers. */
+type FileSystemObserverRecord = {
+  readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
+  readonly changedHandle?: { readonly kind: FileSystemHandle['kind'] };
+  readonly relativePathComponents: readonly string[];
+  readonly relativePathMovedFrom?: readonly string[];
+};
+
+type FileSystemObserverHandle = {
+  observe(handle: FileSystemDirectoryHandle, options: { recursive: boolean }): Promise<void> | void;
+  disconnect(): void;
+};
+
+type FileSystemObserverConstructor = new (
+  callback: (records: readonly FileSystemObserverRecord[]) => void,
+) => FileSystemObserverHandle;
+
+/**
+ * Translate one platform record into the port's fact vocabulary. An `errored`
+ * record is a lost observer, which is exactly a `reset`.
+ *
+ * @param record - One `FileSystemObserver` record.
+ * @returns The equivalent {@link ExternalChangeFact}.
+ */
+const toExternalChangeFact = (record: FileSystemObserverRecord): ExternalChangeFact => {
+  if (record.type === 'errored') {
+    return { kind: 'reset' };
+  }
+  const kind =
+    record.type === 'appeared' ? 'created' : record.type === 'disappeared' ? 'deleted' : (record.type as 'modified');
+  const entryKind = record.changedHandle?.kind;
+  const movedFrom = record.relativePathMovedFrom;
+  return {
+    kind,
+    path: record.relativePathComponents.join('/'),
+    ...(entryKind === undefined ? {} : { entry: entryKind === 'directory' ? 'dir' : 'file' }),
+    ...(Array.isArray(movedFrom) ? { from: movedFrom.join('/') } : {}),
+  };
 };
 
 const hasDomName = (error: unknown, name: string): boolean =>
@@ -334,6 +380,35 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       this._assertRootedPath(prefix);
       this._invalidateHandleCachePrefix(prefix);
     }
+  }
+
+  /**
+   * Observe this root through the platform's `FileSystemObserver`.
+   *
+   * The API is not universally available and `observe()` can be refused for a
+   * handle whose permission was revoked; either way the root has a polling
+   * fallback, so both resolve `undefined` rather than rejecting.
+   *
+   * @param listener - Receives every normalised fact batch.
+   * @returns A disposer, or `undefined` when no observer could be armed.
+   */
+  public async observe(listener: (facts: readonly ExternalChangeFact[]) => void): Promise<(() => void) | undefined> {
+    const browser = globalThis as typeof globalThis & { FileSystemObserver?: FileSystemObserverConstructor };
+    if (typeof browser.FileSystemObserver !== 'function') {
+      return undefined;
+    }
+    const observer = new browser.FileSystemObserver((records) => {
+      listener(records.map((record) => toExternalChangeFact(record)));
+    });
+    try {
+      await observer.observe(this._rootHandle, { recursive: true });
+    } catch {
+      observer.disconnect();
+      return undefined;
+    }
+    return () => {
+      observer.disconnect();
+    };
   }
 
   /**

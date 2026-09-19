@@ -1,26 +1,20 @@
 import { assertRootedPath } from '@taucad/utils/path';
+import type { FileMode } from '@taucad/filesystem';
 
 declare const revisionIdBrand: unique symbol;
 
 /** Opaque identity of one immutable revision. @public */
 export type RevisionId = string & { readonly [revisionIdBrand]: true };
 
-/** Git mode supported for materialized regular files. @public */
-export type RevisionFileMode = '100644' | '100755';
-
 /** One immutable file entry in a revision tree. @public */
 export type RevisionTreeEntry = Readonly<{
   path: string;
   content: Uint8Array<ArrayBuffer>;
-  mode: RevisionFileMode;
+  mode: FileMode;
 }>;
 
 /** Constructor input for one immutable revision entry. @public */
-export type RevisionTreeInput = readonly [
-  path: string,
-  content: Uint8Array<ArrayBuffer> | string,
-  mode?: RevisionFileMode,
-];
+export type RevisionTreeInput = readonly [path: string, content: Uint8Array<ArrayBuffer> | string, mode?: FileMode];
 
 const textEncoder = new TextEncoder();
 
@@ -55,7 +49,7 @@ const ownedBytes = (content: Uint8Array<ArrayBuffer> | string): Uint8Array<Array
   typeof content === 'string' ? textEncoder.encode(content) : new Uint8Array(content);
 
 const comparePath = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
-const defaultFileMode: RevisionFileMode = '100644';
+const defaultFileMode: FileMode = '100644';
 
 /**
  * Runtime-immutable file tree. Inputs and returned bytes are defensively copied,
@@ -65,7 +59,7 @@ const defaultFileMode: RevisionFileMode = '100644';
  * @public
  */
 export class ImmutableRevisionTree {
-  readonly #files: ReadonlyMap<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }>>;
+  readonly #files: ReadonlyMap<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>;
   readonly #byteLength: number;
 
   /**
@@ -74,7 +68,7 @@ export class ImmutableRevisionTree {
    * @param entries - File paths and their bytes or UTF-8 text.
    */
   public constructor(entries: Iterable<RevisionTreeInput>) {
-    const files = new Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }>>();
+    const files = new Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>();
     let byteLength = 0;
     for (const [rawPath, content, mode = defaultFileMode] of entries) {
       const path = canonicalFilePath(rawPath);
@@ -129,7 +123,7 @@ export class ImmutableRevisionTree {
   }
 
   /** Read one file's supported Git mode. */
-  public mode(path: string): RevisionFileMode | undefined {
+  public mode(path: string): FileMode | undefined {
     return this.#files.get(canonicalFilePath(path))?.mode;
   }
 

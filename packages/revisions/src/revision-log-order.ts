@@ -21,7 +21,7 @@
  * nothing else, and `seconds` never enters it.
  */
 
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { RevisionId } from '#algorithms/index.js';
 
 /** One revision as the walk needs it: its parents, its time, and the caller's entry. @internal */
 export type RevisionLogNode<Entry> = Readonly<{

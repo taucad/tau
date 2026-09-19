@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { contentDigest } from '@taucad/cache-core';
-import { revisionId } from '@taucad/filesystem/revisions';
+import { revisionId } from '@taucad/revisions/algorithms';
 
 import type { JobAcceptedEvent, JobLifecycleEvent } from '#jobs/job-reducer.js';
 import { reduceJobSnapshot } from '#jobs/job-reducer.js';

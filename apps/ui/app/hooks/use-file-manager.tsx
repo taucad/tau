@@ -9,10 +9,17 @@ import type { SnapshotFrom } from 'xstate';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
-import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type {
+  BulkMoveEdit,
+  BulkMoveResult,
+  FileSystemClient,
+  ScopedStorageClient,
+} from '@taucad/fs-client/file-system-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { createRootedContentClient } from '@taucad/fs-client/rooted-content-client';
+import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { MountConfig, WorkspaceMutationError } from '@taucad/filesystem';
+import type { MountConfig, WorkspaceMutationError, WorkspaceScope } from '@taucad/filesystem';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
   getHomeStorageBackend,
@@ -22,7 +29,7 @@ import {
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
-import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
+import type { RootedBridgeConsumer, WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -133,65 +140,27 @@ type DeleteFileOptions = {
 };
 
 /**
- * Typed proxy dispatch facade. Mirrors the worker {@link FileSystemClient}
- * one-to-one. Each method gates on the FM machine becoming `ready`
- * before forwarding to the worker — no per-method `useCallback`
- * ceremony.
+ * The authority's **topology** surface (charter D5, O1.2).
  *
- * Use this surface for:
+ * Project discovery and the project-directory lifecycle: the four calls whose
+ * subject is a *project directory*, not a file inside one. Mount, unmount and
+ * storage-root teardown are {@link WorkspaceFacade}'s; content belongs to the
+ * root that owns the path ({@link RootedContentClient}); a physical scope the
+ * mount table does not route is {@link ScopedStorageClient}'s.
  *
- * - **Cross-workspace writes** that target prefixes outside this provider's
- *   `rootDirectory`. Keys are interpreted in the worker's filesystem
- *   namespace and routed by the mount table (longest-prefix match), so
- *   absolute paths like `/projects/<id>/main.scad` land in the matching
- *   mounted backend regardless of the FM provider's scope. This is the
- *   documented escape hatch for the project bootstrap mount-write-unmount
- *   transaction in `use-project-manager.tsx` — passing absolute keys
- *   through the cache-bound `writeFile`/`writeFiles` callbacks below would
- *   trip `WorkspaceScopeViolationError` (and previously spammed the tree
- *   service with `WorkspacePathEscapeError`).
- * - **Cache-free / scope-routed reads** for `/files`-style cross-workspace
- *   dispatch and admin tooling.
- *
- * The cache-bound editor flows continue to use the dedicated `readFile` /
- * `writeFile` / `renameFile` callbacks below; those enforce workspace-
- * relative keys at the boundary.
+ * No content method may reappear here. The authority-global surface walks the
+ * raw provider, so any content call on it is an unmasked read or write of a
+ * project tree — which is exactly what the reserved layout refuses everywhere
+ * else (authority Rule 16). `use-file-manager.test-d.ts` pins the absence.
  *
  * @public
  */
 export type FileSystemClientFacade = Pick<
-  ComposedViewClient,
-  | 'readFile'
-  | 'writeFile'
-  | 'writeFileChecked'
-  | 'writeFiles'
-  | 'mkdir'
-  | 'readdir'
-  | 'stat'
-  | 'lstat'
-  | 'move'
-  | 'bulkMove'
-  | 'canMove'
-  | 'canRename'
-  | 'canCreate'
-  | 'canDelete'
-  | 'unlink'
-  | 'rmdir'
-  | 'exists'
-  | 'getDirectoryStat'
-  | 'getDirectoryContents'
-  | 'duplicateFile'
-  | 'copyDirectory'
-  | 'getZippedDirectory'
-  | 'readShallowDirectory'
-  | 'readDirectory'
+  FileSystemClient,
   | 'listProjectManifests'
   | 'commitPendingProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
   | 'adoptProjectDirectory'
-  /* The one write allowed under a read-only overlay: place a whole bundle so
-   * the project owns it (ruling P11). The guard keeps it whole. */
-  | 'overrideUnit'
 >;
 
 /**
@@ -233,8 +202,8 @@ type FileManagerContextType = {
    *
    * `path` **MUST** be workspace-relative to this provider's
    * `rootDirectory`; absolute keys that escape the workspace root throw
-   * `WorkspaceScopeViolationError` synchronously. Use `client.writeFile`
-   * for cross-workspace writes (worker namespace, no resolver).
+   * `WorkspaceScopeViolationError` synchronously. Use `files.writeFile`
+   * for a write outside this FM's root (the owning root's own connection).
    */
   writeFile: (path: string, data: Uint8Array<ArrayBuffer>, options: WriteFileOptions) => Promise<void>;
   /**
@@ -242,8 +211,8 @@ type FileManagerContextType = {
    *
    * Map keys **MUST** be workspace-relative to this provider's
    * `rootDirectory`; absolute keys that escape the workspace root throw
-   * `WorkspaceScopeViolationError` synchronously. Use `client.writeFiles`
-   * for cross-workspace bootstrap (mount-write-unmount transactions).
+   * `WorkspaceScopeViolationError` synchronously. Use `files.writeFiles`
+   * for a bootstrap outside this FM's root (mount-write-unmount transactions).
    */
   writeFiles: (files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>;
   readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
@@ -290,6 +259,12 @@ type FileManagerContextType = {
    */
   deleteDirectory: (path: string, options?: { recursive?: boolean }) => Promise<void>;
   duplicateFile: (sourcePath: string, destinationPath: string) => Promise<void>;
+  /**
+   * Place a whole overlay unit into the project so the project owns it (ruling
+   * P11). `unitRoot` is checkout-relative, like the tree paths the Files pane
+   * speaks — the one write the composed view allows under a read-only overlay.
+   */
+  overrideUnit: (unitRoot: string) => Promise<void>;
   deleteFile: (path: string, options: DeleteFileOptions) => Promise<void>;
   stat: (path: string) => Promise<FileStat>;
   exists: (path: string) => Promise<boolean>;
@@ -302,16 +277,44 @@ type FileManagerContextType = {
    * the checkout the workbench is showing.
    */
   getZippedDirectory: (path: string, options?: { versionedOnly?: boolean }) => Promise<Blob>;
-  copyDirectory: (sourcePath: string, destinationPath: string) => Promise<void>;
   /**
-   * Typed proxy dispatch facade. Use for cache-free reads/writes and
-   * cross-workspace operations whose keys lie outside this provider's
-   * `rootDirectory` (e.g. the project bootstrap mount-write-unmount
-   * transaction in `use-project-manager.tsx`, which writes
-   * `/projects/<id>/...` keys through the root FM at `/`). Routes through
-   * the worker mount table by absolute path prefix — backend selection
-   * (indexeddb / webaccess with handle+workspaceId / opfs / memory) is
-   * owned by the mount registration, never by the write call.
+   * One project's versioned bytes, read through that project's *own* composed
+   * view — the snapshot a duplicate journals (authority Rule 12, charter D11).
+   *
+   * Not `client.getDirectoryContents`: the project read here is usually not the
+   * one this FM is rooted at, and both the mask and `versionedOnly` classify
+   * project-relative paths — so the read opens that project's own rooted `user`
+   * connection, whose view refuses `.git/**` before provider I/O and whose
+   * filter drops records and cache (authority Rule 16, charter D2).
+   */
+  readVersionedProjectFiles: (projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+  /**
+   * Content through the root that owns the path (charter D5, D12).
+   *
+   * The trusted stores' surface: composer records, chat records and their
+   * attachments, thumbnails, the parameter sidecar, `tau.json` and the project
+   * library file. Absolute paths as everywhere else in the UI; each call
+   * classifies the path's route and issues the operation on that root's own
+   * `'working-copy'` connection, because host record writers read and write the
+   * checkout itself and never the overlays above it (architecture V6, D8).
+   *
+   * Not {@link FileManagerContextType.client}: the authority-global surface is
+   * topology and owns no content.
+   */
+  files: RootedContentClient;
+  /**
+   * Physical-scope reads for the `/files` workspace browser (charter D5).
+   *
+   * The one surface whose paths the mount table does not route, so the
+   * authority — not a rooted view — answers them. `scope` is required.
+   */
+  scopedStorage: ScopedStorageClient;
+  /**
+   * Typed proxy dispatch facade for the authority's **topology** (charter D5):
+   * project discovery and the project-directory lifecycle. Mount, unmount and
+   * storage-root teardown are on {@link FileManagerContextType.workspace}, and
+   * content is on {@link FileManagerContextType.files} — the global surface
+   * serves none.
    */
   client: FileSystemClientFacade;
   /**
@@ -703,8 +706,8 @@ export function FileManagerProvider({
     return proxy;
   }, [fileManagerRef]);
 
-  /** The composed client the FM machine builds once the services are up. */
-  const getReadiedClient = useCallback(async (): Promise<FileSystemClientFacade> => {
+  /** The composed view client the FM machine builds once the services are up. */
+  const getReadiedClient = useCallback(async (): Promise<ComposedViewClient> => {
     const snapshot = await waitForWithTimeout({
       fileManagerRef,
       predicate: createErrorAwareWaitPredicate(
@@ -728,18 +731,94 @@ export function FileManagerProvider({
     return waitForFileManagerServices(fileManagerRef);
   }, [fileManagerRef]);
 
+  /* The opener this worker installed. `setRoot` destroys the worker and connects
+   * a new one, so this identity is what makes the rooted connections below
+   * rotate with it instead of holding ports onto a worker that is gone. */
+  const bridgeOpener = useSelector(fileManagerRef, (state) => state.context.openFileSystemBridge);
+
   const openRootedFileSystemBridge = useCallback(
-    (root: string) => {
-      const opener = fileManagerRef.getSnapshot().context.openFileSystemBridge;
-      if (!opener) {
+    (root: string, consumer: RootedBridgeConsumer) => {
+      if (!bridgeOpener) {
         throw new FileManagerNotReadyError('proxy-timeout', {
           cause: new Error('File Manager filesystem bridge is not ready.'),
         });
       }
-      return opener(root);
+      return bridgeOpener(root, consumer);
     },
-    [fileManagerRef],
+    [bridgeOpener],
   );
+
+  const readVersionedProjectFiles = useCallback(
+    async (projectRoot: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => {
+      await whenServicesReady();
+      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(projectRoot, 'user'));
+      try {
+        return await proxy.contents('', { versionedOnly: true });
+      } finally {
+        proxy.dispose();
+      }
+    },
+    [openRootedFileSystemBridge, whenServicesReady],
+  );
+
+  /**
+   * One owner for open, reuse and dispose (charter D12).
+   *
+   * A root's `'working-copy'` connection opens the first time a trusted store
+   * touches a path under it and is held until the worker is replaced; the effect
+   * below releases what a replaced client opened.
+   */
+  const files = useMemo(
+    () =>
+      createRootedContentClient({
+        open: async (root) => {
+          await whenServicesReady();
+          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+          const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(root, 'working-copy'));
+          return {
+            files: proxy,
+            dispose: () => {
+              proxy.dispose();
+            },
+          };
+        },
+      }),
+    [openRootedFileSystemBridge, whenServicesReady],
+  );
+
+  useEffect(
+    () => () => {
+      files.dispose();
+    },
+    [files],
+  );
+
+  /**
+   * The `/files` browser's scoped reads (charter D5).
+   *
+   * These stay on the authority because a scope the mount table does not route
+   * has no composed view to serve it; `scope` is required, so a routed path
+   * cannot reach content here by omission.
+   */
+  const scopedStorage = useMemo<ScopedStorageClient>(() => {
+    /* One cast, for the one overloaded member: `readFile` answers text or bytes. */
+    const readFile = (async (path: string, options: { scope: WorkspaceScope }) => {
+      const proxy = await getReadiedProxy();
+      return proxy.readFile(path, options);
+    }) as ScopedStorageClient['readFile'];
+    return {
+      readFile,
+      readShallowDirectory: async (path, options) => {
+        const proxy = await getReadiedProxy();
+        return proxy.readShallowDirectory(path, options);
+      },
+      getZippedDirectory: async (path, options) => {
+        const proxy = await getReadiedProxy();
+        return proxy.getZippedDirectory(path, options);
+      },
+    };
+  }, [getReadiedProxy]);
 
   const runtimeFileSystem = useMemo(
     () =>
@@ -747,7 +826,8 @@ export function FileManagerProvider({
         if (contentService === undefined) {
           throw new FileManagerNotReadyError('proxy-timeout');
         }
-        return openRootedFileSystemBridge(rootDirectory);
+        /* The runtime reads the checkout itself, never a consumer's view (G6). */
+        return openRootedFileSystemBridge(rootDirectory, 'working-copy');
       }),
     // A successful service initialization is the host's existing binding
     // identity. Rotating the opaque filesystem here makes every owner keyed
@@ -918,59 +998,43 @@ export function FileManagerProvider({
     [whenServicesReady],
   );
 
-  const copyDirectory = useCallback(
-    async (sourcePath: string, destinationPath: string): Promise<void> => {
-      const { contentService } = await whenServicesReady();
-      await contentService.copyDirectory(sourcePath, destinationPath);
+  /**
+   * Place a whole overlay unit into the project so the project owns it
+   * (ruling P11, architecture V8).
+   *
+   * The composed view's own gesture, not the authority's: it reads the unit's
+   * subtree through the view and writes it back whole, which is why it takes a
+   * checkout-relative path and is not on {@link FileSystemClientFacade}.
+   */
+  const overrideUnit = useCallback(
+    async (unitRoot: string): Promise<void> => {
+      const viewClient = await getReadiedClient();
+      await viewClient.overrideUnit(unitRoot);
     },
-    [whenServicesReady],
+    [getReadiedClient],
   );
 
+  /**
+   * The authority's topology, gated on the machine becoming `ready` (charter D5).
+   *
+   * These four go to the *workspace* proxy and not to the composed view: a
+   * project directory's lifecycle is the authority's subject, and the surface
+   * carries no content for a consumer to reach past it.
+   */
   const client = useMemo<FileSystemClientFacade>(() => {
-    /* The Files pane reads and mutates the one composed view the editor and
-     * the agent read (charter D1): an overlay or records row answers
-     * read-only here instead of `NOT_FOUND` from an authority that has never
-     * held the path. Everything the view does not own it forwards unchanged. */
     const gated = <K extends keyof FileSystemClientFacade>(method: K): FileSystemClientFacade[K] =>
-      // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- pass-through gate, runtime types preserved by FileSystemClientFacade
       (async (...args: unknown[]) => {
-        const proxy = await getReadiedClient();
-        // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- forward through to the typed proxy method
+        const proxy = await getReadiedProxy();
         return (proxy[method] as (...rest: unknown[]) => unknown)(...args);
       }) as FileSystemClientFacade[K];
 
     return {
-      readFile: gated('readFile'),
-      writeFile: gated('writeFile'),
-      writeFileChecked: gated('writeFileChecked'),
-      writeFiles: gated('writeFiles'),
-      mkdir: gated('mkdir'),
-      readdir: gated('readdir'),
-      stat: gated('stat'),
-      lstat: gated('lstat'),
-      move: gated('move'),
-      bulkMove: gated('bulkMove'),
-      canMove: gated('canMove'),
-      canRename: gated('canRename'),
-      canCreate: gated('canCreate'),
-      canDelete: gated('canDelete'),
-      unlink: gated('unlink'),
-      rmdir: gated('rmdir'),
-      exists: gated('exists'),
-      getDirectoryStat: gated('getDirectoryStat'),
-      getDirectoryContents: gated('getDirectoryContents'),
-      duplicateFile: gated('duplicateFile'),
-      copyDirectory: gated('copyDirectory'),
-      getZippedDirectory: gated('getZippedDirectory'),
-      readShallowDirectory: gated('readShallowDirectory'),
-      readDirectory: gated('readDirectory'),
       listProjectManifests: gated('listProjectManifests'),
       commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
       permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
       adoptProjectDirectory: gated('adoptProjectDirectory'),
-      overrideUnit: gated('overrideUnit'),
     };
-  }, [getReadiedClient]);
+  }, [getReadiedProxy]);
 
   const workspace = useMemo<WorkspaceFacade>(() => {
     const configurePersistedRoots = async (): Promise<void> => {
@@ -1086,13 +1150,16 @@ export function FileManagerProvider({
       createDirectory,
       deleteDirectory,
       duplicateFile,
+      overrideUnit,
       deleteFile,
       stat,
       exists,
       readdir,
       getDirectoryStat,
       getZippedDirectory,
-      copyDirectory,
+      readVersionedProjectFiles,
+      files,
+      scopedStorage,
       client,
       workspace,
       activeWorkspaceName,
@@ -1121,13 +1188,16 @@ export function FileManagerProvider({
       createDirectory,
       deleteDirectory,
       duplicateFile,
+      overrideUnit,
       deleteFile,
       stat,
       exists,
       readdir,
       getDirectoryStat,
       getZippedDirectory,
-      copyDirectory,
+      readVersionedProjectFiles,
+      files,
+      scopedStorage,
       client,
       workspace,
       activeWorkspaceName,

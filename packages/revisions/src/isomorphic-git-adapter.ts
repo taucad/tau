@@ -40,9 +40,10 @@ import {
   writeTree,
 } from 'isomorphic-git';
 import type { TreeEntry } from 'isomorphic-git';
-import { ImmutableRevisionTree, ResourceQueue, revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionFileMode, RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
-import type { FileSystemProvider } from '@taucad/filesystem';
+import { ResourceQueue } from '@taucad/filesystem';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import type { FileMode, FileSystemProvider } from '@taucad/filesystem';
+import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
@@ -223,7 +224,7 @@ const withRefLock = async <T>(name: string, operation: () => Promise<T>): Promis
   });
 
 type TreeDraft = Readonly<{
-  files: Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }>>;
+  files: Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>;
   directories: Map<string, TreeDraft>;
 }>;
 
@@ -863,7 +864,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           /* Smudged above the engine, never inside it (S49): the tree holds the
            * pointer and every caller — the user, the agent, a restore — sees
            * the bytes. */
-          return [path, await smudged(new Uint8Array(blob)), mode as RevisionFileMode];
+          return [path, await smudged(new Uint8Array(blob)), mode as FileMode];
         }),
       );
       return new ImmutableRevisionTree(entries);

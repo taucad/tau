@@ -172,7 +172,9 @@ const mockRmdir = vi.fn(async (path: string, options?: { recursive?: boolean }) 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     workerChangeChannel: mockWorkerChangeChannel,
-    client: {
+    /* Content reaches the root that owns the path (W12); the authority-global
+     * surface below it is topology only (charter D5). */
+    files: {
       writeFiles: mockWriteFiles,
       writeFile: async (path: string, bytes: Uint8Array<ArrayBuffer>) =>
         isAttachmentPath(path) ? mockWriteAttachment(path, bytes) : mockWriteFile(path, bytes),
@@ -181,7 +183,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       stat: mockStat,
       exists: vi.fn(async (path: string) => attachmentFiles.has(path)),
       rmdir: mockRmdir,
-      getDirectoryContents: vi.fn(async () => ({})),
+    },
+    client: {
       listProjectManifests: mockListProjectManifests,
       permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,

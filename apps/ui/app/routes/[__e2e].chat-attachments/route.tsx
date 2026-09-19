@@ -51,7 +51,7 @@ export const loader = async (): Promise<Response> => {
 
 const ChatAttachmentsDebugRoute = (): React.JSX.Element => {
   const { createProject, createChat, getChatsForResource, patchChat, isLoading } = useProjectManager();
-  const { client } = useFileManager();
+  const { files } = useFileManager();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const chatCount = searchParams.get('chats') === '2' ? 2 : 1;
@@ -91,11 +91,11 @@ const ChatAttachmentsDebugRoute = (): React.JSX.Element => {
           chatIds.push(second.id);
         }
         if (seedDrafts) {
-          await createComposerRecordStore(client, composerRecordPaths.chat(project.id, first.id)).patch({
+          await createComposerRecordStore(files, composerRecordPaths.chat(project.id, first.id)).patch({
             toolChoice: 'none',
           });
           if (chatIds[1]) {
-            await createComposerRecordStore(client, composerRecordPaths.unread(project.id)).patch({
+            await createComposerRecordStore(files, composerRecordPaths.unread(project.id)).patch({
               unread: { [chatIds[1]]: true },
             });
           }
@@ -108,7 +108,7 @@ const ChatAttachmentsDebugRoute = (): React.JSX.Element => {
     };
     // async-iife: bootstrap -- React effects cannot await local project seeding.
     void seed();
-  }, [chatCount, client, createChat, createProject, getChatsForResource, isLoading, navigate, patchChat, seedDrafts]);
+  }, [chatCount, files, createChat, createProject, getChatsForResource, isLoading, navigate, patchChat, seedDrafts]);
 
   return error ? <main role='alert'>{error}</main> : <Loader />;
 };

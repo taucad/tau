@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { RootedFileSystem } from '@taucad/filesystem';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createActor } from 'xstate';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 

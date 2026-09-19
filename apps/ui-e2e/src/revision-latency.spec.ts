@@ -75,7 +75,7 @@ const revisionChip = (): ReturnType<typeof selectors.getByRole> =>
  * tree ids, and a warm save of 339 ms against 440 ms in 32 interleaved pairs
  * at load 17–31 (24 of 32 pairs favour it).
  *
- * Owner of the residual: `libs/filesystem/src/revision-capture.ts`. Meeting
+ * Owner of the residual: `packages/revisions/src/algorithms/revision-capture.ts`. Meeting
  * 100 ms still needs a capture that does not re-read unchanged files, not a
  * faster digest — `crypto.subtle` (C53) was measured and declined on this evidence.
  */

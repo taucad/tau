@@ -3,8 +3,8 @@
  *
  * A checkout's working copy is the bytes; a composed view is what an agent's
  * tools or a Files pane actually see over them: the checkout, plus read-only
- * overlays at fixed paths, plus the path registry's mask for that consumer,
- * plus provenance per entry. Browser worker, `tau serve`, the Electron utility
+ * overlays at fixed paths, plus the {@link PathPolicy}'s mask for that
+ * consumer, plus provenance per entry. Browser worker, `tau serve`, the Electron utility
  * and the CLI call this same function, so the agent's filesystem and the Files
  * pane cannot disagree about one path (blueprint finding 1).
  *
@@ -24,10 +24,27 @@
  * @module
  */
 
-import type { FileContentMetadata, FileProvenance, FileProvenanceSource, FileStat } from '@taucad/types';
+import type {
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileContentMetadata,
+  FileProvenance,
+  FileProvenanceSource,
+  FileStat,
+  FileStatEntry,
+} from '@taucad/types';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
-import { classify } from '#path-registry.js';
-import type { DirectoryEntry, FileReadStreamOptions, FileSystemProvider, WatchEvent, WatchRequest } from '#types.js';
+import type {
+  DirectoryEntry,
+  FileReadStreamOptions,
+  FileSystemProvider,
+  PathPolicy,
+  WatchEvent,
+  WatchRequest,
+} from '#types.js';
+import type { TreeSearchOptions } from '#tree-index.js';
+import type { RootedPorcelain } from '#rooted-views.js';
+import type { WorkspaceMutationError } from '#workspace-errors.js';
 
 /** Who a view is composed for. The set of paths is the same; the mask is not. @public */
 export type ComposedViewConsumer = 'agent' | 'user';
@@ -78,6 +95,18 @@ type WatchableFileSystem = {
 };
 
 /**
+ * Optional index-backed reads a rooted filesystem brings to the view (charter D3).
+ *
+ * Not derivable from the port: search and recursive stat are answered from the
+ * root's own {@link TreeSearchOptions}-filtered index, so a host that composes
+ * over a bare provider simply offers neither.
+ */
+type IndexedFileSystem = {
+  search(query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]>;
+  statTree(path: string, options?: { admits?: TreeSearchOptions['admits'] }): Promise<FileStatEntry[]>;
+};
+
+/**
  * The working copy a view is composed over: already rooted at the checkout.
  *
  * The root is a string on a host with a mount table and nothing at all on a
@@ -88,7 +117,11 @@ type WatchableFileSystem = {
  * @public
  */
 export type ComposedViewCheckout = Readonly<{
-  filesystem: FileSystemProvider & Partial<WatchableFileSystem>;
+  filesystem: Omit<FileSystemProvider, 'rmdir'> &
+    RecursiveRmdir &
+    Partial<WatchableFileSystem> &
+    Partial<IndexedFileSystem> &
+    Partial<RootedPorcelain>;
   /** Stable checkout id, reported as the `identity` of project entries. */
   id?: string;
 }>;
@@ -96,12 +129,35 @@ export type ComposedViewCheckout = Readonly<{
 /** Options for {@link composeView}. @public */
 export type ComposedViewOptions = Readonly<{
   consumer: ComposedViewConsumer;
+  /**
+   * The reserved layout this view enforces (D6).
+   *
+   * Required, because a view that guessed one would be a second enforcement
+   * point. Tau's hosts pass `tauPathPolicy`; the example below shows where it
+   * comes from.
+   */
+  policy: PathPolicy;
   overlays?: readonly ComposedViewOverlay[];
 }>;
 
+/**
+ * A directory removal that carries the rooted surface's recursive option.
+ *
+ * The bare port's `rmdir` empties one directory; a rooted filesystem's has
+ * always taken `{ recursive: true }` (see {@link RootedFileSystem}), and a view
+ * that dropped the option would turn a Files-pane folder delete into
+ * `ENOTEMPTY`. A provider that only declares `rmdir(path)` still satisfies this.
+ *
+ * @public
+ */
+export type RecursiveRmdir = { rmdir(path: string, options?: { recursive?: boolean }): Promise<void> };
+
 /** A rooted filesystem with provenance. @public */
-export type ComposedView = FileSystemProvider &
-  Partial<WatchableFileSystem> & {
+export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
+  RecursiveRmdir &
+  Partial<WatchableFileSystem> &
+  Partial<IndexedFileSystem> &
+  Partial<RootedPorcelain> & {
     /** What this view knows about one checkout-relative path. */
     provenance(path: string): Promise<FileProvenance>;
     /** One directory's immediate children with stat metadata and provenance. */
@@ -145,7 +201,7 @@ const ancestorsOf = (path: string): string[] => {
  * Compose one checkout into the view its consumer reads.
  *
  * @param checkout - The checkout's working copy, already rooted.
- * @param options - Which consumer the mask is for, and the overlays to compose.
+ * @param options - Which consumer the mask is for, the path policy it enforces, and the overlays to compose.
  * @returns A rooted filesystem that also answers {@link ComposedView.provenance}.
  * @public
  *
@@ -153,17 +209,22 @@ const ancestorsOf = (path: string): string[] => {
  * ```typescript
  * import { composeView } from '@taucad/filesystem/composed-view';
  * import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+ * import { tauPathPolicy } from '@taucad/filesystem/path-registry';
  *
- * const view = composeView({ filesystem: new NodeFsProvider('/checkouts/main') }, { consumer: 'agent' });
+ * const view = composeView(
+ *   { filesystem: new NodeFsProvider('/checkouts/main') },
+ *   { consumer: 'agent', policy: tauPathPolicy },
+ * );
  * await view.provenance('main.ts'); // { source: 'project', versioned: true, agentAccess: 'read-write' }
  * ```
  */
 export const composeView = (checkout: ComposedViewCheckout, options: ComposedViewOptions): ComposedView => {
   const base = checkout.filesystem;
+  const { classify } = options.policy;
   const overlays = options.overlays ?? [];
   const masked = options.consumer === 'agent';
 
-  /** The registry's answer, refused before any provider I/O: the control plane is in no view (A1, P30). */
+  /** The policy's answer, refused before any provider I/O: the control plane is in no view (A1, P30). */
   const readablePath = (path: string): string => {
     if (classify(path).agentAccess === 'hidden') {
       refuseHidden(path);
@@ -286,6 +347,16 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     route.kind === 'overlay'
       ? overlayProvenance(route.overlay.source, route.identity)
       : projectProvenance(path, route.kind === 'project' ? route.overrides : undefined);
+
+  /**
+   * The mask an index query descends with: control-plane subtrees are never
+   * entered, and a caller's own filter narrows further but can never widen.
+   */
+  const admitsVisible =
+    (queryRoot: string, callerAdmits?: TreeSearchOptions['admits']) =>
+    (relativePath: string, kind: 'file' | 'dir'): boolean =>
+      classify(joinRelativePath(queryRoot, relativePath)).agentAccess !== 'hidden' &&
+      callerAdmits?.(relativePath, kind) !== false;
 
   /** Names the checkout contributes to a directory, control-plane rows dropped for every consumer. */
   const upperNames = async (path: string, tolerateMissing: boolean): Promise<string[]> => {
@@ -411,13 +482,140 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
   };
 
   const mutate = async <T>(path: string, apply: (target: string) => Promise<T>): Promise<T> => {
-    const target = writablePath(canonical(path));
-    const route = await routeFor(target);
-    if (route.kind === 'overlay') {
-      refuseOverlay(target);
-    }
-    return apply(target);
+    const [target] = await writableTargets([path]);
+    return apply(target!);
   };
+
+  /**
+   * Every path a batch would write, refused before the batch begins.
+   *
+   * The porcelain below is one operation over many paths, so the mask has to
+   * answer for all of them first: a batch that refused halfway would have
+   * already written the paths before it (Rule 5a's "preflight before the first
+   * mutation").
+   */
+  const writableTargets = async (paths: readonly string[]): Promise<string[]> => {
+    const targets = paths.map((path) => writablePath(canonical(path)));
+    const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+    for (const [index, route] of routes.entries()) {
+      if (route.kind === 'overlay') {
+        refuseOverlay(targets[index]!);
+      }
+    }
+    return targets;
+  };
+
+  /**
+   * A copy source the view serves itself, refused instead of passed down.
+   *
+   * An overlay's bytes are not in the checkout, so a copy the base performed
+   * would answer ENOENT for a path this view reads perfectly well (review N1).
+   * The read-only filesystem is the honest answer until a copy that stages
+   * overlay bytes exists.
+   */
+  const readableSource = async (path: string): Promise<string> => {
+    const from = readablePath(canonical(path));
+    const route = await routeFor(from);
+    if (route.kind === 'overlay') {
+      refuseOverlay(from);
+    }
+    return from;
+  };
+
+  /**
+   * The mask a copy descends with, asked about project-relative spellings.
+   *
+   * A copy root can be any directory, so the source is joined back on before
+   * the policy is asked: `src/.git` is an ordinary directory, `.git` under the
+   * project root is the control plane.
+   */
+  const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
+    ...(base.copyTree === undefined
+      ? {}
+      : {
+          copyTree: async (source: string, target: string, options?: { admits?: TreeSearchOptions['admits'] }) => {
+            const from = await readableSource(source);
+            const [to] = await writableTargets([target]);
+            /* Every entry a copy writes is a target too: `src/.git` is authored
+             * where it sits, but copied to the project root it would be the
+             * control plane, and a records row is not the agent's to write. */
+            const writableBelow = (relativePath: string): boolean => {
+              const { agentAccess } = classify(joinRelativePath(to!, relativePath));
+              return agentAccess !== 'hidden' && (!masked || agentAccess === 'read-write');
+            };
+            const visible = admitsVisible(from, options?.admits);
+            return base.copyTree!(from, to!, {
+              admits: (relativePath, kind) => visible(relativePath, kind) && writableBelow(relativePath),
+            });
+          },
+        }),
+    ...(base.duplicate === undefined
+      ? {}
+      : {
+          duplicate: async (source: string, target: string) => {
+            const from = await readableSource(source);
+            const [to] = await writableTargets([target]);
+            return base.duplicate!(from, to!);
+          },
+        }),
+    ...(base.move === undefined
+      ? {}
+      : {
+          move: async (source: string, target: string): Promise<FileStat> => {
+            const [from, to] = await writableTargets([source, target]);
+            return base.move!(from!, to!);
+          },
+        }),
+    ...(base.bulkMove === undefined
+      ? {}
+      : {
+          bulkMove: async (edits: ReadonlyArray<{ source: string; target: string }>) => {
+            await writableTargets(edits.flatMap(({ source, target }) => [source, target]));
+            return base.bulkMove!(edits);
+          },
+        }),
+    ...(base.writeFiles === undefined
+      ? {}
+      : {
+          writeFiles: async (files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>) => {
+            await writableTargets(Object.keys(files));
+            return base.writeFiles!(files);
+          },
+        }),
+    ...(base.canMove === undefined
+      ? {}
+      : {
+          canMove: async (source: string, target: string): Promise<true | WorkspaceMutationError> => {
+            const [from, to] = await writableTargets([source, target]);
+            return base.canMove!(from!, to!);
+          },
+        }),
+    ...(base.canRename === undefined
+      ? {}
+      : {
+          canRename: async (source: string, newName: string): Promise<true | WorkspaceMutationError> => {
+            const from = canonical(source);
+            await writableTargets([from, `${from.slice(0, from.lastIndexOf('/') + 1)}${newName}`]);
+            return base.canRename!(from, newName);
+          },
+        }),
+    ...(base.canCreate === undefined
+      ? {}
+      : {
+          canCreate: async (path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError> => {
+            const [target] = await writableTargets([path]);
+            return base.canCreate!(target!, kind);
+          },
+        }),
+    ...(base.canDelete === undefined
+      ? {}
+      : {
+          canDelete: async (path: string): Promise<true | WorkspaceMutationError> => {
+            const [target] = await writableTargets([path]);
+            return base.canDelete!(target!);
+          },
+        }),
+  });
 
   return {
     id: `composed-view:${options.consumer}`,
@@ -467,12 +665,29 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     async unlink(path) {
       return mutate(path, async (target) => base.unlink(target));
     },
-    async rmdir(path) {
-      return mutate(path, async (target) => base.rmdir(target));
+    async rmdir(path, rmdirOptions?: { recursive?: boolean }) {
+      return mutate(path, async (target) => base.rmdir(target, rmdirOptions));
     },
     async rename(from, to) {
       return mutate(from, async (source) => mutate(to, async (target) => base.rename(source, target)));
     },
+    ...(base.writeFileChecked === undefined
+      ? {}
+      : {
+          /* The target is a write, the preconditions are reads: a hidden path is
+           * refused on whichever side names it, before the fence is taken. */
+          writeFileChecked: async (input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> => {
+            const [target] = await writableTargets([input.path]);
+            return base.writeFileChecked!({
+              ...input,
+              path: target!,
+              preconditions: input.preconditions.map(({ path, expected }) => ({
+                path: readablePath(canonical(path)),
+                expected,
+              })),
+            });
+          },
+        }),
     ...(base.appendFile === undefined
       ? {}
       : {
@@ -524,5 +739,34 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.refresh === undefined
       ? {}
       : { refresh: async (prefixes?: readonly string[]): Promise<void> => base.refresh!(prefixes) }),
+    /*
+     * The index answers whole subtrees at once, so the mask goes *down* as
+     * `admits` rather than filtering rows on the way back: a hidden subtree is
+     * never descended into, and a capped search returns `maxResults` rows the
+     * consumer may actually see.
+     */
+    ...(base.search === undefined
+      ? {}
+      : {
+          search: async (query: string, searchOptions?: TreeSearchOptions): Promise<FileStatEntry[]> =>
+            base.search!(query, { ...searchOptions, admits: admitsVisible('', searchOptions?.admits) }),
+        }),
+    ...(base.statTree === undefined
+      ? {}
+      : {
+          statTree: async (
+            path: string,
+            statOptions?: { admits?: TreeSearchOptions['admits'] },
+          ): Promise<FileStatEntry[]> => {
+            const target = readablePath(canonical(path));
+            return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
+          },
+        }),
+    /*
+     * The mutating porcelain is a batch in the pipeline below, not N port
+     * writes (charter D4), so the mask answers for every operand of one
+     * operation before any of it runs.
+     */
+    ...porcelain(base),
   };
 };

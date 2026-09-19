@@ -110,8 +110,8 @@ describe('revision machine import boundary', () => {
   });
 
   it('proves the check is not vacuous: a non-machine module does import the filesystem', () => {
-    const port = readFileSync(join(sourceDirectory, 'revision-port.ts'), 'utf8');
+    const chatRef = readFileSync(join(sourceDirectory, 'chat-ref.ts'), 'utf8');
 
-    expect(port).toContain("from '@taucad/filesystem/revisions'");
+    expect(chatRef).toContain("from '@taucad/filesystem'");
   });
 });

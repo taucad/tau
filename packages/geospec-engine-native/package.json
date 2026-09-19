@@ -64,7 +64,6 @@
       "#native-binding": {
         "node": "./dist/native/index.js"
       },
-      "#wasm-binding": "./dist/wasm/geospec_engine_native_wasm.js",
       "#mixed-wasm-binding": "./dist/bindings/mixed-wasm/geospec_engine_native.mjs"
     }
   },
@@ -75,12 +74,13 @@
       "types": "./bindings/node/generated/index.d.ts",
       "node": "./bindings/node/generated/index.js"
     },
-    "#wasm-binding": "./bindings/wasm/generated/geospec_engine_native_wasm.js",
     "#bench/*": "./bench/*.ts",
     "#mixed-wasm-binding": "./bindings/emscripten/generated/geospec_engine_native.mjs"
   },
   "devDependencies": {
-    "@napi-rs/cli": "catalog:"
+    "@napi-rs/cli": "catalog:",
+    "playwright": "catalog:",
+    "vite": "catalog:"
   },
   "napi": {
     "binaryName": "geospec-engine-native",

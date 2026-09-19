@@ -9,7 +9,61 @@ import pytest
 
 CORPUS_PATH = Path(__file__).parents[3] / "conformance" / "early-corpus.json"
 CORPUS_BYTES = CORPUS_PATH.read_bytes()
-CORPUS = json.loads(CORPUS_BYTES)
+PROFILE_PATH = Path(__file__).parents[3] / "rust/tests/fixtures/current-profile-01/plan-corpus.json"
+PROFILE_BYTES = PROFILE_PATH.read_bytes()
+
+
+def load_current_corpus():
+    """Join accepted fixture bytes by ID; never derive expectations from native output."""
+    original_hash = "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476"
+    profile_hash = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d"
+    digest = lambda data: hashlib.sha256(data).hexdigest()
+    assert digest(CORPUS_BYTES) == original_hash
+    assert digest(PROFILE_BYTES) == profile_hash
+    original, profile = json.loads(CORPUS_BYTES), json.loads(PROFILE_BYTES)
+    assert original["schemaVersion"] == profile["schemaVersion"] == 1
+    assert profile["authority"]["adoptedRuling"] == "W2.C-CURRENT-PROFILE-CONFORMANCE-01"
+    assert profile["authority"]["originalCorpusSha256"] == original_hash
+    bindings = {row["id"]: row for row in profile["records"]}
+    mesh_bindings = {row["id"]: row for row in profile["meshes"]}
+    assert len(original["records"]) == len(profile["records"]) == len(bindings) == 320
+    assert len(original["meshes"]) == len(profile["meshes"]) == len(mesh_bindings) == 4
+    assert {row["id"] for row in original["records"]} == bindings.keys()
+    assert {row["id"] for row in original["meshes"]} == mesh_bindings.keys()
+    meshes = []
+    for mesh in original["meshes"]:
+        bound = mesh_bindings[mesh["id"]]
+        assert digest(mesh["requestUtf8"].encode()) == bound["originalRequestSha256"]
+        assert digest(bound["effectiveRequestUtf8"].encode()) == bound["effectiveRequestSha256"]
+        assert digest(bytes.fromhex(mesh["meshHex"])) == mesh["contentHash"] == bound["meshContentHash"]
+        meshes.append({**mesh, "requestUtf8": bound["effectiveRequestUtf8"], "expectedUtf8": bound["expectedUtf8"]})
+    records = []
+    for record in original["records"]:
+        bound = bindings[record["id"]]
+        assert (bound["operation"], bound["ingest"]) == (record["operation"], record["ingest"])
+        source = record["inputUtf8"].encode() if "inputUtf8" in record else bytes.fromhex(record["inputHex"])
+        effective = bound["effectiveInputUtf8"].encode() if "effectiveInputUtf8" in bound else bytes.fromhex(bound["effectiveInputHex"])
+        assert digest(source) == bound["originalInputSha256"]
+        assert digest(effective) == bound["effectiveInputSha256"]
+        if bound.get("preservesOriginalBytes"):
+            assert effective == source
+        joined = {key: value for key, value in record.items() if key not in ("inputUtf8", "inputHex", "expectedUtf8", "expectedCode", "expectedMessage")}
+        for key in ("inputUtf8", "inputHex"):
+            if "effective" + key[0].upper() + key[1:] in bound:
+                joined[key] = bound["effective" + key[0].upper() + key[1:]]
+        for key in ("expectedUtf8", "expectedCode", "expectedMessage"):
+            if key in bound:
+                joined[key] = bound[key]
+        # Same fresh-admission rule as rust/tests/plan_conformance.rs.
+        if not record["ingest"] and record["operation"] in ("evaluatePlan", "processRequest") and (
+            "expectedUtf8" in record or record["id"] == "plan/unavailable/analyzeBrep/evaluatePlan"
+        ):
+            joined["ingest"] = [original["meshes"][0]["id"]]
+        records.append(joined)
+    return {**original, "meshes": meshes, "records": records}
+
+
+CORPUS = load_current_corpus()
 MESHES = {mesh["id"]: mesh for mesh in CORPUS["meshes"]}
 
 
@@ -66,6 +120,8 @@ def test_early_byte_facade(record):
             execute(engine, record)
         assert raised.value.code == record["expectedCode"]
         assert str(raised.value)
+        if "expectedMessage" in record:
+            assert str(raised.value) == record["expectedMessage"]
         return
 
     actual = execute(engine, record)
@@ -104,6 +160,7 @@ if __name__ == "__main__":
             observation["actualUtf8"] == observation["expectedUtf8"]
             and observation["actualCode"] == observation["expectedCode"]
             and (observation["actualCode"] is None or bool(observation["actualMessage"]))
+            and ("expectedMessage" not in record or observation["actualMessage"] == record["expectedMessage"])
         )
         matched &= observation["matched"]
         observations.append(observation)
@@ -111,6 +168,7 @@ if __name__ == "__main__":
     output = json.dumps(
         {
             "corpusSha256": hashlib.sha256(CORPUS_BYTES).hexdigest(),
+            "currentProfileSha256": hashlib.sha256(PROFILE_BYTES).hexdigest(),
             "records": observations,
         },
         ensure_ascii=False,

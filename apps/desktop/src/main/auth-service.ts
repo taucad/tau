@@ -310,9 +310,11 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
       }
       if (!constantTimeEquals(state, current.state)) {
         /* A mismatched state is a cross-site login attempt, not a user error:
-         * refuse without ever presenting the token to the API. */
+         * refuse without ever presenting the token to the API. The attempt in
+         * flight is left alone — anything on the machine can emit this link, and
+         * settling here would let it cancel the person's real sign-in. The
+         * deadline already bounds the attempt. */
         log('error', 'auth.state-mismatch');
-        settlePending(new Error('Desktop sign-in state did not match.'));
         return;
       }
       try {

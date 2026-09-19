@@ -78,19 +78,31 @@ describe('createAuthService — the tau://auth/callback handoff', () => {
     service.dispose();
   });
 
-  it('refuses a mismatched state without ever presenting the token to the API', async () => {
-    const exchange = vi.fn(async () => new Response(undefined, { status: 200 }));
-    const service = createAuthService(baseOptions({ fetch: exchange as unknown as typeof globalThis.fetch }));
-    /* The failure is captured the moment `signIn` is called: the callback below
-     * takes several ticks, and an unobserved rejection in that window is
-     * reported as an unhandled error even though the test awaits it. */
-    const attempt = capture(service.signIn());
-    await service.handleCallback({ oneTimeToken: 'stolen', state: 'not-the-nonce' });
+  it('refuses a mismatched state without presenting the token or cancelling the real sign-in', async () => {
+    const opened: string[] = [];
+    const exchange = vi.fn(
+      async () => new Response(undefined, { status: 200, headers: { [setAuthTokenHeader]: 'bearer-from-verify' } }),
+    );
+    const service = createAuthService(
+      baseOptions({
+        fetch: exchange as unknown as typeof globalThis.fetch,
+        openExternal: async (url) => {
+          opened.push(url);
+        },
+      }),
+    );
+    const attempt = service.signIn();
+    const state = pendingState(await waitForUrl(opened));
 
-    expect(await attempt).toBeInstanceOf(Error);
-    expect(String(await attempt)).toMatch(/state did not match/u);
+    /* Anything on the machine can emit this link, so a forged one must neither
+     * reach the API nor end the attempt the person is in the middle of. */
+    await service.handleCallback({ oneTimeToken: 'stolen', state: 'not-the-nonce' });
     expect(exchange).not.toHaveBeenCalled();
     expect(service.token()).toBeUndefined();
+
+    await service.handleCallback({ oneTimeToken: 'one-time', state });
+    await attempt;
+    expect(service.token()).toBe('bearer-from-verify');
     service.dispose();
   });
 

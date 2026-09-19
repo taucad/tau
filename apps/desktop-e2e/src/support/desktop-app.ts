@@ -376,10 +376,38 @@ export const launchDesktopApp = async (options: {
   };
 };
 
-/** Complete the production loopback authentication flow for a packaged app. */
+/**
+ * Hand the shell one `tau://` link the way the OS does.
+ *
+ * macOS raises `open-url` on `app`; Windows and Linux pass the link in argv and
+ * main re-raises it through the same slot. Main's listener is a module-scope
+ * `app.on('open-url', …)`, so emitting the event in the main process is the
+ * whole delivery — no packaged bundle and no protocol registration required.
+ *
+ * @param session - The launched shell.
+ * @param link - The `tau://` URL, admitted or not.
+ * @returns Nothing.
+ */
+export const deliverDesktopDeepLink = async (session: DesktopSession, link: string): Promise<void> => {
+  await session.application.evaluate(({ app }, url) => {
+    app.emit('open-url', { preventDefault: () => undefined }, url);
+  }, link);
+};
+
+/**
+ * Complete the production sign-in handoff for a packaged app.
+ *
+ * The shell opens `${TAU_FRONTEND_URL}/auth/sign-in?redirectTo=/auth/desktop?state=…`
+ * in the system browser (captured here by the `shell.openExternal` override) and
+ * waits for a `tau://auth/callback` deep link. R4 deleted the loopback listener,
+ * so there is no port to fetch: this mints the one-time token the web route would
+ * have minted and delivers the callback through `open-url`, the same event macOS
+ * raises. Main's listener is installed at module scope, so emitting on `app`
+ * reaches it exactly as the OS would.
+ */
 export const authenticatePackagedDesktop = async (session: DesktopSession, bearerToken: string): Promise<void> => {
   let signInError: unknown;
-  // async-iife: the loopback callback must run while renderer sign-in is pending.
+  // async-iife: the deep-link callback must arrive while renderer sign-in is pending.
   const signIn = (async (): Promise<void> => {
     try {
       await session.page.evaluate(async () => {
@@ -408,9 +436,8 @@ export const authenticatePackagedDesktop = async (session: DesktopSession, beare
     throw new Error(`Packaged desktop sign-in emitted no redirect target: ${externalUrl}`);
   }
   const handoff = new URL(redirect, desktopE2EFrontendUrl);
-  const port = handoff.searchParams.get('port');
   const state = handoff.searchParams.get('state');
-  if (!port || !state) {
+  if (!state) {
     throw new Error(`Packaged desktop sign-in emitted an invalid handoff target: ${handoff.toString()}`);
   }
   const generated = await fetch(`${desktopE2EApiUrl}/v1/auth/one-time-token/generate`, {
@@ -423,13 +450,10 @@ export const authenticatePackagedDesktop = async (session: DesktopSession, beare
   if (!oneTimeToken) {
     throw new Error('Packaged desktop token generation returned no token.');
   }
-  const loopback = new URL(`http://127.0.0.1:${port}/callback`);
-  loopback.searchParams.set('ott', oneTimeToken);
-  loopback.searchParams.set('state', state);
-  const callback = await fetch(loopback);
-  if (!callback.ok) {
-    throw new Error(`Packaged desktop loopback callback failed with HTTP ${String(callback.status)}.`);
-  }
+  const callback = new URL('tau://auth/callback');
+  callback.searchParams.set('ott', oneTimeToken);
+  callback.searchParams.set('state', state);
+  await deliverDesktopDeepLink(session, callback.toString());
   await signIn;
   if (signInError !== undefined) {
     throw signInError instanceof Error

@@ -13,7 +13,7 @@ use geospec_engine_native_core::certificates::{
 use serde_json::{json, Value};
 
 const VERIFIER_SOURCE_HASH: &str =
-    "406d6363a07252339349ff29e443fefa23df0f46d8f3ee67425bb8140bae6fdc";
+    "38922652cc624d2a6c84377bddc20e76a0361dc95b87f9c3e94463ded6610df9";
 
 fn verifier_source_hash() -> String {
     let value = std::env::var("GEOSPEC_F1_VERIFIER_SOURCE_HASH")

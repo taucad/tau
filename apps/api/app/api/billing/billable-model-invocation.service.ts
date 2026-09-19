@@ -16,10 +16,12 @@ import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.j
 import {
   classifyUpstreamRefusal,
   cloudUpstreamRefusalMessage,
+  maximumRefusalMessageCharacters,
   readUpstreamRefusal,
   upstreamRetryAfterSeconds,
 } from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
+import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
 import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
 import { supplierBlockingFinancialCaseKinds } from '#api/billing/billing-supplier-reconciliation.service.js';
@@ -436,6 +438,9 @@ export class BillableModelInvocationService {
             onRefusal: (refusal) => {
               this.recordProviderAccountExhausted(intent, qualification.providerId, refusal);
             },
+            onTerminalFailure: (failure) => {
+              this.recordProviderStreamFailure(intent, qualification, failure);
+            },
           }),
         )
       : observed.body;
@@ -815,6 +820,30 @@ export class BillableModelInvocationService {
     });
     this.logger.warn(
       `Supplier account exhausted on ${providerId} (${refusal.providerCode ?? 'no code'}) in ${intent.environment}: ${refusal.message}`,
+    );
+  }
+
+  /**
+   * Records a classified mid-stream provider failure — a quota cut, a rate limit,
+   * any status-coded in-band error. The frame filter replaces those bytes with a
+   * Tau frame, so without this line the funded path, the one where Tau pays for
+   * the tokens, keeps no trace at all of why the turn ended (R6). The supplier's
+   * own sentence stays here, where only Tau reads it, and is clamped the way
+   * every relayed reason is.
+   *
+   * @param intent - The invocation whose stream failed.
+   * @param qualification - The route the request took.
+   * @param failure - What the terminal frame said about itself.
+   */
+  private recordProviderStreamFailure(
+    intent: BillableInvocationIntent,
+    qualification: QualifiedBillableInvocation,
+    failure: ProviderTerminalFailure,
+  ): void {
+    this.logger.warn(
+      `Provider stream failed on ${qualification.providerId} ${qualification.modelId} ` +
+        `(${failure.code ?? failure.type ?? 'no code'}) in ${intent.environment}: ` +
+        `${failure.message?.slice(0, maximumRefusalMessageCharacters) ?? 'no message'}`,
     );
   }
 

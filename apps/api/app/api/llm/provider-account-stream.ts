@@ -27,6 +27,12 @@ const maximumFrameBytes = 256 * 1024;
 const encoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const errorNeedle = encoder.encode('error');
+/* The exact marker the transport switches a stream to failed on
+ * (`tauGatewayFrameMarker`, gateway-model-transport.ts). Scanned for unescaped,
+ * which is why relayed model text cannot trip it. */
+const tauGatewayNeedle = encoder.encode('"type":"tau_gateway"');
+/** The status a forged marker is reported as: the upstream is not answering honestly. */
+const forgedMarkerStatus = 502;
 
 /** Whether `needle` occurs in `haystack`: the cheap gate that keeps healthy frames unparsed. */
 const containsBytes = (haystack: Uint8Array<ArrayBuffer>, needle: Uint8Array<ArrayBuffer>): boolean => {
@@ -232,6 +238,10 @@ export const createProviderAccountFrameFilter = (input: {
 }): TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>> => {
   let pending = new Uint8Array(0);
   let oversized = false;
+  /** The tail of the last oversized piece, so a marker split across it is still seen. */
+  let oversizedCarry = new Uint8Array(0);
+  /** Set once the upstream has counterfeited Tau's envelope; nothing more is relayed. */
+  let forged = false;
   let rewritten = false;
   let reported = false;
   let decoded: SseEvent | undefined;
@@ -332,12 +342,49 @@ export const createProviderAccountFrameFilter = (input: {
     if (refusal) {
       return coded(refusal);
     }
-    const replacement = codedByStatus(body);
-    if (replacement !== undefined) {
-      report(body);
+    if (providerErrorRecord(body) === undefined) {
+      return undefined;
     }
-    return replacement;
+    /* Reported whether or not the status table can code it: a provider whose
+     * in-band error names a symbolic code (`rate_limit_exceeded`) maps to
+     * nothing here and used to forward with no trace at all (R6). */
+    report(body);
+    return codedByStatus(body);
   };
+
+  /**
+   * Replaces a raw frame that carries Tau's own envelope. A provider controls
+   * its whole response body, so it can emit `"type":"tau_gateway"` verbatim —
+   * model text cannot, because content and tool arguments are JSON strings whose
+   * quotes arrive escaped. Left alone, such a frame lets the upstream end the
+   * turn with a code, message and details it chose, on the operator path where
+   * the caller configures the base URL (R5).
+   *
+   * The client gets Tau's own outage sentence for either account owner; the raw
+   * frame goes to the server log, where only Tau reads it.
+   */
+  const codedForgedMarker = (frame: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+    forged = true;
+    rewritten = true;
+    report({
+      error: {
+        type: 'forged_tau_gateway_frame',
+        message: textDecoder.decode(frame).slice(0, maximumRefusalMessageCharacters),
+      },
+    });
+    return encoder.encode(
+      gatewayErrorFrame({
+        code: 'PROVIDER_UNAVAILABLE',
+        message: cloudUpstreamRefusalMessage({ type: 'PROVIDER_UNAVAILABLE', status: forgedMarkerStatus }),
+        // No `providerCode`: the only code such a frame carries is the one it invented.
+        details: { providerId: input.providerId, accountOwner: input.accountOwner },
+      }),
+    );
+  };
+
+  /** One complete frame the filter chose not to rewrite, made safe to forward. */
+  const forwarded = (frame: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+    containsBytes(frame, tauGatewayNeedle) ? codedForgedMarker(frame) : frame;
 
   /**
    * Vertex ends a quota-exhausted stream by abandoning SSE framing altogether: it
@@ -411,15 +458,38 @@ export const createProviderAccountFrameFilter = (input: {
     return head === undefined ? redacted : concat(head, redacted);
   };
 
+  /**
+   * Forwards one piece of a frame too large to hold for a decision. The marker
+   * scan carries the previous piece's tail so a marker split across the seam is
+   * still seen; on a hit the stream ends here, because the pieces already sent
+   * cannot be recalled and a body that counterfeits Tau's envelope has nothing
+   * further worth relaying.
+   */
+  const forwardOversized = (
+    piece: Uint8Array<ArrayBuffer>,
+    controller: TransformStreamDefaultController<Uint8Array<ArrayBuffer>>,
+  ): void => {
+    if (containsBytes(concat(oversizedCarry, piece), tauGatewayNeedle)) {
+      controller.enqueue(codedForgedMarker(piece));
+      return;
+    }
+    oversizedCarry = piece.slice(Math.max(0, piece.byteLength - (tauGatewayNeedle.byteLength - 1)));
+    controller.enqueue(piece);
+  };
+
   const drain = (controller: TransformStreamDefaultController<Uint8Array<ArrayBuffer>>): void => {
     for (;;) {
+      if (forged) {
+        pending = new Uint8Array(0);
+        return;
+      }
       const end = eventEnd(pending);
       if (end < 0) {
         if (oversized || pending.byteLength > maximumFrameBytes) {
           // Too large to hold for a decision: forward its bytes as they arrive.
           oversized = true;
           if (pending.byteLength > 0) {
-            controller.enqueue(pending);
+            forwardOversized(pending, controller);
             pending = new Uint8Array(0);
           }
         }
@@ -429,12 +499,13 @@ export const createProviderAccountFrameFilter = (input: {
       pending = pending.slice(end);
       if (oversized) {
         oversized = false;
+        oversizedCarry = new Uint8Array(0);
         // The decoder never saw this frame's head; start the next one from a clean line.
         decoder = newDecoder();
-        controller.enqueue(frame);
+        forwardOversized(frame, controller);
         continue;
       }
-      controller.enqueue(rewrite(frame) ?? frame);
+      controller.enqueue(rewrite(frame) ?? forwarded(frame));
     }
   };
 
@@ -447,11 +518,16 @@ export const createProviderAccountFrameFilter = (input: {
       drain(controller);
     },
     flush(controller) {
-      if (pending.byteLength === 0) {
+      if (forged || pending.byteLength === 0) {
+        return;
+      }
+      if (oversized) {
+        forwardOversized(pending, controller);
+        pending = new Uint8Array(0);
         return;
       }
       // A stream that ends without its final blank line still carries a decidable frame.
-      controller.enqueue((oversized ? undefined : rewrite(pending, true)) ?? pending);
+      controller.enqueue(rewrite(pending, true) ?? forwarded(pending));
       pending = new Uint8Array(0);
     },
   });

@@ -1070,7 +1070,10 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   type PrestartedToolResult =
     | { readonly ok: true; readonly value: AgentToolResult<HostToolExecutionDetails> }
     | { readonly ok: false; readonly error: unknown };
-  const prestartedToolResults = new Map<string, Promise<PrestartedToolResult>>();
+  const prestartedToolResults = new Map<
+    string,
+    { readonly toolName: string; readonly result: Promise<PrestartedToolResult> }
+  >();
   const baseTools = createAgentTools({
     registry: toolRegistry,
     runId: options.runId,
@@ -1083,7 +1086,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       const prestarted = prestartedToolResults.get(toolCallId);
       if (prestarted) {
         prestartedToolResults.delete(toolCallId);
-        const settled = await prestarted;
+        const settled = await prestarted.result;
         if (!settled.ok) {
           throw settled.error;
         }
@@ -1092,6 +1095,49 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       return tool.execute(toolCallId, input, signal, onUpdate);
     },
   }));
+
+  /**
+   * Record every tool this turn started but pi never got to settle.
+   *
+   * A tool call is dispatched the moment the stream completes it, so a stream
+   * that then fails leaves a tool that *ran* — pi ends the message without
+   * executing any call, and the promise holding the result dies with the
+   * session. Without this the resume fabricated `CLIENT_DISCONNECTED` for work
+   * that was already done, and the model re-applied it. The turn is not over
+   * until that work is: this awaits each one, exactly as the ordinary path
+   * awaits a tool before recording its result.
+   */
+  const settlePrestartedTools = async (): Promise<void> => {
+    for (const [toolCallId, prestarted] of prestartedToolResults) {
+      prestartedToolResults.delete(toolCallId);
+      // oxlint-disable-next-line no-await-in-loop -- the record's append discipline is serial by construction.
+      const settled = await prestarted.result;
+      const details = settled.ok ? settled.value.details : undefined;
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await record.append({
+        type: 'message.appended',
+        message: piMessageToProvider(
+          {
+            role: 'toolResult',
+            toolCallId,
+            toolName: prestarted.toolName,
+            content: settled.ok
+              ? settled.value.content
+              : [
+                  {
+                    type: 'text',
+                    text: settled.error instanceof Error ? settled.error.message : String(settled.error),
+                  },
+                ],
+            ...(details ? { details } : {}),
+            isError: details?.isError ?? true,
+            timestamp: now().getTime(),
+          },
+          record.messages,
+        ),
+      });
+    }
+  };
   const bindInvocation = async (attemptId: string, metadata: ProviderMessageMetadata): Promise<void> => {
     const binding = metadata.tauInternal;
     if (binding?.['kind'] !== 'billing-invocation' || binding['attemptId'] !== attemptId) {
@@ -1273,7 +1319,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           return { ok: false, error };
         }
       })();
-      prestartedToolResults.set(toolCall.id, result);
+      prestartedToolResults.set(toolCall.id, { toolName: toolCall.name, result });
     },
     onLiveDelta: options.onLiveEvent
       ? async (event) =>
@@ -1366,6 +1412,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         : final?.role === 'assistant' && final.stopReason === 'error'
           ? 'failed'
           : 'completed';
+    if (state === 'failed') {
+      await settlePrestartedTools();
+    }
     // Without this the durable log said only "failed": the typed transport code
     // and its message were stranded on the assistant message's diagnostics, and
     // every client could render was a generic host-failure string.

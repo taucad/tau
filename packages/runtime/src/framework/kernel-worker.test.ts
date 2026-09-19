@@ -476,6 +476,54 @@ describe('KernelWorker lifecycle', () => {
       ).rejects.toMatchObject({ name: 'AbortError' });
     });
 
+    it.each(['missing', 'present'] as const)(
+      'should snapshot a normal %s optional middleware sidecar without unresolved inputs',
+      async (presence) => {
+        const sidecarPath = '.tau/parameters/main.ts.json';
+        const contents: Record<string, Uint8Array<ArrayBuffer>> = {
+          'main.ts': new Uint8Array([1, 2]),
+          'dep.ts': new Uint8Array([3, 4]),
+        };
+        if (presence === 'present') {
+          contents[sidecarPath] = new TextEncoder().encode(
+            JSON.stringify({ activeGroup: 'default', groups: { default: { values: {} } } }),
+          );
+        }
+        const filesystem = createMockFileSystem({ existsResult: (path) => path in contents });
+        filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+          Object.fromEntries(paths.map((path) => [path, contents[path]!])),
+        );
+        const middleware = defineMiddleware({
+          id: 'optional-sidecar',
+          name: 'OptionalSidecar',
+          getDependencies: () => [{ path: sidecarPath }],
+        });
+        const worker = new DependencyKernelWorker({ middleware: [middleware], onLog: noopLog, filesystem });
+        try {
+          const result = await worker.snapshotSource({ file: createGeometryFile('main.ts') });
+          expect(result.success).toBe(true);
+          if (!result.success) {
+            return;
+          }
+          expect(result.issues).toEqual([]);
+          expect(result.data.unresolvedPaths).toEqual([]);
+          expect(result.data.files.map(({ path }) => path)).toEqual(Object.keys(contents).sort());
+          const sidecar = result.data.files.find(({ path }) => path === sidecarPath);
+          if (presence === 'present') {
+            expect(sidecar?.role).toBe('middleware-dependency');
+            expect(sidecar?.content).toEqual(contents[sidecarPath]);
+            expect(sidecar?.sha256).toMatch(/^[0-9a-f]{64}$/u);
+          } else {
+            expect(sidecar).toBeUndefined();
+          }
+          expect(filesystem.mocks.exists).toHaveBeenCalledWith(sidecarPath);
+          expect(worker.createGeometryCalls).toBe(0);
+        } finally {
+          await worker.cleanup();
+        }
+      },
+    );
+
     it('fails closed when a required file is absent or the dependency graph changes', async () => {
       const missingFilesystem = createMockFileSystem({ existsResult: (path) => path !== 'tau.json' });
       missingFilesystem.mocks.readFiles.mockResolvedValue({

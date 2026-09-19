@@ -4,6 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import {
   billableModelRouteIds,
   CodeOwnedBillableModelQualificationResolver,
+  supplierIdentityForRoute,
 } from '#api/billing/billable-model-qualification.js';
 import type {
   BillableInvocationIntent,
@@ -486,6 +487,12 @@ describe('catalog route vocabulary', () => {
         model: row.provider.id === 'vertexai' ? `google/${row.model}` : row.model,
       });
     }
+  });
+
+  it('should refuse to fund a route no catalog row names', () => {
+    expect(() => supplierIdentityForRoute('openai-not-a-catalog-row')).toThrow(
+      'Funded route openai-not-a-catalog-row has no catalog row',
+    );
   });
 
   it('should refuse a supplier model id that is not a catalog route id', () => {

@@ -18,6 +18,7 @@ import { useSession } from '@better-auth-ui/react';
 import { Users } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '#components/ui/loader.js';
+import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { ENV } from '#environment.config.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { authClient } from '#lib/auth-client.js';
@@ -83,6 +84,24 @@ function InvitationNotice({
     </div>
   );
 }
+
+/**
+ * Whatever the route is showing, with the desktop app offered beside it (R4).
+ *
+ * The offer never gates the page: accepting in the browser is what this route
+ * does, and the app is the second way. On the desktop build, and for any link
+ * the shell would refuse, `OpenInDesktop` renders nothing and this is the
+ * page exactly as it was.
+ *
+ * @param body - What the route decided to show.
+ * @returns The page.
+ */
+const withDesktopOffer = (body: React.ReactNode): React.JSX.Element => (
+  <div className='flex flex-col items-center gap-6'>
+    {body}
+    <OpenInDesktop continueLabel='Accept in the browser' />
+  </div>
+);
 
 /**
  * Accept an invitation as the signed-in account, then open the project.
@@ -153,7 +172,7 @@ export default function AcceptInvitation(): React.JSX.Element {
   }, [navigate, openProject, queryClient, session, token]);
 
   if (isPending) {
-    return (
+    return withDesktopOffer(
       <div
         role='status'
         aria-busy='true'
@@ -161,12 +180,12 @@ export default function AcceptInvitation(): React.JSX.Element {
         className='flex items-center justify-center py-16'
       >
         <Loader className='size-6 text-muted-foreground' />
-      </div>
+      </div>,
     );
   }
 
   if (!session) {
-    return (
+    return withDesktopOffer(
       <InvitationNotice
         title='Sign in to accept this invitation'
         detail='Tau records who works on a project, so it needs to know who you are before it can add you to this one.'
@@ -175,13 +194,13 @@ export default function AcceptInvitation(): React.JSX.Element {
             <Link to={signIn}>Sign in</Link>
           </Button>
         }
-      />
+      />,
     );
   }
 
   if (outcome?.kind === 'mismatch') {
     const address = session.user.email;
-    return (
+    return withDesktopOffer(
       <InvitationNotice
         title='This invitation was sent to a different email address.'
         detail={`You are signed in as ${address}. Sign in with the invited address to accept it.`}
@@ -190,12 +209,12 @@ export default function AcceptInvitation(): React.JSX.Element {
             <Link to={signIn}>Use a different account</Link>
           </Button>
         }
-      />
+      />,
     );
   }
 
   if (outcome?.kind === 'unverified') {
-    return (
+    return withDesktopOffer(
       <InvitationNotice
         title='Verify your email address, then open this link again.'
         detail='An invitation is issued to an address, so Tau adds you only once that address is proven to be yours.'
@@ -204,12 +223,12 @@ export default function AcceptInvitation(): React.JSX.Element {
             <Link to='/settings/account'>Go to account settings</Link>
           </Button>
         }
-      />
+      />,
     );
   }
 
   if (outcome?.kind === 'spent') {
-    return (
+    return withDesktopOffer(
       <InvitationNotice
         title='This invitation link is no longer valid.'
         detail='It was revoked or it has expired. Ask the project owner for a new one.'
@@ -218,12 +237,12 @@ export default function AcceptInvitation(): React.JSX.Element {
             <Link to='/projects'>Go to projects</Link>
           </Button>
         }
-      />
+      />,
     );
   }
 
   if (outcome?.kind === 'failed') {
-    return (
+    return withDesktopOffer(
       <InvitationNotice
         title='The invitation could not be accepted.'
         detail='Tau Cloud did not answer. Open the link again in a moment.'
@@ -232,14 +251,14 @@ export default function AcceptInvitation(): React.JSX.Element {
             <Link to='/projects'>Go to projects</Link>
           </Button>
         }
-      />
+      />,
     );
   }
 
-  return (
+  return withDesktopOffer(
     <div role='status' aria-busy='true' className='flex items-center justify-center gap-3 py-16'>
       <Loader className='size-6 text-muted-foreground' />
       <span className='text-sm text-muted-foreground'>Opening the invitation…</span>
-    </div>
+    </div>,
   );
 }

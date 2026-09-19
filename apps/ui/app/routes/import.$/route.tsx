@@ -34,6 +34,7 @@ import { ImportProcessingView } from '#routes/import.$/import-processing-view.js
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '#components/copy-button.js';
+import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
@@ -629,6 +630,9 @@ export default function ImportRoute(): React.JSX.Element {
                 <h1 className='text-2xl font-semibold'>Import Project</h1>
                 <p className='text-sm text-muted-foreground'>Import from GitHub or upload from your computer</p>
               </div>
+              {/* Only when a shared `/i/<repo>` link brought them here: the
+                  bare import page names no repository for the app to open. */}
+              <OpenInDesktop continueLabel='Import in the browser' />
             </div>
 
             {/* Side-by-side cards when no valid repo */}

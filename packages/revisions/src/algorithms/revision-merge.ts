@@ -1,4 +1,4 @@
-import { seemsBinary } from '@taucad/filesystem';
+import { seemsBinary } from '@taucad/filesystem/content-metadata';
 import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
 import type { FileMode } from '@taucad/filesystem';
 import type { RevisionTreeInput } from '#algorithms/revision-tree.js';

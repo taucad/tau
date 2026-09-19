@@ -84,8 +84,8 @@ export type TreeNode =
  * with a single in-memory lookup. Built once from a provider scan, then updated
  * incrementally on every write/delete/rename.
  *
- * When used from {@link WorkspaceFileService}, paths are **relative to the first full
- * `getDirectoryStat` scan root** (not host absolute paths like `/projects/id/...`).
+ * Held per root by {@link TreeIndexes}, so paths are **relative to that root's
+ * first full scan** (not host absolute paths like `/projects/id/...`).
  */
 export class TreeIndex {
   private _root: TreeNode = { type: 'dir', size: 0, mtimeMs: 0, children: new Map() };
@@ -173,8 +173,8 @@ export class TreeIndex {
   }
 
   /**
-   * Recursively collect file stat entries under a directory, matching
-   * the signature of `WorkspaceFileService.getDirectoryStat`.
+   * Recursively collect file stat entries under a directory: what the rooted
+   * `statTree` answers from, masked on the way out.
    *
    * @param basePath - Absolute directory path to walk.
    * @param options - Optional `admits` mask, asked before a descent.
@@ -616,30 +616,18 @@ export class TreeIndexes {
     }
   }
 
-  /** Drop every index; the next query rebuilds from its provider. */
+  /**
+   * Drop every index; the next query rebuilds from its provider.
+   *
+   * ponytail: every topology change clears all of them, because evicting one
+   * root is not enough — paths under a removed prefix fall through to whichever
+   * broader mount now covers them, and that mount's index was scanned while the
+   * boundary still hid the subtree. A targeted eviction would have to drop the
+   * prefix *and* its new coverer; add one when a measurement says the cold
+   * rebuild costs more than the bookkeeping.
+   */
   public clear(): void {
     this._byRoot.clear();
-  }
-
-  /**
-   * Drop the index for one root and every index nested under it: the targeted
-   * alternative to {@link TreeIndexes.clear} for a root whose mount went away,
-   * so the other roots stay warm instead of cold-starting with it.
-   *
-   * Not sufficient on its own for an unmount: paths under the removed prefix now
-   * fall through to whichever broader mount covers them, and that mount's index
-   * was scanned while the boundary still hid the subtree, so it is stale too.
-   * Evict the newly covering root as well, or keep clearing.
-   *
-   * @param root - Absolute root whose mount went away.
-   */
-  public evict(root: string): void {
-    const normalizedRoot = normalizePath(root);
-    for (const key of this._byRoot.keys()) {
-      if (treeRelative(normalizedRoot, key) !== undefined) {
-        this._byRoot.delete(key);
-      }
-    }
   }
 
   /** The first index whose root contains `absolutePath` with no mount boundary between them. */

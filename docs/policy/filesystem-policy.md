@@ -102,7 +102,7 @@ Every admitted operation retains the exact captured mount entry through provider
 
 Always read a single directory level unless the consumer provably needs deep recursion.
 
-Deep reads are permitted only for: `getDirectoryContents` (ZIP/copy), startup-only `getDirectoryStat` hydration, and `readFiles` (kernel dependency batch). Deep reads are forbidden in mutation-triggered refresh paths.
+Deep reads are permitted only for: the rooted `contents` and `archive` content operations (ZIP/copy), startup-only `statTree` hydration, and `readFiles` (kernel dependency batch). Deep reads are forbidden in mutation-triggered refresh paths.
 
 ### Rule 2: Parallel stat, sequential traversal
 
@@ -110,7 +110,7 @@ When listing a single directory, `readdir` + parallel `Promise.all(stat(...))` i
 
 **Backend performance context:** IndexedDB transaction creation has fixed overhead (~0.1–0.3ms each) regardless of payload size. Parallelizing stat calls within a directory lets the browser pipeline IDB transactions instead of sequentially awaiting each one.
 
-**For metadata-only queries (tree display, file counts):** Prefer the in-memory tree in `WorkspaceFileService` over provider stat calls. See Rule 33.
+**For metadata-only queries (tree display, file counts):** Prefer the root's `TreeIndex` over provider stat calls. See Rule 33.
 
 ### Rule 3: Read caching expectations
 
@@ -399,7 +399,7 @@ On backend mount change:
 
 ### Rule 29: Tree refresh remains incremental after startup
 
-`getDirectoryStat` may be used for initial hydration only. Post-startup updates must use:
+The rooted `statTree` may be used for initial hydration only. Post-startup updates must use:
 
 - parent-directory re-read on file create/delete/write
 - subtree invalidation on directory rename/remove
@@ -464,14 +464,14 @@ await Promise.race([authorityMutation(), rejectAfter(30_000)]);
 
 ### Rule 33: In-memory file tree for metadata queries
 
-`WorkspaceFileService.getDirectoryStat` and related metadata queries must use its in-memory file tree, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation IndexedDB transaction overhead (~0.1–0.3ms each); for 6265 files this accumulates to seconds.
+The rooted `statTree` and `search` and related metadata queries must be served from a `TreeIndex`, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation IndexedDB transaction overhead (~0.1–0.3ms each); for 6265 files this accumulates to seconds.
 
-The in-memory tree seeds from the provider's hydrated path index (`DirectIdbProvider._paths`) and is maintained incrementally on writes (not rebuilt).
+`TreeIndexes` holds one `TreeIndex` per root, seeded from the provider's hydrated path index (`DirectIdbProvider._paths`) and maintained incrementally on writes (not rebuilt). An index answers only within its own mount; a topology change clears all of them.
 
 ```typescript
-// CORRECT: Metadata from in-memory tree (O(1))
-const stat = inMemoryTree.stat(path);
-const entries = inMemoryTree.readdir(path);
+// CORRECT: Metadata from the root's in-memory index (O(1))
+const stat = treeIndex.stat(path);
+const entries = treeIndex.readdir(path);
 
 // INCORRECT: Metadata via provider (1 IDB transaction per call)
 const stat = await provider.stat(path);
@@ -480,7 +480,7 @@ const entries = await provider.readdir(path);
 
 ### Rule 34: Bulk writes use provider-native batching
 
-For bulk writes (GitHub import, ZIP upload), the canonical `writeFiles` path may let the IndexedDB provider drain admitted writes in as few native transactions as possible — per-transaction overhead dominates at thousands of files. Do not expose a second provider `bulkImport` mutation path. After commit, update the provider path index and `WorkspaceFileService` tree before the next read; after uncertain failure, refresh before serving metadata.
+For bulk writes (GitHub import, ZIP upload), the canonical `writeFiles` path may let the IndexedDB provider drain admitted writes in as few native transactions as possible — per-transaction overhead dominates at thousands of files. Do not expose a second provider `bulkImport` mutation path. After commit, update the provider path index and the affected `TreeIndex` before the next read; after uncertain failure, refresh before serving metadata.
 
 ### Rule 35: Provider hydration awareness
 
@@ -503,4 +503,4 @@ The main thread owns persisted `ProjectFileSystemConfig` and storage-root handle
 | Watch event -> UI tree patch        | < 75ms p95          | N/A (not implemented)             |
 | Sustained edit burst (100 events)   | 0 silent drops      | N/A (not implemented)             |
 | Bulk import (6265 files)            | < 5s                | ~143s (sequential, pre-DirectIdb) |
-| `getDirectoryStat` (6265 files)     | < 10ms (in-memory)  | ~2s (sequential IDB tx)           |
+| `statTree` (6265 files)             | < 10ms (in-memory)  | ~2s (sequential IDB tx)           |

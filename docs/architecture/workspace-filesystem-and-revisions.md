@@ -72,7 +72,9 @@ L4  Composed view    composeView(checkout, overlays, mask) → RootedFileSystem 
 L3  Checkouts        live checkout (project dir)  ·  linked checkouts (<workspace>/.tau/checkouts/<project>/<id>)  ·  leases
 L2  Revisions        one repository per project · BACKEND (RevisionPort) · branches · change ids · evidence/chat refs
                      REMOTES: git smart HTTP + LFS only · Git remotes · Tau Hosted Remote (git server in Tau API) · atomic receive
-L1  Authority        WorkspaceFileService · mount table · PATH REGISTRY (one classifier) · watch planes
+L1  Authority        WorkspaceFileService (composition root) · mount table · rooted views · mutation pipeline
+                     tree indexes · project routes/directories · external-change ingest · watch planes
+                     PATH REGISTRY (one classifier), injected as a PathPolicy — never imported by the core
 L0  Storage roots    DirectIdb · OPFS · WebAccess · Memory · Node fs
 ```
 
@@ -96,6 +98,25 @@ classify(path: RootedPath, ctx: { checkout: Checkout }): {
 The registry is **the** table. Capture, generated ignore content, the agent mask, composed views, and ingress preflight all read `classify`; callers do not maintain private path-prefix policy. Rule 16's four storage classes are the registry's `class` column.
 
 The registry is structural, not a glob: it is keyed by the project's reserved `.tau/**` layout (below), by the mount table (dependencies), and by the checkout kind (a linked checkout classifies its own `.tau/**` the same way the live one does).
+
+The mechanism core never imports it. `composeView` and revision capture take a `PathPolicy` port (`classify`, `versioned`, `agentAccess`); the composition sites — the file-manager worker, the agent host and `packages/host` — pass the Tau layout instance `tauPathPolicy` from `@taucad/filesystem/path-registry`.
+
+#### Who owns what inside L1
+
+`WorkspaceFileService` keeps its name, constructor and queue ownership and is a **composition root**: the authority-global surface it serves is topology (mounts, project routes, the project-directory lifecycle, external-change polling, storage-root teardown) plus the per-path primitives that trusted composition still calls. Everything with a shape of its own lives in its own module of `libs/filesystem`:
+
+| Owner                                                  | Concern                                                                                                                                 |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `MutationPipeline`                                     | every write: locks, provider commit, cache/index bookkeeping, event emission, batch semantics, the move/copy/duplicate porcelain        |
+| `RootedViews` / `createRootedFileSystem`               | one exact mount captured per view; mount-confined, mask-checked reads, writes and porcelain; `ESTALE` after its mount goes              |
+| `TreeIndex` / `TreeIndexes`                            | one in-memory metadata index per root, fed by mutations and external facts; serves rooted `search` and `statTree` with no provider walk |
+| `content-ops` (`walk`, `contents`, `archive`, capture) | pure read content operations over the port, exported at `@taucad/filesystem/content-ops`; the only place ZIP encoding lives             |
+| `project-routes`                                       | the only speller of `/projects/<id>`, `/checkouts/<id>`, `/previews/<id>` and `/node_modules`; `MountEntry.kind` carries the route id   |
+| `ProjectDirectories`                                   | discovery, pending commit, adopt, permanent delete and manifest I/O — the only L1 module that names `ProjectManifest`                   |
+| `ExternalChangeIngest` / `RemoteChanges`               | normalised facts from each backend's declared `observe()` capability, and cross-tab remote facts; no `backend === '…'` branch remains   |
+| `backend/scope.ts`                                     | the storage-scope discriminant (`isDurableScope`, `projectLocatorFor`) the layer above used to infer from a backend name                |
+
+The consumer surface is the **composed view**, not the authority. A client opens a rooted bridge connection declaring its consumer (`'user'`, `'agent'` or `'working-copy'`); `'user'` and `'agent'` are masked by `composeView`, while `'working-copy'` is the raw rooted filesystem and is trusted composition only — the revision port, host record writers and the project-directory lifecycle (Rule 16, charter D8). Revision algorithms are not here at all: they live at `@taucad/revisions/algorithms`, and `libs/filesystem` holds no `revision-*` module.
 
 ### L2 — Revisions
 

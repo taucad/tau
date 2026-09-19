@@ -113,6 +113,19 @@ describe('attachment materialisation in the session (D15)', () => {
     expect(committed?.type === 'turn.history-projection-committed' && committed.message).toEqual(userWithAttachments);
   });
 
+  it('names the chat every generation request belongs to', async () => {
+    /* One transport serves every chat in a worker, so the chat travels with the
+     * request rather than the composition; the gateway turns it into the
+     * receipt's `chatHint`. */
+    const file = createMemoryEventLogFile();
+    const transport = new RecordingTransport();
+    const session = await openSession({ file, runId: 'run-1', transport });
+
+    await session.prompt({ id: 'user-1', role: 'user', content: 'hello' });
+
+    expect(transport.requests[0]?.chatId).toBe('chat-1');
+  });
+
   it('never hands hydration a file-ref, on the first turn or when a later run rebuilds history', async () => {
     const file = createMemoryEventLogFile();
     const attachments = attachmentsFrom({ [imagePath]: imageBytes, [pdfPath]: pdfBytes });

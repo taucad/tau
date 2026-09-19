@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -168,6 +168,15 @@ const openHolds = (): unknown => {
   };
 };
 
+/** One labelled row of the open credit explanation, by the term that names it. */
+const detailRow = (label: string): HTMLElement => {
+  const term = screen.getByText(label, { selector: 'dt' });
+  if (!(term.parentElement instanceof HTMLElement)) {
+    throw new Error(`The ${label} detail row has no container.`);
+  }
+  return term.parentElement;
+};
+
 const renderPage = (): void => {
   render(
     <MemoryRouter>
@@ -278,7 +287,8 @@ describe('UsagePage', () => {
     renderPage();
     await userEvent.click(screen.getByText('agent'));
 
-    const status = screen.getByRole('status');
+    // Scoped to its own row: the Project row is a live region on the same terms.
+    const status = within(detailRow('Chat')).getByRole('status');
     expect(status).toHaveTextContent(text);
     expect(status).toHaveAttribute('aria-busy', busy);
   });
@@ -298,6 +308,36 @@ describe('UsagePage', () => {
       expect.objectContaining({ projects: ['project-x', 'project-y'] }),
       expect.any(Object),
     );
+  });
+
+  /*
+   * The listing only starts once the snapshot is ready, so the filters and the
+   * table are already on screen while it is in flight. Treating that as a
+   * settled "not available" offered one checkbox covering every project.
+   */
+  it('neither names nor offers to filter projects while the listing is in flight', async () => {
+    useCloudProjects.mockReturnValue({ projects: [], isSettled: false });
+    renderPage();
+
+    expect(screen.queryByRole('button', { name: /Projects/u })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('agent'));
+    const project = within(detailRow('Project')).getByRole('status');
+    expect(project).toHaveTextContent('Finding the project…');
+    expect(project).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('usage-event-detail')).not.toHaveTextContent('project-a');
+  });
+
+  it('stops looking once the page has given up refreshing, rather than waiting forever', async () => {
+    useCloudProjects.mockReturnValue({ projects: [], isSettled: false });
+    useUsageSnapshot.mockReturnValue({ status: 'unable-to-refresh', snapshot, retry: vi.fn() });
+    renderPage();
+
+    expect(useCloudProjects).toHaveBeenCalledWith({ enabled: false });
+    await userEvent.click(screen.getByText('agent'));
+    const detail = screen.getByTestId('usage-event-detail');
+    expect(detail).toHaveTextContent('Project not available');
+    expect(detail).not.toHaveTextContent('Finding the project…');
   });
 
   it('offers the project filter by name', async () => {

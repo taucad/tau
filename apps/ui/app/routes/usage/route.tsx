@@ -26,6 +26,7 @@ import { UsageSummaryCards } from '#routes/usage/usage-summary-cards.js';
 import { UsageTable } from '#routes/usage/usage-table.js';
 import { usageActivityKinds, usageFilterOptions, useUsageFilters } from '#routes/usage/use-usage-filters.js';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
+import type { ProjectNames } from '#routes/usage/activity-names.js';
 import { useBillingRevisionMinimum, usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
 import type { SavedUsageOutcome } from '#db/billing-snapshot-store.js';
 import type { Handle } from '#types/matches.types.js';
@@ -178,9 +179,18 @@ export default function UsagePage(): React.JSX.Element {
   const snapshot = 'snapshot' in usage ? usage.snapshot : undefined;
   /* Project names come from the account's own listing, never from local storage:
      this page is prerendered as a session-neutral offline shell, and a saved
-     snapshot read with no API has nothing to resolve against anyway. */
-  const { projects } = useCloudProjects({ enabled: resolvesNames(usage.status) });
-  const projectNames = useMemo(() => new Map(projects.map((project) => [project.id, project.name])), [projects]);
+     snapshot read with no API has nothing to resolve against anyway.
+     `isSettled` is load-bearing: until the listing answers, nothing here knows
+     whether a project has a name, and saying it has none is a claim the page
+     cannot make yet. */
+  const asking = resolvesNames(usage.status);
+  const { projects, isSettled } = useCloudProjects({ enabled: asking });
+  const projectNames = useMemo<ProjectNames>(() => {
+    if (isSettled) {
+      return new Map(projects.map((project) => [project.id, project.name]));
+    }
+    return asking ? 'asking' : 'unavailable';
+  }, [projects, isSettled, asking]);
   const options = usageFilterOptions(snapshot, filters, projectNames);
 
   return (

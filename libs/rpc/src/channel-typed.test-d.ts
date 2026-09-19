@@ -1,4 +1,3 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- this is a test file.
 import { describe, expectTypeOf, it, assertType } from 'vitest';
 import type {
   Channel,

@@ -8,19 +8,13 @@
  * `@taucad/agent-host/node-launcher` instead.
  */
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { AgentChannelError, createAgentChannelClient } from '#channel/agent-channel-client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type {
   AgentChannelClient,
   AgentChannelClientOptions,
   AgentChannelCloseReason,
 } from '#channel/agent-channel-client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { agentChannelPort } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { AgentChannelEndpoint } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export { connectAgentWorkerChannel, serveAgentWorkerChannel } from '#channel/worker-channel.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 export type { AgentWorkerChannelOptions } from '#channel/worker-channel.js';

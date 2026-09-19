@@ -27,11 +27,8 @@ import type { KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 import { createEmptyGlb, createEmptyGltfGeometry } from '@taucad/geometry-core';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { loadNativeBackend } from '#opencascade-native-backend.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import type { NativeBinding, NativeSolid, NativeTessellation } from '#opencascade-native-backend.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import {
   opencascadeNativeExportSchemas,
   opencascadeNativeOptionsSchema,

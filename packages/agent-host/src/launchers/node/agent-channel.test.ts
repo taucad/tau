@@ -19,15 +19,10 @@ import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc
 import type { Channel, MessagePortLike, MessagePortMainLike, WireProtocolSchemas } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { serveAgentChannel } from '#launchers/node/agent-channel.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { agentChannelLiveEventSchema, agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelCommand, AgentChannelProtocol, AgentChannelResponse } from '#launchers/node/agent-wire.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
 
 const emptyBatch = {

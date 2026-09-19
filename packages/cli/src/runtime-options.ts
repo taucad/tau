@@ -1,6 +1,4 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a dependency.
 import { createCliRuntime } from '#cli-runtime.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a dependency.
 import { loadTauPlugin, loadTauPluginConfig } from '#plugin-loader.js';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import type { PicogkKernelOptions } from '@taucad/picogk';

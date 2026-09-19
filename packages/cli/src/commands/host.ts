@@ -1,8 +1,6 @@
 import { defineCommand } from 'citty';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { oneLine, resolveHostToken, resolveHostUrl } from '#commands/agent/client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 
 /** The same-origin discovery document a Tau Host serves at `/.well-known/tau-host`. */

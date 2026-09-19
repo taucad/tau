@@ -1,6 +1,4 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { JsonValue } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 
 type ScriptedParityUsage = {

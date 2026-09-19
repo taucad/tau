@@ -305,6 +305,7 @@
     "@taucad/oxlint": "workspace:*",
     "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@testing-library/jest-dom": "catalog:",

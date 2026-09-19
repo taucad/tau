@@ -1,6 +1,5 @@
 import { defineCommand } from 'citty';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { cliError, exitCodes } from '#output.js';
 
 /**
@@ -75,7 +74,6 @@ export const tuiCommand = defineCommand({
       );
     }
 
-    // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
     const { runTui } = await import('#tui/app.js');
     await runTui({
       host: args.host,

@@ -1,4 +1,3 @@
-/* eslint-disable import-x/no-extraneous-dependencies -- the package import map resolves `#*.js` to this package's own source files. */
 /**
  * Chats on the graph: `refs/tau/chats/<chatId>` as the transport of a chat's
  * records, and the checkout's `.tau/chats/**` as their canonical form.

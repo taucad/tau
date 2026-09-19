@@ -5,7 +5,6 @@ import { join, resolve } from 'node:path';
 import { defineCommand } from 'citty';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import {
   eventLine,
   expectResult,
@@ -18,9 +17,7 @@ import {
   refusalText,
   replayChat,
 } from '#commands/agent/client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import type { ExternalRefusal } from '#commands/agent/client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 
 const hostArgument = {

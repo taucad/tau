@@ -83,6 +83,7 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "geist": "catalog:",
     "type-fest": "catalog:",
     "zod": "catalog:"

@@ -1,6 +1,4 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { parseEventLogBytes } from '#log/serialization.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent } from '#log/event-types.js';
 
 /**

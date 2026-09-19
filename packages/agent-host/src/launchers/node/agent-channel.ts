@@ -15,13 +15,9 @@
 import { createChannelServer } from '@taucad/rpc';
 import type { ChannelServer, ChannelServerHandle } from '@taucad/rpc';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { agentChannelPort } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentChannelEvent,
   AgentChannelLiveEvent,
@@ -30,7 +26,6 @@ import type {
   AgentChannelRevisionEvent,
 } from '#launchers/node/agent-wire.js';
 import type { JsonValue } from '#log/event-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
 
 /** Re-exported so `@taucad/agent-host/node-launcher` keeps naming its own endpoint type. @public */

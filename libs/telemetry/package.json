@@ -17,5 +17,8 @@
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "devDependencies": {
+    "zod": "catalog:"
   }
 }

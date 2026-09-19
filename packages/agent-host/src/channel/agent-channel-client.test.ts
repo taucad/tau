@@ -18,15 +18,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { MessagePortLike } from '@taucad/rpc';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createAgentChannelClient } from '#channel/agent-channel-client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelCloseReason } from '#channel/agent-channel-client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { serveAgentChannel } from '#launchers/node/agent-channel.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelCommand, AgentChannelResponse } from '#launchers/node/agent-wire.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
 
 const emptyBatch = { cursor: 0, nextCursor: 0, endCursor: 0, events: [] } as const;

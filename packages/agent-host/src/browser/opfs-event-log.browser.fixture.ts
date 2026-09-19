@@ -1,9 +1,6 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createOpfsEventLog } from '#browser.js';
 import { createAgentSession } from '#harness/session.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { serializeLogEvent } from '#log/serialization.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent } from '#log/event-types.js';
 import type { ModelTransport, ToolRegistry } from '#waist/ports.js';
 

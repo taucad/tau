@@ -20,7 +20,6 @@ import { Box, Text, render, useApp, useInput, useStdin, useStdout } from 'ink';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import {
   eventLine,
   expectResult,
@@ -34,9 +33,7 @@ import {
   readPage,
   refusalText,
 } from '#commands/agent/client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import type { ExternalAgentFacts, ExternalRefusal } from '#commands/agent/client.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { sanitize } from '#output.js';
 
 /** Most transcript rows kept in memory; the oldest are dropped (P5). */

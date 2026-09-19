@@ -11,13 +11,9 @@
 import { createChannelClient } from '@taucad/rpc';
 import type { Channel } from '@taucad/rpc';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { agentChannelPort } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentChannelEvent,
   AgentChannelLiveEvent,

@@ -1,4 +1,3 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentLogEvent, MessageAppendedEvent, UserProviderMessage } from '#log/event-types.js';
 
 const user = (id: string, content: string): UserProviderMessage => ({ id, role: 'user', content });

@@ -2,7 +2,6 @@
  * Imported before citty so the shared stdout/EPIPE owner is installed before any
  * command — or citty's own usage renderer — writes a byte.
  */
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { emit, exitCodeFor, exitCodes, isClassifiedFailure, sanitize, writeStdout } from '#output.js';
 import { defineCommand, renderUsage, runCommand } from 'citty';
 import type { ArgsDef, CommandContext, CommandDef, SubCommandsDef } from 'citty';

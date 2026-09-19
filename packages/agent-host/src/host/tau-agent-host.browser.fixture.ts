@@ -1,10 +1,6 @@
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createOpfsEventLog } from '#browser.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- The browser smoke deliberately traverses this package's public root entry.
 import { createTauAgentHost } from '@taucad/agent-host';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { ToolRegistry } from '#waist/ports.js';
 
 type TestSyncAccessHandle = {

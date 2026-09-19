@@ -1,6 +1,5 @@
 import { definePlugin } from '@taucad/runtime/plugin';
 <% for (const capability of capabilities) { %>
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { <%= capability.factoryName %> } from '#<%= capability.fileName %>.js';
 <% } %>
 

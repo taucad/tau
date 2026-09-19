@@ -3,7 +3,6 @@ import { parseArgs } from 'node:util';
 import { serveHostRuntime } from '@taucad/host/runtime-host';
 import type { HostRuntimeHandle } from '@taucad/host/runtime-host';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a dependency.
 import { loadCliRuntime } from '#runtime-options.js';
 
 const { values } = parseArgs({

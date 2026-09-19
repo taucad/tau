@@ -1,9 +1,7 @@
 import { defineCommand, runCommand } from 'citty';
 import { stat } from 'node:fs/promises';
 import { basename, dirname, extname, resolve } from 'node:path';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { exportCommand } from '#commands/export.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { cliError, createOutput, exitCodes, sanitize, writeStdout } from '#output.js';
 
 /*

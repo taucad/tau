@@ -22,5 +22,8 @@
   "dependencies": {
     "@taucad/json-schema": "workspace:*",
     "@taucad/units": "workspace:*"
+  },
+  "devDependencies": {
+    "zod": "catalog:"
   }
 }

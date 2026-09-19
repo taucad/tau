@@ -53,6 +53,9 @@
     "vscode-languageserver-protocol": "^3.18.0",
     "vscode-uri": "catalog:"
   },
+  "devDependencies": {
+    "zod": "catalog:"
+  },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"

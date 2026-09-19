@@ -11,14 +11,14 @@ import * as mdxParser from '@taucad/oxlint/mdx-parser';
 const unlayeredTargetTypes = ['type:lib', 'type:package', 'type:tool', 'type:example'];
 
 /**
- * Workspace root plus every workspace member directory that has a `package.json`
- * (`packages/*`, nested package groups, `libs/*`, `apps/*`, `apps/libs/*`, `examples/*`,
- * `scripts`), so
- * `import-x/no-extraneous-dependencies` resolves deps from the owning manifest.
+ * Every workspace member directory that has a `package.json` (`packages/*`, nested
+ * package groups, `libs/*`, `apps/*`, `apps/libs/*`, `examples/*`, `tools/*`, `scripts`),
+ * shallowest first so a nested member's config block overrides its parent's.
  */
 const workspacePackageDirectories = () => {
   const root = import.meta.dirname;
-  const directories = new Set([root]);
+  /** @type {Set<string>} */
+  const directories = new Set();
 
   const absorbChildren = (base) => {
     try {
@@ -50,12 +50,36 @@ const workspacePackageDirectories = () => {
     absorbChildren(path.join(root, 'apps', app, 'apps'));
   }
   absorbChildren(path.join(root, 'examples'));
+  absorbChildren(path.join(root, 'tools'));
   if (fs.existsSync(path.join(root, 'scripts/package.json'))) {
     directories.add(path.join(root, 'scripts'));
   }
 
-  return [...directories];
+  return [...directories].sort((a, b) => a.split(path.sep).length - b.split(path.sep).length);
 };
+
+const noExtraneousDependenciesOptions = {
+  devDependencies: true,
+  optionalDependencies: false,
+  peerDependencies: false,
+  includeTypes: true,
+};
+
+/*
+ * `import-x/no-extraneous-dependencies` merges every manifest in an array
+ * `packageDir`, so each member gets its own block: its manifest plus the root,
+ * which holds the apps' dependencies and the shared dev tooling (npm policy §1).
+ * Published and bundled source is narrowed to its own manifest further down.
+ */
+const noExtraneousDependenciesByProject = workspacePackageDirectories().map((directory) => ({
+  files: [`${path.relative(import.meta.dirname, directory)}/**/*.{ts,tsx,mts,cts}`],
+  rules: {
+    'import-x/no-extraneous-dependencies': [
+      'error',
+      { ...noExtraneousDependenciesOptions, packageDir: [directory, import.meta.dirname] },
+    ],
+  },
+}));
 
 const dreiDeepJsImportRestriction = {
   group: ['@react-three/drei/*/*.js'],
@@ -594,18 +618,11 @@ const config = [
             'See docs/research/workspace-filesystem-revisions-charter.md (D2, D3, D7, D30, EQ12, EQ14).',
         },
       ],
-      'import-x/no-extraneous-dependencies': [
-        'error',
-        {
-          packageDir: workspacePackageDirectories(),
-          devDependencies: true,
-          optionalDependencies: false,
-          peerDependencies: false,
-          includeTypes: true,
-        },
-      ],
+      'import-x/no-extraneous-dependencies': ['error', noExtraneousDependenciesOptions],
     },
   },
+
+  ...noExtraneousDependenciesByProject,
 
   {
     files: ['**/*.tsx'],
@@ -635,20 +652,16 @@ const config = [
   },
 
   {
-    files: ['packages/**/*.{ts,tsx}'],
-    ignores: ['packages/**/*.{spec,test,config,setup}.{ts,tsx}'],
+    /*
+     * Published packages, the private libraries bundled into them or into an app,
+     * and the standalone examples answer to their own manifest alone: a root
+     * install must not hide a consumer runtime requirement (npm policy §1).
+     * Omitting `packageDir` reads the nearest `package.json`.
+     */
+    files: ['{packages,libs,apps/libs,examples}/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/*.{spec,test,test-d,config,setup}.{ts,tsx,mts,cts}', '**/e2e/**', '**/scripts/**'],
     rules: {
-      'import-x/no-extraneous-dependencies': [
-        'error',
-        {
-          packageDir: workspacePackageDirectories(),
-          devDependencies: true,
-          optionalDependencies: false,
-          peerDependencies: true,
-          includeTypes: true,
-          includeInternal: true,
-        },
-      ],
+      'import-x/no-extraneous-dependencies': ['error', { ...noExtraneousDependenciesOptions, peerDependencies: true }],
     },
   },
 

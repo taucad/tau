@@ -1569,6 +1569,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:packages/runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:packages/runtime-testing
       '@taucad/skills':
         specifier: workspace:*
         version: link:packages/skills
@@ -2149,6 +2152,9 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/converter:
     dependencies:
@@ -2231,6 +2237,10 @@ importers:
       vscode-uri:
         specifier: 'catalog:'
         version: 3.1.0
+    devDependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/lsp-fs:
     dependencies:
@@ -2255,6 +2265,10 @@ importers:
       vscode-uri:
         specifier: 'catalog:'
         version: 3.1.0
+    devDependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/share:
     dependencies:
@@ -2935,7 +2949,11 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
-  libs/api-extractor: {}
+  libs/api-extractor:
+    dependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
 
   libs/chat:
     dependencies:
@@ -2945,9 +2963,25 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+      ai:
+        specifier: 'catalog:'
+        version: 6.0.208(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      diff:
+        specifier: ^8.0.4
+        version: 8.0.4
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
+      safe-regex:
+        specifier: ^2.1.1
+        version: 2.1.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
 
   libs/events: {}
 
@@ -3069,14 +3103,33 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@jscad/modeling':
+        specifier: 'catalog:'
+        version: 2.13.0
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
+      libcascade:
+        specifier: 'catalog:'
+        version: 3.0.2
+      manifold-3d:
+        specifier: 'catalog:'
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
+      replicad:
+        specifier: npm:@taulabs/replicad@0.23.4-beta.2
+        version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
+      replicad-opencascadejs:
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
 
-  libs/telemetry: {}
+  libs/telemetry:
+    devDependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   libs/types:
     dependencies:
@@ -3086,6 +3139,10 @@ importers:
       '@taucad/units':
         specifier: workspace:*
         version: link:../../packages/units
+    devDependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   libs/utils:
     dependencies:
@@ -3472,6 +3529,9 @@ importers:
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../revisions
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
 
   packages/jobs-hatchet:
     dependencies:
@@ -3616,6 +3676,9 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -3975,6 +4038,9 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
       geist:
         specifier: 'catalog:'
         version: 1.7.2(next@16.3.2(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))
@@ -4125,6 +4191,9 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       xstate:
         specifier: 'catalog:'
         version: 5.32.1

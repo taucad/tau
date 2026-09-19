@@ -364,65 +364,6 @@ describe('createGatewayModelTransport', () => {
     }
   });
 
-  it.each([
-    {
-      label: 'one call whose four argument deltas each land on a new index',
-      chunks: [
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"{\\"target"}}]}}]}\n\n',
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call-1","function":{"arguments":"File\\":"}}]}}]}\n\n',
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":2,"id":"call-1","function":{"arguments":"\\"main"}}]}}]}\n\n',
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":3,"id":"call-1","function":{"arguments":".ts\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
-        'data: [DONE]\n\n',
-      ],
-      expected: [{ toolCallId: 'call-1', input: { targetFile: 'main.ts' }, deltas: 4 }],
-    },
-    {
-      label: 'two parallel calls interleaved across those indices',
-      chunks: [
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_file","arguments":"{\\"targetFile\\":"}}]}}]}\n\n',
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call-2","function":{"name":"read_file","arguments":"{\\"targetFile\\":"}}]}}]}\n\n',
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":2,"id":"call-1","function":{"arguments":"\\"main.ts\\"}"}}]}}]}\n\n',
-        'data: {"choices":[{"delta":{"tool_calls":[{"index":3,"id":"call-2","function":{"arguments":"\\"other.ts\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n',
-        'data: [DONE]\n\n',
-      ],
-      expected: [
-        { toolCallId: 'call-1', input: { targetFile: 'main.ts' }, deltas: 2 },
-        { toolCallId: 'call-2', input: { targetFile: 'other.ts' }, deltas: 2 },
-      ],
-    },
-  ])('should assemble $label into whole tool calls', async ({ chunks, expected }) => {
-    /* With `stream_function_call_arguments` on, Gemini increments `index` for
-     * every argument delta and repeats the call's `id` on each one. Resolving by
-     * index alone would mint a fresh tool call per delta — four half-arguments
-     * behind a 200 — so the id has to win. pi reads the index first and falls
-     * back to the id (`openai-completions.ts:498-501`), and because a resolved
-     * block keeps its original `streamIndex` the later indices never register,
-     * so every delta of a call funnels into the block its id names. */
-    const transport = createGatewayModelTransport({
-      baseUrl: 'https://gateway.example',
-      fetch: vi.fn(async () => responseFromChunks(chunks)),
-    });
-
-    const events = await collect(transport.stream(request({ providerKind: 'vertexai' })));
-
-    expect(events.filter((event) => event.type === 'tool-input-start').map((event) => event.toolCallId)).toEqual(
-      expected.map((call) => call.toolCallId),
-    );
-    expect(
-      events
-        .filter((event) => event.type === 'tool-input')
-        .map(({ toolCallId, input }) => ({
-          toolCallId,
-          input,
-        })),
-    ).toEqual(expected.map(({ toolCallId, input }) => ({ toolCallId, input })));
-    for (const call of expected) {
-      expect(
-        events.filter((event) => event.type === 'tool-input-delta' && event.toolCallId === call.toolCallId),
-      ).toHaveLength(call.deltas);
-    }
-  });
-
   it('posts pi-ai OpenAI Chat Completions bytes and maps a fragmented gateway SSE stream', async () => {
     let body: BodyInit | undefined;
     let credentials: string | undefined;
@@ -458,10 +399,9 @@ describe('createGatewayModelTransport', () => {
     expect(bindings).toEqual([{ operationId: 'operation-fixture-1', status: 'pending' }]);
     /* OpenAI's system field has no per-block cache-control wire shape, so this
      * provider deliberately degrades to pi's blanket cacheRetention policy. The
-     * request names no reasoning, so `extra_body.google` carries the streamed
-     * arguments flag alone — the exact shape the gateway schema must admit. */
+     * request names no reasoning, so it carries no `extra_body` at all. */
     expect(body).toBe(
-      String.raw`{"model":"fixture-model","messages":[{"role":"system","content":"static\n\nworkspace\n\ndynamic"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true},"store":false,"max_completion_tokens":8192,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file.","parameters":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"],"additionalProperties":false},"strict":false}}],"extra_body":{"google":{"stream_function_call_arguments":true}}}`,
+      String.raw`{"model":"fixture-model","messages":[{"role":"system","content":"static\n\nworkspace\n\ndynamic"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true},"store":false,"max_completion_tokens":8192,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file.","parameters":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"],"additionalProperties":false},"strict":false}}]}`,
     );
     expect(events).toEqual([
       { type: 'thinking-start', contentIndex: 0 },
@@ -955,7 +895,6 @@ describe('createGatewayModelTransport', () => {
       expectedBody: {
         extra_body: {
           google: {
-            stream_function_call_arguments: true,
             thinking_config: { include_thoughts: true, thinking_level: 'MEDIUM' },
             thought_tag_marker: 'think',
           },
@@ -1000,31 +939,10 @@ describe('createGatewayModelTransport', () => {
 
     expect(path).toBe(fixture.expectedPath);
     expect(body).toMatchObject(fixture.expectedBody);
-    // Gemini's wire is the only one with the key: it buys four argument deltas
-    // per tool call instead of one, and no other provider would accept it.
-    expect(JSON.stringify(body).includes('stream_function_call_arguments')).toBe(fixture.providerKind === 'vertexai');
-  });
-
-  it('sends the Gemini streamed-arguments flag on a turn that asks for no reasoning', async () => {
-    /* The flag is about tool-call argument delivery, not thinking, so it rides
-     * a reasoning-free Vertex turn too — and then it is the only key in
-     * `extra_body.google`, which is the shape the gateway schema has to admit. */
-    let body: unknown;
-    const transport = createGatewayModelTransport({
-      baseUrl: 'https://gateway.example',
-      fetch: vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-        if (typeof init?.body !== 'string') {
-          throw new TypeError('Expected a JSON request body.');
-        }
-        body = JSON.parse(init.body);
-        return byteSplitResponse(authoritativeGatewayWireFixtures.toolTurn);
-      }),
-    });
-
-    await collect(transport.stream(request({ providerKind: 'vertexai' })));
-
-    expect(body).toMatchObject({ extra_body: { google: { stream_function_call_arguments: true } } });
-    expect(JSON.stringify(body)).not.toContain('thinking_config');
+    /* No wire carries `stream_function_call_arguments`: Vertex cancels a turn
+     * mid-stream whenever a streamed tool call closes a nested object on a
+     * string value, which `apply_parameter_operation` does (T3-R). */
+    expect(JSON.stringify(body)).not.toContain('stream_function_call_arguments');
   });
   /* eslint-enable @typescript-eslint/naming-convention -- End frozen provider wire fixture. */
 

@@ -150,25 +150,21 @@ const googleReasoningConfigSchema = z
   .object({
     google: z
       .object({
-        /* The thinking pair travels together and only on a turn that asks for
-         * reasoning; a reasoning-free Vertex turn sends the streamed-arguments
-         * flag alone, so neither can be required. */
         thinking_config: z
           .object({
             include_thoughts: z.literal(true),
             thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH']),
           })
-          .strict()
-          .optional(),
-        thought_tag_marker: z.literal('think').optional(),
-        /* Four tool-argument deltas per call instead of one. Round one refused
-         * this flag after 14/14 function calls answered 499 CANCELLED; the
-         * powered A/B on Tau's real body then measured 0/240, and every one of
-         * those 499s fell inside a single window of shared-quota pressure
-         * (blueprint Finding 1, ruling Q1). `true` is the only value Tau sends,
-         * so it is the only one admitted, and a 499 to a request carrying it is
-         * re-dispatched once without it in `executeGatewayProviderRequest`. */
-        stream_function_call_arguments: z.literal(true).optional(),
+          .strict(),
+        thought_tag_marker: z.literal('think'),
+        /* `stream_function_call_arguments` is deliberately absent, and `.strict()`
+         * therefore refuses it. Two measured mechanisms keep it off: Vertex sheds
+         * requests carrying it with a pre-stream 499 under shared-quota pressure,
+         * and its streamed-arguments serializer cancels a turn mid-stream — HTTP
+         * 200, real deltas, then a bare `CANCELLED` error array — whenever a tool
+         * call closes a nested object on a string value. `apply_parameter_operation`
+         * does exactly that and measured 0/9 live with the flag, 9/9 without
+         * (blueprint Finding 1; T13-AB and T3-BISECT). */
       })
       .strict(),
   })

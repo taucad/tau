@@ -27,8 +27,8 @@ pub use geospec_engine_native_core::backend::brep::{
     MAX_EDGE_TREATMENT_BOUNDARY_USES, MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS,
     MAX_EDGE_TREATMENT_ROWS,
 };
+use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
-use geospec_engine_native_core::backend::pmi::{PmiField, PmiFieldStatus, PmiFaceAssociation};
 use std::{
     cell::{OnceCell, RefCell},
     collections::{BTreeMap, HashMap},
@@ -123,28 +123,77 @@ impl BrepConnector for OcctConnector {
 }
 
 impl BrepSubject for Document {
-    fn pmi_source_faces(&self, source_face_id: u32) -> Result<PmiField<Vec<PmiFaceAssociation>>, BackendError> {
-        if source_face_id == 0 { return Err(invalid_input("PMI source face ID must be positive.")); }
+    fn pmi_source_faces(
+        &self,
+        source_face_id: u32,
+    ) -> Result<PmiField<Vec<PmiFaceAssociation>>, BackendError> {
+        if source_face_id == 0 {
+            return Err(invalid_input("PMI source face ID must be positive."));
+        }
         let mut output = vec![ffi::PmiSourceFace::default(); 4096];
         let mut count = 0;
         let mut status = 0;
         let mut error = ErrorBuffer::new();
-        check(unsafe { ffi::geospec_occt_pmi_source_faces(self.raw.as_ptr(), source_face_id, output.as_mut_ptr(), output.len(), &mut count, &mut status, error.raw()) }, &error)?;
-        if count > output.len() || !(0..=3).contains(&status) { return Err(backend_error("Invalid PMI association transfer count/status.")); }
+        check(
+            unsafe {
+                ffi::geospec_occt_pmi_source_faces(
+                    self.raw.as_ptr(),
+                    source_face_id,
+                    output.as_mut_ptr(),
+                    output.len(),
+                    &mut count,
+                    &mut status,
+                    error.raw(),
+                )
+            },
+            &error,
+        )?;
+        if count > output.len() || !(0..=3).contains(&status) {
+            return Err(backend_error(
+                "Invalid PMI association transfer count/status.",
+            ));
+        }
         let mut associations = Vec::with_capacity(count);
         for row in &output[..count] {
-            if row.route_count > 32 || row.occurrence < -1 { return Err(backend_error("Invalid PMI occurrence route.")); }
-            let occurrence = if row.occurrence < 0 { None } else { Some(u32::try_from(row.occurrence).map_err(|_| backend_error("PMI occurrence overflow."))?) };
-            let face_count = unsafe { match occurrence {
-                Some(occurrence) => ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence),
-                None => ffi::geospec_occt_face_count(self.raw.as_ptr()),
-            }};
-            if row.public_face_ordinal as usize >= face_count || occurrence.is_some() != (row.route_count > 0) {
-                return Err(backend_error("PMI source association is outside its public scope."));
+            if row.route_count > 32 || row.occurrence < -1 {
+                return Err(backend_error("Invalid PMI occurrence route."));
             }
-            associations.push(PmiFaceAssociation { source_face_id, occurrence, public_face_ordinal: row.public_face_ordinal, occurrence_route: row.route[..row.route_count].to_vec() });
+            let occurrence = if row.occurrence < 0 {
+                None
+            } else {
+                Some(
+                    u32::try_from(row.occurrence)
+                        .map_err(|_| backend_error("PMI occurrence overflow."))?,
+                )
+            };
+            let face_count = unsafe {
+                match occurrence {
+                    Some(occurrence) => {
+                        ffi::geospec_occt_occurrence_face_count(self.raw.as_ptr(), occurrence)
+                    }
+                    None => ffi::geospec_occt_face_count(self.raw.as_ptr()),
+                }
+            };
+            if row.public_face_ordinal as usize >= face_count
+                || occurrence.is_some() != (row.route_count > 0)
+            {
+                return Err(backend_error(
+                    "PMI source association is outside its public scope.",
+                ));
+            }
+            associations.push(PmiFaceAssociation {
+                source_face_id,
+                occurrence,
+                public_face_ordinal: row.public_face_ordinal,
+                occurrence_route: row.route[..row.route_count].to_vec(),
+            });
         }
-        let status = match status { 0 => PmiFieldStatus::Supported, 1 => PmiFieldStatus::Missing, 2 => PmiFieldStatus::Ambiguous, _ => PmiFieldStatus::Unsupported };
+        let status = match status {
+            0 => PmiFieldStatus::Supported,
+            1 => PmiFieldStatus::Missing,
+            2 => PmiFieldStatus::Ambiguous,
+            _ => PmiFieldStatus::Unsupported,
+        };
         Ok(PmiField { status, value: Some(associations), reason: (status != PmiFieldStatus::Supported).then(|| "Source face transfer is missing, ambiguous or unqualified; retained bindings are partial.".into()) })
     }
     fn continuous_wall_domain(
@@ -374,27 +423,49 @@ impl BrepSubject for Document {
         nominal_cylindrical_band(value)
     }
 
-    fn selected_interference_material(&self, face: BrepEntity) -> Result<geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial, BackendError> {
+    fn selected_interference_material(
+        &self,
+        face: BrepEntity,
+    ) -> Result<geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial, BackendError>
+    {
         self.validate_entity(face)?;
-        let BrepEntity::Face { occurrence, face: query_face } = face else {
-            return Err(unsupported("Interference material requires an occurrence face."));
+        let BrepEntity::Face {
+            occurrence,
+            face: query_face,
+        } = face
+        else {
+            return Err(unsupported(
+                "Interference material requires an occurrence face.",
+            ));
         };
         let mut band = ffi::NominalCylindricalBand::default();
         let mut kind = u32::MAX;
         let mut error = ErrorBuffer::new();
         unsafe {
-            check(ffi::geospec_occt_selected_interference_material_query(
-                self.raw.as_ptr(), face.into(), &mut band, &mut kind, error.raw()), &error)?;
+            check(
+                ffi::geospec_occt_selected_interference_material_query(
+                    self.raw.as_ptr(),
+                    face.into(),
+                    &mut band,
+                    &mut kind,
+                    error.raw(),
+                ),
+                &error,
+            )?;
         }
         let band = nominal_cylindrical_band(band)?;
         if band.occurrence != occurrence || band.private_query_face != query_face {
-            return Err(backend_error("Interference material source route disagrees with selection."));
+            return Err(backend_error(
+                "Interference material source route disagrees with selection.",
+            ));
         }
         use geospec_engine_native_core::backend::brep::SelectedInterferenceMaterial;
         match (kind, band.transferred_reversed) {
             (0, true) => Ok(SelectedInterferenceMaterial::BoreSlab(band)),
             (1, false) => Ok(SelectedInterferenceMaterial::FiniteCylinder(band)),
-            _ => Err(backend_error("Interference material kind/sense is invalid.")),
+            _ => Err(backend_error(
+                "Interference material kind/sense is invalid.",
+            )),
         }
     }
 
@@ -1267,7 +1338,9 @@ unsafe fn facts(raw: *const ffi::Document, reported: bool) -> Result<DocumentFac
         })?;
         let mut shape_labels = Vec::with_capacity(output.association_count);
         if output.first_association_count > output.association_count {
-            return Err(backend_error("PMI ordered role boundary exceeds association count."));
+            return Err(backend_error(
+                "PMI ordered role boundary exceeds association count.",
+            ));
         }
         for association in 0..output.association_count {
             shape_labels.push(copied_string(|label, error| {
@@ -3555,7 +3628,15 @@ mod ffi {
             kind: *mut u32,
             error: *mut StringBuffer,
         ) -> i32;
-        pub fn geospec_occt_pmi_source_faces(document: *const Document, source_face_id: u32, output: *mut PmiSourceFace, capacity: usize, count: *mut usize, status: *mut i32, error: *mut StringBuffer) -> i32;
+        pub fn geospec_occt_pmi_source_faces(
+            document: *const Document,
+            source_face_id: u32,
+            output: *mut PmiSourceFace,
+            capacity: usize,
+            count: *mut usize,
+            status: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_selected_bore_void_query(
             document: *const Document,
             face: Entity,

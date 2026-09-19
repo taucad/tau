@@ -3,12 +3,14 @@ import type { ConfigService } from '@nestjs/config';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost, ExecutionContext } from '@nestjs/common';
 import type { Auth } from 'better-auth';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
+import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
+import type { ModelInvocationIntent } from '#api/llm/model-invocation.types.js';
 import { LlmGatewayAuthGuard, readLlmGatewayPrincipal } from '#api/llm/llm-gateway.guard.js';
 import { readSingleHeader, validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
@@ -16,7 +18,11 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 const request = (headers: Record<string, string> = {}, rawHeaders?: string[]): FastifyRequest =>
   ({
     headers,
-    raw: { rawHeaders: rawHeaders ?? Object.entries(headers).flatMap(([name, value]) => [name, value]) },
+    query: {},
+    raw: {
+      rawHeaders: rawHeaders ?? Object.entries(headers).flatMap(([name, value]) => [name, value]),
+      once: () => undefined,
+    },
   }) as unknown as FastifyRequest;
 
 const contextFor = (value: FastifyRequest): ExecutionContext =>
@@ -156,6 +162,85 @@ describe('gateway provider headers', () => {
       expect(errorType(caught)).toBe('INVALID_REQUEST');
       expect(errorMessage(caught)).toContain(message);
     }
+  });
+});
+
+describe('gateway receipt attribution', () => {
+  const attemptHeaders = { 'x-tau-attempt-id': 'attempt_boundary' };
+
+  /** Drives a real route through a real service and records the intents it built. */
+  const relay = async (headers: Record<string, string>, rawHeaders?: string[]): Promise<ModelInvocationIntent[]> => {
+    const intents: ModelInvocationIntent[] = [];
+    const reply: Record<string, unknown> = { raw: { once: () => undefined, writableFinished: false } };
+    for (const name of ['header', 'status', 'send']) {
+      reply[name] = () => reply;
+    }
+    const gateway = new LlmGatewayService({
+      invoke: async (intent) => {
+        intents.push(intent);
+        return { state: 'terminal', operationId: 'op_boundary' };
+      },
+    });
+    await new LlmGatewayController(gateway).openai(
+      request(headers, rawHeaders),
+      reply as unknown as FastifyReply,
+      'user_boundary',
+    );
+    return intents;
+  };
+
+  it('should carry both attribution headers into the invocation intent', async () => {
+    const intents = await relay({
+      ...attemptHeaders,
+      'x-tau-project-id': 'proj_01J8ZK4E',
+      'x-tau-chat-id': 'chat_01J8ZK4F',
+    });
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({
+      surface: 'gateway',
+      projectHint: 'proj_01J8ZK4E',
+      chatHint: 'chat_01J8ZK4F',
+    });
+  });
+
+  it('should leave both members absent when the caller sends neither header', async () => {
+    const intents = await relay(attemptHeaders);
+
+    expect(intents[0]).not.toHaveProperty('projectHint');
+    expect(intents[0]).not.toHaveProperty('chatHint');
+  });
+
+  it.each(['project one', 'proj/1', 'a'.repeat(129)])(
+    'should drop the malformed hint %s and still relay the turn',
+    async (hint) => {
+      // Attribution is best effort: a turn the caller is paying for is never
+      // refused because its receipt would be filed under nothing.
+      const intents = await relay({ ...attemptHeaders, 'x-tau-project-id': hint, 'x-tau-chat-id': 'chat_ok' });
+
+      expect(intents).toHaveLength(1);
+      expect(intents[0]).not.toHaveProperty('projectHint');
+      expect(intents[0]).toMatchObject({ chatHint: 'chat_ok' });
+    },
+  );
+
+  it.each(['x-tau-project-id', 'x-tau-chat-id'])('should refuse a duplicated %s with a 400', async (name) => {
+    // A second value is an ambiguous identity, not a malformed one: the same
+    // answer readSingleHeader already gives x-tau-attempt-id.
+    const refusal = relay({ ...attemptHeaders, [name]: 'first' }, [
+      'x-tau-attempt-id',
+      'attempt_boundary',
+      name,
+      'first',
+      name,
+      'second',
+    ]);
+
+    await expect(refusal).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError && error.getStatus() === 400 && errorType(error) === 'INVALID_REQUEST',
+    );
+    await expect(refusal).rejects.toThrow(`Duplicate ${name} headers are not allowed.`);
   });
 });
 

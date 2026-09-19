@@ -53,6 +53,7 @@ import {
   getVisibleAttributes,
 } from '#routes/w.$workspace.$project/chat-kernel-utils.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 type ExplorerProperties = {
   readonly spanTree: SpanNode[];
@@ -327,7 +328,7 @@ function TreeRow({
           data-telemetry-span-id={id}
           className={cn(
             'group relative grid min-h-7 cursor-default grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center rounded-lg px-1.5 py-0 text-xs outline-none transition-colors data-[state=open]:rounded-b-none',
-            'hover:bg-muted focus-visible:focus-outline',
+            'hover:bg-sidebar-accent focus-within:bg-sidebar-accent focus-visible:focus-outline',
             isSelected && 'bg-primary/10',
           )}
           onFocus={() => {
@@ -368,7 +369,10 @@ function TreeRow({
               {hasChildren ? (
                 <button
                   type='button'
-                  className='flex size-4 items-center justify-center rounded-sm outline-none hover:bg-muted-foreground/10 focus-visible:focus-outline'
+                  className={nestedActionVariants({
+                    className:
+                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline',
+                  })}
                   aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} children for ${node.entry.name}`}
                   aria-expanded={!isCollapsed}
                   onClick={(event) => {
@@ -508,7 +512,7 @@ function TimelineRow({
           data-telemetry-span-row
           data-telemetry-span-id={id}
           className={cn(
-            'grid min-h-8 grid-cols-[minmax(8rem,42%)_1fr] items-center rounded-lg px-1.5 py-0 text-xs outline-none transition-colors hover:bg-muted focus-visible:focus-outline data-[state=open]:rounded-b-none',
+            'grid min-h-8 grid-cols-[minmax(8rem,42%)_1fr] items-center rounded-lg px-1.5 py-0 text-xs outline-none transition-colors hover:bg-sidebar-accent focus-within:bg-sidebar-accent focus-visible:focus-outline data-[state=open]:rounded-b-none',
             isSelected && 'bg-primary/10',
           )}
           onFocus={() => {
@@ -523,7 +527,10 @@ function TimelineRow({
               {hasChildren ? (
                 <button
                   type='button'
-                  className='flex size-4 items-center justify-center rounded-sm outline-none hover:bg-muted-foreground/10 focus-visible:focus-outline'
+                  className={nestedActionVariants({
+                    className:
+                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline',
+                  })}
                   aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} children for ${node.entry.name}`}
                   aria-expanded={!isCollapsed}
                   onClick={(event) => {

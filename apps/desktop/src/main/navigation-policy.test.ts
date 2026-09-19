@@ -116,6 +116,13 @@ describe('isPermissionGranted', () => {
     expect(isPermissionGranted('persistent-storage')).toBe(true);
   });
 
+  it('grants the sanitized clipboard write every Copy button needs', () => {
+    /* Chromium asks for this on every `navigator.clipboard.writeText`. Denying
+     * it rejected all nine of the app's clipboard writes with
+     * `NotAllowedError: Write permission denied.` */
+    expect(isPermissionGranted('clipboard-sanitized-write')).toBe(true);
+  });
+
   it('denies everything the app never asks for', () => {
     for (const permission of [
       'media',

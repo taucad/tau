@@ -96,6 +96,35 @@ const eventEnd = (buffer: Uint8Array<ArrayBuffer>): number => {
   return -1;
 };
 
+/**
+ * What a terminal failure frame says about itself: its own type, code and the
+ * provider's sentence. Generated output is never read, but a provider sentence
+ * can quote a fragment of the request it rejected.
+ */
+export type ProviderTerminalFailure = {
+  readonly type?: string;
+  readonly code?: string;
+  readonly message?: string;
+};
+
+/**
+ * The provider's own classification of a terminal frame, read from the frame
+ * itself (OpenAI Responses `error` events are flat) or from its `error` member.
+ *
+ * @param data - Parsed data of a frame already recognised as terminal.
+ * @returns The frame's type, code and sentence, as far as it carries them.
+ */
+const terminalFailureOf = (data: unknown): ProviderTerminalFailure => {
+  const record = (data === null || typeof data !== 'object' ? {} : data) as Record<string, unknown>;
+  const nested = record['error'];
+  const source = nested !== null && typeof nested === 'object' ? (nested as Record<string, unknown>) : record;
+  return {
+    ...(typeof source['type'] === 'string' ? { type: source['type'] } : {}),
+    ...(typeof source['code'] === 'string' ? { code: source['code'] } : {}),
+    ...(typeof source['message'] === 'string' ? { message: source['message'] } : {}),
+  };
+};
+
 const isErrorEvent = (event: SseEvent): boolean =>
   event.event === 'error' ||
   (event.data !== null && typeof event.data === 'object' && (event.data as { type?: unknown }).type === 'error');
@@ -126,18 +155,22 @@ const failedResponseError = (
  * rewrites are built from parsed data.
  *
  * @param input - The route's provider, who owns its account (which decides the
- * message and whether the supplier sentence may stay on the wire), and an
- * optional observer for the recognised refusal.
+ * message and whether the supplier sentence may stay on the wire), an optional
+ * observer for the recognised refusal, and an optional observer for any other
+ * terminal failure frame the relay would otherwise forward without a trace,
+ * called at most once per stream.
  * @returns A transform to pipe the relayed body through.
  */
 export const createProviderAccountFrameFilter = (input: {
   readonly providerId: GatewayProviderId;
   readonly accountOwner: ProviderAccountOwner;
   readonly onRefusal?: (refusal: ProviderAccountRefusal) => void;
+  readonly onTerminalFailure?: (failure: ProviderTerminalFailure) => void;
 }): TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>> => {
   let pending = new Uint8Array(0);
   let oversized = false;
   let rewritten = false;
+  let reported = false;
   let decoded: SseEvent | undefined;
   const newDecoder = (): ReturnType<typeof createSseDecoder> =>
     createSseDecoder({
@@ -174,6 +207,18 @@ export const createProviderAccountFrameFilter = (input: {
     );
   };
 
+  /**
+   * Reports the frame the turn ended on, once: a stream that carries both an
+   * `error` event and a `response.failed` is one failure, not two.
+   */
+  const report = (data: unknown): void => {
+    if (reported) {
+      return;
+    }
+    reported = true;
+    input.onTerminalFailure?.(terminalFailureOf(data));
+  };
+
   /** The replacement bytes for one complete frame, or undefined to forward it unchanged. */
   const rewrite = (frame: Uint8Array<ArrayBuffer>, final = false): Uint8Array<ArrayBuffer> | undefined => {
     /* Only a frame that can name an error is worth parsing, and only one the
@@ -188,7 +233,13 @@ export const createProviderAccountFrameFilter = (input: {
     }
     if (isErrorEvent(event)) {
       const refusal = recognizeProviderAccountRefusal({ providerId: input.providerId, body: event.data });
-      return refusal === undefined ? undefined : coded(refusal);
+      if (refusal) {
+        return coded(refusal);
+      }
+      // Forwarded unchanged, but no longer unrecorded: the relay's only sight
+      // of why the turn ended (R8).
+      report(event.data);
+      return undefined;
     }
     const failed = failedResponseError(event.data);
     if (!failed) {
@@ -200,6 +251,7 @@ export const createProviderAccountFrameFilter = (input: {
       ? undefined
       : recognizeProviderAccountRefusal({ providerId: input.providerId, body: failed.payload });
     if (refusal === undefined && !rewritten) {
+      report(failed.payload);
       return undefined;
     }
     const head = refusal === undefined ? undefined : coded(refusal);

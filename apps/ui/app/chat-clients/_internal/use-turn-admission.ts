@@ -5,7 +5,7 @@ import { awaitAgentHostAvailability } from '#hooks/use-cad-agent-config.js';
 import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { parseAdmissionFailureForPersistence } from '#utils/error.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
@@ -180,7 +180,11 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
       console.error('[useTurnAdmission] durable workspace admission failed', error);
       store.get(activeChatId)?.persistenceActorRef.send({
         type: 'setPersistedError',
-        error: parseErrorForPersistence(
+        /* Admission is the one failure with no run behind it, so the card it
+         * reaches offers a restart rather than a resume. The distinction is
+         * structural and belongs here, where it is a fact rather than a guess
+         * at the message. */
+        error: parseAdmissionFailureForPersistence(
           error instanceof Error ? error : new Error('Durable workspace admission failed', { cause: error }),
         ),
       });

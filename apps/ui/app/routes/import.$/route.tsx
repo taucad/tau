@@ -34,6 +34,7 @@ import { ImportProcessingView } from '#routes/import.$/import-processing-view.js
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '#components/copy-button.js';
+import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
@@ -48,6 +49,7 @@ import { GithubRepositoryPicker } from '#components/github/github-repository-pic
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -628,6 +630,9 @@ export default function ImportRoute(): React.JSX.Element {
                 <h1 className='text-2xl font-semibold'>Import Project</h1>
                 <p className='text-sm text-muted-foreground'>Import from GitHub or upload from your computer</p>
               </div>
+              {/* Only when a shared `/i/<repo>` link brought them here: the
+                  bare import page names no repository for the app to open. */}
+              <OpenInDesktop continueLabel='Import in the browser' />
             </div>
 
             {/* Side-by-side cards when no valid repo */}
@@ -799,7 +804,10 @@ export default function ImportRoute(): React.JSX.Element {
 
                       const queryString = parameters.size > 0 ? `?${parameters.toString()}` : '';
 
-                      return `${globalThis.location.origin}/i/${repoUrl}${queryString}`;
+                      /* Not `location.origin`: on desktop that is `app://tau`,
+                         which nobody can open and which does not even route
+                         `/i/*` (desktop-share-links blueprint, L3). */
+                      return `${shareOrigin()}/i/${repoUrl}${queryString}`;
                     }}
                   />
                 </div>

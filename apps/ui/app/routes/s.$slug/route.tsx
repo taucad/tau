@@ -25,6 +25,7 @@ import PublicationViewRoute, {
 import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
+import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { shareProviderRegistry, withBrowserShareProviderContext } from '#lib/share-providers.js';
 
 export const handle: Handle = { enablePageWrapper: false };
@@ -166,7 +167,16 @@ export const meta: MetaFunction<typeof loader> = (arguments_) => {
   ];
 };
 
-const PortableShareSurface = (): React.JSX.Element => {
+/**
+ * Every share a provider resolves in the browser: `direct`, a Gist, a builtin.
+ *
+ * Exported for the desktop module of this same route
+ * (`s.$slug/desktop-route.tsx`), which serves these slugs identically — the
+ * surface never consults the server, so the SPA needs no second copy of it.
+ *
+ * @returns The password prompt, the failure panel, or the shared workbench.
+ */
+export const PortableShareSurface = (): React.JSX.Element => {
   const { slug = '' } = useParams();
   const location = useLocation();
   const [artifact, setArtifact] = useState<ShareOpenedArtifact>();
@@ -398,9 +408,38 @@ const PortableShareSurface = (): React.JSX.Element => {
   );
 };
 
+/**
+ * The desktop app, offered over whatever `/s/:slug` is showing (R4).
+ *
+ * Never a gate: the shared workbench is what this link is for, and the app is
+ * the second way to it. The workbench is full-bleed, so there is no column to
+ * put the card in and it sits in the bottom corner instead.
+ *
+ * `OpenInDesktop` renders nothing on the desktop build and nothing for a slug
+ * the shell's parser would refuse, so in both of those cases this is an empty
+ * box that takes no pointer events and paints nothing.
+ *
+ * Hidden at phone widths: there is no desktop app to open there, and the corner
+ * belongs to the workbench's drawer trigger.
+ *
+ * @returns The offer's corner.
+ */
+const ShareDesktopOffer = (): React.JSX.Element => (
+  <div className='pointer-events-none fixed inset-x-0 bottom-0 z-50 hidden justify-end p-4 sm:flex'>
+    <div className='pointer-events-auto'>
+      <OpenInDesktop continueLabel='View in the browser' />
+    </div>
+  </div>
+);
+
 export default function ShareRoute(): React.JSX.Element {
   const data = useLoaderData<ShareRouteLoaderData | PublicationRouteLoaderData>();
-  return 'kind' in data && data.kind === 'portable' ? <PortableShareSurface /> : <PublicationViewRoute />;
+  return (
+    <>
+      {'kind' in data && data.kind === 'portable' ? <PortableShareSurface /> : <PublicationViewRoute />}
+      <ShareDesktopOffer />
+    </>
+  );
 }
 
 export const ErrorBoundary = (): React.JSX.Element => <PublicationErrorBoundary />;

@@ -22,6 +22,7 @@ import { ParametersBoolean } from '#components/geometry/parameters/parameters-bo
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
@@ -51,18 +52,19 @@ const ArrayItemRemoveAction = ({ action }: { readonly action: RjsfLayoutContextV
   return (
     <Tooltip>
       <TooltipTrigger asChild>
+        {/* The sidebar row's action: 24 px, nested-action tone, so it reads as a surface on the lit header. */}
         <Button
           type='button'
           variant='ghost'
-          size='icon-sm'
-          className='mr-1 text-muted-foreground hover:text-foreground'
+          size='icon'
+          className={nestedActionVariants({ className: 'mr-1 size-6 shrink-0 text-muted-foreground' })}
           aria-label={action.label}
           onClick={(event) => {
             event.stopPropagation();
             action.onRemove();
           }}
         >
-          <Trash2 aria-hidden='true' />
+          <Trash2 aria-hidden='true' className='size-3.5' />
         </Button>
       </TooltipTrigger>
       <TooltipContent side='left'>{action.label}</TooltipContent>
@@ -129,7 +131,7 @@ function CompositeFieldTemplate({
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none focus-within:bg-sidebar-accent hover:bg-sidebar-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
           className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
@@ -451,7 +453,7 @@ function ObjectFieldTemplate(
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none focus-within:bg-sidebar-accent hover:bg-sidebar-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
           className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
@@ -532,7 +534,7 @@ function ArrayFieldTemplate(
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger
-        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
+        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-sidebar-accent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
         aria-label={`Group: ${prettyTitle}`}
       >
         <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>

@@ -789,7 +789,7 @@ overrides:
   vitest: 4.1.11
 
 patchedDependencies:
-  '@agentclientprotocol/codex-acp@1.7.0': 99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de
+  '@agentclientprotocol/codex-acp@1.7.0': a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   '@taulabs/replicad@0.23.4-beta.2': 4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b
@@ -1440,8 +1440,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.10(three@0.184.0)
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@2.2.3
-        version: '@taulabs/three-viewport-gizmo@2.2.3(three@0.184.0)'
+        specifier: npm:@taulabs/three-viewport-gizmo@2.2.4
+        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0)'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -1896,7 +1896,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de)
+        version: 1.7.0(patch_hash=a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53)
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
         version: 0.0.75
@@ -3149,7 +3149,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de)
+        version: 1.7.0(patch_hash=a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53)
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../agent-host
@@ -14008,8 +14008,8 @@ packages:
   '@taulabs/replicad@0.23.4-beta.2':
     resolution: {integrity: sha512-qYOc74h8YnBhzqGyGIT0LX6iM98szBi9lq7GNPoXjUjIkY1jJVSraB62uXVNPWZB7xL8fKs+NbOSoAkWVg7mdQ==}
 
-  '@taulabs/three-viewport-gizmo@2.2.3':
-    resolution: {integrity: sha512-+/Lo5FsmRXDtMLqQZQzGhPKnptl6wF76VVVUBTOdQLo6x7OTZdEypTRRsd0M/xumEp2pOez2q809jgYVd7bA0A==}
+  '@taulabs/three-viewport-gizmo@2.2.4':
+    resolution: {integrity: sha512-vqvgsi4oTyaKf19useCAZBSV929cZWum/pVny5xHTUDOV8GwrP89OpKeF18Ui4rJ7/b5cLMKmoAZRBvAMDKf9w==}
     peerDependencies:
       three: '>=0.162.0 <1.0.0'
 
@@ -26810,7 +26810,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de)':
+  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53)':
     dependencies:
       '@agentclientprotocol/sdk': 1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@openai/codex': 0.148.0
@@ -37001,7 +37001,7 @@ snapshots:
       opentype.js: 1.3.4
       replicad-opencascadejs: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
 
-  '@taulabs/three-viewport-gizmo@2.2.3(three@0.184.0)':
+  '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0)':
     dependencies:
       three: 0.184.0
 

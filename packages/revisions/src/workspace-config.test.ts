@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { pathRegistry } from '@taucad/filesystem/path-registry';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -31,6 +32,44 @@ describe('generated ignore file', () => {
     expect(generatedIgnoreEntries).toContain('/.tau/runs/');
     expect(generatedIgnoreEntries).toContain('/exports/');
     expect(generatedIgnoreEntries).not.toContain('/.tau/jj-config.toml');
+  });
+
+  /* PP5: `versioned` agrees with the ignore file — a path is unversioned exactly
+   * when the generated block excludes it. Both halves are asserted, because the
+   * pattern's anchoring is what makes them agree: a row that classifies by
+   * segment must be excluded wherever it appears, or a nested `.git` would be
+   * hidden from every view and captured into the revision anyway. */
+  it('should exclude every unversioned row, anchored exactly where the row matches', () => {
+    for (const row of pathRegistry.filter((entry) => !entry.versioned)) {
+      expect(row.anchored, row.prefix).toBe(row.match === 'root');
+      expect(generatedIgnoreEntries).toContain(`${row.anchored ? '/' : '**/'}${row.prefix}${row.directory ? '/' : ''}`);
+    }
+  });
+
+  /* The whole block, literally: it is the one artifact a person reads in their
+   * own checkout, so a changed row has to arrive as a reviewable diff rather
+   * than as a passing `toContain`. */
+  it('should write the generated block exactly as the registry orders it', () => {
+    expect(generatedIgnoreContent(undefined)).toBe(
+      `# BEGIN Tau generated — derived content is never versioned
+/.tau/types/
+/.tau/tsconfig.generated.json
+/.tau/lockfile.json
+/.tau/chats/
+/.tau/runs/
+/.tau/artifacts/
+/.tau/tool-results/
+/.tau/offloaded-tool-results/
+/exports/
+/thumbnail.webp
+/.tau/cache/
+**/node_modules/
+**/.tau/binding.json
+**/.jj/
+**/.git/
+# END Tau generated
+`,
+    );
   });
 
   it('keeps a hand-written ignore file and is idempotent', () => {

@@ -28,8 +28,8 @@ export type FileMap = Map<string, FileData>;
  * asks it again at the project-create boundary, which is where the archive route
  * arrives with no machine in front of it.
  *
- * The registry row for `.git` is anchored, so a vendored `vendor/dep/.git` stays
- * the user's own content.
+ * The control plane matches at any depth, so a vendored `vendor/dep/.git` is
+ * dropped with the project's own: git never tracks one, and neither do we.
  *
  * @param path - Project-relative path from the imported tree.
  * @returns Whether the import drops it.

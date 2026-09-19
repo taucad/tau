@@ -191,6 +191,10 @@ describe('the tree a cut hashes', () => {
     await filesystem.writeFile('.tau/runs/run-1.json', '{}\n');
     await filesystem.writeFile('.tau/cache/blob', 'cached\n');
     await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
+    /* EQ1: a vendored repository is the control plane at any depth. Git itself
+     * never tracks a nested `.git`; capturing one as ordinary files put its
+     * `config` — credentials included — into every revision. */
+    await filesystem.writeFile('vendor/lib/.git/config', '[remote "origin"]\n');
 
     const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
       checkoutId: 'live',

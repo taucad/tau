@@ -29,8 +29,23 @@ export type PathRegistryRow = PathClassification &
   Readonly<{
     /** Project-relative prefix, or the exact path when `directory` is false. */
     prefix: string;
-    /** Whether an ignore pattern for this row is anchored at the project root. */
+    /**
+     * Whether an ignore pattern for this row is anchored at the project root.
+     *
+     * The generated ignore file's spelling and nothing else. How the row
+     * *classifies* a path is {@link PathRegistryRow.match}: one flag meant both
+     * once, which is how a nested `.git` became the agent's to write.
+     */
     anchored: boolean;
+    /**
+     * Where the row matches: only at the project root, or wherever its name
+     * appears as a path segment.
+     *
+     * Control-plane rows are `segment` so their answer cannot depend on how deep
+     * a repository sits (PP3); the `.tau/*`, `exports` and `thumbnail.webp` rows
+     * are `root` because that is the only place they are Tau's.
+     */
+    match: 'root' | 'segment';
     directory: boolean;
   }>;
 
@@ -96,6 +111,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -105,6 +121,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
   {
@@ -114,6 +131,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
 
@@ -127,6 +145,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -136,6 +155,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -145,6 +165,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
 
@@ -157,6 +178,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -166,6 +188,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   /* `.tau/transcripts` is *not* a row: W17's reconciliation (W1 review R3)
@@ -181,6 +204,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -190,6 +214,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -199,6 +224,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -208,6 +234,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -217,6 +244,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
 
@@ -228,9 +256,11 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'none',
     anchored: true,
+    match: 'root',
     directory: true,
   },
-  /* Unanchored: a nested `node_modules` is derived too. */
+  /* A nested `node_modules` is derived too, so the ignore file names it wherever
+   * it appears as well. */
   {
     prefix: 'node_modules',
     class: 'cache',
@@ -238,18 +268,24 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'none',
     anchored: false,
+    match: 'segment',
     directory: true,
   },
 
   /* Control plane: hidden from every composed view, refused before provider
-   * I/O. A revision hash never covers its own store. */
+   * I/O. A revision hash never covers its own store — its own or a vendored
+   * dependency's, a submodule's, a second project's (EQ1, CI1), which is why
+   * every row here matches a segment and none of them is anchored in the ignore
+   * file: `versioned` and the generated block have to agree at every depth
+   * (PP5). */
   {
     prefix: '.tau/binding.json',
     class: 'control-plane',
     versioned: false,
     agentAccess: 'hidden',
     watch: 'none',
-    anchored: true,
+    anchored: false,
+    match: 'segment',
     directory: false,
   },
   {
@@ -258,7 +294,8 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     versioned: false,
     agentAccess: 'hidden',
     watch: 'none',
-    anchored: true,
+    anchored: false,
+    match: 'segment',
     directory: true,
   },
   {
@@ -267,7 +304,8 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     versioned: false,
     agentAccess: 'hidden',
     watch: 'none',
-    anchored: true,
+    anchored: false,
+    match: 'segment',
     directory: true,
   },
 ] satisfies readonly PathRegistryRow[]);
@@ -275,14 +313,23 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
 /**
  * Whether one row covers one already-normalized path.
  *
- * An anchored row matches at the project root; an unanchored one matches any
- * segment, so `lib/node_modules/x` is cache too. A file row matches exactly.
+ * A `root` row matches at the project root only; a `segment` row matches
+ * wherever its prefix sits on segment boundaries, so `lib/node_modules/x` is
+ * cache and `vendor/dep/.git/config` is the control plane however deep the
+ * repository is. A directory row covers itself and everything beneath it; a file
+ * row covers that path alone — which still catches a `.git` that is a worktree
+ * or submodule pointer file rather than a directory, because the directory row
+ * matches the segment either way.
  */
 const covers = (row: PathRegistryRow, relative: string): boolean => {
-  if (!row.anchored) {
-    return relative.split('/').includes(row.prefix);
+  if (row.directory) {
+    const bounded = `/${relative}/`;
+    const pattern = `/${row.prefix}/`;
+    return row.match === 'segment' ? bounded.includes(pattern) : bounded.startsWith(pattern);
   }
-  return row.directory ? relative === row.prefix || relative.startsWith(`${row.prefix}/`) : relative === row.prefix;
+  const bounded = `/${relative}`;
+  const pattern = `/${row.prefix}`;
+  return row.match === 'segment' ? bounded.endsWith(pattern) : bounded === pattern;
 };
 
 /**

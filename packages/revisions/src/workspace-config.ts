@@ -18,14 +18,20 @@ import { pathRegistry } from '@taucad/filesystem/path-registry';
 const unversioned = pathRegistry.filter((row) => !row.versioned);
 
 /**
- * Paths never carried by a revision, as ignore patterns. The `.tau` entries are
- * anchored to the project root because that is the only place they are Tau's;
- * `node_modules` is unanchored because a nested one is derived too.
+ * Paths never carried by a revision, as ignore patterns. The `.tau` families and
+ * `exports` are anchored to the project root because that is the only place they
+ * are Tau's; `node_modules` and the control plane are not, because a nested one
+ * is derived or private too.
+ *
+ * An unanchored row is spelled `**\/` rather than bare: git anchors any pattern
+ * that holds a slash to the directory of the ignore file, so a bare
+ * `.tau/binding.json` would leave a nested one versioned and disagree with
+ * `classify` (PP5).
  *
  * @public
  */
 export const generatedIgnoreEntries: readonly string[] = Object.freeze(
-  unversioned.map((row) => `${row.anchored ? '/' : ''}${row.prefix}${row.directory ? '/' : ''}`),
+  unversioned.map((row) => `${row.anchored ? '/' : '**/'}${row.prefix}${row.directory ? '/' : ''}`),
 );
 
 /** Project-relative path of the generated ignore file. @public */

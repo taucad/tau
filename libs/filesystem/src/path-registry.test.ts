@@ -54,9 +54,44 @@ describe('path registry', () => {
     expect(classify('/.git/HEAD').agentAccess).toBe('hidden');
   });
 
+  /* CI1, ruling EQ1: a repository nested in the design — a vendored dependency,
+   * a submodule, a second Tau project — is the control plane wherever it sits.
+   * A `.git` with no children is a worktree or submodule pointer file, which
+   * names the real store somewhere else, so it is covered by the same row. */
+  it.each(['vendor/lib/.git/hooks/pre-commit', 'a/b/.jj/x', 'sub/.git', 'packages/kernel/.tau/binding.json'])(
+    'should keep %s in the control plane whatever its depth',
+    (path) => {
+      expect(classify(path)).toStrictEqual({
+        class: 'control-plane',
+        versioned: false,
+        agentAccess: 'hidden',
+        watch: 'none',
+      });
+    },
+  );
+
+  /* PP3: a control-plane row matches a path segment, never a root, so its answer
+   * cannot depend on how deep the repository sits. */
+  it('should match every control-plane row by segment, never by root', () => {
+    const controlPlane = pathRegistry.filter((row) => row.class === 'control-plane');
+
+    expect(controlPlane.filter((row) => row.match !== 'segment')).toStrictEqual([]);
+  });
+
+  /* PP2: hidden is inherited. The mask relies on it for every descent and
+   * nothing pinned it — it held because of how the prefix match happened to be
+   * written. */
+  it.each(pathRegistry.filter((row) => row.agentAccess === 'hidden').map((row) => [row.prefix, row] as const))(
+    'should hide every path beneath %s',
+    (_prefix, row) => {
+      expect(classify(memberOf(row)).agentAccess).toBe('hidden');
+      expect(classify(`${memberOf(row)}/deeper/still.bin`).agentAccess).toBe('hidden');
+    },
+  );
+
   /* Ruling D29: one repository name on every host. `.tau/revisions` was the
-   * browser's second name for the same directory; nothing but the anchored
-   * `.git` row may claim the control plane now. */
+   * browser's second name for the same directory; nothing but the `.git` row may
+   * claim the control plane now. */
   it('names the repository once, at .git', () => {
     expect(pathRegistry.filter((row) => row.class === 'control-plane').map((row) => row.prefix)).toStrictEqual([
       '.tau/binding.json',

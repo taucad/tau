@@ -60,27 +60,32 @@ export const classifyReceipts = (
 export type TurnIdentity = { readonly projectId: string; readonly chatId: string };
 
 /**
- * The identity of the chat a live spec has open, as the workspace URL names it.
+ * The chat a live spec has open, as the workspace URL names it.
  *
- * `/w/<workspace>/<projectId>?chat=<chatId>` is the route the spec waits for
- * before its first turn, and those two ids are the same ones the browser host
- * sends as `x-tau-project-id` and `x-tau-chat-id` — so a receipt can be checked
- * for equality rather than merely for being non-null.
+ * `/w/<workspace>/<project>?chat=<chatId>` carries the chat id verbatim, and it
+ * is the same id the browser host sends as `x-tau-chat-id`, so a receipt's
+ * `chatHint` can be checked for equality rather than merely for being non-null.
+ *
+ * The path segment beside it is **not** the project id: it is the project's
+ * slug, which `useProjectIdBySlugs` resolves to the durable `proj_…` id the
+ * host then attributes to. Reading it as an id made every receipt of a live run
+ * report `names project proj_…, not provider-switch-vertex-to-anthropic`. The
+ * project id comes from the device's own project record instead, which is the
+ * same row the app resolved the slug into (`live-chat-turn.ts`).
  *
  * @param url - The target page's current URL.
- * @returns The project and chat ids.
+ * @returns The open chat's id.
  * @throws When the URL is not a workspace route with a chat open, rather than
- * guessing an id and asserting against the wrong thing.
+ * reading a `chat` parameter off some other page.
  */
-export const turnIdentityFromUrl = (url: string): TurnIdentity => {
+export const chatIdFromUrl = (url: string): string => {
   const parsed = new URL(url);
   const segments = parsed.pathname.split('/').filter((segment) => segment !== '');
-  const projectId = segments[0] === 'w' && segments.length >= 3 ? segments[2] : undefined;
   const chatId = parsed.searchParams.get('chat');
-  if (projectId === undefined || chatId === null || chatId === '') {
-    throw new Error(`The live chat URL names no project and chat: ${url}`);
+  if (segments[0] !== 'w' || segments.length < 3 || chatId === null || chatId === '') {
+    throw new Error(`The live chat URL names no open chat: ${url}`);
   }
-  return { projectId, chatId };
+  return chatId;
 };
 
 /** What the browser host's own model calls bill as; T7 tells the two apart by header. */

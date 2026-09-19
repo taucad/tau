@@ -104,7 +104,7 @@ class DeterministicToolCallingTransport implements ModelTransport {
       operationId: `operation-${request.attemptId}`,
       status: 'pending',
     });
-    if (request.systemPrompt.startsWith('Summarize the conversation')) {
+    if (request.systemPrompt.startsWith('You are a context summarization assistant')) {
       yield { type: 'text-delta', text: 'Earlier reads all targeted main.ts.' };
       yield { type: 'completed', stopReason: 'stop' };
       return;
@@ -1187,7 +1187,7 @@ describe('pi full-turn parity fixture', () => {
     await session.close();
   });
 
-  it('should reject a length-terminated compaction summary before persisting it', async () => {
+  it('should fail the turn on a length-terminated compaction summary before persisting it', async () => {
     const initial: AgentLogEvent[] = Array.from({ length: 8 }, (_, sequence) => ({
       version: 1,
       leaderEpoch: 'history-epoch',
@@ -1218,7 +1218,7 @@ describe('pi full-turn parity fixture', () => {
             operationId: `operation-${request.attemptId}`,
             status: 'pending',
           });
-          if (request.systemPrompt.startsWith('Summarize the conversation')) {
+          if (request.systemPrompt.startsWith('You are a context summarization assistant')) {
             yield { type: 'text-delta', text: 'partial summary' };
             yield { type: 'completed', stopReason: 'length' };
             return;
@@ -1233,16 +1233,20 @@ describe('pi full-turn parity fixture', () => {
       eventLog: log,
     });
 
-    await expect(
-      session.prompt({
-        id: 'summary-turn',
-        role: 'user',
-        content: 'continue after summary',
-      }),
-    ).rejects.toThrow('Compaction summary must complete exactly once with stop');
+    await session.prompt({
+      id: 'summary-turn',
+      role: 'user',
+      content: 'continue after summary',
+    });
     const snapshot = await session.snapshot();
     const events = await log.read();
-    expect(snapshot.messages.findLast((message) => message.role === 'assistant')).toBeUndefined();
+    // A compaction failure fails the turn, not the chat: the prompt resolves and
+    // the coded refusal is the run's terminal detail. The truncated summary is
+    // never persisted and never sent a second time.
+    const terminal = events.findLast((event) => event.type === 'run.lifecycle');
+    expect(terminal?.type === 'run.lifecycle' && terminal.state).toBe('failed');
+    expect(terminal?.type === 'run.lifecycle' && terminal.detail?.code).toBe('SUMMARY_REQUIRED');
+    expect(JSON.stringify(snapshot.messages)).not.toContain('partial summary');
     expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(0);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.invocationPurpose).toBe('compaction');

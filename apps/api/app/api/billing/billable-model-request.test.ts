@@ -363,15 +363,33 @@ describe('billable model request contract', () => {
         'openai-completions',
       ).success,
     ).toBe(false);
-    // Vertex answers 499 CANCELLED to every function call after the first
-    // assistant message while `stream_function_call_arguments` is set, so the
-    // transport no longer sends it and the gateway no longer admits it.
+    /* `stream_function_call_arguments` buys four tool-argument deltas per call
+     * instead of one, and the transport sends it on every Vertex turn — beside
+     * the thinking config, and alone when the turn asks for no reasoning. Only
+     * the literal `true` is admitted: `false` is a shape Tau never sends. */
     expect(
       safeParseBillableModelRequest(
         {
           ...gemini,
           extra_body: {
             google: { ...gemini.extra_body.google, stream_function_call_arguments: true },
+          },
+        },
+        'openai-completions',
+      ).success,
+    ).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        { ...gemini, extra_body: { google: { stream_function_call_arguments: true } } },
+        'openai-completions',
+      ).success,
+    ).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        {
+          ...gemini,
+          extra_body: {
+            google: { ...gemini.extra_body.google, stream_function_call_arguments: false },
           },
         },
         'openai-completions',

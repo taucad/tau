@@ -1002,26 +1002,35 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
             } satisfies OpenAIResponsesOptions)
           : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
               ...commonOptions,
-              ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
+              ...(request.providerKind === 'vertexai'
                 ? {
                     /* eslint-disable @typescript-eslint/naming-convention -- Upstream Gemini wire keys use snake_case. */
                     samplingParams: {
                       extra_body: {
                         google: {
-                          thinking_config: {
-                            include_thoughts: true,
-                            thinking_level: reasoning.effort.toUpperCase(),
-                          },
-                          thought_tag_marker: 'think',
-                          // `stream_function_call_arguments: true` belongs here on
-                          // Google's documented wire, but Vertex answers 499
-                          // CANCELLED to every function call emitted after the
-                          // first assistant message while it is set — the second
-                          // sequential call of a turn and every call from user
-                          // turn two on, 14/14 live across all four catalog
-                          // models, and 200 on the same conversations without it
-                          // (blueprint Finding 4 / RC2, ruling Q2). It only made
-                          // tool-input deltas finer-grained on Gemini.
+                          /* Four argument deltas per tool call instead of one, so
+                           * the tool card fills as Gemini writes it. Round one
+                           * pulled this flag after 14/14 function calls answered
+                           * 499 CANCELLED; the powered A/B then measured 0/240
+                           * on Tau's real 35 kB body, 120 of them flag-on, and
+                           * found every one of those 499s inside one 13-minute
+                           * window of shared-quota pressure. The flag is not
+                           * refused, it is shed: it buys a longer-lived server
+                           * shape that a stressed pool cancels first. A 499 never
+                           * reaches this transport as itself — the relay maps it
+                           * to 503 — so the gateway re-dispatches that request
+                           * once without the flag (blueprint Finding 1, ruling
+                           * Q1; L1 follow-up). */
+                          stream_function_call_arguments: true,
+                          ...(reasoning?.effort === undefined
+                            ? {}
+                            : {
+                                thinking_config: {
+                                  include_thoughts: true,
+                                  thinking_level: reasoning.effort.toUpperCase(),
+                                },
+                                thought_tag_marker: 'think',
+                              }),
                         },
                       },
                     },

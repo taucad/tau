@@ -509,6 +509,89 @@ describe('createTauAgentHost', () => {
     await host.close();
   });
 
+  it('resumes from the real result of a tool that ran before the stream failed', async () => {
+    /* The stream starts a tool the moment its call is complete (`prestartTool`),
+     * so a failure one frame later leaves a tool that *ran* with no durable
+     * result: pi never executes the call, and the dropped promise used to reach
+     * the resumed model as `CLIENT_DISCONNECTED` — an invitation to apply a
+     * non-idempotent tool twice (F2). */
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
+    let call = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            call++;
+            if (call === 1) {
+              yield {
+                type: 'tool-input',
+                toolCallId: 'prestart-call-read',
+                toolName: 'read_file',
+                input: { targetFile: 'main.ts' },
+              };
+              throw new GatewayModelTransportError({
+                code: 'NETWORK_ERROR',
+                status: 200,
+                message: 'fixture NETWORK_ERROR',
+              });
+            }
+            yield { type: 'text-delta', text: 'Answered from the tool result that survived.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: 'prestart',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-prestart',
+      runId: 'run-prestart',
+      trigger: 'submit',
+      message: { id: 'turn-prestart', role: 'user', content: 'Read main.ts, then answer.' },
+    });
+    const refused = await host.snapshot('chat-prestart');
+    const resumed = await host.resume('chat-prestart');
+    const events = await readLog(file);
+
+    expect(refused.state).toBe('failed');
+    expect(refused.failure).toMatchObject({ code: 'NETWORK_ERROR' });
+    // The tool ran once, before the failure, and is never dispatched again.
+    expect(invoke).toHaveBeenCalledTimes(1);
+    // Its real result is durable, and there is exactly one record of it.
+    expect(
+      resumed.filter((message) => message.role === 'tool-output' && message.toolCallId === 'prestart-call-read'),
+    ).toMatchObject([{ content: 'fixture-main', isError: false }]);
+    // The re-issued call carries that result, not a fabricated disconnect.
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages.at(-1)).toMatchObject({
+      role: 'tool-output',
+      toolCallId: 'prestart-call-read',
+      isError: false,
+      content: 'fixture-main',
+    });
+    expect(JSON.stringify(requests[1]?.messages)).not.toContain('CLIENT_DISCONNECTED');
+    // The assistant row the provider sees is a plain tool-use turn, not a marker.
+    const assistant = requests[1]?.messages.filter((message) => message.role === 'assistant') ?? [];
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]?.metadata).toMatchObject({ stopReason: 'toolUse' });
+    expect(assistant[0]?.metadata?.errorMessage).toBeUndefined();
+    // The turn itself is untouched: the one user message, and no rewind of it.
+    expect(requests[1]?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'history.rewound')).toHaveLength(0);
+    /* The marker's diagnostic is what `snapshot` reads a chat's failure from,
+     * so a marker left in history would report this chat as failed for the rest
+     * of its life. */
+    const completed = await host.snapshot('chat-prestart');
+    expect(completed.state).toBe('completed');
+    expect(completed.failure).toBeUndefined();
+    await host.close();
+  });
+
   it('rules every failure code a run can end on either resumable or not', () => {
     /* Q5: the *non-resumable* half of the ruling lives here rather than in a
      * second production set nothing would read. Both unions are keyed
@@ -1369,98 +1452,109 @@ the cancelled tools left the system unchanged.
   });
 
   it.each([
-    ['retry', true],
-    ['new_session', false],
-  ] as const)(
-    'resumes an external stop offering %s on the session it remembered only when it can be retried',
-    async (action, resumable) => {
-      const file = createMemoryLogFile();
-      const seen: Array<JsonObject | undefined> = [];
-      const closedChats: string[] = [];
-      let attempt = 0;
-      const externalPort: ExternalAgentPort = {
-        list: () => ['stub-agent'],
-        run: async (turn) => {
-          seen.push(turn.state);
-          attempt += 1;
-          if (attempt > 1) {
-            return;
-          }
-          await turn.remember({ acpSessionId: 'session-1' });
-          throw Object.assign(new Error('The agent is rate limited.'), {
-            code: 'EXTERNAL_AGENT_LIMIT_REACHED',
-            details: {
-              agentId: 'stub-agent',
-              failure: { category: 'limit', title: 'The agent is rate limited.', actions: [action] },
-            },
-          });
-        },
-        closeChat: async (chatId) => {
-          closedChats.push(chatId);
-        },
-      };
-      const chatId = `chat-external-${action}`;
-      const host = createTauAgentHost({
-        ...hostOptions({
-          openEventLog: file.open,
-          transport: {
-            stream: () => {
-              throw new Error('An external turn must never reach the Tau model.');
-            },
+    ['a retry the agent offers', ['retry'], true],
+    // A usage limit: nothing helps *now*, and what clears it is time.
+    ['a usage limit with no action at all', [], true],
+    ['a context limit only a new session clears', ['new_session'], false],
+  ] as const)('continues an external stop on the session it remembered for %s', async (_label, actions, resumable) => {
+    const file = createMemoryLogFile();
+    const seen: Array<JsonObject | undefined> = [];
+    const closedChats: string[] = [];
+    let attempt = 0;
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        seen.push(turn.state);
+        attempt += 1;
+        if (attempt > 1) {
+          return;
+        }
+        await turn.remember({ acpSessionId: 'session-1' });
+        throw Object.assign(new Error('The agent is rate limited.'), {
+          code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+          details: {
+            agentId: 'stub-agent',
+            failure: { category: 'limit', title: 'The agent is rate limited.', actions },
           },
-          toolRegistry: tools(async () => ({ content: null, isError: false })),
-          idPrefix: `external-${action}`,
-        }),
-        externalRunners: { acp: externalPort },
-      });
-
-      await host.admit({
-        chatId,
-        runId: 'run-external-limit',
-        trigger: 'submit',
-        message: { id: 'turn-external-limit', role: 'user', content: 'Run this elsewhere.' },
-        config: {
-          systemPrompt: 'unused by an external turn',
-          toolChoice: 'none',
-          agent: { kind: 'acp', id: 'stub-agent' },
+        });
+      },
+      closeChat: async (chatId) => {
+        closedChats.push(chatId);
+      },
+    };
+    const slug = actions.join('-') || 'none';
+    const chatId = `chat-external-${slug}`;
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
         },
-      });
-      await vi.waitFor(async () => {
-        const stopped = await host.snapshot(chatId);
-        expect(stopped.state).toBe('failed');
-      });
-      await host.resume(chatId);
-      if (!resumable) {
-        const settled = await readLog(file);
-        expect(seen).toHaveLength(1);
-        expect(settled.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []))).toEqual([
-          'admitted',
-          'running',
-          'failed',
-        ]);
-        await host.close();
-        return;
-      }
-      await vi.waitFor(() => {
-        expect(seen).toHaveLength(2);
-      });
-      const events = await readLog(file);
-      /* The agent said retrying can help, so the turn continues in the vendor
-       * session it already holds: nothing told the runner to close the chat,
-       * the second attempt carries the remembered session id, and the turn is
-       * neither rewound nor sent a second time (R9/S11). */
-      expect(seen).toHaveLength(2);
-      expect(closedChats).toEqual([]);
-      expect(seen[1]).toMatchObject({ acpSessionId: 'session-1', agentId: 'stub-agent' });
-      expect(events.some((event) => event.type === 'history.rewound')).toBe(false);
-      expect(
-        reduceEventLog(events)
-          .filter((message) => message.role === 'user')
-          .map((message) => message.id),
-      ).toEqual(['turn-external-limit']);
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: `external-${slug}`,
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId,
+      runId: 'run-external-limit',
+      trigger: 'submit',
+      message: { id: 'turn-external-limit', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await vi.waitFor(async () => {
+      const settling = await host.snapshot(chatId);
+      expect(settling.state).toBe('failed');
+    });
+    /* The gesture a person actually makes: a surface reads the run's failure
+     * off the snapshot and only calls resume when that record says it can be
+     * continued. An external stop writes no assistant diagnostic, so a
+     * snapshot that reported no failure at all made every Resume a rewind
+     * (F1). */
+    const stopped = await host.snapshot(chatId);
+    expect(stopped.failure).toMatchObject({
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+      message: 'The agent is rate limited.',
+    });
+    expect(isResumableRunFailure(stopped.failure)).toBe(resumable);
+    await host.resume(chatId);
+    if (!resumable) {
+      const settled = await readLog(file);
+      expect(seen).toHaveLength(1);
+      expect(settled.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []))).toEqual([
+        'admitted',
+        'running',
+        'failed',
+      ]);
       await host.close();
-    },
-  );
+      return;
+    }
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(2);
+    });
+    const events = await readLog(file);
+    /* The agent said retrying can help, so the turn continues in the vendor
+     * session it already holds: nothing told the runner to close the chat,
+     * the second attempt carries the remembered session id, and the turn is
+     * neither rewound nor sent a second time (R9/S11). */
+    expect(seen).toHaveLength(2);
+    expect(closedChats).toEqual([]);
+    expect(seen[1]).toMatchObject({ acpSessionId: 'session-1', agentId: 'stub-agent' });
+    expect(events.some((event) => event.type === 'history.rewound')).toBe(false);
+    expect(
+      reduceEventLog(events)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.id),
+    ).toEqual(['turn-external-limit']);
+    await host.close();
+  });
 
   it('holds cancel open until an external run settles as cancelled', async () => {
     const file = createMemoryLogFile();

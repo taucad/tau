@@ -889,13 +889,11 @@ describe('projectAgentHostEvent', () => {
     { code: 'UPSTREAM_REJECTED', status: 200, category: 'server' },
     { code: 'UPSTREAM_REJECTED', status: 502, category: 'server' },
     { code: 'PROVIDER_UNAVAILABLE', status: 503, category: 'overloaded' },
-    /* The one code the gateway answers with two statuses — 503 when it
-     * classified the refusal, 502 for a body-less provider response — so the
-     * status is the only thing that tells those cards apart and the code cannot
-     * name one. Its mid-stream frame reads as the generic card until the
-     * gateway answers it one way. */
-    { code: 'PROVIDER_UNAVAILABLE', status: 502, category: 'server' },
-    { code: 'PROVIDER_UNAVAILABLE', status: 200, category: 'generic' },
+    /* The gateway answers this code 503 when it classified the refusal and 502
+     * for a body-less provider response; the code names the same card for both,
+     * so a 499 or 5xx cut mid-stream reaches it too. */
+    { code: 'PROVIDER_UNAVAILABLE', status: 502, category: 'overloaded' },
+    { code: 'PROVIDER_UNAVAILABLE', status: 200, category: 'overloaded' },
   ])('should project $code behind HTTP $status as the $category card', ({ code, status, category }) => {
     const [chunk] = projectAgentHostEvent({
       ...base,

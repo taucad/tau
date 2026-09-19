@@ -5,9 +5,15 @@ export type SseEvent = {
 
 const utf8Bytes = (character: string): number => {
   const codePoint = character.codePointAt(0)!;
-  if (codePoint <= 0x7f) return 1;
-  if (codePoint <= 0x7ff) return 2;
-  if (codePoint <= 0xffff) return 3;
+  if (codePoint <= 0x7f) {
+    return 1;
+  }
+  if (codePoint <= 0x7_ff) {
+    return 2;
+  }
+  if (codePoint <= 0xff_ff) {
+    return 3;
+  }
   return 4;
 };
 
@@ -15,16 +21,24 @@ const parseEvent = (lines: readonly string[]): SseEvent | undefined => {
   let event: string | undefined;
   const data: string[] = [];
   for (const line of lines) {
-    if (line.startsWith(':')) continue;
+    if (line.startsWith(':')) {
+      continue;
+    }
     const colon = line.indexOf(':');
-    const field = colon < 0 ? line : line.slice(0, colon);
-    const rawValue = colon < 0 ? '' : line.slice(colon + 1);
+    const field = colon === -1 ? line : line.slice(0, colon);
+    const rawValue = colon === -1 ? '' : line.slice(colon + 1);
     const value = rawValue.startsWith(' ') ? rawValue.slice(1) : rawValue;
-    if (field === 'event') event = value;
-    if (field === 'data') data.push(value);
+    if (field === 'event') {
+      event = value;
+    }
+    if (field === 'data') {
+      data.push(value);
+    }
   }
   const dataText = data.join('\n');
-  if (dataText === '' || dataText.trim() === '[DONE]') return undefined;
+  if (dataText === '' || dataText.trim() === '[DONE]') {
+    return undefined;
+  }
   try {
     return { ...(event === undefined ? {} : { event }), data: JSON.parse(dataText) as unknown };
   } catch {
@@ -32,10 +46,16 @@ const parseEvent = (lines: readonly string[]): SseEvent | undefined => {
   }
 };
 
+/** A push decoder over one SSE body: bytes in, parsed events out. */
+export type SseDecoder = {
+  write(chunk: Uint8Array<ArrayBuffer>): void;
+  end(): void;
+};
+
 export const createSseDecoder = (input: {
   readonly onEvent: (event: SseEvent) => void;
   readonly maxEventBytes?: number;
-}) => {
+}): SseDecoder => {
   const maxEventBytes = input.maxEventBytes ?? 256 * 1024;
   const decoder = new TextDecoder();
   let currentBytes = 0;
@@ -52,14 +72,18 @@ export const createSseDecoder = (input: {
     const event = parseEvent(lines);
     lines = [];
     currentBytes = 0;
-    if (event !== undefined) input.onEvent(event);
+    if (event !== undefined) {
+      input.onEvent(event);
+    }
   };
 
   const processText = (text: string): void => {
     for (const character of text) {
       if (swallowLf) {
         swallowLf = false;
-        if (character === '\n') continue;
+        if (character === '\n') {
+          continue;
+        }
       }
       currentBytes += utf8Bytes(character);
       if (currentBytes > maxEventBytes) {
@@ -82,12 +106,16 @@ export const createSseDecoder = (input: {
     },
     end(): void {
       processText(decoder.decode());
-      if (line !== '') lines.push(line);
+      if (line !== '') {
+        lines.push(line);
+      }
       line = '';
       const event = parseEvent(lines);
       lines = [];
       currentBytes = 0;
-      if (event !== undefined) input.onEvent(event);
+      if (event !== undefined) {
+        input.onEvent(event);
+      }
     },
   };
 };

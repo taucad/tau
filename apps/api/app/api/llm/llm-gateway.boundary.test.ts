@@ -27,7 +27,8 @@ const request = (headers: Record<string, string> = {}, rawHeaders?: string[]): F
 
 const contextFor = (value: FastifyRequest): ExecutionContext =>
   ({
-    getClass: () => class GatewayTestController {},
+    // The real controller, so a Reflector lookup reads the metadata the routes carry.
+    getClass: () => LlmGatewayController,
     getHandler: () => () => undefined,
     getType: () => 'http',
     switchToHttp: () => ({ getRequest: () => value }),
@@ -35,21 +36,31 @@ const contextFor = (value: FastifyRequest): ExecutionContext =>
 
 const config = {
   get(key: string) {
-    if (key === 'TAU_FRONTEND_URL') return 'https://tau.new';
-    if (key === 'ADDITIONAL_CORS_ORIGINS') return ['https://taucad.dev'];
-    if (key === 'NODE_ENV') return 'production';
+    if (key === 'TAU_FRONTEND_URL') {
+      return 'https://tau.new';
+    }
+    if (key === 'ADDITIONAL_CORS_ORIGINS') {
+      return ['https://taucad.dev'];
+    }
+    if (key === 'NODE_ENV') {
+      return 'production';
+    }
     return undefined;
   },
 } as unknown as ConfigService<Environment, true>;
 
 const errorType = (error: unknown): string | undefined => {
-  if (!(error instanceof LlmGatewayError)) return undefined;
+  if (!(error instanceof LlmGatewayError)) {
+    return undefined;
+  }
   const response = error.getResponse() as { error?: { type?: string } };
   return response.error?.type;
 };
 
 const errorMessage = (error: unknown): string | undefined => {
-  if (!(error instanceof LlmGatewayError)) return undefined;
+  if (!(error instanceof LlmGatewayError)) {
+    return undefined;
+  }
   const response = error.getResponse() as { error?: { message?: string } };
   return response.error?.message;
 };
@@ -72,7 +83,9 @@ describe('gateway authentication boundary', () => {
   };
 
   it('binds the combined authentication guard to both controller routes', () => {
-    expect(Reflect.getMetadata('__guards__', LlmGatewayController)).toContain(LlmGatewayAuthGuard);
+    // Through Nest's own Reflector: `Reflect.getMetadata` exists only because
+    // reflect-metadata patches the native object.
+    expect(new Reflector().get<unknown[]>('__guards__', LlmGatewayController)).toContain(LlmGatewayAuthGuard);
   });
 
   it('accepts a Better Auth session principal', async () => {

@@ -171,7 +171,7 @@ describe('createProviderAccountFrameFilter', () => {
     'should code a refusal that arrives only as response.failed for the %s account',
     async (accountOwner) => {
       const seen: ProviderAccountRefusal[] = [];
-      // frame(3) is the captured `response.failed`; no `error` event precedes it here.
+      // The captured `response.failed` is frame(3); no `error` event precedes it here.
       const text = frame(0) + frame(1) + frame(3);
       const output = await filtered({
         text,

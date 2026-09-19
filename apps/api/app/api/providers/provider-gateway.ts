@@ -187,8 +187,11 @@ const withoutStreamedArguments = (body: unknown): Record<string, unknown> | unde
   if (google === null || typeof google !== 'object' || !(streamedArgumentsKey in google)) {
     return undefined;
   }
-  const remaining = { ...(google as Record<string, unknown>) };
-  delete remaining[streamedArgumentsKey];
+  // Rebuilt without the key rather than deleted from a copy; entry order, and so
+  // the serialized body, is unchanged.
+  const remaining = Object.fromEntries(
+    Object.entries(google as Record<string, unknown>).filter(([key]) => key !== streamedArgumentsKey),
+  );
   return { ...record, [extraBodyKey]: { ...extraBodyRecord, [googleKey]: remaining } };
 };
 

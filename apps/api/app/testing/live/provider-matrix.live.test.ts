@@ -21,6 +21,7 @@ import {
   createLiveToolRegistry,
   hasLiveCredential,
   liveCadSystemPrompt,
+  liveCompletionCeiling,
   liveCredentialName,
   liveSessionModel,
   runWithRateLimitRetry,
@@ -175,11 +176,6 @@ const scriptedResults = (invocation: HostToolInvocation): HostToolResult => {
  */
 const rateLimitAttempts = 5;
 
-/** Cheap rows keep the smallest completion budget that still fits a tool loop with thinking. */
-const economyMaxTokens = 4096;
-/** The declared-reasoning row pays for the catalog's own level, up to and including HIGH. */
-const declaredReasoningMaxTokens = 8192;
-
 /**
  * The cheapest reasoning configuration that keeps thinking enabled.
  *
@@ -243,7 +239,7 @@ const liveThread = async (options: LiveThreadOptions): Promise<HostRunSnapshot> 
       const reasoning = options.reasoning ?? economyReasoning({ ...identity, reasoning: declared });
       const model: AgentSessionModel = {
         ...identity,
-        maxTokens: options.maxTokens ?? economyMaxTokens,
+        maxTokens: options.maxTokens ?? liveCompletionCeiling(options.modelId),
         ...(reasoning === undefined ? {} : { reasoning }),
       };
       const chatId = `${options.slug}-${randomUUID().slice(0, 8)}`;
@@ -414,7 +410,7 @@ const describeModel = (modelId: string): void => {
           modelId,
           slug: `${modelId}-parallel-tools`,
           prompts: [
-            `Read both left.ts and right.ts with ${toolName.readFile}, issuing both calls in the same step. Then reply with both exact tokens separated by a space and nothing else.`,
+            `You must call ${toolName.readFile} twice, once for left.ts and once for right.ts, issuing both calls in the same step. You do not know either file's contents until the results come back, so do not answer before you have called the tool. Then reply with both exact tokens separated by a space and nothing else.`,
           ],
         });
 
@@ -439,7 +435,6 @@ const describeModel = (modelId: string): void => {
           slug: `${modelId}-declared-reasoning`,
           prompts: [`Reply with the token ${tokens.text} and nothing else. Do not call any tool.`],
           ...(declared === undefined ? {} : { reasoning: declared }),
-          maxTokens: declaredReasoningMaxTokens,
         });
 
         expect(snapshot.state, `${JSON.stringify(declared)} was refused: ${refusal(snapshot)}`).toBe('completed');

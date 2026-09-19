@@ -172,6 +172,11 @@ describe('AcceptInvitation', () => {
     expect(screen.getByRole('status', { name: 'Checking your account' })).toBeDefined();
   });
 
+  /* The hold is the app's own `redirectTo`: the link survives the round trip
+     through sign-in and the route runs again on the way back. On the desktop
+     build the same mechanism is what "signed out when the link arrived" means
+     — main loads this route, and it holds the token across the browser
+     sign-in (R4). */
   it('asks a signed-out visitor to sign in and come back here', async () => {
     mockSession.mockReturnValue({ data: undefined, isPending: false });
     mountRoute();
@@ -182,5 +187,16 @@ describe('AcceptInvitation', () => {
       '/auth/sign-in?redirectTo=%2Finvitations%2Ftok_abcdef',
     );
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  /* The page does its own job first and offers the app second (R4): the offer
+     is beside the sign-in hold, never instead of it. */
+  it('offers Tau Desktop beside the sign-in hold without replacing it', async () => {
+    mockSession.mockReturnValue({ data: undefined, isPending: false });
+    mountRoute();
+
+    expect(await screen.findByText('Sign in to accept this invitation')).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Open in Tau Desktop' })).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeDefined();
   });
 });

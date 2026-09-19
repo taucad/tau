@@ -147,9 +147,11 @@ for (const [name, first, second] of pairs) {
       );
       return;
     }
+    // One receipt per agent-loop iteration: a measured pair produced 4, so that
+    // is the floor — a shorter loop on one side of the switch is still legitimate.
     const settled = await expectSettledReceipts(
       (receipt) => receipt.model.providerId === first.providerId || receipt.model.providerId === second.providerId,
-      2,
+      4,
     );
     expect(new Set(settled.map((receipt) => receipt.model.providerId))).toEqual(
       new Set([first.providerId, second.providerId]),

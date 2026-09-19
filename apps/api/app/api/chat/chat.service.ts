@@ -10,6 +10,18 @@ import type {
 } from '#api/llm/model-invocation.types.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 
+/**
+ * Best-effort receipt attribution for a helper turn: which project it was
+ * generated for and which chat asked for it. Both are optional — a hint the
+ * billing identity contract refuses is dropped at the boundary rather than
+ * refusing a turn — and they travel as one parameter so adding the second did
+ * not widen three already-long signatures.
+ */
+export type ChatGenerationHints = {
+  readonly projectHint?: string | undefined;
+  readonly chatHint?: string | undefined;
+};
+
 /** Runs the two API-hosted secondary generators through funded admission. */
 @Injectable()
 export class ChatService {
@@ -20,7 +32,7 @@ export class ChatService {
     messages: ModelMessage[],
     userId: string,
     attemptKey: string,
-    projectHint: string,
+    hints: ChatGenerationHints,
     signal: AbortSignal,
     onAdmitted?: (operationId: string) => void,
   ): Promise<ModelInvocationResult> {
@@ -30,7 +42,7 @@ export class ChatService {
       messages,
       userId,
       attemptKey,
-      projectHint,
+      hints,
       signal,
       onAdmitted,
     );
@@ -41,7 +53,7 @@ export class ChatService {
     messages: ModelMessage[],
     userId: string,
     attemptKey: string,
-    projectHint: string,
+    hints: ChatGenerationHints,
     signal: AbortSignal,
     onAdmitted?: (operationId: string) => void,
   ): Promise<ModelInvocationResult> {
@@ -51,7 +63,7 @@ export class ChatService {
       messages,
       userId,
       attemptKey,
-      projectHint,
+      hints,
       signal,
       onAdmitted,
     );
@@ -64,7 +76,7 @@ export class ChatService {
     messages: ModelMessage[],
     authUserId: string,
     attemptKey: string,
-    projectHint: string,
+    hints: ChatGenerationHints,
     signal: AbortSignal,
     onAdmitted?: (operationId: string) => void,
   ): Promise<ModelInvocationResult> {
@@ -91,7 +103,8 @@ export class ChatService {
           body: JSON.parse(init.body) as unknown,
           priceHeaders: {},
           activity: surface === 'project_name' ? 'title' : 'commit',
-          projectHint,
+          ...(hints.projectHint === undefined ? {} : { projectHint: hints.projectHint }),
+          ...(hints.chatHint === undefined ? {} : { chatHint: hints.chatHint }),
           directPrompt: { system, messages, maximumOutputTokens: 64 },
           signal: sdkSignal,
           onAdmitted,

@@ -90,7 +90,7 @@ it('uses the installed SDK for native text/image input and the actual UI stream 
     messages,
     'owner',
     'attempt',
-    'project',
+    { projectHint: 'project' },
     new AbortController().signal,
     () => {
       admitted = true;
@@ -131,6 +131,60 @@ it('uses the installed SDK for native text/image input and the actual UI stream 
   await result.completion;
 });
 
+it.each([
+  ['project_name', 'title', 'getBuildNameGenerator'],
+  ['commit_name', 'commit', 'getCommitMessageGenerator'],
+] as const)('carries both hints into the %s intent as activity %s', async (_surface, activity, method) => {
+  // The gateway surface produces these from headers; the API's own helper
+  // surfaces produce them from the turn request, and both file the same receipt.
+  const owner = mock<ModelInvocationService>();
+  let captured: ModelInvocationIntent | undefined;
+  owner.invoke.mockImplementation(async (intent) => {
+    captured = intent;
+    return {
+      state: 'streaming',
+      operationId: 'operation-fixture',
+      response: new Response(nativeStream(), { headers: { 'content-type': 'text/event-stream' } }),
+      completion: Promise.resolve(),
+    };
+  });
+
+  await new ChatService(owner)[method](
+    [{ role: 'user', content: 'Name this part' }],
+    'owner',
+    'attempt',
+    { projectHint: 'proj_01J8ZK4E', chatHint: 'chat_01J8ZK4F' },
+    new AbortController().signal,
+  );
+
+  expect(captured).toMatchObject({ activity, projectHint: 'proj_01J8ZK4E', chatHint: 'chat_01J8ZK4F' });
+});
+
+it('leaves an absent hint off the intent instead of sending an empty one', async () => {
+  const owner = mock<ModelInvocationService>();
+  let captured: ModelInvocationIntent | undefined;
+  owner.invoke.mockImplementation(async (intent) => {
+    captured = intent;
+    return {
+      state: 'streaming',
+      operationId: 'operation-fixture',
+      response: new Response(nativeStream(), { headers: { 'content-type': 'text/event-stream' } }),
+      completion: Promise.resolve(),
+    };
+  });
+
+  await new ChatService(owner).getBuildNameGenerator(
+    [{ role: 'user', content: 'Name this part' }],
+    'owner',
+    'attempt',
+    { chatHint: 'chat_01J8ZK4F' },
+    new AbortController().signal,
+  );
+
+  expect(captured).not.toHaveProperty('projectHint');
+  expect(captured).toMatchObject({ chatHint: 'chat_01J8ZK4F' });
+});
+
 it('returns bounded commit text from a max-output response without retrying', async () => {
   const owner = mock<ModelInvocationService>();
   let captured: ModelInvocationIntent | undefined;
@@ -148,7 +202,7 @@ it('returns bounded commit text from a max-output response without retrying', as
     [{ role: 'user', content: 'Describe the change' }],
     'owner',
     'attempt',
-    'project',
+    { projectHint: 'project' },
     new AbortController().signal,
   );
   if (result.state !== 'streaming') {
@@ -196,7 +250,7 @@ describe('secondary generator admission outcomes', () => {
         [{ role: 'user', content: 'name it' }],
         'owner',
         'attempt',
-        'project',
+        { projectHint: 'project' },
         new AbortController().signal,
       ),
     ).resolves.toEqual({ state: 'terminal', operationId: 'old-operation' });
@@ -207,7 +261,7 @@ describe('secondary generator admission outcomes', () => {
         [{ role: 'user', content: 'name it' }],
         'owner',
         'other-attempt',
-        'project',
+        { projectHint: 'project' },
         new AbortController().signal,
       ),
     ).rejects.toThrow('Owner denied invocation');
@@ -228,7 +282,7 @@ describe('secondary generator admission outcomes', () => {
       [{ role: 'user', content: 'name it' }],
       'owner',
       'attempt',
-      'project',
+      { projectHint: 'project' },
       new AbortController().signal,
     );
     if (result.state !== 'streaming') {
@@ -244,7 +298,7 @@ describe('secondary generator admission outcomes', () => {
     const owner = mock<ModelInvocationService>();
     const service = new ChatService(owner);
     await expect(
-      service.getBuildNameGenerator([], 'owner', 'attempt', 'project', new AbortController().signal),
+      service.getBuildNameGenerator([], 'owner', 'attempt', { projectHint: 'project' }, new AbortController().signal),
     ).rejects.toThrow();
     expect(owner.invoke).not.toHaveBeenCalled();
   });
@@ -270,7 +324,7 @@ describe('secondary generator admission outcomes', () => {
       [{ role: 'user', content: 'name it' }],
       'owner',
       'attempt',
-      'project',
+      { projectHint: 'project' },
       controller.signal,
     );
     const rejected = expect(result).rejects.toThrow('Cancelled pending admission');
@@ -284,7 +338,13 @@ describe('secondary generator admission outcomes', () => {
     const owner = mock<ModelInvocationService>();
     const service = new ChatService(owner);
     await expect(
-      service.getBuildNameGenerator([], 'owner', 'attempt', 'project', AbortSignal.abort(new Error('Cancelled'))),
+      service.getBuildNameGenerator(
+        [],
+        'owner',
+        'attempt',
+        { projectHint: 'project' },
+        AbortSignal.abort(new Error('Cancelled')),
+      ),
     ).rejects.toThrow('Cancelled');
     expect(owner.invoke).not.toHaveBeenCalled();
   });

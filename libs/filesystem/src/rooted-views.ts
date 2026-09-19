@@ -343,7 +343,14 @@ export class RootedViews {
       });
     };
     const duplicate = async (source: string, target: string): Promise<void> => {
-      assertMutableRoot(resolveLocal(target).localPath);
+      const to = resolveLocal(target);
+      assertMutableRoot(to.localPath);
+      /* A view is captured to one exact mount, so a target the mount table
+       * routes elsewhere is not this view's to write — shadowing it in the
+       * captured provider is the same boundary crossing `copyTree` refuses. */
+      if (!this._pipeline.isCurrentResolution(to.authorityPath, to.resolution)) {
+        throw new Error(`[WorkspaceFileService] copy would cross mount boundary at '${to.authorityPath}'.`);
+      }
       await writeFile(target, await readFile(source));
     };
     const bulkMove = async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> =>

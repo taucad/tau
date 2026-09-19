@@ -129,6 +129,47 @@ describe('rooted content client', () => {
     expect(opener.disposed.sort()).toEqual(['/', '/projects/proj_a']);
   });
 
+  /*
+   * The context wires `dispose` to an effect cleanup and the client entry
+   * renders in `StrictMode`, whose dev double-mount replays that cleanup against
+   * the same memo value — so a release that latched forever poisoned every
+   * trusted store for the session (gate G-D, H2).
+   */
+  it('should stay usable after a release', async () => {
+    const opener = recordingOpener();
+    const client = createRootedContentClient({ open: opener.open });
+
+    await client.stat('/projects/proj_a/tau.json');
+    client.dispose();
+    await client.stat('/projects/proj_a/tau.json');
+
+    expect(opener.opens).toEqual(['/projects/proj_a', '/projects/proj_a']);
+    /* The reopened connection is live: only the released one was closed. */
+    expect(opener.disposed).toEqual(['/projects/proj_a']);
+    expect(callsOn(opener.opened.get('/projects/proj_a'), 'stat')).toEqual([['tau.json']]);
+  });
+
+  it('should close a connection that finishes opening after a release', async () => {
+    const opener = recordingOpener();
+    let admit = (): void => undefined;
+    const admitted = new Promise<void>((resolve) => {
+      admit = resolve;
+    });
+    const client = createRootedContentClient({
+      open: async (root) => {
+        await admitted;
+        return opener.open(root);
+      },
+    });
+
+    const pending = client.stat('/projects/proj_a/tau.json');
+    client.dispose();
+    admit();
+    await pending;
+
+    expect(opener.disposed).toEqual(['/projects/proj_a']);
+  });
+
   it('should reopen a root whose first connection failed', async () => {
     const opens: string[] = [];
     const client = createRootedContentClient({

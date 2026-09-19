@@ -104,6 +104,8 @@ const rootedConnectionMembers = () => ({
 
 const harness = async (
   seed?: (provider: MemoryProvider) => Promise<void>,
+  /** The root the client is composed at; `'/'` is the always-mounted Home file manager. */
+  clientRoot: string = root,
 ): Promise<{
   client: ComposedViewClient;
   authority: FileSystemClient;
@@ -128,7 +130,7 @@ const harness = async (
     client: createComposedViewClient({
       workspace: authority,
       view,
-      paths: new WorkspacePathResolver(root),
+      paths: new WorkspacePathResolver(clientRoot),
     }),
   };
 };
@@ -281,6 +283,38 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
 
     expect(result.moved.map(({ edit }) => edit)).toEqual([{ source: `${root}/a.ts`, target: `${root}/b/a.ts` }]);
     expect(result.failed.map(({ edit }) => edit)).toEqual([{ source: `${root}/c.ts`, target: `${root}/b/c.ts` }]);
+    /* The toast names the path, and the path it names is the one the caller
+     * asked about (gate G-D, H4). */
+    expect(result.failed[0]?.error).toMatchObject({
+      code: 'NAME_EXISTS',
+      path: `${root}/c.ts`,
+      target: `${root}/b/c.ts`,
+    });
+  });
+
+  it('should answer a routed preflight refusal in the absolute paths it was asked in', async () => {
+    const { client, view } = await harness();
+    vi.mocked(view.canMove).mockResolvedValueOnce(
+      new WorkspaceMutationError('NAME_EXISTS', 'c.ts', { target: 'b/c.ts' }),
+    );
+
+    const answer = await client.canMove(`${root}/c.ts`, `${root}/b/c.ts`);
+
+    expect(answer).toMatchObject({ code: 'NAME_EXISTS', path: `${root}/c.ts`, target: `${root}/b/c.ts` });
+    /* Still the wire contract, so the refusal survives another clone. */
+    expect(answer).toBeInstanceOf(WorkspaceMutationError);
+  });
+
+  /* An operand the resolver cannot spell as a path — `canRename` refuses a bare
+   * `..` before it resolves anything — stays the refusal it already is. */
+  it('should leave a refusal whose operand is not a path alone', async () => {
+    const { client, view } = await harness();
+    vi.mocked(view.canRename).mockResolvedValueOnce(new WorkspaceMutationError('INVALID_NAME', '..'));
+
+    await expect(client.canRename(`${root}/c.ts`, '..')).resolves.toMatchObject({
+      code: 'INVALID_NAME',
+      path: '..',
+    });
   });
 
   /*
@@ -319,6 +353,37 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
 
     await expect(client.canDelete('/node_modules/three/package.json')).resolves.toBe(true);
     expect(authority.canDelete).toHaveBeenCalledWith('/node_modules/three/package.json');
+  });
+
+  /*
+   * The Home file manager is rooted at `/` on every route, where the root prefix
+   * claims every path — including the dependency mount, which no view rooted at
+   * Home's own provider can serve (gate G-D, H1 and H9).
+   */
+  it('should route a Home-rooted read to the view and the dependency mount to the authority', async () => {
+    const { client, authority, view } = await harness(undefined, '/');
+    const viewReaddir = vi.spyOn(view, 'readdir');
+
+    await expect(client.readFile('/main.ts', 'utf8')).resolves.toBe('export {};\n');
+    await client.readdir('/node_modules/three');
+
+    expect(authority.readdir).toHaveBeenCalledWith('/node_modules/three');
+    expect(viewReaddir).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Home's root prefix is `/`, which every path starts with — but a project is
+   * its own route on its own mount, and the view at `/` is confined to Home's
+   * provider. The mount table answers those, so the authority is asked.
+   */
+  it('should leave a path another route owns to the authority at a Home root', async () => {
+    const { client, authority, view } = await harness(undefined, '/');
+    const viewReadFile = vi.spyOn(view, 'readFile');
+
+    await client.readFile('/projects/proj_a/main.ts', 'utf8');
+
+    expect(authority.readFile).toHaveBeenCalledWith('/projects/proj_a/main.ts', 'utf8');
+    expect(viewReadFile).not.toHaveBeenCalled();
   });
 
   /*

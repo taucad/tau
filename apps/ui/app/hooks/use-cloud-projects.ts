@@ -104,13 +104,14 @@ export const fetchCloudProjects = async (): Promise<readonly CloudProject[]> => 
  * no cloud row to read and must not make the library's call on its behalf (N3).
  * @returns The rows, and whether the listing that produced them actually
  * answered — `isSettled` is `false` for a request that is disabled, in flight or
- * failed, and only `true` when the array is the server's own answer.
+ * failed, and only `true` when the array is the server's own answer. `isFailed`
+ * tells the last of those apart: that listing will not answer at all.
  * @public
  */
 export const useCloudProjects = (
   options?: Readonly<{ enabled?: boolean }>,
-): Readonly<{ projects: readonly CloudProject[]; isSettled: boolean }> => {
-  const { data = [], isSuccess } = useQuery({
+): Readonly<{ projects: readonly CloudProject[]; isSettled: boolean; isFailed: boolean }> => {
+  const { data = [], isSuccess, isError } = useQuery({
     queryKey: cloudProjectsQueryKey,
     queryFn: fetchCloudProjects,
     enabled: options?.enabled ?? true,
@@ -121,7 +122,7 @@ export const useCloudProjects = (
        rapid navigations re-asking. */
     staleTime: 30_000,
   });
-  return { projects: data, isSettled: isSuccess };
+  return { projects: data, isSettled: isSuccess, isFailed: isError };
 };
 
 /**

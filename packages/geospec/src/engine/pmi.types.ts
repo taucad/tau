@@ -1,7 +1,9 @@
 /** Explicit support state for one source-attributed inventory field. @public */
 export type GeoSpecPmiField<Value> = {
   readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
+  // oxlint-disable-next-line typescript/no-restricted-types -- Canonical JSON requires explicit null distinct from a missing field.
   readonly value: Value | null;
+  // oxlint-disable-next-line typescript/no-restricted-types -- Canonical JSON requires explicit null distinct from a missing field.
   readonly reason: string | null;
 };
 
@@ -26,12 +28,14 @@ export type GeoSpecPmiNumber = {
 export type GeoSpecPmiFaceAssociation = {
   readonly sourceFaceId: number;
   readonly occurrenceRoute: readonly number[];
+  // oxlint-disable-next-line typescript/no-restricted-types -- Canonical JSON requires explicit null distinct from a missing field.
   readonly occurrence: number | null;
   readonly publicFaceOrdinal: number;
 };
 
 /** One ordered role reference, including incomplete source/transfer evidence. @public */
 export type GeoSpecPmiShapeReference = {
+  // oxlint-disable-next-line typescript/no-restricted-types -- Canonical JSON requires explicit null distinct from a missing field.
   readonly sourceAspectId: number | null;
   readonly sourceUsageIds: readonly number[];
   readonly sourceItemIds: readonly number[];

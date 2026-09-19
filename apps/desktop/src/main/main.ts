@@ -956,14 +956,18 @@ const bootstrapElectronApp = async (): Promise<void> => {
       if (link === undefined) {
         /* A custom scheme has no ownership proof, so a link that is not one of
          * the four the app publishes is another application's, or an attempt. */
-        /* Never the query or fragment: a malformed sign-in callback still
-         * carries a live one-time token, and a share fragment is the payload. */
-        log.log('warn', 'deep-link.refused', { url: value.split(/[?#]/u)[0]!.slice(0, 256) });
+        /* Only the shape: a malformed sign-in callback still carries a live
+         * one-time token in its query, a refused invitation carries its token in
+         * the path, and a share fragment is the payload. */
+        log.log('warn', 'deep-link.refused', {
+          target: /^tau:\/\/([\w-]{1,32})/iu.exec(value)?.[1],
+          length: value.length,
+        });
       } else if (link.kind === 'auth-callback') {
         await auth.handleCallback(link);
       } else {
         log.log('info', 'deep-link.opened', { kind: link.kind });
-        /* macOS keeps the app alive with every window closed. */
+        /* On macOS the app stays alive with every window closed. */
         const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
         await window.loadURL(rendererUrl(link.route));
       }

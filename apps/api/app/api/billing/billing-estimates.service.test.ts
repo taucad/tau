@@ -111,8 +111,8 @@ describe('BillingEstimatesService', () => {
       tier: 'base',
     });
     expect(estimates.routes).toContainEqual({
-      routeId: 'google-gemini-3.7-flash',
-      modelId: 'gemini-3.7-flash',
+      routeId: 'google-gemini-3.8-flash',
+      modelId: 'gemini-3.8-flash',
       typicalHoldAtoms: '213164',
       minimumHoldAtoms: '84464',
       tier: 'base',

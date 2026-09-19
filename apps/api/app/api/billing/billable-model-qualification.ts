@@ -207,15 +207,6 @@ const routes = [
     { pricingRevision: '2026-09-19', validThrough: '2026-12-31T23:59:59.999Z' },
   ),
   route(
-    'google-gemini-3.7-flash',
-    'Gemini 3.7 Flash',
-    'openai-completions',
-    1_000_000,
-    65_536,
-    rates('.75', '.075', undefined, '3.75'),
-    { validThrough: '2026-12-31T23:59:59.999Z' },
-  ),
-  route(
     'google-gemini-3.5-flash-lite',
     'Gemini 3.5 Flash Lite',
     'openai-completions',

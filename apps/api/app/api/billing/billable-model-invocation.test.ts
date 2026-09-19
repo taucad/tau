@@ -151,7 +151,7 @@ describe('BillableModelInvocationService', () => {
         ['openai-gpt-5.5', 'gpt-5.5', 'openai-responses', 'max_output_tokens'],
         ['google-gemini-3.1-pro', 'gemini-3.1-pro-preview-customtools', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.8-flash', 'gemini-3.8-flash', 'openai-completions', 'max_completion_tokens'],
-        ['google-gemini-3.7-flash', 'gemini-3.7-flash', 'openai-completions', 'max_completion_tokens'],
+        ['google-gemini-3.8-flash', 'gemini-3.8-flash', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash', 'gemini-3.5-flash', 'openai-completions', 'max_completion_tokens'],
         ['together-kimi-k3', 'moonshotai/Kimi-K3', 'openai-completions', 'max_completion_tokens'],
@@ -296,7 +296,7 @@ describe('BillableModelInvocationService', () => {
       attempt: { version: 1, key: 'attempt-vertex-completions' },
       providerWire: 'openai-completions',
       body: {
-        model: 'google-gemini-3.7-flash',
+        model: 'google-gemini-3.8-flash',
         messages: [{ role: 'user', content: 'fixture' }],
         stream: true,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact OpenAI Completions wire key.
@@ -313,7 +313,7 @@ describe('BillableModelInvocationService', () => {
     );
     const vertexBody = fetchOnce.mock.lastCall?.[1]?.body;
     expect(typeof vertexBody).toBe('string');
-    expect(vertexBody).toContain('"model":"google/gemini-3.7-flash"');
+    expect(vertexBody).toContain('"model":"google/gemini-3.8-flash"');
   });
 
   it('returns an existing attempt without issuing a promotion or calling a provider', async () => {

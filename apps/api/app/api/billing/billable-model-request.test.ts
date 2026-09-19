@@ -337,7 +337,7 @@ describe('billable model request contract', () => {
       output_config: { effort: 'high' },
     };
     const gemini = {
-      model: 'gemini-3.7-flash',
+      model: 'gemini-3.8-flash',
       messages: [{ role: 'user', content: 'fixture' }],
       max_completion_tokens: 64,
       stream: true,

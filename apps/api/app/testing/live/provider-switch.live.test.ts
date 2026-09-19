@@ -411,20 +411,18 @@ const recallTurn = `Without calling any tool, reply with the exact token the ear
 
 /** The ordered pairs a user can switch between, both directions each. */
 const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'openai-gpt-5.6-luna', to: 'google-gemini-3.7-flash' },
-  { from: 'google-gemini-3.7-flash', to: 'openai-gpt-5.6-luna' },
+  { from: 'openai-gpt-5.6-luna', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-5.6-luna' },
   { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-haiku-4.5' },
   { from: 'anthropic-claude-haiku-4.5', to: 'openai-gpt-5.6-luna' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.7-flash' },
-  { from: 'google-gemini-3.7-flash', to: 'anthropic-claude-haiku-4.5' },
   { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
   { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'xai-grok-4.6', to: 'google-gemini-3.7-flash' },
-  { from: 'google-gemini-3.7-flash', to: 'xai-grok-4.6' },
+  { from: 'xai-grok-4.6', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'xai-grok-4.6' },
   { from: 'xai-grok-4.6', to: 'anthropic-claude-haiku-4.5' },
   { from: 'anthropic-claude-haiku-4.5', to: 'xai-grok-4.6' },
-  { from: 'google-gemini-3.7-flash', to: 'google-gemini-3.1-pro' },
-  { from: 'google-gemini-3.1-pro', to: 'google-gemini-3.7-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'google-gemini-3.1-pro' },
+  { from: 'google-gemini-3.1-pro', to: 'google-gemini-3.8-flash' },
 ];
 
 const credentialsFor = (from: string, to: string): string =>
@@ -536,8 +534,8 @@ for (const pair of switchPairs) {
  * the request carries two consecutive `user` messages (W4 pinned behaviour 3).
  */
 const orphanRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'google-gemini-3.7-flash', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.7-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
   { from: 'anthropic-claude-haiku-4.5', to: 'openai-gpt-5.6-luna' },
 ];
 
@@ -576,9 +574,9 @@ for (const { from, to } of orphanRows) {
 
 /** Compaction then switch, once per target wire, so the summary is proven to replay everywhere. */
 const compactionRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.7-flash' },
+  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
   { from: 'openai-gpt-5.6-luna', to: 'anthropic-claude-haiku-4.5' },
-  { from: 'google-gemini-3.7-flash', to: 'openai-gpt-5.6-luna' },
+  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-5.6-luna' },
 ];
 
 for (const { from, to } of compactionRows) {
@@ -656,8 +654,8 @@ for (const { from, to } of compactionRows) {
 
 /** A parallel tool batch then a switch, on the two wires whose signature and id rules differ most. */
 const parallelRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.7-flash' },
-  { from: 'google-gemini-3.7-flash', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
 ];
 
 for (const { from, to } of parallelRows) {

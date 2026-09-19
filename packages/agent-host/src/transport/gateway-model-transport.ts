@@ -416,14 +416,15 @@ const guardedResponse = (options: {
    *
    * @param chunk - The chunk just read, not yet delivered.
    * @param controller - The guarded stream the released chunks are delivered on.
+   * @returns True once the held bytes have been delivered, false while the frame is still open.
    */
   const hold = (
     chunk: Uint8Array<ArrayBuffer>,
     controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>,
-  ): void => {
+  ): boolean => {
     withheld.push(chunk);
     if (!markerFrameComplete(relayed)) {
-      return;
+      return false;
     }
     // A complete Tau frame that is not this refusal belongs to the SDK after all.
     refusing = false;
@@ -432,11 +433,34 @@ const guardedResponse = (options: {
     }
     withheld = [];
     relayed = sinceLastEventBoundary(relayed);
+    return true;
   };
   const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
     async pull(controller) {
-      try {
-        const next = await reader.read();
+      /* One pull must enqueue, close or error before it resolves: a pull that
+       * only withholds bytes schedules no further pull of its own, so a
+       * marker-bearing frame spanning several chunks would strand the
+       * consumer's pending read. Read on until this call has delivered. */
+      for (;;) {
+        let next: ReadableStreamReadResult<Uint8Array<ArrayBuffer>>;
+        // Only the read is a gateway failure. Guarding this stream's own `close`
+        // and `enqueue` too would record the SDK's cancel-then-close race as
+        // `NETWORK_ERROR` and mask the provider's terminal frame behind it.
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- the upstream body is read serially.
+          next = await reader.read();
+        } catch (error) {
+          // An abort is the consumer's own: Tau's signal, the person pressing
+          // Stop, or the bundled SDK leaving the stream on a terminal frame.
+          if (options.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+            controller.error(error);
+            return;
+          }
+          const failure = networkError('Tau model gateway response stream failed.', error, options.response.status);
+          options.state.failure = failure;
+          controller.error(failure);
+          return;
+        }
         if (next.done) {
           const trailing = refusing ? providerAccountRefusal(relayed, options.response.status) : undefined;
           if (trailing) {
@@ -459,22 +483,18 @@ const guardedResponse = (options: {
           if (failure) {
             options.state.failure = failure;
             controller.error(failure);
+            // oxlint-disable-next-line no-await-in-loop -- the cancel ends this read loop.
             await reader.cancel(failure);
             return;
           }
-          hold(next.value, controller);
-          return;
+          if (hold(next.value, controller)) {
+            return;
+          }
+          continue;
         }
         relayed = sinceLastEventBoundary(relayed);
         controller.enqueue(next.value);
-      } catch (error) {
-        if (options.signal.aborted) {
-          controller.error(error);
-          return;
-        }
-        const failure = networkError('Tau model gateway response stream failed.', error, options.response.status);
-        options.state.failure = failure;
-        controller.error(failure);
+        return;
       }
     },
     cancel: async (reason) => reader.cancel(reason),
@@ -724,7 +744,17 @@ const streamedToolCall = (
 const abortError = (signal: AbortSignal): Error =>
   signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
 
+/**
+ * A provider refusal naming the context window is the request's own fault: it
+ * will be refused identically until the request changes, so it must not read as
+ * a transient outage the person is invited to resume into (R6).
+ */
+const contextWindowRefusal = /context_length_exceeded|exceeds? the context|maximum context length/iu;
+
 const piStreamError = (message: string): GatewayModelTransportError => {
+  if (contextWindowRefusal.test(message)) {
+    return new GatewayModelTransportError({ code: 'INVALID_REQUEST', message });
+  }
   const malformed = /(?:parse|malformed|SSE|stream ended|finish_reason|message_stop|content block)/iu.test(message);
   return new GatewayModelTransportError({
     code: malformed ? 'MALFORMED_RESPONSE' : 'PROVIDER_UNAVAILABLE',

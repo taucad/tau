@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { errorCategory } from '@taucad/types/constants';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import {
+  chatTurnNotStartedCode,
+  parseAdmissionFailureForPersistence,
+  parseErrorForPersistence,
+} from '#utils/error.utils.js';
 
 const googleInvalidArgumentBody = [
   {
@@ -78,5 +82,34 @@ describe('parseErrorForPersistence', () => {
       "This chat's first message is too large to continue. Start a new chat and attach less.",
     );
     expect(parsed.raw).toContain('Context is oversized but has no safe history to evict.');
+  });
+});
+
+describe('parseAdmissionFailureForPersistence', () => {
+  it('should mark an uncoded dispatch failure as a turn that never started', () => {
+    const parsed = parseAdmissionFailureForPersistence(
+      new Error('This chat is still holding a workspace from an earlier run. Reload the page to release it.'),
+    );
+
+    expect(parsed.code).toBe(chatTurnNotStartedCode);
+    expect(parsed.message).toBe(
+      'This chat is still holding a workspace from an earlier run. Reload the page to release it.',
+    );
+  });
+
+  it('should leave a coded refusal on its own card', () => {
+    const parsed = parseAdmissionFailureForPersistence(
+      new Error(
+        JSON.stringify({
+          category: errorCategory.credits,
+          title: 'Credit Limit Reached',
+          message: 'Add credits to start a turn on GPT-6 Astra.',
+          code: 'INSUFFICIENT_CREDIT',
+          httpStatus: 402,
+        }),
+      ),
+    );
+
+    expect(parsed.code).toBe('INSUFFICIENT_CREDIT');
   });
 });

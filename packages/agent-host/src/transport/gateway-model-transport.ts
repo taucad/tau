@@ -322,10 +322,10 @@ const networkError = (message: string, cause: unknown, status?: number): Gateway
   });
 
 /**
- * Tau's own in-stream refusal envelope. The gateway rewrites a recognised
- * provider-account refusal into a single SSE `error` frame carrying this
- * marker; relayed provider bytes escape their own quotes, so nothing else on
- * the wire can produce it.
+ * Tau's own in-stream failure envelope. The gateway rewrites a classified
+ * provider failure — an exhausted account, a mid-stream rate limit — into a
+ * single SSE `error` frame carrying this marker; relayed provider bytes escape
+ * their own quotes, so nothing else on the wire can produce it.
  */
 const tauGatewayFrameMarker = '"type":"tau_gateway"';
 const sseEventBoundary = /\r\n\r\n|\n\n|\r\r/gu;
@@ -345,17 +345,6 @@ const sinceLastEventBoundary = (text: string): string => {
 };
 
 /**
- * Read Tau's coded provider-account refusal out of relayed gateway bytes.
- *
- * Only the frame carrying the marker is decoded, and an incomplete one answers
- * undefined so the caller reads on until the event boundary or EOF completes
- * it.
- *
- * @param relayed - Relayed SSE text since the last delivered event boundary.
- * @param status - HTTP status of the relayed gateway response.
- * @returns The coded refusal, or undefined when no complete Tau frame is present.
- */
-/**
  * Whether the frame carrying the Tau marker has been terminated by an event boundary.
  *
  * @param relayed - Relayed text since the last delivered event boundary.
@@ -367,7 +356,21 @@ const markerFrameComplete = (relayed: string): boolean => {
   return index !== -1 && index < frames.length - 1;
 };
 
-const providerAccountRefusal = (relayed: string, status: number): GatewayModelTransportError | undefined => {
+/**
+ * Read Tau's coded failure out of relayed gateway bytes.
+ *
+ * Only the frame carrying the marker is decoded, and an incomplete one answers
+ * undefined so the caller reads on until the event boundary or EOF completes
+ * it. The frame's code is mapped exactly as an error body's is on the HTTP
+ * path, so a code this build has never heard of still ends the turn — as
+ * `UNKNOWN_GATEWAY_ERROR`, carrying the wire code — rather than reaching pi's
+ * codec to be reported under a guessed one.
+ *
+ * @param relayed - Relayed SSE text since the last delivered event boundary.
+ * @param status - HTTP status of the relayed gateway response.
+ * @returns The coded failure, or undefined when no complete Tau frame is present.
+ */
+const gatewayFailureFrame = (relayed: string, status: number): GatewayModelTransportError | undefined => {
   const frame = relayed.split(sseEventBoundary).find((event) => event.includes(tauGatewayFrameMarker));
   if (frame === undefined) {
     return undefined;
@@ -384,14 +387,22 @@ const providerAccountRefusal = (relayed: string, status: number): GatewayModelTr
     return undefined;
   }
   const envelope = zodUtility.isObject(payload) && zodUtility.isObject(payload['error']) ? payload['error'] : undefined;
-  if (envelope?.['type'] !== 'tau_gateway' || readString(envelope, 'code') !== 'PROVIDER_ACCOUNT_EXHAUSTED') {
+  if (envelope?.['type'] !== 'tau_gateway') {
     return undefined;
   }
+  // A marker-bearing envelope carrying no code is not Tau's failure frame; it
+  // stays the SDK's bytes rather than ending the turn under a status-derived guess.
+  const rawCode = readString(envelope, 'code');
+  if (rawCode === undefined) {
+    return undefined;
+  }
+  const code = gatewayErrorCode(rawCode, status);
   const details = readDetails(envelope);
   return new GatewayModelTransportError({
-    code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-    message: readString(envelope, 'message') ?? 'The model provider account is unavailable.',
+    code,
+    message: readString(envelope, 'message') ?? 'The model gateway ended this stream.',
     status,
+    ...(code === 'UNKNOWN_GATEWAY_ERROR' ? { rawType: rawCode } : {}),
     ...(details === undefined ? {} : { details }),
   });
 };
@@ -403,13 +414,13 @@ const guardedResponse = (options: {
 }): Response => {
   const reader = options.response.body!.getReader();
   const decoder = new TextDecoder();
-  // Relayed text since the last delivered event boundary, so a refusal frame
+  // Relayed text since the last delivered event boundary, so a failure frame
   // split across chunks is still recognised. Trimming stops once the marker
   // appears: from there the whole frame is needed to read its code.
   let relayed = '';
-  let refusing = false;
+  let failing = false;
   // Chunks held back while a marker-bearing frame is still incomplete; they
-  // are replayed in order if that frame turns out not to be a refusal.
+  // are replayed in order if that frame turns out not to be a failure.
   let withheld: Array<Uint8Array<ArrayBuffer>> = [];
   /**
    * Holds one more chunk of a marker-bearing frame; releases them all once the frame proves harmless.
@@ -426,8 +437,8 @@ const guardedResponse = (options: {
     if (!markerFrameComplete(relayed)) {
       return false;
     }
-    // A complete Tau frame that is not this refusal belongs to the SDK after all.
-    refusing = false;
+    // A complete Tau frame carrying no failure code belongs to the SDK after all.
+    failing = false;
     for (const held of withheld) {
       controller.enqueue(held);
     }
@@ -462,13 +473,13 @@ const guardedResponse = (options: {
           return;
         }
         if (next.done) {
-          const trailing = refusing ? providerAccountRefusal(relayed, options.response.status) : undefined;
+          const trailing = failing ? gatewayFailureFrame(relayed, options.response.status) : undefined;
           if (trailing) {
             options.state.failure = trailing;
             controller.error(trailing);
             return;
           }
-          // A marker frame the body never terminated was never a refusal, so it
+          // A marker frame the body never terminated was never a failure, so it
           // and the healthy frames that shared its chunks are the SDK's after
           // all. Closing on them instead loses the turn's terminal frame and
           // reports `Stream ended without finish_reason` in its place.
@@ -480,14 +491,14 @@ const guardedResponse = (options: {
           return;
         }
         relayed += decoder.decode(next.value, { stream: true });
-        refusing ||= relayed.includes(tauGatewayFrameMarker);
-        if (refusing) {
-          // The refusal frame never reaches pi-ai's codec: Tau raises the coded
+        failing ||= relayed.includes(tauGatewayFrameMarker);
+        if (failing) {
+          // The failure frame never reaches pi-ai's codec: Tau raises the coded
           // failure itself rather than letting the SDK report an opaque stream
           // error. An incomplete frame just withholds its bytes and reads on.
-          // ponytail: bytes sharing the refusal's chunk are dropped with it
+          // ponytail: bytes sharing the failure frame's chunk are dropped with it
           // rather than re-encoded; the turn is terminal either way.
-          const failure = providerAccountRefusal(relayed, options.response.status);
+          const failure = gatewayFailureFrame(relayed, options.response.status);
           if (failure) {
             options.state.failure = failure;
             controller.error(failure);

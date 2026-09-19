@@ -145,6 +145,45 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
 };
 
 /**
+ * The gateway's coded mid-stream failure frame, in the one shape it puts on the
+ * wire. Only `code`, `message` and `details` vary between failures, so every
+ * case below builds the frame here rather than restating the contract.
+ *
+ * @param code - Tau gateway code carried by the frame.
+ * @param message - The provider's own sentence.
+ * @param details - Structured fields belonging to the code.
+ * @returns The frame's JSON payload.
+ */
+const tauGatewayFrame = (code: string, message: string, details?: Record<string, string>): string =>
+  JSON.stringify({
+    type: 'error',
+    code,
+    message,
+    error: { type: 'tau_gateway', code, message, ...(details === undefined ? {} : { details }) },
+  });
+
+/**
+ * Chunk a coded frame so the marker lands with the frame still open and the
+ * payload only completes three chunks later: the guard has to withhold bytes
+ * several pulls in a row before it can read the code.
+ *
+ * @param frame - The frame payload, from {@link tauGatewayFrame}.
+ * @returns Relayed chunks ending with the frame's event boundary.
+ */
+const splitAcrossChunks = (frame: string): readonly string[] => {
+  const marker = frame.indexOf('"type":"tau_gateway"') + '"type":"tau_gateway"'.length;
+  const rest = frame.slice(marker);
+  const third = Math.floor(rest.length / 3);
+  return [
+    'data: {"id":"chatcmpl-held","choices":[{"delta":{"content":"partial"}}]}\n\n',
+    `event: error\ndata: ${frame.slice(0, marker)}`,
+    rest.slice(0, third),
+    rest.slice(third, third * 2),
+    `${rest.slice(third * 2)}\n\n`,
+  ];
+};
+
+/**
  * A fetch whose body behaves like a network one: chunks first, EOF only on a
  * later task, and an `AbortError` when the caller's own request is aborted.
  *
@@ -1803,12 +1842,7 @@ describe('createGatewayModelTransport', () => {
       accountOwner: 'tau',
     };
     const message = "The model provider's account is unavailable.";
-    const refusal = JSON.stringify({
-      type: 'error',
-      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-      message,
-      error: { type: 'tau_gateway', code: 'PROVIDER_ACCOUNT_EXHAUSTED', message, details },
-    });
+    const refusal = tauGatewayFrame('PROVIDER_ACCOUNT_EXHAUSTED', message, details);
     // The rewritten frame is split mid-payload: the marker lands in one chunk
     // and the refusal only becomes readable with the next one.
     const split = refusal.indexOf('"details"');
@@ -1859,6 +1893,73 @@ describe('createGatewayModelTransport', () => {
     await session.close();
   });
 
+  it.each([
+    {
+      label: 'a mid-stream rate limit',
+      wireCode: 'RATE_LIMITED',
+      message: 'Resource exhausted. Please try again later.',
+      details: { providerId: 'vertexai', providerCode: 'RESOURCE_EXHAUSTED' },
+      expected: { code: 'RATE_LIMITED', rawType: undefined },
+    },
+    {
+      label: 'a code this client does not know yet',
+      wireCode: 'GATEWAY_CODE_FROM_THE_FUTURE',
+      message: 'The gateway ended this stream.',
+      details: undefined,
+      expected: { code: 'UNKNOWN_GATEWAY_ERROR', rawType: 'GATEWAY_CODE_FROM_THE_FUTURE' },
+    },
+  ])('should raise $label off a mid-stream Tau gateway frame', async ({ wireCode, message, details, expected }) => {
+    /* The gateway rewrites every classified provider failure into this one
+     * frame, not only an exhausted provider account — a live Vertex stream cut
+     * by quota arrives as `RATE_LIMITED` mid-body. The code travels in
+     * `error.code` and is mapped exactly as an error body's code is on the HTTP
+     * path, so a code this build has never heard of degrades to
+     * `UNKNOWN_GATEWAY_ERROR` with the wire code preserved. */
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () =>
+        responseFromChunks([
+          'data: {"id":"chatcmpl-cut","choices":[{"delta":{"content":"partial"}}]}\n\n',
+          `event: error\ndata: ${tauGatewayFrame(wireCode, message, details)}\n\n`,
+        ]),
+      ),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({
+      name: 'GatewayModelTransportError',
+      message,
+      status: 200,
+      details,
+      ...expected,
+    });
+  });
+
+  it.each([
+    {
+      label: 'a terminal frame missing its trailing blank line',
+      chunks: ['data: {"id":"chatcmpl-1","choices":[{"delta":{},"finish_reason":"stop"}]}\n'],
+    },
+    {
+      label: "Vertex's bare JSON 429 tail behind a 200",
+      // Captured live: Vertex abandons SSE framing and appends a pretty-printed
+      // JSON array, then closes the body cleanly. No `data:` prefix, so no
+      // decoder in the chain dispatches it. Classifying it is the gateway's job
+      // (it rewrites the tail into the Tau frame above); the client must not
+      // guess at non-SSE trailing bytes, and says the stream was malformed.
+      chunks: [
+        'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"partial"}}]}\n\n',
+        '\n[{\n  "error": {\n    "code": 429,\n    "message": "Resource exhausted. Please try again later.",\n    "status": "RESOURCE_EXHAUSTED"\n  }\n}\n]',
+      ],
+    },
+  ])('should fail $label as a malformed response', async ({ chunks }) => {
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () => responseFromChunks(chunks)),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' });
+  });
+
   it('should hand a complete Tau frame that is not a refusal to the SDK with the bytes held behind it', async () => {
     const transport = createGatewayModelTransportWithModel({
       baseUrl: 'https://gateway.example',
@@ -1891,31 +1992,26 @@ describe('createGatewayModelTransport', () => {
       label: 'a refusal',
       // The marker lands mid-payload and the refusal only becomes readable
       // three chunks later, so the guard withholds several times in a row.
-      chunks: (() => {
-        const message = "The model provider's account is unavailable.";
-        const refusal = JSON.stringify({
-          type: 'error',
-          code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-          message,
-          error: {
-            type: 'tau_gateway',
-            code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-            message,
-            details: { providerId: 'anthropic', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' },
-          },
-        });
-        const marker = refusal.indexOf('"type":"tau_gateway"') + '"type":"tau_gateway"'.length;
-        const rest = refusal.slice(marker);
-        const third = Math.floor(rest.length / 3);
-        return [
-          'data: {"id":"chatcmpl-held","choices":[{"delta":{"content":"partial"}}]}\n\n',
-          `event: error\ndata: ${refusal.slice(0, marker)}`,
-          rest.slice(0, third),
-          rest.slice(third, third * 2),
-          `${rest.slice(third * 2)}\n\n`,
-        ];
-      })(),
+      chunks: splitAcrossChunks(
+        tauGatewayFrame('PROVIDER_ACCOUNT_EXHAUSTED', "The model provider's account is unavailable.", {
+          providerId: 'anthropic',
+          providerCode: 'credit_balance_exhausted',
+          accountOwner: 'tau',
+        }),
+      ),
       outcome: 'PROVIDER_ACCOUNT_EXHAUSTED',
+    },
+    {
+      // Same withholding, a different code: the guard must hold and raise on
+      // any coded frame, not just the one it was written for.
+      label: 'a rate limit',
+      chunks: splitAcrossChunks(
+        tauGatewayFrame('RATE_LIMITED', 'Resource exhausted. Please try again later.', {
+          providerId: 'vertexai',
+          providerCode: 'RESOURCE_EXHAUSTED',
+        }),
+      ),
+      outcome: 'RATE_LIMITED',
     },
     {
       label: 'a complete Tau frame that is not a refusal',

@@ -86,7 +86,9 @@ export const relayHostFrames = (first: WebSocket, second: WebSocket): { close():
     source.on('close', (code, reason) => {
       finish(mirrorableCloseCode(code), reason.toString());
     });
-    source.on('error', () => finish(1011, 'relay socket failed'));
+    source.on('error', () => {
+      finish(1011, 'relay socket failed');
+    });
     forward(source, destination);
   }
 
@@ -127,24 +129,34 @@ const distributedQueueLimit = 16 * 1024 * 1024;
 const distributedRouteLifetime = 180;
 const distributedPeerTimeout = 15_000;
 
-const asBuffer = (data: RawData): Buffer => {
+/**
+ * Collapses a `ws` frame — which may arrive as a Buffer, an ArrayBuffer or a
+ * fragment list — into the one Buffer its bytes can be read or encoded from.
+ * @param data - Whatever `ws` handed the `message` listener.
+ * @returns The frame's bytes in a single Buffer.
+ */
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- `ws` sends Buffers and only Buffer carries `toString('base64')`
+export const asBuffer = (data: RawData): Buffer => {
   if (Array.isArray(data)) {
     return Buffer.concat(data);
   }
   return data instanceof ArrayBuffer ? Buffer.from(data) : Buffer.from(data);
 };
 
+/** `Array.isArray` widens an `unknown` to `any[]`, so narrow through a guard that keeps the elements `unknown`. */
+const isUnknownArray = (value: unknown): value is readonly unknown[] => Array.isArray(value);
+
 const parseStreamEntries = (value: unknown): ReadonlyArray<{ readonly id: string; readonly payload: string }> => {
-  if (!Array.isArray(value)) {
+  if (!isUnknownArray(value)) {
     return [];
   }
   const entries: Array<{ id: string; payload: string }> = [];
   for (const stream of value) {
-    if (!Array.isArray(stream) || !Array.isArray(stream[1])) {
+    if (!isUnknownArray(stream) || !isUnknownArray(stream[1])) {
       continue;
     }
     for (const entry of stream[1]) {
-      if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !Array.isArray(entry[1])) {
+      if (!isUnknownArray(entry) || typeof entry[0] !== 'string' || !isUnknownArray(entry[1])) {
         continue;
       }
       const payloadIndex = entry[1].indexOf('payload');
@@ -250,12 +262,14 @@ export const relayHostFramesThroughRedis = async (input: {
     input.socket.pause();
     const previous = writes;
     writes = (async () => {
-      await previous;
-      await publish({ kind: 'frame', binary, bytes: buffer.byteLength, data: buffer.toString('base64') });
-      input.socket.resume();
-    })().catch(() => {
-      input.socket.close(1009, 'relay queue limit exceeded');
-    });
+      try {
+        await previous;
+        await publish({ kind: 'frame', binary, bytes: buffer.byteLength, data: buffer.toString('base64') });
+        input.socket.resume();
+      } catch {
+        input.socket.close(1009, 'relay queue limit exceeded');
+      }
+    })();
   });
   /**
    * Whatever ends this socket — a close frame, an abrupt disconnect `ws` reports
@@ -263,12 +277,21 @@ export const relayHostFramesThroughRedis = async (input: {
    * then tear the local side down whether or not the publish landed.
    */
   let departed = false;
+  const publishDeparture = async (code: number, reason: string): Promise<void> => {
+    try {
+      await publish({ kind: 'close', code, reason });
+    } catch {
+      // Best-effort: the peer hears about the departure only if Redis was reachable.
+    } finally {
+      close();
+    }
+  };
   const depart = (code: number, reason: string): void => {
     if (departed || closed) {
       return;
     }
     departed = true;
-    void publish({ kind: 'close', code, reason }).finally(close);
+    void publishDeparture(code, reason);
   };
   input.socket.once('close', (code, reason) => {
     depart(code, reason.toString());
@@ -279,6 +302,7 @@ export const relayHostFramesThroughRedis = async (input: {
 
   const read = async (): Promise<void> => {
     await publish({ kind: 'ready' });
+    // oxlint-disable-next-line no-unmodified-loop-condition -- `close()` flips it, both from this loop and from the socket callbacks above.
     while (!closed) {
       // oxlint-disable-next-line no-await-in-loop -- one blocking stream read preserves frame order.
       const response: unknown = await input.reader.xread('BLOCK', 1000, 'STREAMS', inbound, lastId);
@@ -307,12 +331,17 @@ export const relayHostFramesThroughRedis = async (input: {
       }
     }
   };
-  void read().catch(() => {
-    if (!closed) {
-      input.socket.close(1011, 'distributed relay failed');
+  const pump = async (): Promise<void> => {
+    try {
+      await read();
+    } catch {
+      if (!closed) {
+        input.socket.close(1011, 'distributed relay failed');
+      }
+      close();
     }
-    close();
-  });
+  };
+  void pump();
   /* Every listener above was attached after an await — this reader's connect,
    * and in `parkRoute` a grant read and the session keepalive — so a socket that
    * died during admission emitted its `close` to nobody. Its peer still has to

@@ -297,7 +297,7 @@ export const billableModelRequestSchema = z
     include: z.array(z.literal('reasoning.encrypted_content')).max(1).optional(),
     reasoning: z
       .object({
-        effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+        effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']),
         summary: z.enum(['auto', 'concise', 'detailed']).optional(),
       })
       .strict()
@@ -417,7 +417,7 @@ const responsesWireSchema = z
     max_output_tokens: z.number(),
     reasoning: z
       .object({
-        effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+        effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']),
         summary: z.enum(['auto', 'concise', 'detailed']).optional(),
       })
       .strict()

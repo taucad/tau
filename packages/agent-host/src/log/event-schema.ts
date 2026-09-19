@@ -158,7 +158,7 @@ const systemPromptBlockSchema = z.strictObject({
 });
 /** Provider reasoning controls persisted with an admitted model row. @public */
 export const modelReasoningConfigSchema = z.strictObject({
-  effort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
   summary: z.enum(['auto', 'concise', 'detailed']).optional(),
   display: z.enum(['summarized', 'omitted']).optional(),
   budgetTokens: z.number().int().positive().optional(),

@@ -128,7 +128,7 @@ Avoid:
 
 A Vertex row goes through Tau's OpenAI-compatible route, not Gemini's native `generateContent`. Facts a model author must know:
 
-- Thinking levels are per model. Gemini 3.5 Flash and 3.5 Flash-Lite accept `MINIMAL`; Gemini 3.7 Flash and 3.1 Pro accept `LOW`, `MEDIUM`, `HIGH` only. Setting a level the model rejects is a request-time refusal, not a downgrade.
+- Thinking levels are per model. Gemini 3.5 Flash and 3.5 Flash-Lite accept `MINIMAL` upstream; Gemini 3.7 Flash and 3.1 Pro accept `LOW`, `MEDIUM`, `HIGH` only. Tau cannot declare `MINIMAL`: the `thinkingLevel` enum in `model.schema.ts` and the gateway transport admit only `LOW`, `MEDIUM`, `HIGH`. Setting a level the model rejects is a request-time refusal, not a downgrade.
 - Never send `extra_body.google.stream_function_call_arguments`. It makes Vertex answer 499 on every non-first function call of a turn, and 400 on a unary request.
 - Thought-signature echo is handled by `vertex-completions-shim.ts`: it captures `extra_content.google.thought_signature` off the response stream and replays it onto outbound tool calls. Do not add a second signature path in a catalog change.
 - Tool schemas must satisfy the contract test. Vertex rejects `$ref`/`definitions` loops and a non-object top-level schema outright.

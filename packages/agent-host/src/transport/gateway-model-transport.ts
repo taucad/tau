@@ -980,9 +980,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                   thinkingEnabled: true,
                   ...(reasoning.budgetTokens === undefined ? {} : { thinkingBudgetTokens: reasoning.budgetTokens }),
                   ...(reasoning.display === undefined ? {} : { thinkingDisplay: reasoning.display }),
-                  ...(reasoning.effort === undefined
-                    ? {}
-                    : { effort: reasoning.effort === 'minimal' ? 'low' : reasoning.effort }),
+                  ...(reasoning.effort === undefined ? {} : { effort: reasoning.effort }),
                 }),
           } satisfies AnthropicOptions)
         : isOpenAiResponsesProviderKind(request.providerKind)

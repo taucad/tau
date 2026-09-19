@@ -23,13 +23,13 @@ type Closure = {
 
 const root = resolve(import.meta.dirname, '../../..');
 const cache = resolve(
-  process.env.GEOSPEC_MIXED_CACHE ??
+  process.env['GEOSPEC_MIXED_CACHE'] ??
     resolve(root, 'node_modules/.cache/geospec-engine-native/matcher-full-mixed-build'),
 );
 const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
 
 const main = (): void => {
-  const manifestPath = process.env.GEOSPEC_MIXED_INPUTS;
+  const manifestPath = process.env['GEOSPEC_MIXED_INPUTS'];
   if (!manifestPath) {
     throw new Error('Set GEOSPEC_MIXED_INPUTS to a verified geospec-mixed-build-inputs-v1 JSON closure.');
   }
@@ -40,7 +40,7 @@ const main = (): void => {
     throw new Error('Mixed link optimization must be O0 or O3.');
   }
   const packageRoot = resolve(closure.sourceRoot, 'packages/geospec-engine-native');
-  const output = process.env.GEOSPEC_MIXED_OUTPUT ?? resolve(packageRoot, 'bindings/emscripten/generated');
+  const output = process.env['GEOSPEC_MIXED_OUTPUT'] ?? resolve(packageRoot, 'bindings/emscripten/generated');
   if (closure.schema !== 'geospec-mixed-build-inputs-v1' || closure.libraries.length === 0) {
     throw new Error('Invalid mixed build closure.');
   }

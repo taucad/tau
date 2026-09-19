@@ -1020,4 +1020,43 @@ describe('BillableModelInvocationService', () => {
       expect.objectContaining({ 'tau.billing.terminal.kind': 'absorbed_unknown' }),
     );
   });
+
+  /* R6: the filter replaces a classified failure's bytes, so the funded path — the one
+   * where Tau pays for the tokens — keeps no sight of why the turn ended unless it
+   * observes the filter. The operator leg has always passed both observers. */
+  it('should log a classified mid-stream provider failure with the supplier sentence', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const supplierSentence = 'Resource exhausted. Please try again later.';
+    const cut =
+      `data: {"choices":[{"delta":{"content":"partial"}}]}\n\n` +
+      `data: {"error":{"code":429,"message":"${supplierSentence}","status":"RESOURCE_EXHAUSTED"}}\n\n`;
+    const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
+    qualified.adapter.createEvidenceCollector = () =>
+      createBillableModelEvidenceCollector('openai-responses', new Set(['uncached_input']), 'openai');
+    qualified.adapter.executeOnce = vi.fn(
+      async () => new Response(cut, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    );
+    const { service } = exhaustionHarness(qualified);
+
+    try {
+      const result = await service.invoke(intent());
+      if (result.state !== 'streaming') {
+        throw new Error('The supplier answered 200; the relay did not stream');
+      }
+      const relayed = await result.response.text();
+      await result.completion;
+
+      // The customer reads Tau's sentence; the operator's log keeps the supplier's.
+      expect(relayed).toContain('"code":"RATE_LIMITED"');
+      expect(relayed).not.toContain(supplierSentence);
+      const logged = warn.mock.calls.map((call) => String(call[0]));
+      expect(logged).toContainEqual(expect.stringContaining('Provider stream failed on openai'));
+      expect(logged).toContainEqual(expect.stringContaining('(429)'));
+      expect(logged).toContainEqual(expect.stringContaining(supplierSentence));
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

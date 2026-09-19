@@ -331,8 +331,13 @@ const networkError = (message: string, cause: unknown, status?: number): Gateway
 /**
  * Tau's own in-stream failure envelope. The gateway rewrites a classified
  * provider failure — an exhausted account, a mid-stream rate limit — into a
- * single SSE `error` frame carrying this marker; relayed provider bytes escape
- * their own quotes, so nothing else on the wire can produce it.
+ * single SSE `error` frame carrying this marker.
+ *
+ * Two separate things keep it Tau's: model-generated text cannot produce these
+ * bytes, because content and tool-call arguments are JSON strings whose quotes
+ * arrive escaped; and the API never forwards a provider frame carrying the
+ * marker, since a provider does control its own body at the structural level
+ * (`provider-account-stream.ts`, R5).
  */
 const tauGatewayFrameMarker = '"type":"tau_gateway"';
 const sseEventBoundary = /\r\n\r\n|\n\n|\r\r/gu;

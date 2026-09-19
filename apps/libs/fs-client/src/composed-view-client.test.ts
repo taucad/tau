@@ -5,7 +5,6 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { WorkspaceMutationError } from '@taucad/filesystem';
-import type { FileStat } from '@taucad/types';
 import { createComposedViewClient } from '#composed-view-client.js';
 import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
 import type { FileSystemClient } from '#file-system-client.js';
@@ -266,7 +265,12 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     const { client, view } = await harness();
     const error = new WorkspaceMutationError('NAME_EXISTS', 'c.ts', { target: 'b/c.ts' });
     vi.mocked(view.bulkMove).mockResolvedValueOnce({
-      moved: [{ edit: { source: 'a.ts', target: 'b/a.ts' }, stat: {} as FileStat }],
+      moved: [
+        {
+          edit: { source: 'a.ts', target: 'b/a.ts' },
+          stat: { type: 'file', size: 0, mtimeMs: 0, contentKind: 'binary' },
+        },
+      ],
       failed: [{ edit: { source: 'c.ts', target: 'b/c.ts' }, error }],
     });
 

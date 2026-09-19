@@ -130,7 +130,6 @@ describe('archive', () => {
 describe('content operations over a composed view', () => {
   const checkout = {
     '.git/HEAD': 'ref: refs/heads/main',
-    '.tau/revisions/r1.json': '{"revision":1}',
     '.tau/chats/c1.json': '{"messages":[]}',
     'src/main.ts': 'export const part = 1;',
   } as const;

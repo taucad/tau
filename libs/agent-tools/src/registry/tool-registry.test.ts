@@ -341,6 +341,7 @@ describe('createChatToolRegistry invocation', () => {
       invoke(build({ parameters }), 'apply_parameter_operation', {
         signal: controller.signal,
         input: {
+          action: 'propose',
           targetFile: 'main.py',
           requestId: 'agent:applied',
           expected,

@@ -26,7 +26,7 @@ import type {
   RpcRuntimeClient,
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
-import { getProviderFacingToolInputSchemas } from '@taucad/chat/schemas';
+import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import { z } from 'zod';
 
 import type { HostToolDefinition, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
@@ -145,20 +145,12 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     testingEnabled: options.testingEnabled,
   }).filter((entry) => servable(rpcForTool[entry.toolName]));
   const byName = new Map<string, (typeof schemas)[number]>(schemas.map((entry) => [entry.toolName, entry]));
-  const definitions: HostToolDefinition[] = schemas.map((entry) => {
-    const inputSchema = z.toJSONSchema(entry.schema, {
-      target: 'draft-7',
-      io: 'input',
-    }) as JsonObject & {
-      $schema?: unknown;
-    };
-    delete inputSchema.$schema;
-    return {
-      name: entry.toolName,
-      description: toolDescriptions[entry.toolName as keyof typeof toolDescriptions],
-      inputSchema,
-    };
-  });
+  const definitions: HostToolDefinition[] = schemas.map((entry) => ({
+    name: entry.toolName,
+    description: toolDescriptions[entry.toolName as keyof typeof toolDescriptions],
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- draft-7 JSON Schema is JSON by construction.
+    inputSchema: toProviderToolJsonSchema(entry.schema) as JsonObject,
+  }));
 
   return {
     list: () => definitions,

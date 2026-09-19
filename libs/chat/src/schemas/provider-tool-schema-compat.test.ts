@@ -1,45 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { toolMode, toolName } from '#constants/tool.constants.js';
 import {
   filterProviderFacingToolNamesByModelSupport,
   getProviderFacingToolInputSchemas,
+  toProviderToolJsonSchema,
 } from '#schemas/provider-tool-schemas.js';
 
-const vertexBreakingKeywords = ['const', 'propertyNames', 'prefixItems'] as const;
+/**
+ * Keywords no provider accepts today: Vertex rejects `const`/`propertyNames`/`prefixItems`, and
+ * `$ref`/`definitions`/`$defs` reach Vertex as ref loops it refuses outright.
+ */
+const bannedKeywords = ['const', 'propertyNames', 'prefixItems', '$ref', 'definitions', '$defs'] as const;
 
-type KeywordPathMap = Record<(typeof vertexBreakingKeywords)[number], string[]>;
+type BannedKeyword = (typeof bannedKeywords)[number];
 
-const emptyKeywordPaths = (): KeywordPathMap => ({
+const emptyKeywordPaths = (): Record<BannedKeyword, string[]> => ({
   const: [],
   propertyNames: [],
   prefixItems: [],
+  $ref: [],
+  definitions: [],
+  $defs: [],
 });
 
 const collectKeywordPaths = (
   value: unknown,
   path = '$',
-  paths: KeywordPathMap = emptyKeywordPaths(),
-): KeywordPathMap => {
+  paths: Record<BannedKeyword, string[]> = emptyKeywordPaths(),
+): Record<BannedKeyword, string[]> => {
   if (value === null || typeof value !== 'object') {
     return paths;
   }
-
   if (Array.isArray(value)) {
     for (const [index, entry] of value.entries()) {
       collectKeywordPaths(entry, `${path}[${index}]`, paths);
     }
     return paths;
   }
-
   for (const [key, child] of Object.entries(value)) {
-    if (vertexBreakingKeywords.includes(key as (typeof vertexBreakingKeywords)[number])) {
-      paths[key as (typeof vertexBreakingKeywords)[number]].push(`${path}.${key}`);
+    if ((bannedKeywords as readonly string[]).includes(key)) {
+      paths[key as BannedKeyword].push(`${path}.${key}`);
     }
     collectKeywordPaths(child, `${path}.${key}`, paths);
   }
-
   return paths;
+};
+
+type ProviderToolSchema = {
+  type?: unknown;
+  anyOf?: unknown;
+  oneOf?: unknown;
+  allOf?: unknown;
+  properties?: Record<string, { type?: string; description?: string }>;
+  required?: unknown;
 };
 
 const serializeProviderFacingSchemas = (testingEnabled = true) =>
@@ -48,18 +61,26 @@ const serializeProviderFacingSchemas = (testingEnabled = true) =>
     testingEnabled,
   }).map((entry) => ({
     ...entry,
-    jsonSchema: toJsonSchema(entry.schema),
+    jsonSchema: toProviderToolJsonSchema(entry.schema) as ProviderToolSchema,
   }));
 
-const providerSchemaFor = (name: string): { properties?: Record<string, { type?: string; description?: string }> } => {
+const providerSchemaFor = (name: string): ProviderToolSchema => {
   const schema = serializeProviderFacingSchemas().find((entry) => entry.toolName === name)?.jsonSchema;
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+  if (!schema) {
     throw new Error(`missing JSON Schema for ${name}`);
   }
-  return schema as {
-    properties?: Record<string, { type?: string; description?: string }>;
-  };
+  return schema;
 };
+
+/**
+ * The Anthropic codec forwards only `{type, properties, required}`, so anything a tool expresses
+ * above that level is silently dropped before Claude ever sees it.
+ */
+const anthropicProjection = (schema: ProviderToolSchema) => ({
+  type: 'object',
+  properties: schema.properties ?? {},
+  required: schema.required ?? [],
+});
 
 describe('provider-facing tool schema compatibility', () => {
   it('should resolve the complete active CAD toolbelt', () => {
@@ -125,26 +146,48 @@ describe('provider-facing tool schema compatibility', () => {
     ).toEqual([]);
   });
 
-  it('should emit no Vertex-breaking JSON Schema keywords for active provider-facing inputs', () => {
+  it.each([true, false])(
+    'should declare every provider-facing input as a plain top-level object (testing enabled: %s)',
+    (testingEnabled) => {
+      const failures = serializeProviderFacingSchemas(testingEnabled).flatMap((entry) => {
+        const { jsonSchema } = entry;
+        return [
+          jsonSchema.type === 'object' ? undefined : `${entry.toolName}: top-level type is ${String(jsonSchema.type)}`,
+          jsonSchema.anyOf === undefined ? undefined : `${entry.toolName}: top-level anyOf`,
+          jsonSchema.oneOf === undefined ? undefined : `${entry.toolName}: top-level oneOf`,
+          jsonSchema.allOf === undefined ? undefined : `${entry.toolName}: top-level allOf`,
+        ].filter((failure) => failure !== undefined);
+      });
+
+      expect(failures).toEqual([]);
+    },
+  );
+
+  it.each([true, false])(
+    'should emit no provider-breaking JSON Schema keywords (testing enabled: %s)',
+    (testingEnabled) => {
+      const failures = serializeProviderFacingSchemas(testingEnabled).flatMap((entry) => {
+        const paths = collectKeywordPaths(entry.jsonSchema);
+        return bannedKeywords.flatMap((keyword) => paths[keyword].map((path) => `${entry.toolName}: ${path}`));
+      });
+
+      expect(failures).toEqual([]);
+    },
+  );
+
+  it('should survive the Anthropic codec projection with its parameters intact', () => {
+    // Every CAD tool takes at least one input; an empty projection means Claude was offered a tool it cannot call.
     const failures = serializeProviderFacingSchemas().flatMap((entry) => {
-      const paths = collectKeywordPaths(entry.jsonSchema);
-      return vertexBreakingKeywords.flatMap((keyword) => paths[keyword].map((path) => `${entry.toolName}: ${path}`));
+      const projected = anthropicProjection(entry.jsonSchema);
+      return Object.keys(projected.properties).length > 0 ? [] : [entry.toolName];
     });
 
     expect(failures).toEqual([]);
   });
 
   it('should keep screenshot and use_skill provider inputs pruned to implemented fields', () => {
-    const entries = serializeProviderFacingSchemas();
-    const screenshot = entries.find((entry) => entry.toolName === toolName.screenshot)?.jsonSchema as
-      | { properties?: Record<string, unknown> }
-      | undefined;
-    const useSkill = entries.find((entry) => entry.toolName === toolName.useSkill)?.jsonSchema as
-      | { properties?: Record<string, unknown> }
-      | undefined;
-
-    expect(Object.keys(screenshot?.properties ?? {}).sort()).toEqual(['mode', 'targetFile']);
-    expect(Object.keys(useSkill?.properties ?? {}).sort()).toEqual(['reason', 'skillName']);
+    expect(Object.keys(providerSchemaFor(toolName.screenshot).properties ?? {}).sort()).toEqual(['mode', 'targetFile']);
+    expect(Object.keys(providerSchemaFor(toolName.useSkill).properties ?? {}).sort()).toEqual(['reason', 'skillName']);
   });
 
   it('should keep test_model provider filters as JSON arrays without bracket-key compatibility syntax', () => {

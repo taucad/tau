@@ -18,6 +18,7 @@
     "vitest.billing.config.ts",
     "vitest.setup.ts",
     "vitest.integration.config.ts",
+    "vitest.live.config.ts",
     "drizzle.config.ts",
     "scripts/**/*.mts",
     "app/**/*.test.ts",

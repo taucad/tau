@@ -88,8 +88,17 @@ export const createVertexResponseShim = (signatures: Map<string, string>): Trans
       }
       const signature = call.extra_content?.google?.thought_signature;
       const id = idByIndex.get(index);
-      if (typeof signature === 'string' && id !== undefined) {
-        signatures.set(id, signature);
+      if (typeof signature === 'string') {
+        if (id === undefined) {
+          // Losing it silently costs the next turn a 400 from Gemini with no
+          // trace of why. Ponytail: warned per delta, matching the transport's
+          // own attachment-budget warning; the shim keeps no session state.
+          console.warn(
+            `Tau model gateway: Vertex sent a tool-call thought signature at index ${index} before any call id, so it cannot be echoed on the next turn.`,
+          );
+        } else {
+          signatures.set(id, signature);
+        }
       }
       if (call.extra_content !== undefined) {
         delete call.extra_content;
@@ -147,14 +156,33 @@ export const createVertexResponseShim = (signatures: Map<string, string>): Trans
 };
 
 /**
+ * Google's documented stand-in for a signature Tau does not hold. Gemini accepts
+ * it on a current-turn call and validates nothing (live T21).
+ */
+const dummyThoughtSignature = 'skip_thought_signature_validator';
+
+/** The tool-call signature already on an outbound call, if any. */
+const signatureOf = (call: Record<string, unknown>): unknown =>
+  (call['extra_content'] as { readonly google?: { readonly thought_signature?: unknown } } | undefined)?.google
+    ?.thought_signature;
+
+/**
  * Echo captured Gemini thought signatures onto the outbound tool calls.
  *
  * Gemini 3 rejects a tool-result continuation whose assistant tool calls lost
  * their `thought_signature`, so the value Tau persisted on the durable row and
  * re-materialised onto the pi `ToolCall` is put back on the wire here.
  *
+ * Only the *current* turn is validated — the assistant messages after the last
+ * user message — and within a parallel batch only its first call (live
+ * T14–T17, T23). A current-turn call Tau holds no signature for, which is what
+ * a foreign-provider history or a resume on a switched model produces, carries
+ * {@link dummyThoughtSignature} instead of failing the turn with HTTP 400.
+ * Earlier, completed turns are left exactly as they are: they need no
+ * signature, and nothing here has measured a dummy to be safe on them.
+ *
  * @param context - The pi context this request was built from.
- * @returns A pi `onPayload` step, returning `undefined` when nothing to echo.
+ * @returns A pi `onPayload` step, returning `undefined` when it changed nothing.
  * @public
  */
 export const echoThoughtSignatures =
@@ -171,22 +199,34 @@ export const echoThoughtSignatures =
         }
       }
     }
-    if (byId.size === 0 || !zodUtility.isObject(payload) || !Array.isArray(payload['messages'])) {
+    if (!zodUtility.isObject(payload) || !Array.isArray(payload['messages'])) {
       return undefined;
     }
-    for (const message of payload['messages']) {
+    const { messages } = payload;
+    let lastUser = -1;
+    for (const [index, message] of messages.entries()) {
+      if (zodUtility.isObject(message) && message['role'] === 'user') {
+        lastUser = index;
+      }
+    }
+    let changed = false;
+    for (const [index, message] of messages.entries()) {
       if (!zodUtility.isObject(message) || !Array.isArray(message['tool_calls'])) {
         continue;
       }
-      for (const call of message['tool_calls']) {
-        if (!zodUtility.isObject(call) || typeof call['id'] !== 'string') {
-          continue;
-        }
-        const signature = byId.get(call['id']);
+      const calls = message['tool_calls'].filter((call) => zodUtility.isObject(call)) as Array<Record<string, unknown>>;
+      for (const call of calls) {
+        const signature = typeof call['id'] === 'string' ? byId.get(call['id']) : undefined;
         if (signature !== undefined) {
           call['extra_content'] = { google: { thought_signature: signature } };
+          changed = true;
         }
       }
+      const first = calls[0];
+      if (index > lastUser && first !== undefined && signatureOf(first) === undefined) {
+        first['extra_content'] = { google: { thought_signature: dummyThoughtSignature } };
+        changed = true;
+      }
     }
-    return payload;
+    return changed ? payload : undefined;
   };

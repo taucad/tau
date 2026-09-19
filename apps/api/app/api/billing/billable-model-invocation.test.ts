@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
@@ -914,6 +915,76 @@ describe('BillableModelInvocationService', () => {
       'deployment.environment': 'development',
       providerId: 'openai',
     });
+  });
+
+  /* W3: the funded refusal branch logs what the operator needs and classifies the status
+   * through the same function the self-host path uses, so the two cannot drift. */
+  it('should log the refused upstream body, bounded and redacted, and answer 429 as RATE_LIMITED', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const refusedBody = {
+      error: {
+        type: 'rate_limit_error',
+        message: 'Rate limit reached.',
+        metadata: { authorization: 'Bearer ya29.a0AfH6SMBx-secret-token' },
+      },
+    };
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(JSON.stringify(refusedBody), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '7' },
+        }),
+    );
+    const { service } = exhaustionHarness(qualified);
+
+    try {
+      await service.invoke(intent());
+      expect.fail('The rate-limited supplier should refuse the invocation');
+    } catch (error) {
+      expect((error as LlmGatewayError).getStatus()).toBe(429);
+      expect(gatewayErrorType(error)).toBe('RATE_LIMITED');
+      expect((error as LlmGatewayError).getResponse()).toMatchObject({
+        error: { details: { retryAfterSeconds: 7 } },
+      });
+      // The supplier's own sentence never leaves the API on a funded turn.
+      expect((error as LlmGatewayError).message).not.toContain('Rate limit reached.');
+    }
+
+    expect(warn).toHaveBeenCalledWith(
+      {
+        providerId: 'openai',
+        routeId: 'route',
+        modelId: 'model',
+        upstreamStatus: 429,
+        upstreamBody: JSON.stringify({
+          error: { ...refusedBody.error, metadata: { authorization: '[redacted]' } },
+        }),
+        operationId: 'operation',
+      },
+      'Upstream model provider refused the request',
+    );
+  });
+
+  it('should answer the Vertex 499 CANCELLED as a provider outage on the funded path', async () => {
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { code: 499, message: 'The operation was cancelled.' } }), {
+          status: 499,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const { service } = exhaustionHarness(qualified);
+
+    await expect(service.invoke(intent())).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError &&
+        error.getStatus() === 503 &&
+        gatewayErrorType(error) === 'PROVIDER_UNAVAILABLE',
+    );
   });
 
   /* R1 in-stream + V4 (Cloud): the relayed frame carries Tau's code, and the turn that

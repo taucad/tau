@@ -43,11 +43,18 @@ For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and us
   [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.
 
 Use resolutionMode "declared-only" when inferred semantics are not acceptable. The result retains native values, semantic bindings, provenance, assumptions, diagnostics, and the exact identity required by apply_parameter_operation. Reading in the same mode never disturbs a pending source-unit plan; reading in a different mode rejects it. An "unresolved" result carries a diagnostic code: INVALID_RECORD means the saved values cannot be read and are preserved untouched, and RESOLUTION_SUPERSEDED means a concurrent read changed the mode.`,
-  [toolName.applyParameterOperation]: `Propose one checked parameter operation, or confirm/cancel a previously returned source-unit plan.
+  [toolName.applyParameterOperation]: `Propose one checked parameter operation, or confirm/cancel a plan a previous propose returned.
 
-Call get_parameters first and pass its exact identity as expected. Reuse requestId only for an identical retry. The returned outcome distinguishes committed, rejected, cancelled, known-not-applied, and indeterminate operations; inspect it before continuing.
+Every call names an action:
+- action "propose" with targetFile, requestId, expected, pressure and operation.
+- action "confirm" with targetFile, the proposal's requestId and its planFingerprint.
+- action "cancel" with targetFile and the proposal's requestId.
 
-A source-unit operation changes the unit the source interprets a value in. Only a binding with sourceUnitCapability admits it. Build it from get_parameters, with binding = manifest.bindings[pointer]: parameterId is binding.parameter.value, resource is binding.schema.resource, and producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }. The result is "confirmation-required" with a planFingerprint; confirm with that fingerprint and the same requestId, or cancel.`,
+Pass no other fields: confirm and cancel carry no operation, and propose carries no planFingerprint.
+
+Call get_parameters first and pass its exact identity as expected. Reuse requestId only for an identical retry. The returned outcome distinguishes committed, rejected, cancelled, known-not-applied, and indeterminate operations; inspect it before continuing. An outcome of "confirmation-required" carries a planFingerprint and applies nothing until you follow it with a confirm naming that fingerprint and the same requestId, or a cancel.
+
+A source-unit operation changes the unit the source interprets a value in, and is the operation that asks for confirmation. Only a binding with sourceUnitCapability admits it. Build it from get_parameters, with binding = manifest.bindings[pointer]: parameterId is binding.parameter.value, resource is binding.schema.resource, and producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }.`,
   [toolName.screenshot]: `Capture a screenshot of a specific geometry unit's 3D model for visual inspection.
 
 You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no project-level fallback. The requested geometry unit is resolved or created, then its render is awaited before headless capture. The call fails for a missing source file, render failure or render timeout, an unavailable renderer, or invalid image artifacts.

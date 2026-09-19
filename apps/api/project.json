@@ -95,6 +95,17 @@
         "cwd": "{projectRoot}"
       }
     },
+    "test:live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Live provider suites driven through the in-process model gateway (app/testing/live). Each suite skips when its provider credential is absent from apps/api/.env."
+      },
+      "options": {
+        "command": "vitest run --config vitest.live.config.ts",
+        "cwd": "{projectRoot}"
+      }
+    },
     "test:geospec": {
       "executor": "nx:run-commands",
       "options": {

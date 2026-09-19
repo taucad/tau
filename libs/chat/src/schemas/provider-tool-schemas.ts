@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ToolName, ToolSelection } from '#types/tool.types.js';
 import { toolName } from '#constants/tool.constants.js';
 import type { ToolPartType } from '#schemas/tool-input.registry.js';
@@ -56,6 +57,34 @@ export const filterProviderFacingToolNamesByModelSupport = ({
   return toolNames.filter((name) =>
     (requiredModelInputModalities[name] ?? []).every((modality) => modelSupportsInput(modelSupport, modality)),
   );
+};
+
+/**
+ * Serialize one tool input schema exactly as the host puts it on the wire.
+ *
+ * Every provider-facing tool declaration goes through here, so the schema contract test observes
+ * the same bytes Vertex, Anthropic and OpenAI receive. `io: 'input'` is what makes the wire shape
+ * the flat, typeless side of a schema that narrows to a strict union on the way in.
+ *
+ * @param schema - A provider-facing tool input schema.
+ * @returns Its draft-7 JSON Schema without the `$schema` dialect key providers reject.
+ * @public
+ *
+ * @example <caption>Serializing the active toolbelt</caption>
+ * ```typescript
+ * import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
+ * import { toolMode } from '@taucad/chat/constants';
+ *
+ * const declarations = getProviderFacingToolInputSchemas({
+ *   toolChoice: toolMode.auto,
+ *   testingEnabled: false,
+ * }).map((entry) => ({ name: entry.toolName, inputSchema: toProviderToolJsonSchema(entry.schema) }));
+ * ```
+ */
+export const toProviderToolJsonSchema = (schema: z.ZodType): Record<string, unknown> => {
+  const jsonSchema = z.toJSONSchema(schema, { target: 'draft-7', io: 'input' }) as Record<string, unknown>;
+  delete jsonSchema['$schema'];
+  return jsonSchema;
 };
 
 /** @public */

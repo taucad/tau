@@ -30,6 +30,7 @@ import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { relocateLegacyLfsObjects, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { retireDueLfsObjects, retireLfsObjects } from '#api/git/lfs-retirement.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 
 /**
  * D18: an object is retired only when its unreachable mark is older than the
@@ -90,7 +91,7 @@ const pointerFor = (content: string): { text: string; oid: string; size: number;
   };
 };
 
-describe('LFS retirement through a lease', () => {
+describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through a lease', () => {
   let moduleRef: TestingModule;
   let driver: ObjectStorageService;
   let store: S3RepositoryStore;
@@ -587,7 +588,7 @@ describe('LFS retirement through a lease', () => {
   }, 180_000);
 });
 
-describe('legacy LFS key relocation', () => {
+describe.skipIf(!(await databaseReachable(databaseUrl)))('legacy LFS key relocation', () => {
   let moduleRef: TestingModule;
   let driver: ObjectStorageService;
   let client: postgres.Sql;

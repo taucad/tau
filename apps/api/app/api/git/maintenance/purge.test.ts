@@ -20,6 +20,7 @@ import { encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { maxPurgeObjectsWithoutConfirmation, purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 
 /**
  * S5 and S10 on MinIO and PostgreSQL: a tombstoned tenant's prefixes are
@@ -37,7 +38,7 @@ const databaseUrl = process.env.DATABASE_URL;
 
 const shortLivedClient = (): postgres.Sql => postgres(databaseUrl, { max: 1, prepare: false });
 
-describe('tenant purge', () => {
+describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
   let moduleRef: TestingModule;
   let driver: ObjectStorageService;
   let store: S3RepositoryStore;

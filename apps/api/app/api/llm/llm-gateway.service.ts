@@ -14,6 +14,9 @@ export type LlmGatewayRelayInput = {
   readonly signal: AbortSignal;
   readonly anthropicVersion?: string;
   readonly anthropicBeta?: string;
+  /** Best-effort attribution for the receipt; absent when the caller sent none. */
+  readonly projectHint?: string;
+  readonly chatHint?: string;
 };
 
 /** Relays one authenticated request through the shared funded invocation owner. */
@@ -35,6 +38,8 @@ export class LlmGatewayService {
         ...(input.anthropicBeta === undefined ? {} : { 'anthropic-beta': input.anthropicBeta }),
       },
       activity: 'agent',
+      ...(input.projectHint === undefined ? {} : { projectHint: input.projectHint }),
+      ...(input.chatHint === undefined ? {} : { chatHint: input.chatHint }),
       signal: input.signal,
       onAdmitted: (operationId) => {
         void input.reply.header('x-tau-operation-id', operationId);

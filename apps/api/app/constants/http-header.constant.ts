@@ -37,6 +37,19 @@ export const httpHeader = {
    * browser leg of Tau Cloud cannot make one call (W18 DEF-5).
    */
   gitProtocol: 'git-protocol',
+  /**
+   * Best-effort attribution for a gateway relay: which project and which chat
+   * the turn belongs to, so its receipt can be filtered by them on `/usage`.
+   * Both are opaque owner-scoped ids, optional on every request, dropped rather
+   * than refused when malformed (`readHint` in
+   * `apps/api/app/api/llm/llm-gateway.headers.ts`).
+   *
+   * Like `git-protocol` above, their value here is that CORS derives its
+   * allow-list from this record: omit them and the browser answers the preflight
+   * `204` and drops every gateway call, with nothing in the API log to see.
+   */
+  xTauProjectId: 'x-tau-project-id',
+  xTauChatId: 'x-tau-chat-id',
 } as const;
 
 /**

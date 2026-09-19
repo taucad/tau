@@ -526,8 +526,9 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * The mask a copy descends with, asked about project-relative spellings.
    *
    * A copy root can be any directory, so the source is joined back on before
-   * the policy is asked: `src/.git` is an ordinary directory, `.git` under the
-   * project root is the control plane.
+   * the policy is asked: `notes/exports` is an ordinary directory, `exports`
+   * under the project root is a records row. The control plane needs no such
+   * care — it is the control plane at any depth (path policy contract, PP3).
    */
   const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
     ...(base.copyTree === undefined
@@ -536,9 +537,9 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           copyTree: async (source: string, target: string, options?: { admits?: TreeSearchOptions['admits'] }) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
-            /* Every entry a copy writes is a target too: `src/.git` is authored
-             * where it sits, but copied to the project root it would be the
-             * control plane, and a records row is not the agent's to write. */
+            /* Every entry a copy writes is a target too: `notes/exports` is
+             * authored where it sits, but copied to the project root it would be
+             * a records row, which is not the agent's to write. */
             const writableBelow = (relativePath: string): boolean => {
               const { agentAccess } = classify(joinRelativePath(to!, relativePath));
               return agentAccess !== 'hidden' && (!masked || agentAccess === 'read-write');

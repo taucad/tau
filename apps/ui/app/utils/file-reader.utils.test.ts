@@ -46,11 +46,11 @@ describe('createImportedProjectFiles', () => {
       ['.git/HEAD', { filename: '.git/HEAD', content: bytes(2) }],
       ['.git/objects/ab/cdef', { filename: '.git/objects/ab/cdef', content: bytes(3) }],
       ['.tau/binding.json', { filename: '.tau/binding.json', content: bytes(4) }],
-      /* Anchored, so a vendored repository is the user's own content. */
+      /* The control plane at any depth: a vendored repository goes with the project's own. */
       ['vendor/dep/.git/HEAD', { filename: 'vendor/dep/.git/HEAD', content: bytes(5) }],
     ]);
 
-    expect(Object.keys(createImportedProjectFiles(files, 'main.ts'))).toEqual(['main.ts', 'vendor/dep/.git/HEAD']);
+    expect(Object.keys(createImportedProjectFiles(files, 'main.ts'))).toEqual(['main.ts']);
   });
 
   it('rejects an excluded selected main file', () => {

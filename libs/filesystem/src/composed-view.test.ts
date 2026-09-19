@@ -558,10 +558,13 @@ describe('composeView mutating porcelain', () => {
 
     await view.copyTree!('src', 'backup');
     const midTree = base.copyTree.mock.calls[1]![2]!.admits!;
-    /* Project-relative: `src/.git` is not the control plane, `.git` under the
-     * project root is — the filter must join the copy root before it asks. */
-    expect(midTree('.git', 'dir')).toBe(true);
+    /* Project-relative: `src/exports` is not the records family, `exports` under
+     * the project root is — the filter must join the copy root before it asks.
+     * A repository is the control plane wherever it sits, so `src/.git` is
+     * refused at this depth too (CI1). */
+    expect(midTree('exports', 'dir')).toBe(true);
     expect(midTree('main.ts', 'file')).toBe(true);
+    expect(midTree('.git', 'dir')).toBe(false);
   });
 
   it('should narrow, never widen, a caller filter on a copy', async () => {

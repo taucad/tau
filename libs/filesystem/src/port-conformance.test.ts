@@ -38,6 +38,9 @@ const seeded = {
   'src/main.ts': 'export const part = 1;',
   'src/lib/helper.ts': 'export const helper = 2;',
   '.git/HEAD': 'ref: refs/heads/main',
+  /* A vendored repository: the control plane at any depth, so the mask row below
+   * asserts it on the layer that masks and the bytes on the two below it. */
+  'src/.git/config': '[remote "origin"]',
 } as const;
 
 type Surface = {
@@ -152,6 +155,9 @@ afterEach(() => {
 });
 
 describe.each(layers)('FileSystemProvider conformance: $name', ({ hasPorcelain, masksControlPlane, open }) => {
+  /** `src`'s children: the vendored repository is there below the mask and gone above it. */
+  const sourceChildren = masksControlPlane ? ['lib', 'main.ts'] : ['.git', 'lib', 'main.ts'];
+
   it('should read a file as bytes and as UTF-8', async () => {
     const { port, dispose } = await open();
 
@@ -164,7 +170,7 @@ describe.each(layers)('FileSystemProvider conformance: $name', ({ hasPorcelain, 
     const { port, dispose } = await open();
 
     const children = await port.readdir('src');
-    expect(children.sort()).toStrictEqual(['lib', 'main.ts']);
+    expect(children.sort()).toStrictEqual(sourceChildren);
     await expect(port.stat('src')).resolves.toMatchObject({ type: 'dir' });
     await expect(port.stat('src/main.ts')).resolves.toMatchObject({
       type: 'file',
@@ -251,10 +257,14 @@ describe.each(layers)('FileSystemProvider conformance: $name', ({ hasPorcelain, 
         await expect(port.readFile('.git/HEAD')).rejects.toMatchObject({ code: 'EPERM' });
         await expect(port.exists('.git/HEAD')).resolves.toBe(false);
         expect(await port.readdir('')).not.toContain('.git');
+        /* CI1: the same refusal wherever the repository sits. */
+        await expect(port.readFile('src/.git/config')).rejects.toMatchObject({ code: 'EPERM' });
+        await expect(port.exists('src/.git/config')).resolves.toBe(false);
       } else {
         await expect(port.readFile('.git/HEAD', 'utf8')).resolves.toBe(seeded['.git/HEAD']);
         await expect(port.exists('.git/HEAD')).resolves.toBe(true);
         expect(await port.readdir('')).toContain('.git');
+        await expect(port.readFile('src/.git/config', 'utf8')).resolves.toBe(seeded['src/.git/config']);
       }
       dispose();
     },

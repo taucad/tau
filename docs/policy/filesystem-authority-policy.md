@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-09-18'
+updated: '2026-09-20'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/revisions-policy.md
@@ -22,6 +22,7 @@ related:
   - docs/research/client-host-topology-and-filesystem-authority.md
   - docs/research/agent-revisions-and-compute-cache-spike-closeout-blueprint.md
   - docs/research/agent-host-closeout-v2-charter.md
+  - docs/research/filesystem-revisions-closeout-blueprint.md
 ---
 
 # Filesystem Authority Policy
@@ -212,7 +213,7 @@ Every workspace has exactly four storage classes, each with one owner; a byte is
 | Authored: `tau.json`, sources, inputs, authored `.tau` controls, `.gitignore`, and `.gitattributes`; generated `.tau/types/**`, `.tau/tsconfig.generated.json`, and `.tau/lockfile.json` remain authored-class but unversioned | The selected checkout under the single authority; the path registry alone decides versioning            | Yes only where the registry says `versioned`; these bytes form the revision | Read and write (Rule 15)                                                                                    |
 | Records: `.tau/chats/**`, `.tau/runs/**`, `.tau/artifacts/**`, `.tau/tool-results/**`, `.tau/offloaded-tool-results/**`, `exports/**`, `thumbnail.webp`                                                                        | The selected checkout authority's protected owner path; hosts write, agents may only read               | No                                                                          | Read-only (Rule 15, I-MASK)                                                                                 |
 | Cache: `.tau/cache/**`, `node_modules/**`                                                                                                                                                                                      | Regenerable storage in or composed over the selected checkout; never a private compute-store projection | No                                                                          | Read and write; watch behavior follows provenance and Rule 26                                               |
-| Control plane: revision objects, refs and transactional metadata; binding, epoch, head-routing and idempotency state (`.git/**` on every host, `.jj/**`, `refs/tau/*`, `.tau/binding.json`)                                    | The revision authority, written only through `RevisionPort` and authority admission                     | No: a revision hash never covers its own store, refs, or control state      | Refused by every view, before provider I/O; the unmasked authority is reachable only by trusted composition |
+| Control plane: revision objects, refs and transactional metadata; binding, epoch, head-routing and idempotency state (`.git/**` on every host, `.jj/**`, `refs/tau/*`, `.tau/binding.json`), wherever in the tree they sit     | The revision authority, written only through `RevisionPort` and authority admission                     | No: a revision hash never covers its own store, refs, or control state      | Refused by every view, before provider I/O; the unmasked authority is reachable only by trusted composition |
 
 Classification is trusted and structural, never a glob: the authority names each class at admission, the generated ignore file is a convenience barrier, and a post-snapshot membership audit proves that no record, cache, control, or private byte entered a revision and no authored `.tau` control was excluded. Already-tracked bytes stay tracked; force-add attempts and symlink escapes into a private store are refused.
 
@@ -227,6 +228,27 @@ Deleting one project releases that project's owners and pins in the private stor
 These four classes are ratified. `classify()` is their sole executable registry: callers never infer class, versioning, agent access, watch plane, or generated ignore membership from ad hoc prefixes or globs.
 
 Control-plane paths are refused by every composed view before provider I/O, whichever consumer the view serves and whichever operation reaches it — a read, a walk, a search, an archive, a copy or a transfer. The unmasked authority is reachable only by trusted composition: the revision port, host record writers and project-directory lifecycle. A consumer-facing content operation that runs over the unmasked authority is a bypass, not a shortcut.
+
+### 17. What a path policy must satisfy
+
+A path policy is one function, `classify(path) → PathClassification`, answering four questions about every path in a project: its storage class (Rule 16), whether it is `versioned`, its `agentAccess` (`read-write`, `read-only`, `hidden` — `hidden` is hidden from people too), and its `watch` plane. It is a `.gitignore` that answers four questions instead of one. Tau's instance, `tauPathPolicy`, is the registry table in `libs/filesystem/src/path-registry.ts`; it describes Tau's reserved layout and is not user-editable. The person's own ignore rules stay in their `.gitignore`, whose generated block is derived from the same rows.
+
+Every path policy — Tau's or a test's — satisfies these:
+
+| #   | Property                                                                                                                                                                                                                                                                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PP1 | **Total**: `classify` answers for every canonical relative path; it never throws and never returns a partial answer                                                                                                                                                                                                                                                                       |
+| PP2 | **Hidden is inherited**: if a directory is hidden, every path beneath it is hidden, at any depth                                                                                                                                                                                                                                                                                          |
+| PP3 | **Control plane matches a segment, never a root**: a `control-plane` row matches wherever its name appears as a path segment, so the answer cannot depend on how deep the repository sits                                                                                                                                                                                                 |
+| PP4 | **Project-relative, and the view owes the rebase**: `classify` takes a path relative to the project root (the `.tau/*`, `exports` and `thumbnail.webp` rows are root-matched by design). A view rooted anywhere else — Home `/`, a parent folder — either rebases a path onto its owning project before classifying it, or does not serve it; PP3 makes the control plane safe regardless |
+| PP5 | **`versioned` agrees with the ignore file**: a path is unversioned exactly when the generated ignore block excludes it                                                                                                                                                                                                                                                                    |
+| PP6 | **Unversioned is never less restrictive than versioned for an agent** is _not_ required — the generated and cache rows (`.tau/types`, `.tau/lockfile.json`, `.tau/cache`, `node_modules`) are unversioned and agent-writable by design; recorded so nobody "fixes" it                                                                                                                     |
+
+A row therefore carries two independent facts, never one flag for both: `anchored` is the generated ignore pattern's spelling, and `match` (`'root' | 'segment'`) is how the row classifies a path. Conflating them is what let a nested `.git` be captured into revisions and written by an agent.
+
+There is no user-configurable policy, no per-project policy file, no plugin API for rows and no policy registry. If a second layout ever becomes real, both halves of the capability take the policy by injection and the properties above say what its policy must satisfy.
+
+**Why**: The mask, the capture filter and the generated ignore file are three readings of one table; they agree by property, not by coincidence.
 
 ## Anti-Patterns
 

@@ -40,13 +40,17 @@ const projectRoute = `/projects/${projectId}`;
 const duplicateId = 'proj_nnnnnnnnnnnnnnnnnnnnn';
 
 /**
- * One seed per registry answer that matters: two hidden rows, one records row,
+ * One seed per registry answer that matters: three hidden rows, one records row,
  * two authored rows. The revision store lives under `.git` on every host (git
- * storage substrate D29), so `.git/**` alone stands for the control plane.
+ * storage substrate D29), so `.git/**` alone stands for the control plane — and
+ * a vendored repository's `src/.git/**` stands for the nested one, which the
+ * registry hides at any depth (EQ1, CI1). Every pin below reads the hidden set
+ * from `classify`, so the nested row is covered by all of them.
  */
 const seeded = {
   '.git/HEAD': 'ref: refs/heads/main',
   '.git/objects/x': 'object-bytes',
+  'src/.git/config': '[remote "origin"]',
   '.tau/chats/c1.json': '{"messages":[]}',
   'tau.json': '{}',
   'src/main.ts': 'export const part = 1;',
@@ -118,9 +122,37 @@ describe('masked path reachability through the authority-global surface', () => 
     }
   });
 
-  it('should seed both control-plane rows the pins below look for', () => {
-    expect(hiddenPaths).toEqual(['.git/HEAD', '.git/objects/x']);
+  it('should seed every control-plane row the pins below look for', () => {
+    expect(hiddenPaths).toEqual(['.git/HEAD', '.git/objects/x', 'src/.git/config']);
   });
+
+  /* CI1: a repository nested in the design is the control plane too, for every
+   * consumer and in both directions — the gesture is refused before provider I/O
+   * whether the path is the operand, the destination or the source. */
+  it.each(['user', 'agent'] as const)(
+    'should refuse every gesture into a nested control plane for a %s view',
+    async (consumer) => {
+      const nested = 'src/.git/config';
+      const view = projectView(consumer);
+
+      await expect(view.readFile(nested)).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.writeFile(nested, 'forged')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.mkdir('src/.git/hooks')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.copyTree!('src/.git', 'stolen')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.copyTree!('', 'src/.git/backup')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.move!('src/main.ts', 'src/.git/main.ts')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.move!(nested, 'config')).rejects.toMatchObject({ code: 'EPERM' });
+      expect(await view.exists(nested)).toBe(false);
+      expect(await view.readdir('src')).not.toContain('.git');
+      const indexed = await view.statTree!('');
+      expect(indexed.map((entry) => entry.path)).not.toContain(nested);
+      const found = await view.search!('config');
+      expect(found.map((entry) => entry.path)).not.toContain(nested);
+
+      await view.copyTree!('', `backup-${consumer}`);
+      expect(Object.keys(await physically(projectRoute, `backup-${consumer}`))).not.toContain(nested);
+    },
+  );
 
   /* Flipped by W4: the search a consumer reaches is `search` on the rooted
    * surface, over that root's own index, and the view's policy refuses a hidden
@@ -128,7 +160,7 @@ describe('masked path reachability through the authority-global surface', () => 
   it('should not return control-plane entries from a project search', async () => {
     const view = projectView();
 
-    const matches = await Promise.all(['HEAD', 'objects', 'main'].map(async (query) => view.search!(query)));
+    const matches = await Promise.all(['HEAD', 'objects', 'config', 'main'].map(async (query) => view.search!(query)));
 
     const found = matches.flat().map((entry) => entry.path);
     expect(hiddenAmong(found)).toEqual([]);
@@ -192,19 +224,10 @@ describe('masked path reachability through the authority-global surface', () => 
     expect(copied).toContain('src/main.ts');
   });
 
-  it('should not let a copy land control-plane bytes where they become the control plane', async () => {
-    /* `src/.git/HEAD` is authored where it sits, but copied to the project
-     * root it would be `.git/HEAD` — a destination the mask refuses. */
-    await service.writeFile(`${projectRoute}/src/.git/HEAD`, 'authored where it sits');
-    await service.writeFile(`${projectRoute}/src/.tau/chats/c2.json`, '{}');
-
-    await projectView().copyTree!('src', '');
-
-    /* The project's own control plane is untouched, and the copy did land. */
-    await expect(service.readFile(`${projectRoute}/.git/HEAD`, 'utf8')).resolves.toBe(seeded['.git/HEAD']);
-    await expect(service.exists(`${projectRoute}/main.ts`)).resolves.toBe(true);
-  });
-
+  /* A copy's destination is classified too: `src/.tau/chats` is authored where it
+   * sits — the records rows are Tau's at the project root only — but copied to
+   * the project root it would be the records family, which is not the agent's to
+   * write. The project's own control plane survives the same copy. */
   it('should not let an agent copy records into a records path', async () => {
     await service.writeFile(`${projectRoute}/src/.tau/chats/c2.json`, '{}');
 
@@ -214,19 +237,20 @@ describe('masked path reachability through the authority-global surface', () => 
 
     expect(copied).not.toContain('.tau/chats/c2.json');
     expect(copied).toContain('main.ts');
+    await expect(service.readFile(`${projectRoute}/.git/HEAD`, 'utf8')).resolves.toBe(seeded['.git/HEAD']);
   });
 
   it('should classify a mid-tree copy against the project root, not the copy root', async () => {
-    /* `src/.git/HEAD` is an ordinary authored file: only `.git` directly under
-     * the project is the control plane. A filter that forgot to join the copy
-     * root would drop this row. */
-    await service.writeFile(`${projectRoute}/src/.git/HEAD`, 'not the control plane');
+    /* `src/exports/model.step` is an ordinary authored file: only `exports`
+     * directly under the project is the records family. A filter that forgot to
+     * join the copy root would drop this row. */
+    await service.writeFile(`${projectRoute}/src/exports/model.step`, 'not a record');
 
     await projectView().copyTree!('src', 'src-copy');
 
     const copied = Object.keys(await physically(projectRoute, 'src-copy'));
 
-    expect(copied).toContain('.git/HEAD');
+    expect(copied).toContain('exports/model.step');
     expect(copied).toContain('main.ts');
   });
 });

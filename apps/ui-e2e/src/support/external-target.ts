@@ -116,6 +116,7 @@ declare module 'vitest' {
   export interface ProvidedContext {
     webGpuProfile: TargetWebGpuProfile;
     acpLiveEnabled: boolean;
+    billingMetered: boolean;
   }
 }
 

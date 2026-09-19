@@ -152,6 +152,75 @@ const unboundSignatureStream = sse([
   '[DONE]',
 ]);
 
+/*
+ * A turn that hits its token ceiling: multi-byte text, `finish_reason: "length"`
+ * and a usage-only final chunk whose `choices` array is empty — the three shapes
+ * a split-sensitive relay is most likely to mangle.
+ */
+const lengthStream = sse([
+  { id: 'c6', choices: [{ index: 0, delta: { role: 'assistant', content: '<think>寸法…</think>' } }] },
+  { id: 'c6', choices: [{ index: 0, delta: { content: 'Fillet R‑3 mm on the ✅ edge' } }] },
+  { id: 'c6', choices: [{ index: 0, delta: {}, finish_reason: 'length' }] },
+  { id: 'c6', choices: [], usage: { prompt_tokens: 9, completion_tokens: 4096, total_tokens: 4105 } },
+  '[DONE]',
+]);
+
+/** Parallel tool calls interleaved across two stream indexes, both signed. */
+const parallelToolCallStream = sse([
+  {
+    id: 'c7',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            { index: 0, id: 'call_a', type: 'function', function: { name: 'run', arguments: '{"a":' } },
+            { index: 1, id: 'call_b', type: 'function', function: { name: 'run', arguments: '{"a":' } },
+          ],
+        },
+      },
+    ],
+  },
+  {
+    id: 'c7',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            { index: 0, function: { arguments: '1}' }, extra_content: { google: { thought_signature: signature } } },
+            { index: 1, function: { arguments: '2}' } },
+          ],
+        },
+      },
+    ],
+  },
+  { id: 'c7', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  '[DONE]',
+]);
+
+/** The shapes every chunk-boundary fuzz replays, keyed so a failure names one. */
+const fuzzStreams = {
+  gemini: geminiStream,
+  plain: plainStream,
+  incrementingIndex: incrementingIndexStream,
+  length: lengthStream,
+  parallelToolCalls: parallelToolCallStream,
+  /* A body that ends on its last event with no closing blank line. */
+  noTrailingBlankLine: geminiStream.slice(0, -1),
+} as const;
+
+/*
+ * Multi-chunk partitions, deterministic so a failure reproduces: every stride
+ * from one byte per chunk upwards walks a different phase through the `data: `
+ * prefixes, the event boundaries and the multi-byte characters.
+ */
+const strides = [1, 2, 3, 5, 7, 11, 13, 17, 29, 47, 101];
+
+/** Interior byte offsets of `length` at every multiple of `stride`. */
+const stridedCuts = (length: number, stride: number): readonly number[] =>
+  Array.from({ length: Math.ceil(length / stride) - 1 }, (_value, index) => (index + 1) * stride);
+
 /** Feed `text` through the shim in `cuts + 1` chunks split at absolute byte offsets. */
 const throughShim = async (
   text: string,
@@ -347,6 +416,75 @@ describe('createVertexResponseShim', () => {
 
     expect(await throughShim(plainStream, signatures, [cut])).toBe(plainStream);
     expect([...signatures]).toEqual([]);
+  });
+
+  /*
+   * A dead Gemini turn reaches the person as pi's `Stream ended without
+   * finish_reason`, which is what a relay stage that loses the terminal chunk
+   * looks like from the codec. These replay real response shapes at every
+   * possible chunk boundary — including inside a multi-byte character, inside a
+   * `data:` prefix and between the two newlines of an event boundary — and hold
+   * the shim to byte identity with the unsplit run.
+   */
+  it.each(Object.entries(fuzzStreams))(
+    'should rewrite the %s stream identically at every single chunk boundary',
+    async (_name, text) => {
+      const length = encoder.encode(text).byteLength;
+      const baseline = await throughShim(text, new Map());
+
+      for (let cut = 1; cut < length; cut += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- each split is a separate stream run.
+        expect(await throughShim(text, new Map(), [cut])).toBe(baseline);
+      }
+      expect(length).toBeLessThan(8192);
+    },
+  );
+
+  it.each(Object.entries(fuzzStreams))(
+    'should rewrite the %s stream identically under every strided multi-chunk partition',
+    async (_name, text) => {
+      const length = encoder.encode(text).byteLength;
+      const baseline = await throughShim(text, new Map());
+
+      for (const stride of strides) {
+        // oxlint-disable-next-line no-await-in-loop -- each partition is a separate stream run.
+        expect(await throughShim(text, new Map(), stridedCuts(length, stride))).toBe(baseline);
+      }
+    },
+  );
+
+  it('should deliver the same finish reason through pi under every partition of a Gemini turn', async () => {
+    const length = encoder.encode(geminiStream).byteLength;
+    const summarize = (events: readonly AssistantMessageEvent[]): unknown => {
+      const done = events.find((event) => event.type === 'done');
+      return {
+        reason: done?.reason,
+        text: events
+          .filter((event) => event.type === 'text_delta')
+          .map((event) => event.delta)
+          .join(''),
+        thinking: events
+          .filter((event) => event.type === 'thinking_delta')
+          .map((event) => event.delta)
+          .join(''),
+        content: done?.message.content,
+        error: events.find((event) => event.type === 'error')?.error.errorMessage,
+      };
+    };
+    const baseline = summarize(await streamThroughPi({ signatures: new Map(), bodies: [], context }));
+
+    expect(baseline).toMatchObject({ reason: 'toolUse', error: undefined });
+    for (const stride of strides) {
+      const cuts = stridedCuts(length, stride);
+      // oxlint-disable-next-line no-await-in-loop -- each partition is a separate stream run.
+      const events = await streamThroughPi({ signatures: new Map(), bodies: [], context, cuts });
+      expect(summarize(events)).toEqual(baseline);
+    }
+    for (let cut = 1; cut < length; cut += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each partition is a separate stream run.
+      const events = await streamThroughPi({ signatures: new Map(), bodies: [], context, cuts: [cut] });
+      expect(summarize(events)).toEqual(baseline);
+    }
   });
 });
 

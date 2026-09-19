@@ -1958,6 +1958,96 @@ describe('createGatewayModelTransport', () => {
     expect(settled).toBe(outcome);
   });
 
+  it('should release the bytes held behind an unfinished Tau frame when the stream ends', async () => {
+    /* A marker frame the body never terminated is not a refusal, so the healthy
+     * frames that shared its chunks are still the SDK's. Dropping them at EOF
+     * closes the stream clean and the turn dies as `Stream ended without
+     * finish_reason` even though the terminal frame was on the wire. */
+    const transport = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      model: { contextWindow: 200_000, maxTokens: 8192 },
+      fetch: vi.fn(async () =>
+        responseFromChunks([
+          'data: {"id":"chatcmpl-cut","choices":[{"index":0,"delta":{"content":"partial"}}]}\n\n',
+          'data: {"id":"chatcmpl-cut","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}' +
+            '\n\ndata: {"id":"chatcmpl-cut","type":"tau_gateway"',
+        ]),
+      ),
+    });
+
+    const events = await collect(transport.stream(request()));
+
+    expect(
+      events
+        .filter((event) => event.type === 'text-delta')
+        .map((event) => event.text)
+        .join(''),
+    ).toBe('partial');
+    expect(events.at(-1)).toEqual({ type: 'completed', stopReason: 'stop' });
+  });
+
+  it.each([
+    { label: 'a Gemini tool turn', frames: authoritativeGatewayWireFixtures.toolTurn, providerKind: 'vertexai' },
+    { label: 'a Gemini text turn', frames: authoritativeGatewayWireFixtures.browserTurn, providerKind: 'vertexai' },
+    {
+      label: 'a Responses tool turn',
+      frames: authoritativeGatewayWireFixtures.openAiResponsesToolTurn,
+      providerKind: 'openai',
+    },
+    {
+      label: 'an Anthropic tool turn',
+      frames: authoritativeGatewayWireFixtures.anthropicToolTurn,
+      providerKind: 'anthropic',
+    },
+  ] as const)('should relay $label identically under every chunk partition', async ({ frames, providerKind }) => {
+    /* A Gemini turn that died as `Stream ended without finish_reason` would look
+     * exactly like a relay stage losing the terminal frame at a chunk boundary.
+     * Replayed at every single byte split and at randomised multi-splits — inside
+     * `data:` prefixes, between the two newlines of an event boundary and inside
+     * multi-byte characters — the relayed events must not move. */
+    const bytes = new TextEncoder().encode(frames.join(''));
+    const relay = async (cuts: readonly number[]): Promise<ModelStreamEvent[]> => {
+      const offsets = [0, ...cuts, bytes.byteLength];
+      return collect(
+        createGatewayModelTransport({
+          baseUrl: 'https://gateway.example',
+          fetch: vi.fn(
+            async () =>
+              new Response(
+                new ReadableStream<Uint8Array<ArrayBuffer>>({
+                  start(controller) {
+                    for (let index = 0; index < offsets.length - 1; index += 1) {
+                      controller.enqueue(bytes.slice(offsets[index], offsets[index + 1]));
+                    }
+                    controller.close();
+                  },
+                }),
+                {
+                  status: 200,
+                  headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+                },
+              ),
+          ),
+        }).stream(request({ providerKind })),
+      );
+    };
+    const baseline = await relay([]);
+
+    expect(baseline.at(-1)?.type).toBe('completed');
+    for (let cut = 1; cut < bytes.byteLength; cut += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each partition is a separate stream run.
+      expect(await relay([cut])).toEqual(baseline);
+    }
+    for (const stride of [1, 2, 3, 5, 7, 11, 13, 17, 29, 47, 101]) {
+      const cuts = Array.from(
+        { length: Math.ceil(bytes.byteLength / stride) - 1 },
+        (_value, index) => (index + 1) * stride,
+      );
+      // oxlint-disable-next-line no-await-in-loop -- each partition is a separate stream run.
+      expect(await relay(cuts)).toEqual(baseline);
+    }
+  });
+
   it('should leave a healthy Responses stream untouched while scanning for the refusal frame', async () => {
     const events = await collect(
       createGatewayModelTransport({

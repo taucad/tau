@@ -468,6 +468,14 @@ const guardedResponse = (options: {
             controller.error(trailing);
             return;
           }
+          // A marker frame the body never terminated was never a refusal, so it
+          // and the healthy frames that shared its chunks are the SDK's after
+          // all. Closing on them instead loses the turn's terminal frame and
+          // reports `Stream ended without finish_reason` in its place.
+          for (const held of withheld) {
+            controller.enqueue(held);
+          }
+          withheld = [];
           controller.close();
           return;
         }

@@ -363,3 +363,113 @@ describe('HostsGateway control admission', () => {
     service.onModuleDestroy();
   });
 });
+
+/**
+ * `handleControlMessage` reaches PostgreSQL and Redis, so it can reject for reasons
+ * that have nothing to do with the frame — a dropped pooled connection during the
+ * `lastSeenAt` write is enough. The control chain is assigned synchronously from a
+ * `message` listener, so a rejection nobody catches reaches the process-level
+ * handler, which rethrows it and takes the whole replica down with every device's
+ * socket. Swallowing is not the answer either: a daemon whose `ready` was dropped
+ * believes its presence write landed, so the connection ends and it reconnects.
+ */
+describe('HostsGateway control message failures', () => {
+  const controlGateway = (
+    handleControlMessage: HostsService['handleControlMessage'],
+  ): { open: (deviceId: string) => Promise<{ socket: WebSocket; send: (frame: string) => void }> } => {
+    const hostsService = {
+      authenticateDevice: vi.fn(async (authorization?: string) => ({ id: authorization ?? 'device-1' })),
+      registerControl: vi.fn(async () => undefined),
+      handleControlMessage,
+    } as unknown as HostsService;
+    let handler: WebSocketConnectionHandler | undefined;
+    const devWebSocketService = {
+      registerPathHandler: vi.fn((_path: string, register: WebSocketConnectionHandler) => {
+        handler = register;
+      }),
+      registerPrefixHandler: vi.fn(),
+      ensureStarted: vi.fn(async () => undefined),
+    } as unknown as DevWebSocketService;
+    const gateway = new HostsGateway(hostsService, devWebSocketService, {} as Auth, {} as HttpAdapterHost);
+    const started = gateway.onModuleInit();
+
+    return {
+      open: async (deviceId: string) => {
+        await started;
+        const frames: Array<(raw: Buffer) => void> = [];
+        const socket = {
+          close: vi.fn(),
+          on: vi.fn((event: string, listener: (raw: Buffer) => void) => {
+            if (event === 'message') {
+              frames.push(listener);
+            }
+          }),
+          pause: vi.fn(),
+          resume: vi.fn(),
+        } as unknown as WebSocket;
+        await handler?.(socket, {
+          url: '/v1/agents/control',
+          headers: { host: 'localhost', authorization: deviceId },
+        } as unknown as IncomingMessage);
+        return {
+          socket,
+          send: (frame: string) => {
+            for (const listener of frames) {
+              listener(Buffer.from(frame, 'utf8'));
+            }
+          },
+        };
+      },
+    };
+  };
+
+  /** Let every queued microtask settle, then the macrotask an unhandled rejection is reported on. */
+  const settle = async (): Promise<void> => {
+    for (let turn = 0; turn < 4; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- draining turn by turn is the point.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+  };
+
+  it('closes the control socket and keeps the queue usable when a frame fails', async () => {
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const handleControlMessage = vi
+        .fn<HostsService['handleControlMessage']>()
+        .mockRejectedValueOnce(new Error('connection terminated unexpectedly'))
+        .mockResolvedValue(undefined);
+      const gateway = controlGateway(handleControlMessage);
+
+      const first = await gateway.open('device-1');
+      first.send('{"v":1,"type":"ready","deviceId":"device-1"}');
+      await settle();
+
+      expect(first.socket.close).toHaveBeenCalledWith(1011, expect.any(String));
+      expect(rejections).toEqual([]);
+
+      /* The chain must not stay poisoned: frames already in flight when the close
+       * was issued still reach the service rather than being dropped by a rejected
+       * `previous`. */
+      first.send('{"v":1,"type":"run","runId":"run_1"}');
+      await settle();
+      expect(handleControlMessage).toHaveBeenCalledTimes(2);
+      expect(rejections).toEqual([]);
+
+      /* One device's failure is its own: another device's control socket keeps working. */
+      const second = await gateway.open('device-2');
+      second.send('{"v":1,"type":"ready","deviceId":"device-2"}');
+      await settle();
+      expect(second.socket.close).not.toHaveBeenCalled();
+      expect(handleControlMessage).toHaveBeenCalledTimes(3);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+});

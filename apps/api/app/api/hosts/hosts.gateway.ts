@@ -73,7 +73,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     for (const socket of this.socketServer?.clients ?? []) {
       socket.close(1001, 'service stopping');
     }
-    // Every client was told 1001 above; shutdown does not wait on their close handshakes.
+    /* Every client was told 1001 above; shutdown does not wait on their close
+     * handshakes. This is what the code here always did: `close(cb)` returns
+     * undefined, so the `?? resolve()` that used to follow it fired synchronously
+     * and the awaited promise was already settled — the wait never existed. */
     this.socketServer?.close();
   }
 
@@ -106,10 +109,29 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Control frames are handled strictly in arrival order, one at a time. */
-  private async afterControlMessage(previous: Promise<void>, deviceId: string, raw: RawData): Promise<void> {
-    await previous;
-    await this.hostsService.handleControlMessage(deviceId, asBuffer(raw).toString('utf8'));
+  /**
+   * Control frames are handled strictly in arrival order, one at a time.
+   *
+   * `handleControlMessage` reaches PostgreSQL and Redis, so it can fail for reasons
+   * the frame knows nothing about. A rejection left on this chain would reach the
+   * process-level handler and end the replica, so it ends the one connection
+   * instead: swallowing it would leave a daemon whose `ready` was dropped believing
+   * its presence write landed, while a close makes it reconnect. Every link settles,
+   * so the frames already in flight behind a failure are still handled in order
+   * rather than being dropped by a poisoned `previous`.
+   */
+  private async afterControlMessage(options: {
+    readonly previous: Promise<void>;
+    readonly socket: WebSocket;
+    readonly deviceId: string;
+    readonly raw: RawData;
+  }): Promise<void> {
+    try {
+      await options.previous;
+      await this.hostsService.handleControlMessage(options.deviceId, asBuffer(options.raw).toString('utf8'));
+    } catch {
+      options.socket.close(1011, 'control message failed');
+    }
   }
 
   private async route(socket: WebSocket, request: IncomingMessage): Promise<void> {
@@ -123,7 +145,7 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       await this.hostsService.registerControl(device.id, socket);
       let messages = Promise.resolve();
       socket.on('message', (raw) => {
-        messages = this.afterControlMessage(messages, device.id, raw);
+        messages = this.afterControlMessage({ previous: messages, socket, deviceId: device.id, raw });
       });
       return;
     }

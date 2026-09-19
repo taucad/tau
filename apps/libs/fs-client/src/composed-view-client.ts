@@ -463,7 +463,24 @@ export const createComposedViewClient = (input: {
           const viewMember = viewMutations.get(property);
           const routed = viewMember === undefined ? undefined : viewArgs(property, args, viewPath);
           if (viewMember !== undefined && routed !== undefined) {
-            return (view[viewMember] as (...rest: unknown[]) => Promise<unknown>)(...routed);
+            const answer = await (view[viewMember] as (...rest: unknown[]) => Promise<unknown>)(...routed);
+            if (property !== 'bulkMove') {
+              return answer;
+            }
+            /* Callers match outcomes to the edits they sent, so the edits come
+             * back in the namespace they were asked in. */
+            const absolute = <T extends { edit: BulkMoveEdit }>(outcome: T): T => ({
+              ...outcome,
+              edit: {
+                source: paths.toAbsolutePath(outcome.edit.source),
+                target: paths.toAbsolutePath(outcome.edit.target),
+              },
+            });
+            const { moved, failed } = answer as BulkMoveResult;
+            return {
+              moved: moved.map((outcome) => absolute(outcome)),
+              failed: failed.map((outcome) => absolute(outcome)),
+            };
           }
           return (target[property as 'writeFile'] as (...rest: unknown[]) => Promise<unknown>).apply(target, args);
         };

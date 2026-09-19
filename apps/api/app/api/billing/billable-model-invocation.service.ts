@@ -13,7 +13,12 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { cloudProviderAccountMessage, recognizeProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
-import { classifyUpstreamRefusal, readUpstreamRefusal, upstreamRetryAfterSeconds } from '#api/llm/upstream-refusal.js';
+import {
+  classifyUpstreamRefusal,
+  cloudUpstreamRefusalMessage,
+  readUpstreamRefusal,
+  upstreamRetryAfterSeconds,
+} from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
 import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
@@ -407,12 +412,7 @@ export class BillableModelInvocationService {
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       // Tau owns the key here, so the supplier's own sentence never leaves the API.
-      const message =
-        classification.type === 'UPSTREAM_REJECTED'
-          ? `The model provider rejected the request (HTTP ${response.status}).`
-          : classification.type === 'RATE_LIMITED'
-            ? 'The model provider is rate limiting this request.'
-            : 'The model provider is unavailable.';
+      const message = cloudUpstreamRefusalMessage({ type: classification.type, status: response.status });
       throw new LlmGatewayError(classification.status, classification.type, message, classification.details);
     }
     // The supplier answered: the operation is in flight, not abandoned. Losing this

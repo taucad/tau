@@ -1,4 +1,9 @@
-import { createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
+import {
+  createKernelError,
+  createKernelParameterDeclaration,
+  createKernelSuccess,
+  defineKernel,
+} from '@taucad/runtime/kernel';
 
 /** `<%= name %>` kernel capability. @public */
 export const <%= alias %>Kernel = defineKernel({
@@ -14,10 +19,13 @@ export const <%= alias %>Kernel = defineKernel({
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
-    });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(
+        {},
+        { type: 'object', properties: {}, additionalProperties: false },
+        { id: 'urn:taucad:<%= name %>:parameters', name: '<%= alias %>Parameters' },
+      ),
+    );
   },
   async createGeometry() {
     return { nativeHandle: undefined };

@@ -319,6 +319,25 @@ export const billableModelRouteIds = routes.map((entry) => entry.routeId);
  * accepted on the wire, so this table is keyed by route id alone. */
 const routeById = new Map(routes.map((entry) => [entry.routeId, entry]));
 
+/**
+ * Refuse a premium tariff that no funded route can ever pin.
+ *
+ * A tiered key that matches no route is not inert. `routes` carries the premium
+ * tariff and `tieredValuations` carries the base one, so a key that never
+ * matches leaves the route pinning its premium rate on every request and never
+ * registers the `:long-context` contract the ledger settles the premium against.
+ *
+ * @param tierRouteIds - The route ids the tiered valuation table is keyed by.
+ */
+export const assertTieredRoutesAreFunded = (tierRouteIds: Iterable<string>): void => {
+  for (const routeId of tierRouteIds) {
+    if (!routeById.has(routeId)) {
+      throw new Error(`Tiered tariff ${routeId} has no funded route`);
+    }
+  }
+};
+assertTieredRoutesAreFunded(tieredValuations.keys());
+
 export type BillableModelQualificationDependencies = {
   adapters: ReadonlyMap<string, BillableModelProviderAdapter>;
   credentialAccounts: ReadonlyMap<string, string>;

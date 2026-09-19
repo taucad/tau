@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import {
+  assertTieredRoutesAreFunded,
   billableModelRouteIds,
   CodeOwnedBillableModelQualificationResolver,
   supplierIdentityForRoute,
@@ -493,6 +494,15 @@ describe('catalog route vocabulary', () => {
     expect(() => supplierIdentityForRoute('openai-not-a-catalog-row')).toThrow(
       'Funded route openai-not-a-catalog-row has no catalog row',
     );
+  });
+
+  it('should refuse a premium tariff that no funded route can pin', () => {
+    expect(() => {
+      assertTieredRoutesAreFunded(['openai-gpt-5.6-terrra']);
+    }).toThrow('Tiered tariff openai-gpt-5.6-terrra has no funded route');
+    expect(() => {
+      assertTieredRoutesAreFunded(billableModelRouteIds);
+    }).not.toThrow();
   });
 
   it('should refuse a supplier model id that is not a catalog route id', () => {

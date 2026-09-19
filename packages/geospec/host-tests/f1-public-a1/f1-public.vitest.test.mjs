@@ -3,21 +3,24 @@ import { createGeoSpecVitestAdapter } from '@taucad/geospec/vitest';
 import { Engine, canonicalize } from '@taucad/geospec-engine-native/node';
 import { expect, it } from 'vitest';
 
+/* oxlint-disable no-restricted-imports -- Installed external-consumer acceptance imports its copied sibling harness directly. */
 import {
   admitSubject,
   assertOutput,
   compareReport,
   createForwardingRecorder,
+  createOutput,
   errorRecord,
   loadAuthority,
   reportFromRecorder,
   rowContract,
   writeOutput,
 } from './authority.mjs';
+/* oxlint-enable no-restricted-imports */
 
 it('should run all 12 approved rows through the installed Vitest matcher', async () => {
   const authority = loadAuthority();
-  const output = { schemaVersion: 1, route: 'javascript-vitest', rows: [] };
+  const output = createOutput('javascript-vitest');
 
   for (const row of authority.rows) {
     const claim = rowContract(row);
@@ -37,6 +40,7 @@ it('should run all 12 approved rows through the installed Vitest matcher', async
     let invocationError = null;
     let flushError = null;
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Each row owns a complete engine and matcher lifecycle before the next row starts.
       await chain.toSatisfyRationalPlate();
     } catch (error) {
       invocationError = errorRecord(
@@ -45,11 +49,12 @@ it('should run all 12 approved rows through the installed Vitest matcher', async
       );
     }
     try {
+      // oxlint-disable-next-line no-await-in-loop -- Flush must settle this row's matcher before the next engine lifecycle starts.
       await adapter.flush();
     } catch (error) {
       flushError = errorRecord(error);
     }
-    const report = reportFromRecorder(row, recorder.calls, canonicalize);
+    const report = reportFromRecorder(recorder.calls, canonicalize);
     output.rows.push({
       id: row.id,
       admission,

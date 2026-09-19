@@ -10,7 +10,7 @@ use std::{fs, path::Path};
 
 const CORPUS_SHA256: &str = "b1b605506f72304ccec2484506a39786f203d89e793eaab5e0125d246388d5a3";
 const VERIFIER_SOURCE_HASH: &str =
-    "406d6363a07252339349ff29e443fefa23df0f46d8f3ee67425bb8140bae6fdc";
+    "38922652cc624d2a6c84377bddc20e76a0361dc95b87f9c3e94463ded6610df9";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

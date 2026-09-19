@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 
 const CORPUS_SHA256: &str = "c46c089b0d5097e862e606ed2866dea53dd25a6df207c044c3172d6dc9e100c4";
 const VERIFIER_SOURCE_HASH: &str =
-    "406d6363a07252339349ff29e443fefa23df0f46d8f3ee67425bb8140bae6fdc";
+    "38922652cc624d2a6c84377bddc20e76a0361dc95b87f9c3e94463ded6610df9";
 
 fn verifier_source_hash() -> String {
     let value = std::env::var("GEOSPEC_F1_VERIFIER_SOURCE_HASH")

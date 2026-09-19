@@ -376,7 +376,7 @@ export const ChatEditorFileTree = memo(function ({
   const { projectRef, editorRef, parameterService } = useProject();
   const fileManager = useFileManager();
   const {
-    client,
+    overrideUnit,
     contentService,
     readFile,
     writeFile,
@@ -1437,7 +1437,7 @@ export const ChatEditorFileTree = memo(function ({
   const handleCopyToProject = useCallback(
     (path: string) => {
       const copyToProject = async (): Promise<void> => {
-        await client.overrideUnit(path);
+        await overrideUnit(path);
         treeService?.scheduleRefresh(path);
       };
       toast.promise(copyToProject(), {
@@ -1446,7 +1446,7 @@ export const ChatEditorFileTree = memo(function ({
         error: (error: unknown) => `Copy failed: ${error instanceof Error ? error.message : String(error)}`,
       });
     },
-    [client, treeService],
+    [overrideUnit, treeService],
   );
 
   const handleUploadClick = useCallback(

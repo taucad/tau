@@ -23,17 +23,17 @@
  * authority epoch on the next open (F13, R15).
  */
 
-import { captureRevisionTree } from '@taucad/filesystem';
-import type { RootedFileSystem } from '@taucad/filesystem';
+import type { FileMode, RootedFileSystem } from '@taucad/filesystem';
 import { classify } from '@taucad/filesystem/path-registry';
 import { randomUuid } from '@taucad/utils/id';
 import {
+  captureRevisionTree,
   ImmutableRevisionTree,
   mergeRevisionTrees,
   renderConflictMarkers,
   revisionId,
-} from '@taucad/filesystem/revisions';
-import type { RevisionFileMode, RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
+} from '#algorithms/index.js';
+import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import type { RevisionConflictTerms } from '#revision-conflict.js';
 import { integrationOf, mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
@@ -599,7 +599,7 @@ const frameObject = (type: 'blob' | 'tree', body: Uint8Array<ArrayBuffer>): Uint
   concatBytes(textEncoder.encode(`${type} ${String(body.length)}\0`), body);
 
 type TreeNode = {
-  readonly files: Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }>>;
+  readonly files: Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>;
   readonly directories: Map<string, TreeNode>;
 };
 
@@ -1043,15 +1043,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
 
   const equalEntry = (
-    left: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }> | undefined,
-    right: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }> | undefined,
+    left: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }> | undefined,
+    right: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }> | undefined,
   ): boolean =>
     left === undefined ? right === undefined : right?.mode === left.mode && equalBytes(left.content, right.content);
 
   const entryOf = async (
     live: RevisionFileSystem,
     path: string,
-  ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }> | undefined> => {
+  ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }> | undefined> => {
     try {
       const content = await live.readFile(path);
       const mode = (await live.getFileMode?.(path)) ?? '100644';

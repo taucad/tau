@@ -508,14 +508,14 @@ describe('FileManagerProvider — client + workspace facades', () => {
     return renderHook(() => useFileManager(), { wrapper });
   };
 
-  it('exposes a typed client facade whose methods route through the worker proxy', async () => {
+  it('exposes a scope-required storage facade whose reads route through the worker proxy', async () => {
     const { result } = renderProvider();
 
     expect(result.current.client).toBeDefined();
-    // Spot-check method shape: `client.readShallowDirectory` is gated on
-    // proxy readiness and forwards to the worker.
+    // Spot-check method shape: a physical scope the mount table does not route
+    // is gated on proxy readiness and forwards to the authority (charter D5).
     await act(async () => {
-      const nodes = await result.current.client.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
+      const nodes = await result.current.scopedStorage.readShallowDirectory('/', { scope: { backend: 'indexeddb' } });
       expect(nodes).toEqual([]);
     });
   });
@@ -611,25 +611,30 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(startPolling).toHaveBeenCalledOnce();
   });
 
-  it('routes createDirectory through the project content facade with an absolute project path', async () => {
+  /* Charter D12: the project content facade writes on the project's own rooted
+   * connection, so the call arrives in the view's namespace, not the
+   * authority's. */
+  it('routes createDirectory through the project content facade in the view namespace', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
       await result.current.createDirectory('newfolder', { recursive: true });
     });
 
-    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('/projects/root/newfolder', { recursive: true });
+    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('newfolder', { recursive: true });
     expect(mockProxyWriteFile).not.toHaveBeenCalled();
   });
 
-  it('routes deleteDirectory through the project content facade with an absolute project path', async () => {
+  it('routes deleteDirectory through the project content facade in the view namespace', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
       await result.current.deleteDirectory('subtree', { recursive: true });
     });
 
-    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('/projects/root/subtree', { recursive: true });
+    /* `{ recursive: true }` has to survive the view too, or a folder delete from
+     * the Files pane answers ENOTEMPTY. */
+    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('subtree', { recursive: true });
   });
 
   /*
@@ -641,18 +646,18 @@ describe('FileManagerProvider — client + workspace facades', () => {
   it('refuses a Files-pane delete of a system skill file as read-only, without asking the authority', async () => {
     const { result } = renderProvider();
 
-    await expect(result.current.client.canDelete('/projects/root/.agents/skills/demo/SKILL.md')).resolves.toMatchObject(
-      { code: 'READ_ONLY_MOUNT' },
-    );
+    await expect(result.current.canDelete('.agents/skills/demo/SKILL.md')).resolves.toMatchObject({
+      code: 'READ_ONLY_MOUNT',
+    });
     expect(mockProxyCanDelete).not.toHaveBeenCalled();
   });
 
   it('refuses a Files-pane move of a project file onto a system skill path', async () => {
     const { result } = renderProvider();
 
-    await expect(
-      result.current.client.move('/projects/root/main.ts', '/projects/root/.agents/skills/demo/SKILL.md'),
-    ).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(result.current.moveFile('main.ts', '.agents/skills/demo/SKILL.md')).rejects.toMatchObject({
+      code: 'EROFS',
+    });
     expect(mockProxyMove).not.toHaveBeenCalled();
   });
 

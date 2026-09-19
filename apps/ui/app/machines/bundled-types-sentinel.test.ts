@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
-import type { BundledTypesPayload } from '@taucad/filesystem/bundled-types-mount';
+import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
+import type { BundledTypesPayload } from '#machines/bundled-types-mount.js';
 import { bundledTypesSentinelPath, ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
 
 const payload: BundledTypesPayload = [
@@ -9,18 +9,17 @@ const payload: BundledTypesPayload = [
   { packageName: '@taucad/kcl', content: 'export declare const b: 2;' },
 ];
 
-type PackageReplacement = {
-  readonly packageDirectory: string;
-  readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
-};
-
 /**
- * Mount double at the real mutation boundary: population runs through the
+ * Mount double at the real installation boundary: population runs through the
  * actual `populateBundledTypesMount`, so package-name and path validation are
- * exercised rather than imitated.
+ * exercised rather than imitated. The handle is rooted at `/node_modules`, so
+ * its paths are root-relative while `files` is keyed the way the sentinel reads.
  */
 const createMount = () => {
   const files = new Map<string, string>();
+  const absolute = (localPath: string): string => `/node_modules/${localPath}`;
+  const under = (localPath: string): string[] =>
+    [...files.keys()].filter((path) => path === absolute(localPath) || path.startsWith(`${absolute(localPath)}/`));
   const fileService = {
     readFile: vi.fn(async (path: string) => {
       const content = files.get(path);
@@ -29,24 +28,22 @@ const createMount = () => {
       }
       return content;
     }),
-    replaceBundledTypePackages: vi.fn(async (packages: readonly PackageReplacement[]) => {
-      for (const replacement of packages) {
-        // Map iteration tolerates deletion of the current key.
-        for (const path of files.keys()) {
-          if (path.startsWith(`${replacement.packageDirectory}/`)) {
-            files.delete(path);
-          }
-        }
-        for (const file of replacement.files) {
-          files.set(file.path, file.content);
-        }
+  };
+  const nodeModules = {
+    exists: vi.fn(async (localPath: string) => under(localPath).length > 0),
+    rmdir: vi.fn(async (localPath: string) => {
+      for (const path of under(localPath)) {
+        files.delete(path);
+      }
+    }),
+    writeFiles: vi.fn(async (batch: Record<string, { content: Uint8Array<ArrayBuffer> | string }>) => {
+      for (const [localPath, { content }] of Object.entries(batch)) {
+        files.set(absolute(localPath), typeof content === 'string' ? content : new TextDecoder().decode(content));
       }
     }),
   };
-  const populate = vi.fn(async (entries: BundledTypesPayload) =>
-    populateBundledTypesMount(fileService as unknown as Parameters<typeof populateBundledTypesMount>[0], entries),
-  );
-  return { files, fileService, populate };
+  const populate = vi.fn(async (entries: BundledTypesPayload) => populateBundledTypesMount(nodeModules, entries));
+  return { files, fileService, nodeModules, populate };
 };
 
 describe('ensureBundledTypesMount', () => {
@@ -87,13 +84,13 @@ describe('ensureBundledTypesMount', () => {
     const mount = createMount();
     await ensureBundledTypesMount(mount.fileService, payload, { populate: mount.populate });
     mount.populate.mockClear();
-    mount.fileService.replaceBundledTypePackages.mockClear();
+    mount.nodeModules.writeFiles.mockClear();
 
     await expect(ensureBundledTypesMount(mount.fileService, payload, { populate: mount.populate })).resolves.toBe(
       'skipped',
     );
     expect(mount.populate).not.toHaveBeenCalled();
-    expect(mount.fileService.replaceBundledTypePackages).not.toHaveBeenCalled();
+    expect(mount.nodeModules.writeFiles).not.toHaveBeenCalled();
   });
 
   it('repopulates and restamps when the bundled payload changed', async () => {
@@ -165,7 +162,7 @@ describe('ensureBundledTypesMount', () => {
     const mount = createMount();
     await ensureBundledTypesMount(mount.fileService, payload, { populate: mount.populate, buildIdentity: 'build-1' });
     mount.populate.mockClear();
-    mount.fileService.replaceBundledTypePackages.mockClear();
+    mount.nodeModules.writeFiles.mockClear();
 
     await expect(
       ensureBundledTypesMount(mount.fileService, payload, { populate: mount.populate, buildIdentity: 'build-2' }),

@@ -3468,6 +3468,10 @@ importers:
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../core/cache
+    devDependencies:
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../revisions
 
   packages/jobs-hatchet:
     dependencies:
@@ -4145,6 +4149,9 @@ importers:
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../parameters
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../revisions
       '@taucad/units':
         specifier: workspace:*
         version: link:../units

@@ -60,9 +60,13 @@ export type ProviderRpcFileSystemOptions = {
  * import { ResourceQueue } from '@taucad/filesystem';
  * import { composeView } from '@taucad/filesystem/composed-view';
  * import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+ * import { tauPathPolicy } from '@taucad/filesystem/path-registry';
  * import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
  *
- * const view = composeView({ filesystem: new NodeFsProvider(process.cwd()) }, { consumer: 'agent' });
+ * const view = composeView(
+ *   { filesystem: new NodeFsProvider(process.cwd()) },
+ *   { consumer: 'agent', policy: tauPathPolicy },
+ * );
  * const fileSystem = createProviderRpcFileSystem({ provider: view, mutations: new ResourceQueue() });
  * ```
  */

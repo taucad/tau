@@ -1,6 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { ProviderRegistry } from '#provider-registry.js';
@@ -13,14 +14,17 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
-import { captureRevisionTree } from '#revision-capture.js';
+import { composeView } from '#composed-view.js';
+import { withReadContentOps } from '#content-ops/read-ops.js';
+import { contents } from '#content-ops/contents.js';
+import { tauPathPolicy } from '#path-registry.js';
 import {
   parseProjectManifestBytes,
   projectManifestSchemaUrl,
   projectToManifest,
   serializeProjectManifest,
 } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { FileStatEntry, ProjectManifest } from '@taucad/types';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -440,7 +444,12 @@ describe('WorkspaceFileService', () => {
       await expect(view.readFile('main.ts')).rejects.toMatchObject({ code: 'ESTALE' });
     });
 
-    it('should capture a checkout from its entry kinds without a stat per file', async () => {
+    /* The capture walk itself is `@taucad/revisions/algorithms` (D9/W8), and its
+       own suite pins that it takes kinds from `readdirEntries` and stats
+       nothing. What is this service's claim is the half below: a rooted view
+       over a checkout offers `readdirEntries` and asks the provider for
+       mount-prefixed paths. */
+    it('should list a checkout from its entry kinds without a stat per file', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       await service.configureProjectRoots({
         projects: [{ projectId, backend: 'indexeddb', providerBasePath: projectId }],
@@ -453,9 +462,20 @@ describe('WorkspaceFileService', () => {
       const stat = vi.spyOn(provider, 'stat');
       const readdirEntries = vi.spyOn(provider, 'readdirEntries');
 
-      const tree = await captureRevisionTree(view);
+      const listing = view.readdirEntries;
+      if (listing === undefined) {
+        throw new TypeError('A rooted checkout view offers readdirEntries.');
+      }
+      const kinds = async (path: string): Promise<readonly string[]> => {
+        const entries = await listing(path);
+        return entries.map(({ name, kind }) => `${kind}:${name}`);
+      };
 
-      expect(tree.entries().map(({ path }) => path)).toEqual(['main.ts', 'parts/fillet.ts']);
+      expect([...(await kinds('')), ...(await kinds('parts'))]).toEqual([
+        'file:main.ts',
+        'dir:parts',
+        'file:fillet.ts',
+      ]);
       expect(stat).not.toHaveBeenCalled();
       expect(readdirEntries.mock.calls).toEqual([[checkoutBasePath], [`${checkoutBasePath}/parts`]]);
     });
@@ -1572,11 +1592,8 @@ describe('WorkspaceFileService', () => {
       { name: 'mkdir', run: async () => service.mkdir('/node_modules/package') },
       { name: 'move source', run: async () => service.move('/node_modules/file.ts', '/target.ts') },
       { name: 'move target', run: async () => service.move('/source.txt', '/node_modules/file.ts') },
-      { name: 'duplicateFile', run: async () => service.duplicateFile('/source.txt', '/node_modules/file.ts') },
-      {
-        name: 'copyDirectory',
-        run: async () => service.copyDirectory('/source-dir', '/node_modules/package'),
-      },
+      /* `duplicate` and `copyTree` are the rooted surface's since W12d; the
+       * rooted `assertMutableRoot` refuses the same mount (W5 G8). */
       { name: 'unlink', run: async () => service.unlink('/node_modules/file.ts') },
       { name: 'rmdir', run: async () => service.rmdir('/node_modules/package', { recursive: true }) },
       {
@@ -1914,13 +1931,17 @@ describe('WorkspaceFileService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // duplicateFile
+  // duplicate / copyTree over the rooted surface
   // ---------------------------------------------------------------------------
 
-  describe('duplicateFile', () => {
+  /* The authority had `duplicateFile` and `copyDirectory`; both walked or wrote a
+   * project tree unmasked (W0 pin (d)), and W12d retired them with their last
+   * consumers. The rows are the authority's, kept on the surface that now serves
+   * them — where the composed view above supplies the entry filter (D4). */
+  describe('duplicate and copyTree over the rooted surface', () => {
     it('should copy a file to a new location', async () => {
       await service.writeFile('/src.txt', 'copy me');
-      await service.duplicateFile('/src.txt', '/dst.txt');
+      await service.createRootedFileSystem('/').duplicate!('src.txt', 'dst.txt');
       const content = await service.readFile('/dst.txt', 'utf8');
       expect(content).toBe('copy me');
       expect(await service.exists('/src.txt')).toBe(true);
@@ -1928,30 +1949,25 @@ describe('WorkspaceFileService', () => {
 
     it('should create parent directories for the destination', async () => {
       await service.writeFile('/orig.txt', 'data');
-      await service.duplicateFile('/orig.txt', '/deep/nested/copy.txt');
+      await service.createRootedFileSystem('/').duplicate!('orig.txt', 'deep/nested/copy.txt');
       const content = await service.readFile('/deep/nested/copy.txt', 'utf8');
       expect(content).toBe('data');
     });
-  });
 
-  // ---------------------------------------------------------------------------
-  // copyDirectory
-  // ---------------------------------------------------------------------------
-
-  describe('copyDirectory', () => {
     it('should recursively copy a directory', async () => {
       await service.writeFile('/source/a.txt', 'aaa');
       await service.writeFile('/source/sub/b.txt', 'bbb');
-      await service.copyDirectory('/source', '/dest');
+      await service.createRootedFileSystem('/').copyTree!('source', 'dest');
       expect(await service.readFile('/dest/a.txt', 'utf8')).toBe('aaa');
       expect(await service.readFile('/dest/sub/b.txt', 'utf8')).toBe('bbb');
     });
 
     it('should preserve empty directories, including an entirely empty source', async () => {
+      const rooted = service.createRootedFileSystem('/');
       await service.mkdir('/source/empty/nested', { recursive: true });
-      await service.copyDirectory('/source', '/dest');
+      await rooted.copyTree!('source', 'dest');
       await service.mkdir('/entirely-empty');
-      await service.copyDirectory('/entirely-empty', '/empty-copy');
+      await rooted.copyTree!('entirely-empty', 'empty-copy');
 
       await expect(service.stat('/dest/empty')).resolves.toMatchObject({ type: 'dir' });
       await expect(service.stat('/dest/empty/nested')).resolves.toMatchObject({ type: 'dir' });
@@ -1960,28 +1976,35 @@ describe('WorkspaceFileService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // getDirectoryContents
+  // recursive contents over the rooted surface
   // ---------------------------------------------------------------------------
 
-  describe('getDirectoryContents', () => {
+  /* The authority had `getDirectoryContents`; its last consumer (project
+   * duplication) moved to the project's own composed view in W7, so the walk is
+   * reached as the `contents` content operation over a rooted surface (D2). The
+   * rows are the authority's, kept on the surface that now serves them. */
+  describe('contents over the rooted surface', () => {
+    const rootedContents = async (path: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
+      contents(service.createRootedFileSystem('/'), path);
+
     it('should return all files with relative paths', async () => {
       await service.writeFile('/proj/readme.md', '# Hi');
       await service.writeFile('/proj/src/main.ts', 'code');
-      const contents = await service.getDirectoryContents('/proj');
-      expect(decoder.decode(contents['readme.md'])).toBe('# Hi');
-      expect(decoder.decode(contents['src/main.ts'])).toBe('code');
+      const files = await rootedContents('proj');
+      expect(decoder.decode(files['readme.md'])).toBe('# Hi');
+      expect(decoder.decode(files['src/main.ts'])).toBe('code');
     });
 
     it('should propagate a missing-directory error', async () => {
-      await expect(service.getDirectoryContents('/nonexistent')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(rootedContents('nonexistent')).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
     it('distinguishes an empty directory from a file path', async () => {
       await service.mkdir('/empty');
       await service.writeFile('/file.txt', 'file');
 
-      await expect(service.getDirectoryContents('/empty')).resolves.toEqual({});
-      await expect(service.getDirectoryContents('/file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(rootedContents('empty')).resolves.toEqual({});
+      await expect(rootedContents('file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
     });
   });
 
@@ -2260,14 +2283,20 @@ describe('WorkspaceFileService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // getDirectoryStat
+  // statTree over the rooted surface
   // ---------------------------------------------------------------------------
 
-  describe('getDirectoryStat', () => {
+  /* `getDirectoryStat` answered from the per-root index with nothing masking the
+   * rows on the way out; W12d retired it and a consumer reaches the same index
+   * through `statTree`, where the composed view applies its policy (D3). */
+  describe('statTree over the rooted surface', () => {
+    const statTree = async (path: string): Promise<FileStatEntry[]> =>
+      service.createRootedFileSystem('/').statTree!(path);
+
     it('should return stat entries for all files recursively', async () => {
       await service.writeFile('/stats/a.txt', 'aaa');
       await service.writeFile('/stats/sub/b.txt', 'bb');
-      const stats = await service.getDirectoryStat('/stats');
+      const stats = await statTree('stats');
       expect(stats).toHaveLength(2);
 
       const paths = stats.map((s) => s.path).sort();
@@ -2281,16 +2310,16 @@ describe('WorkspaceFileService', () => {
 
     it('should return empty array for an empty directory', async () => {
       await service.mkdir('/emptystats');
-      const stats = await service.getDirectoryStat('/emptystats');
+      const stats = await statTree('emptystats');
       expect(stats).toEqual([]);
     });
 
     it('should return subdirectory stats from in-memory tree after initial scan', async () => {
       await service.writeFile('/stats/a.txt', 'aaa');
       await service.writeFile('/stats/sub/b.txt', 'bb');
-      await service.getDirectoryStat('/stats');
+      await statTree('stats');
 
-      const subStats = await service.getDirectoryStat('/stats/sub');
+      const subStats = await statTree('stats/sub');
       expect(subStats).toHaveLength(1);
       expect(subStats[0]!.path).toBe('b.txt');
       expect(subStats[0]!.name).toBe('b.txt');
@@ -2298,10 +2327,10 @@ describe('WorkspaceFileService', () => {
 
     it('should list a new file under a subpath after write following initial scan', async () => {
       await service.writeFile('/stats/a.txt', 'aaa');
-      await service.getDirectoryStat('/stats');
+      await statTree('stats');
       await service.writeFile('/stats/sub/c.txt', 'ccc');
 
-      const subStats = await service.getDirectoryStat('/stats/sub');
+      const subStats = await statTree('stats/sub');
       expect(subStats.some((s) => s.path === 'c.txt' && s.name === 'c.txt')).toBe(true);
     });
   });
@@ -2464,14 +2493,11 @@ describe('WorkspaceFileService', () => {
       await service.unlink('/mut-u.txt', context);
       await service.mkdir('/mut-rmdir', { recursive: true });
       await service.rmdir('/mut-rmdir', undefined, context);
-      await service.writeFile('/mut-dup-s.txt', 'e');
-      await service.duplicateFile('/mut-dup-s.txt', '/mut-dup-d.txt', context);
-      await service.mkdir('/mut-cd-src', { recursive: true });
-      await service.writeFile('/mut-cd-src/nested.txt', 'f');
-      await service.copyDirectory('/mut-cd-src', '/mut-cd-dst', context);
+      /* `duplicate` and `copyTree` are the rooted surface's since W12d, and a
+       * rooted connection carries its own origin rather than this context. */
 
       const tagged = originsByType.filter((row) => row.origin === 'all_methods');
-      expect(tagged.length).toBeGreaterThanOrEqual(8);
+      expect(tagged.length).toBeGreaterThanOrEqual(6);
       const types = new Set(tagged.map((row) => row.type));
       expect(types.has('fileWritten')).toBe(true);
       expect(types.has('fileRenamed')).toBe(true);
@@ -2567,7 +2593,7 @@ describe('WorkspaceFileService', () => {
       const events: ChangeEvent[] = [];
       eventBus.subscribe((event) => events.push(event));
 
-      await service.duplicateFile('/dup-src.txt', '/dup-dst.txt');
+      await service.createRootedFileSystem('/').duplicate!('dup-src.txt', 'dup-dst.txt');
 
       expect(events).toContainEqual(
         expect.objectContaining({ type: 'fileWritten', path: '/dup-dst.txt', backend: 'memory' }),
@@ -2639,7 +2665,10 @@ describe('WorkspaceFileService', () => {
       service.setFilePool(pool);
       await service.writeFile('/cached.txt', 'cached');
       await service.readFile('/cached.txt');
-      await service.searchFiles('/', 'cached');
+      /* Captured before dispose: after it the mount is gone, so a fresh rooted
+       * handle cannot even be created and the stale one must refuse. */
+      const rooted = service.createRootedFileSystem('/');
+      await rooted.search!('cached');
       await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
       const getProvider = vi.spyOn(providerRegistry, 'getProvider');
 
@@ -2647,7 +2676,7 @@ describe('WorkspaceFileService', () => {
 
       expect(pool.has('/cached.txt')).toBe(false);
       await expect(service.listProjectManifests()).resolves.toEqual({ entries: [], roots: [] });
-      await expect(service.searchFiles('/', 'cached')).rejects.toThrow();
+      await expect(rooted.search!('cached')).rejects.toThrow();
       expect(getProvider).not.toHaveBeenCalled();
     });
   });
@@ -2735,102 +2764,97 @@ describe('WorkspaceFileService', () => {
   // ---------------------------------------------------------------------------
 
   describe('in-memory tree integration', () => {
-    it('should reflect writeFile in subsequent getDirectoryStat', async () => {
+    /* The index is read through the rooted surface since W12d, where the view
+     * masks its rows; the invalidation the authority owns is what these pin. */
+    const statTree = async (path: string): Promise<FileStatEntry[]> =>
+      service.createRootedFileSystem('/').statTree!(path);
+
+    it('should reflect writeFile in subsequent statTree', async () => {
       await service.writeFile('/root/a.txt', 'aaa');
-      await service.getDirectoryStat('/root');
+      await statTree('root');
 
       await service.writeFile('/root/b.txt', 'bb');
 
-      const stats = await service.getDirectoryStat('/root');
+      const stats = await statTree('root');
       const paths = stats.map((s) => s.path).sort();
       expect(paths).toEqual(['a.txt', 'b.txt']);
     });
 
-    it('should reflect mkdir in subsequent getDirectoryStat', async () => {
+    it('should reflect mkdir in subsequent statTree', async () => {
       await service.writeFile('/root/a.txt', 'a');
-      await service.getDirectoryStat('/root');
+      await statTree('root');
 
       await service.mkdir('/root/sub');
       await service.writeFile('/root/sub/x.txt', 'x');
 
-      const stats = await service.getDirectoryStat('/root/sub');
+      const stats = await statTree('root/sub');
       expect(stats).toHaveLength(1);
       expect(stats[0]!.path).toBe('x.txt');
     });
 
-    it('should reflect unlink in subsequent getDirectoryStat', async () => {
+    it('should reflect unlink in subsequent statTree', async () => {
       await service.writeFile('/root/a.txt', 'a');
       await service.writeFile('/root/b.txt', 'b');
-      await service.getDirectoryStat('/root');
+      await statTree('root');
 
       await service.unlink('/root/a.txt');
 
-      const stats = await service.getDirectoryStat('/root');
+      const stats = await statTree('root');
       expect(stats).toHaveLength(1);
       expect(stats[0]!.path).toBe('b.txt');
     });
 
-    it('should reflect a move in subsequent getDirectoryStat', async () => {
+    it('should reflect a move in subsequent statTree', async () => {
       await service.writeFile('/root/old.txt', 'data');
-      await service.getDirectoryStat('/root');
+      await statTree('root');
 
       await service.move('/root/old.txt', '/root/new.txt');
 
-      const stats = await service.getDirectoryStat('/root');
+      const stats = await statTree('root');
       const paths = stats.map((s) => s.path);
       expect(paths).toContain('new.txt');
       expect(paths).not.toContain('old.txt');
     });
 
-    it('should reflect rmdir in subsequent getDirectoryStat', async () => {
+    it('should reflect rmdir in subsequent statTree', async () => {
       await service.mkdir('/root/sub', { recursive: true });
       await service.writeFile('/root/a.txt', 'a');
-      await service.getDirectoryStat('/root');
+      await statTree('root');
 
       await service.rmdir('/root/sub');
 
-      const stats = await service.getDirectoryStat('/root');
+      const stats = await statTree('root');
       expect(stats).toHaveLength(1);
       expect(stats[0]!.path).toBe('a.txt');
     });
 
-    it('should reflect duplicateFile in subsequent getDirectoryStat', async () => {
+    it('should reflect duplicateFile in subsequent statTree', async () => {
       await service.writeFile('/root/src.txt', 'copy');
-      await service.getDirectoryStat('/root');
+      await statTree('root');
 
-      await service.duplicateFile('/root/src.txt', '/root/dst.txt');
+      await service.createRootedFileSystem('/').duplicate!('root/src.txt', 'root/dst.txt');
 
-      const stats = await service.getDirectoryStat('/root');
+      const stats = await statTree('root');
       const paths = stats.map((s) => s.path).sort();
       expect(paths).toEqual(['dst.txt', 'src.txt']);
     });
 
-    it('should reflect copyDirectory in subsequent getDirectoryStat', async () => {
+    it('should reflect a rooted copyTree in subsequent statTree', async () => {
       await service.writeFile('/root/src/a.txt', 'aaa');
       await service.writeFile('/root/src/sub/b.txt', 'bb');
-      await service.getDirectoryStat('/root');
+      await statTree('root');
 
-      await service.copyDirectory('/root/src', '/root/dest');
+      await service.createRootedFileSystem('/').copyTree!('root/src', 'root/dest');
 
-      const stats = await service.getDirectoryStat('/root/dest');
+      const stats = await statTree('root/dest');
       const paths = stats.map((s) => s.path).sort();
       expect(paths).toEqual(['a.txt', 'sub/b.txt']);
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // getDirectoryStat abort signal
-  // ---------------------------------------------------------------------------
-
-  describe('getDirectoryStat abort signal', () => {
-    it('should throw AbortError when signal is already aborted', async () => {
-      await service.writeFile('/abort/a.txt', 'a');
-      const controller = new AbortController();
-      controller.abort();
-
-      await expect(service.getDirectoryStat('/abort', { signal: controller.signal })).rejects.toThrow('aborted');
-    });
-  });
+  /* The abort signal went with `getDirectoryStat` (W12d). The rooted `statTree`
+   * takes an entry filter, not a signal: a warm index answers without I/O, and a
+   * cold build is one walk the rooted view owns. */
 });
 
 // =============================================================================
@@ -2840,15 +2864,32 @@ describe('WorkspaceFileService', () => {
 describe('WorkspaceFileService integration [DirectIDB]', () => {
   let service: WorkspaceFileService;
   let rootProvider: FileSystemProvider;
+  let registry: ProviderRegistry;
+  let mounts: MountTable;
+
+  /** One more mount, so a per-root index has a root to be keyed by (charter D3). */
+  const mountMemory = async (prefix: string, storageRootKey: string): Promise<FileSystemProvider> => {
+    const provider = await registry.getProvider({ backend: 'memory', storageRootKey });
+    mounts.mount(prefix, provider, { class: 'authored', backend: 'memory', storageRootKey });
+    return provider;
+  };
+
+  /** Every read a cold scan can make, spied on one provider. */
+  const scanSpies = (provider: FileSystemProvider): MockInstance[] =>
+    (['readdirWithStats', 'readdirEntries', 'readdir', 'stat'] as const)
+      .filter((method) => typeof provider[method] === 'function')
+      .map((method) => vi.spyOn(provider, method));
 
   beforeEach(async () => {
     const providerRegistry = new ProviderRegistry({
       databasePrefix: `test-integration-${crypto.randomUUID()}`,
     });
+    registry = providerRegistry;
     const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
     rootProvider = provider;
 
     const mountTable = new MountTable();
+    mounts = mountTable;
     mountTable.mount('/', provider, {
       class: 'authored',
       backend: 'indexeddb',
@@ -2918,27 +2959,36 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: '/evented.txt' }));
   });
 
-  it('should build in-memory tree via getDirectoryStat', async () => {
+  it('should build the per-root tree index via statTree', async () => {
     await service.writeFile('/tree/a.txt', 'a');
     await service.writeFile('/tree/b/c.txt', 'c');
-    const stats = await service.getDirectoryStat('/');
+    const stats = await service.createRootedFileSystem('/').statTree!('');
     expect(stats.length).toBeGreaterThan(0);
   });
 
-  describe('searchFiles', () => {
-    it('should return matching files from InMemoryFileTree', async () => {
+  /* The index is read through the rooted surface since W12d (D3); these rows are
+   * the authority's index behaviour, on the surface that now serves it. */
+  describe('search over the rooted surface', () => {
+    const search = async (
+      root: string,
+      query: string,
+      options?: { maxResults?: number; includeDirectories?: boolean },
+    ): Promise<FileStatEntry[]> => service.createRootedFileSystem(root).search!(query, options);
+    const warmRoot = async (root: string): Promise<unknown> => service.createRootedFileSystem(root).statTree!('');
+
+    it('should return matching files from the tree index', async () => {
       await service.writeFile('/src/main.ts', 'console.log("hi")');
       await service.writeFile('/src/utils/helper.ts', 'export {}');
       await service.writeFile('/README.md', '# Hello');
-      await service.getDirectoryStat('/');
+      await warmRoot('/');
 
-      const results = await service.searchFiles('/', 'helper');
+      const results = await search('/', 'helper');
       expect(results).toHaveLength(1);
       expect(results[0]!.path).toBe('src/utils/helper.ts');
     });
 
     it('should build the requested root when the tree is cold', async () => {
-      const results = await service.searchFiles('/', 'anything');
+      const results = await search('/', 'anything');
       expect(results).toEqual([]);
     });
 
@@ -2946,48 +2996,91 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await service.writeFile('/a.ts', 'a');
       await service.writeFile('/b.ts', 'b');
       await service.writeFile('/c.ts', 'c');
-      await service.getDirectoryStat('/');
+      await warmRoot('/');
 
-      const results = await service.searchFiles('/', '.ts', { maxResults: 2 });
+      const results = await search('/', '.ts', { maxResults: 2 });
       expect(results).toHaveLength(2);
     });
 
     it('should forward includeDirectories option', async () => {
       await service.writeFile('/src/main.ts', 'a');
-      await service.getDirectoryStat('/');
+      await warmRoot('/');
 
-      const results = await service.searchFiles('/', 'src', { includeDirectories: true });
+      const results = await search('/', 'src', { includeDirectories: true });
       const types = results.map((r) => r.type);
       expect(types).toContain('dir');
     });
 
-    it('rebuilds the sole cache for sequential A to B to A searches', async () => {
+    /*
+     * Charter D3: the index is per root, so two roots queried alternately both
+     * stay warm. The single-slot index this replaced rebuilt on every switch.
+     */
+    it('keeps two roots warm across alternating searches', async () => {
+      const a = await mountMemory('/a', 'memory:warm-a');
+      const b = await mountMemory('/b', 'memory:warm-b');
       await service.writeFile('/a/a-only.ts', 'a');
       await service.writeFile('/b/b-only.ts', 'b');
+      await expect(search('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
+      await expect(search('/b', 'only')).resolves.toMatchObject([{ path: 'b-only.ts' }]);
+      const reads = [...scanSpies(a), ...scanSpies(b)];
 
-      await expect(service.searchFiles('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
-      await expect(service.searchFiles('/b', 'only')).resolves.toMatchObject([{ path: 'b-only.ts' }]);
-      await expect(service.searchFiles('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
+      await expect(search('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
+      await expect(search('/b', 'only')).resolves.toMatchObject([{ path: 'b-only.ts' }]);
+
+      for (const spy of reads) {
+        expect(spy).not.toHaveBeenCalled();
+      }
+    });
+
+    /*
+     * Charter D3's acceptance: a warm query performs no provider walk at all.
+     * The spies cover every read a scan can make, so a fallback walk sneaking
+     * back in fails here rather than only showing up as latency.
+     */
+    it('serves a warm search and statTree without reading the provider', async () => {
+      await service.writeFile('/src/main.ts', 'a');
+      await service.writeFile('/src/util/helper.ts', 'b');
+      const rooted = service.createRootedFileSystem('/');
+      const reads = (['readdirWithStats', 'readdirEntries', 'readdir', 'stat'] as const)
+        .filter((method) => typeof rootProvider[method] === 'function')
+        .map((method) => vi.spyOn(rootProvider, method));
+
+      await expect(rooted.search!('helper')).resolves.toMatchObject([{ path: 'src/util/helper.ts' }]);
+
+      /* Cold: exactly one scan of the root and its one subdirectory. */
+      expect(reads.some((spy) => spy.mock.calls.length > 0)).toBe(true);
+      for (const spy of reads) {
+        spy.mockClear();
+      }
+
+      await expect(rooted.search!('main')).resolves.toMatchObject([{ path: 'src/main.ts' }]);
+      await expect(rooted.statTree!('')).resolves.toHaveLength(2);
+      await expect(rooted.statTree!('src/util')).resolves.toMatchObject([{ path: 'helper.ts' }]);
+
+      for (const spy of reads) {
+        expect(spy).not.toHaveBeenCalled();
+      }
     });
 
     it('returns concurrent root scans from their local trees independent of completion order', async () => {
+      const aProvider = await mountMemory('/a', 'memory:concurrent-a');
+      const bProvider = await mountMemory('/b', 'memory:concurrent-b');
       await service.writeFile('/a/a-only.ts', 'a');
       await service.writeFile('/b/b-only.ts', 'b');
-      const originalReaddir = rootProvider.readdir.bind(rootProvider);
       const aGate = Promise.withResolvers<void>();
       const bGate = Promise.withResolvers<void>();
-      vi.spyOn(rootProvider, 'readdir').mockImplementation(async (path) => {
-        if (path === '/a') {
-          await aGate.promise;
-        }
-        if (path === '/b') {
-          await bGate.promise;
-        }
-        return originalReaddir(path);
-      });
+      const holdReaddir = (provider: FileSystemProvider, gate: PromiseWithResolvers<void>): void => {
+        const original = provider.readdir.bind(provider);
+        vi.spyOn(provider, 'readdir').mockImplementation(async (path) => {
+          await gate.promise;
+          return original(path);
+        });
+      };
+      holdReaddir(aProvider, aGate);
+      holdReaddir(bProvider, bGate);
 
-      const a = service.searchFiles('/a', 'only');
-      const b = service.searchFiles('/b', 'only');
+      const a = search('/a', 'only');
+      const b = search('/b', 'only');
       bGate.resolve();
       await expect(b).resolves.toMatchObject([{ path: 'b-only.ts' }]);
       aGate.resolve();
@@ -3048,7 +3141,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await svc.writeFile('/doomed.txt', 'before');
       await svc.readFile('/keep.txt');
       await svc.readFile('/doomed.txt');
-      await svc.getDirectoryStat('/');
+      await svc.createRootedFileSystem('/').statTree!('');
       const readdirWithStats = vi.spyOn(provider, 'readdirWithStats');
       const writeFile = provider.writeFile.bind(provider);
       const successfulPath = '/ok.txt';
@@ -3067,7 +3160,9 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
 
       expect(pool.has('/keep.txt')).toBe(true);
       expect(pool.has('/doomed.txt')).toBe(false);
-      await expect(svc.getDirectoryStat('/')).resolves.toContainEqual(expect.objectContaining({ path: 'ok.txt' }));
+      await expect(svc.createRootedFileSystem('/').statTree!('')).resolves.toContainEqual(
+        expect.objectContaining({ path: 'ok.txt' }),
+      );
       expect(readdirWithStats).not.toHaveBeenCalled();
     });
 
@@ -3194,11 +3289,14 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
   // ---------------------------------------------------------------------------
 
   describe('getZippedDirectory', () => {
+    /* Scope-only since W3: a routed path is archived on its rooted view. */
+    const scope = { backend: 'indexeddb' } as const;
+
     it('should return a Blob containing the directory files as a zip', async () => {
       await service.writeFile('/ziptest/a.txt', 'hello');
       await service.writeFile('/ziptest/b.txt', 'world');
 
-      const blob = await service.getZippedDirectory('/ziptest');
+      const blob = await service.getZippedDirectory('/ziptest', { scope });
 
       expect(blob).toBeInstanceOf(Blob);
       expect(blob.size).toBeGreaterThan(0);
@@ -3208,7 +3306,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await service.writeFile('/ziptest/sub/nested.txt', 'nested content');
       await service.writeFile('/ziptest/root.txt', 'root content');
 
-      const blob = await service.getZippedDirectory('/ziptest');
+      const blob = await service.getZippedDirectory('/ziptest', { scope });
       const jszipModule = await import('jszip');
       const jszip = jszipModule.default;
       const zip = await jszip.loadAsync(await blob.arrayBuffer());
@@ -3227,7 +3325,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     it('should handle empty directories', async () => {
       await service.mkdir('/emptydir', { recursive: true });
 
-      const blob = await service.getZippedDirectory('/emptydir');
+      const blob = await service.getZippedDirectory('/emptydir', { scope });
 
       expect(blob).toBeInstanceOf(Blob);
       expect(blob.size).toBeGreaterThan(0);
@@ -3236,16 +3334,23 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     it('rejects missing and file paths instead of returning plausible empty archives', async () => {
       await service.writeFile('/file.txt', 'file');
 
-      await expect(service.getZippedDirectory('/missing')).rejects.toMatchObject({ code: 'ENOENT' });
-      await expect(service.getZippedDirectory('/file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(service.getZippedDirectory('/missing', { scope })).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(service.getZippedDirectory('/file.txt', { scope })).rejects.toMatchObject({ code: 'ENOTDIR' });
     });
   });
 
   // ---------------------------------------------------------------------------
-  // getZippedDirectory — path registry pruning
+  // archive over the rooted view — the surface a project export now reaches
   // ---------------------------------------------------------------------------
 
-  describe('getZippedDirectory path classification', () => {
+  /*
+   * The whole-project export is served by `archive` over the connection's
+   * composed view (charter D2, W3), so these are the assertions the authority's
+   * own zip used to carry. Nothing filters the control plane here: the view
+   * never enumerates it. `versionedOnly` is the caller's own filter, built the
+   * way the file-manager worker builds it.
+   */
+  describe('archive over the project rooted view', () => {
     const projectId = 'proj_zzzzzzzzzzzzzzzzzzzzz';
     const projectRoute = `/projects/${projectId}`;
 
@@ -3273,6 +3378,16 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
         .sort();
     };
 
+    /** The rooted read content operation exactly as `handlerForRoot` composes it. */
+    const projectArchive = async (path: string, options?: { versionedOnly?: boolean }): Promise<Blob> =>
+      withReadContentOps(
+        composeView(
+          { filesystem: service.createRootedFileSystem(projectRoute) },
+          { consumer: 'user', policy: tauPathPolicy },
+        ),
+        tauPathPolicy,
+      ).archive(path, options);
+
     beforeEach(async () => {
       await service.configureProjectRoots({
         projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:0', providerBasePath: 'gear-system' }],
@@ -3287,7 +3402,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     it('should omit control-plane paths from a project archive without reading their bytes', async () => {
       const readFile = vi.spyOn(rootProvider, 'readFile');
 
-      const entries = await zipEntries(await service.getZippedDirectory(projectRoute));
+      const entries = await zipEntries(await projectArchive(''));
 
       expect(entries).toContain('main.ts');
       expect(entries).toContain('.tau/chats/chat_a/log.json');
@@ -3299,15 +3414,24 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     });
 
     it('should archive only versioned project bytes when versionedOnly is set', async () => {
-      const entries = await zipEntries(await service.getZippedDirectory(projectRoute, { versionedOnly: true }));
+      const entries = await zipEntries(await projectArchive('', { versionedOnly: true }));
 
       expect(entries).toEqual(['.gitignore', '.tau/parameters/size.json', 'main.ts', 'tau.json']);
     });
 
-    it('should archive an unversioned records folder when that folder is the zip root', async () => {
-      const entries = await zipEntries(await service.getZippedDirectory(`${projectRoute}/exports`));
+    it('should archive an unversioned records folder when that folder is the archive root', async () => {
+      const entries = await zipEntries(await projectArchive('exports'));
 
       expect(entries).toEqual(['part.stl']);
+    });
+
+    /* The registry is asked about project-relative spellings whatever the
+     * archive root is, so a versioned-only export of one folder keeps that
+     * folder's versioned bytes instead of misclassifying every name. */
+    it('should classify project-relative when a versionedOnly archive is rooted at a subfolder', async () => {
+      const entries = await zipEntries(await projectArchive('.tau/parameters', { versionedOnly: true }));
+
+      expect(entries).toEqual(['size.json']);
     });
   });
 

@@ -17,7 +17,7 @@ const pdf: DraftAttachment = {
 
 // Every stored file reads back as bytes of its declared size, named by its path.
 const readFile = vi.fn(async (path: string) => new Uint8Array(path.endsWith('.pdf') ? 3 * 1024 * 1024 : 4));
-const fileManager = { client: { readFile } };
+const fileManager = { files: { readFile } };
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => fileManager,
 }));

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';

@@ -13,7 +13,7 @@
  * a conflicted revision never leaves the host that created it.
  */
 
-import type { ImmutableRevisionTree, RevisionId } from '@taucad/filesystem/revisions';
+import type { ImmutableRevisionTree, RevisionId } from '#algorithms/index.js';
 import type { RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import type { ObjectFormat } from '#object-hash.js';
 import type { Remote } from '#remotes.js';
@@ -134,7 +134,7 @@ export type WriteRevisionInput = Readonly<{
    * {@link WriteRevisionInput.largeObjects} asks for the clean step.
    *
    * Required: a merge is computed by the caller, with `mergeRevisionTrees` from
-   * `@taucad/filesystem/revisions`, and the terms of an unresolved one arrive
+   * `@taucad/revisions/algorithms`, and the terms of an unresolved one arrive
    * here as {@link WriteRevisionInput.conflict} — which is what keeps a conflict
    * a value in the graph without either engine having to agree on a merge
    * algorithm (I-CONF, EQ14).

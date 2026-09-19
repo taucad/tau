@@ -13,7 +13,7 @@
  *   createRootedBridgeFileSystem ── the agent's own rooted port ──
  *                                                    WorkspaceFileService
  *                                                                 │
- *   FileContentService ── WorkerChangeChannel ── the UI's unrooted port
+ *   FileContentService ── WorkerChangeChannel ── the UI's own rooted port
  * ```
  */
 
@@ -25,11 +25,12 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { joinPath } from '@taucad/utils/path';
 import {
   createPreparedWorkspaceFileSystems,
@@ -85,7 +86,7 @@ const createBrowserHarness = async (): Promise<{
      * composed view, one that does not reads the checkout itself. */
     handlerForRoot: (root, context, consumer) => {
       const filesystem = fileService.createRootedFileSystem(root, context);
-      return consumer === undefined ? filesystem : composeView({ filesystem }, { consumer });
+      return consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
     },
   });
   const worker = {
@@ -98,25 +99,33 @@ const createBrowserHarness = async (): Promise<{
   const uiClient = createFileSystemBridgeProxy(connection);
   await uiClient.ready;
 
+  /* The change transport is the project's own rooted connection (charter D12,
+   * W12b): it delivers root-relative paths and never the UI's own writes. */
+  const viewConnection = openFileSystemBridge(worker, { root: projectRoot, consumer: 'user' });
+  const viewClient = createFileSystemBridgeProxy(viewConnection);
+  await viewClient.ready;
+
   const paths = new WorkspacePathResolver(projectRoot);
   const content = new FileContentService({
     // Text on the wire throughout: jsdom's `MessagePort` clones a `Uint8Array`
     // into its own realm, which the bridge's wire schemas reject. The pin is
     // about event visibility, not binary transport.
-    proxy: mock<FileSystemClient>({
+    proxy: mock<ComposedViewClient>({
       readFile: (async (path: string, options?: unknown) => {
         const text = await uiClient.readFile(path, 'utf8');
         return options === 'utf8' ? text : encoder.encode(text);
-      }) as FileSystemClient['readFile'],
+      }) as ComposedViewClient['readFile'],
       stat: async (path: string) => uiClient.stat(path),
     }),
     paths,
-    channel: new WorkerChangeChannel({ transport: { listen: uiClient.listen }, paths }),
+    channel: new WorkerChangeChannel({ transport: { listen: viewClient.listen } }),
     refreshGuard: new RefreshGenerationGuard(),
   });
 
   disposers.push(() => {
     content.dispose();
+    viewClient.dispose();
+    viewConnection.dispose();
     uiClient.dispose();
     connection.dispose();
     exposed.cleanup();

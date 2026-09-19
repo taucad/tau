@@ -1,5 +1,5 @@
 import { Topic } from '@taucad/events';
-import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileOperation, PreparedFileOperation } from '@taucad/fs-client/file-content-service';
 import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -204,7 +204,7 @@ export const createParameterSetService = (
   options: Readonly<{
     rootDirectory: string;
     client: Pick<
-      ComposedViewClient,
+      RootedContentClient,
       'exists' | 'readFile' | 'writeFileChecked' | 'move' | 'unlink' | 'rmdir' | 'mkdir'
     >;
     subscribe(path: string, listener: () => void): () => void;

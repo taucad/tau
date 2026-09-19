@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ImmutableRevisionTree } from '#revision-tree.js';
+import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
 
 describe('ImmutableRevisionTree', () => {
   it('refuses a file whose path is also a directory prefix', () => {

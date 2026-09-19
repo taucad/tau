@@ -1,5 +1,5 @@
 import { createMemoryProvider } from '@taucad/filesystem/backend';
-import { revisionId } from '@taucad/filesystem/revisions';
+import { revisionId } from '@taucad/revisions/algorithms';
 import {
   bootstrapRemoteRevisionStore,
   createGitRemoteTransport,

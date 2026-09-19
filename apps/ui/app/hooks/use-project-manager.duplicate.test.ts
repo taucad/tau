@@ -24,7 +24,13 @@ const operationId = 'req_bbbbbbbbbbbbbbbbbbbbb';
 let lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
 const phases: string[] = [];
 
-const mockGetDirectoryContents = vi.fn(async () => ({
+/**
+ * What the source project's own composed view answers with `versionedOnly`: the
+ * project, and none of the control plane, records or cache beside it (charter
+ * D11, ZIP follow-up F-2). A raw walk of the same directory would also carry
+ * `.git/**`, `.tau/chats/**` and `thumbnail.webp`.
+ */
+const mockReadVersionedProjectFiles = vi.fn(async () => ({
   'main.ts': new Uint8Array([1]),
   'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
 }));
@@ -38,7 +44,7 @@ const mockCommitPendingProjectDirectory = vi.fn(async () => {
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    client: {
+    files: {
       readFile: vi.fn(async () => lastManifest),
       writeFiles: vi.fn(async () => {
         phases.push('files');
@@ -47,13 +53,15 @@ vi.mock('#hooks/use-file-manager.js', () => ({
         phases.push('manifest');
         lastManifest = bytes;
       }),
-      getDirectoryContents: mockGetDirectoryContents,
       exists: vi.fn(async () => false),
       rmdir: vi.fn(async () => undefined),
+    },
+    client: {
       listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },
     workspace: { syncProjectRoots: mockSyncProjectRoots },
+    readVersionedProjectFiles: mockReadVersionedProjectFiles,
   }),
 }));
 
@@ -208,7 +216,24 @@ describe('useProjectManager.duplicateProject', () => {
       manifest: serializeProjectManifest(duplicateProject),
     });
     expect(phases).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete']);
-    expect(mockGetDirectoryContents).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
+    expect(mockReadVersionedProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
+  });
+
+  it('journals only the project, never the control plane, records or cache beside it', async () => {
+    /* The raw directory read this replaced handed the journal every byte in the
+     * project directory: the duplicate then carried the source's `.git`, its
+     * chats under a foreign resource id, and its thumbnail (ZIP follow-up F-2). */
+    mockReadVersionedProjectFiles.mockResolvedValueOnce({
+      'main.ts': new Uint8Array([1]),
+      'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
+    });
+
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () => result.current.duplicateProject(sourceProject.id));
+
+    const journalled = Object.keys(mockDuplicate.mock.calls[0]?.[0].files ?? {});
+    expect(journalled).toEqual(['main.ts']);
+    expect(mockReadVersionedProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
   });
 
   it('records the same webaccess workspace on the duplicate', async () => {
@@ -243,7 +268,7 @@ describe('useProjectManager.duplicateProject', () => {
   });
 
   it('leaves the duplicate pending when source-file copying fails', async () => {
-    mockGetDirectoryContents.mockRejectedValueOnce(new Error('copy failed'));
+    mockReadVersionedProjectFiles.mockRejectedValueOnce(new Error('copy failed'));
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(act(async () => result.current.duplicateProject(sourceProject.id))).rejects.toThrow('copy failed');

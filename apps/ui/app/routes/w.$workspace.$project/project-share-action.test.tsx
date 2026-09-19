@@ -70,7 +70,7 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ client: fileClient }),
+  useFileManager: () => ({ files: fileClient }),
 }));
 
 vi.mock('#hooks/use-projects.js', () => ({

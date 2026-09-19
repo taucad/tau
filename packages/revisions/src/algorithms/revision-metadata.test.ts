@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { revisionMetadataSchema } from '#revision-metadata.js';
+import { revisionMetadataSchema } from '#algorithms/revision-metadata.js';
 
 describe('revisionMetadataSchema', () => {
   it('rejects an unknown sixth provenance source', () => {

@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 
 import { createProjectRevisions } from '#revisions.js';
 import { hostRevisionActor } from '#revision-actor.js';

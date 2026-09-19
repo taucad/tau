@@ -473,7 +473,8 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         await fileManager.workspace.syncProjectRoots();
         const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
         const { openFileSystemBridge } = await waitForRootedBridgeOpener(fileManager.fileManagerRef);
-        const proxy = createFileSystemBridgeProxy(openFileSystemBridge(rootDirectory));
+        /* Trusted composition: the workspace authority serves the checkout (G6). */
+        const proxy = createFileSystemBridgeProxy(openFileSystemBridge(rootDirectory, 'working-copy'));
         await proxy.ready;
         return proxy;
       },

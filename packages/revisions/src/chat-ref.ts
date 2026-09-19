@@ -28,9 +28,9 @@
  * what the fetch path calls with the refs the fetch wrote.
  */
 
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
-import type { RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
+import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 
 import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';

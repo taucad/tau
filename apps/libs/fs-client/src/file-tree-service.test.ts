@@ -2,14 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
-import type { FileSystemClient } from '#file-system-client.js';
 import type { FileTreeNode } from '@taucad/filesystem';
 import type { ChangeEvent, FileEntry, FileProvenance, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { createComposedViewClient } from '#composed-view-client.js';
+import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { headlessVisibilityProvider } from '#visibility-provider.js';
@@ -56,17 +57,26 @@ const skillOverlay = (): ComposedViewOverlay => {
  * The production client: in-root reads through one composed view, everything
  * else on the authority.
  */
-const createComposedProxy = async (): Promise<FileSystemClient> => {
+const createComposedProxy = async (): Promise<ComposedViewClient> => {
   const provider = new MemoryProvider();
   await provider.writeFile('main.ts', 'export {};\n');
   return createComposedViewClient({
-    workspace: mock<FileSystemClient>({
+    workspace: mock<ComposedViewClient>({
       readDirectory: vi.fn().mockResolvedValue([]),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue(textStat()),
       getDirectoryStat: vi.fn().mockResolvedValue([]),
     }),
-    view: composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()] }),
+    /* The rooted connection also archives a subtree (charter D2) and serves the
+     * mutation pipeline's porcelain (D4); this harness reads rows. */
+    view: Object.assign(
+      composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()], policy: tauPathPolicy }),
+      {
+        archive: vi.fn<ComposedViewProxy['archive']>(),
+        search: vi.fn<ComposedViewProxy['search']>().mockResolvedValue([]),
+        statTree: vi.fn<ComposedViewProxy['statTree']>().mockResolvedValue([]),
+      },
+    ) as unknown as ComposedViewProxy,
     paths: new WorkspacePathResolver(workspaceRoot),
   });
 };
@@ -140,14 +150,14 @@ function connectContentService(tree: FileTreeService): (event: ContentChangeEven
 }
 
 function createTreeHarness(overrides?: {
-  proxy?: FileSystemClient;
+  proxy?: ComposedViewClient;
   workspaceRoot?: string;
   initialEntries?: FileEntry[];
   visibility?: VisibilityProvider;
   onExternalPollTelemetry?: ConstructorParameters<typeof FileTreeService>[0]['onExternalPollTelemetry'];
 }): {
   tree: FileTreeService;
-  proxy: FileSystemClient;
+  proxy: ComposedViewClient;
   emitFileChanged: (event: ChangeEvent) => void;
   disposeChannel: () => void;
 } {
@@ -158,10 +168,10 @@ function createTreeHarness(overrides?: {
   });
   const root = overrides?.workspaceRoot ?? workspaceRoot;
   const paths = new WorkspacePathResolver(root);
-  const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+  const channel = new WorkerChangeChannel({ transport: { listen } });
   const proxy =
     overrides?.proxy ??
-    mock<FileSystemClient>({
+    mock<ComposedViewClient>({
       readDirectory: vi.fn().mockResolvedValue([]),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue(textStat()),
@@ -325,7 +335,7 @@ describe('FileTreeService rooted search and external polling', () => {
     const unsubscribe = vi.fn();
     const firstPoll = Promise.withResolvers<void>();
     const report = vi.fn<(aggregate: ExternalPollTelemetry) => void>();
-    const proxy = mock<FileSystemClient>({
+    const proxy = mock<ComposedViewClient>({
       pollExternalChanges: vi.fn().mockReturnValueOnce(firstPoll.promise).mockResolvedValue(undefined),
     });
     const { tree, disposeChannel } = createTreeHarness({
@@ -388,7 +398,7 @@ describe('FileTreeService rooted search and external polling', () => {
     const report = vi.fn<(aggregate: ExternalPollTelemetry) => void>();
     const poll = vi.fn().mockRejectedValueOnce(new Error('first poll failed')).mockResolvedValue(undefined);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const proxy = mock<FileSystemClient>({ pollExternalChanges: poll });
+    const proxy = mock<ComposedViewClient>({ pollExternalChanges: poll });
     const { tree, disposeChannel } = createTreeHarness({ proxy, onExternalPollTelemetry: report });
 
     tree.startPolling();
@@ -437,7 +447,7 @@ describe('FileTreeService rooted search and external polling', () => {
     vi.useFakeTimers();
     const pollExternalChanges = vi.fn().mockResolvedValue(true);
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({ pollExternalChanges }),
+      proxy: mock<ComposedViewClient>({ pollExternalChanges }),
     });
 
     tree.startPolling();
@@ -460,7 +470,7 @@ describe('FileTreeService rooted search and external polling', () => {
     vi.useFakeTimers();
     const pollExternalChanges = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({ pollExternalChanges }),
+      proxy: mock<ComposedViewClient>({ pollExternalChanges }),
     });
 
     tree.startPolling();
@@ -481,7 +491,7 @@ describe('FileTreeService rooted search and external polling', () => {
     vi.useFakeTimers();
     const pollExternalChanges = vi.fn().mockResolvedValue(true);
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({ pollExternalChanges }),
+      proxy: mock<ComposedViewClient>({ pollExternalChanges }),
     });
 
     tree.startPolling();
@@ -503,7 +513,7 @@ describe('FileTreeService rooted search and external polling', () => {
     vi.useFakeTimers();
     const pollExternalChanges = vi.fn().mockResolvedValue(undefined);
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({ pollExternalChanges }),
+      proxy: mock<ComposedViewClient>({ pollExternalChanges }),
     });
 
     tree.startPolling();
@@ -528,7 +538,7 @@ describe('FileTreeService rooted search and external polling', () => {
     vi.useFakeTimers();
     const pending = Promise.withResolvers<void>();
     const report = vi.fn<(aggregate: ExternalPollTelemetry) => void>();
-    const proxy = mock<FileSystemClient>({ pollExternalChanges: vi.fn().mockReturnValue(pending.promise) });
+    const proxy = mock<ComposedViewClient>({ pollExternalChanges: vi.fn().mockReturnValue(pending.promise) });
     const { tree, disposeChannel } = createTreeHarness({ proxy, onExternalPollTelemetry: report });
 
     tree.startPolling();
@@ -564,8 +574,8 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const listen = vi.fn().mockReturnValue(vi.fn());
     const paths = new WorkspacePathResolver(workspaceRoot);
-    const channel = new WorkerChangeChannel({ transport: { listen }, paths });
-    const proxy = mock<FileSystemClient>({
+    const channel = new WorkerChangeChannel({ transport: { listen } });
+    const proxy = mock<ComposedViewClient>({
       readDirectory: vi.fn(),
       readdir: vi.fn().mockResolvedValue([]),
       stat: vi.fn().mockResolvedValue(textStat()),
@@ -615,7 +625,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
   ])('should refresh a $row row whose provenance alone changed', async ({ node }) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { tree, proxy, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi.fn().mockResolvedValue([node(false)]),
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -640,7 +650,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
   it('should keep a pending root refresh when a narrower write arrives inside the debounce window', async () => {
     vi.useFakeTimers();
     const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi.fn().mockResolvedValue([]),
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -656,7 +666,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     vi.mocked(proxy.readDirectory).mockClear();
 
     tree.scheduleRefresh('');
-    emitFileChanged({ type: 'fileWritten', path: '/projects/abc/src/main.ts', backend: 'indexeddb' });
+    emitFileChanged({ type: 'fileWritten', path: 'src/main.ts', backend: 'indexeddb' });
     await vi.advanceTimersByTimeAsync(100);
 
     expect(proxy.readDirectory).toHaveBeenCalledOnce();
@@ -682,7 +692,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
       return [];
     });
     const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory,
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -697,7 +707,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     readDirectory.mockClear();
 
     emitFileChanged({ type: 'backendChanged', backend: 'indexeddb' });
-    emitFileChanged({ type: 'fileWritten', path: '/projects/abc/src/other.ts', backend: 'indexeddb' });
+    emitFileChanged({ type: 'fileWritten', path: 'src/other.ts', backend: 'indexeddb' });
     await vi.waitFor(() => {
       expect(tree.getTreeSnapshot().has('src/nested/new.ts')).toBe(true);
     });
@@ -720,7 +730,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
       .mockReturnValueOnce(resync.promise)
       .mockResolvedValue([textNode('leak.ts')]);
     const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory,
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -755,7 +765,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
       .mockResolvedValueOnce([textNode('file.ts')])
       .mockResolvedValueOnce([]);
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory,
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -779,7 +789,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
 
   it('should remove tree entries when disk children disappear', async () => {
     const { tree, proxy, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi.fn(),
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -802,9 +812,9 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
   it('should set isDirectoryResolved on root when initialEntries bootstrap runs', () => {
     const listen = vi.fn().mockReturnValue(vi.fn());
     const paths = new WorkspacePathResolver(workspaceRoot);
-    const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+    const channel = new WorkerChangeChannel({ transport: { listen } });
     const tree = new FileTreeService({
-      proxy: mock<FileSystemClient>(),
+      proxy: mock<ComposedViewClient>(),
       paths,
       channel,
       visibility: headlessVisibilityProvider,
@@ -820,9 +830,9 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
   it('should not mark root resolved when initialEntries is empty', () => {
     const listen = vi.fn().mockReturnValue(vi.fn());
     const paths = new WorkspacePathResolver(workspaceRoot);
-    const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+    const channel = new WorkerChangeChannel({ transport: { listen } });
     const tree = new FileTreeService({
-      proxy: mock<FileSystemClient>(),
+      proxy: mock<ComposedViewClient>(),
       paths,
       channel,
       visibility: headlessVisibilityProvider,
@@ -879,7 +889,7 @@ describe('FileTreeService listDirectory / subscribePath', () => {
 
   it('should reject with NotFound when readDirectory fails with ENOENT', async () => {
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi.fn().mockRejectedValue(Object.assign(new Error('enoent'), { code: 'ENOENT' })),
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -894,7 +904,7 @@ describe('FileTreeService listDirectory / subscribePath', () => {
 
   it('should return sync entries after cold load without empty array on success', async () => {
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi
           .fn()
           .mockResolvedValueOnce([textNode('a.ts', { size: 1 })])
@@ -913,7 +923,7 @@ describe('FileTreeService listDirectory / subscribePath', () => {
 
   it('should propagate size and mtimeMs from readDirectory into listed rows', async () => {
     const { tree, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi
           .fn()
           .mockResolvedValueOnce([
@@ -943,7 +953,7 @@ describe('FileTreeService listDirectory / subscribePath', () => {
       resolveRead = resolve;
     });
     const { tree, proxy, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi.fn().mockReturnValue(readPromise),
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
@@ -961,7 +971,7 @@ describe('FileTreeService listDirectory / subscribePath', () => {
 
   it('should notify subscribePath when mergeChildren updates that directory', async () => {
     const { tree, proxy, disposeChannel } = createTreeHarness({
-      proxy: mock<FileSystemClient>({
+      proxy: mock<ComposedViewClient>({
         readDirectory: vi.fn(),
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),

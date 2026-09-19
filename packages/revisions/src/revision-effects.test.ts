@@ -19,8 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
-import { captureRevisionTree } from '@taucad/filesystem';
+import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { classify } from '@taucad/filesystem/path-registry';
 

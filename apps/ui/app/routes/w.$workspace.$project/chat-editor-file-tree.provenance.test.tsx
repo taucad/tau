@@ -43,7 +43,7 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    client: { overrideUnit },
+    overrideUnit,
     contentService: undefined,
     treeService: undefined,
     runtimeFileSystem: undefined,

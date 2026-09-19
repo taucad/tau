@@ -261,7 +261,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     cleanups.push(computeConnection.dispose);
   }
   const kernelOptions = resolveKernelOptions({
-    fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot)),
+    /* The kernel runs the checkout itself, never a consumer's composed view (G6). */
+    fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot, 'working-copy')),
     compute: computeConnection?.compute,
   });
   client = createRuntimeClient(kernelOptions);

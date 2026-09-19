@@ -68,20 +68,77 @@ describe('FileManagerProvider props discriminated union', () => {
 describe('useFileManager surface', () => {
   type Context = NonNullable<ReturnType<typeof useFileManager>>;
 
-  it('exposes a typed client facade gated behind getReadiedProxy', () => {
+  it('exposes a topology-only client facade gated behind getReadiedProxy', () => {
     expectTypeOf<Context>().toHaveProperty('client');
     type Client = Context['client'];
-    expectTypeOf<Client>().toHaveProperty('readFile');
-    expectTypeOf<Client>().toHaveProperty('unlink');
-    expectTypeOf<Client>().toHaveProperty('rmdir');
-    expectTypeOf<Client>().toHaveProperty('getZippedDirectory');
-    expectTypeOf<Client>().toHaveProperty('readShallowDirectory');
+    expectTypeOf<Client>().toHaveProperty('listProjectManifests');
     expectTypeOf<Client>().toHaveProperty('commitPendingProjectDirectory');
+    expectTypeOf<Client>().toHaveProperty('adoptProjectDirectory');
+    expectTypeOf<Client>().toHaveProperty('permanentlyDeleteProjectDirectory');
+  });
 
-    expectTypeOf<Parameters<Client['unlink']>>().toEqualTypeOf<[path: string]>();
-    expectTypeOf<{ scope: WorkspaceScope; recursive: true }>().toExtend<NonNullable<Parameters<Client['rmdir']>[1]>>();
-    expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<Parameters<Client['getZippedDirectory']>[1]>>();
-    expectTypeOf<{ scope: WorkspaceScope }>().toExtend<NonNullable<Parameters<Client['readShallowDirectory']>[1]>>();
+  /**
+   * O1.2, asserted where a consumer would take it (charter D5, D12).
+   *
+   * The authority-global surface is topology. A content method reappearing on
+   * `useFileManager().client` — by widening the facade, or by re-adding one to
+   * the `FileSystemClient` it is picked from — fails here before any consumer
+   * can reach the unmasked authority through it.
+   */
+  it('carries no content method on the topology client', () => {
+    type Client = Context['client'];
+    expectTypeOf<Client>().not.toHaveProperty('readFile');
+    expectTypeOf<Client>().not.toHaveProperty('writeFile');
+    expectTypeOf<Client>().not.toHaveProperty('writeFileChecked');
+    expectTypeOf<Client>().not.toHaveProperty('writeFiles');
+    expectTypeOf<Client>().not.toHaveProperty('mkdir');
+    expectTypeOf<Client>().not.toHaveProperty('readdir');
+    expectTypeOf<Client>().not.toHaveProperty('stat');
+    expectTypeOf<Client>().not.toHaveProperty('lstat');
+    expectTypeOf<Client>().not.toHaveProperty('exists');
+    expectTypeOf<Client>().not.toHaveProperty('unlink');
+    expectTypeOf<Client>().not.toHaveProperty('rmdir');
+    expectTypeOf<Client>().not.toHaveProperty('move');
+    expectTypeOf<Client>().not.toHaveProperty('bulkMove');
+    expectTypeOf<Client>().not.toHaveProperty('duplicateFile');
+    expectTypeOf<Client>().not.toHaveProperty('copyDirectory');
+    expectTypeOf<Client>().not.toHaveProperty('searchFiles');
+    expectTypeOf<Client>().not.toHaveProperty('getDirectoryStat');
+    expectTypeOf<Client>().not.toHaveProperty('readDirectory');
+    expectTypeOf<Client>().not.toHaveProperty('readShallowDirectory');
+    expectTypeOf<Client>().not.toHaveProperty('getZippedDirectory');
+    expectTypeOf<Client>().not.toHaveProperty('overrideUnit');
+    /* The preflights answer about content too. */
+    expectTypeOf<Client>().not.toHaveProperty('canMove');
+    expectTypeOf<Client>().not.toHaveProperty('canRename');
+    expectTypeOf<Client>().not.toHaveProperty('canCreate');
+    expectTypeOf<Client>().not.toHaveProperty('canDelete');
+  });
+
+  /** Content is the owning root's (W12c); the trusted stores take this one. */
+  it('exposes a rooted content client beside it', () => {
+    expectTypeOf<Context>().toHaveProperty('files');
+    type Files = Context['files'];
+    expectTypeOf<Files>().toHaveProperty('readFile');
+    expectTypeOf<Files>().toHaveProperty('writeFile');
+    expectTypeOf<Files>().toHaveProperty('writeFileChecked');
+    expectTypeOf<Files>().toHaveProperty('rmdir');
+    expectTypeOf<Parameters<Files['unlink']>>().toEqualTypeOf<[path: string]>();
+    /* Absolute paths, and no `scope`: the root owns the routing. */
+    expectTypeOf<{ recursive: true }>().toExtend<NonNullable<Parameters<Files['rmdir']>[1]>>();
+    expectTypeOf<Files>().not.toHaveProperty('listProjectManifests');
+  });
+
+  /** The `/files` browser's physical reads: scope required, nothing routed (charter D5). */
+  it('exposes a scope-required storage client for the physical browser', () => {
+    expectTypeOf<Context>().toHaveProperty('scopedStorage');
+    type Scoped = Context['scopedStorage'];
+    expectTypeOf<Scoped>().toHaveProperty('readShallowDirectory');
+    expectTypeOf<Scoped>().toHaveProperty('readFile');
+    expectTypeOf<Scoped>().toHaveProperty('getZippedDirectory');
+    expectTypeOf<Parameters<Scoped['readShallowDirectory']>[1]>().toEqualTypeOf<{ readonly scope: WorkspaceScope }>();
+    expectTypeOf<Parameters<Scoped['getZippedDirectory']>[1]>().toEqualTypeOf<{ readonly scope: WorkspaceScope }>();
+    expectTypeOf<Scoped>().not.toHaveProperty('writeFile');
   });
 
   it('exposes a workspace admin facade with mount/unmount/root teardown', () => {

@@ -1,5 +1,6 @@
 import { ResourceQueue } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -11,7 +12,7 @@ let provider: MemoryProvider;
 
 const fileSystemFor = (signal?: AbortSignal) =>
   createProviderRpcFileSystem({
-    provider: composeView({ filesystem: provider }, { consumer: 'agent' }),
+    provider: composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy }),
     mutations: new ResourceQueue(),
     ...(signal ? { signal } : {}),
   });

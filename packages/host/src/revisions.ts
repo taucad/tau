@@ -29,7 +29,7 @@ import { jsonValueSchema } from '@taucad/agent-host';
 import type { AgentChannelRevisionEvent, JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
-import { revisionId } from '@taucad/filesystem/revisions';
+import { revisionId } from '@taucad/revisions/algorithms';
 import {
   awaitSyncSettled,
   createProjectRevisionsActor,

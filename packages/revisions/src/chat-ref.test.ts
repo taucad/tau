@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { classify } from '@taucad/filesystem/path-registry';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -32,7 +32,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { isHostLocalRef, refPatternIsHostLocal } from '#remotes.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { RevisionId } from '#algorithms/index.js';
 import type { RevisionPort } from '#revision-port.js';
 
 const decoder = new TextDecoder();
@@ -363,6 +363,7 @@ describe.each([
     });
     const target = await createMemoryProvider();
     for (const head of [firstHead, revisionId(renamed.commitId)]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Replay order is the claim: the rename must land after the first head.
       await projectChats({
         port: harness.port,
         filesystem: target,

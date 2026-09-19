@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { authoringTypeMaps, geospecTypes } from '@taucad/api-extractor/authoring-types';
 import {
   jscadModelingTypes,
@@ -6,7 +7,7 @@ import {
   opencascadeTypes,
 } from '@taucad/api-extractor/kernel-types';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
+import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
 import { describe, expect, it } from 'vitest';
 
 const createMemoryFileService = async (): Promise<WorkspaceFileService> => {
@@ -18,6 +19,17 @@ const createMemoryFileService = async (): Promise<WorkspaceFileService> => {
     backend: 'memory',
     storageRootKey,
   });
+  const nodeModulesRootKey = 'memory:bundled-types-node-modules';
+  mountTable.mount(
+    '/node_modules',
+    await providerRegistry.getProvider({ backend: 'memory', storageRootKey: nodeModulesRootKey }),
+    {
+      class: 'derived',
+      backend: 'memory',
+      storageRootKey: nodeModulesRootKey,
+      providerBasePath: 'tau-node-modules',
+    },
+  );
   return new WorkspaceFileService({
     providerRegistry,
     resourceQueue: new ResourceQueue(),
@@ -38,7 +50,7 @@ describe('bundled kernel types mount', () => {
           packageJson: entry.packageJson,
         })),
       );
-      await populateBundledTypesMount(fileService, payload);
+      await populateBundledTypesMount(fileService.createRootedFileSystem('/node_modules'), payload);
 
       await expect(fileService.readFile('/node_modules/@jscad/modeling/index.d.ts', 'utf8')).resolves.toBe(
         jscadModelingTypes['@jscad/modeling'],

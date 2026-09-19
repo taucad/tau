@@ -207,11 +207,11 @@ export type ComposerSurface = Parameters<typeof composerRecordPaths.surfaceAttac
  * own directory.
  */
 function useSurfaceAttachments(surface: ComposerSurface): { directory: string; attachments: AttachmentStore } {
-  const { client } = useFileManager();
+  const { files } = useFileManager();
   return useMemo(() => {
     const directory = composerRecordPaths.surfaceAttachments(surface);
-    return { directory, attachments: createAttachmentStore(client, directory) };
-  }, [client, surface]);
+    return { directory, attachments: createAttachmentStore(files, directory) };
+  }, [files, surface]);
 }
 
 function useComposerDraftMachine(attachments: AttachmentStore) {
@@ -294,8 +294,8 @@ export function HomeNewProjectComposerProvider({
 }: {
   readonly children: React.ReactNode;
 }): React.JSX.Element {
-  const { client } = useFileManager();
-  const store = useMemo(() => createComposerRecordStore(client, composerRecordPaths.newProject), [client]);
+  const { files } = useFileManager();
+  const store = useMemo(() => createComposerRecordStore(files, composerRecordPaths.newProject), [files]);
   /* Declared before both actors: effect cleanups run in declaration order, so the debounced keystroke
    * reaches the record while the draft and the record are still running (R9). */
   const flushDraftOnUnmount = useRef<() => void>(undefined);

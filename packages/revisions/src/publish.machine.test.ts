@@ -43,7 +43,7 @@ import type {
   PublishTagActorInput,
   PublishVersionsActorOutput,
 } from '#publish.machine.js';
-import { revisionId } from '@taucad/filesystem/revisions';
+import { revisionId } from '#algorithms/index.js';
 
 import type { RevisionTag } from '#revision-port.js';
 import { createManualClock } from '#test/fake-actors.js';

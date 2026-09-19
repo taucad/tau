@@ -132,7 +132,7 @@ export function useAttachmentSource(
   part: { readonly url: string; readonly mediaType: string },
 ): AttachmentSource {
   // Optional: a surface without a filesystem still renders `data:` parts, and shows references as absent.
-  const client = useOptionalFileManager()?.client;
+  const client = useOptionalFileManager()?.files;
   const [resolved, setResolved] = useState<{ key: string; source: AttachmentSource } | undefined>(undefined);
   const isReference = attachmentReferenceOf(part) !== undefined;
   const listed = typeof directories === 'string' ? [directories] : (directories ?? []);

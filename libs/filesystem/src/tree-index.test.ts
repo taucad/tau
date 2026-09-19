@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { InMemoryFileTree } from '#in-memory-file-tree.js';
+import type { FileStatEntry } from '@taucad/types';
+import { TreeIndex, TreeIndexes } from '#tree-index.js';
 
-type BuildEntry = Parameters<InMemoryFileTree['build']>[0][number];
+type BuildEntry = Parameters<TreeIndex['build']>[0][number];
 
 const textFile = (
   path: string,
@@ -17,11 +18,11 @@ const textFile = (
 });
 
 /** Paths in these tests are relative to the virtual tree root (same convention as WorkspaceFileService after scan-root normalization). */
-describe('InMemoryFileTree', () => {
-  let tree: InMemoryFileTree;
+describe('TreeIndex', () => {
+  let tree: TreeIndex;
 
   beforeEach(() => {
-    tree = new InMemoryFileTree();
+    tree = new TreeIndex();
   });
 
   describe('build', () => {
@@ -256,5 +257,82 @@ describe('InMemoryFileTree', () => {
       expect(stats).toHaveLength(6265);
       expect(elapsed).toBeLessThan(20);
     });
+  });
+});
+
+describe('TreeIndexes', () => {
+  const file = (path: string): FileStatEntry => ({
+    path,
+    name: path.split('/').at(-1)!,
+    type: 'file',
+    size: 1,
+    mtimeMs: 0,
+    contentKind: 'binary',
+  });
+
+  it('keys indexes by root, so one root cold does not evict another warm', () => {
+    const indexes = new TreeIndexes();
+    indexes.build('/a', [file('one.ts')]);
+    indexes.build('/b', [file('two.ts')]);
+
+    expect(indexes.search('/a', 'one')).toMatchObject([{ path: 'one.ts' }]);
+    expect(indexes.search('/b', 'two')).toMatchObject([{ path: 'two.ts' }]);
+    expect(indexes.search('/c', 'three')).toBeUndefined();
+  });
+
+  /* Nested roots are ordinary: `/` and a project route can both be warm, and a
+   * write inside the project is a fact for both of them. */
+  it('applies one write to every index whose root contains it', () => {
+    const indexes = new TreeIndexes();
+    indexes.build('/', [file('projects/x/main.ts')]);
+    indexes.build('/projects/x', [file('main.ts')]);
+
+    indexes.addFile('/projects/x/added.ts', { size: 2, contentKind: 'binary' });
+
+    expect(
+      indexes
+        .statTree('/projects/x')
+        ?.map((entry) => entry.path)
+        .sort(),
+    ).toEqual(['added.ts', 'main.ts']);
+    expect(indexes.get('/')?.stat('projects/x/added.ts')?.type).toBe('file');
+    expect(indexes.statType('/projects/x/added.ts')).toBe('file');
+  });
+
+  it('leaves an index a path falls outside of untouched', () => {
+    const indexes = new TreeIndexes();
+    indexes.build('/a', [file('one.ts')]);
+
+    indexes.addFile('/b/two.ts', { size: 1, contentKind: 'binary' });
+    indexes.removeFile('/b/two.ts');
+
+    expect(indexes.statTree('/a')).toMatchObject([{ path: 'one.ts' }]);
+    expect(indexes.statTree('/b')).toBeUndefined();
+  });
+
+  /* G7: one index holds one mount's tree, because that is all the scan that
+   * built it walked. Answering for a path behind a nested mount reports a false
+   * empty (or invents entries) where the caller must fall back to a walk. */
+  it('does not answer for a path behind a nested mount', () => {
+    const indexes = new TreeIndexes(() => ['/', '/projects/x']);
+    indexes.build('/', [file('main.ts')]);
+
+    expect(indexes.statTree('/projects/x')).toBeUndefined();
+    expect(indexes.statType('/projects/x/src/a.ts')).toBeUndefined();
+
+    indexes.addFile('/projects/x/added.ts', { size: 1, contentKind: 'binary' });
+
+    expect(indexes.get('/')?.stat('projects/x/added.ts')).toBeUndefined();
+    expect(indexes.statTree('/')).toMatchObject([{ path: 'main.ts' }]);
+  });
+
+  it('drops every index on clear', () => {
+    const indexes = new TreeIndexes();
+    indexes.build('/a', [file('one.ts')]);
+
+    indexes.clear();
+
+    expect(indexes.get('/a')).toBeUndefined();
+    expect(indexes.statTree('/a')).toBeUndefined();
   });
 });

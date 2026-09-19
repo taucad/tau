@@ -24,7 +24,7 @@ describe('ProviderService vertexai', () => {
     };
 
     const providerService = new ProviderService(configService as unknown as ConfigService<Environment, true>);
-    const model = providerService.createModelClass('vertexai', { model: 'gemini-3.7-flash' }) as ChatVertexAI;
+    const model = providerService.createModelClass('vertexai', { model: 'gemini-3.8-flash' }) as ChatVertexAI;
 
     expect(model.invocationParams({}).streamFunctionCallArguments).toBeUndefined();
   });

@@ -15,8 +15,8 @@ import {
   submitTurn,
 } from '#support/live-chat-turn.js';
 
-const modelId = 'google-gemini-3.7-flash';
-const providerModelId = 'gemini-3.7-flash';
+const modelId = 'google-gemini-3.8-flash';
+const providerModelId = 'gemini-3.8-flash';
 const isGeminiReceipt = (receipt: UsageReceipt): boolean => receipt.model.id === providerModelId;
 
 const readProjectFiles = async (): Promise<{

@@ -71,7 +71,7 @@ const flavours: Readonly<Record<WireFamily, Flavour>> = {
   },
   vertexai: {
     api: 'openai-completions',
-    modelId: 'gemini-3.7-flash',
+    modelId: 'gemini-3.8-flash',
     callIds: ['uMxj91xgFixture', 'Pv2kd81QFixture'],
     // What the Vertex shim plus pi's completions codec record for a Gemini thought.
     thinkingSignature: 'reasoning_content',

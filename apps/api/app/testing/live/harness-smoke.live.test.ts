@@ -15,7 +15,7 @@ import {
 } from '#testing/live/live-gateway.harness.js';
 import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
 
-const modelId = 'google-gemini-3.7-flash';
+const modelId = 'google-gemini-3.8-flash';
 
 const textOf = (message: ProviderMessage): string =>
   typeof message.content === 'string'

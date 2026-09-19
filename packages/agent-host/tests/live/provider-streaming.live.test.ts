@@ -33,7 +33,7 @@ const defaults: Record<ProviderCase['providerKind'], Omit<ProviderCase, 'provide
     reasoning: { budgetTokens: 4000, display: 'summarized' },
   },
   vertexai: {
-    modelId: 'google-gemini-3.7-flash',
+    modelId: 'google-gemini-3.8-flash',
     contextWindow: 200_000,
     reasoning: { effort: 'high' },
   },

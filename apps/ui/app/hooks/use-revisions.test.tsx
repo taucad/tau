@@ -10,13 +10,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { useRevisionChanges, useRevisionFileComparison, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import { setRevisionSessionUser } from '#lib/revision-actor.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-revision-status.js', async () => {
@@ -52,6 +53,7 @@ const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Elem
 beforeEach(() => {
   revisionStatusHarness.reset();
   settlements = [];
+  setRevisionSessionUser(undefined);
 });
 
 describe('useRevisions', () => {
@@ -501,5 +503,23 @@ describe('useRevisionChanges', () => {
     /* The pseudonym stays stable and per workspace; the scheme is not copy. */
     expect(result.current.revisions[1]?.actor).toBe('Anonymous · 2722de98');
     expect(result.current.revisions[0]?.actor).toBe('tau-browser-agent-host');
+  });
+
+  /* F4: the session is a store the hook subscribes to, not a value it read once. */
+  it('renames a revision to the person who signs in mid-session, without the rows changing', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-1', revisionNumber: 1, source: 'user', actor: 'user-1', trigger: 'save' }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions[0]?.actor).toBe('Another account');
+    });
+
+    act(() => {
+      setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
+    });
+
+    expect(result.current.revisions[0]?.actor).toBe('Ada');
   });
 });

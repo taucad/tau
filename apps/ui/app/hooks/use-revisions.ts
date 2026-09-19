@@ -18,7 +18,8 @@ import { useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
-import { getRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import {
   getHostFinalizedTurns,
@@ -117,28 +118,28 @@ const titleOf = (row: RevisionRow): string => {
  * described rather than printed raw.
  *
  * @param row - One graph row.
+ * @param session - The signed-in person, as the hook subscribed to them.
  * @returns The attribution line.
  */
-const actorOf = (row: RevisionRow): string => {
+const actorOf = (row: RevisionRow, session: RevisionSessionUser | undefined): string => {
   if (row.source === 'agent') {
     return row.actor;
   }
   if (row.actor.startsWith('anon:')) {
     return `Anonymous · ${row.actor.slice('anon:'.length)}`;
   }
-  const session = getRevisionSessionUser();
   if (session !== undefined && session.id === row.actor) {
     return session.name ?? session.email ?? 'You';
   }
   return row.actor === '' ? 'Unknown' : 'Another account';
 };
 
-const cardOf = (row: RevisionRow): RevisionCard => ({
+const cardOf = (row: RevisionRow, session: RevisionSessionUser | undefined): RevisionCard => ({
   revisionId: row.revisionId,
   n: row.revisionNumber,
   createdAt: row.createdAt,
   summary: titleOf(row),
-  actor: actorOf(row),
+  actor: actorOf(row, session),
   turnId: row.turnId,
   conflicted: row.conflicted,
   tags: row.tags,
@@ -231,6 +232,8 @@ export function useRevisions(): RevisionsView {
   const status = useRevisionStatus();
   const branch = status?.branch;
   const headRevisionId = status?.headRevisionId;
+  /* Subscribed, not read once: a sign-in mid-session relabels every card. */
+  const session = useRevisionSessionUser();
   const finalized = useHostFinalizedTurns(projectId);
   const finalizedBranchHeads = useMemo(
     () => [
@@ -292,7 +295,7 @@ export function useRevisions(): RevisionsView {
     if (client === undefined || branch === undefined) {
       return emptyView;
     }
-    const revisions = (rows ?? []).map((row) => cardOf(row));
+    const revisions = (rows ?? []).map((row) => cardOf(row, session));
     const byTurnId = new Map<string, RevisionCard>();
     const settledIdByTurn = new Map(
       finalized.flatMap(({ card }) => (card.turnId === undefined ? [] : [[card.turnId, card.revisionId] as const])),
@@ -307,7 +310,7 @@ export function useRevisions(): RevisionsView {
       attachTurnCard(byTurnId, settledIdByTurn, card);
     }
     for (const row of settledBranchRows.rows) {
-      attachTurnCard(byTurnId, settledIdByTurn, cardOf(row));
+      attachTurnCard(byTurnId, settledIdByTurn, cardOf(row, session));
     }
     const selectedIds = new Set((rows ?? []).map((row) => row.revisionId));
     const branchFacts = new Map<string, { revisionNumber: number | undefined; ahead: number; behind: number }>();
@@ -334,7 +337,7 @@ export function useRevisions(): RevisionsView {
         branchRows.pending.some((pending, index) => status?.branches[index]?.head !== undefined && pending),
       branchFacts,
     };
-  }, [branch, branchRows, client, finalized, headRevisionId, isPending, rows, settledBranchRows, status]);
+  }, [branch, branchRows, client, finalized, headRevisionId, isPending, rows, session, settledBranchRows, status]);
 }
 
 /**

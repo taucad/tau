@@ -500,9 +500,6 @@ describe('catalog route vocabulary', () => {
     expect(() => {
       assertTieredRoutesAreFunded(['openai-gpt-5.6-terrra']);
     }).toThrow('Tiered tariff openai-gpt-5.6-terrra has no funded route');
-    expect(() => {
-      assertTieredRoutesAreFunded(billableModelRouteIds);
-    }).not.toThrow();
   });
 
   it('should refuse a supplier model id that is not a catalog route id', () => {

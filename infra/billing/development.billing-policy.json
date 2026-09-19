@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "environment": "development",
-  "policyVersion": "development-v2",
+  "policyVersion": "development-v3",
   "markupBps": 3000,
   "fleet": {
     "minimumSchemaVersion": 1,

@@ -89,7 +89,9 @@
     {
       "id": "a2/raw/asymmetric-all-fields",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "8de57eb3bb9958215d68bec099365bfec7a49b7b7b9b831ca4e366754de5cdf4",
       "effectiveInputSha256": "faa2c3dae7b4033aff73af1f4f6d5356435e5f08913634f9eaf1b154fc13b32f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -109,7 +111,9 @@
     {
       "id": "plan/a2/asymmetric-all-fields/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "9e4af9877655b4d2c0f87b61adab9a68ecfd694b8d4e86b395eb591e6052c69e",
       "effectiveInputSha256": "0a35a26f17ce0aaafc3f511acbda0263d4689efb28b6daa05c451a9f646211ba",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -119,7 +123,9 @@
     {
       "id": "a2/raw/all-axis-failure-order",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "d2f238438011bda83f29c30dd86c9d629e0769d42a4f2a520566d7d51dfcadca",
       "effectiveInputSha256": "e3e93b3f1c40c5dcca493b2e790a1b1bd5478d1509024965bad15100e94b29b5",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -139,7 +145,9 @@
     {
       "id": "plan/a2/all-axis-failure-order/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "9a43c75cbde2aeb5f7c6d81d3eed07f18bd98f16b9fa914195d4d1a525f6b7e6",
       "effectiveInputSha256": "b83cceda831fcc7d70feaffe5cd2ce68b970defe161510c2d45e4df95a937179",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -149,7 +157,9 @@
     {
       "id": "a2/raw/negative-unsatisfied",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "e7b4510c7cd1c26e5d02ffeef9874466ec667b97c147baddde6d214d532bd1ba",
       "effectiveInputSha256": "d72ef9720fc76a6c1d4729d9eb0fab47eb84e4d3ad8f38fcda36d39a50944540",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -169,7 +179,9 @@
     {
       "id": "plan/a2/negative-unsatisfied/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "828a3dde9856a922bea5abd652b13d08c8eb19d9b6619d66c8c9486a6fff91e5",
       "effectiveInputSha256": "49f6c2f4a84cc76e207681c11e8d34c1e1d82263909bd693809befd77ff818bb",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -179,7 +191,9 @@
     {
       "id": "a2/raw/negative-satisfied",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "000ffa4edfb80ddf62e6a208be1d6b6e295010957d1ee00a4c5daae81941d01f",
       "effectiveInputSha256": "09cb8a164204da24a62d5f04b9afea2d80c518aaf3f9ea59050103002f2af47e",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -199,7 +213,9 @@
     {
       "id": "plan/a2/negative-satisfied/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "f472ee27ecb2fe9d7858474ddc6db5679985df11a8810a7211f2d7d2398fca0f",
       "effectiveInputSha256": "28f63a279dccd72c8ad79f831aa94c93b3770b3f305a18999281345c31777e4e",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -209,7 +225,9 @@
     {
       "id": "a2/raw/baked-rotation-translation",
       "operation": "processRequest",
-      "ingest": ["baked"],
+      "ingest": [
+        "baked"
+      ],
       "originalInputSha256": "da642c4058a72b7eb9301f92e0b5fa7190493dceff802bb723a9fc975e1bbb70",
       "effectiveInputSha256": "4b4e059f7c028616eca893c9dbc79c5052749d8621c7058be5b6784b0114478c",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -229,7 +247,9 @@
     {
       "id": "plan/a2/baked-rotation-translation/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["baked"],
+      "ingest": [
+        "baked"
+      ],
       "originalInputSha256": "aa445f79979e7e23f97034f06e2b0cc286bd21275213bf5eb4e859fe0c9fa13d",
       "effectiveInputSha256": "9c0439031c8e858b655316a04d286a8bf9b1440b8159e4fa60a619a2b450bda8",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -239,7 +259,9 @@
     {
       "id": "a2/raw/float32-and-reconstructed-extrema",
       "operation": "processRequest",
-      "ingest": ["rounding"],
+      "ingest": [
+        "rounding"
+      ],
       "originalInputSha256": "956084260e5d72ee1c0b256448d21679e72b819c9bbae29c95c273b547b99fc5",
       "effectiveInputSha256": "e1e4c91cb91973f75f44dff6305196cf2b117e66999c0c691c22233e5d833d41",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -259,7 +281,9 @@
     {
       "id": "plan/a2/float32-and-reconstructed-extrema/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["rounding"],
+      "ingest": [
+        "rounding"
+      ],
       "originalInputSha256": "2e1078375d4ca76bf8294a47af629630fd305de70c2a167b509b92ba6059c66f",
       "effectiveInputSha256": "0d185ab6e1353e7685ca80c8baef4ff2a0214b5ef9379c780290bb16a5c78b70",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -269,7 +293,9 @@
     {
       "id": "a2/raw/degenerate-envelope",
       "operation": "processRequest",
-      "ingest": ["degenerate"],
+      "ingest": [
+        "degenerate"
+      ],
       "originalInputSha256": "dd5ad3314de1a910dadf269c9c8fae7b8b42c05fde60616c08a58a5eedce2cf4",
       "effectiveInputSha256": "86c73edfbf60b6f08f6985ccddad4178d82e2f54d3c43345f749ac649a8c6081",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -289,7 +315,9 @@
     {
       "id": "plan/a2/degenerate-envelope/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["degenerate"],
+      "ingest": [
+        "degenerate"
+      ],
       "originalInputSha256": "d2ca0152cca116c65710558f1341bdc100e24e59b7a0d5502efbe26f6699f82f",
       "effectiveInputSha256": "b7d3a90ed1bf7f4944803fc7d0c23fe9c4e99b2d86c8169bbea7c9d039330edb",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -299,7 +327,9 @@
     {
       "id": "a2/raw/tolerance-equality",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "1f61e7d88d511b06da405110fe6dbaf49c7882dae9e803ea390684201195a3ae",
       "effectiveInputSha256": "40669737ecf0cd4e1e6894d412d38db56377e530a9fd40ddf06351b1143cbd2e",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -319,7 +349,9 @@
     {
       "id": "plan/a2/tolerance-equality/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "cf9eb8c271b09eb3fb8f5655535896eb714ea50ec6e2532e22acfcf89a669d07",
       "effectiveInputSha256": "a7df2bce0bcba598f48af3c31202dd8e7c6dbae7568f3354686d6ac80798b391",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -329,7 +361,9 @@
     {
       "id": "a2/raw/tolerance-outside",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "9d70261d14875272a53d950a05ad7dd5d8b5262f3a5d6e0e19ec82b602818283",
       "effectiveInputSha256": "8978a967ef537bcc660a355849218b0d37b4e348d22019ea878e5c2335417dbe",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -349,7 +383,9 @@
     {
       "id": "plan/a2/tolerance-outside/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "889dd54e5f4b2c4205262f190337fceebe6a3741b3eefc2d50103558a7031c0c",
       "effectiveInputSha256": "862d321e9ae98d484e6ca3d30c1ad479765242fabd26c0b5d80dd7c806198c05",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -359,7 +395,9 @@
     {
       "id": "a2/raw/default-tolerance-inside",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "30deb0cf54e2d5254f24bdf4943e8a49dcfe53fc8eb3c8a15c663e49f9a88fcb",
       "effectiveInputSha256": "cfffdfc21394d2006c9295041199b37297c1a82ebb16dd0d74c00521c932d818",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -379,7 +417,9 @@
     {
       "id": "plan/a2/default-tolerance-inside/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "8e3ad1bd935c3bf7f02b7b6912e59e10aa5a655fbb9ec581d7a3587bc01c49ea",
       "effectiveInputSha256": "9cb63bd8ab25319667cf814b510356e6003257f3be1a5f653b0d8397ee76fe00",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -389,7 +429,9 @@
     {
       "id": "a2/raw/default-tolerance-outside",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "34a9df0252a52dd7060c84a76aace007d460164aa8f0c1fb465e91a6223f9b7e",
       "effectiveInputSha256": "43484490f851f223db1ccf3e147a3ee50f9640037cf5b1f209fd5678edadcdc0",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -409,7 +451,9 @@
     {
       "id": "plan/a2/default-tolerance-outside/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "a30d82c05fea2bf4a51f4d81cc668728e8f8b4e9495da60c1db690b380742176",
       "effectiveInputSha256": "8eef4a9f640ef6b076ac361642d14ccc68979bdaf2dc4e6511ef714a28dd0456",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -419,7 +463,9 @@
     {
       "id": "a2/raw/zero-tolerance",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "336903010fc03bcc4080b15de27483cfbbbf2da7a1f590cc378c24fbf7fb86f0",
       "effectiveInputSha256": "0a9f8629028363d430251fcf884cd6f24c79408b64da11075d151718ccacf1fa",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -439,7 +485,9 @@
     {
       "id": "plan/a2/zero-tolerance/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "72890aa64b175cb6f1489c1c8fdcf82d832c3dfd8ff84095bbe47f5aa896d44b",
       "effectiveInputSha256": "f45a28122dae9321b4507b2b20f3658c5edc9e073f6f0cf05f481fbe6b38d745",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -449,7 +497,9 @@
     {
       "id": "a2/raw/empty-expectation",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "f3d53b16c8dcc8488279945d797b851a4ba311e31a32b7043e54da0cb6c66be1",
       "effectiveInputSha256": "55f608b20edd39dbef8e9117a3c59dda499b6d257878e1db4d357b5018ffca0f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -469,7 +519,9 @@
     {
       "id": "plan/a2/empty-expectation/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "fe2f39ba14dbb5c0902404f467f85b9cdf5989b5c9ce86f9062a18e3aade6405",
       "effectiveInputSha256": "5aa6399642779499ac621e23c7715c292c534113271d3bcce08d69b3a06960a5",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -479,7 +531,9 @@
     {
       "id": "a2/raw/empty-axis-objects",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "94bf754ad5e086aa9bfdd64a99a7da7110279d362ba3fbb55f48ffd2861cdb95",
       "effectiveInputSha256": "50602d04c94aaa192e0c88a5c4fbcda1b0bb1275dea88f33b92a49c1a5433d81",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -499,7 +553,9 @@
     {
       "id": "plan/a2/empty-axis-objects/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "006894243182ec328e5a5528aa716f302e6b02060caf25251f1e48ec70ae590e",
       "effectiveInputSha256": "aec47690ea6588b87023f10f9ff25bfd2e9045b13202a3c14fadfb6c61c4e5a6",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -509,7 +565,9 @@
     {
       "id": "a2/raw/one-argument-lowering",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "5b3fbab2b12d64910d1f5b7d3429883dee979ed8e13a911dfbc1542a00228589",
       "effectiveInputSha256": "4e363ac625e65387f3cd4becd5729abb36e74c3c4e45076b6f0dd4f34c7675ee",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -529,7 +587,9 @@
     {
       "id": "plan/a2/one-argument-lowering/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "2d05cb097d7e853e58800f31d364f1e10e63a091b09e878cdfd4fb732be1402d",
       "effectiveInputSha256": "38dde961f03d3763101e7dc77311d7aa8787ba2fecda895ac33fd2040c81c914",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -539,7 +599,9 @@
     {
       "id": "a2/raw/two-argument-lowering",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "777d89fc2e3e4ade418f38f311a7829011eeecb097a42f71ed36d7a305b18e06",
       "effectiveInputSha256": "48750c938f7da84793965cc0394bababdd9f74af79550dab9474d19d8629ae1b",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -559,7 +621,9 @@
     {
       "id": "plan/a2/two-argument-lowering/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "48e30dacfbd493ff135749e3b1b28efbabfe7b689f60ee18c6753e3fab81b9d5",
       "effectiveInputSha256": "1b116b5c3c175c069c21faa3e2c1b5265c05bfd88c7e05dd3142419a13609e94",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -569,7 +633,9 @@
     {
       "id": "a2/raw/insufficient-budget-positive",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "1367fd65a475f37e40d00f72bd63b617134c415b8f1cbef8d74e502e788b3efd",
       "effectiveInputSha256": "cf08a7498eb6ca06b8132dc18e11b6dcea152bb5587dd3d11b9314c456d9174b",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -589,7 +655,9 @@
     {
       "id": "plan/a2/insufficient-budget-positive/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "2072672160d7b51cc6af6b002cf30db185ce6fc1b3a2cefdfbe89b416f2524aa",
       "effectiveInputSha256": "715c2649f8a3b9249c752d0af72c6382bd326a1b13977f0b33d2d038201a8e3f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -599,7 +667,9 @@
     {
       "id": "a2/raw/insufficient-budget-negative",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "c584dc4c39d111fad7770f585486b192a98f2dd2dc0c16b020c1656edf75db15",
       "effectiveInputSha256": "e8344875730f88548c22c1834db9f865fac5080a0750561cf3b501330f6a6e2e",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -619,7 +689,9 @@
     {
       "id": "plan/a2/insufficient-budget-negative/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "13c7e5a2c79b331e3000a3a99b05f847e26b9b05bba67974adb7f1242272bfd7",
       "effectiveInputSha256": "b2b759db3f8dda362fec7d9ee4271baa8b4f53337f448c02db3355750d497f74",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -629,7 +701,9 @@
     {
       "id": "a2/raw/distinct-identical-claims-in-authored-order",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "b539e96bde1fff578629bd08953444ad82fd46739d1afccffb7d9fd02a2fa7cb",
       "effectiveInputSha256": "700c231024dd02dc655ee6bec9083f5164497c185382be84e09cc72e1382123f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -649,7 +723,9 @@
     {
       "id": "plan/a2/distinct-identical-claims-in-authored-order/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "42483ebe22f580eb458425a6b6821c5e254262ae7c0640852cbed5d313b25e8f",
       "effectiveInputSha256": "57b6dc2fe6988863149b7b56c1a2015393c35a044e7f862612611a5a1047119a",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -888,7 +964,9 @@
     {
       "id": "a2/invalid-claim/null-expected",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "187176d3e9fbc53cce39f7b9337ef5229c77c41e739ee18e1dc8381e7ac6a887",
       "effectiveInputSha256": "69ce44addaaa4b4db1e7d1a0007465a8d48454b7a8a6dc5bcdee914cc76f4a10",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -910,7 +988,9 @@
     {
       "id": "plan/invalid-claim/null-expected/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "f6f73258f05d1c968d29209cd0bcdd6d8a5b0f36a1c5003c44ac5941a4a93a2d",
       "effectiveInputSha256": "a9499e7b2c15af6f9d84557b5275bc9dbbc93be0568ceb03f46eb11094a845f5",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -921,7 +1001,9 @@
     {
       "id": "a2/invalid-claim/array-expected",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "647ccaacb7f55399413276be9a17b0581c6180170c34d0b157ba21a488ef6994",
       "effectiveInputSha256": "75cbb2689060b52e831c0f1f31a194063cf8295ab8e12f3e92e8f659922e1aad",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -943,7 +1025,9 @@
     {
       "id": "plan/invalid-claim/array-expected/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "bd4cbdef25e62975a0340577694df0ec80b67ed6735f31112b9b529bdf6dcb67",
       "effectiveInputSha256": "9ec19488f18db590aedf2a011974c021aee0398d05554534155d54c78212f5bf",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -954,7 +1038,9 @@
     {
       "id": "a2/invalid-claim/null-min",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "b094c1b7732826a46ca83d9e312e01f5dffbb1759e8395573952b2e3419be54e",
       "effectiveInputSha256": "6aea676cc7b8ac1a2f645a7925f6fd89c3a8930688a3661381e44cdf3782fbaf",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -976,7 +1062,9 @@
     {
       "id": "plan/invalid-claim/null-min/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "c177c2d736a749cf3a19302c3a056cb91839bec62f04cbff9271600f71dcdd28",
       "effectiveInputSha256": "1f2316b9a018598de68842d4dcab4c2453f816124d91d9b1e33e492da00aa173",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -987,7 +1075,9 @@
     {
       "id": "a2/invalid-claim/short-min",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "e60fab5691b1880532089a65107c52046b30c9fcf0efe917c24e263057149f92",
       "effectiveInputSha256": "4c4c1ea0958024f4713b9b67b132de3fcb30d54567d0d16c785c48121888d587",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1009,7 +1099,9 @@
     {
       "id": "plan/invalid-claim/short-min/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "7784a229c6e259c214f882ffc4a5c288b0442308cef0662fbe22d93223cc7d70",
       "effectiveInputSha256": "2aa959668247cd5590230fff7835497d358a5380d0105f559a66b25ef5dcb129",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1020,7 +1112,9 @@
     {
       "id": "a2/invalid-claim/long-max",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "51bd835f6a0bfd72db383219537a37016817f519ca2d6fd2ed20905907ea41c4",
       "effectiveInputSha256": "2bea57d918ed27104d65029599728a33a4553bf443f3e5ba19777ea59445bd47",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1042,7 +1136,9 @@
     {
       "id": "plan/invalid-claim/long-max/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "a7b800418b700e14744f80ba5253482a36414004a1ccb0eb0e46356e8527b477",
       "effectiveInputSha256": "ef65872bc8d730457e7390c2b1c1050fef67ca59e15938d0331355b0e55ff855",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1053,7 +1149,9 @@
     {
       "id": "a2/invalid-claim/array-size",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "8f74b39ebbd45f791e27b8179e9085322fcd15b72fe758e9f0331af7487a8552",
       "effectiveInputSha256": "b4de255a87739926d84aef57a063c2e1a201838666fd0df18d5499c948731844",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1073,7 +1171,9 @@
     {
       "id": "plan/invalid-claim/array-size/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "24cf719aabb50986db36890cd98e9d1db1016035b5fd40979f8b6dc9a9c27766",
       "effectiveInputSha256": "67ac1e6a500f9b8e2e84966b1c0f5352f6cb13f42936cc8cdb5e784f8b8ec570",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1083,7 +1183,9 @@
     {
       "id": "a2/invalid-claim/array-center",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "55698120638a309c14a560e0b40caa6195b92fdbce3c41a0952c0642b18b1549",
       "effectiveInputSha256": "e4b1c8d24242a5b1b811fc42043aad99d2b19e79cf168f07f0d949181269abca",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1103,7 +1205,9 @@
     {
       "id": "plan/invalid-claim/array-center/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "d0fe78ee28c670902be9d27fb34671b72ff8127c5a111ed028b5f94008f70bea",
       "effectiveInputSha256": "911cf3a2d8c2658863b99cc30eb0e87804b78c235afe5af2125f8c9465ea1a70",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1113,7 +1217,9 @@
     {
       "id": "a2/invalid-claim/string-axis",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "332c7d95878e0e8f43afa7c7c9df5c32a64a68a117116407f7b7f1efc8316c82",
       "effectiveInputSha256": "02382c2f9b23d4931af5d92993b43083df2d05b302486ed47e72950f31582930",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1135,7 +1241,9 @@
     {
       "id": "plan/invalid-claim/string-axis/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "91f4739535e23fa8f2dda5b2ed261293e4a0f393b63c41bdc66e4150135fb082",
       "effectiveInputSha256": "8f31a81e5482fd037dfbe2dfafb104a7cd4f57a3eb508c54a52c454d348954c7",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1146,7 +1254,9 @@
     {
       "id": "a2/invalid-claim/unknown-axis",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "177c8b266d0a1525f738128d6606754fe835ede3b76ae229e4408dda060f1223",
       "effectiveInputSha256": "280a8fff3daa0e2d5c7286b7c807333842c88e52a5150ec10bca043940fd816f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1168,7 +1278,9 @@
     {
       "id": "plan/invalid-claim/unknown-axis/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "557f3a8f40bc2f2e00a9d5107352000f8176fb078b5c08010822a1cfe9a87003",
       "effectiveInputSha256": "26e658eddccba25c613f476da034a2e3269224f90c0dcd4d4ede0689a7de95c7",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1179,7 +1291,9 @@
     {
       "id": "a2/invalid-claim/negative-tolerance",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "a20688c8e3beaedccbf07b83e936e6a0928ad5dd3a16b2040fff3aabca8f8926",
       "effectiveInputSha256": "0f3f72f0dadcdc15547cc95f2d73470899babaaac3350d7f4af6b98cb5ed9f4f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1201,7 +1315,9 @@
     {
       "id": "plan/invalid-claim/negative-tolerance/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "3ead9cde3eafc85a59dd02dd0fc2b9c2bfc698cf90e0a65b88e602c6ae1b071d",
       "effectiveInputSha256": "195ab86d8bc00bc8951c11b82909965d83011738ca3e8d5cf112237f8b46e852",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1212,7 +1328,9 @@
     {
       "id": "a2/invalid-claim/null-tolerance",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "63754961ddfcf529b92d7559d1e8c91da21c50e94ea65e39211d8105c21557e6",
       "effectiveInputSha256": "7448168802cfa75a327b541e26a14ae40f8140cdb3ddb4858ec9dd6aad0f994e",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1234,7 +1352,9 @@
     {
       "id": "plan/invalid-claim/null-tolerance/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "5f3236ca4e829a703d8b327a2e019479933f04a329af009f1a0e8a4dfa5c81ed",
       "effectiveInputSha256": "233acc00b0839267bb091a7302fde985a2e903b847443d6288bb9d8215b9fb93",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1245,7 +1365,9 @@
     {
       "id": "a2/invalid-claim/selector",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "5a237b3d8a919ef23ba6b51db19b068616645feecf18415191cd223b4f62136b",
       "effectiveInputSha256": "5806b8192022c8f3bce4b1c9c52f9e04c845a74d30ffe27b9177acec3d2c1463",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1267,7 +1389,9 @@
     {
       "id": "plan/invalid-claim/selector/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "edc810b4d23d6f23f9d4b0d5fb0e4d1ed4acde60a0f2212a12975a811767da66",
       "effectiveInputSha256": "3847a0335ba922ff6e3d0affd398449fa9ed633be438c1db41d8872324257336",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1278,7 +1402,9 @@
     {
       "id": "a2/invalid-claim/occurrence",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "53948a1789d903918061066a67fe11c012ca0df34a245177857ac83be555d77f",
       "effectiveInputSha256": "807b3ee81152f721f2ea740da8bf06a315066631b9bad3b99c09e43546f85f26",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1300,7 +1426,9 @@
     {
       "id": "plan/invalid-claim/occurrence/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "48b8f278273f455afc229073d15403407ebdfba1ae6d8c279b659bd9d48f4b16",
       "effectiveInputSha256": "23b02d5ec14f5b5d126558535aadff29139aae3020e2231a329a265863ff45b0",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1311,7 +1439,9 @@
     {
       "id": "a2/invalid-claim/brep",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "246e703e12e601e4b9fcac87f70300f03d993b69d3566a10970ce0f044604c08",
       "effectiveInputSha256": "7c69e1145c6c45b1d023e8330834ef71f99bd3195d37a52af9dac9ffe41937d6",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1333,7 +1463,9 @@
     {
       "id": "plan/invalid-claim/brep/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "8776b9f496e70cdbb1fcc6f5cf35abf5e6fd62a695be6c151addfee520656e7c",
       "effectiveInputSha256": "921b066fee9f162d90a27fb85080df0f631aeb63eab817ae2f5021248258f7e6",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1344,7 +1476,9 @@
     {
       "id": "a2/invalid-claim/missing-expected",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "0c25bdc1cd0d838961aaa095216156d582046e0f99429461ebbfe2f5adac6668",
       "effectiveInputSha256": "2454b14c55da88be55f4c4654b75c8e61c4617ed59eb8ada10c4942f9e8ba993",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1366,7 +1500,9 @@
     {
       "id": "plan/invalid-claim/missing-expected/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "5e8bbc879edb74759b54974aee0087f54fd9f0022465c788e0f063a9b12dd642",
       "effectiveInputSha256": "6b5359dd8775fd5b08129164d581939d6daaebc4212f85b1548bf88fd2cab11f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1377,7 +1513,9 @@
     {
       "id": "a2/invalid-claim/wrong-kind",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "3865e45331e4ac8d297089bbcf7961f87e0114ad48be7b0a37292899539ede72",
       "effectiveInputSha256": "cdebbfdc06855dc12d1329d0086beba87b6db42ecf92335610b7d22ec4481ed0",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1399,7 +1537,9 @@
     {
       "id": "plan/invalid-claim/wrong-kind/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "1de3c6d066ced334aee3558ffb8eea94eb5909ec1a8cae3eb0ae650f5aaddbc8",
       "effectiveInputSha256": "553d55b010999ca4434195b8a4a92422126f96add5f9e51601d5ed3f87a03a68",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1410,7 +1550,9 @@
     {
       "id": "a2/invalid-claim/payload-selector",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "3c2b1bf29f0aa832e777db1f4003c104f77e1f51022a1a3fbce8db9c48dae363",
       "effectiveInputSha256": "b13fa0d0a86f89c3d9269e6ce4d72688e1f8f0acf1ce80467f1f3776afe36d5d",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1432,7 +1574,9 @@
     {
       "id": "plan/invalid-claim/payload-selector/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "d06d957f1f22c1e0f5853829d7ba216a6bbe94af8e166aa0c1cb1a742f53bbac",
       "effectiveInputSha256": "8dcfd444943c47f2fbe4baff2280dde6ec3ded59fcc49c35ab8a2ec83ed304e1",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1443,7 +1587,9 @@
     {
       "id": "a2/invalid-claim/conflicting-one-argument",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "39864672a90a270338cfaee77fc715c7e6544a3ee4025e65866b5e46b22e7803",
       "effectiveInputSha256": "0e328b1f85f2c8616e3912007b7d15165d2e21a234abc9c7fac827ce1d7de98f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1465,7 +1611,9 @@
     {
       "id": "plan/invalid-claim/conflicting-one-argument/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "5caec94dbe35121f2ed1b773a5a04a0cf8103a57913692e7b62f926041e51119",
       "effectiveInputSha256": "30260d2b6a1ad09aafacd7da2506a1e24d13663865672675a895b9978233f3f1",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1476,7 +1624,9 @@
     {
       "id": "a2/invalid-claim/conflicting-two-arguments",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "ff8ef6fe984809fca0f67b1b2f3b38b86af933e5139410c89b8fac641fbf7c62",
       "effectiveInputSha256": "3e4ef00c99002c4c8292bbc98f91eb4560659befadf562d872a406f9dbc942c9",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1498,7 +1648,9 @@
     {
       "id": "plan/invalid-claim/conflicting-two-arguments/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "41595df637e4a47750786cd1ed324195af317b2cf218d7826b5d44aaf364a891",
       "effectiveInputSha256": "98c19644c7491d14f22206ab3fae35bc4e1aa48fe46f55a5b38672e015875d8d",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1509,7 +1661,9 @@
     {
       "id": "a2/invalid-claim/too-many-arguments",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "4eaaf744cda676c20eef369d6760a3dde86e56811ce96541f6ec8439a0c2ce72",
       "effectiveInputSha256": "9858cc13d78cce2a1f7830f1910d2274f186fc5b9b3e61803397fd84d1d413ce",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1531,7 +1685,9 @@
     {
       "id": "plan/invalid-claim/too-many-arguments/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "41072372e02402c476902ee835beb89479dd229766124e4f6f68b986eb40264a",
       "effectiveInputSha256": "f153e91f5951f6fe04931c15d3e95da83bcb0a1db4beb5f02074c9a1794a18d2",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1542,7 +1698,9 @@
     {
       "id": "a2/invalid-claim/null-arguments",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "6a4d48698656f6f3bf5fcfcb0298b9962dde8b4db18c9b18efb2ad76792af151",
       "effectiveInputSha256": "6a0a9d45a98c8dfa5740f165233888af57692f05407140cb8885249a4321089f",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1564,7 +1722,9 @@
     {
       "id": "plan/invalid-claim/null-arguments/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "5b9212677a79f5985be605e6487380c9489f5d79bc13e1b5a0f1ebe0f8dfff8b",
       "effectiveInputSha256": "6949e512293b950125502a787fa07602ff48d30fe17d42eea96bf03fe7db3917",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1575,7 +1735,9 @@
     {
       "id": "a2/invalid-claim/zero-subject-slots",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "e6c07ed39119766b1f61b86cfdbae01535e6ebfc94e08fe1db89af30c4eddb20",
       "effectiveInputSha256": "256a54d0f3d7ec9d587876c2d98df89462223ea124bc74c9fa20063378ccf192",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1597,7 +1759,9 @@
     {
       "id": "plan/invalid-claim/zero-subject-slots/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "c98fbe9341b26aa5149687fe084b9eb675981ecbfba53f66143a074fba0f484d",
       "effectiveInputSha256": "a5fdef50eadac68340f702ae1447faa0cefce4bf70c53f4e12e6fefbda66609b",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1608,7 +1772,9 @@
     {
       "id": "a2/invalid-claim/two-subject-slots",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "a69d13d5f23c1d6a545a912e68683f255ab7193809ee1bff2c2ad3f994b126b7",
       "effectiveInputSha256": "514f8dceb2cc750badc86f00ea04341021ff8949b2926f8bd51794a4440ffc3c",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1630,7 +1796,9 @@
     {
       "id": "plan/invalid-claim/two-subject-slots/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "9c50237f36dfcef00b32e664236221abee34a07c34baa79658204b265d160ad1",
       "effectiveInputSha256": "7e82825b14eaca82776c333a87db32e64048b47b90d81e8980aab7457d6f5937",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1641,7 +1809,9 @@
     {
       "id": "a2/invalid-claim/unresolved-slot",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "b4c945f2798ee6164fd625e5a76dbc64aa4dccd4b095146a23ceae62a2285c38",
       "effectiveInputSha256": "fafbfccf1e59abcf6170c2255437e65626ce6155a403522913b14fa9f1c17242",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -1663,7 +1833,9 @@
     {
       "id": "plan/invalid-claim/unresolved-slot/evaluate",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "c8056e869dab3f521a37a4b260178ac8e95eb2cf3c0b7b602ce07399377f8fb2",
       "effectiveInputSha256": "5016d3f914bb06e23ad61c9e3baaa189dcd9d49fabbe21fc871ed86fb96df8e4",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -2630,7 +2802,9 @@
     {
       "id": "equivalence/arrays-absent-args/evaluate-authored",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "345973904f14edd38f86e1726b7564da8d95b9440a302d86ad6820ff221ec26d",
       "effectiveInputSha256": "08bd9dea0a999512ccffdee10e728b19cf196453528817b047615634902a63ae",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -2650,7 +2824,9 @@
     {
       "id": "equivalence/arrays-empty-args/evaluate-authored",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "21304a89087e52a57fe50784a0e6dc24892033202dec1258f4be46dfff52b27b",
       "effectiveInputSha256": "fbb2088542ec6abc298cab072aa65da45275beddcd7810287b528feed8ee88a6",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -2670,7 +2846,9 @@
     {
       "id": "equivalence/arrays-two-args/evaluate-authored",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "c6f7c3387db7a4aa193f95db18acc806fe3b5dd668f0165a76d485e6a96e8026",
       "effectiveInputSha256": "e06a3f24384f0a56e079c9d39cac0c28c37539b8eb405c8c18e3f843a0904456",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -2690,7 +2868,9 @@
     {
       "id": "equivalence/axes-no-args/evaluate-authored",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "08290884fd9c175abe7179ff4efabf1bd32d754dbb660e426434dc575d41663b",
       "effectiveInputSha256": "7f905a259bb1f3a892666c1cb6e15c3c025a5dffe319ef9631989bd451bbbf4e",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -2710,7 +2890,9 @@
     {
       "id": "equivalence/axes-one-arg/evaluate-authored",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "f1571c885342b13f1c612bcf35409645214ed0be581567f40f9bbdcef3f8289c",
       "effectiveInputSha256": "26de9493376fe543f1ca2d545499c0d7042782af180fce30de3128402aef336c",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -2730,7 +2912,9 @@
     {
       "id": "equivalence/axes-explicit-tolerance/evaluate-authored",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "48e30dacfbd493ff135749e3b1b28efbabfe7b689f60ee18c6753e3fab81b9d5",
       "effectiveInputSha256": "1b116b5c3c175c069c21faa3e2c1b5265c05bfd88c7e05dd3142419a13609e94",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -2750,7 +2934,9 @@
     {
       "id": "equivalence/transport-id/evaluate-authored",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "345973904f14edd38f86e1726b7564da8d95b9440a302d86ad6820ff221ec26d",
       "effectiveInputSha256": "08bd9dea0a999512ccffdee10e728b19cf196453528817b047615634902a63ae",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3040,7 +3226,9 @@
     {
       "id": "batch/late-invalid/processRequest",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "84b896465d0e0af8f9df05b473ad0029cf37f8489a79cbcbc61742ee9ad1ae9e",
       "effectiveInputSha256": "4dd32f83672042446e02cdf6d23856dc43c2d981093479e3457abf37f49b027d",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3062,7 +3250,9 @@
     {
       "id": "batch/late-invalid/evaluatePlan",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "f3861b099f6e09736da928d7c50a2109100a28221831f65c710f3531a81ac50b",
       "effectiveInputSha256": "ea85a5a22acd7ff1091083621e6c42ea7a3a8f61847b0e03c2a1c3d7aa834d75",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3073,7 +3263,9 @@
     {
       "id": "batch/late-unresolved/processRequest",
       "operation": "processRequest",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "05a55159eb4ca38596586e71d8c42d4e444e550b9330b8a96fabfc1ce75888a9",
       "effectiveInputSha256": "03b4c5af219faef3d0718b356346636454ac6452f6252c1db2f1a83e67474651",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3095,7 +3287,9 @@
     {
       "id": "batch/late-unresolved/evaluatePlan",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "dfe9098808b63da50ab1f4ff8b7f4ef75ae0af559eab78c927b95d17d78155b2",
       "effectiveInputSha256": "ab256cd335ec231d77d3149f58d0f434f755847ff85989e7bf9448864e7f53a8",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3170,7 +3364,9 @@
     {
       "id": "envelope/extra",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "c817cbcb23df4b219a67b8b310981412caea26b53ebfde2d6e53fb4a4ca54847",
       "effectiveInputSha256": "5f9b0528219fbda1cd2b7215f2ff0950a9b2d5f6a8965538b4dfbf21598a6cff",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3181,7 +3377,9 @@
     {
       "id": "envelope/numeric-profile",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "336068f2ebd9dd04d457f747d5f808934e7edbaae51338370645f32c5a570d24",
       "effectiveInputSha256": "40bbbc750e0cbb07ccaabdbe151b97300d85753c5d42129e6ab7c63463197d90",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3192,7 +3390,9 @@
     {
       "id": "envelope/missing-numeric-profile",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "ed1938af3b7403efc24f156ecf6cd643969da6d5f3c4d6e7a400618bbb059271",
       "effectiveInputSha256": "4a6734629a9fe1816bc158ebbee40e94b8b4ec835edfe5ed567077eb38dd609e",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3203,7 +3403,9 @@
     {
       "id": "envelope/protocol-version",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "6be9b786a5dea6f54a432c168498772b8586f10b97bcfaa74fdbb6dd81415f7d",
       "effectiveInputSha256": "d4e19551e27d3b7d8587ed0bd6567adc46eb97902262c4ba76fa4fcec3d8f25c",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3214,7 +3416,9 @@
     {
       "id": "envelope/registry-version",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "6847981b027d6c530e3963599191d80b0c2d9473a87ad8af4f8bb7b8f36df826",
       "effectiveInputSha256": "f2b46eda278ad7bfc6dbcb13891fe5c49e52a13a283560dea0d6a3f9635c8cf5",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3225,7 +3429,9 @@
     {
       "id": "envelope/canonical-profile",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "bec9cf18ab9e5b69096f9773a75a1259f0b96e8f7f33d4f585569f79106e91ee",
       "effectiveInputSha256": "a7bc48c767e5c2237d817dd7eef23cae1f44b955bf2b1338806aac6d96a9d029",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3236,7 +3442,9 @@
     {
       "id": "envelope/transport-id",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "a03e5576a1bedc62fc5fd2d0a19cee2da446c5fd4007f978a8c08d3f45773837",
       "effectiveInputSha256": "12469ab0b6c45eea99081392237f8d2676cb4d9fe9138a8284031605f4ea8e87",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3247,7 +3455,9 @@
     {
       "id": "envelope/transport-method",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "e9d7d53c32061cdb7a275a98ee0c1c2766552ec43cd9423ebe57d844c460a53b",
       "effectiveInputSha256": "4939a78687adf9ce5ede17ce5e94b121dab975e006d4b139b9b46f153c544d82",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3258,7 +3468,9 @@
     {
       "id": "plan/missing-budget/canonicalPlan",
       "operation": "canonicalPlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "90fc607b87b157e91212db5f0975c751a61dd9bc9e69035478df48205a8b937a",
       "effectiveInputSha256": "b757bb119c36aff13d156db98b4485e71c2334f87e464e9e98c71380ee781020",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3269,7 +3481,9 @@
     {
       "id": "plan/missing-budget/evaluatePlan",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "629cf71cab1837fed7691c030ad6dd59d0a6628c69c58c9606e7a893d04bd4f3",
       "effectiveInputSha256": "2892fd04fc7a1ac9f9d04d53021cad03d3309f011a0a1261c07bf5fa5ed9a6b5",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3280,7 +3494,9 @@
     {
       "id": "plan/missing-polarity/canonicalPlan",
       "operation": "canonicalPlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "855b1f2d942986effa9815a66f50a2c4038ae3914dabf8aaa53ed318b2363880",
       "effectiveInputSha256": "8ad2c3f1a257e1da4ff1a85d86a40ee9ba1d3ead52cbadd8f6c7ad1aab514e25",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",
@@ -3291,7 +3507,9 @@
     {
       "id": "plan/missing-polarity/evaluatePlan",
       "operation": "evaluatePlan",
-      "ingest": ["asymmetric"],
+      "ingest": [
+        "asymmetric"
+      ],
       "originalInputSha256": "5c013fb7147ee8675de9dcab50bc0072a149b3abc83b343b47d0058d5888a211",
       "effectiveInputSha256": "776d79513028e17c842d5f4a5856aebe87783204e051cb9cd3e80a6ad6207461",
       "inputDerivation": "registry-5-profile-v3-and-fresh-admission-binding",

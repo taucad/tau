@@ -28,7 +28,9 @@
     "./backend": "./src/backend/index.ts",
     "./backend/node": "./src/backend/node/index.ts",
     "./composed-view": "./src/composed-view.ts",
+    "./content-metadata": "./src/content-metadata.ts",
     "./path-registry": "./src/path-registry.ts",
+    "./backend/stream-utils": "./src/backend/stream-utils.ts",
     "./content-ops": "./src/content-ops/index.ts",
     "./storage-root-key": "./src/storage-root-key.ts"
   },
@@ -55,10 +57,20 @@
         "import": "./dist/composed-view.mjs",
         "default": "./dist/composed-view.mjs"
       },
+      "./content-metadata": {
+        "types": "./dist/content-metadata.d.mts",
+        "import": "./dist/content-metadata.mjs",
+        "default": "./dist/content-metadata.mjs"
+      },
       "./path-registry": {
         "types": "./dist/path-registry.d.mts",
         "import": "./dist/path-registry.mjs",
         "default": "./dist/path-registry.mjs"
+      },
+      "./backend/stream-utils": {
+        "types": "./dist/backend/stream-utils.d.mts",
+        "import": "./dist/backend/stream-utils.mjs",
+        "default": "./dist/backend/stream-utils.mjs"
       },
       "./content-ops": {
         "types": "./dist/content-ops/index.d.mts",

@@ -23,14 +23,14 @@ export type {
 export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
 export { WorkspaceFileService } from '#workspace-file-service.js';
-export { pendingProjectCommitInputSchema, ProjectDirectories } from '#project-directories.js';
+export { pendingProjectCommitInputSchema } from '#project-directories.js';
 export type {
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,
 } from '#project-directories.js';
-/* `MutationPipeline`, `RootedViews` and `TreeIndex` are the composition root's
+/* `ProjectDirectories`, `MutationPipeline`, `RootedViews` and `TreeIndex` are the composition root's
  * own collaborators (D14): a consumer reaches them through
  * `WorkspaceFileService`, never by constructing one, so only the shapes they
  * hand back are exported. */

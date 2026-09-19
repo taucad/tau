@@ -9,7 +9,7 @@
  */
 
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
-import { bufferToStream } from '@taucad/filesystem';
+import { bufferToStream } from '@taucad/filesystem/backend/stream-utils';
 import type { FileMode, FileSystemProvider } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
 import type { RevisionTreeInput } from '#algorithms/revision-tree.js';

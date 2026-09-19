@@ -32,7 +32,7 @@ Three runtime contexts collaborate to turn user code into 3D geometry:
 └──────────────┘  └──────────────────┘
 ```
 
-**File Manager Worker**: single instance hosting `WorkspaceFileService`, `ProviderRegistry`, `ResourceQueue`, `InMemoryFileTree`, and `ChangeEventBus`. Owns mounted browser filesystem access. Serves both the main thread and kernel workers via the bridge protocol.
+**File Manager Worker**: single instance hosting `WorkspaceFileService`, `ProviderRegistry`, `ResourceQueue`, `TreeIndexes`, and `ChangeEventBus`. Owns mounted browser filesystem access. Serves both the main thread and kernel workers via the bridge protocol, composing a masked view per rooted connection.
 
 **Kernel Worker**: one per geometry unit. Runs bundler (esbuild), executes user code, computes geometry, tessellates, and pushes results. Watches its dependency graph via the filesystem bridge.
 
@@ -161,7 +161,7 @@ Worker-side, before delivery to subscribers:
 
 ### Startup hydration
 
-On project load, `getDirectoryStat(projectRoot)` provides a one-time recursive snapshot for the initial file explorer state. This is the only permitted full recursive scan.
+On project load, the rooted `statTree('')` provides a one-time recursive snapshot for the initial file explorer state, answered from the root's `TreeIndex`. This is the only permitted full recursive scan.
 
 ### Post-startup incremental updates
 

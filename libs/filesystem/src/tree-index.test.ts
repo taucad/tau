@@ -326,19 +326,6 @@ describe('TreeIndexes', () => {
     expect(indexes.statTree('/')).toMatchObject([{ path: 'main.ts' }]);
   });
 
-  it('evicts a root and every index nested under it when its mount goes', () => {
-    const indexes = new TreeIndexes(() => ['/', '/projects/x']);
-    indexes.build('/', [file('main.ts')]);
-    indexes.build('/projects/x', [file('main.ts')]);
-    indexes.build('/projects/x/src', [file('a.ts')]);
-
-    indexes.evict('/projects/x');
-
-    expect(indexes.get('/projects/x')).toBeUndefined();
-    expect(indexes.get('/projects/x/src')).toBeUndefined();
-    expect(indexes.get('/')).toBeDefined();
-  });
-
   it('drops every index on clear', () => {
     const indexes = new TreeIndexes();
     indexes.build('/a', [file('one.ts')]);

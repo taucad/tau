@@ -16,6 +16,8 @@ import { StorageModule } from '#storage/storage.module.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
 import { applyBlobReferences } from '#api/publications/publication-materializer.js';
 import { databaseReachable } from '#testing/database-reachable.js';
+import { createScratchDatabase } from '#testing/scratch-database.js';
+import type { ScratchDatabase } from '#testing/scratch-database.js';
 
 /**
  * S6's publication half (charter D10): a content-addressed blob nothing
@@ -28,6 +30,7 @@ import { databaseReachable } from '#testing/database-reachable.js';
 describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('zero-count blob collector', () => {
   let moduleRef: TestingModule;
   let driver: ObjectStorageService;
+  let scratch: ScratchDatabase;
   let client: postgres.Sql;
   let database: ReturnType<typeof drizzle<typeof schema>>;
   const shas: string[] = [];
@@ -60,15 +63,20 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('zero-coun
 
     driver = moduleRef.get(ObjectStorageService);
     assertDestructiveTestBucketAllowed(driver.bucketFor('private'), 'the W6 blob collector suite');
+    /* Its own database, because the job under test is scoped by state rather
+       than by identity: a seeded id cannot bound "every `refcount = 0` row",
+       and the objects it deletes are whichever rows it found. Every blob the
+       passes below can reach is therefore one this suite put there. */
+    scratch = await createScratchDatabase('blob_collector');
     /* More than one connection: the fence cases below hold a publisher's
        transaction open while a pass runs on another. */
-    client = postgres(process.env.DATABASE_URL, { max: 4, prepare: false });
+    client = postgres(scratch.url, { max: 4, prepare: false });
     database = drizzle(client, { schema });
-  }, 60_000);
+  }, 300_000);
 
   afterAll(async () => {
+    /* The rows go with the database; the bucket is shared, so its objects do not. */
     if (shas.length > 0) {
-      await database.delete(blobRef).where(inArray(blobRef.sha256, shas));
       await driver.deleteBlobs({
         namespace: 'blobs',
         keys: shas.map((sha256) => blobKeyFromSha256Hex(sha256)),
@@ -76,6 +84,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('zero-coun
       });
     }
     await client.end();
+    await scratch.drop();
   }, 60_000);
 
   it('should delete a blob nothing references and keep one that is referenced', async () => {
@@ -122,7 +131,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('zero-coun
     /* A second connection, which sees only committed rows: while the delete is
        uncommitted the row is still visible to it, and the bytes must already be
        gone by the time it disappears. */
-    const observer = postgres(process.env.DATABASE_URL, { max: 1, prepare: false });
+    const observer = postgres(scratch.url, { max: 1, prepare: false });
     const observing = drizzle(observer, { schema });
     const watchedDriver = {
       ...driver,
@@ -241,6 +250,44 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('zero-coun
 
     expect(collected?.collected ?? []).not.toStrictEqual(expect.arrayContaining([sha256]));
     expect(await exists(sha256)).toBe(true);
+  }, 120_000);
+
+  /*
+   * Review R1. `collectZeroCountBlobs` selects by *state*, not by identity:
+   * every `refcount = 0` row there is, then the matching objects out of both
+   * tiers. Nothing a seeded id can do bounds that, so the boundary has to be
+   * the database — and this is the row that proves it is one. A developer who
+   * unpublishes a publication leaves exactly this behind, and `nx test api`
+   * must not be the thing that collects it.
+   */
+  it('should leave a zero-count blob in the configured database untouched', async () => {
+    const body = new Uint8Array(randomBytes(32));
+    const foreignSha = createHash('sha256').update(body).digest('hex');
+    const foreignClient = postgres(process.env.DATABASE_URL, { max: 1, prepare: false });
+    const configured = drizzle(foreignClient, { schema });
+    try {
+      await driver.putBlob({
+        namespace: 'blobs',
+        key: blobKeyFromSha256Hex(foreignSha),
+        body,
+        contentType: 'application/octet-stream',
+        tier: 'private',
+      });
+      await configured.insert(blobRef).values({ sha256: foreignSha, sizeBytes: BigInt(body.byteLength), refcount: 0 });
+      // Something of its own to collect, so a pass that did nothing cannot pass this.
+      const orphan = await seedBlob(0);
+
+      const result = await collectZeroCountBlobs({ database, driver });
+
+      expect(result.collected).toStrictEqual(expect.arrayContaining([orphan]));
+      expect(result.planned).not.toContain(foreignSha);
+      expect(await configured.query.blobRef.findFirst({ where: inArray(blobRef.sha256, [foreignSha]) })).toBeDefined();
+      expect(await exists(foreignSha)).toBe(true);
+    } finally {
+      await configured.delete(blobRef).where(inArray(blobRef.sha256, [foreignSha]));
+      await driver.deleteBlobs({ namespace: 'blobs', keys: [blobKeyFromSha256Hex(foreignSha)], tier: 'private' });
+      await foreignClient.end();
+    }
   }, 120_000);
 
   it('should plan without deleting under a dry run', async () => {

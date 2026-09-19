@@ -1,7 +1,7 @@
-import type { FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
 import { WorkspaceMutationError } from '@taucad/filesystem';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
-import type { FileSystemClient } from '#file-system-client.js';
+import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '#file-system-client.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 
 /**
@@ -27,6 +27,27 @@ export type ComposedViewProxy = {
   search(query: string, options?: { maxResults?: number; includeDirectories?: boolean }): Promise<FileStatEntry[]>;
   /** Recursively stat one directory of the view from the same index. */
   statTree(path: string): Promise<FileStatEntry[]>;
+  /*
+   * The mutating half, on the same connection as the reads (charter D12): the
+   * bridge suppresses a port's own change events, so a write issued on any other
+   * port comes back to this client as somebody else's edit.
+   */
+  writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+  writeFiles(files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void>;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  unlink(path: string): Promise<void>;
+  rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  move(source: string, target: string): Promise<FileStat>;
+  bulkMove(edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult>;
+  /** The view's name for the authority's `duplicateFile`. */
+  duplicate(source: string, target: string): Promise<void>;
+  /** The view's name for the authority's `copyDirectory`. */
+  copyTree(source: string, target: string): Promise<void>;
+  canMove(source: string, target: string): Promise<true | WorkspaceMutationError>;
+  canRename(source: string, newName: string): Promise<true | WorkspaceMutationError>;
+  canCreate(path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError>;
+  canDelete(path: string): Promise<true | WorkspaceMutationError>;
 };
 
 /**
@@ -109,6 +130,29 @@ const guardedPreflights = new Map<string, readonly number[]>([
   ['canDelete', [0]],
 ]);
 
+/**
+ * The view's own name for each guarded member, where the two surfaces differ.
+ *
+ * The rooted porcelain spells a tree copy `copyTree` and a file copy
+ * `duplicate`; everything else is the same word on both surfaces.
+ */
+const viewMutations = new Map<string, keyof ComposedViewProxy>([
+  ['writeFile', 'writeFile'],
+  ['writeFileChecked', 'writeFileChecked'],
+  ['writeFiles', 'writeFiles'],
+  ['mkdir', 'mkdir'],
+  ['unlink', 'unlink'],
+  ['rmdir', 'rmdir'],
+  ['move', 'move'],
+  ['bulkMove', 'bulkMove'],
+  ['duplicateFile', 'duplicate'],
+  ['copyDirectory', 'copyTree'],
+  ['canMove', 'canMove'],
+  ['canRename', 'canRename'],
+  ['canCreate', 'canCreate'],
+  ['canDelete', 'canDelete'],
+]);
+
 /** The paths a guarded call would touch, whatever shape its arguments take. */
 const touchedPaths = (property: string, args: readonly unknown[]): readonly string[] => {
   if (property === 'writeFileChecked') {
@@ -138,6 +182,57 @@ const touchedPaths = (property: string, args: readonly unknown[]): readonly stri
 };
 
 /**
+ * The same guarded call in the view's own namespace, or `undefined` when one of
+ * its paths is not the view's to serve.
+ *
+ * The shapes are {@link touchedPaths}': the same three irregular members carry
+ * their paths in a record, an edit list or a checked-write input, and every
+ * other one carries them in the positions the tables above declare. An
+ * all-or-nothing rewrite is the point — a batch with one path outside the root
+ * is the authority's whole call, not a pair of half calls.
+ */
+const viewArgs = (
+  property: string,
+  args: readonly unknown[],
+  relative: (absolutePath: string) => string | undefined,
+): unknown[] | undefined => {
+  if (property === 'writeFileChecked') {
+    const input = args[0] as Omit<CheckedFileWrite, 'signal'>;
+    const path = relative(input.path);
+    const preconditions = input.preconditions.map((precondition) => ({
+      ...precondition,
+      path: relative(precondition.path),
+    }));
+    return path === undefined || preconditions.some((precondition) => precondition.path === undefined)
+      ? undefined
+      : [{ ...input, path, preconditions }];
+  }
+  if (property === 'writeFiles') {
+    const entries = Object.entries((args[0] ?? {}) as Record<string, unknown>).map(
+      ([path, descriptor]) => [relative(path), descriptor] as const,
+    );
+    return entries.some(([path]) => path === undefined) ? undefined : [Object.fromEntries(entries)];
+  }
+  if (property === 'bulkMove') {
+    const edits = ((args[0] ?? []) as readonly BulkMoveEdit[]).map(({ source, target }) => ({
+      source: relative(source),
+      target: relative(target),
+    }));
+    return edits.some(({ source, target }) => source === undefined || target === undefined) ? undefined : [edits];
+  }
+  const rewritten = [...args];
+  /* `canRename`'s second argument is a bare name, not a path. */
+  for (const index of guardedMutations.get(property) ?? guardedPreflights.get(property) ?? []) {
+    const path = relative(args[index] as string);
+    if (path === undefined) {
+      return undefined;
+    }
+    rewritten[index] = path;
+  }
+  return rewritten;
+};
+
+/**
  * One filesystem client that reads the project through its composed view and
  * asks the authority for everything else.
  *
@@ -151,15 +246,17 @@ const touchedPaths = (property: string, args: readonly unknown[]): readonly stri
  *   That includes search and recursive stat, which the view answers from its
  *   root's own index (charter D3): the same rows the tree shows, masked by the
  *   same policy, and warm for as long as the project is open.
- * - **Writes and the remaining workspace porcelain** — the move preflights,
- *   cross-root writes — stay on the authority. That porcelain is
- *   authority-global and has no rooted counterpart yet; writes stay there
- *   because the authority suppresses a port's own change events, and re-issuing
- *   this client's writes through a second port would echo every UI edit back to
- *   the UI as an external change.
+ * - **Writes and the mutating porcelain inside the project root** go to the view
+ *   too, on that one connection (charter D12): the authority suppresses a port's
+ *   own change events, so a write issued on any other port would come back to
+ *   this client as somebody else's edit. That is why the routing cannot be split
+ *   across two changes — the reads and the writes have to share a port or the UI
+ *   re-announces itself.
  * - **Paths outside the project root** (the global `/node_modules` alias the
- *   resolver keeps) are the authority's too: dependencies are a mount, not an
- *   overlay.
+ *   resolver keeps) are the authority's: dependencies are a mount, not an
+ *   overlay, and no rooted handle serves them. A batch with one path outside the
+ *   root is the authority's whole call — this client never splits one operation
+ *   across both surfaces.
  *
  * @param input - The authority client, the rooted view, and the path resolver they share.
  * @returns A client with the same surface as `workspace`, reading through the view, plus {@link ComposedViewClient.overrideUnit}.
@@ -246,19 +343,13 @@ export const createComposedViewClient = (input: {
     return encoding ? view.readFile(relative, 'utf8') : view.readFile(relative);
   };
 
-  /** Every file of one unit, keyed by the absolute path the authority writes it at. */
+  /** Every file of one unit, keyed by the view-relative path it is written at. */
   const unitFiles = async (relativePath: string): Promise<Record<string, { content: Uint8Array<ArrayBuffer> }>> => {
     const rows = await view.readdirWithStats(relativePath);
     const parts = await Promise.all(
       rows.map(async (row) => {
         const child = `${relativePath}/${row.name}`;
-        return row.type === 'dir'
-          ? unitFiles(child)
-          : {
-              [paths.toAbsolutePath(child)]: {
-                content: await view.readFile(child),
-              },
-            };
+        return row.type === 'dir' ? unitFiles(child) : { [child]: { content: await view.readFile(child) } };
       }),
     );
     return Object.assign({}, ...parts) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
@@ -269,7 +360,7 @@ export const createComposedViewClient = (input: {
     if (current.source === 'project') {
       throw Object.assign(new Error(`EEXIST: ${unitRoot} is already the project's own.`), { code: 'EEXIST' });
     }
-    await workspace.writeFiles(await unitFiles(unitRoot));
+    await view.writeFiles(await unitFiles(unitRoot));
     /* The memo answered "overlay" for every path under the unit; the project
      * owns them from the next read, so drop what it remembers. */
     for (const key of provenance.keys()) {
@@ -368,6 +459,11 @@ export const createComposedViewClient = (input: {
               return new WorkspaceMutationError('READ_ONLY_MOUNT', refused);
             }
             throw Object.assign(new Error(`EROFS: ${refused} is served read-only by this view.`), { code: 'EROFS' });
+          }
+          const viewMember = viewMutations.get(property);
+          const routed = viewMember === undefined ? undefined : viewArgs(property, args, viewPath);
+          if (viewMember !== undefined && routed !== undefined) {
+            return (view[viewMember] as (...rest: unknown[]) => Promise<unknown>)(...routed);
           }
           return (target[property as 'writeFile'] as (...rest: unknown[]) => Promise<unknown>).apply(target, args);
         };

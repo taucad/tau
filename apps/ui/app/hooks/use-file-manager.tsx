@@ -13,7 +13,6 @@ import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '@taucad/fs-
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError } from '@taucad/filesystem';
-import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
   getHomeStorageBackend,
@@ -23,7 +22,7 @@ import {
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
-import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
+import type { RootedBridgeConsumer, WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -740,7 +739,7 @@ export function FileManagerProvider({
   }, [fileManagerRef]);
 
   const openRootedFileSystemBridge = useCallback(
-    (root: string, consumer?: ComposedViewConsumer) => {
+    (root: string, consumer: RootedBridgeConsumer) => {
       const opener = fileManagerRef.getSnapshot().context.openFileSystemBridge;
       if (!opener) {
         throw new FileManagerNotReadyError('proxy-timeout', {
@@ -772,7 +771,8 @@ export function FileManagerProvider({
         if (contentService === undefined) {
           throw new FileManagerNotReadyError('proxy-timeout');
         }
-        return openRootedFileSystemBridge(rootDirectory);
+        /* The runtime reads the checkout itself, never a consumer's view (G6). */
+        return openRootedFileSystemBridge(rootDirectory, 'working-copy');
       }),
     // A successful service initialization is the host's existing binding
     // identity. Rotating the opaque filesystem here makes every owner keyed

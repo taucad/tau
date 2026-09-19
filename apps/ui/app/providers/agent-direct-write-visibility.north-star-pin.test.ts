@@ -13,7 +13,7 @@
  *   createRootedBridgeFileSystem ── the agent's own rooted port ──
  *                                                    WorkspaceFileService
  *                                                                 │
- *   FileContentService ── WorkerChangeChannel ── the UI's unrooted port
+ *   FileContentService ── WorkerChangeChannel ── the UI's own rooted port
  * ```
  */
 
@@ -99,6 +99,12 @@ const createBrowserHarness = async (): Promise<{
   const uiClient = createFileSystemBridgeProxy(connection);
   await uiClient.ready;
 
+  /* The change transport is the project's own rooted connection (charter D12,
+   * W12b): it delivers root-relative paths and never the UI's own writes. */
+  const viewConnection = openFileSystemBridge(worker, { root: projectRoot, consumer: 'user' });
+  const viewClient = createFileSystemBridgeProxy(viewConnection);
+  await viewClient.ready;
+
   const paths = new WorkspacePathResolver(projectRoot);
   const content = new FileContentService({
     // Text on the wire throughout: jsdom's `MessagePort` clones a `Uint8Array`
@@ -112,12 +118,14 @@ const createBrowserHarness = async (): Promise<{
       stat: async (path: string) => uiClient.stat(path),
     }),
     paths,
-    channel: new WorkerChangeChannel({ transport: { listen: uiClient.listen }, paths }),
+    channel: new WorkerChangeChannel({ transport: { listen: viewClient.listen } }),
     refreshGuard: new RefreshGenerationGuard(),
   });
 
   disposers.push(() => {
     content.dispose();
+    viewClient.dispose();
+    viewConnection.dispose();
     uiClient.dispose();
     connection.dispose();
     exposed.cleanup();

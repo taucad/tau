@@ -787,7 +787,6 @@ describe('Monaco external-content production wiring', () => {
           return vi.fn();
         },
       },
-      paths,
     });
     const contentService = new FileContentService({
       proxy,
@@ -817,7 +816,7 @@ describe('Monaco external-content production wiring', () => {
       await modelService.acquireModel('main.ts');
       expect(models.get('file:///main.ts')?.getValue()).toBe('before');
       bytes = new TextEncoder().encode('after');
-      emitWorkerChange?.({ type: 'fileWritten', path: '/project/main.ts', backend: 'indexeddb' });
+      emitWorkerChange?.({ type: 'fileWritten', path: 'main.ts', backend: 'indexeddb' });
 
       await vi.waitFor(() => {
         expect(models.get('file:///main.ts')?.getValue()).toBe('after');

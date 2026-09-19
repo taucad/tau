@@ -24,7 +24,15 @@
  * @module
  */
 
-import type { FileContentMetadata, FileProvenance, FileProvenanceSource, FileStat, FileStatEntry } from '@taucad/types';
+import type {
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileContentMetadata,
+  FileProvenance,
+  FileProvenanceSource,
+  FileStat,
+  FileStatEntry,
+} from '@taucad/types';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import type {
   DirectoryEntry,
@@ -109,7 +117,11 @@ type IndexedFileSystem = {
  * @public
  */
 export type ComposedViewCheckout = Readonly<{
-  filesystem: FileSystemProvider & Partial<WatchableFileSystem> & Partial<IndexedFileSystem> & Partial<RootedPorcelain>;
+  filesystem: Omit<FileSystemProvider, 'rmdir'> &
+    RecursiveRmdir &
+    Partial<WatchableFileSystem> &
+    Partial<IndexedFileSystem> &
+    Partial<RootedPorcelain>;
   /** Stable checkout id, reported as the `identity` of project entries. */
   id?: string;
 }>;
@@ -128,8 +140,21 @@ export type ComposedViewOptions = Readonly<{
   overlays?: readonly ComposedViewOverlay[];
 }>;
 
+/**
+ * A directory removal that carries the rooted surface's recursive option.
+ *
+ * The bare port's `rmdir` empties one directory; a rooted filesystem's has
+ * always taken `{ recursive: true }` (see {@link RootedFileSystem}), and a view
+ * that dropped the option would turn a Files-pane folder delete into
+ * `ENOTEMPTY`. A provider that only declares `rmdir(path)` still satisfies this.
+ *
+ * @public
+ */
+export type RecursiveRmdir = { rmdir(path: string, options?: { recursive?: boolean }): Promise<void> };
+
 /** A rooted filesystem with provenance. @public */
-export type ComposedView = FileSystemProvider &
+export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
+  RecursiveRmdir &
   Partial<WatchableFileSystem> &
   Partial<IndexedFileSystem> &
   Partial<RootedPorcelain> & {
@@ -640,12 +665,29 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     async unlink(path) {
       return mutate(path, async (target) => base.unlink(target));
     },
-    async rmdir(path) {
-      return mutate(path, async (target) => base.rmdir(target));
+    async rmdir(path, rmdirOptions?: { recursive?: boolean }) {
+      return mutate(path, async (target) => base.rmdir(target, rmdirOptions));
     },
     async rename(from, to) {
       return mutate(from, async (source) => mutate(to, async (target) => base.rename(source, target)));
     },
+    ...(base.writeFileChecked === undefined
+      ? {}
+      : {
+          /* The target is a write, the preconditions are reads: a hidden path is
+           * refused on whichever side names it, before the fence is taken. */
+          writeFileChecked: async (input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> => {
+            const [target] = await writableTargets([input.path]);
+            return base.writeFileChecked!({
+              ...input,
+              path: target!,
+              preconditions: input.preconditions.map(({ path, expected }) => ({
+                path: readablePath(canonical(path)),
+                expected,
+              })),
+            });
+          },
+        }),
     ...(base.appendFile === undefined
       ? {}
       : {

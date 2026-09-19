@@ -611,25 +611,30 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(startPolling).toHaveBeenCalledOnce();
   });
 
-  it('routes createDirectory through the project content facade with an absolute project path', async () => {
+  /* Charter D12: the project content facade writes on the project's own rooted
+   * connection, so the call arrives in the view's namespace, not the
+   * authority's. */
+  it('routes createDirectory through the project content facade in the view namespace', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
       await result.current.createDirectory('newfolder', { recursive: true });
     });
 
-    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('/projects/root/newfolder', { recursive: true });
+    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('newfolder', { recursive: true });
     expect(mockProxyWriteFile).not.toHaveBeenCalled();
   });
 
-  it('routes deleteDirectory through the project content facade with an absolute project path', async () => {
+  it('routes deleteDirectory through the project content facade in the view namespace', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
       await result.current.deleteDirectory('subtree', { recursive: true });
     });
 
-    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('/projects/root/subtree', { recursive: true });
+    /* `{ recursive: true }` has to survive the view too, or a folder delete from
+     * the Files pane answers ENOTEMPTY. */
+    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('subtree', { recursive: true });
   });
 
   /*

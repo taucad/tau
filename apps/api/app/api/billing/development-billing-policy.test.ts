@@ -25,6 +25,18 @@ describe('development billing policy', () => {
     expect(JSON.parse(checkedIn)).toEqual(JSON.parse(generateDevelopmentBillingPolicy(checkedIn)));
   });
 
+  it('drops a route the table no longer funds instead of refusing the document that still names it', () => {
+    const current = JSON.parse(checkedIn) as {
+      routes: Array<{ routeId: string; sku: string; meterContractId: string }>;
+    };
+    const [template] = current.routes;
+    const retired = { ...template!, routeId: 'google-retired-flash', sku: 'model:google-retired-flash' };
+    const withRetired = JSON.stringify({ ...current, routes: [...current.routes, retired] });
+
+    const generated = JSON.parse(generateDevelopmentBillingPolicy(withRetired)) as typeof current;
+    expect(generated.routes.map((entry) => entry.routeId)).not.toContain('google-retired-flash');
+  });
+
   it('funds every qualified catalog route against the registered meter contracts', () => {
     registerBillableModelMeterContracts();
     const { policy } = validateCommercialPolicy(checkedIn);

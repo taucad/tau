@@ -42,7 +42,16 @@ const rateId = (routeId: string, dimension: string, tier: string | null): string
  */
 export const generateDevelopmentBillingPolicy = (current: string): string => {
   registerBillableModelMeterContracts();
-  const { policy } = validateCommercialPolicy(current);
+  /* The route table replaces these three wholesale, so only the rest is read from
+     the document. Validating the old ones would refuse the very regeneration
+     that drops a route the table stopped funding. */
+  const parsed = JSON.parse(current) as { fleet: Record<string, unknown> };
+  const { policy } = validateCommercialPolicy({
+    ...parsed,
+    fleet: { ...parsed.fleet, meterContractIds: [] },
+    rates: [],
+    routes: [],
+  });
   const generated = {
     ...policy,
     fleet: { ...policy.fleet, meterContractIds: billableModelRouteMeters.map((route) => route.meterContractId) },

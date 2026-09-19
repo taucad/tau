@@ -1,10 +1,6 @@
 import { expect } from 'vitest';
-import '@taucad/geospec/vitest';
-import type {
-  GeoSpecAssertionClient,
-  GeoSpecCanonicalClaimReport,
-  GeoSpecNativeSubject,
-} from '@taucad/geospec/assertion-client';
+import type { GeoSpecAssertionClient } from '@taucad/geospec/vitest';
+import type { GeoSpecCanonicalClaimReport, GeoSpecNativeSubject } from '@taucad/geospec/assertion-client';
 
 export const invokeStandalone = async (
   client: GeoSpecAssertionClient,
@@ -16,10 +12,10 @@ export const invokeVitest = async (subject: GeoSpecNativeSubject): Promise<void>
 
 export const rejectStandaloneArgument = (client: GeoSpecAssertionClient, subject: GeoSpecNativeSubject): void => {
   // @ts-expect-error The fixed native matcher is nullary.
-  client.expectGeo(subject).toSatisfyRationalPlate({});
+  void client.expectGeo(subject).toSatisfyRationalPlate({});
 };
 
 export const rejectVitestArgument = (subject: GeoSpecNativeSubject): void => {
   // @ts-expect-error The installed Vitest matcher is nullary.
-  expect(subject).toSatisfyRationalPlate({});
+  void expect(subject).toSatisfyRationalPlate({});
 };

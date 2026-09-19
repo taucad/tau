@@ -17,9 +17,10 @@
  *   `p95Ms`, `p99Ms`, `minMs`, `maxMs`, `stddevMs`).
  * - Chat schema reasoning-timing fields under `providerMetadata.common`
  *   (`reasoningStartedAtMs`, `reasoningEndedAtMs`, `firstTokenAtMs`,
- *   `startedAtMs`) — stamped server-side, persisted in IndexedDB, and
- *   round-tripped through the AI SDK reducer; renaming breaks the wire
- *   format. See `libs/chat/src/schemas/common-reasoning-metadata.schema.ts`
+ *   `startedAtMs`, `endedAtMs`) — stamped server-side, persisted in
+ *   IndexedDB, and round-tripped through the AI SDK reducer; renaming
+ *   breaks the wire format. See
+ *   `libs/chat/src/schemas/common-reasoning-metadata.schema.ts`
  *   and `docs/research/reasoning-duration-display.md`.
  * - Internal benchmark formatter `formatMs(n: number): string` whose
  *   suffix participates in the API name (formatter for milliseconds).
@@ -51,6 +52,7 @@ const ALLOWED_MS_SUFFIXES = [
   'reasoningEndedAtMs',
   'firstTokenAtMs',
   'startedAtMs',
+  'endedAtMs',
   // Internal benchmark report formatter.
   'formatMs',
 ];

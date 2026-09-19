@@ -224,24 +224,52 @@ describe('gateway receipt attribution', () => {
     },
   );
 
-  it.each(['x-tau-project-id', 'x-tau-chat-id'])('should refuse a duplicated %s with a 400', async (name) => {
-    // A second value is an ambiguous identity, not a malformed one: the same
-    // answer readSingleHeader already gives x-tau-attempt-id.
-    const refusal = relay({ ...attemptHeaders, [name]: 'first' }, [
-      'x-tau-attempt-id',
-      'attempt_boundary',
-      name,
-      'first',
-      name,
-      'second',
-    ]);
+  it('should honour a compaction activity the client asserts', async () => {
+    const intents = await relay({ ...attemptHeaders, 'x-tau-activity': 'compaction' });
 
-    await expect(refusal).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof LlmGatewayError && error.getStatus() === 400 && errorType(error) === 'INVALID_REQUEST',
-    );
-    await expect(refusal).rejects.toThrow(`Duplicate ${name} headers are not allowed.`);
+    expect(intents[0]).toMatchObject({ activity: 'compaction' });
   });
+
+  it('should label a turn agent when the caller asserts no activity', async () => {
+    const intents = await relay(attemptHeaders);
+
+    expect(intents[0]).toMatchObject({ activity: 'agent' });
+  });
+
+  it.each(['title', 'commit', 'summary', 'completion', 'other', 'AGENT', 'not-a-kind', ''])(
+    'should refuse the asserted activity %s and label the turn agent',
+    async (activity) => {
+      /* `title` and `commit` are the load-bearing pair: they route to a separate
+       * `helper` concurrency pool, so honouring them from a header would let a
+       * caller admit past the primary pool's limit. */
+      const intents = await relay({ ...attemptHeaders, 'x-tau-activity': activity });
+
+      expect(intents).toHaveLength(1);
+      expect(intents[0]).toMatchObject({ activity: 'agent' });
+    },
+  );
+
+  it.each(['x-tau-project-id', 'x-tau-chat-id', 'x-tau-activity'])(
+    'should refuse a duplicated %s with a 400',
+    async (name) => {
+      // A second value is an ambiguous identity, not a malformed one: the same
+      // answer readSingleHeader already gives x-tau-attempt-id.
+      const refusal = relay({ ...attemptHeaders, [name]: 'first' }, [
+        'x-tau-attempt-id',
+        'attempt_boundary',
+        name,
+        'first',
+        name,
+        'second',
+      ]);
+
+      await expect(refusal).rejects.toSatisfy(
+        (error: unknown) =>
+          error instanceof LlmGatewayError && error.getStatus() === 400 && errorType(error) === 'INVALID_REQUEST',
+      );
+      await expect(refusal).rejects.toThrow(`Duplicate ${name} headers are not allowed.`);
+    },
+  );
 });
 
 describe('gateway error envelope on the wire', () => {

@@ -50,6 +50,12 @@ export const httpHeader = {
    */
   xTauProjectId: 'x-tau-project-id',
   xTauChatId: 'x-tau-chat-id',
+  /**
+   * What kind of turn the caller is relaying, so a compaction is not filed as
+   * agent spend. Only the kinds a client may safely assert are honoured; see
+   * `clientAssertableActivity` in `llm-gateway.headers.ts`.
+   */
+  xTauActivity: 'x-tau-activity',
 } as const;
 
 /**

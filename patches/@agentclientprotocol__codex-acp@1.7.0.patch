@@ -1,8 +1,41 @@
 diff --git a/dist/index.js b/dist/index.js
-index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..bf772a4f475b2bbd3da91844a45486edc997629c 100755
+index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..0a810574d3d0958f614813ff2c4c29a1bb412aed 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -28255,7 +28255,7 @@ var CodexAcpClient = class {
+@@ -24929,6 +24929,7 @@ ${event.stdin}
+       actions: actionsOverride ?? policy.actions
+     };
+     this.failuresById.set(id, failure);
++    if (kind === "quota_exhausted") (this.quotaFailureIds ??= /* @__PURE__ */ new Set()).add(id);
+     this.failureTurnIdById.set(id, attributeToTurn ? turnId : void 0);
+     this.activeFailureIdByScope.set(scope, id);
+     this.sessionState.sessionFailure = failure;
+@@ -24991,8 +24992,24 @@ ${event.stdin}
+     const combinedTitle = `${summary} \u2014 ${details}`;
+     return combinedTitle.length <= MAX_SESSION_FAILURE_TITLE_LENGTH ? [combinedTitle] : [summary, details];
+   }
++  exhaustedRateLimitReset() {
++    let earliest;
++    for (const entry of this.sessionState.rateLimits?.values() ?? []) {
++      for (const window2 of [entry.snapshot?.primary, entry.snapshot?.secondary]) {
++        if (!window2 || typeof window2.resetsAt !== "number" || !(window2.usedPercent >= 100)) continue;
++        if (earliest !== void 0 && earliest.resetsAt <= window2.resetsAt) continue;
++        earliest = {
++          resetsAt: window2.resetsAt,
++          ...typeof window2.windowDurationMins === "number" ? { windowMinutes: window2.windowDurationMins } : {}
++        };
++      }
++    }
++    return earliest;
++  }
+   createSessionFailureMeta(failure) {
++    const rateLimit = this.quotaFailureIds?.has(failure.id) ? this.exhaustedRateLimitReset() : void 0;
+     return {
++      ...rateLimit === void 0 ? {} : { "_codex/rateLimit": rateLimit },
+       [JETBRAINS_META_KEY]: {
+         [AIR_META_KEY]: {
+           [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+@@ -28255,7 +28272,7 @@ var CodexAcpClient = class {
      return this.codexClient.getMcpServerStartupVersion();
    }
    async createSessionConfig(projectPath, additionalDirectories, mcpServers) {
@@ -11,7 +44,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..bf772a4f475b2bbd3da91844a45486ed
      const activeProvider = this.gatewayConfig ? {
        apiType: gatewayApiTypeFromConfig(this.gatewayConfig),
        baseUrl: this.gatewayConfig.config.base_url
-@@ -28273,7 +28273,7 @@ var CodexAcpClient = class {
+@@ -28273,7 +28290,7 @@ var CodexAcpClient = class {
          trust_level: "trusted"
        }]))
      };
@@ -20,7 +53,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..bf772a4f475b2bbd3da91844a45486ed
      if (mcpServers.length === 0) {
        return configWithWorkspaceRoots;
      }
-@@ -28421,7 +28421,7 @@ var CodexAcpClient = class {
+@@ -28421,7 +28438,7 @@ var CodexAcpClient = class {
        input,
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
@@ -29,7 +62,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..bf772a4f475b2bbd3da91844a45486ed
        summary: disableSummary ? "none" : "auto",
        effort,
        model: modelId.model,
-@@ -29769,6 +29769,7 @@ var CodexCommands = class {
+@@ -29769,6 +29786,7 @@ var CodexCommands = class {
      }
      for (const entry of skillsEntries) {
        for (const skill of entry.skills) {
@@ -37,7 +70,7 @@ index 3e8bb8292a5441cf1e9be1b68965a1ddbfc62fda..bf772a4f475b2bbd3da91844a45486ed
          const name = `$${skill.name}`;
          if (commands.has(name)) continue;
          const description = skill.shortDescription ?? skill.description ?? skill.name;
-@@ -29933,7 +29934,7 @@ var CodexCommands = class {
+@@ -29933,7 +29951,7 @@ var CodexCommands = class {
        }
        case "skills": {
          const response = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));

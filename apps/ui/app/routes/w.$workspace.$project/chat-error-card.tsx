@@ -4,6 +4,14 @@ import { cn } from '@taucad/ui/utils/cn';
 
 type ChatErrorCardTone = 'neutral' | 'warning' | 'destructive' | 'notice';
 
+/**
+ * The consequence a kept turn states, outside every disclosure.
+ *
+ * One string so the recovery cards cannot drift apart on the promise they make
+ * (DESIGN: the consequence and the action never fold away).
+ */
+export const turnSavedSentence = 'Everything up to here is saved.';
+
 const toneClassName: Record<ChatErrorCardTone, string> = {
   neutral: 'bg-muted',
   warning: 'border-warning/20 bg-warning/10',

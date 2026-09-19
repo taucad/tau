@@ -8,12 +8,19 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-import { createTauAgentHost, hostRunStateOfLifecycle, runLedgerOf } from '#host/tau-agent-host.js';
+import {
+  createTauAgentHost,
+  hostRunStateOfLifecycle,
+  isResumableRunFailure,
+  runLedgerOf,
+} from '#host/tau-agent-host.js';
 import type { ExternalAgentPort } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
-import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
+import { GatewayModelTransportError, gatewayModelErrorCodes } from '#transport/gateway-model-transport.js';
+import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
+import type { HostCompactionError } from '#harness/compaction.js';
 
 const tauInternal = (message: ProviderMessage | undefined): JsonObject | undefined => message?.metadata?.tauInternal;
 
@@ -407,8 +414,11 @@ describe('createTauAgentHost', () => {
 
   it.each([
     ['INSUFFICIENT_CREDIT', 402, true],
+    /* The in-stream guard wraps a provider failure with the *healthy*
+     * response's status, so a mid-call `NETWORK_ERROR` carries a 200. */
+    ['NETWORK_ERROR', 200, true],
     ['MODEL_NOT_IN_CATALOG', 400, false],
-  ] as const)('resumes a %s refusal at the blocked step only when it is retryable', async (code, status, retryable) => {
+  ] as const)('resumes a %s failure at the blocked step only when it is retryable', async (code, status, retryable) => {
     const file = createMemoryLogFile();
     const requests: ModelStreamRequest[] = [];
     const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
@@ -475,6 +485,12 @@ describe('createTauAgentHost', () => {
     // built from: the prior tool result intact, the user turn appearing once,
     // and no rewind of the turn itself.
     expect(lifecycle).toEqual(['admitted', 'running', 'failed', 'running', 'completed']);
+    /* The one retraction a resume makes: the trailing failure marker, and
+     * nothing before it (R4). A `regenerate` would retain nothing past the
+     * user message instead. */
+    const rewound = events.filter((event) => event.type === 'history.rewound');
+    expect(rewound.map((event) => event.trigger)).toEqual(['retry']);
+    expect(rewound[0]?.retainedMessageIds).toEqual(refused.messages.slice(0, -1).map((message) => message.id));
     expect(requests).toHaveLength(3);
     expect(requests[2]?.messages.map((message) => `${message.role}:${message.id}`)).toEqual(
       requests[1]?.messages.map((message) => `${message.role}:${message.id}`),
@@ -491,6 +507,129 @@ describe('createTauAgentHost', () => {
       state: 'completed',
     });
     await host.close();
+  });
+
+  it('resumes from the real result of a tool that ran before the stream failed', async () => {
+    /* The stream starts a tool the moment its call is complete (`prestartTool`),
+     * so a failure one frame later leaves a tool that *ran* with no durable
+     * result: pi never executes the call, and the dropped promise used to reach
+     * the resumed model as `CLIENT_DISCONNECTED` — an invitation to apply a
+     * non-idempotent tool twice (F2). */
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
+    let call = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            call++;
+            if (call === 1) {
+              yield {
+                type: 'tool-input',
+                toolCallId: 'prestart-call-read',
+                toolName: 'read_file',
+                input: { targetFile: 'main.ts' },
+              };
+              throw new GatewayModelTransportError({
+                code: 'NETWORK_ERROR',
+                status: 200,
+                message: 'fixture NETWORK_ERROR',
+              });
+            }
+            yield { type: 'text-delta', text: 'Answered from the tool result that survived.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: 'prestart',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-prestart',
+      runId: 'run-prestart',
+      trigger: 'submit',
+      message: { id: 'turn-prestart', role: 'user', content: 'Read main.ts, then answer.' },
+    });
+    const refused = await host.snapshot('chat-prestart');
+    const resumed = await host.resume('chat-prestart');
+    const events = await readLog(file);
+
+    expect(refused.state).toBe('failed');
+    expect(refused.failure).toMatchObject({ code: 'NETWORK_ERROR' });
+    // The tool ran once, before the failure, and is never dispatched again.
+    expect(invoke).toHaveBeenCalledTimes(1);
+    // Its real result is durable, and there is exactly one record of it.
+    expect(
+      resumed.filter((message) => message.role === 'tool-output' && message.toolCallId === 'prestart-call-read'),
+    ).toMatchObject([{ content: 'fixture-main', isError: false }]);
+    // The re-issued call carries that result, not a fabricated disconnect.
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages.at(-1)).toMatchObject({
+      role: 'tool-output',
+      toolCallId: 'prestart-call-read',
+      isError: false,
+      content: 'fixture-main',
+    });
+    expect(JSON.stringify(requests[1]?.messages)).not.toContain('CLIENT_DISCONNECTED');
+    // The assistant row the provider sees is a plain tool-use turn, not a marker.
+    const assistant = requests[1]?.messages.filter((message) => message.role === 'assistant') ?? [];
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]?.metadata).toMatchObject({ stopReason: 'toolUse' });
+    expect(assistant[0]?.metadata?.errorMessage).toBeUndefined();
+    // The turn itself is untouched: the one user message, and no rewind of it.
+    expect(requests[1]?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'history.rewound')).toHaveLength(0);
+    /* The marker's diagnostic is what `snapshot` reads a chat's failure from,
+     * so a marker left in history would report this chat as failed for the rest
+     * of its life. */
+    const completed = await host.snapshot('chat-prestart');
+    expect(completed.state).toBe('completed');
+    expect(completed.failure).toBeUndefined();
+    await host.close();
+  });
+
+  it('rules every failure code a run can end on either resumable or not', () => {
+    /* Q5: the *non-resumable* half of the ruling lives here rather than in a
+     * second production set nothing would read. Both unions are keyed
+     * exhaustively, so a code added to the transport or to compaction fails to
+     * compile until this table rules it one way or the other. */
+    /* eslint-disable @typescript-eslint/naming-convention -- the keys are wire failure codes, not identifiers. */
+    const resumability = {
+      // Gateway transport (`gatewayModelErrorCodes`); the seven resumable ones are Q2's list.
+      BILLING_RECOVERY_UNAVAILABLE: false,
+      FUNDED_HELPER_LIMIT: false,
+      FUNDED_OPERATION_LIMIT: false,
+      INSUFFICIENT_CREDIT: true,
+      MODEL_NOT_IN_CATALOG: false,
+      MODEL_PROVIDER_UNSUPPORTED: false,
+      ORIGIN_NOT_ALLOWED: false,
+      PROVIDER_ACCOUNT_EXHAUSTED: false,
+      RATE_LIMITED: true,
+      UNAUTHENTICATED: true,
+      INVALID_REQUEST: true,
+      PROVIDER_UNAVAILABLE: true,
+      UPSTREAM_REJECTED: true,
+      MALFORMED_RESPONSE: true,
+      NETWORK_ERROR: true,
+      UNKNOWN_GATEWAY_ERROR: false,
+      // Compaction and leadership (R12): a resume would meet the same wall.
+      SUMMARY_REQUIRED: false,
+      NO_EVICTABLE_HISTORY: false,
+      SESSION_LOG_INTEGRITY: false,
+      CIRCUIT_BREAKER_OPEN: false,
+      LEADERSHIP_LOST: false,
+    } as const satisfies Record<GatewayModelErrorCode | HostCompactionError['code'] | 'LEADERSHIP_LOST', boolean>;
+    /* eslint-enable @typescript-eslint/naming-convention -- ends the wire-code key exception. */
+    const ruled = Object.entries(resumability);
+
+    expect(gatewayModelErrorCodes.filter((code) => !(code in resumability))).toEqual([]);
+    expect(
+      ruled.filter(([code]) => isResumableRunFailure({ message: `fixture ${code}`, code })).map(([code]) => code),
+    ).toEqual(ruled.filter(([, resumable]) => resumable).map(([code]) => code));
   });
 
   it('executes tool and steady-state turns, then cold-rebuilds the completed transcript', async () => {
@@ -1309,6 +1448,111 @@ the cancelled tools left the system unchanged.
         { message: 'You have hit your usage limit.', code: 'EXTERNAL_AGENT_LIMIT_REACHED', details },
       ]);
     });
+    await host.close();
+  });
+
+  it.each([
+    ['a retry the agent offers', ['retry'], true],
+    // A usage limit: nothing helps *now*, and what clears it is time.
+    ['a usage limit with no action at all', [], true],
+    ['a context limit only a new session clears', ['new_session'], false],
+  ] as const)('continues an external stop on the session it remembered for %s', async (_label, actions, resumable) => {
+    const file = createMemoryLogFile();
+    const seen: Array<JsonObject | undefined> = [];
+    const closedChats: string[] = [];
+    let attempt = 0;
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        seen.push(turn.state);
+        attempt += 1;
+        if (attempt > 1) {
+          return;
+        }
+        await turn.remember({ acpSessionId: 'session-1' });
+        throw Object.assign(new Error('The agent is rate limited.'), {
+          code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+          details: {
+            agentId: 'stub-agent',
+            failure: { category: 'limit', title: 'The agent is rate limited.', actions },
+          },
+        });
+      },
+      closeChat: async (chatId) => {
+        closedChats.push(chatId);
+      },
+    };
+    const slug = actions.join('-') || 'none';
+    const chatId = `chat-external-${slug}`;
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: `external-${slug}`,
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId,
+      runId: 'run-external-limit',
+      trigger: 'submit',
+      message: { id: 'turn-external-limit', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await vi.waitFor(async () => {
+      const settling = await host.snapshot(chatId);
+      expect(settling.state).toBe('failed');
+    });
+    /* The gesture a person actually makes: a surface reads the run's failure
+     * off the snapshot and only calls resume when that record says it can be
+     * continued. An external stop writes no assistant diagnostic, so a
+     * snapshot that reported no failure at all made every Resume a rewind
+     * (F1). */
+    const stopped = await host.snapshot(chatId);
+    expect(stopped.failure).toMatchObject({
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+      message: 'The agent is rate limited.',
+    });
+    expect(isResumableRunFailure(stopped.failure)).toBe(resumable);
+    await host.resume(chatId);
+    if (!resumable) {
+      const settled = await readLog(file);
+      expect(seen).toHaveLength(1);
+      expect(settled.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []))).toEqual([
+        'admitted',
+        'running',
+        'failed',
+      ]);
+      await host.close();
+      return;
+    }
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(2);
+    });
+    const events = await readLog(file);
+    /* The agent said retrying can help, so the turn continues in the vendor
+     * session it already holds: nothing told the runner to close the chat,
+     * the second attempt carries the remembered session id, and the turn is
+     * neither rewound nor sent a second time (R9/S11). */
+    expect(seen).toHaveLength(2);
+    expect(closedChats).toEqual([]);
+    expect(seen[1]).toMatchObject({ acpSessionId: 'session-1', agentId: 'stub-agent' });
+    expect(events.some((event) => event.type === 'history.rewound')).toBe(false);
+    expect(
+      reduceEventLog(events)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.id),
+    ).toEqual(['turn-external-limit']);
     await host.close();
   });
 

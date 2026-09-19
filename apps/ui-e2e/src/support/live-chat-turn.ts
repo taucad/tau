@@ -13,25 +13,13 @@ import { expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
+import { classifyReceipts } from '#support/usage-receipt.js';
+import type { UsageReceipt } from '#support/usage-receipt.js';
 
 /** A catalog row a live spec drives: the selector/cookie id and the provider that bills it. */
 export type LiveModel = {
   readonly id: string;
   readonly providerId: string;
-};
-
-/** One `/v1/billing/usage` row for a model turn. */
-export type UsageReceipt = {
-  readonly kind: 'base';
-  readonly customerState: 'absorbed' | 'released' | 'settled';
-  readonly executionStatus: string;
-  readonly meteringStatus: string;
-  readonly model: { readonly id: string; readonly providerId: string | null };
-  readonly operationId: string;
-  readonly tokens: {
-    readonly output: string | null;
-    readonly reasoning?: string | null;
-  };
 };
 
 /** The chat composer every live spec types into. */
@@ -224,34 +212,37 @@ export const readUsageReceipts = async (): Promise<readonly UsageReceipt[]> => {
 };
 
 /**
- * Wait until at least `minimumCount` matching receipts exist, and assert every one settled.
+ * Wait until at least `minimumCount` matching receipts were charged, and refuse an absorbed one.
+ *
+ * The floor is over the *settled* receipts rather than over every match: a turn
+ * that recovered from a transient provider refusal writes a `released` receipt
+ * for the same model beside the charged ones, and failing on it would call a
+ * correct run a defect (`classifyReceipts`).
  *
  * @param match - Which receipts this assertion owns (by provider or provider-side model).
- * @param minimumCount - How many the turns so far must have produced.
- * @returns The matching receipts.
+ * @param minimumCount - How many charged receipts the turns so far must have produced.
+ * @returns The charged receipts.
  */
 export const expectSettledReceipts = async (
   match: (receipt: UsageReceipt) => boolean,
   minimumCount: number,
 ): Promise<readonly UsageReceipt[]> => {
-  let receipts: readonly UsageReceipt[] = [];
+  let verdict = classifyReceipts([], match);
   await expect
     .poll(
       async () => {
-        const rows = await readUsageReceipts();
-        receipts = rows.filter((receipt) => match(receipt));
-        return receipts.length;
+        verdict = classifyReceipts(await readUsageReceipts(), match);
+        return verdict.settled.length;
       },
       { timeout: 120_000 },
     )
     .toBeGreaterThanOrEqual(minimumCount);
-  for (const receipt of receipts) {
-    expect(receipt.executionStatus).toBe('succeeded');
-    expect(receipt.customerState).toBe('settled');
-    expect(receipt.meteringStatus).toBe('complete');
+  // Tau paying for the call instead of the customer is a defect in its own right, never a recovery.
+  expect(verdict.absorbed.map((receipt) => receipt.operationId)).toEqual([]);
+  for (const receipt of verdict.settled) {
     expect(BigInt(receipt.tokens.output!)).toBeGreaterThanOrEqual(BigInt(receipt.tokens.reasoning ?? '0'));
   }
-  return receipts;
+  return verdict.settled;
 };
 
 /** The live project's physical file tree, read through the backend its durable config names. */

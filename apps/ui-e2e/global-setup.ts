@@ -92,8 +92,13 @@ export const setup = async (): Promise<() => Promise<void> | void> => {
   const environment = { ...process.env };
   environment['PORT'] = testPort;
   environment['TAU_DEBUG'] = 'true';
-  environment['TAU_API_URL'] = 'http://localhost:4000';
-  environment['TAU_WEBSOCKET_URL'] = 'ws://localhost:4001';
+  /* The same origin `browser-command.ts` signs accounts in against, so a second
+   * checkout can point a tier at its own API instead of colliding on 4000. The
+   * WebSocket origin is the API's: the only route it carries is the API's
+   * `/v1/kernels/zoo` (`ui-runtime.definition.ts`). */
+  const apiOrigin = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:4000';
+  environment['TAU_API_URL'] = apiOrigin;
+  environment['TAU_WEBSOCKET_URL'] = `ws://${new URL(apiOrigin).host}`;
   environment['TAU_FRONTEND_URL'] = testBaseURL;
   environment['NODE_ENV'] = development ? 'development' : 'production';
 

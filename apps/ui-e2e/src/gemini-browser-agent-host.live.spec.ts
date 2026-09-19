@@ -3,7 +3,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import type { UsageReceipt } from '#support/live-chat-turn.js';
+import type { UsageReceipt } from '#support/usage-receipt.js';
 import {
   billingMounted,
   expandActivities,
@@ -100,25 +100,31 @@ const expectTerminalVertexOperations = async (
   minimumCount: number,
 ): Promise<Awaited<ReturnType<typeof target.readTauVertexOperations>>> => {
   let operations: Awaited<ReturnType<typeof target.readTauVertexOperations>> = [];
+  let settled: Awaited<ReturnType<typeof target.readTauVertexOperations>> = [];
   await expect
     .poll(
       async () => {
         operations = await target.readTauVertexOperations(email);
-        return (
-          operations.length >= minimumCount && operations.every((operation) => operation.terminalRevision !== null)
+        settled = operations.filter(
+          (operation) =>
+            operation.customerState === 'settled' &&
+            operation.executionStatus === 'succeeded' &&
+            operation.meteringStatus === 'complete' &&
+            operation.terminalRevision !== null,
         );
+        return settled.length;
       },
       { timeout: 120_000 },
     )
-    .toBe(true);
-  for (const operation of operations) {
-    expect(operation.customerState).toBe('settled');
-    expect(operation.executionStatus).toBe('succeeded');
-    expect(operation.meteringStatus).toBe('complete');
+    .toBeGreaterThanOrEqual(minimumCount);
+  // Counted rather than required of every row, for the reason `expectSettledReceipts` gives:
+  // a turn that recovered from a provider refusal leaves a released operation behind it.
+  expect(operations.filter((operation) => operation.customerState === 'absorbed')).toEqual([]);
+  for (const operation of settled) {
     // oxlint-disable-next-line typescript/no-non-null-assertion -- A settled operation always carries its token counts.
     expect(BigInt(operation.outputTokens!)).toBeGreaterThanOrEqual(BigInt(operation.reasoningTokens ?? '0'));
   }
-  return operations;
+  return settled;
 };
 
 test('Gemini creates a cube, then adds a vertical cylinder cutout on the next user turn', async () => {
@@ -157,9 +163,10 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
 
   // Billing evidence last: both turns are already proven by the transcript, the
   // project files and the revision graph, so a receipt assertion failing here
-  // names the metering rather than the provider wire. Each turn bills at least
-  // its first model call and its post-tool continuation. A self-hosted API
-  // mounts no billing, so there the evidence above is the whole proof.
+  // names the metering rather than the provider wire. One receipt per agent-loop
+  // iteration, so a two-turn run of this prompt measured 18; the floor is 6,
+  // low enough that a legitimately shorter tool loop still passes. A self-hosted
+  // API mounts no billing, so there the evidence above is the whole proof.
   if (!(await billingMounted())) {
     await target.writeArtifact(
       'gemini-browser-agent-host-live-evidence.json',
@@ -167,11 +174,11 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
     );
     return;
   }
-  const usage = await expectSettledReceipts(isGeminiReceipt, 4);
+  const usage = await expectSettledReceipts(isGeminiReceipt, 6);
   for (const receipt of usage) {
     expect(receipt.model.providerId).toBe('vertexai');
   }
-  const operations = await expectTerminalVertexOperations(email, 4);
+  const operations = await expectTerminalVertexOperations(email, 6);
   await target.writeArtifact(
     'gemini-browser-agent-host-live-evidence.json',
     `${JSON.stringify({ modelId, usage, operations }, null, 2)}\n`,

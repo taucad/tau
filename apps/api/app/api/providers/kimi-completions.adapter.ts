@@ -306,7 +306,7 @@ export class TauChatKimiCompletions extends ChatOpenAICompletions {
     )) as KimiCompletion;
     const usage = normalizeKimiUsage(response.usage);
     const generations: ChatGeneration[] = response.choices.map((choice) => {
-      const message = convertKimiMessage(choice.message as KimiResponseMessage, response, {
+      const message = convertKimiMessage(choice.message, response, {
         usage,
         modelProvider: this.modelProvider,
       });

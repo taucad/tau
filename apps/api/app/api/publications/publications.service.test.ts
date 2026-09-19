@@ -373,7 +373,6 @@ const testManifestDocument = {
   version: 1,
   projectId: 'proj_x',
   entryPath: 'main.ts',
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- file-path keys can't be camelCase
   files: { 'main.ts': `sha256:${testManifestSha}` },
   kernels: [],
   runtime: '@taucad/runtime@x',
@@ -552,7 +551,7 @@ describe('publication tree rules', () => {
     const files = await readPublishedTree(
       {
         databaseService: {} as unknown as PublicationsServiceDeps[0],
-        storage: storage,
+        storage,
         git: realGit,
         resolveLfsObject: lfsResolver(storage),
       },
@@ -2525,12 +2524,10 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
   it('should emit authenticated proxy URLs with encoded paths for private publication files', async () => {
     const { service, storage } = createViewerService({
       row: baseRow,
-      /* eslint-disable @typescript-eslint/naming-convention -- file-path keys can't be camelCase */
       manifestFiles: {
         'main.ts': `sha256:${testManifestSha}`,
         'src/deep file.ts': `sha256:${'b'.repeat(64)}`,
       },
-      /* eslint-enable @typescript-eslint/naming-convention -- end file-path window */
     });
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_owner' });

@@ -1,5 +1,11 @@
+import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
 import { createSseDecoder } from '#api/llm/llm-gateway.stream.js';
 import type { SseEvent } from '#api/llm/llm-gateway.stream.js';
+import {
+  classifyUpstreamRefusal,
+  cloudUpstreamRefusalMessage,
+  maximumRefusalMessageCharacters,
+} from '#api/llm/upstream-refusal.js';
 import {
   cloudProviderAccountMessage,
   providerAccountMessage,
@@ -19,6 +25,7 @@ const lineFeed = 10;
  * gateway's memory profile. */
 const maximumFrameBytes = 256 * 1024;
 const encoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 const errorNeedle = encoder.encode('error');
 
 /** Whether `needle` occurs in `haystack`: the cheap gate that keeps healthy frames unparsed. */
@@ -43,22 +50,76 @@ const concat = (head: Uint8Array<ArrayBuffer>, tail: Uint8Array<ArrayBuffer>): U
   return joined;
 };
 
-/** The Tau-coded frame that replaces a recognised supplier refusal on the wire. */
-export const providerAccountExhaustedFrame = (input: {
+/**
+ * The Tau-coded frame that replaces a classified provider failure on the wire.
+ * One envelope for every code, so a client that switches on `error.code` needs no
+ * new parsing when a new failure becomes codable.
+ *
+ * @param input - The gateway code its clients switch on, the message the account
+ * owner is allowed to read, and the structured fields the code carries.
+ * @returns The complete SSE frame, blank line included, so both the API decoder
+ * and the transport see one finished event.
+ */
+export const gatewayErrorFrame = (input: {
+  readonly code: LlmGatewayErrorType;
   readonly message: string;
   readonly details: ProviderAccountRefusalDetails;
 }): string =>
   `event: error\ndata: ${JSON.stringify({
     type: 'error',
-    code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+    code: input.code,
     message: input.message,
     error: {
       type: 'tau_gateway',
-      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      code: input.code,
       message: input.message,
       details: input.details,
     },
   })}\n\n`;
+
+/**
+ * Vertex wraps its trailing refusal in a one-element array; every recognizer and
+ * the failure log read the object inside it.
+ *
+ * @param body - A parsed provider body.
+ * @returns The single element of a one-element array, or the body unchanged.
+ */
+const unwrapProviderBody = (body: unknown): unknown =>
+  Array.isArray(body) && body.length === 1 ? (body[0] as unknown) : body;
+
+/**
+ * The `error` member of a provider body.
+ *
+ * @param body - A parsed provider body, already unwrapped.
+ * @returns The error object, or undefined when the body carries none.
+ */
+const providerErrorRecord = (body: unknown): Record<string, unknown> | undefined => {
+  if (body === null || typeof body !== 'object') {
+    return undefined;
+  }
+  const { error } = body as { error?: unknown };
+  return error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
+};
+
+/**
+ * The HTTP status a provider error object names, when it names one as a number.
+ * A provider whose `code` is symbolic (`rate_limit_exceeded`) names no status
+ * here and keeps its frame on the raw-forward path.
+ *
+ * @param error - A provider error object.
+ * @returns The status, or undefined when the error does not carry one.
+ */
+const providerErrorStatus = (error: Record<string, unknown>): number | undefined => {
+  const { code } = error;
+  if (typeof code === 'number') {
+    return Number.isInteger(code) ? code : undefined;
+  }
+  if (typeof code !== 'string' || code.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(code);
+  return Number.isInteger(parsed) ? parsed : undefined;
+};
 
 /**
  * End index (exclusive) of the first complete SSE event in `buffer`, or -1 when
@@ -118,9 +179,11 @@ const terminalFailureOf = (data: unknown): ProviderTerminalFailure => {
   const record = (data === null || typeof data !== 'object' ? {} : data) as Record<string, unknown>;
   const nested = record['error'];
   const source = nested !== null && typeof nested === 'object' ? (nested as Record<string, unknown>) : record;
+  const { code } = source;
   return {
     ...(typeof source['type'] === 'string' ? { type: source['type'] } : {}),
-    ...(typeof source['code'] === 'string' ? { code: source['code'] } : {}),
+    // Vertex names its status as a number; the log reads a code either way.
+    ...(typeof code === 'string' || typeof code === 'number' ? { code: String(code) } : {}),
     ...(typeof source['message'] === 'string' ? { message: source['message'] } : {}),
   };
 };
@@ -196,11 +259,48 @@ export const createProviderAccountFrameFilter = (input: {
     rewritten = true;
     input.onRefusal?.(refusal);
     return encoder.encode(
-      providerAccountExhaustedFrame({
+      gatewayErrorFrame({
+        code: 'PROVIDER_ACCOUNT_EXHAUSTED',
         message: providerAccountMessage(input.accountOwner, refusal),
         details: {
           providerId: input.providerId,
           ...(refusal.providerCode === undefined ? {} : { providerCode: refusal.providerCode }),
+          accountOwner: input.accountOwner,
+        },
+      }),
+    );
+  };
+
+  /**
+   * The Tau-coded frame for a provider failure the account matchers do not claim,
+   * mapped through the same status table the pre-stream legs use so the two cannot
+   * drift. Undefined when the body names no status, which keeps the raw forward.
+   */
+  const codedByStatus = (body: unknown): Uint8Array<ArrayBuffer> | undefined => {
+    const error = providerErrorRecord(body);
+    const status = error === undefined ? undefined : providerErrorStatus(error);
+    if (error === undefined || status === undefined) {
+      return undefined;
+    }
+    const { type } = classifyUpstreamRefusal({ status, accountOwner: input.accountOwner });
+    const { status: providerCode, message } = error;
+    /* The operator owns the key, so the supplier's own reason stays in the message,
+     * clamped the way the pre-stream leg clamps it because the chat persists it. On
+     * Cloud the key is Tau's and the customer reads the shared sentence instead.
+     * Either way the raw sentence still reaches the server log through `report`. */
+    const supplierSentence =
+      typeof message === 'string' && message !== '' ? message.slice(0, maximumRefusalMessageCharacters) : undefined;
+    rewritten = true;
+    return encoder.encode(
+      gatewayErrorFrame({
+        code: type,
+        message:
+          input.accountOwner === 'tau' || supplierSentence === undefined
+            ? cloudUpstreamRefusalMessage({ type, status })
+            : supplierSentence,
+        details: {
+          providerId: input.providerId,
+          ...(typeof providerCode === 'string' ? { providerCode } : {}),
           accountOwner: input.accountOwner,
         },
       }),
@@ -219,6 +319,46 @@ export const createProviderAccountFrameFilter = (input: {
     input.onTerminalFailure?.(terminalFailureOf(data));
   };
 
+  /**
+   * Codes one provider error body — the account matchers first, then the status
+   * table — and records the failure when it codes one. Undefined leaves the
+   * frame on the raw-forward path.
+   */
+  const codedProviderFailure = (raw: unknown): Uint8Array<ArrayBuffer> | undefined => {
+    const body = unwrapProviderBody(raw);
+    // An account refusal has its own observer; every other coded failure is
+    // reported here, so one failure never logs twice.
+    const refusal = recognizeProviderAccountRefusal({ providerId: input.providerId, body });
+    if (refusal) {
+      return coded(refusal);
+    }
+    const replacement = codedByStatus(body);
+    if (replacement !== undefined) {
+      report(body);
+    }
+    return replacement;
+  };
+
+  /**
+   * Vertex ends a quota-exhausted stream by abandoning SSE framing altogether: it
+   * appends a bare, pretty-printed JSON array carrying a 429 after the last
+   * well-formed chunk and closes cleanly. No line in it is a `data:` field, so
+   * every decoder in the chain discards it and the turn dies as `Stream ended
+   * without finish_reason` with the real cause erased (Finding 3).
+   *
+   * Bytes that are not such an error object — including a tail the stream cut
+   * before it became valid JSON — parse as nothing and keep today's raw forward.
+   */
+  const codedTrailingJson = (frame: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> | undefined => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(textDecoder.decode(frame)) as unknown;
+    } catch {
+      return undefined;
+    }
+    return codedProviderFailure(parsed);
+  };
+
   /** The replacement bytes for one complete frame, or undefined to forward it unchanged. */
   const rewrite = (frame: Uint8Array<ArrayBuffer>, final = false): Uint8Array<ArrayBuffer> | undefined => {
     /* Only a frame that can name an error is worth parsing, and only one the
@@ -229,21 +369,25 @@ export const createProviderAccountFrameFilter = (input: {
     }
     const event = decode(frame, final);
     if (event === undefined) {
-      return undefined;
+      return codedTrailingJson(frame);
     }
     if (isErrorEvent(event)) {
       const refusal = recognizeProviderAccountRefusal({ providerId: input.providerId, body: event.data });
       if (refusal) {
         return coded(refusal);
       }
-      // Forwarded unchanged, but no longer unrecorded: the relay's only sight
+      // Coded or forwarded, but no longer unrecorded: the relay's only sight
       // of why the turn ended (R8).
       report(event.data);
-      return undefined;
+      return codedByStatus(event.data);
     }
     const failed = failedResponseError(event.data);
     if (!failed) {
-      return undefined;
+      /* A provider can also refuse in-band, as a plain chunk carrying an `error`
+       * object and none of the markers above; Vertex does. Forwarded, its status
+       * never reached the client, so a mid-stream 429 arrived as a provider
+       * outage with no rate-limit card (F3). */
+      return codedProviderFailure(event.data);
     }
     /* A refusal that reaches the wire only as `response.failed` (no `error`
      * event ahead of it) is coded here, once, ahead of the frame itself. */

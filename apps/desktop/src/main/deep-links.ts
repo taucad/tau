@@ -86,7 +86,9 @@ const importRoute = (segments: readonly string[]): DeepLink | undefined => {
   ) {
     return undefined;
   }
-  return { kind: 'import', route: `/i/${repository}` };
+  /* `/i/*` is a server redirect on the web and is not in the desktop SPA;
+   * `/import/*` is the page it redirects to, and the one the SPA serves. */
+  return { kind: 'import', route: `/import/${repository}` };
 };
 
 const authCallback = (segments: readonly string[], parameters: URLSearchParams): DeepLink | undefined => {

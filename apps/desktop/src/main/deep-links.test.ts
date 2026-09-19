@@ -34,11 +34,11 @@ const admitted: ReadonlyArray<readonly [string, string, DeepLink]> = [
     'tau://s/direct#v=2&p=pass%2Bword',
     { kind: 'share', route: '/s/direct#v=2&p=pass%2Bword' },
   ],
-  ['a single-segment import', 'tau://i/tau-examples', { kind: 'import', route: '/i/tau-examples' }],
+  ['a single-segment import', 'tau://i/tau-examples', { kind: 'import', route: '/import/tau-examples' }],
   [
     'a multi-segment import repository',
     'tau://i/github.com/taucad/tau-examples',
-    { kind: 'import', route: '/i/github.com/taucad/tau-examples' },
+    { kind: 'import', route: '/import/github.com/taucad/tau-examples' },
   ],
   [
     'a sign-in callback',
@@ -48,8 +48,8 @@ const admitted: ReadonlyArray<readonly [string, string, DeepLink]> = [
   /* The WHATWG parser resolves dot segments before this module sees a path, so
    * these are not traversals to refuse — they are the routes they normalise to.
    * The percent-encoded rows below prove nothing sneaks past that resolution. */
-  ['a dot segment the parser resolves away', 'tau://i/./taucad', { kind: 'import', route: '/i/taucad' }],
-  ['a dot-dot segment the parser resolves away', 'tau://i/taucad/../etc', { kind: 'import', route: '/i/etc' }],
+  ['a dot segment the parser resolves away', 'tau://i/./taucad', { kind: 'import', route: '/import/taucad' }],
+  ['a dot-dot segment the parser resolves away', 'tau://i/taucad/../etc', { kind: 'import', route: '/import/etc' }],
   ['an empty fragment marker', 'tau://s/direct#', { kind: 'share', route: '/s/direct' }],
 ];
 

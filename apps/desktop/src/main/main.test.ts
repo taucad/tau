@@ -612,7 +612,7 @@ describe('desktop main deep links', () => {
       listener('open-url')({ preventDefault: vi.fn() }, 'tau://i/github.com/taucad/tau-examples');
 
       await vi.waitFor(() => {
-        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/i/github.com/taucad/tau-examples');
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/import/github.com/taucad/tau-examples');
       });
     },
     bootMilliseconds,

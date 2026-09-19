@@ -5,6 +5,8 @@ ignorecase: true
 nonword: true
 tokens:
   - 'docs/research/'
+  - 'docs/handbooks/'
+  - 'docs/incidents/'
   - '/Users/[\w./-]+'
   - '\bblueprints?\b'
   - '\b(the|this) audits?\b'

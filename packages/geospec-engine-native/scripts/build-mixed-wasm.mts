@@ -7,7 +7,7 @@ import process from 'node:process';
 
 type Input = { path: string; sha256: string };
 type Closure = {
-  schema: 'geospec-mixed-build-inputs-v1';
+  schema: string;
   sourceRoot: string;
   rustc: string;
   cargo: string;
@@ -18,24 +18,29 @@ type Closure = {
   occtPrefix: string;
   libraries: string[];
   inputs: Input[];
+  linkOptimization?: string;
 };
 
 const root = resolve(import.meta.dirname, '../../..');
 const cache = resolve(
-  process.env['GEOSPEC_MIXED_CACHE'] ??
+  process.env.GEOSPEC_MIXED_CACHE ??
     resolve(root, 'node_modules/.cache/geospec-engine-native/matcher-full-mixed-build'),
 );
-const digest = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
 
 const main = (): void => {
-  const manifestPath = process.env['GEOSPEC_MIXED_INPUTS'];
+  const manifestPath = process.env.GEOSPEC_MIXED_INPUTS;
   if (!manifestPath) {
     throw new Error('Set GEOSPEC_MIXED_INPUTS to a verified geospec-mixed-build-inputs-v1 JSON closure.');
   }
   const manifestBytes = readFileSync(manifestPath);
   const closure = JSON.parse(manifestBytes.toString()) as Closure;
+  const linkOptimization = closure.linkOptimization ?? 'O0';
+  if (linkOptimization !== 'O0' && linkOptimization !== 'O3') {
+    throw new Error('Mixed link optimization must be O0 or O3.');
+  }
   const packageRoot = resolve(closure.sourceRoot, 'packages/geospec-engine-native');
-  const output = process.env['GEOSPEC_MIXED_OUTPUT'] ?? resolve(packageRoot, 'bindings/emscripten/generated');
+  const output = process.env.GEOSPEC_MIXED_OUTPUT ?? resolve(packageRoot, 'bindings/emscripten/generated');
   if (closure.schema !== 'geospec-mixed-build-inputs-v1' || closure.libraries.length === 0) {
     throw new Error('Invalid mixed build closure.');
   }
@@ -52,6 +57,7 @@ const main = (): void => {
   mkdirSync(output, { recursive: true });
   const runDirectory = resolve(cache, `attempt-${Date.now()}`);
   mkdirSync(runDirectory);
+  /* eslint-disable @typescript-eslint/naming-convention -- Exact Rust, Cargo and cc-rs environment keys. */
   const environment = {
     ...process.env,
     ...closure.environment,
@@ -64,7 +70,8 @@ const main = (): void => {
     CXXFLAGS_wasm32_unknown_emscripten:
       '-fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
   };
-  const commands: { executable: string; args: string[]; status: number | null }[] = [];
+  /* eslint-enable @typescript-eslint/naming-convention -- Resume normal identifier checks after external keys. */
+  const commands: Array<{ executable: string; args: string[]; status: ReturnType<typeof spawnSync>['status'] }> = [];
   const run = (name: string, executable: string, args: string[]): string => {
     const result = spawnSync(executable, args, {
       cwd: root,
@@ -72,20 +79,25 @@ const main = (): void => {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 ** 2,
     });
-    writeFileSync(resolve(runDirectory, `${name}.stdout`), result.stdout ?? '');
-    writeFileSync(resolve(runDirectory, `${name}.stderr`), result.stderr ?? String(result.error ?? ''));
+    writeFileSync(resolve(runDirectory, `${name}.stdout`), result.stdout || '');
+    writeFileSync(resolve(runDirectory, `${name}.stderr`), result.stderr || String(result.error ?? ''));
     commands.push({ executable, args, status: result.status });
     writeFileSync(resolve(runDirectory, 'commands.json'), `${JSON.stringify(commands, null, 2)}\n`);
-    if (result.status !== 0) throw new Error(`${name} failed: ${result.stderr?.slice(-3000) ?? result.error}`);
+    if (result.status !== 0) {
+      throw new Error(`${name} failed: ${(result.stderr || '').slice(-3000) || result.error}`);
+    }
     return result.stdout;
   };
   const rustVersion = run('rust-version', closure.rustc, ['-vV']);
-  if (!rustVersion.includes('c656540d6467dee1381f0cbd882412d6bd1cd5ae'))
+  if (!rustVersion.includes('c656540d6467dee1381f0cbd882412d6bd1cd5ae')) {
     throw new Error('Wrong selected Rust nightly.');
+  }
   const emVersion = run('emscripten-version', closure.emxx, ['--version']);
-  if (!emVersion.includes('6.0.5')) throw new Error('Wrong selected Emscripten version.');
+  if (!emVersion.includes('6.0.5')) {
+    throw new Error('Wrong selected Emscripten version.');
+  }
   const binding = readFileSync(resolve(packageRoot, 'bindings/emscripten/src/lib.rs'));
-  const exports = [...binding.toString().matchAll(/pub extern "C" fn (geospec_engine_native_[a-z_]+)/g)].map(
+  const exports = [...binding.toString().matchAll(/pub extern "C" fn (geospec_engine_native_[_a-z]+)/g)].map(
     (match) => `_${match[1]}`,
   );
   exports.push('_malloc', '_free');
@@ -105,7 +117,7 @@ const main = (): void => {
   const staticlib = resolve(target, 'wasm32-unknown-emscripten/release/libgeospec_engine_native_emscripten.a');
   const modulePath = resolve(output, 'geospec_engine_native.mjs');
   run('link', closure.emxx, [
-    '-O0',
+    `-${linkOptimization}`,
     '-fexceptions',
     '-frtti',
     '--no-entry',
@@ -143,7 +155,7 @@ const main = (): void => {
         bindingSha256: digest(binding),
         rustVersion,
         emVersion,
-        profile: 'emscripten-6.0.5-js-exceptions-sjlj-st-rust-c656540-panic-abort-link-O0',
+        profile: `emscripten-6.0.5-js-exceptions-sjlj-st-rust-c656540-panic-abort-link-${linkOptimization}`,
         artifacts,
         qualification: 'Current-source compile/link only; runtime and target parity require independent checks.',
       },

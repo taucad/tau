@@ -10,6 +10,7 @@
     "paths": {
       "#*": ["./src/*"]
     },
+    "noEmit": true,
     "allowImportingTsExtensions": true,
     "allowJs": true
   },
@@ -17,6 +18,7 @@
     "vitest.config.ts",
     "vitest.setup.ts",
     "tsdown.config.ts",
+    "scripts/build-mixed-wasm.mts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
     "src/**/*.test-d.ts",

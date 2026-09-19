@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
+import type { GeoSpecRunnerResult, GeoSpecRunnerRunOptions } from 'geospec/runner/worker';
 
 import { hasGeoSpecSelectionFilters, runGeoSpecTests } from '#geospec/run-tests.js';
 
@@ -9,33 +10,33 @@ const discoveryOver = (tree: Record<string, readonly string[]>): GeoSpecDiscover
   stat: async (path: string) => ({ kind: path in tree ? 'directory' : 'file' }),
 });
 
+/** The adapter takes `Pick<GeoSpecRunner, 'run'>`, so the fake implements exactly that slice. */
 const passingRunner = () => ({
-  run: vi.fn(async ({ files }: { files: readonly string[] }) => ({
-    success: true,
-    passed: 1,
-    failed: 0,
-    selectedTests: 1,
-    files: files.map(
-      (file) =>
-        ({
-          file,
-          result: {
-            success: true,
-            issues: [],
-            tests: [{ suite: ['cube'], name: 'is watertight', status: 'passed', assertions: [], diagnostics: [] }],
-          },
-        }) as const,
-    ),
-  })),
+  run: vi.fn(
+    async ({ files }: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> => ({
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: files.map((file) => ({
+        file,
+        result: {
+          success: true,
+          passed: true,
+          tests: [{ suite: ['cube'], name: 'is watertight', status: 'passed', assertions: [], diagnostics: [] }],
+          bundle: { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] },
+        },
+      })),
+    }),
+  ),
 });
 
 describe('runGeoSpecTests', () => {
   it('discovers project-relative files and projects the runner verdict', async () => {
     const runner = passingRunner();
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the `run` slice this adapter uses.
     const output = await runGeoSpecTests({
       discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
-      runner: runner as never,
+      runner,
       args: {},
     });
 
@@ -46,8 +47,7 @@ describe('runGeoSpecTests', () => {
 
   it('never runs, and names the missing-file failure, when nothing is discovered', async () => {
     const runner = passingRunner();
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the `run` slice this adapter uses.
-    const output = await runGeoSpecTests({ discovery: discoveryOver({ '': [] }), runner: runner as never, args: {} });
+    const output = await runGeoSpecTests({ discovery: discoveryOver({ '': [] }), runner, args: {} });
 
     expect(runner.run).not.toHaveBeenCalled();
     expect(output.failures[0]).toMatchObject({ id: 'missing_geospec_file' });
@@ -57,8 +57,7 @@ describe('runGeoSpecTests', () => {
     const runner = passingRunner();
     const output = await runGeoSpecTests({
       discovery: discoveryOver({ '': [] }),
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the `run` slice this adapter uses.
-      runner: runner as never,
+      runner,
       args: { include: ['parts/**/*.geospec.ts'] },
     });
 
@@ -69,8 +68,7 @@ describe('runGeoSpecTests', () => {
     const runner = passingRunner();
     await runGeoSpecTests({
       discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the `run` slice this adapter uses.
-      runner: runner as never,
+      runner,
       args: { testNamePattern: 'watertight', testTimeout: 5000 },
     });
 

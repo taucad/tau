@@ -1,247 +1,203 @@
 use std::error::Error;
 
-use geospec_engine_native_core::{canonicalize, process_request, ProtocolError};
+use geospec_engine_native_core::{canonicalize, process_request, Engine, ProtocolError};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
-const CONTENT_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
+const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
 
-const INITIALIZE_REQUEST: &[u8] = br#"{"method":"initialize","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1"}"#;
-const CANONICAL_INITIALIZE_REQUEST: &[u8] = br#"{"canonicalProfile":"geospec-jcs-v1","method":"initialize","protocolVersion":3,"registryVersion":4,"requestId":"r1"}"#;
-const HISTORICAL_INITIALIZE_RESPONSE: &[u8] = br#"{"requestId":"r1","result":{"canonicalProfile":"geospec-jcs-v1","capabilities":[{"name":"toHaveBoundingBox","registryVersion":4,"scope":"mesh-buffer-whole-subject"}],"protocolVersion":3,"qualification":"experimental","registryVersion":4}}"#;
-
-const POSITIVE_PLAN: &[u8] = br#"{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}"#;
-const CANONICAL_POSITIVE_PLAN: &[u8] = br#"{"claims":[{"capability":"analyzeMesh","claimId":"c1","payload":null,"polarity":"positive","subjectSlots":["s1"],"workUnitBudget":100}],"subjects":[{"contentHash":"0000000000000000000000000000000000000000000000000000000000000000","slot":"s1"}]}"#;
-const POSITIVE_REQUEST: &[u8] = br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#;
-const POSITIVE_RESPONSE: &[u8] = br#"{"requestId":"r1","result":{"results":[{"claimId":"c1","diagnostics":[{"code":"GEOSPEC_CAPABILITY_UNAVAILABLE","details":{"capability":"analyzeMesh"},"message":"Capability is not implemented in this engine slice.","severity":"error"}],"status":"refused"}]}}"#;
-const NEGATIVE_REQUEST: &[u8] = br#"{"method":"submitClaims","requestId":"r2","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c2","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"negative","workUnitBudget":100}]}}"#;
-const NEGATIVE_RESPONSE: &[u8] = br#"{"requestId":"r2","result":{"results":[{"claimId":"c2","diagnostics":[{"code":"GEOSPEC_CAPABILITY_UNAVAILABLE","details":{"capability":"analyzeMesh"},"message":"Capability is not implemented in this engine slice.","severity":"error"}],"status":"refused"}]}}"#;
-
-fn assert_canonical(input: &[u8], expected: &[u8]) {
-    let actual = canonicalize(input).expect("input should canonicalize");
-    assert_eq!(actual, expected);
-    assert_eq!(
-        canonicalize(&actual).expect("canonical bytes should round-trip"),
-        expected
-    );
+fn current() -> Value {
+    assert_eq!(format!("{:x}", Sha256::digest(CURRENT)), CURRENT_SHA256);
+    serde_json::from_str(CURRENT).expect("explicit current-profile bindings")
 }
 
-fn assert_response(input: &[u8], expected: &[u8]) -> Value {
-    let actual = process_request(input).expect("request should produce a response");
-    assert_eq!(actual, expected);
-    assert_eq!(
-        canonicalize(&actual).expect("response should be canonical"),
-        actual
-    );
-    serde_json::from_slice(&actual).expect("response should decode as normal JSON")
-}
-
-fn assert_typed_error(
-    operation: fn(&[u8]) -> Result<Vec<u8>, ProtocolError>,
-    input: &[u8],
-    expected_code: &str,
-) {
-    let first = operation(input).expect_err("input should be rejected");
-    let second = operation(input).expect_err("repeated input should be rejected");
-    let _: &dyn Error = &first;
-    assert_eq!(first.code(), expected_code);
-    assert_eq!(first.code(), second.code());
-    assert!(!first.to_string().is_empty());
-}
-
-#[test]
-fn canonicalizes_the_frozen_gne_canon_01_vectors() {
-    assert_canonical(
-        br#"{"z":-0,"sub":5e-324,"boundary":1e-7,"safe":9007199254740991}"#,
-        br#"{"boundary":1e-7,"safe":9007199254740991,"sub":5e-324,"z":0}"#,
-    );
-    assert_canonical(
-        "{\"￰\":2,\"𐀀\":1,\"😀\":\"ok\"}".as_bytes(),
-        "{\"𐀀\":1,\"😀\":\"ok\",\"￰\":2}".as_bytes(),
-    );
-    assert_canonical(
-        br#"{"measurementSubnormal":5e-324,"measurementIntegral":1e20,"measurementExponent":1e21}"#,
-        br#"{"measurementExponent":1e+21,"measurementIntegral":100000000000000000000,"measurementSubnormal":5e-324}"#,
-    );
-}
-
-#[test]
-fn rejects_duplicate_keys_malformed_utf8_and_unpaired_surrogates() {
-    assert_typed_error(canonicalize, br#"{"a":1,"a":2}"#, "duplicate-key");
-    assert_typed_error(
-        canonicalize,
-        &[0x7b, 0x22, 0x73, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d],
-        "invalid-utf8",
-    );
-    assert_typed_error(canonicalize, br#"{"s":"\ud800"}"#, "invalid-json");
-    assert_typed_error(canonicalize, br#"{"n":NaN}"#, "invalid-json");
-    assert_typed_error(canonicalize, br#"{"n":1e400}"#, "invalid-number");
-}
-
-#[test]
-fn enforces_the_frozen_container_depth_rule() {
-    let depth_64 = format!("{}0{}", "[".repeat(64), "]".repeat(64));
-    let depth_65 = format!("{}0{}", "[".repeat(65), "]".repeat(65));
-
-    assert_canonical(depth_64.as_bytes(), depth_64.as_bytes());
-    assert_typed_error(canonicalize, depth_65.as_bytes(), "limit-exceeded");
-}
-
-#[test]
-fn initializes_with_exact_canonical_request_and_response_bytes() {
-    assert_canonical(INITIALIZE_REQUEST, CANONICAL_INITIALIZE_REQUEST);
-    // CONFIG-01 is the only reviewed discovery amendment in this source control.
-    let amendment: Value =
-        serde_json::from_str(include_str!("fixtures/initialize-config-01.json")).unwrap();
-    let expected = amendment["expectedUtf8"].as_str().unwrap();
-    let mut previous: Value = serde_json::from_str(expected).unwrap();
-    previous["result"]
-        .as_object_mut()
-        .unwrap()
-        .remove("configuration");
-    assert_eq!(
-        previous,
-        serde_json::from_slice::<Value>(HISTORICAL_INITIALIZE_RESPONSE).unwrap()
-    );
-    let response = assert_response(INITIALIZE_REQUEST, expected.as_bytes());
-
-    assert_eq!(response["requestId"], "r1");
-    assert_eq!(response["result"]["protocolVersion"], 3);
-    assert_eq!(response["result"]["registryVersion"], 4);
-    assert_eq!(response["result"]["canonicalProfile"], "geospec-jcs-v1");
-    assert_eq!(response["result"]["qualification"], "experimental");
-    assert_eq!(
-        response["result"]["capabilities"].as_array().map(Vec::len),
-        Some(1)
-    );
-}
-
-#[test]
-fn refuses_positive_and_negative_analyze_mesh_claims_with_exact_diagnostics() {
-    assert_eq!(CONTENT_HASH.len(), 64);
-    assert_canonical(POSITIVE_PLAN, CANONICAL_POSITIVE_PLAN);
-
-    for (request, expected, request_id, claim_id) in [
-        (POSITIVE_REQUEST, POSITIVE_RESPONSE, "r1", "c1"),
-        (NEGATIVE_REQUEST, NEGATIVE_RESPONSE, "r2", "c2"),
-    ] {
-        let response = assert_response(request, expected);
-        let result = &response["result"]["results"][0];
-        assert_eq!(response["requestId"], request_id);
-        assert_eq!(result["claimId"], claim_id);
-        assert_eq!(result["status"], "refused");
-        assert_eq!(
-            result["diagnostics"][0]["code"],
-            "GEOSPEC_CAPABILITY_UNAVAILABLE"
-        );
-        assert_eq!(result["diagnostics"][0]["severity"], "error");
-        assert_eq!(
-            result["diagnostics"][0]["details"]["capability"],
-            "analyzeMesh"
-        );
-    }
-}
-
-#[test]
-fn applies_the_null_payload_default_and_accepts_the_maximum_exact_budget() {
-    let omitted = br#"{"method":"submitClaims","requestId":"r3","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c3","capability":"analyzeMesh","subjectSlots":["s1"],"polarity":"positive","workUnitBudget":100}]}}"#;
-    let explicit_null = br#"{"method":"submitClaims","requestId":"r3","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c3","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#;
-    let maximum_budget = br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":9007199254740991}]}}"#;
-
-    assert_eq!(
-        process_request(omitted).expect("omitted payload should default to null"),
-        process_request(explicit_null).expect("explicit null should be accepted")
-    );
-    assert_eq!(
-        process_request(maximum_budget).expect("maximum exact budget should be valid"),
-        POSITIVE_RESPONSE
-    );
-}
-
-#[test]
-fn rejects_invalid_versions_profiles_claim_links_and_budgets() {
-    let invalid_requests: &[(&[u8], &str)] = &[
-        (
-            br#"{"method":"initialize","requestId":"r1","protocolVersion":2,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1"}"#,
-            "unsupported-version",
-        ),
-        (
-            br#"{"method":"initialize","requestId":"r1","protocolVersion":3,"registryVersion":3,"canonicalProfile":"geospec-jcs-v1"}"#,
-            "unsupported-version",
-        ),
-        (
-            br#"{"method":"initialize","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"legacy-v2-registry-v3"}"#,
-            "unsupported-version",
-        ),
-        (
-            br#"{"method":"initialize","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","extra":true}"#,
-            "invalid-request",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"unknownCapability","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#,
-            "unknown-capability",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["missing"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":[],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":{},"polarity":"positive","workUnitBudget":100}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"sideways","workUnitBudget":100}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":0}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":1.5}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":9007199254740992}]}}"#,
-            "invalid-claim",
-        ),
-        (
-            br#"{"method":"submitClaims","requestId":"r1","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100},{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#,
-            "invalid-claim",
-        ),
-    ];
-
-    for (request, code) in invalid_requests {
-        assert_typed_error(process_request, request, code);
-    }
-}
-
-#[test]
-fn preserves_distinct_claims_and_authored_result_order() {
-    let request = br#"{"method":"submitClaims","requestId":"ordered","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c2","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100},{"claimId":"c1","capability":"analyzeMesh","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#;
-    let expected = br#"{"requestId":"ordered","result":{"results":[{"claimId":"c2","diagnostics":[{"code":"GEOSPEC_CAPABILITY_UNAVAILABLE","details":{"capability":"analyzeMesh"},"message":"Capability is not implemented in this engine slice.","severity":"error"}],"status":"refused"},{"claimId":"c1","diagnostics":[{"code":"GEOSPEC_CAPABILITY_UNAVAILABLE","details":{"capability":"analyzeMesh"},"message":"Capability is not implemented in this engine slice.","severity":"error"}],"status":"refused"}]}}"#;
-
-    let response = assert_response(request, expected);
-    let results = response["result"]["results"]
+fn binding<'a>(current: &'a Value, id: &str) -> &'a Value {
+    current["records"]
         .as_array()
-        .expect("results should be an array");
-    assert_eq!(results.len(), 2);
-    assert_eq!(results[0]["claimId"], "c2");
-    assert_eq!(results[1]["claimId"], "c1");
+        .expect("record bindings")
+        .iter()
+        .find(|record| record["id"] == id)
+        .unwrap_or_else(|| panic!("missing explicit binding {id}"))
+}
+
+fn input(binding: &Value) -> Vec<u8> {
+    if let Some(value) = binding["effectiveInputUtf8"].as_str() {
+        value.as_bytes().to_vec()
+    } else {
+        let hex = binding["effectiveInputHex"].as_str().expect("bound input");
+        (0..hex.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+            .collect()
+    }
+}
+
+fn assert_exact(
+    actual: Result<Vec<u8>, ProtocolError>,
+    expected: &Value,
+    name: &str,
+) -> Option<Value> {
+    if let Some(bytes) = expected["expectedUtf8"].as_str() {
+        let actual = actual.unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(actual, bytes.as_bytes(), "{name}: canonical bytes");
+        assert_eq!(canonicalize(&actual).unwrap(), actual, "{name}: canonical");
+        Some(serde_json::from_slice(&actual).unwrap())
+    } else {
+        let first = actual.expect_err(name);
+        let _: &dyn Error = &first;
+        assert_eq!(first.code(), expected["expectedCode"].as_str().unwrap());
+        if let Some(message) = expected["expectedMessage"].as_str() {
+            assert_eq!(first.to_string(), message, "{name}: exact message");
+        } else {
+            assert!(!first.to_string().is_empty(), "{name}: diagnostic message");
+        }
+        None
+    }
+}
+
+fn engine_with_admitted_mesh(current: &Value) -> Engine {
+    let manifest: Value = serde_json::from_str(include_str!("fixtures/mesh-entry.json")).unwrap();
+    let mesh_binding = &current["meshes"][0];
+    let fixture = manifest["fixtures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|fixture| fixture["hash"] == mesh_binding["meshContentHash"])
+        .expect("bound mesh fixture");
+    let hex = fixture["hex"].as_str().unwrap();
+    let mesh: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+        .collect();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&mesh)),
+        mesh_binding["meshContentHash"]
+    );
+    let request = mesh_binding["effectiveRequestUtf8"].as_str().unwrap();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(request)),
+        mesh_binding["effectiveRequestSha256"]
+    );
+    let mut engine = Engine::new();
+    assert_exact(
+        engine.ingest_mesh(request.as_bytes(), &mesh),
+        mesh_binding,
+        "current mesh admission",
+    );
+    engine
 }
 
 #[test]
-fn refuses_other_recognized_execution_capabilities_without_advertising_them() {
-    let request = br#"{"method":"submitClaims","requestId":"brep","protocolVersion":3,"registryVersion":4,"canonicalProfile":"geospec-jcs-v1","plan":{"subjects":[{"slot":"s1","contentHash":"0000000000000000000000000000000000000000000000000000000000000000"}],"claims":[{"claimId":"c1","capability":"analyzeBrep","subjectSlots":["s1"],"payload":null,"polarity":"positive","workUnitBudget":100}]}}"#;
-    let expected = br#"{"requestId":"brep","result":{"results":[{"claimId":"c1","diagnostics":[{"code":"GEOSPEC_CAPABILITY_UNAVAILABLE","details":{"capability":"analyzeBrep"},"message":"Capability is not implemented in this engine slice.","severity":"error"}],"status":"refused"}]}}"#;
+fn canonicalizes_and_rejects_the_frozen_codec_vectors_without_reserializing_inputs() {
+    let current = current();
+    for id in [
+        "a1/codec/numbers",
+        "a1/codec/utf16",
+        "a1/codec/number-thresholds",
+        "a1/codec/depth64",
+        "a1/codec/initialize",
+        "a1/codec/plan",
+    ] {
+        let bound = binding(&current, id);
+        let input = input(bound);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&input)),
+            bound["effectiveInputSha256"]
+        );
+        assert_exact(canonicalize(&input), bound, id);
+    }
+    for id in [
+        "ordinary/duplicate/canonicalize",
+        "ordinary/nonutf8/canonicalize",
+        "ordinary/surrogate/canonicalize",
+        "ordinary/nan/canonicalize",
+        "ordinary/depth65/canonicalize",
+    ] {
+        let bound = binding(&current, id);
+        assert_exact(canonicalize(&input(bound)), bound, id);
+    }
+    let overflow = br#"{"n":1e400}"#;
+    let error = canonicalize(overflow).expect_err("overflow must be rejected");
+    assert_eq!(error.code(), "invalid-number");
+}
 
-    let response = assert_response(request, expected);
-    assert_eq!(response["result"]["results"][0]["status"], "refused");
+#[test]
+fn reports_the_complete_current_initialize_contract_through_both_entrypoints() {
+    let current = current();
+    let bound = binding(&current, "a1/raw/initialize");
+    let request = input(bound);
+    let engine = Engine::new().process_request(&request);
+    let free = process_request(&request);
+    let engine = assert_exact(engine, bound, "Engine::initialize").unwrap();
+    let free = assert_exact(free, bound, "process_request::initialize").unwrap();
+    assert_eq!(engine, free);
+    assert_eq!(
+        engine["result"]["capabilities"].as_array().unwrap().len(),
+        31
+    );
+}
+
+#[test]
+fn covers_current_analyze_mesh_payload_budget_order_and_ancillary_polarity() {
+    let current = current();
+    let engine = engine_with_admitted_mesh(&current);
+    for id in [
+        "a1/raw/positive",
+        "a1/raw/maximum-budget",
+        "a1/raw/omitted",
+        "a1/raw/null",
+        "a1/raw/order",
+        "a1/raw/negative",
+    ] {
+        let bound = binding(&current, id);
+        let response = assert_exact(engine.process_request(&input(bound)), bound, id);
+        if let Some(response) = response {
+            let results = response["result"]["results"].as_array().unwrap();
+            assert!(!results.is_empty(), "{id}: complete results");
+            if id == "a1/raw/order" {
+                assert_eq!(results[0]["claimId"], "c2");
+                assert_eq!(results[1]["claimId"], "c1");
+            }
+        }
+    }
+}
+
+#[test]
+fn covers_current_brep_unavailability_after_mesh_admission() {
+    let current = current();
+    let engine = engine_with_admitted_mesh(&current);
+    let bound = binding(&current, "a1/raw/brep");
+    let response = assert_exact(engine.process_request(&input(bound)), bound, "a1/raw/brep")
+        .expect("BRep unavailability is a claim result");
+    assert_eq!(
+        response["result"]["results"][0]["diagnostics"][0]["code"],
+        "GEOSPEC_BREP_EVIDENCE_UNAVAILABLE"
+    );
+}
+
+#[test]
+fn rejects_invalid_versions_profiles_claim_links_and_budgets_exactly() {
+    let current = current();
+    for number in 1..=14 {
+        let id = format!("a1/invalid/{number}");
+        let bound = binding(&current, &id);
+        let request = input(bound);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&request)),
+            bound["effectiveInputSha256"]
+        );
+        assert_exact(process_request(&request), bound, &id);
+    }
+    let old = binding(&current, "a1/invalid/2");
+    let request = input(old);
+    assert_eq!(
+        request,
+        old["effectiveInputUtf8"].as_str().unwrap().as_bytes()
+    );
+    let error = process_request(&request).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "GeoSpec registry version 3 is incompatible with version 5."
+    );
 }

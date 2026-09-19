@@ -506,12 +506,14 @@ impl CsgConnector for ProofCsg {
                 let volume = volume(intersection);
                 Solid {
                     bounds: (volume > 0.0).then_some(intersection),
-                    mesh: (volume > 0.0)
-                        .then(|| cube(intersection))
-                        .unwrap_or(TriangleMesh {
+                    mesh: if volume > 0.0 {
+                        cube(intersection)
+                    } else {
+                        TriangleMesh {
                             positions: Vec::new(),
                             triangles: Vec::new(),
-                        }),
+                        }
+                    },
                     volume,
                 }
             }
@@ -592,13 +594,24 @@ impl CsgConnector for ProofCsg {
     }
 }
 
-fn engine() -> (
+type EngineSignals = (
     Engine,
     Rc<RefCell<Vec<u64>>>,
     Rc<Cell<u32>>,
     Rc<Cell<u32>>,
     Rc<Cell<u32>>,
-) {
+);
+
+type EngineWallSignals = (
+    Engine,
+    Rc<RefCell<Vec<u64>>>,
+    Rc<Cell<u32>>,
+    Rc<Cell<u32>>,
+    Rc<Cell<u32>>,
+    Rc<Cell<u32>>,
+);
+
+fn engine() -> EngineSignals {
     let (engine, budgets, intersections, csg_calls, tessellations, _) =
         engine_with_wall(Ok(box_domain([2.0, 3.0, 4.0])));
     (engine, budgets, intersections, csg_calls, tessellations)
@@ -606,14 +619,7 @@ fn engine() -> (
 
 fn engine_with_wall(
     continuous_wall: Result<ContinuousWallDomain, BackendError>,
-) -> (
-    Engine,
-    Rc<RefCell<Vec<u64>>>,
-    Rc<Cell<u32>>,
-    Rc<Cell<u32>>,
-    Rc<Cell<u32>>,
-    Rc<Cell<u32>>,
-) {
+) -> EngineWallSignals {
     let budgets = Rc::new(RefCell::new(Vec::new()));
     let intersections = Rc::new(Cell::new(0));
     let csg_calls = Rc::new(Cell::new(0));
@@ -648,7 +654,7 @@ fn ingest_step(engine: &mut Engine) -> (String, String) {
         "method": "ingestSubject",
         "requestId": "step-admit",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "format": "step",
         "frame": {"coordinateSystem": "z-up", "sourceUnit": "auto", "outputUnit": "mm"},
@@ -720,7 +726,7 @@ fn ingest_gltf(engine: &mut Engine) -> (String, String) {
         "method": "ingestSubject",
         "requestId": "gltf-admit",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "format": "gltf",
         "frame": {"coordinateSystem": "z-up", "sourceUnit": "mm", "outputUnit": "mm"},
@@ -752,7 +758,7 @@ fn claims(engine: &Engine, subject_hash: &str, claims: Vec<Value>) -> Value {
         "method": "submitClaims",
         "requestId": "proofs",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "plan": {
             "subjects": [{"slot": "part", "subjectHash": subject_hash}],
@@ -779,191 +785,73 @@ fn claim(id: &str, capability: &str, payload: Value, polarity: &str, budget: u64
 }
 
 #[test]
-fn interference_preserves_complete_common_evidence_and_budget_replay() {
+fn sampled_gltf_interference_and_required_pairs_refuse_before_geometry() {
     let (mut engine, _, intersections, _, _) = engine();
-    let (subject_hash, content_hash) = ingest_gltf(&mut engine);
-    let expected = json!({
-        "pairs": [{"left": "A#0", "right": "B#0"}],
-        "allowances": [{
-            "kind": "intentionalInterference",
-            "left": "A#0",
-            "right": "B#0",
-            "maxVolume": 0.5,
-            "reason": "source-authored press fit"
-        }]
-    });
-
-    let cold = claims(
-        &engine,
-        &subject_hash,
-        vec![claim(
-            "cold",
-            "toHaveNoComponentInterference",
-            json!({"kind": "componentInterference", "expected": expected}),
-            "positive",
-            87,
-        )],
-    );
-    assert_eq!(cold["result"]["results"][0]["status"], "refused");
-    assert_eq!(
-        cold["result"]["results"][0]["diagnostics"][0]["details"],
-        json!({
-            "matcher": "toHaveNoComponentInterference",
-            "budget": 87,
-            "unitsUsed": 88,
-            "unit": "work-units"
-        })
-    );
-    assert_eq!(intersections.get(), 0);
-
-    let positive = claims(
-        &engine,
-        &subject_hash,
-        vec![claim(
-            "positive",
-            "toHaveNoComponentInterference",
-            json!({"kind": "componentInterference", "expected": expected}),
-            "positive",
-            88,
-        )],
-    );
-    let result = &positive["result"]["results"][0];
-    assert_eq!(result["status"], "passed");
-    assert_eq!(result["evidence"]["profile"], "geospec-original24-v1");
-    assert_eq!(result["evidence"]["subjectContentHash"], content_hash);
-    assert_eq!(result["evidence"]["polarity"], "positive");
-    assert_eq!(result["evidence"]["positiveSatisfied"], true);
-    assert_eq!(result["evidence"]["measured"]["checkedPairs"], 1);
-    assert_eq!(
-        result["evidence"]["measured"]["overlaps"][0]["leftComponentId"],
-        0
-    );
-    assert_eq!(
-        result["evidence"]["measured"]["overlaps"][0]["rightComponentId"],
-        1
-    );
-    assert_eq!(
-        result["evidence"]["measured"]["overlaps"][0]["intersectionVolume"],
-        0.5
-    );
-    assert_eq!(
-        result["evidence"]["witnesses"]["components"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|component| (&component["id"], &component["label"]))
-            .collect::<Vec<_>>(),
-        vec![(&json!(0), &json!("A#0")), (&json!(1), &json!("B#0"))]
-    );
-    assert_eq!(
-        result["evidence"]["witnesses"]["allowances"][0]["reason"],
-        "source-authored press fit"
-    );
-    assert_eq!(result["evidence"]["normalizedExpected"]["tolerance"], 0.001);
-    assert_eq!(intersections.get(), 1);
-
-    let warm = claims(
-        &engine,
-        &subject_hash,
-        vec![claim(
-            "warm",
-            "toHaveNoComponentInterference",
-            json!({"kind": "componentInterference", "expected": expected}),
-            "positive",
-            87,
-        )],
-    );
-    assert_eq!(warm["result"]["results"][0]["status"], "refused");
-    assert_eq!(
-        warm["result"]["results"][0]["diagnostics"][0]["details"],
-        cold["result"]["results"][0]["diagnostics"][0]["details"]
-    );
-    assert_eq!(intersections.get(), 1);
-
-    let negative = claims(
-        &engine,
-        &subject_hash,
-        vec![claim(
-            "negative",
-            "toHaveNoComponentInterference",
-            json!({"kind": "componentInterference", "expected": expected}),
-            "negative",
-            88,
-        )],
-    );
-    assert_eq!(negative["result"]["results"][0]["status"], "failed");
-    assert_eq!(
-        negative["result"]["results"][0]["diagnostics"][0]["code"],
-        "GEOSPEC_NEGATED_MATCH"
-    );
-    assert_eq!(
-        negative["result"]["results"][0]["evidence"]["polarity"],
-        "negative"
-    );
-
-    let mismatch = claims(
-        &engine,
-        &subject_hash,
-        vec![claim(
-            "mismatch",
-            "toHaveNoComponentInterference",
-            json!({
-                "kind": "componentInterference",
-                "expected": {"pairs": [{"left": "A#0", "right": "B#0"}]}
-            }),
-            "positive",
-            88,
-        )],
-    );
-    let mismatch = &mismatch["result"]["results"][0];
-    assert_eq!(mismatch["status"], "failed");
-    assert_eq!(
-        mismatch["diagnostics"][0]["code"],
-        "GEOSPEC_COMPONENT_INTERFERENCE_DETECTED"
-    );
-    assert_eq!(
-        mismatch["diagnostics"][0]["details"]["overlaps"],
-        mismatch["evidence"]["witnesses"]["unexplained"]
-    );
-    assert_eq!(
-        mismatch["diagnostics"][0]["spatial"]["center"],
-        json!([0.75, 0.5, 0.5])
-    );
-
+    let (subject_hash, _) = ingest_gltf(&mut engine);
+    let unsupported = json!([{
+        "code": "GEOSPEC_EVIDENCE_UNSUPPORTED",
+        "severity": "error",
+        "message": "This selected component pair has no bounded complete-material noninterference certificate."
+    }]);
+    for polarity in ["positive", "negative"] {
+        for budget in [87, 88, 179, 180] {
+            let response = claims(
+                &engine,
+                &subject_hash,
+                vec![claim(
+                    "sampled-interference",
+                    "toHaveNoComponentInterference",
+                    json!({
+                        "kind": "componentInterference",
+                        "expected": {"pairs": [{"left": "A#0", "right": "B#0"}]}
+                    }),
+                    polarity,
+                    budget,
+                )],
+            );
+            assert_eq!(
+                response["result"]["numericProfile"],
+                "geospec-st-logical-requests-v3"
+            );
+            let result = &response["result"]["results"][0];
+            assert_eq!(result["status"], "refused");
+            assert_eq!(result["diagnostics"], unsupported);
+        }
+    }
     let required = claims(
         &engine,
         &subject_hash,
-        vec![
-            claim(
-                "required-positive",
-                "toHaveNoComponentInterference",
-                json!({
-                    "kind": "componentInterference",
-                    "expected": {"pairs": [{"left": "missing-a", "right": "missing-b"}]}
-                }),
-                "positive",
-                88,
-            ),
-            claim(
-                "required-negative",
-                "toHaveNoComponentInterference",
-                json!({
-                    "kind": "componentInterference",
-                    "expected": {"pairs": [{"left": "missing-a", "right": "missing-b"}]}
-                }),
-                "negative",
-                88,
-            ),
-        ],
+        ["positive", "negative"]
+            .into_iter()
+            .map(|polarity| {
+                claim(
+                    polarity,
+                    "toHaveNoComponentInterference",
+                    json!({
+                        "kind": "componentInterference",
+                        "expected": {"pairs": [{"left": "missing-a", "right": "missing-b"}]}
+                    }),
+                    polarity,
+                    180,
+                )
+            })
+            .collect(),
     );
-    let required = required["result"]["results"].as_array().unwrap();
-    assert_eq!(required[0]["status"], "refused");
-    assert_eq!(required[1]["status"], "refused");
-    assert_eq!(
-        required[0]["diagnostics"][0]["code"],
-        "GEOSPEC_SELECTOR_UNMATCHED"
-    );
-    assert_eq!(required[0]["diagnostics"], required[1]["diagnostics"]);
+    let expected = json!([{
+        "code": "GEOSPEC_SELECTOR_UNMATCHED",
+        "severity": "error",
+        "message": "Requested component pair at index 0 did not match two distinct components.",
+        "details": {
+            "matcher": "toHaveNoComponentInterference",
+            "pair": {"left": "missing-a", "right": "missing-b"},
+            "pairIndex": 0
+        }
+    }]);
+    for result in required["result"]["results"].as_array().unwrap() {
+        assert_eq!(result["status"], "refused");
+        assert_eq!(result["diagnostics"], expected);
+    }
+    assert_eq!(intersections.get(), 0);
 }
 
 fn wall_result(domain: ContinuousWallDomain, expected: Value) -> Value {
@@ -1146,158 +1034,71 @@ fn continuous_wall_numeric_expectations_preserve_polarity_and_tolerance_boundari
 }
 
 #[test]
-fn void_topology_preserves_complete_common_evidence_for_both_polarities() {
-    let (mut engine, _, _, _, _) = engine();
-    let (subject_hash, content_hash) = ingest_step(&mut engine);
-    let expected = json!({
-        "path": [[0, 0, -1], [0, 0, 1]],
-        "material": ["wall"],
-        "bounds": {"min": [-2, -2, -2], "max": [2, 2, 2]}
-    });
-    let response = claims(
-        &engine,
-        &subject_hash,
-        vec![
-            claim(
-                "positive",
-                "toHaveVoidContinuity",
-                json!({"kind": "voidContinuity", "expected": expected}),
-                "positive",
-                100,
-            ),
-            claim(
-                "negative",
-                "toHaveVoidContinuity",
-                json!({"kind": "voidContinuity", "expected": expected}),
-                "negative",
-                100,
-            ),
-        ],
-    );
-    let results = response["result"]["results"].as_array().unwrap();
-    let evidence = &results[0]["evidence"];
-    let proof = &evidence["measured"];
-    assert_eq!(results[0]["status"], "passed");
-    assert_eq!(evidence["subjectContentHash"], content_hash);
-    assert_eq!(proof, &evidence["witnesses"]["proof"]);
-    assert_eq!(proof["region"]["min"], json!([-2, -2, -2]));
-    assert_eq!(proof["materials"][0]["path"], "wall");
-    assert_eq!(proof["broadPhase"]["materialsStrictlyInterior"], true);
-    assert_eq!(proof["waypoints"][0]["windingNumbers"], json!([1]));
-    assert_eq!(proof["waypoints"][0]["shellMembership"], json!([1]));
-    assert!(proof.get("sectionStations").is_none());
-    assert!(proof.get("bottleneck").is_none());
-    assert_eq!(results[1]["status"], "failed");
-    assert_eq!(
-        results[1]["diagnostics"][0]["code"],
-        "GEOSPEC_NEGATED_MATCH"
-    );
-    assert_eq!(results[1]["evidence"]["polarity"], "negative");
-}
-
-#[test]
-fn void_minimum_cross_section_refuses_both_polarities_before_geometry() {
-    let (mut engine, _, _, csg_calls, tessellations) = engine();
-    let (subject_hash, _) = ingest_step(&mut engine);
-    let expected = json!({
-        "path": [[0, 0, -1], [0, 0, 1]],
-        "material": ["wall"],
-        "bounds": {"min": [-2, -2, -2], "max": [2, 2, 2]},
-        "minCrossSection": 1
-    });
-    let response = claims(
-        &engine,
-        &subject_hash,
-        vec![
-            claim(
-                "positive",
-                "toHaveVoidContinuity",
-                json!({"kind": "voidContinuity", "expected": expected}),
-                "positive",
-                100,
-            ),
-            claim(
-                "negative",
-                "toHaveVoidContinuity",
-                json!({"kind": "voidContinuity", "expected": expected}),
-                "negative",
-                100,
-            ),
-        ],
-    );
-    let results = response["result"]["results"].as_array().unwrap();
-    let expected_diagnostic = json!({
-        "code": "GEOSPEC_EVIDENCE_UNSUPPORTED",
-        "severity": "error",
-        "message": "The void profile samples cross-sections; a continuous minimum cross-section is not qualified.",
-        "suggestion": "Use a qualified continuous section proof for the declared geometry representation.",
-        "details": {
-            "matcher": "toHaveVoidContinuity",
-            "profile": "geospec-void-sampled-sections-v1",
-            "continuousMinimumQualified": false
+fn sampled_step_voids_keep_csg_and_minimum_cross_section_refusals_distinct() {
+    for min_cross_section in [None, Some(1)] {
+        let (mut engine, _, _, csg_calls, tessellations) = engine();
+        let (subject_hash, _) = ingest_step(&mut engine);
+        let path = if min_cross_section.is_some() {
+            json!([{"occurrence": "wall"}])
+        } else {
+            json!([[0, 0, -1], [0, 0, 1]])
+        };
+        let mut expected = json!({
+            "path": path,
+            "material": ["wall"],
+            "bounds": {"min": [-2, -2, -2], "max": [2, 2, 2]}
+        });
+        if let Some(value) = min_cross_section {
+            expected["minCrossSection"] = json!(value);
         }
-    });
-    assert_eq!(results[0]["status"], "refused");
-    assert_eq!(results[1]["status"], "refused");
-    assert_eq!(results[0]["diagnostics"], json!([expected_diagnostic]));
-    assert_eq!(results[0]["diagnostics"], results[1]["diagnostics"]);
-    assert_eq!(csg_calls.get(), 0);
-    assert_eq!(tessellations.get(), 0);
+        let response = claims(
+            &engine,
+            &subject_hash,
+            ["positive", "negative"]
+                .into_iter()
+                .map(|polarity| {
+                    claim(
+                        polarity,
+                        "toHaveVoidContinuity",
+                        json!({"kind": "voidContinuity", "expected": expected}),
+                        polarity,
+                        180,
+                    )
+                })
+                .collect(),
+        );
+        let diagnostic = if min_cross_section.is_some() {
+            json!([{
+                "code": "GEOSPEC_EVIDENCE_UNSUPPORTED",
+                "severity": "error",
+                "message": "The void profile samples cross-sections; a continuous minimum cross-section is not qualified.",
+                "suggestion": "Use a qualified continuous section proof for the declared geometry representation.",
+                "details": {
+                    "matcher": "toHaveVoidContinuity",
+                    "profile": "geospec-void-sampled-sections-v1",
+                    "continuousMinimumQualified": false
+                }
+            }])
+        } else {
+            json!([{
+                "code": "GEOSPEC_UNSUPPORTED_EVIDENCE",
+                "severity": "error",
+                "message": "The BRep connector has no qualified selected continuous domain query."
+            }])
+        };
+        let results = response["result"]["results"].as_array().unwrap();
+        for result in results {
+            assert_eq!(result["status"], "refused");
+            assert_eq!(result["diagnostics"], diagnostic);
+        }
+        assert_eq!(results[0]["diagnostics"], results[1]["diagnostics"]);
+        assert_eq!(csg_calls.get(), 0);
+        assert_eq!(tessellations.get(), 0);
+    }
 }
 
 // Successor controls predeclared by W2.C-LOGICAL-BUDGET-02. Old evidence above
 // retains its earlier budget assertions; these tests do not rewrite that corpus.
-#[test]
-fn logical_budget_v2_cold_warm_overlap_has_the_predeclared_180_boundary() {
-    let (mut engine, _, intersections, csg_calls, _) = engine();
-    let (subject_hash, _) = ingest_gltf(&mut engine);
-    for pass in 0..2 {
-        for polarity in ["positive", "negative"] {
-            for budget in [179_u64, 180] {
-                let response = claims(
-                    &engine,
-                    &subject_hash,
-                    vec![claim(
-                        "logical-boundary",
-                        "toHaveNoComponentInterference",
-                        json!({"kind":"componentInterference","expected":{}}),
-                        polarity,
-                        budget,
-                    )],
-                );
-                assert_eq!(
-                    response["result"]["numericProfile"],
-                    "geospec-st-logical-requests-v2"
-                );
-                let row = &response["result"]["results"][0];
-                if budget == 179 {
-                    assert_eq!(row["status"], "refused");
-                    assert_eq!(row["diagnostics"][0]["code"], "MATCHER_TIMEOUT");
-                    assert_eq!(row["diagnostics"][0]["details"]["unitsUsed"], 180);
-                } else {
-                    assert_eq!(
-                        row["status"],
-                        if polarity == "positive" {
-                            "failed"
-                        } else {
-                            "passed"
-                        }
-                    );
-                    assert_eq!(
-                        row["evidence"]["measured"]["overlaps"][0]["intersectionVolume"],
-                        0.5
-                    );
-                }
-            }
-        }
-        assert_eq!(
-            csg_calls.get() - intersections.get(),
-            2,
-            "total calls minus intersections counts source admissions on this fixture"
-        );
-        assert_eq!(intersections.get(), 4 * (pass + 1));
-    }
-}
 
 // W3-WALL-CONTINUOUS-02 supersedes the snapshotted CONTINUOUS01 interim refusal.
 #[test]

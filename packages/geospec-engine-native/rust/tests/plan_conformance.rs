@@ -2,9 +2,10 @@ use geospec_engine_native_core::{canonicalize, Engine, ProtocolError};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-// Independent literals frozen before this candidate was read or executed.
 const CORPUS: &str = include_str!("../../conformance/early-corpus.json");
 const CORPUS_SHA256: &str = "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476";
+const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
+const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
 
 fn string<'a>(value: &'a Value, field: &str) -> &'a str {
     value[field].as_str().expect(field)
@@ -20,6 +21,13 @@ fn bytes(hex: &str) -> Vec<u8> {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn input(record: &Value) -> Vec<u8> {
+    record["effectiveInputUtf8"].as_str().map_or_else(
+        || bytes(string(record, "effectiveInputHex")),
+        |s| s.as_bytes().to_vec(),
+    )
 }
 
 fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value) -> Value {
@@ -43,12 +51,14 @@ fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value) -> Value {
         Err(error) => {
             let _: &dyn std::error::Error = &error;
             let message = error.to_string();
+            let expected_message = expected["expectedMessage"].as_str();
             json!({
                 "passed": expected["expectedCode"].as_str() == Some(error.code())
-                    && !message.is_empty(),
+                    && expected_message.map_or(!message.is_empty(), |expected| expected == message),
                 "actualCode": error.code(),
                 "actualMessage": message,
                 "expectedCode": expected["expectedCode"],
+                "expectedMessage": expected_message,
                 "expectedUtf8": expected["expectedUtf8"],
             })
         }
@@ -56,17 +66,48 @@ fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value) -> Value {
 }
 
 #[test]
-fn matches_every_frozen_early_host_record_through_public_byte_operations() {
+fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindings() {
     assert_eq!(format!("{:x}", Sha256::digest(CORPUS)), CORPUS_SHA256);
+    assert_eq!(format!("{:x}", Sha256::digest(CURRENT)), CURRENT_SHA256);
     let corpus: Value = serde_json::from_str(CORPUS).expect("independent frozen corpus");
+    let current: Value = serde_json::from_str(CURRENT).expect("explicit successor bindings");
     assert_eq!(corpus["schemaVersion"], 1);
+    assert_eq!(current["schemaVersion"], 1);
+    assert_eq!(
+        current["authority"]["adoptedRuling"],
+        "W2.C-CURRENT-PROFILE-CONFORMANCE-01"
+    );
     let meshes = corpus["meshes"].as_array().expect("meshes");
+    let mesh_bindings = current["meshes"].as_array().expect("mesh bindings");
     let records = corpus["records"].as_array().expect("records");
+    let bindings = current["records"].as_array().expect("record bindings");
+    assert_eq!(records.len(), 320);
+    assert_eq!(bindings.len(), records.len());
+    assert_eq!(mesh_bindings.len(), meshes.len());
     let mut outcomes = Vec::with_capacity(records.len());
     let mut failures = Vec::new();
 
-    for record in records {
+    for (record, binding) in records.iter().zip(bindings) {
         let id = string(record, "id");
+        assert_eq!(binding["id"], id, "binding order");
+        assert_eq!(binding["operation"], record["operation"]);
+        let original = record["inputUtf8"].as_str().map_or_else(
+            || bytes(string(record, "inputHex")),
+            |s| s.as_bytes().to_vec(),
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&original)),
+            binding["originalInputSha256"]
+        );
+        let effective = input(binding);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&effective)),
+            binding["effectiveInputSha256"]
+        );
+        if binding["preservesOriginalBytes"] == true {
+            assert_eq!(effective, original, "{id}: malformed/version bytes changed");
+        }
+
         let mut engine = Engine::new();
         let mut admissions = Vec::new();
         for mesh_id in record["ingest"].as_array().expect("ingest IDs") {
@@ -74,49 +115,69 @@ fn matches_every_frozen_early_host_record_through_public_byte_operations() {
                 .iter()
                 .find(|m| m["id"] == *mesh_id)
                 .expect("mesh ID");
+            let bound = mesh_bindings
+                .iter()
+                .find(|m| m["id"] == *mesh_id)
+                .expect("mesh binding");
             let data = bytes(string(mesh, "meshHex"));
             assert_eq!(format!("{:x}", Sha256::digest(&data)), mesh["contentHash"]);
-            let admission = compare(
-                engine.ingest_mesh(string(mesh, "requestUtf8").as_bytes(), &data),
-                mesh,
+            let request = string(bound, "effectiveRequestUtf8").as_bytes();
+            assert_eq!(
+                format!("{:x}", Sha256::digest(request)),
+                bound["effectiveRequestSha256"]
             );
+            let admission = compare(engine.ingest_mesh(request, &data), bound);
             if admission["passed"] != true {
                 failures.push(format!("{id}: admission {mesh_id}: {admission}"));
             }
             admissions.push(json!({"meshId": mesh_id, "comparison": admission}));
         }
 
-        let input = if let Some(input) = record["inputUtf8"].as_str() {
-            input.as_bytes().to_vec()
-        } else {
-            bytes(string(record, "inputHex"))
-        };
-        let actual = match string(record, "operation") {
-            "canonicalize" => canonicalize(&input),
-            "ingestMesh" => engine.ingest_mesh(&input, &bytes(string(record, "meshHex"))),
-            "processRequest" => engine.process_request(&input),
-            "canonicalPlan" => engine.canonical_plan(&input),
-            "evaluatePlan" => engine.evaluate_plan(&input),
+        let operation = string(record, "operation");
+        if matches!(operation, "evaluatePlan" | "processRequest")
+            && admissions.is_empty()
+            && (record["expectedUtf8"].is_string()
+                || id == "plan/unavailable/analyzeBrep/evaluatePlan")
+        {
+            let mesh = &meshes[0];
+            let bound = &mesh_bindings[0];
+            let data = bytes(string(mesh, "meshHex"));
+            let request = string(bound, "effectiveRequestUtf8").as_bytes();
+            let admission = compare(engine.ingest_mesh(request, &data), bound);
+            assert_eq!(
+                admission["passed"], true,
+                "fresh explicit current-profile admission"
+            );
+            admissions.push(json!({"meshId": mesh["id"], "comparison": admission}));
+        }
+
+        let actual = match operation {
+            "canonicalize" => canonicalize(&effective),
+            "ingestMesh" => engine.ingest_mesh(&effective, &bytes(string(record, "meshHex"))),
+            "processRequest" => engine.process_request(&effective),
+            "canonicalPlan" => engine.canonical_plan(&effective),
+            "evaluatePlan" => engine.evaluate_plan(&effective),
             other => panic!("unknown frozen operation: {other}"),
         };
-        let comparison = compare(actual, record);
+        let comparison = compare(actual, binding);
         if comparison["passed"] != true {
             failures.push(format!("{id}: {comparison}"));
         }
         outcomes.push(json!({
             "id": id,
             "operation": record["operation"],
+            "inputDerivation": binding["inputDerivation"],
             "admissions": admissions,
             "comparison": comparison,
         }));
     }
 
-    // Optional retained evidence stays in the caller's explicitly assigned lane.
     if let Some(path) = std::env::var_os("GEOSPEC_CONFORMANCE_EVIDENCE") {
         std::fs::write(
             path,
             serde_json::to_vec_pretty(&json!({
                 "corpusSha256": CORPUS_SHA256,
+                "bindingSha256": CURRENT_SHA256,
                 "recordCount": records.len(),
                 "failedComparisons": failures.len(),
                 "outcomes": outcomes,

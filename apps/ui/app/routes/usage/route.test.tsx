@@ -11,6 +11,8 @@ const useOpenHolds = vi.hoisted(() => vi.fn());
 const useSavedUsage = vi.hoisted(() => vi.fn());
 const useBillingRevisionMinimum = vi.hoisted(() => vi.fn());
 const usePersistSavedUsage = vi.hoisted(() => vi.fn());
+const useCloudProjects = vi.hoisted(() => vi.fn());
+vi.mock('#hooks/use-cloud-projects.js', () => ({ useCloudProjects }));
 vi.mock('@taucad/billing/hooks/use-usage-snapshot', () => ({ useUsageSnapshot }));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
 vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
@@ -164,6 +166,10 @@ beforeEach(() => {
   useBillingRevisionMinimum.mockReturnValue(undefined);
   useSavedUsage.mockReturnValue(undefined);
   usePersistSavedUsage.mockReturnValue('saved');
+  useCloudProjects.mockReturnValue({
+    projects: [{ id: 'project-a', name: 'Gearbox', role: 'owner' }],
+    isSettled: true,
+  });
 });
 
 afterEach(() => {
@@ -204,6 +210,51 @@ describe('UsagePage', () => {
     expect(detail).toHaveTextContent('Authorized maximum');
     expect(detail).toHaveTextContent('Cache read');
     expect(detail).toHaveTextContent('Reasoning (of output)');
+  });
+
+  // ── Names, never ids (Q9) ────────────────────────────────────────────────
+  it('names the project a receipt belongs to instead of showing its id', async () => {
+    renderPage();
+    await userEvent.click(screen.getByText('agent'));
+
+    const detail = screen.getByTestId('usage-event-detail');
+    expect(detail).toHaveTextContent('Gearbox');
+    expect(detail).not.toHaveTextContent('project-a');
+  });
+
+  it('labels a project it cannot resolve rather than falling back to the id', async () => {
+    useCloudProjects.mockReturnValue({ projects: [], isSettled: true });
+    renderPage();
+    await userEvent.click(screen.getByText('agent'));
+
+    const detail = screen.getByTestId('usage-event-detail');
+    expect(detail).toHaveTextContent('Project not available');
+    expect(detail).not.toHaveTextContent('project-a');
+  });
+
+  it('never renders the chat id, which no cheap source here can name', async () => {
+    renderPage();
+    await userEvent.click(screen.getByText('agent'));
+
+    const detail = screen.getByTestId('usage-event-detail');
+    expect(detail).toHaveTextContent('Chat name not available');
+    expect(detail).not.toHaveTextContent('chat-a');
+  });
+
+  it('offers the project filter by name', async () => {
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Projects/u }));
+
+    expect(await screen.findByRole('menuitemcheckbox', { name: 'Gearbox' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'project-a' })).not.toBeInTheDocument();
+  });
+
+  it('asks for no project listing while the page is offline on a saved snapshot', () => {
+    useSavedUsage.mockReturnValue({ snapshot, label: 'a@example.test' });
+    useUsageSnapshot.mockReturnValue({ status: 'saved', snapshot, retry: vi.fn() });
+    renderPage();
+
+    expect(useCloudProjects).toHaveBeenCalledWith({ enabled: false });
   });
 
   it.each([

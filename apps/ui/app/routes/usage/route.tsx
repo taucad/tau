@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { Filter, RefreshCw, X } from 'lucide-react';
@@ -25,6 +25,8 @@ import { ReservedTable } from '#routes/usage/reserved-table.js';
 import { UsageSummaryCards } from '#routes/usage/usage-summary-cards.js';
 import { UsageTable } from '#routes/usage/usage-table.js';
 import { usageActivityKinds, usageFilterOptions, useUsageFilters } from '#routes/usage/use-usage-filters.js';
+import { projectLabel } from '#routes/usage/activity-names.js';
+import { useCloudProjects } from '#hooks/use-cloud-projects.js';
 import { useBillingRevisionMinimum, usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
 import type { SavedUsageOutcome } from '#db/billing-snapshot-store.js';
 import type { Handle } from '#types/matches.types.js';
@@ -110,6 +112,9 @@ function UsageFreshness({
 /** Filters are request state the server applies; offline there is nothing to re-request. */
 const hidesFilters = (status: UsageSnapshotResult['status']): boolean => status === 'signed-out' || status === 'saved';
 
+/** Only a live page can name a project: a saved or signed-out one has no listing to ask for. */
+const resolvesNames = (status: UsageSnapshotResult['status']): boolean => status === 'ready' || status === 'refreshing';
+
 /** One canonical filter dimension; the server, not the table, applies it. */
 function FilterMenu<Value extends string>({
   label,
@@ -173,6 +178,11 @@ export default function UsagePage(): React.JSX.Element {
   const [openEventId, setOpenEventId] = useState<string>();
   const snapshot = 'snapshot' in usage ? usage.snapshot : undefined;
   const options = usageFilterOptions(snapshot, filters);
+  /* Project names come from the account's own listing, never from local storage:
+     this page is prerendered as a session-neutral offline shell, and a saved
+     snapshot read with no API has nothing to resolve against anyway. */
+  const { projects } = useCloudProjects({ enabled: resolvesNames(usage.status) });
+  const projectNames = useMemo(() => new Map(projects.map((project) => [project.id, project.name])), [projects]);
 
   return (
     <div className='container mx-auto space-y-6 px-4 py-8'>
@@ -198,7 +208,7 @@ export default function UsagePage(): React.JSX.Element {
           />
           <FilterMenu
             label='Projects'
-            options={options.projects.map((project) => ({ id: project, label: project }))}
+            options={options.projects.map((project) => ({ id: project, label: projectLabel(project, projectNames) }))}
             selected={filters.projects}
             onToggle={toggleProject}
           />
@@ -248,6 +258,7 @@ export default function UsagePage(): React.JSX.Element {
           <UsageTable
             rows={snapshot.rows?.items ?? []}
             hasMore={snapshot.rows?.complete === false}
+            projectNames={projectNames}
             description='Select an action to see its credit explanation'
             openEventId={openEventId}
             onOpenEventChange={setOpenEventId}

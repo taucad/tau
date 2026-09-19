@@ -29,7 +29,7 @@ import { WatchRegistry } from '#watch-registry.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 /* The scope discriminants are the backend layer's own vocabulary (D13); the
  * authority reads capabilities and admission answers, never a backend name. */
-import { hasStandaloneTree, matchesProtectedMountScope, scopeForRouteConfig, toScope } from '#backend/scope.js';
+import { isDurableScope, matchesProtectedMountScope, scopeForRouteConfig, toScope } from '#backend/scope.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 /* External change and cross-tab receive are their own modules (D13/W9); the
  * authority keeps the one public poll and owns nothing of either mechanism. */
@@ -146,7 +146,8 @@ export class WorkspaceFileService {
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private _filePool: SharedPool | undefined;
   private readonly _mountTable: MountTable;
-  private readonly _treeIndexes = new TreeIndexes();
+  /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
+  private readonly _treeIndexes = new TreeIndexes(() => this._mountTable.listMounts().map((entry) => entry.prefix));
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
@@ -981,7 +982,7 @@ export class WorkspaceFileService {
    * @returns Sorted tree nodes (folders first, then alphabetical).
    */
   public async readShallowDirectory(path: string, options?: { scope?: WorkspaceScope }): Promise<FileTreeNode[]> {
-    if (options?.scope !== undefined && !hasStandaloneTree(options.scope)) {
+    if (options?.scope !== undefined && !isDurableScope(options.scope)) {
       return [];
     }
 

@@ -39,6 +39,7 @@ export class GitProtocolExceptionFilter extends HttpExceptionFilter {
     const request = context.getRequest<FastifyRequest>();
     const reply = context.getResponse<FastifyReply>();
     if (request.headers.origin !== undefined || !(exception instanceof HttpException) || reply.sent) {
+      // oxlint-disable-next-line promise/valid-params, promise/prefer-await-to-then -- `super.catch` is Nest's ExceptionFilter.catch, not Promise.catch
       super.catch(exception, host);
       return;
     }

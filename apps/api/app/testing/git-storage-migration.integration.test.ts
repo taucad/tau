@@ -7,6 +7,7 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { assertSchemaCompatibility, readMigrationHead } from '#database/database-migration.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 
 /**
  * Testing policy §13: a durable migration needs failure-injection and restart
@@ -23,9 +24,10 @@ import { assertSchemaCompatibility, readMigrationHead } from '#database/database
 const migrationsFolder = path.resolve(import.meta.dirname, '../database/migrations');
 /*
  * The workspace's own PostgreSQL, which `pnpm infra:up` starts and CI's
- * `docker-compose` job brings up with the same credentials. Deliberately not
- * `DATABASE_URL`: this tier loads `.env.test`, whose URL names a database that
- * does not exist, and a scratch database is created off this one anyway.
+ * `docker-compose` job brings up with the same credentials. Its own variable
+ * rather than `DATABASE_URL`: this connection is only the admin one a scratch
+ * database is created from, so an operator can aim it elsewhere without moving
+ * the database the rest of the suites use.
  */
 const adminUrl =
   process.env['TAU_MIGRATION_TEST_DATABASE_URL'] ?? 'postgresql://dev_user:dev_password@localhost:5432/tau_dev';
@@ -48,26 +50,7 @@ type Journal = { entries: Array<{ readonly tag: string; readonly when: number }>
  */
 const w3MigrationTag = '0041_git_storage_substrate';
 
-const reachable = async (): Promise<boolean> => {
-  const client = postgres(adminUrl, {
-    max: 1,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- postgres.js option name
-    connect_timeout: 5,
-    onnotice() {
-      /* Probe only; a notice is not a diagnostic. */
-    },
-  });
-  try {
-    await client`SELECT 1`;
-    return true;
-  } catch {
-    return false;
-  } finally {
-    await client.end();
-  }
-};
-
-describe.skipIf(!(await reachable()))('W3 migration on a real PostgreSQL', () => {
+describe.skipIf(!(await databaseReachable(adminUrl)))('W3 migration on a real PostgreSQL', () => {
   const scratchName = `tau_w3_migration_${String(process.pid)}`;
   let scratchUrl: string;
   let admin: postgres.Sql;

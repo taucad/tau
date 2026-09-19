@@ -312,7 +312,7 @@ export type AgentToolChoice = 'none' | 'auto' | 'any' | 'custom' | readonly stri
 
 /** Provider reasoning controls frozen with one admitted model row. @public */
 export type ModelReasoningConfig = {
-  readonly effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined;
+  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined;
   readonly summary?: 'auto' | 'concise' | 'detailed' | undefined;
   readonly display?: 'summarized' | 'omitted' | undefined;
   readonly budgetTokens?: number | undefined;

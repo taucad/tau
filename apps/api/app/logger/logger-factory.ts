@@ -197,12 +197,12 @@ const customErrorMessage = (...args: Parameters<NonNullable<Options['customError
   ].join(' ');
 };
 
+// oxlint-disable-next-line max-params -- pino-http callback signature
 const customErrorObject = (
   _request: IncomingMessage,
   _response: ServerResponse,
   _error: Error,
   _responseTime: number,
-  // oxlint-disable-next-line max-params -- pino-http callback signature
 ) => {
   // We don't want to log the error object as it's handled in the `HttpExceptionFilter` logging.
   // Returning `undefined` will cause the error object to not be logged.

@@ -973,6 +973,52 @@ describe('BillingUsageService PostgreSQL foundation', () => {
   });
 });
 
+/*
+ * The gateway surface had no hint producer at all until Finding 5, so nothing
+ * proved the pair survives admission and comes back out of the feed — every
+ * other hint assertion in this file is a hand-seeded fixture read back.
+ */
+it('should return a gateway operation with the project and chat it was attributed to', async () => {
+  const fixture = await createFixture();
+  const key = randomUUID();
+  const admitted = await ledger.admitOperation({
+    ...admission(fixture, key),
+    surface: 'gateway',
+    projectHint: 'proj_gateway_01J8ZK4E',
+    chatHint: 'chat_gateway_01J8ZK4F',
+  });
+  if (admitted.status !== 'admitted') {
+    throw new Error('gateway operation was not admitted');
+  }
+  expect(await ledger.markDispatchIntent(admitted.operationId, admitted.generation)).toBe(true);
+  await ledger.terminalizeOperation({
+    operationId: admitted.operationId,
+    accountId: fixture.accountId,
+    requestDigest: `sha256:${key}`,
+    expectedGeneration: admitted.generation,
+    evidence: {
+      kind: 'final_usage',
+      usageOccurredAt: new Date(0),
+      executionStatus: 'succeeded',
+      meterItems: [
+        { dimension: 'uncached_input', tier: null, quantity: 1n },
+        { dimension: 'cache_write', tier: '5m', quantity: 0n },
+        { dimension: 'cache_write', tier: '1h', quantity: 0n },
+        { dimension: 'cache_read', tier: null, quantity: 0n },
+        { dimension: 'output', tier: null, quantity: 0n },
+      ],
+      normalizationEvidence: { version: 'test-v1', providerRequestId: `request-${key}`, fields: { input: '1' } },
+    },
+    resolvedAt: new Date(),
+  });
+
+  const page = await usage.getUsage({ authUserId: fixture.userId, rawQuery: { range: 'all_time' } });
+
+  expect(page.rows?.items[0]).toMatchObject({
+    activity: { kind: 'agent', projectHint: 'proj_gateway_01J8ZK4E', chatHint: 'chat_gateway_01J8ZK4F' },
+  });
+});
+
 it('should recover only the authenticated original attempt without creating an account or changing credit', async () => {
   const fixture = await createFixture();
   const key = randomUUID();

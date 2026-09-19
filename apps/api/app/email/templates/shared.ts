@@ -45,6 +45,7 @@ const styles = {
     backgroundColor: light.canvas,
     fontFamily: fontStack.sans,
     color: light.foreground,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React inline styles name vendor-prefixed properties in PascalCase
     WebkitFontSmoothing: 'antialiased',
   },
   container: { maxWidth: '560px', margin: '0 auto', padding: '32px 24px' },

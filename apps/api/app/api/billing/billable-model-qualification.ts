@@ -11,6 +11,7 @@ import {
   billableModelRequestContainsImage,
   safeParseBillableModelRequest,
 } from '#api/billing/billable-model-request.js';
+import { modelList } from '#api/models/model.constants.js';
 import type {
   BillableInvocationIntent,
   BillableModelProviderAdapter,
@@ -36,6 +37,8 @@ type Route = {
   combinedMaximum?: bigint;
   allowsImage?: boolean;
   outputParameter: 'max_output_tokens' | 'max_completion_tokens' | 'max_tokens';
+  /** The date this route's tariff was read off the supplier's published pricing, when later than the table's sweep. */
+  pricingRevision?: string;
   validThrough?: string;
   rates?: readonly Rate[];
   temporaryUnavailableReason?: string;
@@ -71,45 +74,54 @@ const inputOutputRates = (input: string, output: string): readonly Rate[] => [
   { dimension: 'uncached_input', tier: null, numeratorPicoUsd: picoUsd(input) },
   { dimension: 'output', tier: null, numeratorPicoUsd: picoUsd(output) },
 ];
-const catalogRouteIds: Readonly<Record<string, string>> = {
-  'claude-fable-5-1': 'anthropic-claude-fable-5.1',
-  'claude-fable-5': 'anthropic-claude-fable-5',
-  'claude-opus-5': 'anthropic-claude-opus-5',
-  'claude-opus-4-8': 'anthropic-claude-opus-4.8',
-  'claude-sonnet-5': 'anthropic-claude-sonnet-5',
-  'claude-sonnet-4-6': 'anthropic-claude-sonnet-4.6',
-  'claude-haiku-4-5-20251001': 'anthropic-claude-haiku-4.5',
-  'gpt-6-astra': 'openai-gpt-6-astra',
-  'gpt-5.6-sol': 'openai-gpt-5.6-sol',
-  'gpt-5.6-terra': 'openai-gpt-5.6-terra',
-  'gpt-5.6-luna': 'openai-gpt-5.6-luna',
-  'gpt-5.5': 'openai-gpt-5.5',
-  'gemini-3.1-pro-preview': 'google-gemini-3.1-pro',
-  'gemini-3.7-flash': 'google-gemini-3.7-flash',
-  'gemini-3.5-flash-lite': 'google-gemini-3.5-flash-lite',
-  'gemini-3.5-flash': 'google-gemini-3.5-flash',
-  'moonshotai/Kimi-K3': 'together-kimi-k3',
-  'zai-org/GLM-5.2': 'together-glm-5.2',
-  'morph-minimax27-230b': 'morph-minimax-m2.7',
-  'grok-4.6': 'xai-grok-4.6',
+const catalogRowsById = new Map(
+  Object.values(modelList)
+    .flatMap((provider) => Object.values(provider))
+    .map((row) => [row.id, row] as const),
+);
+
+/**
+ * The upstream model one funded route bills against.
+ *
+ * Funding a route and pricing it are decisions this file owns and a reviewer
+ * reads here; *which* upstream model a catalog row names is the catalog's own
+ * fact, and repeating it here is how qualification silently drifted from the
+ * catalog once already. A funded route with no catalog row is a fault at import,
+ * not a route that quietly bills an invented model id.
+ *
+ * @param routeId - The catalog `/v1/models` row id the funded route serves.
+ * @returns The route's provider id and the supplier's own model id.
+ */
+export const supplierIdentityForRoute = (routeId: string): { modelId: string; providerId: string } => {
+  const row = catalogRowsById.get(routeId);
+  if (!row) {
+    throw new Error(`Funded route ${routeId} has no catalog row`);
+  }
+  return { modelId: row.model, providerId: row.provider.id };
 };
 
 // oxlint-disable-next-line max-params -- keeps the audited static route table compact.
 const route = (
-  providerId: string,
-  modelId: string,
+  routeId: string,
   modelDisplayName: string,
   wire: BillableProviderWire,
   contextMaximum: number,
   outputMaximum: number,
   supplierRates?: readonly Rate[],
   extra?: Partial<
-    Pick<Route, 'allowsImage' | 'combinedMaximum' | 'outputParameter' | 'temporaryUnavailableReason' | 'validThrough'>
+    Pick<
+      Route,
+      | 'allowsImage'
+      | 'combinedMaximum'
+      | 'outputParameter'
+      | 'pricingRevision'
+      | 'temporaryUnavailableReason'
+      | 'validThrough'
+    >
   >,
 ): Route => ({
-  routeId: catalogRouteIds[modelId] ?? `${providerId}-${modelId.replaceAll('.', '-').toLowerCase()}`,
-  providerId,
-  modelId,
+  routeId,
+  ...supplierIdentityForRoute(routeId),
   modelDisplayName,
   wire,
   contextMaximum: BigInt(contextMaximum),
@@ -123,63 +135,28 @@ const route = (
 
 const routes = [
   route(
-    'anthropic',
-    'claude-fable-5-1',
+    'anthropic-claude-fable-5.1',
     'Fable 5.1',
     'anthropic',
     1_000_000,
     128_000,
     rates('10', '.25', '12.5', '50', '5m'),
   ),
+  route('anthropic-claude-fable-5', 'Fable 5', 'anthropic', 1_000_000, 128_000, rates('10', '1', '12.5', '50', '5m')),
+  route('anthropic-claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
+  route('anthropic-claude-opus-4.8', 'Opus 4.8', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
+  route('anthropic-claude-sonnet-5', 'Sonnet 5', 'anthropic', 1_000_000, 128_000, rates('2', '.2', '2.5', '10', '5m')),
   route(
-    'anthropic',
-    'claude-fable-5',
-    'Fable 5',
-    'anthropic',
-    1_000_000,
-    128_000,
-    rates('10', '1', '12.5', '50', '5m'),
-  ),
-  route('anthropic', 'claude-opus-5', 'Opus 5', 'anthropic', 1_000_000, 128_000, rates('5', '.5', '6.25', '25', '5m')),
-  route(
-    'anthropic',
-    'claude-opus-4-8',
-    'Opus 4.8',
-    'anthropic',
-    1_000_000,
-    128_000,
-    rates('5', '.5', '6.25', '25', '5m'),
-  ),
-  route(
-    'anthropic',
-    'claude-sonnet-5',
-    'Sonnet 5',
-    'anthropic',
-    1_000_000,
-    128_000,
-    rates('2', '.2', '2.5', '10', '5m'),
-  ),
-  route(
-    'anthropic',
-    'claude-sonnet-4-6',
+    'anthropic-claude-sonnet-4.6',
     'Sonnet 4.6',
     'anthropic',
     1_000_000,
     64_000,
     rates('3', '.3', '3.75', '15', '5m'),
   ),
+  route('anthropic-claude-haiku-4.5', 'Haiku 4.5', 'anthropic', 200_000, 64_000, rates('1', '.1', '1.25', '5', '5m')),
   route(
-    'anthropic',
-    'claude-haiku-4-5-20251001',
-    'Haiku 4.5',
-    'anthropic',
-    200_000,
-    64_000,
-    rates('1', '.1', '1.25', '5', '5m'),
-  ),
-  route(
-    'openai',
-    'gpt-6-astra',
+    'openai-gpt-6-astra',
     'GPT-6 Astra',
     'openai-responses',
     1_050_000,
@@ -187,8 +164,7 @@ const routes = [
     rates('20', '2', '25', '75', '30m'),
   ),
   route(
-    'openai',
-    'gpt-5.6-sol',
+    'openai-gpt-5.6-sol',
     'GPT-5.6 Sol',
     'openai-responses',
     1_050_000,
@@ -197,8 +173,7 @@ const routes = [
     { validThrough: '2026-11-21T23:59:59.999Z' },
   ),
   route(
-    'openai',
-    'gpt-5.6-terra',
+    'openai-gpt-5.6-terra',
     'GPT-5.6 Terra',
     'openai-responses',
     1_050_000,
@@ -206,18 +181,16 @@ const routes = [
     rates('4', '.4', '5', '18', '30m'),
   ),
   route(
-    'openai',
-    'gpt-5.6-luna',
+    'openai-gpt-5.6-luna',
     'GPT-5.6 Luna',
     'openai-responses',
     1_050_000,
     128_000,
     rates('.4', '.04', '.5', '1.8', '30m'),
   ),
-  route('openai', 'gpt-5.5', 'GPT-5.5', 'openai-responses', 1_050_000, 128_000, rates('10', '1', undefined, '45')),
+  route('openai-gpt-5.5', 'GPT-5.5', 'openai-responses', 1_050_000, 128_000, rates('10', '1', undefined, '45')),
   route(
-    'vertexai',
-    'gemini-3.1-pro-preview',
+    'google-gemini-3.1-pro',
     'Gemini 3.1 Pro',
     'openai-completions',
     1_000_000,
@@ -225,8 +198,16 @@ const routes = [
     rates('4', '.4', undefined, '18'),
   ),
   route(
-    'vertexai',
-    'gemini-3.7-flash',
+    'google-gemini-3.8-flash',
+    'Gemini 3.8 Flash',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('.75', '.075', undefined, '3.75'),
+    { pricingRevision: '2026-09-19', validThrough: '2026-12-31T23:59:59.999Z' },
+  ),
+  route(
+    'google-gemini-3.7-flash',
     'Gemini 3.7 Flash',
     'openai-completions',
     1_000_000,
@@ -235,8 +216,7 @@ const routes = [
     { validThrough: '2026-12-31T23:59:59.999Z' },
   ),
   route(
-    'vertexai',
-    'gemini-3.5-flash-lite',
+    'google-gemini-3.5-flash-lite',
     'Gemini 3.5 Flash Lite',
     'openai-completions',
     1_048_576,
@@ -244,26 +224,16 @@ const routes = [
     rates('.3', '.03', undefined, '2.5'),
   ),
   route(
-    'vertexai',
-    'gemini-3.5-flash',
+    'google-gemini-3.5-flash',
     'Gemini 3.5 Flash',
     'openai-completions',
     1_048_576,
     65_536,
     rates('1.5', '.15', undefined, '9'),
   ),
+  route('together-kimi-k3', 'Kimi K3', 'openai-completions', 1_000_000, 200_000, rates('3', '.3', undefined, '15')),
   route(
-    'together',
-    'moonshotai/Kimi-K3',
-    'Kimi K3',
-    'openai-completions',
-    1_000_000,
-    200_000,
-    rates('3', '.3', undefined, '15'),
-  ),
-  route(
-    'together',
-    'zai-org/GLM-5.2',
+    'together-glm-5.2',
     'GLM 5.2',
     'openai-completions',
     1_000_000,
@@ -271,31 +241,22 @@ const routes = [
     rates('1.4', '.26', undefined, '4.4'),
     { allowsImage: false },
   ),
-  route(
-    'morph',
-    'morph-minimax27-230b',
-    'MiniMax M2.7',
-    'openai-completions',
-    196_608,
-    196_608,
-    inputOutputRates('.279', '1.2'),
-    {
-      allowsImage: false,
-      combinedMaximum: 196_608n,
-      outputParameter: 'max_tokens',
-    },
-  ),
-  route('xai', 'grok-4.6', 'Grok 4.6', 'openai-responses', 500_000, 64_000, rates('4', '1', undefined, '12')),
+  route('morph-minimax-m2.7', 'MiniMax M2.7', 'openai-completions', 196_608, 196_608, inputOutputRates('.279', '1.2'), {
+    allowsImage: false,
+    combinedMaximum: 196_608n,
+    outputParameter: 'max_tokens',
+  }),
+  route('xai-grok-4.6', 'Grok 4.6', 'openai-responses', 500_000, 64_000, rates('4', '1', undefined, '12')),
 ] as const;
 
 const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly Rate[] }>([
-  ['gpt-6-astra', { minimum: 272_001n, baseRates: rates('10', '1', '12.5', '50', '30m') }],
-  ['gpt-5.6-sol', { minimum: 272_001n, baseRates: rates('4', '.4', '5', '20', '30m') }],
-  ['gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
-  ['gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
-  ['gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
-  ['gemini-3.1-pro-preview', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
-  ['grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
+  ['openai-gpt-6-astra', { minimum: 272_001n, baseRates: rates('10', '1', '12.5', '50', '30m') }],
+  ['openai-gpt-5.6-sol', { minimum: 272_001n, baseRates: rates('4', '.4', '5', '20', '30m') }],
+  ['openai-gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
+  ['openai-gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
+  ['openai-gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
+  ['google-gemini-3.1-pro', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
+  ['xai-grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
 ]);
 const jointInputProviders = new Set(['anthropic', 'openai', 'morph', 'xai']);
 const observedValuationProviders = new Set(['anthropic', 'openai', 'morph', 'vertexai', 'xai']);
@@ -324,7 +285,11 @@ export const routeSkuFamily = (sku: string): readonly [string, string] => {
   return [base, `${base}${longContextSuffix}`];
 };
 
-const sourceRevision = (routeId: string): string => `official-pricing:2026-09-06:${routeId}`;
+/* When Tau last swept every route's tariff off the suppliers' published pricing.
+ * A route added since pins its own reading date rather than claiming the sweep's. */
+const pricingSweep = '2026-09-06';
+const sourceRevision = (selected: Pick<Route, 'pricingRevision' | 'routeId'>): string =>
+  `official-pricing:${selected.pricingRevision ?? pricingSweep}:${selected.routeId}`;
 const valuationRates = (entries: readonly Rate[]) =>
   entries.map((entry) => ({
     dimension: entry.dimension,
@@ -346,11 +311,11 @@ const valuationRates = (entries: readonly Rate[]) =>
  * @returns The pinned tariff, whether it is the premium tier, and the observed valuation.
  */
 const pinTariff = (
-  selected: Pick<Route, 'modelId' | 'providerId' | 'routeId'>,
+  selected: Pick<Route, 'pricingRevision' | 'providerId' | 'routeId'>,
   routeRates: readonly Rate[],
   maximumInput: bigint,
 ): { longContext: boolean; rates: readonly Rate[]; valuation?: SupplierValuation } => {
-  const tiered = tieredValuations.get(selected.modelId);
+  const tiered = tieredValuations.get(selected.routeId);
   const longContext = tiered !== undefined && maximumInput >= tiered.minimum;
   const rates = longContext ? routeRates : (tiered?.baseRates ?? routeRates);
   return {
@@ -360,7 +325,7 @@ const pinTariff = (
       ? {
           valuation: {
             version: 'supplier-valuation-v1',
-            sourceRevision: sourceRevision(selected.routeId),
+            sourceRevision: sourceRevision(selected),
             longContextMinimumInputTokens: longContext ? tiered.minimum.toString() : null,
             baseRates: valuationRates(longContext ? tiered.baseRates : rates),
             longContextRates: longContext ? valuationRates(routeRates) : null,
@@ -376,6 +341,25 @@ export const billableModelRouteIds = routes.map((entry) => entry.routeId);
 /* Clients speak the catalog `/v1/models` row id; provider model ids are never
  * accepted on the wire, so this table is keyed by route id alone. */
 const routeById = new Map(routes.map((entry) => [entry.routeId, entry]));
+
+/**
+ * Refuse a premium tariff that no funded route can ever pin.
+ *
+ * A tiered key that matches no route is not inert. `routes` carries the premium
+ * tariff and `tieredValuations` carries the base one, so a key that never
+ * matches leaves the route pinning its premium rate on every request and never
+ * registers the `:long-context` contract the ledger settles the premium against.
+ *
+ * @param tierRouteIds - The route ids the tiered valuation table is keyed by.
+ */
+export const assertTieredRoutesAreFunded = (tierRouteIds: Iterable<string>): void => {
+  for (const routeId of tierRouteIds) {
+    if (!routeById.has(routeId)) {
+      throw new Error(`Tiered tariff ${routeId} has no funded route`);
+    }
+  }
+};
+assertTieredRoutesAreFunded(tieredValuations.keys());
 
 export type BillableModelQualificationDependencies = {
   adapters: ReadonlyMap<string, BillableModelProviderAdapter>;
@@ -394,7 +378,7 @@ export const billableModelRouteMeters = routes.flatMap((entry) => {
   if (entry.rates === undefined) {
     return [];
   }
-  const tiered = tieredValuations.get(entry.modelId);
+  const tiered = tieredValuations.get(entry.routeId);
   const meter = (routeId: string, rates: readonly Rate[]) => ({
     routeId,
     meterContractId: `model-meter-v1:${routeId}`,

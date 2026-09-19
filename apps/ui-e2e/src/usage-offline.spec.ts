@@ -19,7 +19,7 @@
  * without its redirect identity (see the `both the origin and the API
  * unreachable` case, which pins exactly that).
  */
-import { describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { TargetSelector, TargetSurface } from '#support/external-target.js';
@@ -88,7 +88,32 @@ const cutTheApi = async (account: StubbedAccount, snapshot = snapshotA): Promise
   await installBillingApiStub({ environment: 'development', account, snapshot, apiReachable: false });
 };
 
+/**
+ * Whether the harness is serving a cloud build.
+ *
+ * `TAU_CLOUD_ENABLED=true` is a *build-time* input: without it `app/routes.ts`
+ * drops the `/usage` route and `react-router.config.ts`'s `buildEnd` never
+ * generates the offline shell, so there is no contract here to be right or
+ * wrong about. Asked of the served bytes rather than of this runner's
+ * environment, because an Nx dependency task inherits only the caller's
+ * environment — the build that is running is the only thing that decides.
+ */
+const cloudBuildServed = async (): Promise<boolean> => {
+  await target.navigate('/offline-shell-worker.js');
+  return target.evaluate(async () => {
+    const response = await fetch('/offline-shell-worker.js');
+    return response.ok;
+  });
+};
+
 describe('Offline usage contract', () => {
+  beforeEach(async ({ skip }) => {
+    skip(
+      !(await cloudBuildServed()),
+      'The harness is serving a self-host UI build, which has no /usage route and no offline shell: rerun after `TAU_CLOUD_ENABLED=true nx run ui:build`.',
+    );
+  });
+
   test('should render the saved snapshot with its server instant when a cold page cannot reach the API', async () => {
     await signInAndSave(accountA);
     const asOf = await formatInstantInPage(snapshotA.asOf);

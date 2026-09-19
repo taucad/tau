@@ -172,6 +172,13 @@ export type GatewayModelTransportOptions = {
   readonly auth?: (() => string | undefined | Promise<string | undefined>) | undefined;
   readonly baseUrl: string;
   /**
+   * The cloud project every call from this composition belongs to, for the
+   * gateway's spend attribution. Per composition, since one worker serves one
+   * project. Omitted for a workspace with no cloud identity — a `tau serve`
+   * checkout — whose receipts then name no project.
+   */
+  readonly projectId?: string | undefined;
+  /**
    * Catalog limits for a host that configures one default model. Optional: a
    * host that has none — every turn names its own row — supplies these through
    * {@link ModelStreamRequest} instead, which is what the harness always does.
@@ -322,10 +329,15 @@ const networkError = (message: string, cause: unknown, status?: number): Gateway
   });
 
 /**
- * Tau's own in-stream refusal envelope. The gateway rewrites a recognised
- * provider-account refusal into a single SSE `error` frame carrying this
- * marker; relayed provider bytes escape their own quotes, so nothing else on
- * the wire can produce it.
+ * Tau's own in-stream failure envelope. The gateway rewrites a classified
+ * provider failure — an exhausted account, a mid-stream rate limit — into a
+ * single SSE `error` frame carrying this marker.
+ *
+ * Two separate things keep it Tau's: model-generated text cannot produce these
+ * bytes, because content and tool-call arguments are JSON strings whose quotes
+ * arrive escaped; and the API never forwards a provider frame carrying the
+ * marker, since a provider does control its own body at the structural level
+ * (`provider-account-stream.ts`, R5).
  */
 const tauGatewayFrameMarker = '"type":"tau_gateway"';
 const sseEventBoundary = /\r\n\r\n|\n\n|\r\r/gu;
@@ -345,17 +357,6 @@ const sinceLastEventBoundary = (text: string): string => {
 };
 
 /**
- * Read Tau's coded provider-account refusal out of relayed gateway bytes.
- *
- * Only the frame carrying the marker is decoded, and an incomplete one answers
- * undefined so the caller reads on until the event boundary or EOF completes
- * it.
- *
- * @param relayed - Relayed SSE text since the last delivered event boundary.
- * @param status - HTTP status of the relayed gateway response.
- * @returns The coded refusal, or undefined when no complete Tau frame is present.
- */
-/**
  * Whether the frame carrying the Tau marker has been terminated by an event boundary.
  *
  * @param relayed - Relayed text since the last delivered event boundary.
@@ -367,7 +368,21 @@ const markerFrameComplete = (relayed: string): boolean => {
   return index !== -1 && index < frames.length - 1;
 };
 
-const providerAccountRefusal = (relayed: string, status: number): GatewayModelTransportError | undefined => {
+/**
+ * Read Tau's coded failure out of relayed gateway bytes.
+ *
+ * Only the frame carrying the marker is decoded, and an incomplete one answers
+ * undefined so the caller reads on until the event boundary or EOF completes
+ * it. The frame's code is mapped exactly as an error body's is on the HTTP
+ * path, so a code this build has never heard of still ends the turn — as
+ * `UNKNOWN_GATEWAY_ERROR`, carrying the wire code — rather than reaching pi's
+ * codec to be reported under a guessed one.
+ *
+ * @param relayed - Relayed SSE text since the last delivered event boundary.
+ * @param status - HTTP status of the relayed gateway response.
+ * @returns The coded failure, or undefined when no complete Tau frame is present.
+ */
+const gatewayFailureFrame = (relayed: string, status: number): GatewayModelTransportError | undefined => {
   const frame = relayed.split(sseEventBoundary).find((event) => event.includes(tauGatewayFrameMarker));
   if (frame === undefined) {
     return undefined;
@@ -384,14 +399,22 @@ const providerAccountRefusal = (relayed: string, status: number): GatewayModelTr
     return undefined;
   }
   const envelope = zodUtility.isObject(payload) && zodUtility.isObject(payload['error']) ? payload['error'] : undefined;
-  if (envelope?.['type'] !== 'tau_gateway' || readString(envelope, 'code') !== 'PROVIDER_ACCOUNT_EXHAUSTED') {
+  if (envelope?.['type'] !== 'tau_gateway') {
     return undefined;
   }
+  // A marker-bearing envelope carrying no code is not Tau's failure frame; it
+  // stays the SDK's bytes rather than ending the turn under a status-derived guess.
+  const rawCode = readString(envelope, 'code');
+  if (rawCode === undefined) {
+    return undefined;
+  }
+  const code = gatewayErrorCode(rawCode, status);
   const details = readDetails(envelope);
   return new GatewayModelTransportError({
-    code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-    message: readString(envelope, 'message') ?? 'The model provider account is unavailable.',
+    code,
+    message: readString(envelope, 'message') ?? 'The model gateway ended this stream.',
     status,
+    ...(code === 'UNKNOWN_GATEWAY_ERROR' ? { rawType: rawCode } : {}),
     ...(details === undefined ? {} : { details }),
   });
 };
@@ -403,13 +426,13 @@ const guardedResponse = (options: {
 }): Response => {
   const reader = options.response.body!.getReader();
   const decoder = new TextDecoder();
-  // Relayed text since the last delivered event boundary, so a refusal frame
+  // Relayed text since the last delivered event boundary, so a failure frame
   // split across chunks is still recognised. Trimming stops once the marker
   // appears: from there the whole frame is needed to read its code.
   let relayed = '';
-  let refusing = false;
+  let failing = false;
   // Chunks held back while a marker-bearing frame is still incomplete; they
-  // are replayed in order if that frame turns out not to be a refusal.
+  // are replayed in order if that frame turns out not to be a failure.
   let withheld: Array<Uint8Array<ArrayBuffer>> = [];
   /**
    * Holds one more chunk of a marker-bearing frame; releases them all once the frame proves harmless.
@@ -426,8 +449,8 @@ const guardedResponse = (options: {
     if (!markerFrameComplete(relayed)) {
       return false;
     }
-    // A complete Tau frame that is not this refusal belongs to the SDK after all.
-    refusing = false;
+    // A complete Tau frame carrying no failure code belongs to the SDK after all.
+    failing = false;
     for (const held of withheld) {
       controller.enqueue(held);
     }
@@ -462,13 +485,13 @@ const guardedResponse = (options: {
           return;
         }
         if (next.done) {
-          const trailing = refusing ? providerAccountRefusal(relayed, options.response.status) : undefined;
+          const trailing = failing ? gatewayFailureFrame(relayed, options.response.status) : undefined;
           if (trailing) {
             options.state.failure = trailing;
             controller.error(trailing);
             return;
           }
-          // A marker frame the body never terminated was never a refusal, so it
+          // A marker frame the body never terminated was never a failure, so it
           // and the healthy frames that shared its chunks are the SDK's after
           // all. Closing on them instead loses the turn's terminal frame and
           // reports `Stream ended without finish_reason` in its place.
@@ -480,14 +503,14 @@ const guardedResponse = (options: {
           return;
         }
         relayed += decoder.decode(next.value, { stream: true });
-        refusing ||= relayed.includes(tauGatewayFrameMarker);
-        if (refusing) {
-          // The refusal frame never reaches pi-ai's codec: Tau raises the coded
+        failing ||= relayed.includes(tauGatewayFrameMarker);
+        if (failing) {
+          // The failure frame never reaches pi-ai's codec: Tau raises the coded
           // failure itself rather than letting the SDK report an opaque stream
           // error. An incomplete frame just withholds its bytes and reads on.
-          // ponytail: bytes sharing the refusal's chunk are dropped with it
+          // ponytail: bytes sharing the failure frame's chunk are dropped with it
           // rather than re-encoded; the turn is terminal either way.
-          const failure = providerAccountRefusal(relayed, options.response.status);
+          const failure = gatewayFailureFrame(relayed, options.response.status);
           if (failure) {
             options.state.failure = failure;
             controller.error(failure);
@@ -557,6 +580,15 @@ const authenticatedFetch =
     readonly state: GatewayFetchState;
     readonly providerKind: ModelProviderKind;
     readonly attemptId: string;
+    /** Spend attribution, each sent only when the caller has one to give. */
+    readonly projectId?: string | undefined;
+    readonly chatId?: string | undefined;
+    /**
+     * The billing activity kind this call is, when it is not the gateway's own
+     * default. Typed to the kinds this host can honestly claim, so a value the
+     * billing wire does not define cannot be put on it.
+     */
+    readonly activity?: 'compaction' | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
@@ -580,6 +612,17 @@ const authenticatedFetch =
       // escape hatch, which Tau's gateway never reads (it proxies server-side).
       headers.delete('anthropic-dangerous-direct-browser-access');
       headers.set('x-tau-attempt-id', options.attemptId);
+      // The receipt is the only place this spend can be attributed to the work
+      // that caused it. Absent rather than empty when there is nothing to name.
+      if (options.projectId !== undefined) {
+        headers.set('x-tau-project-id', options.projectId);
+      }
+      if (options.chatId !== undefined) {
+        headers.set('x-tau-chat-id', options.chatId);
+      }
+      if (options.activity !== undefined) {
+        headers.set('x-tau-activity', options.activity);
+      }
       let body = init?.body;
       // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
       // per-system-block cache-control wire shape and uses pi's blanket retention.
@@ -940,6 +983,13 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       state,
       providerKind: request.providerKind!,
       attemptId: request.attemptId,
+      // Per composition, then per request: the worker owns one project and
+      // serves every chat in it.
+      ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+      ...(request.chatId === undefined ? {} : { chatId: request.chatId }),
+      // A generation is the gateway's default activity and says nothing; a
+      // compaction is a kind of its own and says so.
+      ...(request.invocationPurpose === 'compaction' ? { activity: 'compaction' } : {}),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }
@@ -980,9 +1030,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                   thinkingEnabled: true,
                   ...(reasoning.budgetTokens === undefined ? {} : { thinkingBudgetTokens: reasoning.budgetTokens }),
                   ...(reasoning.display === undefined ? {} : { thinkingDisplay: reasoning.display }),
-                  ...(reasoning.effort === undefined
-                    ? {}
-                    : { effort: reasoning.effort === 'minimal' ? 'low' : reasoning.effort }),
+                  ...(reasoning.effort === undefined ? {} : { effort: reasoning.effort }),
                 }),
           } satisfies AnthropicOptions)
         : isOpenAiResponsesProviderKind(request.providerKind)
@@ -1004,15 +1052,23 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                             thinking_level: reasoning.effort.toUpperCase(),
                           },
                           thought_tag_marker: 'think',
-                          // `stream_function_call_arguments: true` belongs here on
-                          // Google's documented wire, but Vertex answers 499
-                          // CANCELLED to every function call emitted after the
-                          // first assistant message while it is set — the second
-                          // sequential call of a turn and every call from user
-                          // turn two on, 14/14 live across all four catalog
-                          // models, and 200 on the same conversations without it
-                          // (blueprint Finding 4 / RC2, ruling Q2). It only made
-                          // tool-input deltas finer-grained on Gemini.
+                          /* `stream_function_call_arguments: true` belongs here on
+                           * Google's documented wire and stays off, for two
+                           * measured reasons. Under shared-quota pressure Vertex
+                           * sheds requests carrying it with a pre-stream 499
+                           * (7/7 inside one bad window, 0/120 outside one). And
+                           * its streamed-arguments serializer cancels a turn
+                           * mid-stream — HTTP 200, real deltas, then a bare
+                           * `[{"error":{"code":499,…CANCELLED}}]` tail no
+                           * pre-stream retry can see — whenever a tool call
+                           * closes a nested object on a string value:
+                           * `apply_parameter_operation` is 0/9 live with the
+                           * flag and 9/9 without it, across 3.7 Flash, 3.8 Flash
+                           * and 3.1 Pro. It is a value shape, so no schema
+                           * contract test can guarantee it away. The live
+                           * matrix's `apply_parameter_operation` row is the
+                           * standing guard for anyone re-enabling it (blueprint
+                           * Finding 1; T13-AB and T3-BISECT). */
                         },
                       },
                     },

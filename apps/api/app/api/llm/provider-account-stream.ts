@@ -1,5 +1,11 @@
+import type { LlmGatewayErrorType } from '#api/llm/llm-gateway.error.js';
 import { createSseDecoder } from '#api/llm/llm-gateway.stream.js';
 import type { SseEvent } from '#api/llm/llm-gateway.stream.js';
+import {
+  classifyUpstreamRefusal,
+  cloudUpstreamRefusalMessage,
+  maximumRefusalMessageCharacters,
+} from '#api/llm/upstream-refusal.js';
 import {
   cloudProviderAccountMessage,
   providerAccountMessage,
@@ -19,7 +25,14 @@ const lineFeed = 10;
  * gateway's memory profile. */
 const maximumFrameBytes = 256 * 1024;
 const encoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 const errorNeedle = encoder.encode('error');
+/* The exact marker the transport switches a stream to failed on
+ * (`tauGatewayFrameMarker`, gateway-model-transport.ts). Scanned for unescaped,
+ * which is why relayed model text cannot trip it. */
+const tauGatewayNeedle = encoder.encode('"type":"tau_gateway"');
+/** The status a forged marker is reported as: the upstream is not answering honestly. */
+const forgedMarkerStatus = 502;
 
 /** Whether `needle` occurs in `haystack`: the cheap gate that keeps healthy frames unparsed. */
 const containsBytes = (haystack: Uint8Array<ArrayBuffer>, needle: Uint8Array<ArrayBuffer>): boolean => {
@@ -43,22 +56,76 @@ const concat = (head: Uint8Array<ArrayBuffer>, tail: Uint8Array<ArrayBuffer>): U
   return joined;
 };
 
-/** The Tau-coded frame that replaces a recognised supplier refusal on the wire. */
-export const providerAccountExhaustedFrame = (input: {
+/**
+ * The Tau-coded frame that replaces a classified provider failure on the wire.
+ * One envelope for every code, so a client that switches on `error.code` needs no
+ * new parsing when a new failure becomes codable.
+ *
+ * @param input - The gateway code its clients switch on, the message the account
+ * owner is allowed to read, and the structured fields the code carries.
+ * @returns The complete SSE frame, blank line included, so both the API decoder
+ * and the transport see one finished event.
+ */
+export const gatewayErrorFrame = (input: {
+  readonly code: LlmGatewayErrorType;
   readonly message: string;
   readonly details: ProviderAccountRefusalDetails;
 }): string =>
   `event: error\ndata: ${JSON.stringify({
     type: 'error',
-    code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+    code: input.code,
     message: input.message,
     error: {
       type: 'tau_gateway',
-      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      code: input.code,
       message: input.message,
       details: input.details,
     },
   })}\n\n`;
+
+/**
+ * Vertex wraps its trailing refusal in a one-element array; every recognizer and
+ * the failure log read the object inside it.
+ *
+ * @param body - A parsed provider body.
+ * @returns The single element of a one-element array, or the body unchanged.
+ */
+const unwrapProviderBody = (body: unknown): unknown =>
+  Array.isArray(body) && body.length === 1 ? (body[0] as unknown) : body;
+
+/**
+ * The `error` member of a provider body.
+ *
+ * @param body - A parsed provider body, already unwrapped.
+ * @returns The error object, or undefined when the body carries none.
+ */
+const providerErrorRecord = (body: unknown): Record<string, unknown> | undefined => {
+  if (body === null || typeof body !== 'object') {
+    return undefined;
+  }
+  const { error } = body as { error?: unknown };
+  return error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
+};
+
+/**
+ * The HTTP status a provider error object names, when it names one as a number.
+ * A provider whose `code` is symbolic (`rate_limit_exceeded`) names no status
+ * here and keeps its frame on the raw-forward path.
+ *
+ * @param error - A provider error object.
+ * @returns The status, or undefined when the error does not carry one.
+ */
+const providerErrorStatus = (error: Record<string, unknown>): number | undefined => {
+  const { code } = error;
+  if (typeof code === 'number') {
+    return Number.isInteger(code) ? code : undefined;
+  }
+  if (typeof code !== 'string' || code.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(code);
+  return Number.isInteger(parsed) ? parsed : undefined;
+};
 
 /**
  * End index (exclusive) of the first complete SSE event in `buffer`, or -1 when
@@ -118,9 +185,11 @@ const terminalFailureOf = (data: unknown): ProviderTerminalFailure => {
   const record = (data === null || typeof data !== 'object' ? {} : data) as Record<string, unknown>;
   const nested = record['error'];
   const source = nested !== null && typeof nested === 'object' ? (nested as Record<string, unknown>) : record;
+  const { code } = source;
   return {
     ...(typeof source['type'] === 'string' ? { type: source['type'] } : {}),
-    ...(typeof source['code'] === 'string' ? { code: source['code'] } : {}),
+    // Vertex names its status as a number; the log reads a code either way.
+    ...(typeof code === 'string' || typeof code === 'number' ? { code: String(code) } : {}),
     ...(typeof source['message'] === 'string' ? { message: source['message'] } : {}),
   };
 };
@@ -169,6 +238,10 @@ export const createProviderAccountFrameFilter = (input: {
 }): TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>> => {
   let pending = new Uint8Array(0);
   let oversized = false;
+  /** The tail of the last oversized piece, so a marker split across it is still seen. */
+  let oversizedCarry = new Uint8Array(0);
+  /** Set once the upstream has counterfeited Tau's envelope; nothing more is relayed. */
+  let forged = false;
   let rewritten = false;
   let reported = false;
   let decoded: SseEvent | undefined;
@@ -196,11 +269,48 @@ export const createProviderAccountFrameFilter = (input: {
     rewritten = true;
     input.onRefusal?.(refusal);
     return encoder.encode(
-      providerAccountExhaustedFrame({
+      gatewayErrorFrame({
+        code: 'PROVIDER_ACCOUNT_EXHAUSTED',
         message: providerAccountMessage(input.accountOwner, refusal),
         details: {
           providerId: input.providerId,
           ...(refusal.providerCode === undefined ? {} : { providerCode: refusal.providerCode }),
+          accountOwner: input.accountOwner,
+        },
+      }),
+    );
+  };
+
+  /**
+   * The Tau-coded frame for a provider failure the account matchers do not claim,
+   * mapped through the same status table the pre-stream legs use so the two cannot
+   * drift. Undefined when the body names no status, which keeps the raw forward.
+   */
+  const codedByStatus = (body: unknown): Uint8Array<ArrayBuffer> | undefined => {
+    const error = providerErrorRecord(body);
+    const status = error === undefined ? undefined : providerErrorStatus(error);
+    if (error === undefined || status === undefined) {
+      return undefined;
+    }
+    const { type } = classifyUpstreamRefusal({ status, accountOwner: input.accountOwner });
+    const { status: providerCode, message } = error;
+    /* The operator owns the key, so the supplier's own reason stays in the message,
+     * clamped the way the pre-stream leg clamps it because the chat persists it. On
+     * Cloud the key is Tau's and the customer reads the shared sentence instead.
+     * Either way the raw sentence still reaches the server log through `report`. */
+    const supplierSentence =
+      typeof message === 'string' && message !== '' ? message.slice(0, maximumRefusalMessageCharacters) : undefined;
+    rewritten = true;
+    return encoder.encode(
+      gatewayErrorFrame({
+        code: type,
+        message:
+          input.accountOwner === 'tau' || supplierSentence === undefined
+            ? cloudUpstreamRefusalMessage({ type, status })
+            : supplierSentence,
+        details: {
+          providerId: input.providerId,
+          ...(typeof providerCode === 'string' ? { providerCode } : {}),
           accountOwner: input.accountOwner,
         },
       }),
@@ -219,6 +329,83 @@ export const createProviderAccountFrameFilter = (input: {
     input.onTerminalFailure?.(terminalFailureOf(data));
   };
 
+  /**
+   * Codes one provider error body — the account matchers first, then the status
+   * table — and records the failure when it codes one. Undefined leaves the
+   * frame on the raw-forward path.
+   */
+  const codedProviderFailure = (raw: unknown): Uint8Array<ArrayBuffer> | undefined => {
+    const body = unwrapProviderBody(raw);
+    // An account refusal has its own observer; every other coded failure is
+    // reported here, so one failure never logs twice.
+    const refusal = recognizeProviderAccountRefusal({ providerId: input.providerId, body });
+    if (refusal) {
+      return coded(refusal);
+    }
+    if (providerErrorRecord(body) === undefined) {
+      return undefined;
+    }
+    /* Reported whether or not the status table can code it: a provider whose
+     * in-band error names a symbolic code (`rate_limit_exceeded`) maps to
+     * nothing here and used to forward with no trace at all (R6). */
+    report(body);
+    return codedByStatus(body);
+  };
+
+  /**
+   * Replaces a raw frame that carries Tau's own envelope. A provider controls
+   * its whole response body, so it can emit `"type":"tau_gateway"` verbatim —
+   * model text cannot, because content and tool arguments are JSON strings whose
+   * quotes arrive escaped. Left alone, such a frame lets the upstream end the
+   * turn with a code, message and details it chose, on the operator path where
+   * the caller configures the base URL (R5).
+   *
+   * The client gets Tau's own outage sentence for either account owner; the raw
+   * frame goes to the server log, where only Tau reads it.
+   */
+  const codedForgedMarker = (frame: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+    forged = true;
+    rewritten = true;
+    report({
+      error: {
+        type: 'forged_tau_gateway_frame',
+        message: textDecoder.decode(frame).slice(0, maximumRefusalMessageCharacters),
+      },
+    });
+    return encoder.encode(
+      gatewayErrorFrame({
+        code: 'PROVIDER_UNAVAILABLE',
+        message: cloudUpstreamRefusalMessage({ type: 'PROVIDER_UNAVAILABLE', status: forgedMarkerStatus }),
+        // No `providerCode`: the only code such a frame carries is the one it invented.
+        details: { providerId: input.providerId, accountOwner: input.accountOwner },
+      }),
+    );
+  };
+
+  /** One complete frame the filter chose not to rewrite, made safe to forward. */
+  const forwarded = (frame: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+    containsBytes(frame, tauGatewayNeedle) ? codedForgedMarker(frame) : frame;
+
+  /**
+   * Vertex ends a quota-exhausted stream by abandoning SSE framing altogether: it
+   * appends a bare, pretty-printed JSON array carrying a 429 after the last
+   * well-formed chunk and closes cleanly. No line in it is a `data:` field, so
+   * every decoder in the chain discards it and the turn dies as `Stream ended
+   * without finish_reason` with the real cause erased (Finding 3).
+   *
+   * Bytes that are not such an error object — including a tail the stream cut
+   * before it became valid JSON — parse as nothing and keep today's raw forward.
+   */
+  const codedTrailingJson = (frame: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> | undefined => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(textDecoder.decode(frame)) as unknown;
+    } catch {
+      return undefined;
+    }
+    return codedProviderFailure(parsed);
+  };
+
   /** The replacement bytes for one complete frame, or undefined to forward it unchanged. */
   const rewrite = (frame: Uint8Array<ArrayBuffer>, final = false): Uint8Array<ArrayBuffer> | undefined => {
     /* Only a frame that can name an error is worth parsing, and only one the
@@ -229,21 +416,25 @@ export const createProviderAccountFrameFilter = (input: {
     }
     const event = decode(frame, final);
     if (event === undefined) {
-      return undefined;
+      return codedTrailingJson(frame);
     }
     if (isErrorEvent(event)) {
       const refusal = recognizeProviderAccountRefusal({ providerId: input.providerId, body: event.data });
       if (refusal) {
         return coded(refusal);
       }
-      // Forwarded unchanged, but no longer unrecorded: the relay's only sight
+      // Coded or forwarded, but no longer unrecorded: the relay's only sight
       // of why the turn ended (R8).
       report(event.data);
-      return undefined;
+      return codedByStatus(event.data);
     }
     const failed = failedResponseError(event.data);
     if (!failed) {
-      return undefined;
+      /* A provider can also refuse in-band, as a plain chunk carrying an `error`
+       * object and none of the markers above; Vertex does. Forwarded, its status
+       * never reached the client, so a mid-stream 429 arrived as a provider
+       * outage with no rate-limit card (F3). */
+      return codedProviderFailure(event.data);
     }
     /* A refusal that reaches the wire only as `response.failed` (no `error`
      * event ahead of it) is coded here, once, ahead of the frame itself. */
@@ -267,15 +458,38 @@ export const createProviderAccountFrameFilter = (input: {
     return head === undefined ? redacted : concat(head, redacted);
   };
 
+  /**
+   * Forwards one piece of a frame too large to hold for a decision. The marker
+   * scan carries the previous piece's tail so a marker split across the seam is
+   * still seen; on a hit the stream ends here, because the pieces already sent
+   * cannot be recalled and a body that counterfeits Tau's envelope has nothing
+   * further worth relaying.
+   */
+  const forwardOversized = (
+    piece: Uint8Array<ArrayBuffer>,
+    controller: TransformStreamDefaultController<Uint8Array<ArrayBuffer>>,
+  ): void => {
+    if (containsBytes(concat(oversizedCarry, piece), tauGatewayNeedle)) {
+      controller.enqueue(codedForgedMarker(piece));
+      return;
+    }
+    oversizedCarry = piece.slice(Math.max(0, piece.byteLength - (tauGatewayNeedle.byteLength - 1)));
+    controller.enqueue(piece);
+  };
+
   const drain = (controller: TransformStreamDefaultController<Uint8Array<ArrayBuffer>>): void => {
     for (;;) {
+      if (forged) {
+        pending = new Uint8Array(0);
+        return;
+      }
       const end = eventEnd(pending);
       if (end < 0) {
         if (oversized || pending.byteLength > maximumFrameBytes) {
           // Too large to hold for a decision: forward its bytes as they arrive.
           oversized = true;
           if (pending.byteLength > 0) {
-            controller.enqueue(pending);
+            forwardOversized(pending, controller);
             pending = new Uint8Array(0);
           }
         }
@@ -285,12 +499,13 @@ export const createProviderAccountFrameFilter = (input: {
       pending = pending.slice(end);
       if (oversized) {
         oversized = false;
+        oversizedCarry = new Uint8Array(0);
         // The decoder never saw this frame's head; start the next one from a clean line.
         decoder = newDecoder();
-        controller.enqueue(frame);
+        forwardOversized(frame, controller);
         continue;
       }
-      controller.enqueue(rewrite(frame) ?? frame);
+      controller.enqueue(rewrite(frame) ?? forwarded(frame));
     }
   };
 
@@ -303,11 +518,16 @@ export const createProviderAccountFrameFilter = (input: {
       drain(controller);
     },
     flush(controller) {
-      if (pending.byteLength === 0) {
+      if (forged || pending.byteLength === 0) {
+        return;
+      }
+      if (oversized) {
+        forwardOversized(pending, controller);
+        pending = new Uint8Array(0);
         return;
       }
       // A stream that ends without its final blank line still carries a decidable frame.
-      controller.enqueue((oversized ? undefined : rewrite(pending, true)) ?? pending);
+      controller.enqueue(rewrite(pending, true) ?? forwarded(pending));
       pending = new Uint8Array(0);
     },
   });

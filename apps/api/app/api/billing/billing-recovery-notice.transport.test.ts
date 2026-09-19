@@ -1,18 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
+import type { DatabaseService } from '#database/database.service.js';
 import type { EmailService } from '#email/email.service.js';
 
 type OwnerRows = ReadonlyArray<{ readonly email: string }>;
 
-const databaseReturning = (rows: OwnerRows): never => {
-  const stub = {
-    database: {
-      select: () => ({
-        from: () => ({ innerJoin: () => ({ where: () => ({ limit: async () => rows }) }) }),
-      }),
-    },
+/**
+ * The transport walks exactly one `select(…).from(…).innerJoin(…).where(…).limit(…)`
+ * chain, so the fake implements that chain and nothing else. Drizzle's `select` is
+ * overloaded, which no single-signature fake can satisfy; the one assertion that
+ * bridges it stays here rather than at each call site.
+ */
+const databaseReturning = (rows: OwnerRows): Pick<DatabaseService, 'database'> => {
+  const database = {
+    select: () => ({
+      from: () => ({ innerJoin: () => ({ where: () => ({ limit: async () => rows }) }) }),
+    }),
   };
-  return stub as never;
+  return { database: database as unknown as DatabaseService['database'] };
 };
 
 const createTransport = (rows: OwnerRows) => {

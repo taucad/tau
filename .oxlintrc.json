@@ -482,7 +482,7 @@
       "error",
       "always",
       {
-        "ignorePattern": "pragma|ignore|prettier-ignore|webpack\\w+:|c8|v8 ignore|type-coverage:|async-iife:",
+        "ignorePattern": "pragma|ignore|prettier-ignore|webpack\\w+:|c8|v8 ignore|type-coverage:|async-iife:|ponytail:",
         "ignoreInlineComments": true,
         "ignoreConsecutiveComments": true
       }

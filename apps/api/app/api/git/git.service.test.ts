@@ -24,6 +24,7 @@ import type {
   StoredObject,
 } from '#api/git/store/port.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
@@ -419,36 +420,9 @@ describe('GitRepositoryService derived state (D19)', () => {
  * Needs `pnpm infra:up` and a migrated database:
  * `DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev`.
  */
-/*
- * The workspace's own gate for a suite that needs a real database
- * (`app/testing/git-storage-migration.integration.test.ts`): probe the
- * configured URL rather than the presence of an environment variable, because
- * the tracked `.env.test` pins a placeholder that answers nothing.
- */
 const databaseUrl = process.env.DATABASE_URL;
 
-const databaseReachable = async (): Promise<boolean> => {
-  try {
-    const probe = postgres(databaseUrl, {
-      max: 1,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- postgres.js option name
-      connect_timeout: 5,
-      onnotice() {
-        /* Probe only; a notice is not a diagnostic. */
-      },
-    });
-    try {
-      await probe`SELECT 1`;
-      return true;
-    } finally {
-      await probe.end();
-    }
-  } catch {
-    return false;
-  }
-};
-
-describe.skipIf(!(await databaseReachable()))('derived_generation is a compare-and-swap (F4)', () => {
+describe.skipIf(!(await databaseReachable(databaseUrl)))('derived_generation is a compare-and-swap (F4)', () => {
   const casOwnerId = `user-w4a-cas-${randomBytes(5).toString('hex')}`;
   const casProjectId = `proj-w4a-cas-${randomBytes(5).toString('hex')}`;
   let client: ReturnType<typeof postgres>;

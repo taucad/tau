@@ -16,7 +16,7 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "vitest run apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
+          "vitest run apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
           "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/project-card-preview-parity.spec.ts src/user-project-thumbnail-generation.spec.ts"
         ],
         "env": {
@@ -76,6 +76,24 @@
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "command": "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
+      }
+    },
+    "test:e2e:live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Opt-in live provider tier: the two specs that spend real provider credit and then assert the billing receipts they produced. The UI is built by the first command rather than a dependsOn, because it must be the cloud variant (TAU_CLOUD_ENABLED=true is a build-time input of ui:build) and a dependency task inherits only the caller's environment — a self-host bundle's transport omits fundedOperations entirely, so no receipt could exist to assert. global-setup.ts starts the UI only: the tier needs a cloud API already listening at TAU_E2E_API_URL (default :4000) with TAU_CLOUD_ENABLED=true, the BILLING_* secrets and the placeholder STRIPE_* values apps/api/.env.example names — nothing on the funded path calls Stripe. Also needs `pnpm infra:up` and one `nx run api:billing-policy:publish:development` per database fork."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "parallel": false,
+        "commands": [
+          "TAU_CLOUD_ENABLED=true pnpm --dir ../.. exec nx run ui:build",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/gemini-browser-agent-host.live.spec.ts src/provider-switch.live.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_LIVE_GEMINI": "true"
+        }
       }
     },
     "test:e2e:safari-host": {

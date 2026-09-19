@@ -127,8 +127,8 @@ export const GenAiInterruptRecoveryOutcome = {
 /**
  * Budgeting mode used for context-window decisions.
  *
- * `estimated` is the only active mode today; exact provider-native counting is
- * reserved for a future TokenBudgetService implementation slot.
+ * `estimated` is the only mode implemented: budgets come from a token estimate
+ * rather than a provider-native count.
  * @public
  */
 export const GenAiContextBudgetKind = {

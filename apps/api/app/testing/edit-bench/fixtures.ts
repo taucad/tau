@@ -1,6 +1,6 @@
 import type { DeterministicEditFileInput, RpcClientErrorCode } from '@taucad/chat';
-import type { BenchmarkErrorCode, ReplayCase, ReplayFixture } from './replay-fixture.schema.js';
-import { replayFixtureStoreSchema } from './replay-fixture.schema.js';
+import type { BenchmarkErrorCode, ReplayCase, ReplayFixture } from '#testing/edit-bench/replay-fixture.schema.js';
+import { replayFixtureStoreSchema } from '#testing/edit-bench/replay-fixture.schema.js';
 
 const encoder = new TextEncoder();
 const encode = (content: string): Uint8Array<ArrayBuffer> => encoder.encode(content);

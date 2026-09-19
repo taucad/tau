@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyUpstreamRefusal,
+  cloudUpstreamRefusalMessage,
   readUpstreamRefusal,
   redactCredentials,
   upstreamRetryAfterSeconds,
@@ -132,5 +133,21 @@ describe('classifyUpstreamRefusal', () => {
       status: 503,
       type: 'PROVIDER_UNAVAILABLE',
     });
+  });
+});
+
+describe('cloudUpstreamRefusalMessage', () => {
+  it.each([
+    ['UPSTREAM_REJECTED', 400, 'The model provider rejected the request (HTTP 400).'],
+    ['RATE_LIMITED', 429, 'The model provider is rate limiting this request.'],
+    ['PROVIDER_UNAVAILABLE', 503, 'The model provider is unavailable.'],
+  ] as const)('should answer a %s with the sentence a Cloud customer reads', (type, status, expected) => {
+    expect(cloudUpstreamRefusalMessage({ type, status })).toBe(expected);
+  });
+
+  it('should never quote the supplier, whatever it said', () => {
+    // The pre-stream leg and the mid-stream frame filter share these sentences so
+    // a refusal cannot name Tau's supplier account on one path and not the other.
+    expect(cloudUpstreamRefusalMessage({ type: 'RATE_LIMITED', status: 429 })).not.toContain('Resource exhausted');
   });
 });

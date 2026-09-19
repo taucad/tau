@@ -13,25 +13,14 @@ import { expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
+import type { StoredProjectConfig } from '#support/project-storage-state.js';
+import { chatIdFromUrl, classifyReceipts } from '#support/usage-receipt.js';
+import type { TurnIdentity, UsageReceipt } from '#support/usage-receipt.js';
 
 /** A catalog row a live spec drives: the selector/cookie id and the provider that bills it. */
 export type LiveModel = {
   readonly id: string;
   readonly providerId: string;
-};
-
-/** One `/v1/billing/usage` row for a model turn. */
-export type UsageReceipt = {
-  readonly kind: 'base';
-  readonly customerState: 'absorbed' | 'released' | 'settled';
-  readonly executionStatus: string;
-  readonly meteringStatus: string;
-  readonly model: { readonly id: string; readonly providerId: string | null };
-  readonly operationId: string;
-  readonly tokens: {
-    readonly output: string | null;
-    readonly reasoning?: string | null;
-  };
 };
 
 /** The chat composer every live spec types into. */
@@ -63,15 +52,38 @@ const withPageText = async (message: string, assertion: () => Promise<void>): Pr
 };
 
 /**
+ * This device's record of the project the running spec created.
+ *
+ * `use-project-manager.tsx` writes the row through `setProjectFileSystemConfig`
+ * before `createProject` resolves — so before the navigation these specs wait
+ * for — and keys it by the durable project id, which is the same id
+ * `useProject()` hands the agent host as `authority.projectId`. Each live test
+ * creates exactly one project, so the newest row is that project.
+ */
+const activeProjectConfig = async (): Promise<StoredProjectConfig> => {
+  const storage = await readProjectStorageState();
+  const config = storage.configs.at(-1);
+  if (!config) {
+    throw new Error('The live project has no filesystem configuration.');
+  }
+  return config;
+};
+
+/**
  * Sign a funded test account in, pin the model and kernel, and open a new project's chat.
  *
  * @param options - The account email, the catalog model the first turn runs on, and the project name.
+ * @returns The project and chat the turns will run in — the same two ids the
+ * browser host sends as `x-tau-project-id`/`x-tau-chat-id`. The chat comes from
+ * the URL while the route is pinned; the project comes from this device's
+ * project record, because the URL carries the project's *slug* and the host
+ * attributes to the id that slug resolves to (`chatIdFromUrl`).
  */
 export const openLiveChat = async (options: {
   readonly email: string;
   readonly modelId: string;
   readonly projectName: string;
-}): Promise<void> => {
+}): Promise<TurnIdentity> => {
   await target.authenticateTauTestUser({
     creditAtoms: '100000000',
     email: options.email,
@@ -95,6 +107,9 @@ export const openLiveChat = async (options: {
   await target.waitFor(() => document.querySelector('[aria-label="Ask Tau to build anything..."]') !== null, null, {
     timeout: 60_000,
   });
+  const chatId = chatIdFromUrl(await target.currentUrl());
+  const config = await activeProjectConfig();
+  return { projectId: config.projectId, chatId };
 };
 
 /**
@@ -224,42 +239,39 @@ export const readUsageReceipts = async (): Promise<readonly UsageReceipt[]> => {
 };
 
 /**
- * Wait until at least `minimumCount` matching receipts exist, and assert every one settled.
+ * Wait until at least `minimumCount` matching receipts were charged, and refuse an absorbed one.
+ *
+ * The floor is over the *settled* receipts rather than over every match: a turn
+ * that recovered from a transient provider refusal writes a `released` receipt
+ * for the same model beside the charged ones, and failing on it would call a
+ * correct run a defect (`classifyReceipts`).
  *
  * @param match - Which receipts this assertion owns (by provider or provider-side model).
- * @param minimumCount - How many the turns so far must have produced.
- * @returns The matching receipts.
+ * @param minimumCount - How many charged receipts the turns so far must have produced.
+ * @returns The charged receipts.
  */
 export const expectSettledReceipts = async (
   match: (receipt: UsageReceipt) => boolean,
   minimumCount: number,
 ): Promise<readonly UsageReceipt[]> => {
-  let receipts: readonly UsageReceipt[] = [];
+  let verdict = classifyReceipts([], match);
   await expect
     .poll(
       async () => {
-        const rows = await readUsageReceipts();
-        receipts = rows.filter((receipt) => match(receipt));
-        return receipts.length;
+        verdict = classifyReceipts(await readUsageReceipts(), match);
+        return verdict.settled.length;
       },
       { timeout: 120_000 },
     )
     .toBeGreaterThanOrEqual(minimumCount);
-  for (const receipt of receipts) {
-    expect(receipt.executionStatus).toBe('succeeded');
-    expect(receipt.customerState).toBe('settled');
-    expect(receipt.meteringStatus).toBe('complete');
+  // Tau paying for the call instead of the customer is a defect in its own right, never a recovery.
+  expect(verdict.absorbed.map((receipt) => receipt.operationId)).toEqual([]);
+  for (const receipt of verdict.settled) {
     expect(BigInt(receipt.tokens.output!)).toBeGreaterThanOrEqual(BigInt(receipt.tokens.reasoning ?? '0'));
   }
-  return receipts;
+  return verdict.settled;
 };
 
 /** The live project's physical file tree, read through the backend its durable config names. */
-export const readActiveProjectTree = async (): Promise<Readonly<Record<string, string>>> => {
-  const storage = await readProjectStorageState();
-  const config = storage.configs.at(-1);
-  if (!config) {
-    throw new Error('The live project has no filesystem configuration.');
-  }
-  return readProjectTree(config);
-};
+export const readActiveProjectTree = async (): Promise<Readonly<Record<string, string>>> =>
+  readProjectTree(await activeProjectConfig());

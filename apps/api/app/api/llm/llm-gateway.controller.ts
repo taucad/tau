@@ -2,7 +2,13 @@ import { Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
 import { LlmGatewayAuthGuard, LlmGatewayPrincipal } from '#api/llm/llm-gateway.guard.js';
-import { assertNoQuery, invocationSignal, readSingleHeader, validateAttemptId } from '#api/llm/llm-gateway.headers.js';
+import {
+  assertNoQuery,
+  invocationSignal,
+  readAttribution,
+  readSingleHeader,
+  validateAttemptId,
+} from '#api/llm/llm-gateway.headers.js';
 
 @Controller({ path: 'llm', version: '1' })
 @UseGuards(LlmGatewayAuthGuard)
@@ -23,6 +29,7 @@ export class LlmGatewayController {
       attemptId: validateAttemptId(readSingleHeader(request, 'x-tau-attempt-id')),
       reply,
       signal: invocationSignal(request, reply),
+      ...readAttribution(request),
       anthropicVersion: readSingleHeader(request, 'anthropic-version'),
       anthropicBeta: readSingleHeader(request, 'anthropic-beta'),
     });
@@ -42,6 +49,7 @@ export class LlmGatewayController {
       attemptId: validateAttemptId(readSingleHeader(request, 'x-tau-attempt-id')),
       reply,
       signal: invocationSignal(request, reply),
+      ...readAttribution(request),
     });
   }
 
@@ -59,6 +67,7 @@ export class LlmGatewayController {
       attemptId: validateAttemptId(readSingleHeader(request, 'x-tau-attempt-id')),
       reply,
       signal: invocationSignal(request, reply),
+      ...readAttribution(request),
     });
   }
 }

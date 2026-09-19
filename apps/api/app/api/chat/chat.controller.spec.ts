@@ -97,6 +97,43 @@ describe('ChatController after the API chat plane deletion', () => {
   });
 
   it.each([
+    ['project_name', 'getBuildNameGenerator'],
+    ['commit_name', 'getCommitMessageGenerator'],
+  ] as const)('attributes a %s turn to its project and chat', async (profile, method) => {
+    const { controller, chatService } = harness();
+
+    await controller.createChat(generatorBody(profile), 'user_1', fastifyRequest(), reply());
+
+    expect(chatService[method]).toHaveBeenCalledWith(
+      expect.anything(),
+      'user_1',
+      'request_chat_1_00000000',
+      { projectHint: 'proj_1', chatHint: 'chat_1' },
+      expect.anything(),
+      expect.any(Function),
+    );
+  });
+
+  it('drops a project id the billing identity contract refuses and still runs the turn', async () => {
+    /* `projectId` is only `z.string().min(1)` on the wire; a value outside the
+     * bounded identity class used to reach `admissionHistorySchema.parse` and
+     * throw a 500 instead of generating a name. */
+    const { controller, chatService } = harness();
+    const response = reply();
+
+    await controller.createChat(
+      { ...generatorBody('project_name'), projectId: 'proj 1' },
+      'user_1',
+      fastifyRequest(),
+      response,
+    );
+
+    expect(chatService.getBuildNameGenerator).toHaveBeenCalledOnce();
+    expect(chatService.getBuildNameGenerator.mock.calls[0]![3]).toEqual({ chatHint: 'chat_1' });
+    expect(response.status).toHaveBeenCalledWith(200);
+  });
+
+  it.each([
     ['tau', { kind: 'tau', model: 'openai-gpt-5.5' }],
     ['acp', { kind: 'acp', hostId: 'origin', agentId: 'codex' }],
   ] as const)('refuses a %s CAD turn with a typed placement error', async (_kind, execution) => {

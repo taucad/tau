@@ -363,9 +363,10 @@ describe('billable model request contract', () => {
         'openai-completions',
       ).success,
     ).toBe(false);
-    // Vertex answers 499 CANCELLED to every function call after the first
-    // assistant message while `stream_function_call_arguments` is set, so the
-    // transport no longer sends it and the gateway no longer admits it.
+    /* Vertex cancels a turn mid-stream whenever a streamed tool call closes a
+     * nested object on a string value, which `apply_parameter_operation` does,
+     * so the transport no longer sends `stream_function_call_arguments` and the
+     * gateway no longer admits it (T13-AB, T3-BISECT). */
     expect(
       safeParseBillableModelRequest(
         {

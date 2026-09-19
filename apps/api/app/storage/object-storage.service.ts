@@ -19,7 +19,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
-import { STORAGE_HEALTH_PROBE_KEY, STORAGE_NAMESPACE_PREFIXES } from '#storage/storage.constants.js';
+import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage/storage.constants.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
@@ -528,7 +528,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     pageSize?: number;
   }): AsyncIterable<ListedObject> {
     const prefix = this.resolveKey(args.namespace, args.keyPrefix).resolvedKey;
-    const namespacePrefix = STORAGE_NAMESPACE_PREFIXES[args.namespace];
+    const namespacePrefix = storageNamespacePrefixes[args.namespace];
     const bucket = this.resolveBucket(args.tier);
     let continuationToken: string | undefined;
 
@@ -750,7 +750,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   }
 
   public publicUrl(args: { namespace: StorageNamespace; key: string }): string {
-    const prefix = STORAGE_NAMESPACE_PREFIXES[args.namespace];
+    const prefix = storageNamespacePrefixes[args.namespace];
     const encodedKey = args.key
       .split('/')
       .map((segment) => encodeURIComponent(segment))
@@ -777,7 +777,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
       const response = await this.client.send(
         new HeadObjectCommand({
           Bucket: this.bucket,
-          Key: STORAGE_HEALTH_PROBE_KEY,
+          Key: storageHealthProbeKey,
         }),
       );
 
@@ -825,7 +825,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
    * `blobs/` + `ab/cde...` → `blobs/ab/cde...`
    */
   private resolveKey(namespace: StorageNamespace, key: string): { resolvedKey: string } {
-    return { resolvedKey: `${STORAGE_NAMESPACE_PREFIXES[namespace]}${key}` };
+    return { resolvedKey: `${storageNamespacePrefixes[namespace]}${key}` };
   }
 
   private resolveBucket(tier: StorageTier | undefined): string {

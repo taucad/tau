@@ -11,6 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@tauc
 import { formatCreditAtoms } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { usageColumns, usageEventId, usageEventNetAtoms } from '#routes/usage/columns.js';
+import { chatLabel, projectLabel } from '#routes/usage/activity-names.js';
+import type { ProjectNames } from '#routes/usage/activity-names.js';
+import { useChatName } from '#routes/usage/use-chat-name.js';
 
 const tableHooks = { useReactTable };
 
@@ -18,6 +21,8 @@ type UsageTableProps = {
   readonly rows: WireUsageEvent[];
   /** True when the server has further pages for this range. */
   readonly hasMore: boolean;
+  /** The account's project listing, or why the page has none, so a receipt names its project instead of identifying it. */
+  readonly projectNames: ProjectNames;
   readonly title?: string;
   readonly description?: string;
   /** Row whose credit explanation is open; owned by the page so a refresh keeps it. */
@@ -25,11 +30,28 @@ type UsageTableProps = {
   readonly onOpenEventChange: (id: string | undefined) => void;
 };
 
-function DetailRow({ label, value }: { readonly label: string; readonly value: string }): React.JSX.Element {
+function DetailRow({
+  label,
+  value,
+  isPending,
+}: {
+  readonly label: string;
+  readonly value: string;
+  /** Present when this row resolves after the panel opens; the live region then exists before its value changes. */
+  readonly isPending?: boolean;
+}): React.JSX.Element {
   return (
     <div className='flex justify-between gap-4'>
       <dt className='text-muted-foreground'>{label}</dt>
-      <dd className='font-mono'>{value}</dd>
+      <dd className='font-mono'>
+        {isPending === undefined ? (
+          value
+        ) : (
+          <span role='status' aria-busy={isPending}>
+            {value}
+          </span>
+        )}
+      </dd>
     </div>
   );
 }
@@ -37,15 +59,35 @@ function DetailRow({ label, value }: { readonly label: string; readonly value: s
 const tokenValue = (value: string | undefined): string => value ?? 'Not reported';
 
 /** The per-action credit explanation: exact credits, tokens and the pinned public rates. */
-function UsageEventDetail({ event }: { readonly event: WireUsageEvent }): React.JSX.Element {
+function UsageEventDetail({
+  event,
+  projectNames,
+}: {
+  readonly event: WireUsageEvent;
+  readonly projectNames: ProjectNames;
+}): React.JSX.Element {
+  /* Mounted only for the row a reader opened, so no chat storage is touched
+     until then — the page, prerendered shell included, still renders with no
+     local source behind it. */
+  const chatName = useChatName(event.activity.projectHint, event.activity.chatHint);
   return (
     <div className='grid gap-4 rounded-md border p-4 text-sm md:grid-cols-3' data-testid='usage-event-detail'>
       <dl className='flex flex-col gap-1'>
         <DetailRow label='Credits' value={`${formatCreditAtoms(usageEventNetAtoms(event))} credits`} />
         <DetailRow label='Model' value={event.model.id} />
         <DetailRow label='Activity' value={event.activity.kind} />
-        <DetailRow label='Project' value={event.activity.projectHint ?? 'Other Tau activity'} />
-        <DetailRow label='Chat' value={event.activity.chatHint ?? 'Other Tau activity'} />
+        <DetailRow
+          label='Project'
+          value={projectLabel(event.activity.projectHint, projectNames)}
+          isPending={event.activity.projectHint === null ? undefined : projectNames === 'asking'}
+        />
+        <DetailRow
+          label='Chat'
+          value={chatLabel(event.activity, chatName)}
+          isPending={
+            event.activity.chatHint === null || event.activity.projectHint === null ? undefined : chatName === undefined
+          }
+        />
         <DetailRow label='Usage time' value={event.usageOccurredAt ?? 'Not reported'} />
         <DetailRow label='Range timing' value={event.timingStatus} />
       </dl>
@@ -94,6 +136,7 @@ function UsageEventDetail({ event }: { readonly event: WireUsageEvent }): React.
 export function UsageTable({
   rows,
   hasMore,
+  projectNames,
   title = 'Activity',
   description,
   openEventId,
@@ -152,7 +195,7 @@ export function UsageTable({
             onOpenEventChange(id === openEventId ? undefined : id);
           }}
         />
-        {openEvent ? <UsageEventDetail event={openEvent} /> : undefined}
+        {openEvent ? <UsageEventDetail event={openEvent} projectNames={projectNames} /> : undefined}
         <p className='text-sm text-muted-foreground'>
           {hasMore
             ? `Showing the first ${rows.length} actions of this range; the totals above cover the whole range.`

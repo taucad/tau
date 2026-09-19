@@ -23,6 +23,9 @@ const singlePathFields = new Map<string, 'targetFile' | 'path'>([
   [toolName.globSearch, 'path'],
 ]);
 
+/** `Array.isArray` widens an `unknown` to `any[]`, so narrow through a guard that keeps the elements `unknown`. */
+const isUnknownArray = (value: unknown): value is readonly unknown[] => Array.isArray(value);
+
 const repairModelPath = (value: unknown): string | undefined => {
   if (typeof value !== 'string') {
     return undefined;
@@ -43,18 +46,11 @@ const repairPathField = (record: Record<string, unknown>, field: string): Record
 };
 
 const repairPathRows = (value: unknown, field: string): { value: unknown; changed: boolean } => {
-  if (!Array.isArray(value)) {
+  if (!isUnknownArray(value)) {
     return { value, changed: false };
   }
-  let changed = false;
-  const rows = value.map((row) => {
-    if (!isRecord(row)) {
-      return row;
-    }
-    const repaired = repairPathField(row, field);
-    changed ||= repaired !== undefined;
-    return repaired ?? row;
-  });
+  const rows = value.map((row) => (isRecord(row) ? (repairPathField(row, field) ?? row) : row));
+  const changed = rows.some((row, index) => row !== value[index]);
   return { value: changed ? rows : value, changed };
 };
 
@@ -68,8 +64,8 @@ export const normalizeProjectPathToolInputAliases = (name: string, input: unknow
     return { input, changed: false, healedKeys: [] };
   }
 
-  if (name === toolName.testModel && Array.isArray(input['files'])) {
-    const files = input['files'];
+  const { files } = input;
+  if (name === toolName.testModel && isUnknownArray(files)) {
     const nextFiles = files.map((value) => repairModelPath(value) ?? value);
     const changed = nextFiles.some((value, index) => value !== files[index]);
     return changed
@@ -124,8 +120,8 @@ export const normalizeProjectPathToolOutputAliases = (
   let next = output;
   const healedKeys: string[] = [];
   for (const [collection, field] of rowFields) {
-    if (field === '' && Array.isArray(next[collection])) {
-      const values = next[collection];
+    const values = next[collection];
+    if (field === '' && isUnknownArray(values)) {
       const repaired = values.map((value) => repairModelPath(value) ?? value);
       if (repaired.some((value, index) => value !== values[index])) {
         next = { ...next, [collection]: repaired };
@@ -134,24 +130,23 @@ export const normalizeProjectPathToolOutputAliases = (
       continue;
     }
 
-    const repaired = repairPathRows(next[collection], field);
+    const repaired = repairPathRows(values, field);
     if (repaired.changed) {
       next = { ...next, [collection]: repaired.value };
       healedKeys.push(collection);
     }
   }
 
-  if (name === toolName.getKernelResult && Array.isArray(next['kernelIssues'])) {
-    let changed = false;
-    const kernelIssues = next['kernelIssues'].map((issue) => {
+  const issues = next['kernelIssues'];
+  if (name === toolName.getKernelResult && isUnknownArray(issues)) {
+    const kernelIssues = issues.map((issue) => {
       if (!isRecord(issue) || !isRecord(issue['location'])) {
         return issue;
       }
       const location = repairPathField(issue['location'], 'fileName');
-      changed ||= location !== undefined;
       return location ? { ...issue, location } : issue;
     });
-    if (changed) {
+    if (kernelIssues.some((issue, index) => issue !== issues[index])) {
       next = { ...next, kernelIssues };
       healedKeys.push('kernelIssues');
     }

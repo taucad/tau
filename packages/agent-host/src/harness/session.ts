@@ -84,7 +84,20 @@ const zeroUsage: Usage = {
 // 16,384 with a per-call raise up to the route ceiling (Q2).
 const defaultRequestedMaxTokens = 16_384;
 
-const requestedMaxTokens = (ceiling: number, requested: number | undefined): number =>
+/**
+ * The completion ceiling one turn asks the provider for.
+ *
+ * A ceiling is a limit, not a spend: the provider bills what it generates, and
+ * on a reasoning model this budget has to cover thinking as well as the answer.
+ * Exported so a harness can send what a real turn sends instead of restating
+ * the number.
+ *
+ * @param ceiling - The route's own maximum output tokens.
+ * @param requested - A per-call raise, bounded by that ceiling.
+ * @returns The `maxTokens` the provider request carries.
+ * @public
+ */
+export const requestedMaxTokens = (ceiling: number, requested: number | undefined): number =>
   Math.min(requested ?? defaultRequestedMaxTokens, ceiling);
 
 const modelFor = (options: AgentSessionModel): Model<Api> => ({
@@ -161,6 +174,8 @@ const createPartial = (model: Model<Api>): AssistantMessage => ({
 
 type CreateTransportStreamOptions = {
   readonly transport: ModelTransport;
+  /** The chat every request from this stream belongs to, for spend attribution. */
+  readonly chatId?: string | undefined;
   readonly providerKind?: ModelProviderKind | undefined;
   readonly reasoning?: ModelReasoningConfig | undefined;
   readonly identities: MessageIdentities;
@@ -295,6 +310,7 @@ export const createTransportStreamFunction =
         const documents = options.documents?.();
         const events = options.transport.stream({
           attemptId,
+          ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
           invocationPurpose,
           ...(funded
             ? {
@@ -676,6 +692,8 @@ const asMiddleware =
 
 const compactionModelsWithTransport = (options: {
   readonly transport: ModelTransport;
+  /** The chat whose history this compaction summarises. */
+  readonly chatId?: string | undefined;
   readonly providerKind?: ModelProviderKind | undefined;
   readonly reasoning?: ModelReasoningConfig | undefined;
   readonly identities: MessageIdentities;
@@ -701,6 +719,7 @@ const compactionModelsWithTransport = (options: {
         const documents = options.documents();
         const stream = options.transport.stream({
           attemptId,
+          ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
           invocationPurpose: 'compaction',
           ...(documents.size === 0 ? {} : { documents: new Map(documents) }),
           ...(funded
@@ -1227,6 +1246,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   let restoreRecentSkillContent = false;
   const base = createTransportStreamFunction({
     transport: options.modelTransport,
+    chatId: options.chatId,
     providerKind: effectiveModel.providerKind,
     reasoning: effectiveModel.reasoning,
     identities: record.messages,
@@ -1367,6 +1387,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       ? undefined
       : compactionModelsWithTransport({
           transport: options.modelTransport,
+          chatId: options.chatId,
           providerKind: effectiveModel.providerKind,
           reasoning: effectiveModel.reasoning,
           identities: record.messages,

@@ -2,8 +2,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import {
+  assertTieredRoutesAreFunded,
   billableModelRouteIds,
   CodeOwnedBillableModelQualificationResolver,
+  supplierIdentityForRoute,
 } from '#api/billing/billable-model-qualification.js';
 import type {
   BillableInvocationIntent,
@@ -49,8 +51,8 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(20);
-    expect(new Set(billableModelRouteIds).size).toBe(20);
+    expect(billableModelRouteIds).toHaveLength(21);
+    expect(new Set(billableModelRouteIds).size).toBe(21);
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
     expect(billableModelRouteIds).toContain('morph-minimax-m2.7');
   });
@@ -486,6 +488,18 @@ describe('catalog route vocabulary', () => {
         model: row.provider.id === 'vertexai' ? `google/${row.model}` : row.model,
       });
     }
+  });
+
+  it('should refuse to fund a route no catalog row names', () => {
+    expect(() => supplierIdentityForRoute('openai-not-a-catalog-row')).toThrow(
+      'Funded route openai-not-a-catalog-row has no catalog row',
+    );
+  });
+
+  it('should refuse a premium tariff that no funded route can pin', () => {
+    expect(() => {
+      assertTieredRoutesAreFunded(['openai-gpt-5.6-terrra']);
+    }).toThrow('Tiered tariff openai-gpt-5.6-terrra has no funded route');
   });
 
   it('should refuse a supplier model id that is not a catalog route id', () => {

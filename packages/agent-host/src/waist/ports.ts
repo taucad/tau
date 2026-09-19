@@ -131,6 +131,12 @@ export type AgentLiveEventPayload = AgentLiveEvent extends infer Event
 export type ModelStreamRequest = {
   /** Durable caller identity for this one Tau gateway invocation. */
   readonly attemptId: string;
+  /**
+   * The chat this invocation belongs to, for the gateway's spend attribution.
+   * Per request rather than per transport: one transport serves every chat in a
+   * worker. Absent when the caller has no chat identity to give.
+   */
+  readonly chatId?: string | undefined;
   /** Why this distinct provider invocation exists. */
   readonly invocationPurpose: 'generation' | 'compaction';
   /** Called after the response header is validated and before its stream is consumed. */

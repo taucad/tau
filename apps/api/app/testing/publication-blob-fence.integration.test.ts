@@ -7,6 +7,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import * as schema from '#database/schema.js';
@@ -42,24 +43,7 @@ import { dirname, join } from 'node:path';
    and overridable on the command line. */
 const databaseUrl = process.env.DATABASE_URL;
 
-const reachable = async (): Promise<boolean> => {
-  const probe = postgres(databaseUrl, {
-    max: 1,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- postgres.js option name
-    connect_timeout: 5,
-    onnotice() {
-      /* Probe only. */
-    },
-  });
-  try {
-    await probe`SELECT 1`;
-    return true;
-  } catch {
-    return false;
-  } finally {
-    await probe.end();
-  }
-};
+const reachable = typeof databaseUrl === 'string' && databaseUrl.length > 0 && (await databaseReachable(databaseUrl));
 
 const utf8 = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 
@@ -93,7 +77,7 @@ const git = (cwd: string, ...args: readonly string[]): string =>
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-describe.skipIf(!(await reachable()))('publication reference counting on a real PostgreSQL', () => {
+describe.skipIf(!reachable)('publication reference counting on a real PostgreSQL', () => {
   let client: postgres.Sql;
   let database: ReturnType<typeof drizzle<typeof schema>>;
   const shas: string[] = [];

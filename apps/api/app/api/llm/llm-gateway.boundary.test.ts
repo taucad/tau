@@ -1,30 +1,34 @@
-import { EventEmitter } from 'node:events';
-import type { ServerResponse } from 'node:http';
 import { Reflector } from '@nestjs/core';
 import type { ConfigService } from '@nestjs/config';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost, ExecutionContext } from '@nestjs/common';
 import type { Auth } from 'better-auth';
-import type { FastifyRequest } from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { describe, expect, it, vi } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
+import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
+import type { ModelInvocationIntent } from '#api/llm/model-invocation.types.js';
 import { LlmGatewayAuthGuard, readLlmGatewayPrincipal } from '#api/llm/llm-gateway.guard.js';
 import { readSingleHeader, validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
-import { GatewayAbortScope, GatewayDownstreamLifecycle } from '#api/llm/llm-gateway.stream.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 const request = (headers: Record<string, string> = {}, rawHeaders?: string[]): FastifyRequest =>
   ({
     headers,
-    raw: { rawHeaders: rawHeaders ?? Object.entries(headers).flatMap(([name, value]) => [name, value]) },
+    query: {},
+    raw: {
+      rawHeaders: rawHeaders ?? Object.entries(headers).flatMap(([name, value]) => [name, value]),
+      once: () => undefined,
+    },
   }) as unknown as FastifyRequest;
 
 const contextFor = (value: FastifyRequest): ExecutionContext =>
   ({
-    getClass: () => class GatewayTestController {},
+    // The real controller, so a Reflector lookup reads the metadata the routes carry.
+    getClass: () => LlmGatewayController,
     getHandler: () => () => undefined,
     getType: () => 'http',
     switchToHttp: () => ({ getRequest: () => value }),
@@ -32,21 +36,31 @@ const contextFor = (value: FastifyRequest): ExecutionContext =>
 
 const config = {
   get(key: string) {
-    if (key === 'TAU_FRONTEND_URL') return 'https://tau.new';
-    if (key === 'ADDITIONAL_CORS_ORIGINS') return ['https://taucad.dev'];
-    if (key === 'NODE_ENV') return 'production';
+    if (key === 'TAU_FRONTEND_URL') {
+      return 'https://tau.new';
+    }
+    if (key === 'ADDITIONAL_CORS_ORIGINS') {
+      return ['https://taucad.dev'];
+    }
+    if (key === 'NODE_ENV') {
+      return 'production';
+    }
     return undefined;
   },
 } as unknown as ConfigService<Environment, true>;
 
 const errorType = (error: unknown): string | undefined => {
-  if (!(error instanceof LlmGatewayError)) return undefined;
+  if (!(error instanceof LlmGatewayError)) {
+    return undefined;
+  }
   const response = error.getResponse() as { error?: { type?: string } };
   return response.error?.type;
 };
 
 const errorMessage = (error: unknown): string | undefined => {
-  if (!(error instanceof LlmGatewayError)) return undefined;
+  if (!(error instanceof LlmGatewayError)) {
+    return undefined;
+  }
   const response = error.getResponse() as { error?: { message?: string } };
   return response.error?.message;
 };
@@ -69,7 +83,9 @@ describe('gateway authentication boundary', () => {
   };
 
   it('binds the combined authentication guard to both controller routes', () => {
-    expect(Reflect.getMetadata('__guards__', LlmGatewayController)).toContain(LlmGatewayAuthGuard);
+    // Through Nest's own Reflector: `Reflect.getMetadata` exists only because
+    // reflect-metadata patches the native object.
+    expect(new Reflector().get<unknown[]>('__guards__', LlmGatewayController)).toContain(LlmGatewayAuthGuard);
   });
 
   it('accepts a Better Auth session principal', async () => {
@@ -162,51 +178,111 @@ describe('gateway provider headers', () => {
   });
 });
 
-describe('gateway abort settlement state', () => {
-  afterEach(() => vi.useRealTimers());
+describe('gateway receipt attribution', () => {
+  const attemptHeaders = { 'x-tau-attempt-id': 'attempt_boundary' };
 
-  it('keeps client abort and gateway destroy mutually exclusive', () => {
-    const clientRaw = new EventEmitter();
-    const onClientAbort = vi.fn();
-    const client = new GatewayDownstreamLifecycle(
-      clientRaw as unknown as Pick<ServerResponse, 'once' | 'removeListener'>,
-      onClientAbort,
+  /** Drives a real route through a real service and records the intents it built. */
+  const relay = async (headers: Record<string, string>, rawHeaders?: string[]): Promise<ModelInvocationIntent[]> => {
+    const intents: ModelInvocationIntent[] = [];
+    const reply: Record<string, unknown> = { raw: { once: () => undefined, writableFinished: false } };
+    for (const name of ['header', 'status', 'send']) {
+      reply[name] = () => reply;
+    }
+    const gateway = new LlmGatewayService({
+      invoke: async (intent) => {
+        intents.push(intent);
+        return { state: 'terminal', operationId: 'op_boundary' };
+      },
+    });
+    await new LlmGatewayController(gateway).openai(
+      request(headers, rawHeaders),
+      reply as unknown as FastifyReply,
+      'user_boundary',
     );
-    clientRaw.emit('close');
-    expect(client.cause).toBe('client_abort');
-    expect(onClientAbort).toHaveBeenCalledOnce();
+    return intents;
+  };
 
-    const gatewayRaw = new EventEmitter();
-    const onGatewayClose = vi.fn();
-    const gateway = new GatewayDownstreamLifecycle(
-      gatewayRaw as unknown as Pick<ServerResponse, 'once' | 'removeListener'>,
-      onGatewayClose,
-    );
-    gateway.markGatewayDestroy();
-    gatewayRaw.emit('close');
-    expect(gateway.cause).toBe('gateway_destroy');
-    expect(onGatewayClose).not.toHaveBeenCalled();
+  it('should carry both attribution headers into the invocation intent', async () => {
+    const intents = await relay({
+      ...attemptHeaders,
+      'x-tau-project-id': 'proj_01J8ZK4E',
+      'x-tau-chat-id': 'chat_01J8ZK4F',
+    });
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({
+      surface: 'gateway',
+      projectHint: 'proj_01J8ZK4E',
+      chatHint: 'chat_01J8ZK4F',
+    });
   });
 
-  it('aborts a stalled post-client-abort drain at its idle deadline', async () => {
-    vi.useFakeTimers();
-    const scope = new GatewayAbortScope(20, 100);
-    scope.touch();
-    scope.startPostAbortDrain();
-    await vi.advanceTimersByTimeAsync(21);
-    expect(scope.controller.signal.aborted).toBe(true);
-    expect(scope.abortReason).toBe('upstream_idle');
+  it('should leave both members absent when the caller sends neither header', async () => {
+    const intents = await relay(attemptHeaders);
+
+    expect(intents[0]).not.toHaveProperty('projectHint');
+    expect(intents[0]).not.toHaveProperty('chatHint');
   });
 
-  it('aborts an active post-client-abort drain at its total settlement deadline', async () => {
-    vi.useFakeTimers();
-    const scope = new GatewayAbortScope(100, 20);
-    scope.touch();
-    scope.startPostAbortDrain();
-    await vi.advanceTimersByTimeAsync(21);
-    expect(scope.controller.signal.aborted).toBe(true);
-    expect(scope.abortReason).toBe('settlement_deadline');
+  it.each(['project one', 'proj/1', 'a'.repeat(129)])(
+    'should drop the malformed hint %s and still relay the turn',
+    async (hint) => {
+      // Attribution is best effort: a turn the caller is paying for is never
+      // refused because its receipt would be filed under nothing.
+      const intents = await relay({ ...attemptHeaders, 'x-tau-project-id': hint, 'x-tau-chat-id': 'chat_ok' });
+
+      expect(intents).toHaveLength(1);
+      expect(intents[0]).not.toHaveProperty('projectHint');
+      expect(intents[0]).toMatchObject({ chatHint: 'chat_ok' });
+    },
+  );
+
+  it('should honour a compaction activity the client asserts', async () => {
+    const intents = await relay({ ...attemptHeaders, 'x-tau-activity': 'compaction' });
+
+    expect(intents[0]).toMatchObject({ activity: 'compaction' });
   });
+
+  it('should label a turn agent when the caller asserts no activity', async () => {
+    const intents = await relay(attemptHeaders);
+
+    expect(intents[0]).toMatchObject({ activity: 'agent' });
+  });
+
+  it.each(['title', 'commit', 'summary', 'completion', 'other', 'AGENT', 'not-a-kind', ''])(
+    'should refuse the asserted activity %s and label the turn agent',
+    async (activity) => {
+      /* `title` and `commit` are the load-bearing pair: they route to a separate
+       * `helper` concurrency pool, so honouring them from a header would let a
+       * caller admit past the primary pool's limit. */
+      const intents = await relay({ ...attemptHeaders, 'x-tau-activity': activity });
+
+      expect(intents).toHaveLength(1);
+      expect(intents[0]).toMatchObject({ activity: 'agent' });
+    },
+  );
+
+  it.each(['x-tau-project-id', 'x-tau-chat-id', 'x-tau-activity'])(
+    'should refuse a duplicated %s with a 400',
+    async (name) => {
+      // A second value is an ambiguous identity, not a malformed one: the same
+      // answer readSingleHeader already gives x-tau-attempt-id.
+      const refusal = relay({ ...attemptHeaders, [name]: 'first' }, [
+        'x-tau-attempt-id',
+        'attempt_boundary',
+        name,
+        'first',
+        name,
+        'second',
+      ]);
+
+      await expect(refusal).rejects.toSatisfy(
+        (error: unknown) =>
+          error instanceof LlmGatewayError && error.getStatus() === 400 && errorType(error) === 'INVALID_REQUEST',
+      );
+      await expect(refusal).rejects.toThrow(`Duplicate ${name} headers are not allowed.`);
+    },
+  );
 });
 
 describe('gateway error envelope on the wire', () => {

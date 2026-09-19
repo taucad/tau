@@ -135,3 +135,32 @@ export const classifyUpstreamRefusal = (input: {
   }
   return { status: HttpStatus.BAD_GATEWAY, type: 'UPSTREAM_REJECTED' };
 };
+
+/**
+ * How much of a supplier's own sentence an operator is shown. The message is
+ * persisted into the chat's error row, so a provider that echoes a fragment of
+ * the request it rejected cannot make that row unbounded.
+ */
+export const maximumRefusalMessageCharacters = 500;
+
+/**
+ * What a Cloud customer is told about a refused upstream call. Tau owns the key
+ * on that path, so the supplier's own sentence never leaves the API; these three
+ * sentences are all a customer reads. Shared so the pre-stream leg and the
+ * mid-stream frame filter cannot drift apart.
+ *
+ * @param input - The classification this refusal already mapped to, and the
+ * upstream status it came from.
+ * @returns The message the customer may read.
+ */
+export const cloudUpstreamRefusalMessage = (input: {
+  readonly type: LlmGatewayErrorType;
+  readonly status: number;
+}): string => {
+  if (input.type === 'UPSTREAM_REJECTED') {
+    return `The model provider rejected the request (HTTP ${String(input.status)}).`;
+  }
+  return input.type === 'RATE_LIMITED'
+    ? 'The model provider is rate limiting this request.'
+    : 'The model provider is unavailable.';
+};

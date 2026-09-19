@@ -983,6 +983,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
               baseUrl: agent.gatewayBaseUrl,
               model: agent.model,
               auth: () => currentCredential?.credential,
+              /* No `projectId`: a `tau serve` workspace is a directory, not a
+               * cloud project, so its receipts name no project by design. */
             }),
           }
         : {}),

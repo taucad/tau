@@ -10,7 +10,7 @@ export {
   providerMessageSchema,
   userProviderMessageSchema,
 } from '#log/event-schema.js';
-export { createAgentSession, createTransportStreamFunction } from '#harness/session.js';
+export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
 export { createTauAgentHost, isResumableRunFailure } from '#host/tau-agent-host.js';
 /* The daemon channel vocabulary. Zod only — the WebSocket client half validates
  * against these same schemas inside a browser bundle, so they must not ride the

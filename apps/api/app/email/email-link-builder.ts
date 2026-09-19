@@ -14,6 +14,7 @@ export const sanitizeFrontendRedirectPath = ({
   callbackURL,
   frontendURL,
 }: {
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- URLSearchParams.get returns null for a missing key
   readonly callbackURL?: string | null;
   readonly frontendURL: string;
 }): string => {

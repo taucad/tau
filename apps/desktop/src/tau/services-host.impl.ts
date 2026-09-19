@@ -893,6 +893,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         });
         const transportOptions = {
           baseUrl: agentHostConfig.gatewayBaseUrl,
+          /* The renderer's own project id, which is the id `GET /v1/projects`
+           * lists, so every receipt this launcher produces attributes to the
+           * project the usage page can name. */
+          projectId,
           auth: () => authToken,
         } as const;
         return revisions.record(

@@ -157,10 +157,14 @@ const googleReasoningConfigSchema = z
           })
           .strict(),
         thought_tag_marker: z.literal('think'),
-        // `stream_function_call_arguments` is deliberately absent, and `.strict()`
-        // therefore refuses it: Vertex answers 499 CANCELLED to every function
-        // call emitted after the first assistant message while that flag is set
-        // (vertex-ai-cross-provider-closeout-blueprint Finding 4 / RC2, ruling Q2).
+        /* `stream_function_call_arguments` is deliberately absent, and `.strict()`
+         * therefore refuses it. Two measured mechanisms keep it off: Vertex sheds
+         * requests carrying it with a pre-stream 499 under shared-quota pressure,
+         * and its streamed-arguments serializer cancels a turn mid-stream — HTTP
+         * 200, real deltas, then a bare `CANCELLED` error array — whenever a tool
+         * call closes a nested object on a string value. `apply_parameter_operation`
+         * does exactly that and measured 0/9 live with the flag, 9/9 without
+         * (blueprint Finding 1; T13-AB and T3-BISECT). */
       })
       .strict(),
   })
@@ -297,7 +301,7 @@ export const billableModelRequestSchema = z
     include: z.array(z.literal('reasoning.encrypted_content')).max(1).optional(),
     reasoning: z
       .object({
-        effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+        effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']),
         summary: z.enum(['auto', 'concise', 'detailed']).optional(),
       })
       .strict()
@@ -417,7 +421,7 @@ const responsesWireSchema = z
     max_output_tokens: z.number(),
     reasoning: z
       .object({
-        effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+        effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']),
         summary: z.enum(['auto', 'concise', 'detailed']).optional(),
       })
       .strict()

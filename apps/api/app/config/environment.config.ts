@@ -469,6 +469,7 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
  * (or migrates from under) another checkout's schema.
  */
 const withWorktreeDatabases = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  // oxlint-disable-next-line @typescript-eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
   if (environment['NODE_ENV'] !== 'development') {
     return environment;
   }

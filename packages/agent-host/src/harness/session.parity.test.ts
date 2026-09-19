@@ -1250,6 +1250,8 @@ describe('pi full-turn parity fixture', () => {
     expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(0);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.invocationPurpose).toBe('compaction');
+    // Compaction spend belongs to the chat that caused it, like its generation.
+    expect(requests[0]?.chatId).toBe('chat-summary-stop');
     expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(1);
     expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(1);
     await session.close();

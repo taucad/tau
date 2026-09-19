@@ -12,7 +12,7 @@ import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.
 import { ObjectStorageService, isPreconditionFailed } from '#storage/object-storage.service.js';
 import type { PutBlobResult } from '#storage/object-storage.service.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
-import { STORAGE_HEALTH_PROBE_KEY } from '#storage/storage.constants.js';
+import { storageHealthProbeKey } from '#storage/storage.constants.js';
 
 const scaleIt = process.env['TAU_SCALE_TESTS'] === '1' ? it : it.skip;
 
@@ -197,7 +197,7 @@ describe('ObjectStorageService', () => {
     if (result !== undefined) {
       expect(typeof result.etag).toBe('string');
       expect(typeof result.size).toBe('number');
-      expect(STORAGE_HEALTH_PROBE_KEY).toBe('__health/probe.txt');
+      expect(storageHealthProbeKey).toBe('__health/probe.txt');
     }
   });
 

@@ -9,12 +9,17 @@ if (typeof rawViewCookieSecret !== 'string' || rawViewCookieSecret.length < 32) 
 }
 
 if (!Reflect.has(globalThis, 'DOMMatrix')) {
-  class TestDOMMatrix {
-    public readonly is2D = true;
-    public readonly isIdentity = true;
+  class TestDomMatrix {
+    public get is2D(): boolean {
+      return true;
+    }
+
+    public get isIdentity(): boolean {
+      return true;
+    }
   }
 
-  Reflect.set(globalThis, 'DOMMatrix', TestDOMMatrix);
+  Reflect.set(globalThis, 'DOMMatrix', TestDomMatrix);
 }
 
 if (!Reflect.has(globalThis, 'ImageData')) {
@@ -30,6 +35,7 @@ if (!Reflect.has(globalThis, 'ImageData')) {
 }
 
 if (!Reflect.has(globalThis, 'Path2D')) {
+  // oxlint-disable-next-line @typescript-eslint/no-extraneous-class -- the Path2D stub only has to be constructible
   class TestPath2D {}
 
   Reflect.set(globalThis, 'Path2D', TestPath2D);

@@ -15,6 +15,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { LiveModel } from '#support/live-chat-turn.js';
+import { attributionFaults } from '#support/usage-receipt.js';
 import {
   billingMounted,
   expandActivities,
@@ -106,7 +107,7 @@ const namesModel = (model: LiveModel, invokedId: string): boolean =>
 for (const [name, first, second] of pairs) {
   test(`${name}: the second turn replays the first turn's tool result`, async () => {
     const email = `switch-live-${String(Date.now())}@e2e.tau`;
-    await openLiveChat({ email, modelId: first.id, projectName: `Provider Switch ${name}` });
+    const turn = await openLiveChat({ email, modelId: first.id, projectName: `Provider Switch ${name}` });
 
     await submitTurn(firstPrompt);
     await expectAssistantText(/EDGE-WRITTEN/u);
@@ -147,16 +148,24 @@ for (const [name, first, second] of pairs) {
       );
       return;
     }
+    // One receipt per agent-loop iteration: a measured pair produced 4, so that
+    // is the floor — a shorter loop on one side of the switch is still legitimate.
     const settled = await expectSettledReceipts(
       (receipt) => receipt.model.providerId === first.providerId || receipt.model.providerId === second.providerId,
-      2,
+      4,
+    );
+    // Written before the receipt assertions, so a failing verdict still leaves
+    // the rows it judged on disk instead of only in the failure message.
+    await target.writeArtifact(
+      `provider-switch-live-${first.providerId}-to-${second.providerId}.json`,
+      `${JSON.stringify({ from: first, to: second, turn, invokedModels, settled }, null, 2)}\n`,
     );
     expect(new Set(settled.map((receipt) => receipt.model.providerId))).toEqual(
       new Set([first.providerId, second.providerId]),
     );
-    await target.writeArtifact(
-      `provider-switch-live-${first.providerId}-to-${second.providerId}.json`,
-      `${JSON.stringify({ from: first, to: second, invokedModels, settled }, null, 2)}\n`,
-    );
+    // Both sides of the switch bill the same chat: the provider changed, the
+    // attribution did not. Matching by provider also sweeps in the API's own
+    // name and commit generation, which `attributionFaults` leaves alone.
+    expect(attributionFaults(settled, turn)).toEqual([]);
   }, 900_000);
 }

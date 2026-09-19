@@ -154,7 +154,14 @@ export class ProviderService {
             location: 'global',
             streaming: true,
             streamUsage: true,
-            streamFunctionCallArguments: true,
+            /* `streamFunctionCallArguments` is deliberately absent: the client
+             * turns it into `toolConfig.functionCallingConfig` on the native
+             * `generateContent` wire — even on a tool-free turn — and Vertex
+             * sheds requests carrying it with a pre-stream 499 under
+             * shared-quota pressure. Its OpenAI-compatible twin,
+             * `extra_body.google.stream_function_call_arguments`, is off for the
+             * same reason plus a mid-stream serializer cancel (blueprint
+             * Finding 1). */
             authOptions: {
               credentials,
               projectId: credentials.project_id,

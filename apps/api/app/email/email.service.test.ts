@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { ConfigService } from '@nestjs/config';
+import type { Environment } from '#config/environment.config.js';
 import { EmailService } from '#email/email.service.js';
 
 const sendMock = vi.fn();
 const resendConstructorMock = vi.fn();
 
 vi.mock('resend', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the module's exported class name
   Resend: class {
     public readonly emails = { send: sendMock };
 
@@ -16,15 +20,17 @@ vi.mock('resend', () => ({
 
 const createService = (resendApiKey: string): EmailService => {
   const values: Record<string, string> = {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
     RESEND_API_KEY: resendApiKey,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
     TAU_FRONTEND_URL: 'https://tau.new',
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
     TAU_EMAIL_FROM: 'Tau <identity@tau.new>',
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
     TAU_EMAIL_REPLY_TO: 'help@tau.new',
   };
 
-  return new EmailService({
-    get: vi.fn((key: string) => values[key] ?? ''),
-  } as never);
+  return new EmailService(mock<ConfigService<Environment, true>>({ get: vi.fn((key: string) => values[key] ?? '') }));
 };
 
 describe('EmailService delivery gate', () => {

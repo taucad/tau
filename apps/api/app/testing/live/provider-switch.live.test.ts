@@ -22,6 +22,7 @@ import {
   createLiveToolRegistry,
   hasLiveCredential,
   liveCadSystemPrompt,
+  liveCompletionCeiling,
   liveCredentialName,
   liveSessionModel,
   runWithRateLimitRetry,
@@ -122,8 +123,6 @@ const scriptedResults = (invocation: HostToolInvocation): HostToolResult =>
         isError: true,
       };
 
-/** Cheap legs keep the smallest completion budget that still fits a tool loop with thinking. */
-const economyMaxTokens = 4096;
 /** Anthropic's reasoning floor is a thinking budget rather than an effort word. */
 const economyThinkingBudget = 1024;
 /**
@@ -158,7 +157,7 @@ const legModel = (modelId: string, contextWindow?: number, maxTokens?: number): 
         : { ...declared, effort: 'low' };
   return {
     ...identity,
-    maxTokens: maxTokens ?? economyMaxTokens,
+    maxTokens: maxTokens ?? liveCompletionCeiling(modelId),
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(reasoning === undefined ? {} : { reasoning }),
   };
@@ -418,6 +417,8 @@ const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }>
   { from: 'anthropic-claude-haiku-4.5', to: 'openai-gpt-5.6-luna' },
   { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.7-flash' },
   { from: 'google-gemini-3.7-flash', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
   { from: 'xai-grok-4.6', to: 'google-gemini-3.7-flash' },
   { from: 'google-gemini-3.7-flash', to: 'xai-grok-4.6' },
   { from: 'xai-grok-4.6', to: 'anthropic-claude-haiku-4.5' },

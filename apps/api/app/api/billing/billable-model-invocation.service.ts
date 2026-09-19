@@ -13,8 +13,15 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { cloudProviderAccountMessage, recognizeProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
-import { classifyUpstreamRefusal, readUpstreamRefusal, upstreamRetryAfterSeconds } from '#api/llm/upstream-refusal.js';
+import {
+  classifyUpstreamRefusal,
+  cloudUpstreamRefusalMessage,
+  maximumRefusalMessageCharacters,
+  readUpstreamRefusal,
+  upstreamRetryAfterSeconds,
+} from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
+import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
 import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
 import { supplierBlockingFinancialCaseKinds } from '#api/billing/billing-supplier-reconciliation.service.js';
@@ -407,12 +414,7 @@ export class BillableModelInvocationService {
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       // Tau owns the key here, so the supplier's own sentence never leaves the API.
-      const message =
-        classification.type === 'UPSTREAM_REJECTED'
-          ? `The model provider rejected the request (HTTP ${response.status}).`
-          : classification.type === 'RATE_LIMITED'
-            ? 'The model provider is rate limiting this request.'
-            : 'The model provider is unavailable.';
+      const message = cloudUpstreamRefusalMessage({ type: classification.type, status: response.status });
       throw new LlmGatewayError(classification.status, classification.type, message, classification.details);
     }
     // The supplier answered: the operation is in flight, not abandoned. Losing this
@@ -435,6 +437,9 @@ export class BillableModelInvocationService {
             accountOwner: 'tau',
             onRefusal: (refusal) => {
               this.recordProviderAccountExhausted(intent, qualification.providerId, refusal);
+            },
+            onTerminalFailure: (failure) => {
+              this.recordProviderStreamFailure(intent, qualification, failure);
             },
           }),
         )
@@ -815,6 +820,30 @@ export class BillableModelInvocationService {
     });
     this.logger.warn(
       `Supplier account exhausted on ${providerId} (${refusal.providerCode ?? 'no code'}) in ${intent.environment}: ${refusal.message}`,
+    );
+  }
+
+  /**
+   * Records a classified mid-stream provider failure — a quota cut, a rate limit,
+   * any status-coded in-band error. The frame filter replaces those bytes with a
+   * Tau frame, so without this line the funded path, the one where Tau pays for
+   * the tokens, keeps no trace at all of why the turn ended (R6). The supplier's
+   * own sentence stays here, where only Tau reads it, and is clamped the way
+   * every relayed reason is.
+   *
+   * @param intent - The invocation whose stream failed.
+   * @param qualification - The route the request took.
+   * @param failure - What the terminal frame said about itself.
+   */
+  private recordProviderStreamFailure(
+    intent: BillableInvocationIntent,
+    qualification: QualifiedBillableInvocation,
+    failure: ProviderTerminalFailure,
+  ): void {
+    this.logger.warn(
+      `Provider stream failed on ${qualification.providerId} ${qualification.modelId} ` +
+        `(${failure.code ?? failure.type ?? 'no code'}) in ${intent.environment}: ` +
+        `${failure.message?.slice(0, maximumRefusalMessageCharacters) ?? 'no message'}`,
     );
   }
 

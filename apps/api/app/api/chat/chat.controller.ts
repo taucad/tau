@@ -11,7 +11,7 @@ import { ChatMessagesValidationPipe } from '#api/chat/chat.dto.js';
 import { ChatExceptionFilter } from '#api/chat/chat-exception.filter.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { validateImageParts } from '#api/chat/utils/validate-image-parts.js';
-import { assertNoQuery, invocationSignal } from '#api/llm/llm-gateway.headers.js';
+import { assertNoQuery, invocationSignal, readHint } from '#api/llm/llm-gateway.headers.js';
 
 /**
  * The two secondary generators are all that remain of `POST /v1/chat`.
@@ -47,6 +47,11 @@ export class ChatController {
     const onAdmitted = (operationId: string): void => {
       void response.header('x-tau-operation-id', operationId);
     };
+    /* `projectId` is only `z.string().min(1)` on the wire, but the ledger admits a
+     * hint as the bounded identity class — an id with a space reached
+     * `admissionHistorySchema.parse` and threw a 500. Attribution is best effort,
+     * so a hint it refuses is dropped and the turn still runs. */
+    const hints = { projectHint: readHint(body.projectId), chatHint: readHint(body.id) };
 
     switch (body.agent.profile) {
       case 'project_name': {
@@ -56,7 +61,7 @@ export class ChatController {
           modelMessages,
           userId,
           body.admission.idempotencyKey,
-          body.projectId,
+          hints,
           signal,
           onAdmitted,
         );
@@ -68,7 +73,7 @@ export class ChatController {
           modelMessages,
           userId,
           body.admission.idempotencyKey,
-          body.projectId,
+          hints,
           signal,
           onAdmitted,
         );

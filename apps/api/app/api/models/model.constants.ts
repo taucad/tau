@@ -576,7 +576,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-3.1-pro-preview',
+      model: 'gemini-3.1-pro-preview-customtools',
       support: {
         modalities: imageInputModalities,
       },
@@ -597,6 +597,40 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         temperature: 1,
         thinkingLevel: 'HIGH',
+      },
+    },
+    'gemini-3.8-flash': {
+      id: 'google-gemini-3.8-flash',
+      providerKind: 'tau-hosted',
+      name: 'Gemini 3.8 Flash',
+      slug: 'gemini-3.8-flash',
+      recommended: true,
+      description:
+        "Google's fastest strong model for everyday CAD edits, agentic tool loops, and multi-step geometry reasoning.",
+      provider: {
+        id: 'vertexai',
+        name: 'Google',
+      },
+      model: 'gemini-3.8-flash',
+      support: {
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'gemini',
+        families: ['gemini'],
+        contextWindow: 200_000, // Provider supports 1,048,576 tokens; Tau caps the effective chat budget.
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 1.5,
+          outputTokens: 7.5,
+          cacheReadTokens: 0.15,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        // Google's own default for this model; it rejects MINIMAL outright.
+        thinkingLevel: 'MEDIUM',
       },
     },
     'gemini-3.7-flash': {

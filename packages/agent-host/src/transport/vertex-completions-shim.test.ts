@@ -229,7 +229,7 @@ const throughShim = async (
 ): Promise<string> => {
   const raw = encoder.encode(text);
   const offsets = [0, ...cuts, raw.byteLength];
-  const source = new ReadableStream<Uint8Array>({
+  const source = new ReadableStream<Uint8Array<ArrayBuffer>>({
     start(controller) {
       for (let index = 0; index < offsets.length - 1; index++) {
         controller.enqueue(raw.slice(offsets[index], offsets[index + 1]));
@@ -240,6 +240,7 @@ const throughShim = async (
   const reader = source.pipeThrough(createVertexResponseShim(signatures)).getReader();
   let out = '';
   for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- the shim's output is read serially.
     const next = await reader.read();
     if (next.done) {
       break;
@@ -249,7 +250,7 @@ const throughShim = async (
   return out + decoder.decode();
 };
 
-const model = {
+const model: Model<'openai-completions'> = {
   id: 'gemini-fixture',
   name: 'gemini-fixture',
   provider: 'vertexai',
@@ -261,7 +262,7 @@ const model = {
   contextWindow: 100_000,
   maxTokens: 512,
   compat: { supportsDeveloperRole: false },
-} as Model<'openai-completions'>;
+};
 
 const context: Context = {
   systemPrompt: 'CAD',

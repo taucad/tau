@@ -145,6 +145,70 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
 };
 
 /**
+ * The headers one composition puts on the wire for one request.
+ *
+ * @param options - Per-composition transport options beyond the base URL.
+ * @param overrides - Per-request fields under test.
+ * @returns The headers the gateway was called with.
+ */
+const headersFor = async (
+  options: { readonly projectId?: string } = {},
+  overrides: Partial<ModelStreamRequest> = {},
+): Promise<Headers> => {
+  let headers: Headers | undefined;
+  await collect(
+    createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      ...options,
+      fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        headers = new Headers(init?.headers);
+        return fixtureResponse();
+      }),
+    }).stream(request(overrides)),
+  );
+  return headers!;
+};
+
+/**
+ * The gateway's coded mid-stream failure frame, in the one shape it puts on the
+ * wire. Only `code`, `message` and `details` vary between failures, so every
+ * case below builds the frame here rather than restating the contract.
+ *
+ * @param code - Tau gateway code carried by the frame.
+ * @param message - The provider's own sentence.
+ * @param details - Structured fields belonging to the code.
+ * @returns The frame's JSON payload.
+ */
+const tauGatewayFrame = (code: string, message: string, details?: Record<string, string>): string =>
+  JSON.stringify({
+    type: 'error',
+    code,
+    message,
+    error: { type: 'tau_gateway', code, message, ...(details === undefined ? {} : { details }) },
+  });
+
+/**
+ * Chunk a coded frame so the marker lands with the frame still open and the
+ * payload only completes three chunks later: the guard has to withhold bytes
+ * several pulls in a row before it can read the code.
+ *
+ * @param frame - The frame payload, from {@link tauGatewayFrame}.
+ * @returns Relayed chunks ending with the frame's event boundary.
+ */
+const splitAcrossChunks = (frame: string): readonly string[] => {
+  const marker = frame.indexOf('"type":"tau_gateway"') + '"type":"tau_gateway"'.length;
+  const rest = frame.slice(marker);
+  const third = Math.floor(rest.length / 3);
+  return [
+    'data: {"id":"chatcmpl-held","choices":[{"delta":{"content":"partial"}}]}\n\n',
+    `event: error\ndata: ${frame.slice(0, marker)}`,
+    rest.slice(0, third),
+    rest.slice(third, third * 2),
+    `${rest.slice(third * 2)}\n\n`,
+  ];
+};
+
+/**
  * A fetch whose body behaves like a network one: chunks first, EOF only on a
  * later task, and an `AbortError` when the caller's own request is aborted.
  *
@@ -333,8 +397,9 @@ describe('createGatewayModelTransport', () => {
     expect(headers?.has('x-api-key')).toBe(false);
     expect(headers?.get('x-tau-attempt-id')).toBe('attempt-fixture-1');
     expect(bindings).toEqual([{ operationId: 'operation-fixture-1', status: 'pending' }]);
-    // OpenAI's system field has no per-block cache-control wire shape, so this
-    // provider deliberately degrades to pi's blanket cacheRetention policy.
+    /* OpenAI's system field has no per-block cache-control wire shape, so this
+     * provider deliberately degrades to pi's blanket cacheRetention policy. The
+     * request names no reasoning, so it carries no `extra_body` at all. */
     expect(body).toBe(
       String.raw`{"model":"fixture-model","messages":[{"role":"system","content":"static\n\nworkspace\n\ndynamic"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true},"store":false,"max_completion_tokens":8192,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file.","parameters":{"type":"object","properties":{"targetFile":{"type":"string"}},"required":["targetFile"],"additionalProperties":false},"strict":false}}]}`,
     );
@@ -874,11 +939,9 @@ describe('createGatewayModelTransport', () => {
 
     expect(path).toBe(fixture.expectedPath);
     expect(body).toMatchObject(fixture.expectedBody);
-    // Vertex answers 499 CANCELLED to every function call emitted after the
-    // first assistant message while this flag is set: the second sequential
-    // call in a turn and every call from user turn two on, across all four
-    // catalog models (14/14 live; blueprint Finding 4, RC2, ruling Q2). Its
-    // only product effect was per-delta tool-input granularity on Gemini.
+    /* No wire carries `stream_function_call_arguments`: Vertex cancels a turn
+     * mid-stream whenever a streamed tool call closes a nested object on a
+     * string value, which `apply_parameter_operation` does (T3-R). */
     expect(JSON.stringify(body)).not.toContain('stream_function_call_arguments');
   });
   /* eslint-enable @typescript-eslint/naming-convention -- End frozen provider wire fixture. */
@@ -922,6 +985,41 @@ describe('createGatewayModelTransport', () => {
     expect(headers?.has('authorization')).toBe(false);
   });
 
+  it('names the project and chat a call belongs to, and sends neither when it has neither', async () => {
+    /* The receipt is the only place spend can be attributed: without these the
+     * `/usage` page can say nothing about which project or chat a turn belonged
+     * to. The project is per-composition (one worker serves one project) and
+     * the chat is per-request (one transport serves every chat in it). Absent,
+     * not empty, when unknown — a `tau serve` workspace has no cloud project,
+     * and the server would drop an unparseable hint anyway. */
+    const both = await headersFor({ projectId: 'proj_fixture' }, { chatId: 'chat_fixture' });
+    expect(both.get('x-tau-project-id')).toBe('proj_fixture');
+    expect(both.get('x-tau-chat-id')).toBe('chat_fixture');
+
+    const neither = await headersFor({});
+    expect(neither.has('x-tau-project-id')).toBe(false);
+    expect(neither.has('x-tau-chat-id')).toBe(false);
+
+    // Each stands alone: a chat in a project with no cloud identity still names itself.
+    const chatOnly = await headersFor({}, { chatId: 'chat_fixture' });
+    expect(chatOnly.has('x-tau-project-id')).toBe(false);
+    expect(chatOnly.get('x-tau-chat-id')).toBe('chat_fixture');
+  });
+
+  it('names a compaction call as compaction, and leaves an ordinary turn to the gateway default', async () => {
+    /* `compaction` is a kind of its own in the billing wire
+     * (`financialActivityKindSchema`), so a summarisation the person never
+     * asked for reads as what it was instead of as their turn. Generation sends
+     * nothing: the gateway's own default is `agent`, and a header repeating it
+     * would be one more value to keep in step for no gain. The host has no
+     * third purpose to map — `invocationPurpose` is exactly these two. */
+    const compaction = await headersFor({}, { invocationPurpose: 'compaction' });
+    expect(compaction.get('x-tau-activity')).toBe('compaction');
+
+    const generation = await headersFor({}, { invocationPurpose: 'generation' });
+    expect(generation.has('x-tau-activity')).toBe(false);
+  });
+
   it('strips the bundled SDK telemetry headers the gateway CORS allow-list rejects', async () => {
     const seen: Array<readonly string[]> = [];
     const transportFor = (response: () => Response) =>
@@ -940,8 +1038,10 @@ describe('createGatewayModelTransport', () => {
       ),
     );
 
-    // Every surviving name must sit in apps/api's CORS allow-list
-    // (apps/api/app/constants/http-header.constant.ts) or be CORS-safelisted.
+    /* Every surviving name must sit in apps/api's CORS allow-list
+     * (apps/api/app/constants/http-header.constant.ts) or be CORS-safelisted.
+     * No project or chat hint here: this composition names no project and the
+     * request no chat, which is how a `tau serve` workspace calls. */
     expect(seen).toEqual([
       ['accept', 'content-type', 'user-agent', 'x-tau-attempt-id'],
       ['accept', 'anthropic-beta', 'anthropic-version', 'content-type', 'user-agent', 'x-tau-attempt-id'],
@@ -1345,12 +1445,12 @@ describe('createGatewayModelTransport', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it.each(['minimal', 'xhigh'] as const)('refuses unsupported Vertex %s reasoning before fetch', async (effort) => {
+  it('refuses unsupported Vertex xhigh reasoning before fetch', async () => {
     const fetchSpy = vi.fn();
     const transport = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy });
 
     await expect(
-      collect(transport.stream(request({ providerKind: 'vertexai', reasoning: { effort } }))),
+      collect(transport.stream(request({ providerKind: 'vertexai', reasoning: { effort: 'xhigh' } }))),
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -1803,12 +1903,7 @@ describe('createGatewayModelTransport', () => {
       accountOwner: 'tau',
     };
     const message = "The model provider's account is unavailable.";
-    const refusal = JSON.stringify({
-      type: 'error',
-      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-      message,
-      error: { type: 'tau_gateway', code: 'PROVIDER_ACCOUNT_EXHAUSTED', message, details },
-    });
+    const refusal = tauGatewayFrame('PROVIDER_ACCOUNT_EXHAUSTED', message, details);
     // The rewritten frame is split mid-payload: the marker lands in one chunk
     // and the refusal only becomes readable with the next one.
     const split = refusal.indexOf('"details"');
@@ -1859,6 +1954,73 @@ describe('createGatewayModelTransport', () => {
     await session.close();
   });
 
+  it.each([
+    {
+      label: 'a mid-stream rate limit',
+      wireCode: 'RATE_LIMITED',
+      message: 'Resource exhausted. Please try again later.',
+      details: { providerId: 'vertexai', providerCode: 'RESOURCE_EXHAUSTED' },
+      expected: { code: 'RATE_LIMITED', rawType: undefined },
+    },
+    {
+      label: 'a code this client does not know yet',
+      wireCode: 'GATEWAY_CODE_FROM_THE_FUTURE',
+      message: 'The gateway ended this stream.',
+      details: undefined,
+      expected: { code: 'UNKNOWN_GATEWAY_ERROR', rawType: 'GATEWAY_CODE_FROM_THE_FUTURE' },
+    },
+  ])('should raise $label off a mid-stream Tau gateway frame', async ({ wireCode, message, details, expected }) => {
+    /* The gateway rewrites every classified provider failure into this one
+     * frame, not only an exhausted provider account — a live Vertex stream cut
+     * by quota arrives as `RATE_LIMITED` mid-body. The code travels in
+     * `error.code` and is mapped exactly as an error body's code is on the HTTP
+     * path, so a code this build has never heard of degrades to
+     * `UNKNOWN_GATEWAY_ERROR` with the wire code preserved. */
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () =>
+        responseFromChunks([
+          'data: {"id":"chatcmpl-cut","choices":[{"delta":{"content":"partial"}}]}\n\n',
+          `event: error\ndata: ${tauGatewayFrame(wireCode, message, details)}\n\n`,
+        ]),
+      ),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({
+      name: 'GatewayModelTransportError',
+      message,
+      status: 200,
+      details,
+      ...expected,
+    });
+  });
+
+  it.each([
+    {
+      label: 'a terminal frame missing its trailing blank line',
+      chunks: ['data: {"id":"chatcmpl-1","choices":[{"delta":{},"finish_reason":"stop"}]}\n'],
+    },
+    {
+      label: "Vertex's bare JSON 429 tail behind a 200",
+      // Captured live: Vertex abandons SSE framing and appends a pretty-printed
+      // JSON array, then closes the body cleanly. No `data:` prefix, so no
+      // decoder in the chain dispatches it. Classifying it is the gateway's job
+      // (it rewrites the tail into the Tau frame above); the client must not
+      // guess at non-SSE trailing bytes, and says the stream was malformed.
+      chunks: [
+        'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"partial"}}]}\n\n',
+        '\n[{\n  "error": {\n    "code": 429,\n    "message": "Resource exhausted. Please try again later.",\n    "status": "RESOURCE_EXHAUSTED"\n  }\n}\n]',
+      ],
+    },
+  ])('should fail $label as a malformed response', async ({ chunks }) => {
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () => responseFromChunks(chunks)),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({ code: 'MALFORMED_RESPONSE' });
+  });
+
   it('should hand a complete Tau frame that is not a refusal to the SDK with the bytes held behind it', async () => {
     const transport = createGatewayModelTransportWithModel({
       baseUrl: 'https://gateway.example',
@@ -1891,31 +2053,26 @@ describe('createGatewayModelTransport', () => {
       label: 'a refusal',
       // The marker lands mid-payload and the refusal only becomes readable
       // three chunks later, so the guard withholds several times in a row.
-      chunks: (() => {
-        const message = "The model provider's account is unavailable.";
-        const refusal = JSON.stringify({
-          type: 'error',
-          code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-          message,
-          error: {
-            type: 'tau_gateway',
-            code: 'PROVIDER_ACCOUNT_EXHAUSTED',
-            message,
-            details: { providerId: 'anthropic', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' },
-          },
-        });
-        const marker = refusal.indexOf('"type":"tau_gateway"') + '"type":"tau_gateway"'.length;
-        const rest = refusal.slice(marker);
-        const third = Math.floor(rest.length / 3);
-        return [
-          'data: {"id":"chatcmpl-held","choices":[{"delta":{"content":"partial"}}]}\n\n',
-          `event: error\ndata: ${refusal.slice(0, marker)}`,
-          rest.slice(0, third),
-          rest.slice(third, third * 2),
-          `${rest.slice(third * 2)}\n\n`,
-        ];
-      })(),
+      chunks: splitAcrossChunks(
+        tauGatewayFrame('PROVIDER_ACCOUNT_EXHAUSTED', "The model provider's account is unavailable.", {
+          providerId: 'anthropic',
+          providerCode: 'credit_balance_exhausted',
+          accountOwner: 'tau',
+        }),
+      ),
       outcome: 'PROVIDER_ACCOUNT_EXHAUSTED',
+    },
+    {
+      // Same withholding, a different code: the guard must hold and raise on
+      // any coded frame, not just the one it was written for.
+      label: 'a rate limit',
+      chunks: splitAcrossChunks(
+        tauGatewayFrame('RATE_LIMITED', 'Resource exhausted. Please try again later.', {
+          providerId: 'vertexai',
+          providerCode: 'RESOURCE_EXHAUSTED',
+        }),
+      ),
+      outcome: 'RATE_LIMITED',
     },
     {
       label: 'a complete Tau frame that is not a refusal',

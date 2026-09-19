@@ -187,7 +187,10 @@ export const useBrowserAgentHostProjectAvailability = (providerKind: string): Br
         if (!storage) {
           throw new Error('The active project filesystem is unavailable.');
         }
-        const capabilities = await readRootedBridgeCapabilities(() => openFileSystemBridge(rootDirectory));
+        /* A capability probe of the checkout's own provider (G6). */
+        const capabilities = await readRootedBridgeCapabilities(() =>
+          openFileSystemBridge(rootDirectory, 'working-copy'),
+        );
         if (!capabilities.writable || !capabilities.durability) {
           throw new Error('The active project filesystem is not writable or did not declare durability.');
         }

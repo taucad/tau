@@ -21,7 +21,7 @@ function createTreeHarness(overrides?: { proxy?: FileSystemClient }): {
 } {
   const listen = vi.fn().mockReturnValue(vi.fn());
   const paths = new WorkspacePathResolver(workspaceRoot);
-  const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+  const channel = new WorkerChangeChannel({ transport: { listen } });
   const proxy =
     overrides?.proxy ??
     mock<FileSystemClient>({

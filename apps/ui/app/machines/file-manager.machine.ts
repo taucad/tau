@@ -99,11 +99,26 @@ const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) =
  */
 export type WorkspaceUnavailableReason = 'missing' | 'disconnected' | 'permission';
 
+/**
+ * Which surface a rooted bridge connection asks for. Required, never defaulted
+ * (gate G-B finding G6).
+ *
+ * A UI-originated connection names the consumer whose composed view it reads —
+ * `'user'` or `'agent'` — and gets that consumer's mask and overlays. Trusted
+ * composition names `'working-copy'`: the host's own capture, apply and language
+ * planes must read the checkout itself and never the overlays above it
+ * (architecture V6). Since W5 that raw surface also carries the mutating
+ * porcelain, so the choice is a write decision as well as a read one — which is
+ * why it is spelled at every call site instead of falling out of an omitted
+ * argument.
+ */
+export type RootedBridgeConsumer = ComposedViewConsumer | 'working-copy';
+
 type FileManagerContext = {
   worker: Worker | undefined;
   proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
   bridgeDispose?: () => void;
-  openFileSystemBridge?: (root: string, consumer?: ComposedViewConsumer) => FileSystemBridgeConnection;
+  openFileSystemBridge?: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
   openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort?: (projectId: string) => MessagePort;
   computeControl?: ReturnType<typeof computeOpeners>['computeControl'];
@@ -157,7 +172,7 @@ type WorkerConnectedEvent = {
   worker: Worker;
   proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
   bridgeDispose: () => void;
-  openFileSystemBridge: (root: string, consumer?: ComposedViewConsumer) => FileSystemBridgeConnection;
+  openFileSystemBridge: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
   openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort: (projectId: string) => MessagePort;
   computeControl: ReturnType<typeof computeOpeners>['computeControl'];
@@ -346,8 +361,10 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
         class: 'authored',
       });
     }
-    const openBridge = (root: string, consumer?: ComposedViewConsumer): FileSystemBridgeConnection =>
-      openFileSystemBridge(worker, { root, ...(consumer === undefined ? {} : { consumer }) });
+    /* `'working-copy'` is the absence of a consumer on the wire: the bridge hands
+     * back the checkout's raw rooted filesystem when no consumer is named. */
+    const openBridge = (root: string, consumer: RootedBridgeConsumer): FileSystemBridgeConnection =>
+      openFileSystemBridge(worker, { root, ...(consumer === 'working-copy' ? {} : { consumer }) });
     worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
     const { openComputeBinding, openComputeStorePort, computeControl } = computeOpeners(worker, context.projectId);
 
@@ -470,17 +487,19 @@ const initializeServicesActor = fromSafeAsync<
 
   const paths = new WorkspacePathResolver(context.rootDirectory);
   const refreshGuard = new RefreshGenerationGuard();
-  const workerChangeChannel = new WorkerChangeChannel({
-    transport: { listen: proxy.listen! },
-    paths,
-  });
   const visibilityProvider = createDomVisibilityProvider();
 
   /*
    * One composition, read by both consumers (charter D1). The user's view is a
    * rooted bridge connection the file-manager worker composes; the agent's is
-   * the same function over its own rooted provider. Writes and workspace
-   * porcelain stay on the authority connection — see `createComposedViewClient`.
+   * the same function over its own rooted provider.
+   *
+   * One connection, and it carries the changes too (charter D12): reads, writes,
+   * porcelain, watch and `fileChanged` all ride this port, because the authority
+   * suppresses a port's own events by port identity. Split them and the UI hears
+   * its own writes back as somebody else's. Only the topology calls — mount,
+   * project roots, discovery — stay on the workspace surface, which owns no
+   * content.
    */
   const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
@@ -490,6 +509,7 @@ const initializeServicesActor = fromSafeAsync<
       viewProxy.dispose();
     });
   };
+  const workerChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
   const client = createComposedViewClient({ workspace: proxy, view: viewProxy, paths });
 
   const contentService = new FileContentService({

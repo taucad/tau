@@ -51,7 +51,7 @@ function createHarness(
   const listen = vi.fn().mockReturnValue(vi.fn());
   const { workspaceRoot = '/project', paths: inputPaths, proxy: inputProxy, ...serviceOptions } = init ?? {};
   const paths = inputPaths ?? new WorkspacePathResolver(workspaceRoot);
-  const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+  const channel = new WorkerChangeChannel({ transport: { listen } });
   const refreshGuard = new RefreshGenerationGuard();
   const proxy = inputProxy ?? createMockProxy();
   const service = new FileContentService({
@@ -106,7 +106,7 @@ function recordOutcomeKinds(
 }
 
 function fileWritten(pathRelative: string): ChangeEvent {
-  return { type: 'fileWritten', path: `/project/${pathRelative}`, backend: 'indexeddb' };
+  return { type: 'fileWritten', path: pathRelative, backend: 'indexeddb' };
 }
 
 describe('FileContentService', () => {
@@ -797,7 +797,7 @@ describe('FileContentService', () => {
       const mockProxy = createMockProxy();
       const listen = vi.fn().mockReturnValue(vi.fn());
       const paths = new WorkspacePathResolver('/project');
-      const channel = new WorkerChangeChannel({ transport: { listen }, paths });
+      const channel = new WorkerChangeChannel({ transport: { listen } });
       const refreshGuard = new RefreshGenerationGuard();
       const svc = new FileContentService({
         proxy: mockProxy,
@@ -880,7 +880,7 @@ describe('FileContentService', () => {
       await svc.resolve('main.ts');
       vi.mocked(mockProxy.readFile).mockResolvedValue(encoder.encode('fresh'));
 
-      emit({ type: 'directoryChanged', path: '/project', backend: 'webaccess' });
+      emit({ type: 'directoryChanged', path: '', backend: 'webaccess' });
 
       await vi.waitFor(() => {
         const outcome = svc.peekOutcome('main.ts');
@@ -1295,8 +1295,8 @@ describe('FileContentService', () => {
         vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([3]));
         emitFileChanged({
           type: 'fileRenamed',
-          oldPath: '/project/old.ts',
-          newPath: '/project/new.ts',
+          oldPath: 'old.ts',
+          newPath: 'new.ts',
           backend: 'indexeddb',
         });
         await vi.waitFor(() => {
@@ -1335,7 +1335,7 @@ describe('FileContentService', () => {
           }
           return new Uint8Array([1]);
         });
-        emitFileChanged({ type: 'directoryChanged', path: '/project/lib', backend: 'indexeddb' });
+        emitFileChanged({ type: 'directoryChanged', path: 'lib', backend: 'indexeddb' });
         await vi.waitFor(() => {
           expect(service.peekOutcome('lib/a.ts').kind).toBe('text');
         });
@@ -1522,7 +1522,7 @@ describe('FileContentService', () => {
       service.subscribe('main.ts', callback);
 
       vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([4, 5]));
-      emitFileChanged({ type: 'fileWritten', path: '/project/main.ts', backend: 'indexeddb' });
+      emitFileChanged({ type: 'fileWritten', path: 'main.ts', backend: 'indexeddb' });
 
       await vi.waitFor(() => {
         expect(callback.mock.calls.length).toBeGreaterThanOrEqual(1);
@@ -1540,7 +1540,7 @@ describe('FileContentService', () => {
       await service.resolve('main.ts');
 
       vi.mocked(proxy.readFile).mockResolvedValueOnce(after);
-      emitFileChanged({ type: 'fileWritten', path: '/project/main.ts', backend: 'indexeddb' });
+      emitFileChanged({ type: 'fileWritten', path: 'main.ts', backend: 'indexeddb' });
 
       await vi.waitFor(() => {
         expectTextContent(service.peekOutcome('main.ts'), after);
@@ -1552,7 +1552,7 @@ describe('FileContentService', () => {
       vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([1]));
       await service.resolve('main.ts');
 
-      emitFileChanged({ type: 'fileDeleted', path: '/project/main.ts', backend: 'indexeddb' });
+      emitFileChanged({ type: 'fileDeleted', path: 'main.ts', backend: 'indexeddb' });
 
       expect(service.has('main.ts')).toBe(false);
       expect(service.isOrphaned('main.ts')).toBe(true);
@@ -1568,8 +1568,8 @@ describe('FileContentService', () => {
       vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([3]));
       emitFileChanged({
         type: 'fileRenamed',
-        oldPath: '/project/old.ts',
-        newPath: '/project/new.ts',
+        oldPath: 'old.ts',
+        newPath: 'new.ts',
         backend: 'indexeddb',
       });
 
@@ -1597,7 +1597,7 @@ describe('FileContentService', () => {
         }
         return new Uint8Array([1]);
       });
-      emitFileChanged({ type: 'directoryChanged', path: '/project/lib', backend: 'indexeddb' });
+      emitFileChanged({ type: 'directoryChanged', path: 'lib', backend: 'indexeddb' });
 
       await vi.waitFor(() => {
         expect(service.peekOutcome('lib/a.ts').kind).toBe('text');
@@ -1632,20 +1632,11 @@ describe('FileContentService', () => {
       expect(vi.mocked(proxy.readFile)).not.toHaveBeenCalled();
     });
 
-    it('should ignore events that fall outside the project root', async () => {
-      vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([1]));
-      await service.resolve('main.ts');
-
-      emitFileChanged({ type: 'fileWritten', path: '/other/main.ts', backend: 'indexeddb' });
-
-      expect(service.has('main.ts')).toBe(true);
-    });
-
     it('should emit a directoryCreated ContentChangeEvent when the worker reports a directoryCreated change', async () => {
       const handler = vi.fn();
       service.onDidContentChange(handler);
 
-      emitFileChanged({ type: 'directoryCreated', path: '/project/newdir', backend: 'indexeddb' });
+      emitFileChanged({ type: 'directoryCreated', path: 'newdir', backend: 'indexeddb' });
 
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'directoryCreated', path: 'newdir' }));
     });
@@ -1654,7 +1645,7 @@ describe('FileContentService', () => {
       const handler = vi.fn();
       service.onDidContentChange(handler);
 
-      emitFileChanged({ type: 'directoryDeleted', path: '/project/old', backend: 'indexeddb' });
+      emitFileChanged({ type: 'directoryDeleted', path: 'old', backend: 'indexeddb' });
 
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'directoryDeleted', path: 'old' }));
     });
@@ -1665,8 +1656,8 @@ describe('FileContentService', () => {
 
       emitFileChanged({
         type: 'directoryRenamed',
-        oldPath: '/project/old',
-        newPath: '/project/new',
+        oldPath: 'old',
+        newPath: 'new',
         backend: 'indexeddb',
       });
 
@@ -1953,25 +1944,28 @@ describe('FileContentService over the composed view (north star W2)', () => {
     };
   };
 
-  const composedHarness = async (): Promise<FileContentHarness & { authority: FileSystemClient }> => {
+  const composedHarness = async (): Promise<
+    FileContentHarness & { authority: FileSystemClient; provider: MemoryProvider }
+  > => {
     const provider = new MemoryProvider();
     await provider.writeFile('main.ts', 'export {};\n');
     const authority = createMockProxy();
     const proxy = createComposedViewClient({
       workspace: authority,
+      /* The rooted connection also archives a subtree (charter D2) and serves the
+       * mutation pipeline's porcelain (D4); this harness reads and writes single
+       * files, which the view itself answers, so the rest is not stubbed. */
       view: Object.assign(
         composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()], policy: tauPathPolicy }),
-        /* The rooted connection also archives a subtree (charter D2); this
-         * harness reads single files. */
         {
           archive: vi.fn<ComposedViewProxy['archive']>(),
           search: vi.fn<ComposedViewProxy['search']>(),
           statTree: vi.fn<ComposedViewProxy['statTree']>(),
         },
-      ),
+      ) as unknown as ComposedViewProxy,
       paths: new WorkspacePathResolver('/projects/abc'),
     });
-    return { ...createHarness({ workspaceRoot: '/projects/abc', proxy }), authority };
+    return { ...createHarness({ workspaceRoot: '/projects/abc', proxy }), authority, provider };
   };
 
   /*
@@ -2008,7 +2002,10 @@ describe('FileContentService over the composed view (north star W2)', () => {
 
     expect(new TextDecoder().decode(await harness.service.resolveBytes('main.ts'))).toBe('export {};\n');
     await harness.service.write('main.ts', new TextEncoder().encode('export const a = 1;\n'), 'user');
-    expect(harness.authority.writeFile).toHaveBeenCalledWith('/projects/abc/main.ts', expect.any(Uint8Array));
+    /* The write lands on the view, on the same connection the reads use (charter
+     * D12) — never on the authority, whose port would echo it straight back. */
+    await expect(harness.provider.readFile('main.ts', 'utf8')).resolves.toBe('export const a = 1;\n');
+    expect(harness.authority.writeFile).not.toHaveBeenCalled();
     harness.disposeChannel();
   });
 });

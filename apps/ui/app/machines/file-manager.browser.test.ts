@@ -251,7 +251,7 @@ it('registers a project persisted after worker boot before opening its rooted br
     if (open === undefined) {
       throw new Error('The rooted filesystem bridge opener was not published.');
     }
-    const unavailable = createFileSystemBridgeProxy(open(rootDirectory));
+    const unavailable = createFileSystemBridgeProxy(open(rootDirectory, 'working-copy'));
     try {
       await unavailable.ready;
       expect(unavailable.hello.payload).toMatchObject({
@@ -271,7 +271,7 @@ it('registers a project persisted after worker boot before opening its rooted br
       throw new Error('The file-manager proxy was not published.');
     }
     await ready.context.proxy.configureProjectRoots(await getProjectRootConfigs());
-    const proxy = createFileSystemBridgeProxy(open(rootDirectory));
+    const proxy = createFileSystemBridgeProxy(open(rootDirectory, 'working-copy'));
     try {
       await proxy.ready;
       expect(proxy.hello.payload).toMatchObject({

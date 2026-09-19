@@ -186,7 +186,9 @@ export function ChatTurnHost(): ReactNode {
         if (!openFileSystemBridge) {
           throw new Error('The active project filesystem bridge is unavailable.');
         }
-        return openFileSystemBridge(rootDirectory);
+        /* Trusted composition: the turn's capture and apply planes read the
+         * checkout, not the overlays above it (G6, architecture V6). */
+        return openFileSystemBridge(rootDirectory, 'working-copy');
       };
       return {
         projectStorage: resolveProjectStorage,

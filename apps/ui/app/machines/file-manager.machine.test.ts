@@ -456,7 +456,7 @@ describe('fileManagerMachine', () => {
       expect(actor.getSnapshot().value).toBe('ready');
     });
 
-    actor.getSnapshot().context.openFileSystemBridge?.('/projects/project-a');
+    actor.getSnapshot().context.openFileSystemBridge?.('/projects/project-a', 'working-copy');
     expect(() => actor.getSnapshot().context.openComputeStorePort?.('workspace-candidate')).toThrow(/authority/);
     actor.getSnapshot().context.openComputeStorePort?.('project-a');
 

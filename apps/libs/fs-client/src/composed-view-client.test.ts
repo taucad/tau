@@ -77,9 +77,42 @@ const authorityMock = (): FileSystemClient =>
     readDirectory: vi.fn().mockResolvedValue([{ id: 'three', name: 'three', size: 0, mtimeMs: 0, children: [] }]),
   });
 
+/**
+ * What the worker adds on top of the composed view (charter D2, D4).
+ *
+ * `archive`, `search` and `statTree` are the read content operations and the
+ * root's index; the rest is the mutation pipeline's porcelain, which a
+ * `MemoryProvider` has none of — so the view this harness composes cannot wire
+ * them and they are declared here, where the routing assertions can see them.
+ */
+const rootedConnectionMembers = () => ({
+  archive: vi.fn<ComposedViewProxy['archive']>().mockResolvedValue(new Blob(['view'])),
+  search: vi.fn<ComposedViewProxy['search']>().mockResolvedValue([]),
+  statTree: vi.fn<ComposedViewProxy['statTree']>().mockResolvedValue([]),
+  writeFileChecked: vi
+    .fn<ComposedViewProxy['writeFileChecked']>()
+    .mockResolvedValue({ status: 'applied', content: new Uint8Array() }),
+  writeFiles: vi.fn<ComposedViewProxy['writeFiles']>().mockResolvedValue(undefined),
+  move: vi
+    .fn<ComposedViewProxy['move']>()
+    .mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0, contentKind: 'binary' }),
+  bulkMove: vi.fn<ComposedViewProxy['bulkMove']>().mockResolvedValue({ moved: [], failed: [] }),
+  duplicate: vi.fn<ComposedViewProxy['duplicate']>().mockResolvedValue(undefined),
+  copyTree: vi.fn<ComposedViewProxy['copyTree']>().mockResolvedValue(undefined),
+  canMove: vi.fn<ComposedViewProxy['canMove']>().mockResolvedValue(true),
+  canRename: vi.fn<ComposedViewProxy['canRename']>().mockResolvedValue(true),
+  canCreate: vi.fn<ComposedViewProxy['canCreate']>().mockResolvedValue(true),
+  canDelete: vi.fn<ComposedViewProxy['canDelete']>().mockResolvedValue(true),
+});
+
 const harness = async (
   seed?: (provider: MemoryProvider) => Promise<void>,
-): Promise<{ client: ComposedViewClient; authority: FileSystemClient; view: ComposedViewProxy }> => {
+): Promise<{
+  client: ComposedViewClient;
+  authority: FileSystemClient;
+  view: ComposedViewProxy;
+  provider: MemoryProvider;
+}> => {
   const provider = new MemoryProvider();
   await provider.writeFile('main.ts', 'export {};\n');
   await seed?.(provider);
@@ -89,15 +122,12 @@ const harness = async (
    * so what this package owns is the routing, not the archive bytes. */
   const view: ComposedViewProxy = Object.assign(
     composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()], policy: tauPathPolicy }),
-    {
-      archive: vi.fn<ComposedViewProxy['archive']>().mockResolvedValue(new Blob(['view'])),
-      search: vi.fn<ComposedViewProxy['search']>().mockResolvedValue([]),
-      statTree: vi.fn<ComposedViewProxy['statTree']>().mockResolvedValue([]),
-    },
+    rootedConnectionMembers(),
   );
   return {
     authority,
     view,
+    provider,
     client: createComposedViewClient({
       workspace: authority,
       view,
@@ -183,8 +213,14 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     expect(authority.bulkMove).not.toHaveBeenCalled();
   });
 
-  it('should leave every project-only mutation on the authority', async () => {
-    const { client, authority } = await harness();
+  /*
+   * Charter D12: the writes ride the connection the reads ride. The authority
+   * suppresses a port's own change events by port identity, so a write issued on
+   * the workspace port would come back to this client as somebody else's edit —
+   * which is why the whole guarded surface moves together, not method by method.
+   */
+  it('should issue every project mutation on the view in its own namespace', async () => {
+    const { client, authority, view, provider } = await harness();
 
     await expect(client.canDelete(`${root}/main.ts`)).resolves.toBe(true);
     await client.move(`${root}/main.ts`, `${root}/renamed.ts`);
@@ -195,11 +231,59 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
       preconditions: [{ path: `${root}/parameters.json`, expected: null }],
     });
     await client.duplicateFile(`${root}/main.ts`, `${root}/copy.ts`);
-    expect(authority.canDelete).toHaveBeenCalledWith(`${root}/main.ts`);
-    expect(authority.move).toHaveBeenCalledWith(`${root}/main.ts`, `${root}/renamed.ts`);
+    await client.copyDirectory(`${root}/src`, `${root}/src-copy`);
+    await client.bulkMove([{ source: `${root}/a.ts`, target: `${root}/b/a.ts` }]);
+    await client.writeFile(`${root}/written.ts`, 'export {};\n');
+    await client.mkdir(`${root}/made`, { recursive: true });
+    await client.rmdir(`${root}/made`, { recursive: true });
+
+    expect(view.canDelete).toHaveBeenCalledWith('main.ts');
+    expect(view.move).toHaveBeenCalledWith('main.ts', 'renamed.ts');
+    expect(view.writeFiles).toHaveBeenCalledWith({ 'a.ts': { content: skillBytes } });
+    expect(view.writeFileChecked).toHaveBeenCalledWith({
+      path: 'parameters.json',
+      data: '{}',
+      preconditions: [{ path: 'parameters.json', expected: null }],
+    });
+    expect(view.duplicate).toHaveBeenCalledWith('main.ts', 'copy.ts');
+    expect(view.copyTree).toHaveBeenCalledWith('src', 'src-copy');
+    expect(view.bulkMove).toHaveBeenCalledWith([{ source: 'a.ts', target: 'b/a.ts' }]);
+    /* `writeFile`, `mkdir` and `rmdir` are the view's own, so the bytes are the
+     * proof: the composed view wrote through to the checkout. */
+    await expect(provider.readFile('written.ts', 'utf8')).resolves.toBe('export {};\n');
+    await expect(provider.exists('made')).resolves.toBe(false);
+
+    for (const method of [
+      authority.canDelete,
+      authority.move,
+      authority.writeFiles,
+      authority.writeFileChecked,
+      authority.duplicateFile,
+      authority.copyDirectory,
+      authority.bulkMove,
+      authority.writeFile,
+      authority.mkdir,
+      authority.rmdir,
+    ]) {
+      expect(method).not.toHaveBeenCalled();
+    }
+  });
+
+  /*
+   * A batch is one operation: half of it on the view and half on the authority
+   * would take two lock sets and two origins, so a path the view cannot serve
+   * sends the whole call to the authority.
+   */
+  it('should send a batch that reaches outside the project root to the authority whole', async () => {
+    const { client, authority, view } = await harness();
+
+    await client.writeFiles({
+      [`${root}/a.ts`]: { content: skillBytes },
+      '/node_modules/three/index.d.ts': { content: skillBytes },
+    });
+
     expect(authority.writeFiles).toHaveBeenCalledOnce();
-    expect(authority.writeFileChecked).toHaveBeenCalledOnce();
-    expect(authority.duplicateFile).toHaveBeenCalledWith(`${root}/main.ts`, `${root}/copy.ts`);
+    expect(view.writeFiles).not.toHaveBeenCalled();
   });
 
   it('should refuse a checked write when its target or any precondition is read-only', async () => {
@@ -257,14 +341,15 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
  */
 describe('createComposedViewClient overrideUnit (north star W4 attempt a2)', () => {
   it('should write every file of the unit under the project and nothing else', async () => {
-    const { client, authority } = await harness();
+    const { client, authority, view } = await harness();
 
     await client.overrideUnit(`${skillsRoot}/cad-replicad`);
 
-    expect(authority.writeFiles).toHaveBeenCalledOnce();
-    const written = vi.mocked(authority.writeFiles).mock.calls[0]![0];
-    expect(Object.keys(written)).toEqual([`${root}/${skillPath}`]);
-    expect(written[`${root}/${skillPath}`]!.content).toEqual(skillBytes);
+    expect(view.writeFiles).toHaveBeenCalledOnce();
+    const written = vi.mocked(view.writeFiles).mock.calls[0]![0];
+    expect(Object.keys(written)).toEqual([skillPath]);
+    expect(written[skillPath]!.content).toEqual(skillBytes);
+    expect(authority.writeFiles).not.toHaveBeenCalled();
   });
 
   it('should refuse a unit the project already owns', async () => {

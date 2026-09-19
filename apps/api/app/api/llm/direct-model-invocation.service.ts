@@ -152,8 +152,11 @@ export class DirectModelInvocationService implements ModelInvocationService {
    * unlike the funded path it writes no ledger row, so a 200 that ends in
    * `response.failed` or an `error` event leaves nothing behind (R8).
    *
-   * Identification and the provider's own sentence only; no prompt or response
-   * content, and the sentence is clamped the way a relayed reason is.
+   * Logged: the route, the provider's request id, the frame's code or type, and
+   * the provider's own sentence clamped to 500 characters the way a relayed
+   * reason is. Generated output is never read, but a provider sentence can
+   * quote a fragment of the request it rejected, so this line is operator
+   * evidence and not safe to forward further.
    *
    * @param input - The route the request took, the provider's own identifier
    * for the call when it sent one, and what the terminal frame said about itself.

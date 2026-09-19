@@ -197,6 +197,24 @@ describe('DirectModelInvocationService', () => {
       })}\n\n`,
       'Your input exceeds the context window of this model.',
     ],
+    [
+      // One failure, one line: providers that send both shapes for the same
+      // turn must not produce two ERROR lines.
+      'an error event followed by response.failed',
+      `event: error\ndata: ${JSON.stringify({
+        type: 'error',
+        code: 'server_error',
+        message: 'The server had an error while processing your request.',
+      })}\n\nevent: response.failed\ndata: ${JSON.stringify({
+        type: 'response.failed',
+        response: {
+          id: 'resp_1',
+          status: 'failed',
+          error: { code: 'server_error', message: 'The server had an error while processing your request.' },
+        },
+      })}\n\n`,
+      'The server had an error while processing your request.',
+    ],
   ])('should log %s as the direct relay evidence of a terminal upstream failure', async (_label, frame, reason) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(frame, {

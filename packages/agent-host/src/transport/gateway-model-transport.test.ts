@@ -1726,6 +1726,78 @@ describe('createGatewayModelTransport', () => {
     expect(events.at(-1)?.type).toBe('completed');
   });
 
+  it.each([
+    {
+      label: 'a refusal',
+      // The marker lands mid-payload and the refusal only becomes readable
+      // three chunks later, so the guard withholds several times in a row.
+      chunks: (() => {
+        const message = "The model provider's account is unavailable.";
+        const refusal = JSON.stringify({
+          type: 'error',
+          code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+          message,
+          error: {
+            type: 'tau_gateway',
+            code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+            message,
+            details: { providerId: 'anthropic', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' },
+          },
+        });
+        const marker = refusal.indexOf('"type":"tau_gateway"') + '"type":"tau_gateway"'.length;
+        const rest = refusal.slice(marker);
+        const third = Math.floor(rest.length / 3);
+        return [
+          'data: {"id":"chatcmpl-held","choices":[{"delta":{"content":"partial"}}]}\n\n',
+          `event: error\ndata: ${refusal.slice(0, marker)}`,
+          rest.slice(0, third),
+          rest.slice(third, third * 2),
+          `${rest.slice(third * 2)}\n\n`,
+        ];
+      })(),
+      outcome: 'PROVIDER_ACCOUNT_EXHAUSTED',
+    },
+    {
+      label: 'a complete Tau frame that is not a refusal',
+      chunks: [
+        'data: {"id":"chatcmpl-tau","choices":[{"index":0,"delta":{"content":"partial"}}]}\n\n',
+        'data: {"id":"chatcmpl-tau","type":"tau_gateway",',
+        '"choices":[{"index":0,',
+        '"delta":{"content":" tail"}}]}',
+        '\n\ndata: {"id":"chatcmpl-tau","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+        'data: [DONE]\n\n',
+      ],
+      outcome: 'partial tail',
+    },
+  ] as const)('settles $label whose marker frame spans several chunks', async ({ chunks, outcome }) => {
+    /* A `pull` that only withholds delivers nothing, so the stream schedules no
+     * further pull of its own: two withheld chunks in a row must not strand the
+     * consumer's pending read. */
+    const transport = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      model: { contextWindow: 200_000, maxTokens: 8192 },
+      fetch: vi.fn(async () => responseFromChunks(chunks)),
+    });
+
+    const settled = await Promise.race([
+      collect(transport.stream(request())).then(
+        (events) =>
+          events
+            .filter((event) => event.type === 'text-delta')
+            .map((event) => event.text)
+            .join(''),
+        (error: unknown) => (error as { code?: string }).code ?? 'rejected',
+      ),
+      new Promise<'stalled'>((resolve) => {
+        globalThis.setTimeout(() => {
+          resolve('stalled');
+        }, 500);
+      }),
+    ]);
+
+    expect(settled).toBe(outcome);
+  });
+
   it('should leave a healthy Responses stream untouched while scanning for the refusal frame', async () => {
     const events = await collect(
       createGatewayModelTransport({

@@ -383,6 +383,8 @@ export const billableModelRouteMeters = routes.flatMap((entry) => {
     routeId,
     meterContractId: `model-meter-v1:${routeId}`,
     rates,
+    // A tariff that expires is a supplier promotion; the catalog keeps showing the standard price.
+    ...(entry.validThrough === undefined ? {} : { validThrough: entry.validThrough }),
   });
   return tiered === undefined
     ? [meter(entry.routeId, entry.rates)]

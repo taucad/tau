@@ -4,6 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import {
   assertTieredRoutesAreFunded,
   billableModelRouteIds,
+  billableModelRouteMeters,
   CodeOwnedBillableModelQualificationResolver,
   supplierIdentityForRoute,
 } from '#api/billing/billable-model-qualification.js';
@@ -488,6 +489,37 @@ describe('catalog route vocabulary', () => {
         model: row.provider.id === 'vertexai' ? `google/${row.model}` : row.model,
       });
     }
+  });
+
+  /* The model selector shows the catalog price and billing charges the route
+   * tariff. A route whose tariff expires is a supplier promotion, and the catalog
+   * deliberately keeps the standard price; every other route must agree. */
+  it('should show the billed base price in the catalog for every route without a promotion', () => {
+    const mismatches = billableModelRouteMeters
+      .filter((meter) => meter.validThrough === undefined)
+      .flatMap((meter) => {
+        const row = catalogRows.find((entry) => entry.id === meter.routeId);
+        if (!row) {
+          return [];
+        }
+        const billed = (dimension: string): number | undefined => {
+          const rate = meter.rates.find((entry) => entry.dimension === dimension);
+          return rate === undefined ? undefined : Number(rate.numeratorPicoUsd) / 1e12;
+        };
+        const { cost } = row.details;
+        return [
+          ['uncached_input', cost.inputTokens],
+          ['cache_read', cost.cacheReadTokens],
+          ['cache_write', cost.cacheWriteTokens],
+          ['output', cost.outputTokens],
+        ].flatMap(([dimension, shown]) => {
+          const charged = billed(String(dimension));
+          return charged === undefined || charged === shown
+            ? []
+            : [`${meter.routeId} ${String(dimension)}: shows ${String(shown)}, bills ${String(charged)}`];
+        });
+      });
+    expect(mismatches).toEqual([]);
   });
 
   it('should refuse to fund a route no catalog row names', () => {

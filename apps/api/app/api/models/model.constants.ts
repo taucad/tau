@@ -397,6 +397,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
         maxTokens: 128_000,
         knowledgeCutoff: '2026-02',
+        // OpenAI's standard price; billing charges its promotional rate while that lasts.
         cost: {
           inputTokens: 5,
           outputTokens: 30,
@@ -436,10 +437,10 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         maxTokens: 128_000,
         knowledgeCutoff: '2026-02',
         cost: {
-          inputTokens: 2.5,
-          outputTokens: 15,
-          cacheReadTokens: 0.25,
-          cacheWriteTokens: 3.125,
+          inputTokens: 2,
+          outputTokens: 12,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 2.5,
         },
       },
       configuration: {
@@ -620,6 +621,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         families: ['gemini'],
         contextWindow: 200_000, // Provider supports 1,048,576 tokens; Tau caps the effective chat budget.
         maxTokens: 65_536,
+        // Google's standard price; billing charges its promotional rate while that lasts.
         cost: {
           inputTokens: 1.5,
           outputTokens: 7.5,

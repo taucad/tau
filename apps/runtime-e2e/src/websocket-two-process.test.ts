@@ -148,7 +148,7 @@ const createBrowserFileSystem = async (
     service.dispose();
   });
   return {
-    fileSystem: fromFileSystemBridge(() => openFileSystemBridge(bridgeWorker, { root })),
+    fileSystem: fromFileSystemBridge(() => openFileSystemBridge(bridgeWorker, { root, consumer: 'working-copy' })),
     service,
     root,
   };

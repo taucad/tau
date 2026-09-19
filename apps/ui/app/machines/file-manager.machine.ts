@@ -1,7 +1,6 @@
 import { assign, assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
-import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
+import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
@@ -98,21 +97,6 @@ const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) =
  *   recovers without a re-pick.
  */
 export type WorkspaceUnavailableReason = 'missing' | 'disconnected' | 'permission';
-
-/**
- * Which surface a rooted bridge connection asks for. Required, never defaulted
- * (gate G-B finding G6).
- *
- * A UI-originated connection names the consumer whose composed view it reads —
- * `'user'` or `'agent'` — and gets that consumer's mask and overlays. Trusted
- * composition names `'working-copy'`: the host's own capture, apply and language
- * planes must read the checkout itself and never the overlays above it
- * (architecture V6). Since W5 that raw surface also carries the mutating
- * porcelain, so the choice is a write decision as well as a read one — which is
- * why it is spelled at every call site instead of falling out of an omitted
- * argument.
- */
-export type RootedBridgeConsumer = ComposedViewConsumer | 'working-copy';
 
 type FileManagerContext = {
   worker: Worker | undefined;
@@ -361,10 +345,8 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
         class: 'authored',
       });
     }
-    /* `'working-copy'` is the absence of a consumer on the wire: the bridge hands
-     * back the checkout's raw rooted filesystem when no consumer is named. */
     const openBridge = (root: string, consumer: RootedBridgeConsumer): FileSystemBridgeConnection =>
-      openFileSystemBridge(worker, { root, ...(consumer === 'working-copy' ? {} : { consumer }) });
+      openFileSystemBridge(worker, { root, consumer });
     worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
     const { openComputeBinding, openComputeStorePort, computeControl } = computeOpeners(worker, context.projectId);
 

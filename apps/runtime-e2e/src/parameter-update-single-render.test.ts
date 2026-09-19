@@ -92,6 +92,8 @@ const createProjectWorkspace = async (
       openFileSystemBridge(bridgeWorker, {
         messageType: filesystemBridgeConnectMessageType,
         root: `/projects/${projectId}`,
+        /* The kernel runs the checkout itself, never a consumer's view (G6). */
+        consumer: 'working-copy',
       }),
     ),
     dispose: () => {

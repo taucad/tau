@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as barrel from '#index.js';
-import { createFileSystemBridgeHello, fileSystemBridgeSchemas } from '#filesystem-bridge-protocol.js';
+import {
+  createFileSystemBridgeHello,
+  fileSystemBridgeProtocolVersion,
+  fileSystemBridgeSchemas,
+} from '#filesystem-bridge-protocol.js';
 
 describe('void call results', () => {
   const { result } = fileSystemBridgeSchemas.calls.writeFile;
@@ -43,9 +47,9 @@ describe('filesystem bridge hello capabilities', () => {
     expect(fileSystemBridgeSchemas.hello.safeParse(hello)).toEqual({ success: true, data: hello });
   });
 
-  it('still accepts a version-1 hello from before durability classes', () => {
+  it('still accepts a hello from before durability classes', () => {
     const legacy = {
-      v: 1,
+      v: fileSystemBridgeProtocolVersion,
       state: 'ready',
       capabilities: { persistent: true, writable: true, quotaBased: true },
       watchable: false,

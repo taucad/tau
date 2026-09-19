@@ -606,23 +606,24 @@ export type CoalescerFactory = (
 ) => ChangeEventCoalescer;
 
 /**
+ * Which surface a rooted bridge connection asks for, named on every rooted
+ * connect envelope (invariant CI2).
+ *
+ * `'user'` and `'agent'` are masked by `composeView`; `'working-copy'` is the
+ * checkout's raw rooted filesystem, which the host's own capture, apply and
+ * language planes read because they must not see the overlays composed above
+ * it (architecture V6). An absent or unknown value is refused — no code path
+ * treats absence as a value.
+ * @public
+ */
+export type RootedBridgeConsumer = ComposedViewConsumer | 'working-copy';
+
+/**
  * Options for configuring the filesystem bridge message type.
  * @public
  */
 export type FileSystemBridgeOptions = {
   messageType?: string;
-  /**
-   * Project mount to expose as `/` for this connection. The root is consumed
-   * by the filesystem server when the connection is accepted; it is never
-   * forwarded to runtime calls.
-   */
-  root?: string;
-  /**
-   * Compose the root as this consumer's view instead of handing back the raw
-   * working copy. Omit it for the host's own capture, apply and language
-   * planes, which read the checkout itself.
-   */
-  consumer?: ComposedViewConsumer;
   /** Coalescing window for UI-bound fileChanged events (default: 500). Milliseconds. */
   uiCoalescingWindow?: number;
   /**
@@ -631,7 +632,23 @@ export type FileSystemBridgeOptions = {
    * When omitted, events pass through without batching.
    */
   createCoalescer?: CoalescerFactory;
-};
+} & (
+  | {
+      /** The workspace surface: no root, and therefore no view to name. */
+      root?: undefined;
+      consumer?: undefined;
+    }
+  | {
+      /**
+       * Project mount to expose as `/` for this connection. The root is consumed
+       * by the filesystem server when the connection is accepted; it is never
+       * forwarded to runtime calls.
+       */
+      root: string;
+      /** Which surface this rooted connection reads; required beside a root (CI2). */
+      consumer: RootedBridgeConsumer;
+    }
+);
 
 /**
  * Minimal event bus interface for broadcasting file change events
@@ -659,12 +676,8 @@ export type ExposeFileSystemHandle = {
 export type RootedFileSystemHandlerFactory = (
   root: string,
   context: WorkspaceMutationContext,
-  /**
-   * Which composed view the connection asked for, or `undefined` for the
-   * checkout's raw working copy — the host's own capture and apply plane,
-   * which must not see composed overlays (architecture V6).
-   */
-  consumer: ComposedViewConsumer | undefined,
+  /** The surface the connection named; an unrecognised one never reaches here. */
+  consumer: RootedBridgeConsumer,
 ) => FileSystemBridgeRuntimeService | undefined;
 
 type FileSystemBridgeConnectEnvelope = {
@@ -672,7 +685,6 @@ type FileSystemBridgeConnectEnvelope = {
   readonly type: string;
   readonly port: MessagePort;
   readonly root?: unknown;
-  readonly consumer?: unknown;
 };
 
 const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<FileSystemBridgeConnectEnvelope> =>
@@ -681,7 +693,18 @@ const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<F
     type: z.literal(messageType),
     port: z.instanceof(MessagePort),
     root: z.unknown().optional(),
-    consumer: z.unknown().optional(),
+  });
+
+/**
+ * The rooted half of a connect envelope: a root always names the surface it
+ * serves. Parsed separately from the envelope above so an envelope that names
+ * no recognised consumer is answered with a typed `ROOT_UNAVAILABLE` (CI2)
+ * instead of failing validation and dropping the port without a word.
+ */
+const rootedConnectSchema: z.ZodType<{ readonly root: string; readonly consumer: RootedBridgeConsumer }> =
+  z.looseObject({
+    root: z.string(),
+    consumer: z.enum(['user', 'agent', 'working-copy']),
   });
 
 const fileSystemBridgePeerEnvelopeSchema = (messageType: string) =>
@@ -724,7 +747,7 @@ type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
   handlerForRoot?: (
     root: string,
     context: WorkspaceMutationContext,
-    consumer: ComposedViewConsumer | undefined,
+    consumer: RootedBridgeConsumer,
   ) => StringKeyedObject | undefined;
   changeEventBus?: BridgeChangeEventBus;
   /* Inline `Pick`, no named alias.
@@ -810,6 +833,7 @@ function exposeFileSystemHandlers(
         const { port, v } = peerEnvelope.data;
         const error = new FileSystemBridgeProtocolVersionError(v);
         port.postMessage({
+          // The RPC frame version, not the filesystem bridge protocol version.
           v: 1,
           k: 'lh',
           o: 0,
@@ -847,10 +871,6 @@ function exposeFileSystemHandlers(
 
     const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
     const requestedRoot = typeof parsedEnvelope.data.root === 'string' ? parsedEnvelope.data.root : undefined;
-    const requestedConsumer =
-      parsedEnvelope.data.consumer === 'agent' || parsedEnvelope.data.consumer === 'user'
-        ? parsedEnvelope.data.consumer
-        : undefined;
     const mutationContext = { originClientId: portId };
     let portHandlers: StringKeyedObject;
     let handlersAvailable = true;
@@ -859,8 +879,14 @@ function exposeFileSystemHandlers(
       portHandlers = bindMutationContextForPort(handlers, mutationContext);
     } else {
       scopedPorts.set(port, requestedRoot);
+      /* Fail closed (CI2): only an envelope that names its consumer reaches the
+       * handler, so no surface is served to a connection that did not ask for it
+       * by name. Absent and unknown are the same refusal. */
+      const rooted = rootedConnectSchema.safeParse(event.data);
       try {
-        const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext, requestedConsumer);
+        const rootedHandlers = rooted.success
+          ? options?.handlerForRoot?.(requestedRoot, mutationContext, rooted.data.consumer)
+          : undefined;
         handlersAvailable = rootedHandlers !== undefined;
         unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
         portHandlers =
@@ -1050,8 +1076,7 @@ export function openFileSystemBridge(
     v: fileSystemBridgeProtocolVersion,
     type: messageType,
     port: channel.port1,
-    ...(options?.root === undefined ? {} : { root: options.root }),
-    ...(options?.consumer === undefined ? {} : { consumer: options.consumer }),
+    ...(options?.root === undefined ? {} : { root: options.root, consumer: options.consumer }),
   };
   worker.postMessage(envelope, [channel.port1]);
   const rawPort = asFileSystemBridgePort(channel.port2);

@@ -215,7 +215,7 @@ describe('a Home composer record', () => {
   it('should round-trip through the working copy the rooted content client opens', async () => {
     const provider = home();
     const client = createRootedContentClient({
-      /* The worker's own `handlerForRoot`: no consumer means the checkout itself (V6). */
+      /* The worker's own `handlerForRoot`: a `'working-copy'` connection is the checkout itself (V6). */
       open: async () => ({ files: provider as unknown as RootedFiles, dispose: () => undefined }),
     });
 

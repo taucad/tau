@@ -29,7 +29,8 @@ import {
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
-import type { RootedBridgeConsumer, WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
+import type { RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';

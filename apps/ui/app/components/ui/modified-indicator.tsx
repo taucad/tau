@@ -1,13 +1,16 @@
 import { RefreshCcwDot } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 /**
  * Signals a value has been modified from its default.
  *
  * Below `md`: shows the reset icon only (always tappable).
  * `md` and up: small yellow dot; hover morphs into the reset icon.
- * Uses `group/modified` for hover on larger breakpoints.
+ * Uses `group/modified` for hover on larger breakpoints. The dot is status and
+ * stays visible at rest; the button's own hover surface is the nested-action
+ * tone, so it reads as a control on a lit header.
  */
 export function ModifiedIndicator({
   onReset,
@@ -25,7 +28,12 @@ export function ModifiedIndicator({
       <TooltipTrigger asChild>
         <button
           type='button'
-          className={cn('group/modified relative flex size-4 shrink-0 items-center justify-center', className)}
+          className={nestedActionVariants({
+            className: cn(
+              'group/modified relative flex size-4 shrink-0 items-center justify-center rounded-md outline-none focus-visible:focus-outline',
+              className,
+            ),
+          })}
           aria-label={tooltip}
           onClick={(event) => {
             event.stopPropagation();

@@ -4,10 +4,15 @@
  * The whole exchange happens in main. better-auth's OAuth callback carries no
  * credential, so a token-minting hop is mandatory: the system browser lands on
  * the web app's `/auth/desktop` route, which mints a one-time token from the
- * *browser's* session and hands it to a loopback listener here. Main then
- * redeems it cookie-lessly — better-auth short-circuits its origin check for
- * requests with no cookie, and Tau's CORS validator allows a missing `Origin`,
- * so no `trustedOrigins` change is needed and the renderer never sees a token.
+ * *browser's* session and hands it back through a `tau://auth/callback` deep
+ * link (R4, ruling D4). Main then redeems it cookie-lessly — better-auth
+ * short-circuits its origin check for requests with no cookie, and Tau's CORS
+ * validator allows a missing `Origin` — so no `trustedOrigins` change is needed
+ * and the renderer never sees a token.
+ *
+ * The deep link replaces an ephemeral loopback listener, which meant every
+ * sign-in opened a port on the machine that any local process could reach, and
+ * handed the browser an `http://127.0.0.1` navigation to make.
  *
  * Nothing in this module imports `electron`: `safeStorage`, the external-URL
  * opener, and `fetch` all arrive as options, which is what makes the state
@@ -15,17 +20,19 @@
  */
 
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { createServer } from 'node:http';
-import type { Server } from 'node:http';
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-/** Path the web handoff page navigates to on the loopback listener. */
-export const loopbackCallbackPath = '/callback';
-/** Query parameter names the handoff page sends. */
-export const handoffParameterNames = { token: 'ott', state: 'state' } as const;
 /** Response header better-auth's bearer plugin emits with a fresh session token. */
 export const setAuthTokenHeader = 'set-auth-token';
+
+/** The parsed `tau://auth/callback` payload main hands back. */
+export type AuthCallback = {
+  /** Single-use token the browser minted from its own session. */
+  readonly oneTimeToken: string;
+  /** Nonce this service generated for the attempt in flight. */
+  readonly state: string;
+};
 
 /** `safeStorage`, narrowed to what custody needs. */
 export type SafeStorageLike = {
@@ -70,14 +77,23 @@ export type AuthService = {
   restore(): Promise<void>;
   /** Open the system browser and settle when a session arrives (or the attempt fails). */
   signIn(): Promise<void>;
+  /** Redeem a `tau://auth/callback` link against the sign-in in flight, if any. */
+  handleCallback(callback: AuthCallback): Promise<void>;
   /** Drop the stored credential. */
   signOut(): Promise<void>;
   /** Re-validate the session, re-persisting a refreshed token and dropping on 401. */
   refresh(): Promise<void>;
   /** Subscribe to sign-in, sign-out, and refresh. Returns an unsubscribe function. */
   onChange(listener: () => void): () => void;
-  /** Stop the refresh timer and any in-flight loopback listener. */
+  /** Stop the refresh timer and abandon any sign-in in flight. */
   dispose(): void;
+};
+
+/** One interactive sign-in waiting for its callback. */
+type PendingSignIn = {
+  readonly state: string;
+  readonly settled: PromiseWithResolvers<void>;
+  readonly deadline: NodeJS.Timeout;
 };
 
 const nonce = (): string => randomBytes(24).toString('base64url');
@@ -87,9 +103,6 @@ const constantTimeEquals = (a: string, b: string): boolean => {
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 };
-
-const callbackBody = (message: string): string =>
-  `<!doctype html><meta charset="utf-8"><title>Tau</title><body style="font:16px system-ui;padding:3rem">${message}</body>`;
 
 /* Sessions idle out after seven days and the bearer plugin re-issues on a 24 h
  * `updateAge`, so an hourly probe is the cheapest cadence that still notices a
@@ -113,7 +126,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
    * to disk — an e2e run must not leave a credential behind in userData. */
   const seeded = options.packaged ? undefined : options.seededToken;
   let token: string | undefined = seeded;
-  let server: Server | undefined;
+  let pending: PendingSignIn | undefined;
   let timer: NodeJS.Timeout | undefined;
 
   const notify = (): void => {
@@ -182,9 +195,20 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
     }
   };
 
-  const closeServer = (): void => {
-    server?.close();
-    server = undefined;
+  /* One attempt, one outcome: whatever settles it also stops the clock and
+   * clears the nonce, which is what makes the callback single-use. */
+  const settlePending = (error?: Error): void => {
+    const current = pending;
+    if (current === undefined) {
+      return;
+    }
+    pending = undefined;
+    clearTimeout(current.deadline);
+    if (error === undefined) {
+      current.settled.resolve();
+    } else {
+      current.settled.reject(error);
+    }
   };
 
   const refresh = async (): Promise<void> => {
@@ -251,69 +275,55 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
     },
 
     async signIn() {
-      if (server) {
+      if (pending !== undefined) {
         throw new Error('A desktop sign-in is already in progress.');
       }
       const state = nonce();
-      const settled = Promise.withResolvers<void>();
-      /* An async request handler: Node ignores the returned promise, so every
-       * path settles the deferred itself and nothing escapes as an unhandled
-       * rejection. */
-      const listener = createServer(async (request, response) => {
-        const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
-        if (requestUrl.pathname !== loopbackCallbackPath) {
-          response.writeHead(404).end();
-          return;
-        }
-        const received = requestUrl.searchParams.get(handoffParameterNames.state) ?? '';
-        const oneTimeToken = requestUrl.searchParams.get(handoffParameterNames.token) ?? '';
-        if (!constantTimeEquals(received, state)) {
-          /* A mismatched state is a cross-site login attempt, not a user error:
-           * refuse without ever presenting the token to the API. */
-          log('error', 'auth.state-mismatch');
-          response.writeHead(400, { 'content-type': 'text/html' }).end(callbackBody('Sign-in could not be verified.'));
-          settled.reject(new Error('Desktop sign-in state did not match.'));
-          return;
-        }
-        try {
-          await exchange(oneTimeToken);
-          response
-            .writeHead(200, { 'content-type': 'text/html' })
-            .end(callbackBody('Signed in. You can close this tab and return to Tau.'));
-          log('info', 'auth.signed-in');
-          notify();
-          settled.resolve();
-        } catch (error) {
-          response.writeHead(500, { 'content-type': 'text/html' }).end(callbackBody('Sign-in failed.'));
-          settled.reject(error instanceof Error ? error : new Error(String(error)));
-        }
-      });
-      server = listener;
-
-      const signInDeadline = setTimeout(
+      const deadline = setTimeout(
         () => {
-          settled.reject(new Error('Desktop sign-in timed out.'));
+          settlePending(new Error('Desktop sign-in timed out.'));
         },
         options.signInTimeout ?? 5 * 60 * 1000,
       );
-
+      deadline.unref();
+      const settled = Promise.withResolvers<void>();
+      pending = { state, settled, deadline };
       try {
-        await new Promise<void>((resolve, reject) => {
-          listener.once('error', reject);
-          listener.listen(0, '127.0.0.1', resolve);
-        });
-        const address = listener.address();
-        if (address === null || typeof address === 'string') {
-          throw new Error('Loopback sign-in listener did not bind a port.');
-        }
         /* The redirect target is nested inside `redirectTo`, so it is encoded
          * once as a whole — the sign-in page hands it back verbatim after auth. */
-        const handoff = `/auth/desktop?port=${String(address.port)}&state=${state}`;
+        const handoff = `/auth/desktop?state=${state}`;
         await options.openExternal(`${options.frontendUrl}/auth/sign-in?redirectTo=${encodeURIComponent(handoff)}`);
-        await settled.promise;
-      } finally {
-        clearTimeout(signInDeadline);
-        closeServer();
+      } catch (error) {
+        settlePending(error instanceof Error ? error : new Error(String(error)));
+      }
+      await settled.promise;
+    },
+
+    async handleCallback({ oneTimeToken, state }) {
+      const current = pending;
+      if (current === undefined) {
+        /* Nobody asked for this: a replay of a link already redeemed, one that
+         * arrived after the attempt expired, or one another application on the
+         * machine emitted. The scheme proves nothing, so silence is the answer. */
+        log('warn', 'auth.callback-unexpected');
+        return;
+      }
+      if (!constantTimeEquals(state, current.state)) {
+        /* A mismatched state is a cross-site login attempt, not a user error:
+         * refuse without ever presenting the token to the API. The attempt in
+         * flight is left alone — anything on the machine can emit this link, and
+         * settling here would let it cancel the person's real sign-in. The
+         * deadline already bounds the attempt. */
+        log('error', 'auth.state-mismatch');
+        return;
+      }
+      try {
+        await exchange(oneTimeToken);
+        log('info', 'auth.signed-in');
+        notify();
+        settlePending();
+      } catch (error) {
+        settlePending(error instanceof Error ? error : new Error(String(error)));
       }
     },
 
@@ -334,7 +344,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
         timer = undefined;
       }
       listeners.clear();
-      closeServer();
+      settlePending(new Error('The desktop sign-in was abandoned.'));
     },
   };
 };

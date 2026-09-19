@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 
-import '@testing-library/jest-dom/vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import AuthDesktopRoute, { buildDesktopLoopbackUrl, parseDesktopHandoffTarget } from '#routes/auth.desktop/route.js';
+import AuthDesktopRoute, { buildDesktopCallbackUrl, parseDesktopHandoffTarget } from '#routes/auth.desktop/route.js';
 
 const mocks = vi.hoisted(() => ({
-  search: '?port=51234&state=abcd1234efgh',
+  search: '?state=abcd1234efgh',
   session: { user: { id: 'usr_1' } } as unknown,
   authenticate: vi.fn(),
   authFetch: vi.fn(),
@@ -33,32 +32,31 @@ vi.mock('#lib/auth-client.js', () => ({
 }));
 
 describe('parseDesktopHandoffTarget', () => {
-  it('accepts a concrete loopback port and an opaque nonce', () => {
-    expect(parseDesktopHandoffTarget('?port=51234&state=abcd1234efgh')).toEqual({
-      port: 51_234,
-      state: 'abcd1234efgh',
-    });
+  it('accepts the opaque nonce on its own, with no port', () => {
+    expect(parseDesktopHandoffTarget('?state=abcd1234efgh')).toEqual({ state: 'abcd1234efgh' });
+  });
+
+  /* The loopback listener is gone with R4: the callback goes to the app's own
+     scheme, so there is no port for a caller to point somewhere else. */
+  it('ignores a port a caller still tries to supply', () => {
+    expect(parseDesktopHandoffTarget('?port=51234&state=abcd1234efgh')).toEqual({ state: 'abcd1234efgh' });
   });
 
   it.each([
-    ['a missing port', '?state=abcd1234efgh'],
-    ['a non-numeric port', '?port=80x&state=abcd1234efgh'],
-    ['the ephemeral placeholder port', '?port=0&state=abcd1234efgh'],
-    ['an out-of-range port', '?port=65536&state=abcd1234efgh'],
-    ['a fractional port', '?port=1234.5&state=abcd1234efgh'],
-    ['a missing state', '?port=51234'],
-    ['a too-short state', '?port=51234&state=abc'],
-    ['a state carrying URL separators', '?port=51234&state=abcd1234%26evil%3D1'],
-    ['a state carrying a path traversal', '?port=51234&state=..%2F..%2Fetc'],
+    ['a missing state', '?'],
+    ['a state with only a port beside it', '?port=51234'],
+    ['a too-short state', '?state=abc'],
+    ['a state carrying URL separators', '?state=abcd1234%26evil%3D1'],
+    ['a state carrying a path traversal', '?state=..%2F..%2Fetc'],
   ])('rejects %s', (_label, search) => {
     expect(parseDesktopHandoffTarget(search)).toBeUndefined();
   });
 });
 
-describe('buildDesktopLoopbackUrl', () => {
-  it('targets 127.0.0.1 and echoes the state alongside the token', () => {
-    expect(buildDesktopLoopbackUrl({ port: 51_234, state: 'abcd1234efgh' }, 'ott-value')).toBe(
-      'http://127.0.0.1:51234/callback?ott=ott-value&state=abcd1234efgh',
+describe('buildDesktopCallbackUrl', () => {
+  it('targets the app scheme and echoes the state alongside the token', () => {
+    expect(buildDesktopCallbackUrl({ state: 'abcd1234efgh' }, 'ott-value')).toBe(
+      'tau://auth/callback?ott=ott-value&state=abcd1234efgh',
     );
   });
 });
@@ -67,7 +65,7 @@ describe('AuthDesktopRoute', () => {
   const assign = vi.fn();
 
   beforeEach(() => {
-    mocks.search = '?port=51234&state=abcd1234efgh';
+    mocks.search = '?state=abcd1234efgh';
     mocks.session = { user: { id: 'usr_1' } };
     mocks.authFetch.mockResolvedValue({ data: { token: 'ott-value' }, error: null });
     vi.stubGlobal('location', { href: 'http://app.test/auth/desktop', assign });
@@ -79,8 +77,8 @@ describe('AuthDesktopRoute', () => {
   });
 
   // MAJOR 2: any site can navigate a signed-in browser here. Minting on mount
-  // would hand a session-bearing token to whatever is listening on the
-  // attacker-chosen loopback port, with no user in the loop.
+  // would hand a session-bearing token to whatever claims `tau://`, with no
+  // user in the loop.
   it('mints nothing until the user confirms, even with a valid request', async () => {
     render(<AuthDesktopRoute />);
 
@@ -91,26 +89,50 @@ describe('AuthDesktopRoute', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
-  it('names the requesting port so the user can refuse an unexpected one', () => {
+  it('says what it is asking for and how long the request lives', () => {
     render(<AuthDesktopRoute />);
 
-    expect(screen.getByText(/127\.0\.0\.1:51234/)).toBeInTheDocument();
+    expect(
+      screen.getByText('Only continue if you just started sign-in from Tau Desktop on this computer.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('This request expires in 5 minutes.')).toBeInTheDocument();
   });
 
-  it('mints a one-time token and navigates to the loopback callback on confirmation', async () => {
+  it('mints a one-time token and navigates to the app scheme on confirmation', async () => {
     render(<AuthDesktopRoute />);
 
     await userEvent.click(screen.getByRole('button', { name: /connect to tau desktop/i }));
 
     await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith('http://127.0.0.1:51234/callback?ott=ott-value&state=abcd1234efgh');
+      expect(assign).toHaveBeenCalledWith('tau://auth/callback?ott=ott-value&state=abcd1234efgh');
     });
     expect(mocks.authFetch).toHaveBeenCalledWith('/one-time-token/generate');
-    expect(screen.getByText('You can return to the app')).toBeInTheDocument();
+    expect(screen.getByText('Opening Tau Desktop')).toBeInTheDocument();
+  });
+
+  /* The fallback is a visible button, never a timer, and sign-in is the one
+     flow with no browser continuation to offer instead. */
+  it('offers a way out of opening, and re-offers the same unspent token', async () => {
+    render(<AuthDesktopRoute />);
+
+    await userEvent.click(screen.getByRole('button', { name: /connect to tau desktop/i }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Tau Desktop didn’t open' }));
+
+    expect(screen.getByText('Tau Desktop didn’t open')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Get Tau Desktop' })).toHaveAttribute('href', 'https://docs.tau.new');
+    expect(
+      screen.getByText('To sign in without the desktop app, close this tab and use Tau in the browser.'),
+    ).toBeInTheDocument();
+
+    assign.mockClear();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(assign).toHaveBeenCalledWith('tau://auth/callback?ott=ott-value&state=abcd1234efgh');
+    expect(mocks.authFetch).toHaveBeenCalledTimes(1);
   });
 
   it('never mints a token for a malformed request', async () => {
-    mocks.search = '?port=0&state=abc';
+    mocks.search = '?state=abc';
 
     render(<AuthDesktopRoute />);
 

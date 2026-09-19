@@ -287,3 +287,32 @@ describe('GitHub remote authority', () => {
     ).rejects.toThrow('The requested GitHub authority is not allowed.');
   });
 });
+
+describe('browser share provider origin', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    globalThis.window.ENV = originalClientEnvironment;
+  });
+
+  it('should build share links from the document origin on the web', async () => {
+    await withBrowserShareProviderContext(async (context) => {
+      expect(context.origin).toBe(globalThis.location.origin);
+    });
+  });
+
+  it('should build share links from the web origin on desktop, not from app://tau', async () => {
+    /* `formatShareUrl` derives every direct and gist link from this origin, and
+       `/s/*` is not even routed in the desktop SPA
+       (`docs/research/desktop-share-links-blueprint.md`, L2). */
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    globalThis.window.ENV = {
+      ...originalClientEnvironment,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+      TAU_FRONTEND_URL: 'https://tau.new',
+    };
+
+    await withBrowserShareProviderContext(async (context) => {
+      expect(context.origin).toBe('https://tau.new');
+    });
+  });
+});

@@ -22,6 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { CopyButton } from '#components/copy-button.js';
 import { ENV } from '#environment.config.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { shareOrigin } from '#lib/share-origin.js';
 
 /** One row of `GET /v1/projects/:id/collaborators`. Never a token. */
 type CollaboratorEntry = Readonly<{
@@ -203,7 +205,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
   /* The link is only ever rendered from the token held in this component's
      state; it is never written to storage, a query cache or a log (I8). */
   const invitationUrl =
-    issued === undefined ? undefined : new URL(`/invitations/${issued.token}`, globalThis.location.origin).toString();
+    issued === undefined ? undefined : new URL(`/invitations/${issued.token}`, shareOrigin()).toString();
 
   /*
    * F5: where the gesture leaves a keyboard.
@@ -311,7 +313,15 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
             />
             <CopyButton getText={() => invitationUrl} readyToCopyText='Copy link' copiedText='Copied' size='sm' />
           </div>
-          <p className='text-xs text-muted-foreground'>Tau does not email this link. Send it to them yourself.</p>
+          {/* The desktop shell has no inbound link path, so `app://tau` was
+              never the answer: the invitee finishes in a browser and the
+              project arrives on their desktop's next cloud listing (blueprint
+              Finding 5, ruling Q4). Either way the owner sends the link. */}
+          <p className='text-xs text-muted-foreground'>
+            {isDesktopTarget()
+              ? 'This link opens in the browser. Once they accept, the project appears in their Tau.'
+              : 'Tau does not email this link. Send it to them yourself.'}
+          </p>
           {expiryCopy(issued.expiresAt) === undefined ? undefined : (
             <p className='text-xs text-muted-foreground'>{expiryCopy(issued.expiresAt)}</p>
           )}

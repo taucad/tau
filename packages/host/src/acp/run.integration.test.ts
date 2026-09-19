@@ -281,6 +281,10 @@ const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[
 const lifecycleOf = (events: readonly AgentLogEvent[]): readonly string[] =>
   events.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []));
 
+/** One run's own last lifecycle record, in a chat that holds several runs. */
+const stopOf = (events: readonly AgentLogEvent[], runId: string): AgentLogEvent | undefined =>
+  events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
+
 const textOfMessage = (message: ProviderMessage | undefined): string => {
   const { content } = message ?? {};
   if (typeof content === 'string') {
@@ -864,6 +868,109 @@ describe('the external agent run kind', () => {
     expect(lifecycleOf(events)).not.toContain('completed');
   }, 90_000);
 
+  /*
+   * R13. Claude Code reports a limit's reset one update *before* the failure,
+   * on `usage_update`; the AIR failure object never carries one. The stop has
+   * to carry it so the card can name the window and hold Resume until then.
+   */
+  it('should carry the reset a Claude usage_update reported onto a usage-limit stop', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-quota-reset';
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+
+    await runTurn(harness, { chatId, runId: 'run-external-quota-reset', text: 'fail:quota reset:soon' });
+
+    const events = await readLog(harness.workspaceRoot, chatId);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state: 'failed',
+      detail: {
+        code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+        /* The second report of that turn is unreadable, and the readable one
+         * before it still decides: a report Tau cannot parse is not a reset. */
+        details: {
+          failure: { category: 'limit' },
+          resetsAt: expect.closeTo(resetsAt, -1) as unknown as number,
+          window: 'five_hour',
+        },
+      },
+    });
+  }, 90_000);
+
+  /* Each of the two negative cases runs its own positive control first, in the
+   * same chat: a turn that *does* stamp, so "no reset" cannot pass by the
+   * reader being dead. */
+  it('should drop a held reset once the agent reports the limit allowed again', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-quota-lifted';
+
+    await runTurn(harness, { chatId, runId: 'run-quota-lifted-1', text: 'fail:quota reset:soon' });
+    expect(JSON.stringify(await readLog(harness.workspaceRoot, chatId))).toContain('"window":"five_hour"');
+    await runTurn(harness, { chatId, runId: 'run-quota-lifted-2', text: 'fail:quota reset:lifted' });
+
+    const stop = stopOf(await readLog(harness.workspaceRoot, chatId), 'run-quota-lifted-2');
+    expect(stop).toMatchObject({ state: 'failed', detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED' } });
+    expect(JSON.stringify(stop)).not.toContain('resetsAt');
+  }, 90_000);
+
+  /* A reset that has already passed would release a held Resume the moment the
+   * card rendered, which is the same round trip into the same limit. */
+  it('should ignore a reported reset that has already passed', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-quota-past';
+
+    await runTurn(harness, { chatId, runId: 'run-quota-past-1', text: 'fail:quota reset:soon' });
+    expect(JSON.stringify(await readLog(harness.workspaceRoot, chatId))).toContain('"window":"five_hour"');
+    await runTurn(harness, { chatId, runId: 'run-quota-past-2', text: 'fail:quota reset:past' });
+
+    const stop = stopOf(await readLog(harness.workspaceRoot, chatId), 'run-quota-past-2');
+    expect(stop).toMatchObject({ state: 'failed', detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED' } });
+    expect(JSON.stringify(stop)).not.toContain('resetsAt');
+  }, 90_000);
+
+  /*
+   * F4. A context or budget limit is `limit` too, and no reset clears it: the
+   * account's reset must not be stamped there, or the card would announce a
+   * time in place of the agent's own sentence.
+   */
+  it('should leave a held reset off a limit only a new chat clears', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-context-reset';
+
+    await runTurn(harness, { chatId, runId: 'run-context-reset-1', text: 'fail:quota reset:soon' });
+    expect(JSON.stringify(await readLog(harness.workspaceRoot, chatId))).toContain('"window":"five_hour"');
+    await runTurn(harness, { chatId, runId: 'run-context-reset-2', text: 'fail:context reset:soon' });
+
+    const stop = stopOf(await readLog(harness.workspaceRoot, chatId), 'run-context-reset-2');
+    expect(stop).toMatchObject({
+      state: 'failed',
+      detail: {
+        code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+        message: 'Codex ran out of room in its context window.',
+        details: { failure: { category: 'limit', actions: ['new_session'] } },
+      },
+    });
+    expect(JSON.stringify(stop)).not.toContain('resetsAt');
+  }, 90_000);
+
+  /* R14. Codex has no `usage_update` reset; the patched adapter attaches its own
+   * snapshot beside the AIR failure, in minutes rather than window names. */
+  it("should carry the Codex adapter's snapshot reset, named as a window", async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-quota-codex';
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+
+    await runTurn(harness, { chatId, runId: 'run-external-quota-codex', text: 'fail:quota reset:codex' });
+
+    const events = await readLog(harness.workspaceRoot, chatId);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state: 'failed',
+      detail: {
+        code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+        details: { resetsAt: expect.closeTo(resetsAt, -1) as unknown as number, window: 'five_hour' },
+      },
+    });
+  }, 90_000);
+
   it('should keep the retry action the agent offered for a rate limit', async () => {
     const harness = await startHarness();
     const chatId = 'chat-external-rate';
@@ -878,6 +985,102 @@ describe('the external agent run kind', () => {
         message: 'Codex is temporarily rate limited.',
         details: { failure: { category: 'limit', actions: ['retry'] } },
       },
+    });
+  }, 90_000);
+
+  /*
+   * R9/S11. A resume after a stop the agent said a retry can help re-enters the
+   * vendor session that still holds the turn. Replaying the user's message
+   * there would spend the person's own quota on the same work twice.
+   */
+  it('should continue a retryable stop on the remembered session instead of replaying the turn', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-resume-retry';
+
+    await runTurn(harness, { chatId, runId: 'run-external-resume-retry', text: 'fail:rate noask' });
+    await harness.launcher.execute({ type: 'resume', chatId });
+    await until(async () => sent(harness.frames, 'session/prompt') === 2, 'the continuation prompt', {
+      dump: async () => readLog(harness.workspaceRoot, chatId),
+    });
+
+    const prompts = harness.frames
+      .filter(({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"session/prompt"'))
+      .map(({ frame }) => frame);
+    expect(sent(harness.frames, 'session/new')).toBe(1);
+    expect(prompts).toHaveLength(2);
+    /* The same vendor session, so the agent still has the turn in front of it. */
+    const sessionIdOf = (frame: string): string => /"sessionId":"([^"]+)"/u.exec(frame)?.[1] ?? '';
+    expect(sessionIdOf(prompts[1] ?? '')).toBe(sessionIdOf(prompts[0] ?? ''));
+    expect(prompts[1]).toContain('Continue from where you stopped.');
+    expect(prompts[1]).not.toContain('fail:rate');
+    await harness.launcher.execute({ type: 'cancel', chatId, runId: 'run-external-resume-retry' });
+  }, 90_000);
+
+  /*
+   * F3. A resume reuses the run id, so a run that stopped, resumed and was
+   * *then* cut short by a restart still carries the first stop's `failed` row.
+   * Continuing on that stale row is exactly the turn ACP cannot prove finished.
+   */
+  it('should refuse a resume whose own attempt a restart cut short, stale stop and all', async () => {
+    const { launcher, workspaceRoot, frames } = await startHarness();
+    const chatId = 'chat-external-stale-stop';
+    const runId = 'run-external-stale-stop';
+    await mkdir(join(workspaceRoot, '.tau', 'chats', chatId), { recursive: true });
+    const base = { version: 1, leaderEpoch: 'epoch-before-restart', recordedAt: new Date(0).toISOString(), runId };
+    await writeFile(
+      join(workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl'),
+      [
+        {
+          ...base,
+          sequence: 0,
+          type: 'message.appended',
+          message: {
+            id: 'user-1',
+            role: 'user',
+            content: 'write the file',
+            metadata: { tauInternal: { kind: 'external-agent', agentId: 'codex', acpSessionId: 'fake-session-1' } },
+          },
+        },
+        { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted', storageDurability: 'exclusive-append' },
+        { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
+        /* The agent's own stop, and the resume the person clicked on it. */
+        {
+          ...base,
+          sequence: 3,
+          type: 'run.lifecycle',
+          state: 'failed',
+          detail: {
+            code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+            message: 'Codex is temporarily rate limited.',
+            details: { agentId: 'codex', failure: { category: 'limit', title: 'rate', actions: ['retry'] } },
+          },
+        },
+        { ...base, sequence: 4, type: 'run.lifecycle', state: 'admitted' },
+        /* …and the daemon died here, with that resume still in flight. */
+        { ...base, sequence: 5, type: 'run.lifecycle', state: 'running' },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n'),
+      'utf8',
+    );
+
+    await launcher.execute({ type: 'attach', chatId, cursor: 0, limit: 16 });
+    await until(
+      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
+      'the ambiguous resumed run to fail again',
+      { dump: async () => readLog(workspaceRoot, chatId) },
+    );
+
+    /* Reattached to the remembered session, and then refused: no prompt was
+     * sent on a turn whose outcome ACP cannot report. */
+    expect(sent(frames, 'session/resume')).toBe(1);
+    expect(sent(frames, 'session/new')).toBe(0);
+    expect(sent(frames, 'session/prompt')).toBe(0);
+    const settled = await readLog(workspaceRoot, chatId);
+    expect(settled.at(-1)).toMatchObject({
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
     });
   }, 90_000);
 

@@ -304,7 +304,7 @@ describe('PaneviewHeaderControls', () => {
     expect(controls).toBeInTheDocument();
   });
 
-  it('applies the shared neutral action treatment at the controls boundary', () => {
+  it('does not restate the action tone on descendant buttons (nested-action surfaces R2)', () => {
     render(
       <PaneviewHeader api={mockApi} title='main.ts'>
         <PaneviewHeaderControls>
@@ -315,13 +315,22 @@ describe('PaneviewHeaderControls', () => {
 
     const controls = screen.getByRole('button', { name: 'Action' }).closest('[data-slot="paneview-header-controls"]');
     expect(controls).toHaveAttribute('data-slot', 'paneview-header-controls');
-    expect(controls?.className).toContain('[&_button:hover]:bg-accent');
-    expect(controls?.className).toContain('[&_button:hover]:text-foreground');
-    expect(controls?.className).toContain('[&_button:focus-visible]:bg-accent');
-    expect(controls?.className).toContain('[&_button:focus-visible]:text-foreground');
-    expect(controls?.className).toContain('[&_button:focus-visible]:focus-outline');
-    expect(controls?.className).toContain('[&_button[data-state=open]]:bg-accent');
-    expect(controls?.className).toContain('[&_button[data-state=open]]:text-foreground');
+    // Each control owns its own tone through `nestedActionVariants`; a second owner here drifts.
+    expect(controls?.className).not.toContain('[&_button');
+  });
+
+  it('lights the sidebar row background on hover, focus-within and an open nested menu (R1)', () => {
+    const { container } = render(<PaneviewHeader api={mockApi} title='main.ts' />);
+
+    const header = container.querySelector('[data-slot="paneview-header"]');
+    expect(header).toHaveClass(
+      'hover:bg-sidebar-accent',
+      'focus-within:bg-sidebar-accent',
+      'has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
+      'data-[state=open]:hover:bg-sidebar-accent',
+      'data-[state=open]:focus-within:bg-sidebar-accent',
+    );
+    expect(header?.className).not.toContain('hover:bg-accent');
   });
 });
 
@@ -449,7 +458,7 @@ describe('PaneviewHeaderAction', () => {
     expect(handleClick).toHaveBeenCalledOnce();
   });
 
-  it('applies the Dockview action hover classes', () => {
+  it('takes the nested-action tone, not the header fill (R2)', () => {
     render(
       <PaneviewHeaderAction>
         <svg data-testid='icon' />
@@ -457,8 +466,13 @@ describe('PaneviewHeaderAction', () => {
     );
 
     const button = screen.getByRole('button');
-    expect(button.classList.contains('hover:bg-accent')).toBe(true);
-    expect(button.classList.contains('hover:text-foreground')).toBe(true);
+    expect(button).toHaveClass(
+      'hover:bg-nested-action-hover',
+      'hover:text-foreground',
+      'focus-visible:bg-nested-action-hover',
+      'data-[state=open]:bg-nested-action-hover',
+    );
+    expect(button.classList.contains('hover:bg-accent')).toBe(false);
   });
 
   it('renders with a 24px target', () => {

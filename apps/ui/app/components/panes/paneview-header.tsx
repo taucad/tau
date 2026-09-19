@@ -3,6 +3,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import type { PaneviewPanelApi } from 'dockview-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 const defaultExpandedHeight = 200;
 
@@ -117,9 +118,15 @@ export function PaneviewHeader({
         ref={rootRef}
         data-slot='paneview-header'
         data-state={expanded ? 'open' : 'closed'}
+        /* The sidebar row's lit states and colour (`sidebarRowClass`): hover, focus-within and
+         * an open nested menu light `bg-sidebar-accent`, so an action's `nested-action-hover`
+         * reads as a surface on top. `data-[state=open]` is the pane's expansion, whose
+         * `bg-card` needs the compound variants to yield to the lit states. */
         className={cn(
           'group/paneview-header mx-2 my-1 flex h-8 min-w-0 items-center overflow-hidden rounded-lg border border-transparent bg-transparent pr-1 text-[13px] select-none',
-          'transition-colors duration-150 hover:bg-accent data-[state=open]:border-border data-[state=open]:bg-card data-[state=open]:hover:bg-accent motion-reduce:transition-none',
+          'transition-colors duration-150 motion-reduce:transition-none',
+          'hover:bg-sidebar-accent focus-within:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
+          'data-[state=open]:border-border data-[state=open]:bg-card data-[state=open]:hover:bg-sidebar-accent data-[state=open]:focus-within:bg-sidebar-accent data-[state=open]:has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
         )}
       >
         <button
@@ -170,7 +177,8 @@ export function PaneviewHeaderTitle({
  *
  * Pushes content to the trailing edge via `ml-auto`. Accepts arbitrary div
  * attributes (e.g. `data-testid`) — internal event handlers are not
- * overridable since they own the propagation contract.
+ * overridable since they own the propagation contract. It sets no tone on
+ * the buttons inside: each control owns its own through `nestedActionVariants`.
  */
 export function PaneviewHeaderControls({
   children,
@@ -181,15 +189,7 @@ export function PaneviewHeaderControls({
     <div
       {...rest}
       data-slot='paneview-header-controls'
-      className={cn(
-        'ml-auto flex items-center gap-1',
-        '[&_button]:rounded-md [&_button]:text-muted-foreground [&_button]:transition-colors [&_button]:duration-150 [&_button]:outline-none',
-        '[&_button:hover]:bg-accent [&_button:hover]:text-foreground',
-        '[&_button:focus-visible]:bg-accent [&_button:focus-visible]:text-foreground [&_button:focus-visible]:focus-outline',
-        '[&_button[data-state=open]]:bg-accent [&_button[data-state=open]]:text-foreground',
-        'motion-reduce:[&_button]:transition-none',
-        className,
-      )}
+      className={cn('ml-auto flex items-center gap-1', className)}
       onPointerDown={(event) => {
         event.stopPropagation();
       }}
@@ -230,8 +230,9 @@ export function PaneviewHeaderContentActions({
 /**
  * Compact icon button for paneview panel headers.
  *
- * Sized at 24px (`size-6`) for a compact WCAG 2.2 target. Wraps in a
- * `Tooltip` when the `tooltip` prop is provided.
+ * Sized at 24px (`size-6`) for a compact WCAG 2.2 target, toned by
+ * `nestedActionVariants` — the sidebar row's action, so it reads as a surface
+ * on the lit header. Wraps in a `Tooltip` when the `tooltip` prop is provided.
  */
 export function PaneviewHeaderAction({
   tooltip,
@@ -246,16 +247,17 @@ export function PaneviewHeaderAction({
   const button = (
     <button
       type='button'
-      className={cn(
-        'flex size-6 items-center justify-center rounded-md',
-        'text-muted-foreground transition-colors duration-150 motion-reduce:transition-none',
-        'hover:bg-accent hover:text-foreground',
-        'outline-none focus-visible:focus-outline',
-        'disabled:pointer-events-none disabled:opacity-50',
-        "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
-        'shrink-0 select-none',
-        className,
-      )}
+      className={nestedActionVariants({
+        className: cn(
+          'flex size-6 items-center justify-center rounded-md',
+          'text-muted-foreground duration-150 motion-reduce:transition-none',
+          'outline-none focus-visible:bg-nested-action-hover focus-visible:text-foreground focus-visible:focus-outline',
+          'disabled:pointer-events-none disabled:opacity-50',
+          "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+          'shrink-0 select-none',
+          className,
+        ),
+      })}
       {...properties}
     >
       {children}

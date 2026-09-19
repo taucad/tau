@@ -2436,4 +2436,98 @@ describe('BrowserPlacementChatTransport attachments', () => {
       { type: 'file-ref', path: `attachments/${attachmentHash}.png`, mimeType: 'image/png' },
     ]);
   });
+  /* R7: the consumer cancels the readable side the moment it reads the error
+     chunk this stream wrote, which errors the transform's writable side. The
+     close that followed then rejected into the settled-stream branch, and the
+     console carried "Cannot close a ERRORED writable stream" for a failure the
+     card had already reported. */
+  it('should not log a settled-stream failure when the reader cancels on the error chunk', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-errored-writer-close';
+    const runId = 'run-errored-writer-close';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    /* Held open so the cancel lands while the stream body is still running,
+       which is the field ordering: the SDK reads the error chunk and drops the
+       reader long before the body reaches its close. */
+    const started = Promise.withResolvers<void>();
+    const failing = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-errored-close',
+          sequence: 1,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'failed',
+          detail: {
+            message: 'server_error: The server had an error while processing your request.',
+            code: 'PROVIDER_UNAVAILABLE',
+            status: 200,
+          },
+        });
+        await started.promise;
+        return { chatId, runId, turnId: `message-${chatId}`, state: 'failed', messages: [] } as const;
+      }),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-errored-close',
+        backend: 'opfs',
+        providerBasePath: 'project-errored-close',
+      }),
+      createClient: async () => failing,
+      markRunId: async () => undefined,
+    });
+    const logged: unknown[] = [];
+    const consoleError = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(...args);
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: 'user-errored-close', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      const reader = stream.getReader();
+      const readUntilFailure = async (): Promise<UIMessageChunk | undefined> => {
+        const next = await reader.read();
+        if (next.done) {
+          return undefined;
+        }
+        return next.value.type === 'error' ? next.value : readUntilFailure();
+      };
+      const failureChunk = await readUntilFailure();
+      expect(failureChunk).toMatchObject({ type: 'error' });
+
+      // What the AI SDK does with an error chunk: stop reading and drop the
+      // reader, which errors the writable side the body still holds.
+      await reader.cancel();
+      started.resolve();
+      await vi.waitFor(() => {
+        expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'failed' });
+      });
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+
+      expect(
+        logged.filter((entry) => typeof entry === 'string' && entry.includes('stream failed after it settled')),
+      ).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+      unregister();
+      clearBrowserAgentHostRun(chatId);
+    }
+  });
 });

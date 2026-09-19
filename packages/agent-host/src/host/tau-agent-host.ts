@@ -1,6 +1,10 @@
 import { util as zodUtility } from 'zod';
 import { createAgentSession } from '#harness/session.js';
-import { createPortableId, transportFailureFromProviderMessages } from '#harness/session-record.js';
+import {
+  createPortableId,
+  transportFailureDiagnosticType,
+  transportFailureFromProviderMessages,
+} from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type {
   AgentToolChoice,
@@ -19,6 +23,7 @@ import type {
   AgentLiveEvent,
   AgentLiveEventPayload,
   DurableEventLog,
+  HostRunFailure,
   HostRunSnapshot,
   InterruptApprovalPort,
   InterruptRequest,
@@ -30,6 +35,7 @@ import type { EventLogBatch } from '#log/event-log-appender.js';
 import type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
 import type { ClientContext } from '#harness/cad-middleware.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { externalAgentStopCodes } from '#launchers/node/agent-wire.js';
 
 type SessionEvent = AgentLogEvent extends infer Event
   ? Event extends LogEventBase
@@ -889,38 +895,186 @@ const pendingToolInputs = (messages: readonly ProviderMessage[]) => {
   );
 };
 
+/**
+ * The failed call's marker, rewritten as the tool-use turn it actually was.
+ *
+ * A stream that fails *after* it completed a tool call leaves the marker mid
+ * history — the tool's own rows follow it — so there is no prefix to rewind to.
+ * Left as it stands, its transport-failure diagnostic is what every later
+ * `snapshot()` reports as this chat's failure, and the re-issued call tells the
+ * model its own last turn errored. Rewriting it keeps the work that settled and
+ * drops the failure: the message the stream would have written had it simply
+ * ended after that call.
+ *
+ * @param marker - The last assistant message of the failed run.
+ * @param messages - The reduced history the resume starts from.
+ * @returns The replacement envelope, or `undefined` when no tool call settled.
+ */
+const settledMarkerEnvelope = (
+  marker: ProviderMessage,
+  messages: readonly ProviderMessage[],
+): ProviderMessage | undefined => {
+  const settled = new Set(messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])));
+  const isCall = (block: JsonValue): boolean => isJsonObject(block) && block['type'] === 'toolCall';
+  /* A call with no durable result is one the stream never finished writing. It
+   * has no `tool-input` row either, and a provider refuses an unanswered call,
+   * so it leaves with the failure. */
+  const blocks: readonly JsonValue[] = Array.isArray(marker.content) ? marker.content : [];
+  const content = blocks.filter(
+    (block) => !isCall(block) || (isJsonObject(block) && typeof block['id'] === 'string' && settled.has(block['id'])),
+  );
+  if (!content.some((block) => isCall(block))) {
+    return undefined;
+  }
+  const { errorMessage: _failed, diagnostics, ...metadata } = marker.metadata ?? {};
+  const kept = diagnostics?.filter(
+    (diagnostic) => !isJsonObject(diagnostic) || diagnostic['type'] !== transportFailureDiagnosticType,
+  );
+  return {
+    ...marker,
+    content,
+    metadata: { ...metadata, stopReason: 'toolUse', ...(kept?.length ? { diagnostics: kept } : {}) },
+  };
+};
+
+/**
+ * The record that clears a resumable failure's marker before its call is re-issued.
+ *
+ * The stream wrapper records a failed call as an assistant message carrying the
+ * transport-failure diagnostic. Left in place, pi refuses to continue from an
+ * assistant tail and the recovery reminder tells the model a network drop
+ * cancelled tools that in fact settled. The marker takes one of two shapes:
+ * nothing ran after it, and retracting it restores the exact context the failed
+ * call was built from; or a tool it had already started settled behind it, and
+ * only its envelope can change ({@link settledMarkerEnvelope}) because a rewind
+ * retains a prefix and the marker is no longer the tail.
+ *
+ * @param messages - The reduced history of the failed run.
+ * @returns The event to append, or `undefined` when there is nothing to clear.
+ */
+const failureMarkerClearance = (messages: readonly ProviderMessage[]): SessionEvent | undefined => {
+  const marker = messages.findLast((message) => message.role === 'assistant');
+  if (!marker) {
+    return undefined;
+  }
+  if (messages.at(-1) === marker) {
+    return {
+      type: 'history.rewound',
+      trigger: 'retry',
+      retainedMessageIds: messages.slice(0, -1).map((message) => message.id),
+    };
+  }
+  /* Behind the tail, only a message that is provably the failure marker may be
+   * rewritten: an ordinary assistant turn that happens to be the last one is
+   * somebody's real output. */
+  const isMarker = marker.metadata?.diagnostics?.some(
+    (diagnostic) => isJsonObject(diagnostic) && diagnostic['type'] === transportFailureDiagnosticType,
+  );
+  const replacement = isMarker ? settledMarkerEnvelope(marker, messages) : undefined;
+  return replacement === undefined
+    ? undefined
+    : { type: 'message.envelope-replaced', messageId: marker.id, replacement };
+};
+
 const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cancelled']);
 
 /**
  * Failure codes whose run can be continued at the step it stopped on.
  *
- * A refused *admission* never reached the provider, so the turn's history is
- * whole: every tool that ran is settled, nothing is half applied, and the only
- * thing missing is the model call the gateway would not fund. Once the account
- * can fund it, re-issuing that one call is the entire recovery — no rewind of
- * the turn, and no second charge for tool work the customer already paid for.
- * Every other failure ends the run for good and is dispatched afresh.
+ * A model call that failed — refused before it was funded, or dropped in the
+ * middle of its stream — leaves the turn's history whole, and the only thing
+ * missing is that one call. It is whole because the session settles what it
+ * started: a tool the stream dispatched mid-response (`prestartTool`) records
+ * its real result before the run is marked failed, so a resume continues from
+ * the work that happened rather than re-applying it. Re-issuing that one call
+ * is the entire recovery — no rewind of the turn, and no second charge for tool
+ * work the customer already paid for. A failure that a second attempt would
+ * only meet again (no evictable history, a lost leadership, a model the catalog
+ * does not carry) ends the run for good and is dispatched afresh.
  *
  * One set, read by the host's own `resume` and by the surfaces that decide
- * whether to offer Resume at all.
+ * whether to offer Resume at all. The non-resumable half is ruled by
+ * `tau-agent-host.test.ts`, which keys both code unions exhaustively.
  */
-const resumableRunFailureCodes = new Set<string>(['INSUFFICIENT_CREDIT']);
+const resumableRunFailureCodes = new Set<string>([
+  'INSUFFICIENT_CREDIT',
+  'INVALID_REQUEST',
+  'MALFORMED_RESPONSE',
+  'NETWORK_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'RATE_LIMITED',
+  // A session that expired mid-turn: signing in again is the whole recovery.
+  'UNAUTHENTICATED',
+  'UPSTREAM_REJECTED',
+]);
 
 /**
- * Whether a failed run's recorded failure code can be resumed at its blocked step.
+ * Whether an external agent's own stop leaves the turn continuable.
  *
- * @param code - `RunFailureDetail.code` from the run's terminal record.
+ * An external turn stops on its provider's terms, not on a code Tau can rule:
+ * the same `EXTERNAL_AGENT_LIMIT_REACHED` is a rate limit that clears in a
+ * minute, a quota that clears at a stated hour, or a context ceiling only a new
+ * session clears. The agent says which in `failure.actions`
+ * ({@link externalAgentStopCodes}):
+ *
+ * - `retry` — the agent's own word that trying again can work.
+ * - no actions at all on a `limit` — nothing helps *now*; what clears a quota
+ *   is time, so the surface holds Resume until the reported reset and then
+ *   continues the same vendor session.
+ * - any other action (`new_session`, `login`) — that action has to happen
+ *   first, and no resume can stand in for it.
+ *
+ * @param failure - The terminal record, as the runner attached its details.
+ * @returns `true` when continuing the agent's own session is the recovery.
+ */
+const externalStopIsResumable = (failure: RunFailureDetail): boolean => {
+  if (!externalAgentStopCodes.some((code) => code === failure.code)) {
+    return false;
+  }
+  const stop = zodUtility.isObject(failure.details) ? failure.details['failure'] : undefined;
+  const actions = zodUtility.isObject(stop) ? stop['actions'] : undefined;
+  if (!Array.isArray(actions)) {
+    return false;
+  }
+  return (
+    actions.includes('retry') || (actions.length === 0 && zodUtility.isObject(stop) && stop['category'] === 'limit')
+  );
+};
+
+/**
+ * Whether a failed run's terminal record can be resumed at its blocked step.
+ *
+ * Reads the whole record, not just its code: an external agent's stop is
+ * resumable or not by the actions the agent itself reported.
+ *
+ * @param failure - `RunFailureDetail` from the run's terminal record.
  * @returns `true` when `resume` will continue this run rather than replay it.
  * @public
  */
-export const isResumableRunFailure = (code: string | undefined): boolean =>
-  code !== undefined && resumableRunFailureCodes.has(code);
+export const isResumableRunFailure = (failure: RunFailureDetail | undefined): boolean =>
+  failure?.code !== undefined && (resumableRunFailureCodes.has(failure.code) || externalStopIsResumable(failure));
+
+/**
+ * The coded failure this run ended on, as its own lifecycle record states it.
+ *
+ * The one record every failure writes, whoever raised it: a model call leaves
+ * its diagnostic on an assistant message as well, but an external agent's stop
+ * leaves only this. A codeless failure is omitted — there is nothing for a
+ * surface or a resume to rule on.
+ *
+ * @param events - The chat's durable events.
+ * @param runId - The run to describe.
+ * @returns The terminal failure, or `undefined` unless the run failed with a code.
+ */
+const terminalFailureOf = (events: readonly AgentLogEvent[], runId: string): HostRunFailure | undefined => {
+  const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
+  const detail = last?.type === 'run.lifecycle' && last.state === 'failed' ? last.detail : undefined;
+  return detail?.code === undefined ? undefined : { ...detail, code: detail.code };
+};
 
 /* Whether this run's terminal record is a refusal {@link isResumableRunFailure} covers. */
-const refusedResumably = (events: readonly AgentLogEvent[], runId: string): boolean => {
-  const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
-  return last?.type === 'run.lifecycle' && last.state === 'failed' && isResumableRunFailure(last.detail?.code);
-};
+const refusedResumably = (events: readonly AgentLogEvent[], runId: string): boolean =>
+  isResumableRunFailure(terminalFailureOf(events, runId));
 
 /**
  * Assemble Tau's portable run lifecycle over the pi adapter and W1-W5 ports.
@@ -1592,7 +1746,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const events = await log.read();
     const current = currentRun(events);
     const external = externalTurnOf(events);
-    if (!current || !external || terminalStates.has(current.state)) {
+    /* A terminal run has nothing to continue — unless the agent stopped it and
+     * said a retry can help, which is the same continuation one attempt later
+     * (R9/S11). */
+    if (!current || !external || (terminalStates.has(current.state) && !refusedResumably(events, current.runId))) {
       return false;
     }
     const { agentId, kind: _kind, runKind, ...state } = external.marker;
@@ -1600,7 +1757,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       chatId,
       runId: current.runId,
       agent: { kind: runKind, id: agentId },
-      state,
+      /* The session this chat *reached*, not the one its admission asked for:
+       * `remember` records the vendor session id by replacing the user
+       * message's envelope, which only the reducer's view carries. Resuming
+       * from the raw marker opened a second vendor session and replayed the
+       * turn on the person's own quota. */
+      state: externalSessionOf(events, agentId) ?? state,
     });
     return true;
   };
@@ -1663,7 +1825,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       throw new Error(`Chat ${chatId} has no durable session log.`);
     }
     const messages = reduceEventLog(events);
-    const failure = transportFailureFromProviderMessages(messages);
     /* A log with no lifecycle record at all admits no run, and the tail is the
      * only identity there is to answer with. Every log a host writes opens with
      * one, so this is the shape of a log written by nothing that ran. */
@@ -1677,6 +1838,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       throw Object.assign(new Error(`Chat ${chatId} has no admitted run to describe.`), { code: 'NO_RUN_ADMITTED' });
     }
     const runId = current?.runId ?? last.runId;
+    /* The assistant diagnostic first, because it carries the transport's own
+     * refusal fields; the lifecycle record when there is no such marker, which
+     * is every failure that never was a model call — an external agent's stop
+     * writes no assistant message at all. Without the fallback a surface read
+     * no failure for those runs and could only rewind the turn (F1). */
+    const failure = transportFailureFromProviderMessages(messages) ?? terminalFailureOf(events, runId);
     return {
       chatId,
       runId,
@@ -1827,27 +1994,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           if (!refusedResumably(events, runId)) {
             return reduceEventLog(events);
           }
-          /* The stream wrapper records a refusal as an assistant message
-           * carrying the transport-failure diagnostic and no model output. It
-           * is a failure marker, not a turn: left in place, pi refuses to
-           * continue from an assistant tail and the recovery reminder would
-           * tell the model a network drop cancelled tools that in fact all
-           * settled. Retracting it restores the exact context the refused call
-           * was built from, so the resume re-issues that one call. */
-          const refused = reduceEventLog(events);
-          if (refused.at(-1)?.role === 'assistant') {
-            await append({
-              chatId,
-              log,
-              runId,
-              events: [
-                {
-                  type: 'history.rewound',
-                  trigger: 'retry',
-                  retainedMessageIds: refused.slice(0, -1).map((message) => message.id),
-                },
-              ],
-            });
+          /* An external stop clears nothing: its trailing assistant message is
+           * the agent's own work, and the vendor session still holds the turn
+           * this resume continues. */
+          const cleared = externalTurnOf(events) ? undefined : failureMarkerClearance(reduceEventLog(events));
+          if (cleared) {
+            await append({ chatId, log, runId, events: [cleared] });
             events = await log.read();
           }
         }

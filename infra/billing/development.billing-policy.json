@@ -25,6 +25,7 @@
       "model-meter-v1:openai-gpt-5.5:long-context",
       "model-meter-v1:google-gemini-3.1-pro",
       "model-meter-v1:google-gemini-3.1-pro:long-context",
+      "model-meter-v1:google-gemini-3.8-flash",
       "model-meter-v1:google-gemini-3.7-flash",
       "model-meter-v1:google-gemini-3.5-flash-lite",
       "model-meter-v1:google-gemini-3.5-flash",
@@ -757,6 +758,36 @@
       "retailOverride": null
     },
     {
+      "rateId": "google-gemini-3.8-flash:uncached-input:none",
+      "meterContractId": "model-meter-v1:google-gemini-3.8-flash",
+      "dimension": "uncached_input",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "750000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "google-gemini-3.8-flash:cache-read:none",
+      "meterContractId": "model-meter-v1:google-gemini-3.8-flash",
+      "dimension": "cache_read",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "75000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
+      "rateId": "google-gemini-3.8-flash:output:none",
+      "meterContractId": "model-meter-v1:google-gemini-3.8-flash",
+      "dimension": "output",
+      "tier": null,
+      "unit": "token",
+      "referenceNumeratorPicoUsd": "3750000000000",
+      "denominatorUnits": "1000000",
+      "retailOverride": null
+    },
+    {
       "rateId": "google-gemini-3.7-flash:uncached-input:none",
       "meterContractId": "model-meter-v1:google-gemini-3.7-flash",
       "dimension": "uncached_input",
@@ -1241,6 +1272,19 @@
         "google-gemini-3.1-pro:long-context:uncached-input:none",
         "google-gemini-3.1-pro:long-context:cache-read:none",
         "google-gemini-3.1-pro:long-context:output:none"
+      ],
+      "enabled": true,
+      "spendBudgetId": "development-spend",
+      "riskBudgetId": "development-risk"
+    },
+    {
+      "routeId": "google-gemini-3.8-flash",
+      "sku": "model:google-gemini-3.8-flash",
+      "meterContractId": "model-meter-v1:google-gemini-3.8-flash",
+      "rateIds": [
+        "google-gemini-3.8-flash:uncached-input:none",
+        "google-gemini-3.8-flash:cache-read:none",
+        "google-gemini-3.8-flash:output:none"
       ],
       "enabled": true,
       "spendBudgetId": "development-spend",

@@ -150,6 +150,7 @@ describe('BillableModelInvocationService', () => {
         ['openai-gpt-5.6-luna', 'gpt-5.6-luna', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-5.5', 'gpt-5.5', 'openai-responses', 'max_output_tokens'],
         ['google-gemini-3.1-pro', 'gemini-3.1-pro-preview-customtools', 'openai-completions', 'max_completion_tokens'],
+        ['google-gemini-3.8-flash', 'gemini-3.8-flash', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.7-flash', 'gemini-3.7-flash', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'openai-completions', 'max_completion_tokens'],
         ['google-gemini-3.5-flash', 'gemini-3.5-flash', 'openai-completions', 'max_completion_tokens'],

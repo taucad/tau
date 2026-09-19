@@ -418,6 +418,8 @@ const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }>
   { from: 'anthropic-claude-haiku-4.5', to: 'openai-gpt-5.6-luna' },
   { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.7-flash' },
   { from: 'google-gemini-3.7-flash', to: 'anthropic-claude-haiku-4.5' },
+  { from: 'anthropic-claude-haiku-4.5', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-haiku-4.5' },
   { from: 'xai-grok-4.6', to: 'google-gemini-3.7-flash' },
   { from: 'google-gemini-3.7-flash', to: 'xai-grok-4.6' },
   { from: 'xai-grok-4.6', to: 'anthropic-claude-haiku-4.5' },

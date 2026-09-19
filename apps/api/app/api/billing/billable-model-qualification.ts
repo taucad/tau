@@ -37,6 +37,8 @@ type Route = {
   combinedMaximum?: bigint;
   allowsImage?: boolean;
   outputParameter: 'max_output_tokens' | 'max_completion_tokens' | 'max_tokens';
+  /** The date this route's tariff was read off the supplier's published pricing, when later than the table's sweep. */
+  pricingRevision?: string;
   validThrough?: string;
   rates?: readonly Rate[];
   temporaryUnavailableReason?: string;
@@ -107,7 +109,15 @@ const route = (
   outputMaximum: number,
   supplierRates?: readonly Rate[],
   extra?: Partial<
-    Pick<Route, 'allowsImage' | 'combinedMaximum' | 'outputParameter' | 'temporaryUnavailableReason' | 'validThrough'>
+    Pick<
+      Route,
+      | 'allowsImage'
+      | 'combinedMaximum'
+      | 'outputParameter'
+      | 'pricingRevision'
+      | 'temporaryUnavailableReason'
+      | 'validThrough'
+    >
   >,
 ): Route => ({
   routeId,
@@ -188,6 +198,15 @@ const routes = [
     rates('4', '.4', undefined, '18'),
   ),
   route(
+    'google-gemini-3.8-flash',
+    'Gemini 3.8 Flash',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('.75', '.075', undefined, '3.75'),
+    { pricingRevision: '2026-09-19', validThrough: '2026-12-31T23:59:59.999Z' },
+  ),
+  route(
     'google-gemini-3.7-flash',
     'Gemini 3.7 Flash',
     'openai-completions',
@@ -266,7 +285,11 @@ export const routeSkuFamily = (sku: string): readonly [string, string] => {
   return [base, `${base}${longContextSuffix}`];
 };
 
-const sourceRevision = (routeId: string): string => `official-pricing:2026-09-06:${routeId}`;
+/* When Tau last swept every route's tariff off the suppliers' published pricing.
+ * A route added since pins its own reading date rather than claiming the sweep's. */
+const pricingSweep = '2026-09-06';
+const sourceRevision = (selected: Pick<Route, 'pricingRevision' | 'routeId'>): string =>
+  `official-pricing:${selected.pricingRevision ?? pricingSweep}:${selected.routeId}`;
 const valuationRates = (entries: readonly Rate[]) =>
   entries.map((entry) => ({
     dimension: entry.dimension,
@@ -288,7 +311,7 @@ const valuationRates = (entries: readonly Rate[]) =>
  * @returns The pinned tariff, whether it is the premium tier, and the observed valuation.
  */
 const pinTariff = (
-  selected: Pick<Route, 'providerId' | 'routeId'>,
+  selected: Pick<Route, 'pricingRevision' | 'providerId' | 'routeId'>,
   routeRates: readonly Rate[],
   maximumInput: bigint,
 ): { longContext: boolean; rates: readonly Rate[]; valuation?: SupplierValuation } => {
@@ -302,7 +325,7 @@ const pinTariff = (
       ? {
           valuation: {
             version: 'supplier-valuation-v1',
-            sourceRevision: sourceRevision(selected.routeId),
+            sourceRevision: sourceRevision(selected),
             longContextMinimumInputTokens: longContext ? tiered.minimum.toString() : null,
             baseRates: valuationRates(longContext ? tiered.baseRates : rates),
             longContextRates: longContext ? valuationRates(routeRates) : null,

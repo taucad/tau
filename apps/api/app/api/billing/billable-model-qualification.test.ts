@@ -51,8 +51,8 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(20);
-    expect(new Set(billableModelRouteIds).size).toBe(20);
+    expect(billableModelRouteIds).toHaveLength(21);
+    expect(new Set(billableModelRouteIds).size).toBe(21);
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
     expect(billableModelRouteIds).toContain('morph-minimax-m2.7');
   });

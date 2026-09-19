@@ -102,7 +102,12 @@ const createFixture = async (partSource: string) => {
     input: {
       contentService: fileService as unknown as Record<string, unknown>,
       openFileSystemBridge: (root) =>
-        openFileSystemBridge(bridgeWorker as Worker, { messageType: filesystemBridgeConnectMessageType, root }),
+        openFileSystemBridge(bridgeWorker as Worker, {
+          messageType: filesystemBridgeConnectMessageType,
+          root,
+          /* The kernel runs the checkout itself, never a consumer's view (G6). */
+          consumer: 'working-copy',
+        }),
     },
   }).start();
 

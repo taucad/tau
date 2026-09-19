@@ -34,8 +34,15 @@ import type { WireValidator } from '@taucad/rpc';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
 
-/** Current filesystem bridge protocol version. @public */
-export const fileSystemBridgeProtocolVersion = 1;
+/**
+ * Current filesystem bridge protocol version.
+ *
+ * Version 2 made `consumer` a required member of a rooted connect envelope
+ * (blueprint W2, EQ2), so a version-1 peer is refused by version rather than
+ * by a confusing `ROOT_UNAVAILABLE`.
+ * @public
+ */
+export const fileSystemBridgeProtocolVersion = 2;
 
 const unavailableCapabilities = null;
 

@@ -13,13 +13,15 @@
 
 import { describe, expectTypeOf, it } from 'vitest';
 import type { WorkspaceFileService, WorkspaceMutationContext } from '@taucad/filesystem';
-import { bindMutationContextForPort } from '@taucad/fs-bridge';
+import { bindMutationContextForPort, openFileSystemBridge } from '@taucad/fs-bridge';
 import type {
   FileSystemBridgeHello,
   FileSystemBridgeRootedProxy,
   FileSystemBridgeWorkspaceProxy,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
+  RootedBridgeConsumer,
+  RootedFileSystemHandlerFactory,
 } from '@taucad/fs-bridge';
 import type { createBridgeServer } from '@taucad/rpc/bridge';
 
@@ -133,6 +135,28 @@ describe('bridge proxy surfaces — rooted / workspace split', () => {
     expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('copyDirectory');
     expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('searchFiles');
     expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('getDirectoryStat');
+  });
+});
+
+/**
+ * A rooted connection names its consumer in the type, not only on the wire
+ * (blueprint W2, invariant CI2): the options are a discriminated pair —
+ * unrooted carries neither member, rooted carries both.
+ */
+describe('rooted connect options — type guarantees', () => {
+  it('requires a consumer beside a root and refuses one without a root', () => {
+    const worker = { postMessage: () => undefined };
+    // @ts-expect-error A rooted connection must name the surface it reads.
+    openFileSystemBridge(worker, { root: '/projects/alpha' });
+    // @ts-expect-error A workspace connection reads no composed view, so it names no consumer.
+    openFileSystemBridge(worker, { consumer: 'user' });
+    openFileSystemBridge(worker, { root: '/projects/alpha', consumer: 'working-copy' });
+    openFileSystemBridge(worker);
+    expectTypeOf<RootedBridgeConsumer>().toEqualTypeOf<'user' | 'agent' | 'working-copy'>();
+  });
+
+  it('hands the rooted handler the literal consumer, never an absent one', () => {
+    expectTypeOf<Parameters<RootedFileSystemHandlerFactory>[2]>().toEqualTypeOf<RootedBridgeConsumer>();
   });
 });
 

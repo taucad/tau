@@ -460,7 +460,11 @@ describe('fileManagerMachine', () => {
     expect(() => actor.getSnapshot().context.openComputeStorePort?.('workspace-candidate')).toThrow(/authority/);
     actor.getSnapshot().context.openComputeStorePort?.('project-a');
 
-    expect(mockOpenFileSystemBridge).toHaveBeenCalledWith(expect.anything(), { root: '/projects/project-a' });
+    /* The envelope always carries the consumer the caller named (W2, CI2). */
+    expect(mockOpenFileSystemBridge).toHaveBeenCalledWith(expect.anything(), {
+      root: '/projects/project-a',
+      consumer: 'working-copy',
+    });
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
     expect(workerTestState.instances[0]?.postMessage).toHaveBeenCalledWith(
       // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.

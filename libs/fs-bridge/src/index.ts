@@ -28,6 +28,7 @@ export type {
   FileSystemBridgeOptions,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
+  RootedBridgeConsumer,
   RootedFileSystemHandlerFactory,
 } from '#filesystem-bridge.js';
 

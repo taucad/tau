@@ -1,6 +1,11 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
-import { createFileSystemBridgePort, createFileSystemBridgeProxy, fileSystemBridgeSchemas } from '@taucad/fs-bridge';
+import {
+  createFileSystemBridgePort,
+  createFileSystemBridgeProxy,
+  fileSystemBridgeProtocolVersion,
+  fileSystemBridgeSchemas,
+} from '@taucad/fs-bridge';
 import type {
   FileSystemBridgeHello,
   FileSystemBridgePort,
@@ -53,12 +58,16 @@ describe('filesystem bridge protocol contract', () => {
     };
     // @ts-expect-error Availability is never inferred from missing capabilities.
     const noState: FileSystemBridgeHello = {
-      v: 1,
+      v: fileSystemBridgeProtocolVersion,
       capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
       watchable: false,
     };
     // @ts-expect-error Ready runtime peers must publish concrete capabilities.
-    const noCapabilities: FileSystemBridgeHello = { v: 1, state: 'ready', watchable: false };
+    const noCapabilities: FileSystemBridgeHello = {
+      v: fileSystemBridgeProtocolVersion,
+      state: 'ready',
+      watchable: false,
+    };
     expectTypeOf(noVersion).toExtend<FileSystemBridgeHello>();
     expectTypeOf(noState).toExtend<FileSystemBridgeHello>();
     expectTypeOf(noCapabilities).toExtend<FileSystemBridgeHello>();

@@ -280,15 +280,16 @@ try {
 
 exposeFileSystem(fileService, {
   /*
-   * A connection that names a consumer gets that consumer's composed view
-   * (architecture L4); one that does not gets the checkout itself, because the
-   * host's own capture, apply and language planes must read the working copy
-   * and never the overlays composed above it (V6).
+   * Every rooted connection names the surface it reads (architecture L4, W2):
+   * `'user'` and `'agent'` get that consumer's composed view, `'working-copy'`
+   * gets the checkout itself, because the host's own capture, apply and language
+   * planes must read the working copy and never the overlays composed above it
+   * (V6). A connection that names neither never reaches here (CI2).
    */
   handlerForRoot: (root, context, consumer) => {
     const filesystem = fileService.createRootedFileSystem(root, context);
     const view =
-      consumer === undefined
+      consumer === 'working-copy'
         ? filesystem
         : composeView({ filesystem }, { consumer, overlays: [systemSkillsOverlay()], policy: tauPathPolicy });
     /*

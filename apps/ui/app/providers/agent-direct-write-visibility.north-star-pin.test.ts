@@ -82,11 +82,13 @@ const createBrowserHarness = async (): Promise<{
   const exposed = exposeFileSystem(fileService, {
     changeEventBus: eventBus,
     messageSource,
-    /* The production handler: a connection that names a consumer reads the
-     * composed view, one that does not reads the checkout itself. */
+    /* The production handler: `'user'` and `'agent'` read the composed view,
+     * `'working-copy'` reads the checkout itself. */
     handlerForRoot: (root, context, consumer) => {
       const filesystem = fileService.createRootedFileSystem(root, context);
-      return consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
+      return consumer === 'working-copy'
+        ? filesystem
+        : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
     },
   });
   const worker = {
@@ -151,7 +153,9 @@ const createAgentFileSystem = async (worker: {
     rootDirectory: projectRoot,
     backend: 'memory',
     openConnection: async () => {
-      const proxy = createFileSystemBridgeProxy(openFileSystemBridge(worker, { root: projectRoot }));
+      const proxy = createFileSystemBridgeProxy(
+        openFileSystemBridge(worker, { root: projectRoot, consumer: 'working-copy' }),
+      );
       await proxy.ready;
       disposers.push(() => {
         proxy.dispose();

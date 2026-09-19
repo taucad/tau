@@ -53,11 +53,8 @@ export const createVertexResponseShim = (
   // ever parsed; the remainder carries into the next chunk.
   let carry = '';
   let thinking = false;
-  // With `stream_function_call_arguments` on, each argument delta of a call
-  // arrives at a new `index` carrying the call's own `id`; with it off, the
-  // continuation delta repeats the index and may omit the id. Keeping the id
-  // first seen at an index covers the second shape, and the first shape names
-  // its own id on every delta.
+  // A tool call's continuation delta repeats its `index` and may omit the `id`,
+  // so the id first seen at an index is kept and reused for the rest of the call.
   const idByIndex = new Map<number, string>();
 
   const rewriteThought = (delta: ChoiceDelta): boolean => {

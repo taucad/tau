@@ -475,9 +475,8 @@ describe('cross-provider history contract', () => {
         }
         // No message B's wire would refuse for carrying nothing.
         expect(view.emptyMessages).toEqual([]);
-        // Gemini streams tool arguments in four deltas instead of one; no other
-        // wire has the key, and history rebuilding must not move it between them.
-        expect(serialized.includes('stream_function_call_arguments')).toBe(target === 'vertexai');
+        // The flag Vertex cancels a turn over; no wire carries it (T3-R).
+        expect(serialized).not.toContain('stream_function_call_arguments');
         // Gemini's per-call credential exists on no other wire.
         if (target !== 'vertexai') {
           expect(serialized).not.toContain('thought_signature');

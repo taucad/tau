@@ -1036,35 +1036,34 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
             } satisfies OpenAIResponsesOptions)
           : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
               ...commonOptions,
-              ...(request.providerKind === 'vertexai'
+              ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
                 ? {
                     /* eslint-disable @typescript-eslint/naming-convention -- Upstream Gemini wire keys use snake_case. */
                     samplingParams: {
                       extra_body: {
                         google: {
-                          /* Four argument deltas per tool call instead of one, so
-                           * the tool card fills as Gemini writes it. Round one
-                           * pulled this flag after 14/14 function calls answered
-                           * 499 CANCELLED; the powered A/B then measured 0/240
-                           * on Tau's real 35 kB body, 120 of them flag-on, and
-                           * found every one of those 499s inside one 13-minute
-                           * window of shared-quota pressure. The flag is not
-                           * refused, it is shed: it buys a longer-lived server
-                           * shape that a stressed pool cancels first. A 499 never
-                           * reaches this transport as itself — the relay maps it
-                           * to 503 — so the gateway re-dispatches that request
-                           * once without the flag (blueprint Finding 1, ruling
-                           * Q1; L1 follow-up). */
-                          stream_function_call_arguments: true,
-                          ...(reasoning?.effort === undefined
-                            ? {}
-                            : {
-                                thinking_config: {
-                                  include_thoughts: true,
-                                  thinking_level: reasoning.effort.toUpperCase(),
-                                },
-                                thought_tag_marker: 'think',
-                              }),
+                          thinking_config: {
+                            include_thoughts: true,
+                            thinking_level: reasoning.effort.toUpperCase(),
+                          },
+                          thought_tag_marker: 'think',
+                          /* `stream_function_call_arguments: true` belongs here on
+                           * Google's documented wire and stays off, for two
+                           * measured reasons. Under shared-quota pressure Vertex
+                           * sheds requests carrying it with a pre-stream 499
+                           * (7/7 inside one bad window, 0/120 outside one). And
+                           * its streamed-arguments serializer cancels a turn
+                           * mid-stream — HTTP 200, real deltas, then a bare
+                           * `[{"error":{"code":499,…CANCELLED}}]` tail no
+                           * pre-stream retry can see — whenever a tool call
+                           * closes a nested object on a string value:
+                           * `apply_parameter_operation` is 0/9 live with the
+                           * flag and 9/9 without it, across 3.7 Flash, 3.8 Flash
+                           * and 3.1 Pro. It is a value shape, so no schema
+                           * contract test can guarantee it away. The live
+                           * matrix's `apply_parameter_operation` row is the
+                           * standing guard for anyone re-enabling it (blueprint
+                           * Finding 1; T13-AB and T3-BISECT). */
                         },
                       },
                     },

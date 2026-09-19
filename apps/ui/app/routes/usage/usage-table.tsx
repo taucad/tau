@@ -12,6 +12,7 @@ import { formatCreditAtoms } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { usageColumns, usageEventId, usageEventNetAtoms } from '#routes/usage/columns.js';
 import { chatLabel, projectLabel } from '#routes/usage/activity-names.js';
+import type { ProjectNames } from '#routes/usage/activity-names.js';
 import { useChatName } from '#routes/usage/use-chat-name.js';
 
 const tableHooks = { useReactTable };
@@ -20,8 +21,8 @@ type UsageTableProps = {
   readonly rows: WireUsageEvent[];
   /** True when the server has further pages for this range. */
   readonly hasMore: boolean;
-  /** Project id to project name, so a receipt names its project instead of identifying it. */
-  readonly projectNames: ReadonlyMap<string, string>;
+  /** The account's project listing, or why the page has none, so a receipt names its project instead of identifying it. */
+  readonly projectNames: ProjectNames;
   readonly title?: string;
   readonly description?: string;
   /** Row whose credit explanation is open; owned by the page so a refresh keeps it. */
@@ -63,7 +64,7 @@ function UsageEventDetail({
   projectNames,
 }: {
   readonly event: WireUsageEvent;
-  readonly projectNames: ReadonlyMap<string, string>;
+  readonly projectNames: ProjectNames;
 }): React.JSX.Element {
   /* Mounted only for the row a reader opened, so no chat storage is touched
      until then — the page, prerendered shell included, still renders with no
@@ -75,11 +76,17 @@ function UsageEventDetail({
         <DetailRow label='Credits' value={`${formatCreditAtoms(usageEventNetAtoms(event))} credits`} />
         <DetailRow label='Model' value={event.model.id} />
         <DetailRow label='Activity' value={event.activity.kind} />
-        <DetailRow label='Project' value={projectLabel(event.activity.projectHint, projectNames)} />
+        <DetailRow
+          label='Project'
+          value={projectLabel(event.activity.projectHint, projectNames)}
+          isPending={event.activity.projectHint === null ? undefined : projectNames === 'asking'}
+        />
         <DetailRow
           label='Chat'
-          value={chatLabel(event.activity.chatHint, chatName)}
-          isPending={event.activity.chatHint === null ? undefined : chatName === undefined}
+          value={chatLabel(event.activity, chatName)}
+          isPending={
+            event.activity.chatHint === null || event.activity.projectHint === null ? undefined : chatName === undefined
+          }
         />
         <DetailRow label='Usage time' value={event.usageOccurredAt ?? 'Not reported'} />
         <DetailRow label='Range timing' value={event.timingStatus} />

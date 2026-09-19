@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { wireUsageSnapshotSchema } from '@taucad/billing';
 import { unresolvedProjectsOption, usageFilterOptions } from '#routes/usage/use-usage-filters.js';
+import type { ProjectNames } from '#routes/usage/activity-names.js';
 
 const timestamp = '2026-09-12T00:00:00.000Z';
 
@@ -111,5 +112,39 @@ describe('usageFilterOptions', () => {
 
   it('offers no project option at all when nothing carried a project', () => {
     expect(usageFilterOptions(snapshotWith([null]), noFilters, new Map()).projects).toEqual([]);
+  });
+
+  /*
+   * Offering the collapsed option before the listing answered lets one click
+   * filter by every project at once — and when the names land those boxes are
+   * all checked, a selection the reader never made.
+   */
+  it.each([{ names: 'asking' }, { names: 'unavailable' }] satisfies Array<{ names: ProjectNames }>)(
+    'offers no project filter while names are $names',
+    ({ names }) => {
+      expect(usageFilterOptions(snapshotWith(['proj_a', 'proj_x']), noFilters, names).projects).toEqual([]);
+    },
+  );
+
+  /*
+   * The read wire is `z.string().min(1).max(256)` with no charset, so a hint
+   * equal to the synthetic key is only impossible by an invariant enforced one
+   * service away. Collapsing it keeps option ids unique whatever arrives.
+   */
+  it('keeps option ids unique even when a hint is the synthetic key itself', () => {
+    const options = usageFilterOptions(
+      snapshotWith(['proj_a', unresolvedProjectsOption]),
+      noFilters,
+      new Map([
+        ['proj_a', 'Gearbox'],
+        [unresolvedProjectsOption, 'Impostor'],
+      ]),
+    );
+
+    expect(options.projects).toEqual([
+      { id: 'proj_a', label: 'Gearbox', ids: ['proj_a'] },
+      { id: unresolvedProjectsOption, label: 'Project not available', ids: [unresolvedProjectsOption] },
+    ]);
+    expect(new Set(options.projects.map((option) => option.id)).size).toBe(options.projects.length);
   });
 });

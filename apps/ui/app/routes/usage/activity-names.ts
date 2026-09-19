@@ -15,6 +15,20 @@ const otherTauActivity = 'Other Tau activity';
 export const unresolvedProjectName = 'Project not available';
 
 /**
+ * What the page knows about project names.
+ *
+ * The listing is a request like any other, so "has not answered yet" is a state
+ * a reader sees — it starts only once the snapshot is ready, with the table
+ * already on screen. Collapsing it into the answered map makes every project
+ * look settled and unnamed, which is what let one filter click select them all.
+ *
+ * - a map: the listing answered; a missing id really is unnamed
+ * - `asking`: in flight, so nothing is known yet
+ * - `unavailable`: the page will never ask (offline, signed out, or done refreshing)
+ */
+export type ProjectNames = ReadonlyMap<string, string> | 'asking' | 'unavailable';
+
+/**
  * The project a receipt belongs to, by name.
  *
  * Resolved against `GET /v1/projects`, which is the account's own listing, so a
@@ -24,12 +38,18 @@ export const unresolvedProjectName = 'Project not available';
  * was Tau's own work, the other says it was the reader's and cannot be named.
  *
  * @param hint - `activity.projectHint`, null when the spend had no project.
- * @param names - Project id to project name, from the cloud listing.
+ * @param names - The listing, or why the page does not have one.
  * @returns A name a reader recognises, never the raw id.
  */
-export const projectLabel = (hint: string | null, names: ReadonlyMap<string, string>): string => {
+export const projectLabel = (hint: string | null, names: ProjectNames): string => {
   if (hint === null) {
     return otherTauActivity;
+  }
+  if (names === 'asking') {
+    return 'Finding the project…';
+  }
+  if (names === 'unavailable') {
+    return unresolvedProjectName;
   }
   return names.get(hint) ?? unresolvedProjectName;
 };
@@ -42,14 +62,25 @@ export const projectLabel = (hint: string | null, names: ReadonlyMap<string, str
  * storage cannot answer, has no name to give here — said plainly rather than
  * left as a loading label that never settles.
  *
- * @param hint - `activity.chatHint`, null when the spend had no chat.
- * @param name - The resolved name, null when the lookup settled on nothing,
- * undefined while it is still reading.
+ * The two hints are produced independently, so a chat hint can arrive with no
+ * project hint beside it — and the chat's storage is found through its project.
+ * There is then nowhere to look, which is not the same as having looked and
+ * found nothing; only the second may say the chat is absent.
+ *
+ * @param activity - The receipt's `projectHint` and `chatHint`.
+ * @param name - The resolved name, null when the lookup settled on nothing or
+ * never ran, undefined while it is still reading.
  * @returns A name a reader recognises, never the raw id.
  */
-export const chatLabel = (hint: string | null, name: string | null | undefined): string => {
-  if (hint === null) {
+export const chatLabel = (
+  activity: { readonly projectHint: string | null; readonly chatHint: string | null },
+  name: string | null | undefined,
+): string => {
+  if (activity.chatHint === null) {
     return otherTauActivity;
+  }
+  if (activity.projectHint === null) {
+    return 'Chat name not available';
   }
   if (name === undefined) {
     return 'Finding the chat…';

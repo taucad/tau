@@ -18,6 +18,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 
 const { useChatName } = await import('#routes/usage/use-chat-name.js');
+const { chatLabel } = await import('#routes/usage/activity-names.js');
 
 const wrapper = ({ children }: { readonly children: React.ReactNode }): React.JSX.Element => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -71,5 +72,16 @@ describe('useChatName', () => {
 
     expect(result.current).toBeNull();
     expect(getChatsForResource).not.toHaveBeenCalled();
+  });
+
+  /*
+   * `null` here means "nothing was looked up", not "looked and found nothing",
+   * and the two must not render the same: the label tells them apart by whether
+   * there was a project to look in at all.
+   */
+  it('never lets a lookup that never happened read as an absent chat', () => {
+    const { result } = renderHook(() => useChatName(null, 'chat_two'), { wrapper });
+
+    expect(chatLabel({ projectHint: null, chatHint: 'chat_two' }, result.current)).toBe('Chat name not available');
   });
 });

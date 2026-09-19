@@ -103,7 +103,7 @@ describe('DirectModelInvocationService', () => {
       [{ role: 'user', content: 'Name this part' }],
       'owner',
       'attempt',
-      'project',
+      { projectHint: 'project' },
       new AbortController().signal,
     );
     if (result.state !== 'streaming') {

@@ -145,6 +145,31 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
 };
 
 /**
+ * The headers one composition puts on the wire for one request.
+ *
+ * @param options - Per-composition transport options beyond the base URL.
+ * @param overrides - Per-request fields under test.
+ * @returns The headers the gateway was called with.
+ */
+const headersFor = async (
+  options: { readonly projectId?: string } = {},
+  overrides: Partial<ModelStreamRequest> = {},
+): Promise<Headers> => {
+  let headers: Headers | undefined;
+  await collect(
+    createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      ...options,
+      fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        headers = new Headers(init?.headers);
+        return fixtureResponse();
+      }),
+    }).stream(request(overrides)),
+  );
+  return headers!;
+};
+
+/**
  * The gateway's coded mid-stream failure frame, in the one shape it puts on the
  * wire. Only `code`, `message` and `details` vary between failures, so every
  * case below builds the frame here rather than restating the contract.
@@ -988,7 +1013,10 @@ describe('createGatewayModelTransport', () => {
     const transport = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
       fetch: vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-        body = JSON.parse(String(init?.body));
+        if (typeof init?.body !== 'string') {
+          throw new TypeError('Expected a JSON request body.');
+        }
+        body = JSON.parse(init.body);
         return byteSplitResponse(authoritativeGatewayWireFixtures.toolTurn);
       }),
     });
@@ -1046,24 +1074,6 @@ describe('createGatewayModelTransport', () => {
      * the chat is per-request (one transport serves every chat in it). Absent,
      * not empty, when unknown — a `tau serve` workspace has no cloud project,
      * and the server would drop an unparseable hint anyway. */
-    const headersFor = async (
-      options: { readonly projectId?: string },
-      overrides: Partial<ModelStreamRequest> = {},
-    ): Promise<Headers> => {
-      let headers: Headers | undefined;
-      await collect(
-        createGatewayModelTransport({
-          baseUrl: 'https://gateway.example',
-          ...options,
-          fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-            headers = new Headers(init?.headers);
-            return fixtureResponse();
-          }),
-        }).stream(request(overrides)),
-      );
-      return headers!;
-    };
-
     const both = await headersFor({ projectId: 'proj_fixture' }, { chatId: 'chat_fixture' });
     expect(both.get('x-tau-project-id')).toBe('proj_fixture');
     expect(both.get('x-tau-chat-id')).toBe('chat_fixture');
@@ -1076,6 +1086,20 @@ describe('createGatewayModelTransport', () => {
     const chatOnly = await headersFor({}, { chatId: 'chat_fixture' });
     expect(chatOnly.has('x-tau-project-id')).toBe(false);
     expect(chatOnly.get('x-tau-chat-id')).toBe('chat_fixture');
+  });
+
+  it('names a compaction call as compaction, and leaves an ordinary turn to the gateway default', async () => {
+    /* `compaction` is a kind of its own in the billing wire
+     * (`financialActivityKindSchema`), so a summarisation the person never
+     * asked for reads as what it was instead of as their turn. Generation sends
+     * nothing: the gateway's own default is `agent`, and a header repeating it
+     * would be one more value to keep in step for no gain. The host has no
+     * third purpose to map — `invocationPurpose` is exactly these two. */
+    const compaction = await headersFor({}, { invocationPurpose: 'compaction' });
+    expect(compaction.get('x-tau-activity')).toBe('compaction');
+
+    const generation = await headersFor({}, { invocationPurpose: 'generation' });
+    expect(generation.has('x-tau-activity')).toBe(false);
   });
 
   it('strips the bundled SDK telemetry headers the gateway CORS allow-list rejects', async () => {

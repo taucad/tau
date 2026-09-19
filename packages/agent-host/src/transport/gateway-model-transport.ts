@@ -578,6 +578,12 @@ const authenticatedFetch =
     /** Spend attribution, each sent only when the caller has one to give. */
     readonly projectId?: string | undefined;
     readonly chatId?: string | undefined;
+    /**
+     * The billing activity kind this call is, when it is not the gateway's own
+     * default. Typed to the kinds this host can honestly claim, so a value the
+     * billing wire does not define cannot be put on it.
+     */
+    readonly activity?: 'compaction' | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
@@ -608,6 +614,9 @@ const authenticatedFetch =
       }
       if (options.chatId !== undefined) {
         headers.set('x-tau-chat-id', options.chatId);
+      }
+      if (options.activity !== undefined) {
+        headers.set('x-tau-activity', options.activity);
       }
       let body = init?.body;
       // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
@@ -970,9 +979,12 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       providerKind: request.providerKind!,
       attemptId: request.attemptId,
       // Per composition, then per request: the worker owns one project and
-      // serves every chat in it. T7 adds `invocationPurpose` here the same way.
+      // serves every chat in it.
       ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
       ...(request.chatId === undefined ? {} : { chatId: request.chatId }),
+      // A generation is the gateway's default activity and says nothing; a
+      // compaction is a kind of its own and says so.
+      ...(request.invocationPurpose === 'compaction' ? { activity: 'compaction' } : {}),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }

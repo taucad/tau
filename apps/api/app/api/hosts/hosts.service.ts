@@ -117,6 +117,28 @@ type OnlineDevice = {
   capabilities?: HostCapabilities;
 };
 
+/**
+ * A device row as its owner sees it: the credential hash never leaves this
+ * service, and everything a live control connection advertises is merged in.
+ */
+type HostDeviceListing = Omit<typeof hostDevice.$inferSelect, 'credentialHash'> & {
+  readonly online: boolean;
+  readonly runtimeVersion: string | undefined;
+  readonly capacity: number | undefined;
+  readonly agent: HostCapabilities['agent'];
+};
+
+/** The browser's half of a session the daemon has just accepted. */
+type HostSessionOffer = {
+  readonly id: string;
+  readonly runtimeVersion: string;
+  readonly expiresAt: string;
+  readonly url: string;
+  readonly runtimeUrl: string;
+  readonly fileSystemUrl: string;
+  readonly agentUrl?: string;
+};
+
 const hashSecret = (secret: string): string => createHash('sha256').update(secret).digest('base64url');
 const pairingKey = (deviceCodeHash: string): string => `host:pairing:device:${deviceCodeHash}`;
 const userCodeKey = (userCode: string): string => `host:pairing:user:${userCode}`;
@@ -436,7 +458,9 @@ export class HostsService implements OnModuleDestroy {
       .limit(runListLimit);
   }
 
-  public async authenticateDevice(authorization: string | undefined) {
+  public async authenticateDevice(
+    authorization: string | undefined,
+  ): Promise<typeof hostDevice.$inferSelect | undefined> {
     const credential = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : '';
     if (!credential) {
       return undefined;
@@ -605,7 +629,7 @@ export class HostsService implements OnModuleDestroy {
       });
   }
 
-  public async listDevices(userId: string) {
+  public async listDevices(userId: string): Promise<HostDeviceListing[]> {
     const devices = await this.databaseService.database
       .select()
       .from(hostDevice)
@@ -686,7 +710,11 @@ export class HostsService implements OnModuleDestroy {
     await Promise.all(deletions);
   }
 
-  public async createSession(options: { deviceId: string; userId: string; runtimeVersion: string }) {
+  public async createSession(options: {
+    deviceId: string;
+    userId: string;
+    runtimeVersion: string;
+  }): Promise<HostSessionOffer> {
     const owned = await this.databaseService.database
       .select({ id: hostDevice.id })
       .from(hostDevice)

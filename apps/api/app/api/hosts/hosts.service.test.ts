@@ -546,7 +546,9 @@ describe('HostsService session lifetime', () => {
     return {
       close: vi.fn(),
       readyState,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors ws's own readyState constant names
       OPEN: 1,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors ws's own readyState constant names
       CLOSED: 3,
       once: vi.fn((event: string, listener: () => void) => {
         if (event === 'close') {

@@ -340,6 +340,16 @@ describe('UsagePage', () => {
     expect(detail).not.toHaveTextContent('Finding the project…');
   });
 
+  it('stops looking once the listing has failed, rather than waiting forever', async () => {
+    useCloudProjects.mockReturnValue({ projects: [], isSettled: false, isFailed: true });
+    renderPage();
+
+    await userEvent.click(screen.getByText('agent'));
+    const detail = screen.getByTestId('usage-event-detail');
+    expect(detail).toHaveTextContent('Project not available');
+    expect(detail).not.toHaveTextContent('Finding the project…');
+  });
+
   it('offers the project filter by name', async () => {
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: /Projects/u }));

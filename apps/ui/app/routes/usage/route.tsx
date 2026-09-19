@@ -182,15 +182,16 @@ export default function UsagePage(): React.JSX.Element {
      snapshot read with no API has nothing to resolve against anyway.
      `isSettled` is load-bearing: until the listing answers, nothing here knows
      whether a project has a name, and saying it has none is a claim the page
-     cannot make yet. */
+     cannot make yet. A listing that failed will not answer either, so it is
+     unavailable rather than still being asked. */
   const asking = resolvesNames(usage.status);
-  const { projects, isSettled } = useCloudProjects({ enabled: asking });
+  const { projects, isSettled, isFailed } = useCloudProjects({ enabled: asking });
   const projectNames = useMemo<ProjectNames>(() => {
     if (isSettled) {
       return new Map(projects.map((project) => [project.id, project.name]));
     }
-    return asking ? 'asking' : 'unavailable';
-  }, [projects, isSettled, asking]);
+    return asking && !isFailed ? 'asking' : 'unavailable';
+  }, [projects, isSettled, isFailed, asking]);
   const options = usageFilterOptions(snapshot, filters, projectNames);
 
   return (

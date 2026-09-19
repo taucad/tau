@@ -87,22 +87,59 @@ describe('ChatError', () => {
     vi.clearAllMocks();
   });
 
-  it('tells the customer when a rate-limited request can be retried', () => {
-    const rateLimited: ChatErrorPayload = {
+  /* F5: the rate-limit and service cards are routed by CATEGORY, so each also
+     serves codes the host rules unrecoverable. `isResumableRunFailure` is the
+     one decision, taken here and handed to the card, so no card can promise a
+     resume the next click will not perform. */
+  it('tells the customer when a funded-operation limit can be retried, without promising the turn', () => {
+    persisted({
       category: errorCategory.rateLimit,
       title: 'Rate limit exceeded',
       message: 'The funded-operation failsafe is active.',
       code: 'FUNDED_OPERATION_LIMIT',
       httpStatus: 429,
       details: { retryAfterSeconds: 30 },
-    };
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({ error: undefined, persistedError: rateLimited } as unknown as CombinedChatState),
-    );
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Try again in 30 seconds.')).toBeInTheDocument();
+    expect(screen.getByText('Funded operation limit reached')).toBeInTheDocument();
+    expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
+  });
+
+  it('should promise the turn and say Resume for a rate limit the host does resume', () => {
+    persisted({
+      category: errorCategory.rateLimit,
+      title: 'Rate limit exceeded',
+      message: 'The model provider asked Tau to wait.',
+      code: 'RATE_LIMITED',
+      httpStatus: 429,
+      details: { retryAfterSeconds: 30 },
+    });
 
     render(<ChatErrorBanner />);
 
     expect(screen.getByText('Resume in 30 seconds.')).toBeInTheDocument();
+    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  it('should keep Try again for a service refusal the host rules unrecoverable', () => {
+    persisted({
+      category: errorCategory.overloaded,
+      title: 'Service Temporarily Unavailable',
+      message: 'Tau is finalizing earlier work on this chat.',
+      code: 'BILLING_RECOVERY_UNAVAILABLE',
+      httpStatus: 503,
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Finalizing earlier work')).toBeInTheDocument();
+    expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   /* The masked in-stream failure arrives on an HTTP 200, so its category reads

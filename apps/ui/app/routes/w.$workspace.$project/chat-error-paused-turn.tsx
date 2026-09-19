@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronRight, CircleAlert, Play, Repeat } from 'lucide-react';
+import { ChevronRight, CircleAlert, Play, RefreshCcw, Repeat } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
@@ -14,6 +14,12 @@ type ChatErrorPausedTurnProps = {
   readonly className?: string;
   /** The provider's own sentence for what went wrong. */
   readonly reason: string;
+  /**
+   * Whether the host will continue this run rather than replay it, decided once
+   * by `chat-error.tsx` from `isResumableRunFailure`. A card promises the turn
+   * and says Resume only when it is `true`.
+   */
+  readonly resumable: boolean;
   /** Overrides the paused-turn heading; the refusal (S6) names itself. */
   readonly title?: string;
   readonly icon?: LucideIcon;
@@ -28,15 +34,16 @@ type ChatErrorPausedTurnProps = {
 /**
  * A model call that failed with the turn intact.
  *
- * Every coded model-call failure reads the same way: the provider's words, the
- * promise that the turn is kept, and one **Resume**, which re-issues that one
+ * A resumable one reads the same way every time: the provider's words, the
+ * promise that the turn is saved, and one **Resume**, which re-issues that one
  * call with every settled tool result still in the history. The verb states the
- * behaviour, so nothing here offers *Try again* — that verb belongs to the turn
- * that never started.
+ * behaviour, so a failure the host rules unrecoverable makes no promise and
+ * keeps *Try again* — the gesture it will actually get.
  */
 export const ChatErrorPausedTurn = memo(function ({
   className,
   reason,
+  resumable,
   title = 'Tau paused this turn',
   icon = CircleAlert,
   guidance,
@@ -55,7 +62,9 @@ export const ChatErrorPausedTurn = memo(function ({
       description={
         <>
           <p>{reason}</p>
-          <p>{guidance === undefined ? turnSavedSentence : `${turnSavedSentence} ${guidance}`}</p>
+          {resumable ? (
+            <p>{guidance === undefined ? turnSavedSentence : `${turnSavedSentence} ${guidance}`}</p>
+          ) : undefined}
         </>
       }
       actions={
@@ -79,8 +88,8 @@ export const ChatErrorPausedTurn = memo(function ({
               continueChat();
             }}
           >
-            <Play className='size-3.5' />
-            Resume
+            {resumable ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}
+            {resumable ? 'Resume' : 'Try again'}
           </Button>
         </>
       }

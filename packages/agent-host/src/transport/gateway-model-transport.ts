@@ -468,6 +468,14 @@ const guardedResponse = (options: {
             controller.error(trailing);
             return;
           }
+          // A marker frame the body never terminated was never a refusal, so it
+          // and the healthy frames that shared its chunks are the SDK's after
+          // all. Closing on them instead loses the turn's terminal frame and
+          // reports `Stream ended without finish_reason` in its place.
+          for (const held of withheld) {
+            controller.enqueue(held);
+          }
+          withheld = [];
           controller.close();
           return;
         }
@@ -996,7 +1004,15 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                             thinking_level: reasoning.effort.toUpperCase(),
                           },
                           thought_tag_marker: 'think',
-                          stream_function_call_arguments: true,
+                          // `stream_function_call_arguments: true` belongs here on
+                          // Google's documented wire, but Vertex answers 499
+                          // CANCELLED to every function call emitted after the
+                          // first assistant message while it is set — the second
+                          // sequential call of a turn and every call from user
+                          // turn two on, 14/14 live across all four catalog
+                          // models, and 200 on the same conversations without it
+                          // (blueprint Finding 4 / RC2, ruling Q2). It only made
+                          // tool-input deltas finer-grained on Gemini.
                         },
                       },
                     },

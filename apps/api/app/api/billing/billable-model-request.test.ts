@@ -345,7 +345,6 @@ describe('billable model request contract', () => {
         google: {
           thinking_config: { include_thoughts: true, thinking_level: 'MEDIUM' },
           thought_tag_marker: 'think',
-          stream_function_call_arguments: true,
         },
       },
     };
@@ -361,6 +360,20 @@ describe('billable model request contract', () => {
     expect(
       safeParseBillableModelRequest(
         { ...gemini, extra_body: { ...gemini.extra_body, arbitrary_passthrough: true } },
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+    // Vertex answers 499 CANCELLED to every function call after the first
+    // assistant message while `stream_function_call_arguments` is set, so the
+    // transport no longer sends it and the gateway no longer admits it.
+    expect(
+      safeParseBillableModelRequest(
+        {
+          ...gemini,
+          extra_body: {
+            google: { ...gemini.extra_body.google, stream_function_call_arguments: true },
+          },
+        },
         'openai-completions',
       ).success,
     ).toBe(false);

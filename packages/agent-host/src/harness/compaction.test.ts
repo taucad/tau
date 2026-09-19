@@ -7,10 +7,10 @@ import { installCompaction } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { createAgentSession } from '#harness/session.js';
 import { createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
-import { MessageIdentities } from '#harness/session-record.js';
+import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import type { SessionRecord } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
-import type { AgentLogEvent } from '#log/event-types.js';
+import type { AgentLogEvent, AssistantProviderMessage, UserProviderMessage } from '#log/event-types.js';
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport, ToolRegistry } from '#waist/ports.js';
 
 const oversizedToolHistory = (toolName = 'read_file'): AgentMessage[] =>
@@ -25,6 +25,50 @@ const oversizedToolHistory = (toolName = 'read_file'): AgentMessage[] =>
       timestamp: index,
     }),
   );
+
+const providerUsage = (totalTokens: number): AssistantMessage['usage'] => ({
+  input: totalTokens,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+});
+
+/** An assistant turn the provider already answered, carrying the usage it reported. */
+const answeredTurn = (totalTokens: number, timestamp: number): AssistantMessage => ({
+  role: 'assistant',
+  content: [{ type: 'text', text: 'Done.' }],
+  api: stubModel.api,
+  provider: stubModel.provider,
+  model: stubModel.id,
+  usage: providerUsage(totalTokens),
+  stopReason: 'stop',
+  timestamp,
+});
+
+const dispatchedStream = () => {
+  const stream = createAssistantMessageEventStream();
+  const message = answeredTurn(0, 100);
+  stream.push({ type: 'start', partial: message });
+  stream.push({ type: 'done', reason: 'stop', message });
+  return stream;
+};
+
+const recordFor = (messages: readonly AgentMessage[]): SessionRecord => {
+  const identities = new MessageIdentities(() => 'unused');
+  for (const [index, message] of messages.entries()) {
+    identities.set(message, `message-${index}`);
+  }
+  return { messages: identities, append: async () => undefined, events: async () => [], history: async () => [] };
+};
+
+const evictableHistory = (count: number): UserMessage[] =>
+  Array.from({ length: count }, (_, index) => ({
+    role: 'user',
+    content: `${index}-${'x'.repeat(4000)}`,
+    timestamp: index,
+  }));
 
 describe('Compaction', () => {
   it('uses the ephemeral first-call lane to clear old tool results at tier 1', async () => {
@@ -843,5 +887,165 @@ describe('Compaction', () => {
         expect(keptCallIds).toContain(message.toolCallId);
       }
     }
+  });
+
+  /*
+   * Provider usage measures the request that produced it, so a retained
+   * assistant keeps reporting the context the provider saw *before* the
+   * eviction. Reusing that number verbatim made every post-summary check see a
+   * context that no longer exists: the strike counter landed on 2 after one
+   * successful summarization and the same turn's ephemeral lane opened the
+   * circuit breaker. All three live compaction rows of the provider-switch
+   * suite died this way.
+   */
+  it('should summarize once and reach the provider when the retained tail carries provider usage', async () => {
+    const history: AgentMessage[] = [
+      ...evictableHistory(6),
+      answeredTurn(7000, 6),
+      { role: 'user', content: 'now mirror the bracket', timestamp: 7 },
+    ];
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages: history },
+    });
+    const summarize = vi.fn(async () => 'Earlier work.');
+    const compaction = installCompaction({
+      agent,
+      record: recordFor(history),
+      contextWindow: 8192,
+      summarize,
+    });
+    const base = vi.fn(dispatchedStream) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
+
+    const prepared = await compaction.prepareTurn(history);
+    const transformed = await compaction.transformContext(prepared);
+    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: transformed as Context['messages'] });
+    const result = await stream.result();
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(transformed)).toContain('<summary>');
+    expect(result.errorMessage).toBeUndefined();
+    expect(base).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ stopReason: 'stop' });
+  });
+
+  it('should clear tool results at tier one when the retained tail carries provider usage', async () => {
+    const history: AgentMessage[] = [
+      ...Array.from(
+        { length: 7 },
+        (_, index): AgentMessage => ({
+          role: 'toolResult',
+          toolCallId: `call-${index}`,
+          toolName: 'read_file',
+          content: [{ type: 'text', text: index < 2 ? 'x'.repeat(8000) : `small-${index}` }],
+          isError: false,
+          timestamp: index,
+        }),
+      ),
+      answeredTurn(7000, 7),
+    ];
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages: history },
+    });
+    const summarize = vi.fn(async () => 'summary should not be needed');
+    const outcome = vi.fn();
+    const compaction = installCompaction({
+      agent,
+      record: recordFor(history),
+      contextWindow: 8192,
+      summarize,
+      onCompaction: outcome,
+    });
+
+    await compaction.prepareTurn(history);
+
+    expect(outcome).toHaveBeenCalledWith(
+      expect.objectContaining({ tier: 'tool_result_clearing', cleared: 2, evicted: 0 }),
+    );
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
+  it('should take a turn on a session reloaded from a log that already holds its summary', async () => {
+    const identities = new MessageIdentities(() => 'unused');
+    const durable: Array<UserProviderMessage | AssistantProviderMessage> = [
+      {
+        id: 'summary-1',
+        role: 'user',
+        content: '<summary>\nEarlier work.\n</summary>',
+        metadata: { timestamp: 20 },
+      },
+      {
+        id: 'assistant-9',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        metadata: {
+          api: stubModel.api,
+          provider: stubModel.provider,
+          model: stubModel.id,
+          stopReason: 'stop',
+          usage: providerUsage(7000),
+          timestamp: 10,
+        },
+      },
+      { id: 'user-10', role: 'user', content: 'keep going', metadata: { timestamp: 21 } },
+    ];
+    const reloaded = durable.map((message) => providerMessageToPi(message, stubModel, identities));
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages: reloaded },
+    });
+    const summarize = vi.fn(async () => 'summary should not be needed');
+    const compaction = installCompaction({
+      agent,
+      record: { messages: identities, append: async () => undefined, events: async () => [], history: async () => [] },
+      contextWindow: 8192,
+      summarize,
+    });
+    const base = vi.fn(dispatchedStream) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
+
+    const prepared = await compaction.prepareTurn(reloaded);
+    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: prepared as Context['messages'] });
+    const result = await stream.result();
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(prepared).toEqual(reloaded);
+    expect(base).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ stopReason: 'stop' });
+  });
+
+  /*
+   * The breaker is a real invariant: a context whose irreducible per-call
+   * overhead already fills the window cannot be summarized back into headroom,
+   * and Tau stops rather than burning provider calls on it.
+   */
+  it('should still open the circuit breaker when compaction cannot restore headroom', async () => {
+    const history: AgentMessage[] = [
+      ...evictableHistory(2),
+      answeredTurn(9000, 2),
+      { role: 'user', content: 'keep going', timestamp: 3 },
+    ];
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages: history },
+    });
+    const summarize = vi.fn(async () => 'Earlier work.');
+    const compaction = installCompaction({
+      agent,
+      record: recordFor(history),
+      contextWindow: 8192,
+      summarize,
+    });
+    const base = vi.fn(dispatchedStream) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
+
+    const prepared = await compaction.prepareTurn(history);
+    const transformed = await compaction.transformContext(prepared);
+    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages: transformed as Context['messages'] });
+    const result = await stream.result();
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(base).not.toHaveBeenCalled();
+    expect(result.errorMessage).toBe('Repeated compaction could not restore provider headroom; start a new thread.');
+    expect(result.diagnostics?.[0]).toMatchObject({ error: { code: 'CIRCUIT_BREAKER_OPEN' } });
   });
 });

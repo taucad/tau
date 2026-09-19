@@ -12,8 +12,9 @@ const isCi = Boolean(process.env['CI']);
 const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
 const chromiumArguments = webGpuLaunchArguments(requiredWebGpuProfile);
 const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
-const liveGeminiSpec = 'src/gemini-browser-agent-host.live.spec.ts';
-const liveGeminiEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
+/** The opt-in specs that spend real provider credit; excluded from every default run. */
+const liveProviderSpecs = ['src/gemini-browser-agent-host.live.spec.ts', 'src/provider-switch.live.spec.ts'];
+const liveProvidersEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
 const playwrightProvider = (options?: Parameters<typeof playwright>[0]): BrowserProviderOption =>
   playwright(options) as unknown as BrowserProviderOption;
 
@@ -59,7 +60,7 @@ export default defineConfig({
           name: 'chromium',
           exclude: [
             'src/headless-chat-image-capture.no-webgpu.spec.ts',
-            ...(liveGeminiEnabled ? [] : [liveGeminiSpec]),
+            ...(liveProvidersEnabled ? [] : liveProviderSpecs),
           ],
           provider: playwrightProvider({
             actionTimeout: 10_000,

@@ -165,6 +165,72 @@ describe('createProviderAccountFrameFilter', () => {
     },
   );
 
+  /*
+   * Healthy Gemini turns died intermittently as pi's `Stream ended without
+   * finish_reason`, which is what a relay stage losing the terminal frame looks
+   * like. The filter holds one event's bytes to decide on it, so it is replayed
+   * here at every single byte split — inside a `data:` prefix, between the two
+   * newlines of an event boundary, inside a multi-byte character and with no
+   * closing blank line — and held to byte identity with the unsplit run.
+   */
+  const healthyStreams = {
+    /* Thought markers, a signed tool call, `finish_reason` and a usage-only final chunk. */
+    geminiToolTurn:
+      `data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":"<think>寸法…</think>","extra_content":{"google":{"thought":true}}}}]}\n\n` +
+      `data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Fillet R‑3 mm ✅"}}]}\n\n` +
+      `data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"run","arguments":"{\\"a\\":1}"},"extra_content":{"google":{"thought_signature":"sig"}}}]}}]}\n\n` +
+      `data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n` +
+      `data: {"id":"c1","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4096}}\n\n` +
+      `data: [DONE]\n\n`,
+    /* A turn whose generated text names an error, so every frame takes the parsing path. */
+    errorWord:
+      `data: {"id":"c2","choices":[{"index":0,"delta":{"content":"The error was a wall thickness of 0.2 mm."}}]}\n\n` +
+      `data: {"id":"c2","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\n` +
+      `data: [DONE]\n\n`,
+    /* CRLF terminators and a body that ends on its last event with no blank line. */
+    crlfNoTrailingBlankLine:
+      `data: {"id":"c3","choices":[{"index":0,"delta":{"content":"ok"}}]}\r\n\r\n` +
+      `data: {"id":"c3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+  } as const;
+
+  it.each(Object.entries(healthyStreams))(
+    'should relay the %s stream identically at every single chunk boundary',
+    async (_name, text) => {
+      const length = encoder.encode(text).byteLength;
+      const split = async (cuts: readonly number[]): Promise<string> => {
+        const bytes = encoder.encode(text);
+        const offsets = [0, ...cuts, length];
+        const source = new ReadableStream<Uint8Array<ArrayBuffer>>({
+          start(controller) {
+            for (let index = 0; index < offsets.length - 1; index += 1) {
+              controller.enqueue(bytes.slice(offsets[index], offsets[index + 1]));
+            }
+            controller.close();
+          },
+        });
+        const parts: Array<Uint8Array<ArrayBuffer>> = [];
+        for await (const part of source.pipeThrough(
+          createProviderAccountFrameFilter({ providerId: 'vertexai', accountOwner: 'operator' }),
+        )) {
+          parts.push(part);
+        }
+        const decoder = new TextDecoder();
+        return parts.map((part) => decoder.decode(part, { stream: true })).join('') + decoder.decode();
+      };
+
+      expect(await split([])).toBe(text);
+      for (let cut = 1; cut < length; cut += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- each split is a separate stream run.
+        expect(await split([cut])).toBe(text);
+      }
+      for (const stride of [1, 2, 3, 5, 7, 11, 13, 17, 29, 47, 101]) {
+        const cuts = Array.from({ length: Math.ceil(length / stride) - 1 }, (_value, index) => (index + 1) * stride);
+        // oxlint-disable-next-line no-await-in-loop -- each partition is a separate stream run.
+        expect(await split(cuts)).toBe(text);
+      }
+    },
+  );
+
   it('should rewrite a refusal that arrives with CRLF terminators and no trailing blank line', async () => {
     const crlf = `event: error\r\ndata: ${JSON.stringify({
       type: 'error',

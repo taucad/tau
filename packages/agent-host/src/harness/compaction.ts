@@ -1,6 +1,7 @@
 import {
   compact as compactWithPi,
   estimateContextTokens,
+  estimateTokens,
   findCutPoint,
   findTurnStartIndex,
   prepareCompaction,
@@ -162,10 +163,8 @@ const compactionSettings = (contextWindow: number): CompactionSettings => ({
   keepRecentTokens: Math.max(32, Math.floor(contextWindow * 0.1)),
 });
 
-const needsCompaction = (messages: readonly AgentMessage[], contextWindow: number): boolean => {
-  const { tokens } = estimateContextTokens([...messages]);
-  return shouldCompact(tokens, contextWindow, compactionSettings(contextWindow));
-};
+const messageTokens = (messages: readonly AgentMessage[]): number =>
+  messages.reduce((total, message) => total + estimateTokens(message), 0);
 
 const summaryText = (message: AgentMessage): string | undefined => {
   const text = userText(message);
@@ -298,6 +297,7 @@ export const installCompaction = (
   const priorPrepare = agent.prepareNextTurn;
   const now = options.now ?? Date.now;
   let strikes = 0;
+  let anchorOverhead: { readonly anchor: string | AgentMessage; readonly tokens: number } | undefined;
   let memo:
     | { readonly fromLength: number; readonly sourceFingerprint: string; readonly run: CompactionRun }
     | undefined;
@@ -305,6 +305,67 @@ export const installCompaction = (
 
   const fingerprint = (messages: readonly AgentMessage[]): string =>
     JSON.stringify(messages.map((message) => options.record.messages.id(message)));
+
+  /*
+   * Estimate what the next request will cost the provider.
+   *
+   * pi anchors its estimate on the usage the last retained assistant reported,
+   * because most of a real request is fixed per-call overhead — system prompt,
+   * tool schemas, injected skills — that no message estimate can see (about
+   * 90 %, per `docs/research/chat-compaction-cascade-fixed-overhead.md`).
+   * Eviction cannot move a number the provider already reported, though, so
+   * reusing that anchor after a compaction reports a context that no longer
+   * exists: tier one could never report success, and the post-summary strike
+   * landed on 2 so the same turn's next attempt opened the circuit breaker.
+   *
+   * Split the anchor instead, the first time it is seen, into the overhead it
+   * implies and the messages it measured, then project every later candidate as
+   * that overhead plus the candidate's own message estimate. On the array the
+   * anchor measured this is pi's own number, eviction and tool-result clearing
+   * move it by exactly what they removed, a fresh assistant re-measures the
+   * overhead by itself, and nothing is counted twice.
+   *
+   * A session reloaded from the durable log replays assistants whose usage
+   * predates its summary and whose overhead this process never measured. pi
+   * treats such pre-summary usage as no anchor at all (`_checkCompaction` in
+   * its coding agent); so does this, falling back to the message estimate until
+   * the next model call re-anchors it.
+   */
+  const contextTokens = (
+    messages: readonly AgentMessage[],
+  ): { readonly tokens: number; readonly anchored: boolean } => {
+    const estimate = estimateContextTokens([...messages]);
+    if (estimate.lastUsageIndex === null) {
+      return { tokens: estimate.tokens, anchored: false };
+    }
+    const anchor = messages[estimate.lastUsageIndex]!;
+    // The durable id survives the per-turn rehydration that gives every message
+    // a new object identity; a message the log has never seen has only itself.
+    const key = options.record.messages.get(anchor) ?? anchor;
+    if (anchorOverhead?.anchor !== key) {
+      if (messages.some((message) => summaryText(message) !== undefined && message.timestamp >= anchor.timestamp)) {
+        return { tokens: messageTokens(messages), anchored: false };
+      }
+      anchorOverhead = {
+        anchor: key,
+        tokens: Math.max(0, estimate.usageTokens - messageTokens(messages.slice(0, estimate.lastUsageIndex + 1))),
+      };
+    }
+    return { tokens: anchorOverhead.tokens + messageTokens(messages), anchored: true };
+  };
+
+  const needsCompaction = (messages: readonly AgentMessage[], forced = false): boolean => {
+    const estimate = contextTokens(messages);
+    /*
+     * The overflow lane runs on the provider's own refusal, so an unanchored
+     * projection cannot certify that clearing a few tool bodies made this
+     * request fit. Summarise rather than spend a call on the same refusal.
+     */
+    return (
+      (forced && !estimate.anchored) ||
+      shouldCompact(estimate.tokens, options.contextWindow, compactionSettings(options.contextWindow))
+    );
+  };
 
   const memoMatches = (messages: readonly AgentMessage[]): boolean =>
     memo !== undefined &&
@@ -346,11 +407,18 @@ export const installCompaction = (
     readonly signal?: AbortSignal | undefined;
     readonly force?: boolean | undefined;
   }): Promise<CompactionRun> => {
-    if (!force && !needsCompaction(input, options.contextWindow)) {
+    /*
+     * Measure the anchor against the untouched input, even when the overflow
+     * lane forces the pass: tier one's candidate has already had tool-result
+     * text removed, and measuring there would credit that text to the fixed
+     * per-call overhead the provider reported.
+     */
+    const oversized = needsCompaction(input);
+    if (!force && !oversized) {
       return { messages: [...input], cleared: 0, evicted: 0, persist: async () => undefined };
     }
     const tierOne = clearOldToolResults(input);
-    if (tierOne.cleared.length > 0 && !needsCompaction(tierOne.messages, options.contextWindow)) {
+    if (tierOne.cleared.length > 0 && !needsCompaction(tierOne.messages, force)) {
       let persisted: Promise<void> | undefined;
       const persist = async (): Promise<void> => {
         persisted ??= persistCleared(tierOne.cleared);
@@ -480,7 +548,7 @@ export const installCompaction = (
     if (durable) {
       await persist();
     }
-    strikes = needsCompaction(messages, options.contextWindow) ? 2 : 0;
+    strikes = needsCompaction(messages) ? 2 : 0;
     options.onSummary?.();
     const outcome: CompactionOutcome = {
       messages,
@@ -494,7 +562,7 @@ export const installCompaction = (
 
   const transformContext = async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
     try {
-      if (!needsCompaction(messages, options.contextWindow)) {
+      if (!needsCompaction(messages)) {
         return messages;
       }
       if (memoMatches(messages)) {

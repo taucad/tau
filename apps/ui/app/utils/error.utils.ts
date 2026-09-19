@@ -11,6 +11,16 @@ type DecodedProviderError = {
 
 const textDecoder = new TextDecoder();
 
+/**
+ * The code an uncoded dispatch failure carries so its card can say the turn
+ * never started.
+ *
+ * Admission runs before any run exists, which is the one failure a restart
+ * loses nothing to — and the only structural fact that separates it from a
+ * model call that stopped mid-turn. @public
+ */
+export const chatTurnNotStartedCode = 'CHAT_TURN_NOT_STARTED';
+
 /** Copy for the agent host's `NO_EVICTABLE_HISTORY` compaction refusal. */
 const noEvictableHistoryMessage =
   "This chat's first message is too large to continue. Start a new chat and attach less.";
@@ -173,8 +183,24 @@ function readNumber(record: Record<string, unknown> | undefined, key: string): n
  * 1. Handles client-side network errors (which never reach the API)
  * 2. Parses the structured ChatError from the API response
  * 3. Falls back to a generic error for unexpected formats
+ *
+ * One parse per Error instance: the chat banner calls this inside a
+ * `useSyncExternalStore` selector, where a fresh object per read (its nested
+ * `details` defeat a shallow compare) is a render loop.
  */
 export function parseErrorForPersistence(error: Error): ChatError {
+  const cached = parsedErrors.get(error);
+  if (cached) {
+    return cached;
+  }
+  const parsed = parseError(error);
+  parsedErrors.set(error, parsed);
+  return parsed;
+}
+
+const parsedErrors = new WeakMap<Error, ChatError>();
+
+function parseError(error: Error): ChatError {
   // Handle client-side network errors (these never reach the API)
   if (isTransportError(error)) {
     return {
@@ -218,4 +244,20 @@ export function parseErrorForPersistence(error: Error): ChatError {
     message: error.message,
     raw: error.message,
   };
+}
+
+/**
+ * Parses a dispatch that failed before its run existed.
+ *
+ * Identical to {@link parseErrorForPersistence}, except that a refusal carrying
+ * no code of its own is stamped with {@link chatTurnNotStartedCode}. A coded
+ * refusal keeps its code: the credit preflight throws the gateway's own 402
+ * payload, and that still belongs on the credits card.
+ *
+ * @param error - The admission failure.
+ * @returns The persisted error the chat's card reads.
+ */
+export function parseAdmissionFailureForPersistence(error: Error): ChatError {
+  const parsed = parseErrorForPersistence(error);
+  return parsed.code === undefined ? { ...parsed, code: chatTurnNotStartedCode } : parsed;
 }

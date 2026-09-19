@@ -43,7 +43,8 @@ const tauCallFacts = (toolCallId: string, toolName: string): ToolInputProviderMe
   return kind === undefined ? undefined : { toolCallId, kind, nativeName: toolName };
 };
 
-const transportFailureDiagnosticType = 'tau.model-transport-failure';
+/** Diagnostic type a coded transport refusal is recorded under. @internal */
+export const transportFailureDiagnosticType = 'tau.model-transport-failure';
 const providerMetadataDiagnosticType = 'tau.provider-message-metadata';
 const liveMessageIdentityDiagnosticType = 'tau.live-message-identity';
 

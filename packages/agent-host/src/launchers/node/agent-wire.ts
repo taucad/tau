@@ -184,8 +184,10 @@ export type ExternalAgentStopCode = (typeof externalAgentStopCodes)[number];
  *
  * `failure` mirrors the ACP AIR `sessionFailure` object both pinned adapters
  * send: `title` is the provider's own sentence, verbatim (its link and reset
- * time included — neither adapter sends a structured reset), and `actions` is
- * the agent's word on what can help, so an empty list means retrying cannot.
+ * time included), and `actions` is the agent's word on what can help, so an
+ * empty list means retrying cannot. `resetsAt` and `window` are present only
+ * when the agent reported its limit's reset as data (Claude Code does, on
+ * `usage_update`; the failure object itself never carries one).
  * `diagnostics` is the adapter's log tail, present only for a failure the agent
  * could not classify; a surface shows it on request, never as the message.
  *
@@ -200,6 +202,10 @@ export const externalAgentStopSchema = z.object({
     /** `retry`, `new_session`, `login` or a later action. */
     actions: z.array(z.string()),
   }),
+  /** When the exhausted limit refreshes, in epoch seconds. */
+  resetsAt: z.number().int().positive().optional(),
+  /** The agent's own name for the exhausted window, e.g. `five_hour` or `seven_day`. */
+  window: z.string().optional(),
   diagnostics: z.string().optional(),
 });
 

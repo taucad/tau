@@ -144,6 +144,52 @@ const responseFromChunks = (chunks: readonly string[], contentType = 'text/event
   );
 };
 
+/**
+ * A fetch whose body behaves like a network one: chunks first, EOF only on a
+ * later task, and an `AbortError` when the caller's own request is aborted.
+ *
+ * `responseFromChunks` closes in `start`, so the read after a terminal frame
+ * returns `done` before the SDK can cancel the reader. A real body is still
+ * open at that point, which is the shape that exposed the masking.
+ *
+ * @param chunks - SSE text delivered one chunk per pull.
+ * @returns A fetch stub for the transport options.
+ */
+const openBodyFetch = (chunks: readonly string[]) =>
+  vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const encoder = new TextEncoder();
+    const signal = init?.signal ?? undefined;
+    let index = 0;
+    const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+      async pull(controller) {
+        const chunk = chunks[index];
+        if (chunk !== undefined) {
+          index += 1;
+          controller.enqueue(encoder.encode(chunk));
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          const onAbort = (): void => {
+            controller.error(new DOMException('The user aborted a request.', 'AbortError'));
+            resolve();
+          };
+          signal?.addEventListener('abort', onAbort, { once: true });
+          globalThis.setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            if (!signal?.aborted) {
+              controller.close();
+            }
+            resolve();
+          }, 0);
+        });
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-fixture-1' },
+    });
+  });
+
 const heldAnthropicResponse = () => {
   const encoder = new TextEncoder();
   const waiting = Promise.withResolvers<void>();
@@ -1300,41 +1346,92 @@ describe('createGatewayModelTransport', () => {
   });
 
   it.each([
-    [
-      'an event:error frame',
-      ['event: error\ndata: {"type":"error","error":{"type":"RATE_LIMITED","message":"slow down"}}\n\n'],
-    ],
-    ['an error envelope', ['data: {"type":"error","error":{"type":"PROVIDER_UNAVAILABLE","message":"offline"}}\n\n']],
-  ] as const)('rejects %s instead of completing successfully', async (_label, chunks) => {
+    {
+      label: 'an event:error frame',
+      chunks: ['event: error\ndata: {"type":"error","error":{"type":"RATE_LIMITED","message":"slow down"}}\n\n'],
+      code: 'PROVIDER_UNAVAILABLE',
+      reason: 'slow down',
+    },
+    {
+      label: 'an error envelope',
+      chunks: ['data: {"type":"error","error":{"type":"PROVIDER_UNAVAILABLE","message":"offline"}}\n\n'],
+      code: 'PROVIDER_UNAVAILABLE',
+      reason: 'offline',
+    },
+  ] as const)('rejects $label with the provider reason', async ({ chunks, code, reason }) => {
     const transport = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
       fetch: vi.fn(async () => responseFromChunks(chunks)),
     });
 
-    await expect(collect(transport.stream(request()))).rejects.toBeInstanceOf(Error);
+    // The provider's own sentence, never the body guard's own close.
+    const failing = collect(transport.stream(request()));
+    await expect(failing).rejects.toMatchObject({ code });
+    await expect(failing).rejects.toThrow(reason);
   });
 
   it.each([
-    [
-      'an Anthropic error envelope',
-      ['event: error\ndata: {"type":"error","error":{"type":"RATE_LIMITED","message":"slow down"}}\n\n'],
-    ],
-    [
-      'Anthropic EOF before message_stop',
-      [
+    {
+      label: 'an Anthropic error envelope',
+      chunks: ['event: error\ndata: {"type":"error","error":{"type":"RATE_LIMITED","message":"slow down"}}\n\n'],
+      code: 'PROVIDER_UNAVAILABLE',
+      reason: 'slow down',
+    },
+    {
+      label: 'Anthropic EOF before message_stop',
+      chunks: [
         'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
         'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
         'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}\n\n',
       ],
-    ],
-  ] as const)('rejects %s as a typed failure', async (_label, chunks) => {
+      code: 'MALFORMED_RESPONSE',
+      reason: 'stream',
+    },
+  ] as const)('rejects $label as a typed failure', async ({ chunks, code, reason }) => {
     const transport = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
       fetch: vi.fn(async () => responseFromChunks(chunks)),
     });
 
-    await expect(collect(transport.stream(request({ providerKind: 'anthropic' })))).rejects.toBeInstanceOf(Error);
+    const failing = collect(transport.stream(request({ providerKind: 'anthropic' })));
+    await expect(failing).rejects.toMatchObject({ code });
+    await expect(failing).rejects.toThrow(reason);
   });
+
+  it.each([
+    {
+      label: 'response.failed',
+      terminal:
+        'event: response.failed\ndata: {"type":"response.failed","sequence_number":1,"response":{"id":"resp_1","object":"response","status":"failed","error":{"code":"server_error","message":"The server had an error while processing your request."},"output":[],"model":"fixture-model"}}\n\n',
+      code: 'PROVIDER_UNAVAILABLE',
+      reason: 'The server had an error while processing your request.',
+    },
+    {
+      label: 'event: error naming the context window',
+      terminal:
+        'event: error\ndata: {"type":"error","sequence_number":1,"code":"context_length_exceeded","message":"Your input exceeds the context window of this model.","param":null}\n\n',
+      code: 'INVALID_REQUEST',
+      reason: 'Your input exceeds the context window of this model.',
+    },
+  ] as const)(
+    'reports the provider reason for $label on a body still open past the terminal frame',
+    async ({ terminal, code, reason }) => {
+      /* The SDK cancels the reader from inside its own `for await` on a terminal
+       * frame and aborts its request; the guard must not report either as a
+       * network failure of its own. */
+      const transport = createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: openBodyFetch([
+          'event: response.created\ndata: {"type":"response.created","sequence_number":0,"response":{"id":"resp_1","object":"response","status":"in_progress","output":[],"model":"fixture-model"}}\n\n',
+          terminal,
+        ]),
+      });
+
+      const failing = collect(transport.stream(request({ providerKind: 'openai' })));
+      await expect(failing).rejects.toMatchObject({ code });
+      await expect(failing).rejects.toThrow(reason);
+    },
+  );
 
   it('rejects a non-SSE success body and EOF without a terminal marker', async () => {
     const wrongType = createGatewayModelTransport({
@@ -1627,6 +1724,78 @@ describe('createGatewayModelTransport', () => {
         .join(''),
     ).toBe('partial tail');
     expect(events.at(-1)?.type).toBe('completed');
+  });
+
+  it.each([
+    {
+      label: 'a refusal',
+      // The marker lands mid-payload and the refusal only becomes readable
+      // three chunks later, so the guard withholds several times in a row.
+      chunks: (() => {
+        const message = "The model provider's account is unavailable.";
+        const refusal = JSON.stringify({
+          type: 'error',
+          code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+          message,
+          error: {
+            type: 'tau_gateway',
+            code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+            message,
+            details: { providerId: 'anthropic', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' },
+          },
+        });
+        const marker = refusal.indexOf('"type":"tau_gateway"') + '"type":"tau_gateway"'.length;
+        const rest = refusal.slice(marker);
+        const third = Math.floor(rest.length / 3);
+        return [
+          'data: {"id":"chatcmpl-held","choices":[{"delta":{"content":"partial"}}]}\n\n',
+          `event: error\ndata: ${refusal.slice(0, marker)}`,
+          rest.slice(0, third),
+          rest.slice(third, third * 2),
+          `${rest.slice(third * 2)}\n\n`,
+        ];
+      })(),
+      outcome: 'PROVIDER_ACCOUNT_EXHAUSTED',
+    },
+    {
+      label: 'a complete Tau frame that is not a refusal',
+      chunks: [
+        'data: {"id":"chatcmpl-tau","choices":[{"index":0,"delta":{"content":"partial"}}]}\n\n',
+        'data: {"id":"chatcmpl-tau","type":"tau_gateway",',
+        '"choices":[{"index":0,',
+        '"delta":{"content":" tail"}}]}',
+        '\n\ndata: {"id":"chatcmpl-tau","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+        'data: [DONE]\n\n',
+      ],
+      outcome: 'partial tail',
+    },
+  ] as const)('settles $label whose marker frame spans several chunks', async ({ chunks, outcome }) => {
+    /* A `pull` that only withholds delivers nothing, so the stream schedules no
+     * further pull of its own: two withheld chunks in a row must not strand the
+     * consumer's pending read. */
+    const transport = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      model: { contextWindow: 200_000, maxTokens: 8192 },
+      fetch: vi.fn(async () => responseFromChunks(chunks)),
+    });
+
+    const settled = await Promise.race([
+      collect(transport.stream(request())).then(
+        (events) =>
+          events
+            .filter((event) => event.type === 'text-delta')
+            .map((event) => event.text)
+            .join(''),
+        (error: unknown) => (error as { code?: string }).code ?? 'rejected',
+      ),
+      new Promise<'stalled'>((resolve) => {
+        globalThis.setTimeout(() => {
+          resolve('stalled');
+        }, 500);
+      }),
+    ]);
+
+    expect(settled).toBe(outcome);
   });
 
   it('should leave a healthy Responses stream untouched while scanning for the refusal frame', async () => {

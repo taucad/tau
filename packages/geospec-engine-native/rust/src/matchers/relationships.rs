@@ -938,7 +938,7 @@ fn project_relationship_diagnostic(
         source.message
     );
     if is_compact_nominal_proof(proof) {
-        // The complete C1/C2/C3 certificate occurs once in the relationship
+        // The complete C1/C2/C3 or box insertion certificate occurs once in the relationship
         // result. Duplicating it in both diagnostic.final and witnesses would
         // defeat the bounded projection. Keep identities and measurements here
         // with an unambiguous index into that unchanged full evidence row.
@@ -1006,7 +1006,7 @@ fn project_relationship_diagnostic(
 
 fn is_compact_nominal_proof(proof: &Proof) -> bool {
     matches!(json_field_ref(&proof.final_evidence, "method"),
-        Some(Json::String(method)) if matches!(method.as_str(), "exact-nominal-cylindrical-band-clearance" | "exact-nominal-finite-contact" | "exact-local-band-engagement"))
+        Some(Json::String(method)) if matches!(method.as_str(), "exact-nominal-cylindrical-band-clearance" | "exact-nominal-finite-contact" | "exact-local-band-engagement" | "continuous-centerline"))
 }
 
 fn endpoints(
@@ -1969,10 +1969,17 @@ fn prove_local_band_engagement(
     let axis = relationship
         .axis
         .ok_or_else(|| finite_contact_failure("Local engagement requires the authored axis."))?;
+    // C1 validation drops its certificate before engagement arithmetic starts.
+    // The latter fits the nominal-analytic schedule (see band_engagement_inner).
+    // Two output slots cover its three retained scalars plus the final JSON,
+    // including both <=32-label source routes. They are not C1 certificates.
+    // Context separately charges all retained records, selectors and prior rows.
     context
         .check_cylindrical_band_capacity(&[
-            continuous::FINITE_CONTACT_RESERVATION_BYTES as u64,
-            2 * continuous::FINITE_CONTACT_OUTPUT_BYTES as u64,
+            continuous::CYLINDRICAL_BAND_PREDICATE_RESERVATION_BYTES.max(
+                continuous::NOMINAL_ANALYTIC_RESERVATION_BYTES
+                    + 2 * continuous::NOMINAL_ANALYTIC_OUTPUT_BYTES,
+            ) as u64,
         ])
         .map_err(ProofError::Refused)?;
     let (positive, evidence) =
@@ -2631,65 +2638,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn finite_contact_compact_projection_preserves_existing_c1_profile() {
-        let relationship = parse_relationship(
-            &crate::codec::decode(br#"{"kind":"clearance","subject":"left","target":"right"}"#)
-                .unwrap(),
-            0,
-        )
-        .unwrap();
-        let selected = Selection {
-            status: SelectionStatus::Resolved,
-            entities: vec![],
-            expected: crate::analysis::selection::Cardinality::One,
-            stability: Stability::Authored,
-            candidates: vec![],
-            diagnostics: vec![],
-        };
-        let proof = Proof {
-            positive: false,
-            broad_phase: empty_object(),
-            final_evidence: final_json(
+    fn compact_projection_preserves_c1_and_box_insertion_profiles() {
+        for (method, profile) in [
+            (
                 "exact-nominal-cylindrical-band-clearance",
-                empty_object(),
-                empty_object(),
-                vec![],
+                "geospec-nominal-cylindrical-band-clearance-v1",
             ),
-            diagnostics: vec![],
-        };
-        let source = Diagnostic::error(
-            "GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH",
-            "Existing C1 control.",
-        );
-        let diagnostic = project_relationship_diagnostic(
-            0,
-            &relationship,
-            &selected,
-            &selected,
-            &proof,
-            &source,
-        );
-        let actual: serde_json::Value =
-            serde_json::from_slice(&crate::codec::encode(&diagnostic.to_json()).unwrap()).unwrap();
-        assert_eq!(
-            actual["details"]["evidence"]["profile"],
-            "geospec-nominal-cylindrical-band-clearance-v1"
-        );
-        assert_eq!(
-            actual["details"]["evidence"]["path"],
-            "evidence.witnesses.relationships[relationshipIndex].final"
-        );
-        assert!(actual["details"]["evidence"].get("final").is_none());
+            ("continuous-centerline", "continuous-centerline"),
+        ] {
+            let relationship = parse_relationship(
+                &crate::codec::decode(br#"{"kind":"clearance","subject":"left","target":"right"}"#)
+                    .unwrap(),
+                0,
+            )
+            .unwrap();
+            let selected = Selection {
+                status: SelectionStatus::Resolved,
+                entities: vec![],
+                expected: crate::analysis::selection::Cardinality::One,
+                stability: Stability::Authored,
+                candidates: vec![],
+                diagnostics: vec![],
+            };
+            let proof = Proof {
+                positive: false,
+                broad_phase: empty_object(),
+                final_evidence: final_json(method, empty_object(), empty_object(), vec![]),
+                diagnostics: vec![],
+            };
+            let source = Diagnostic::error(
+                "GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH",
+                "Existing C1 control.",
+            );
+            let diagnostic = project_relationship_diagnostic(
+                0,
+                &relationship,
+                &selected,
+                &selected,
+                &proof,
+                &source,
+            );
+            let actual: serde_json::Value =
+                serde_json::from_slice(&crate::codec::encode(&diagnostic.to_json()).unwrap())
+                    .unwrap();
+            assert_eq!(actual["details"]["evidence"]["profile"], profile);
+            assert_eq!(
+                actual["details"]["evidence"]["path"],
+                "evidence.witnesses.relationships[relationshipIndex].final"
+            );
+            assert!(actual["details"]["evidence"].get("final").is_none());
+            assert!(actual["details"].get("witnesses").is_none());
+        }
     }
 
-    struct TrimControl(std::cell::Cell<u32>);
+    struct TrimControl {
+        calls: std::cell::Cell<u32>,
+        bands: Vec<crate::backend::brep::NominalCylindricalBand>,
+    }
 
     impl BrepSubject for TrimControl {
         fn cylinder_axial_extent(
             &self,
             _: BrepEntity,
         ) -> Result<CylinderAxialExtent, BackendError> {
-            self.0.set(self.0.get() + 1);
+            self.calls.set(self.calls.get() + 1);
             Ok(CylinderAxialExtent {
                 origin: [0.0; 3],
                 axis: [0.0, 0.0, 1.0],
@@ -2698,9 +2710,118 @@ mod tests {
                 to: 10.0,
             })
         }
-        fn facts(&self) -> Result<std::rc::Rc<crate::backend::brep::DocumentFacts>, BackendError> {
-            unreachable!("only trim query belongs to this control")
+        fn nominal_cylindrical_band(
+            &self,
+            face: BrepEntity,
+        ) -> Result<crate::backend::brep::NominalCylindricalBand, BackendError> {
+            self.calls.set(self.calls.get() + 1);
+            Ok(self
+                .bands
+                .iter()
+                .find(|b| {
+                    face == BrepEntity::Face {
+                        occurrence: b.occurrence,
+                        face: b.private_query_face,
+                    }
+                })
+                .unwrap()
+                .clone())
         }
+        fn reported_facts_and_mesh(
+            &self,
+        ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
+            use crate::backend::{brep::*, TriangleMesh};
+            use std::rc::Rc;
+            Ok(ReportedBrepBundle {
+                facts: self.facts()?,
+                whole_faces: Rc::from([]),
+                occurrence_faces: vec![self
+                    .bands
+                    .iter()
+                    .map(|b| LocatedFace {
+                        entity: BrepEntity::Face {
+                            occurrence: b.occurrence,
+                            face: b.private_query_face,
+                        },
+                        facts: FaceFacts {
+                            index: b.public_face_ordinal,
+                            parameter_bounds: b.parameter_bounds,
+                            area: 1.,
+                            center_of_mass: b.origin,
+                            surface: SurfaceFacts::Cylinder {
+                                origin: b.origin,
+                                axis: b.axis,
+                                radius: b.radius,
+                            },
+                        },
+                        bounds: Bounds {
+                            min: [-40.; 3],
+                            max: [40.; 3],
+                        },
+                        reversed: false,
+                        edge_indices: vec![1, 2, 3],
+                        shape_label: None,
+                    })
+                    .collect::<Vec<_>>()
+                    .into()],
+                mesh: Rc::new(TriangleMesh {
+                    positions: vec![],
+                    triangles: vec![],
+                }),
+            })
+        }
+        fn facts(&self) -> Result<Rc<crate::backend::brep::DocumentFacts>, BackendError> {
+            use crate::backend::brep::*;
+            use std::rc::Rc;
+            Ok(Rc::new(DocumentFacts {
+                source_length_unit: "millimetre".into(),
+                source_unit_to_millimeters: 1.0,
+                products: vec![],
+                occurrences: (0..1)
+                    .map(|index| OccurrenceFacts {
+                        label: format!("occurrence-{index}"),
+                        product_label: "core-product".into(),
+                        name: if index == 1 { "shaft" } else { "housing" }.into(),
+                        placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                        bounds: Bounds {
+                            min: [-40.0; 3],
+                            max: [40.0; 3],
+                        },
+                        path: if index == 1 { "shaft" } else { "housing" }.into(),
+                        parent: None,
+                        product: 0,
+                        product_name: "core-product".into(),
+                        instance_name: None,
+                        ordinal_path: vec![index + 1],
+                    })
+                    .collect(),
+                faces: vec![],
+                pmi: vec![],
+                subshapes: vec![],
+                datum_placements: vec![],
+                semantic_datums: vec![],
+                shape: ShapeFacts {
+                    valid: true,
+                    bounds: Bounds {
+                        min: [-40.0; 3],
+                        max: [40.0; 3],
+                    },
+                    volume: 1.0,
+                    surface_area: 1.0,
+                    center_of_mass: [0.0; 3],
+                    topology: TopologyCounts {
+                        compounds: 0,
+                        solids: 1,
+                        shells: 1,
+                        faces: 3,
+                        wires: 3,
+                        edges: 3,
+                        vertices: 2,
+                    },
+                },
+            }))
+        }
+
         fn faces(&self) -> Result<std::rc::Rc<[crate::backend::brep::LocatedFace]>, BackendError> {
             unreachable!("only trim query belongs to this control")
         }
@@ -2761,9 +2882,239 @@ mod tests {
         }
     }
 
+    fn engagement_band(
+        radius: f64,
+        axis: [f64; 3],
+        origin: [f64; 3],
+        interval: [f64; 2],
+    ) -> crate::backend::brep::NominalCylindricalBand {
+        use crate::backend::brep::*;
+        NominalCylindricalBand {
+            profile: CylindricalBandProfile::NominalV1,
+            occurrence: 0,
+            public_face_ordinal: 0,
+            private_query_face: 1,
+            source_face_entity: 100,
+            source_route_count: 1,
+            source_route: std::array::from_fn(|i| if i == 0 { 200 } else { 0 }),
+            source_same_sense: true,
+            transferred_reversed: false,
+            origin,
+            axis,
+            phase_x: [1.0, 0.0, 0.0],
+            phase_y: [0.0, 1.0, 0.0],
+            radius,
+            from: interval[0],
+            to: interval[1],
+            parameter_bounds: [0.0, std::f64::consts::TAU, interval[0], interval[1]],
+            surface_period: std::f64::consts::TAU,
+            rims: std::array::from_fn(|i| CylindricalBandRim {
+                edge_index: i as u32 + 1,
+                center: origin,
+                axis,
+                phase_x: [1.0, 0.0, 0.0],
+                phase_y: [0.0, 1.0, 0.0],
+                radius,
+                curve_range: [0.0, std::f64::consts::TAU],
+                curve_period: std::f64::consts::TAU,
+                vertex_indices: [i as u32 + 1; 2],
+            }),
+            seam_edge_index: 3,
+            seam_origin: origin,
+            seam_axis: axis,
+            seam_curve_range: interval,
+            seam_vertex_indices: [1, 2],
+            boundary: std::array::from_fn(|i| CylinderBoundaryUse {
+                edge_index: [3, 3, 1, 2][i],
+                orientation: if i % 2 == 0 {
+                    CylinderBoundaryOrientation::Forward
+                } else {
+                    CylinderBoundaryOrientation::Reversed
+                },
+                side: [
+                    CylinderBoundarySide::U0,
+                    CylinderBoundarySide::U1,
+                    CylinderBoundarySide::V0,
+                    CylinderBoundarySide::V1,
+                ][i],
+                curve_range: interval,
+                pcurve_stored: true,
+                parameter_endpoints: [[0.0, 0.0]; 2],
+            }),
+            vertices: std::array::from_fn(|i| CylinderVertex {
+                vertex_index: i as u32 + 1,
+                point: origin,
+            }),
+            face_tolerance_mm: 1e-7,
+            edge_tolerances_mm: [1e-7; 3],
+            vertex_tolerances_mm: [1e-7; 2],
+            period_residual_mm: 0.0,
+            boundary_residuals: [CylindricalBandBoundaryResidual {
+                parameter_coverage_mm: 0.0,
+                curve_surface_mm: 0.0,
+                vertex_attachment_mm: 0.0,
+                limit_mm: 1e-7,
+            }; 4],
+        }
+    }
+
+    #[test]
+    fn local_band_engagement_preserves_depth_polarities_and_warm_work() {
+        use crate::{
+            budget::Budget,
+            identity::SubjectIdentity,
+            registry::Capability,
+            result::Polarity,
+            subject::{Subject, SubjectFormat},
+        };
+        use std::rc::Rc;
+        // Principal R5 source construction: plug radius 5.95, z=8..24;
+        // bore radius 6, z=0..24. Common span is exactly 16, below min 17.
+        // These mock admitted bands test core routing, not OCCT admission.
+        let a = engagement_band(5.95, [0., 0., 1.], [0.; 3], [8., 24.]);
+        let mut b = engagement_band(6., [0., 0., 1.], [0.; 3], [0., 24.]);
+        b.public_face_ordinal = 1;
+        b.private_query_face = 2;
+        let selected = |band: &crate::backend::brep::NominalCylindricalBand| Selection {
+            status: SelectionStatus::Resolved,
+            expected: Cardinality::One,
+            stability: Stability::Authored,
+            candidates: vec![],
+            diagnostics: vec![],
+            entities: vec![Entity {
+                id: format!("face-{}", band.private_query_face),
+                entity_type: crate::analysis::selection::EntityType::Face,
+                occurrence_path: None,
+                occurrence: Some(0),
+                face: Some(BrepEntity::Face {
+                    occurrence: 0,
+                    face: band.private_query_face,
+                }),
+                facts: EntityFacts {
+                    surface_type: Some("cylinder".into()),
+                    face_index: Some(band.public_face_ordinal),
+                    ..EntityFacts::default()
+                },
+                topology_ref: None,
+            }],
+        };
+        let mut relationship = parse_relationship(
+            &crate::codec::decode(
+                br#"{"kind":"insertion","subject":"plug","target":"bore","axis":[0,0,1],"min":17}"#,
+            )
+            .unwrap(),
+            0,
+        )
+        .unwrap();
+        relationship.resolved = Some((selected(&a), selected(&b)));
+        relationship.resolved_bores = Some((vec![None], vec![None]));
+        let prepared = Prepared {
+            relationships: vec![relationship],
+        };
+        let identity = SubjectIdentity::step(
+            b"local-band-core-control",
+            "millimetre",
+            1.,
+            crate::backend::brep::BrepIdentityProfile {
+                ingest_profile: "core-control",
+                backend_profile: "core-control",
+            },
+            None,
+        )
+        .unwrap();
+        let mut subject = Subject::new(
+            identity.primary_hash().into(),
+            SubjectFormat::Step,
+            "mm".into(),
+        );
+        subject.semantic_identity.set(identity).unwrap();
+        subject.brep = Some(Box::new(TrimControl {
+            calls: std::cell::Cell::new(0),
+            bands: vec![a, b],
+        }));
+        let subjects = [Rc::new(subject)];
+        let payload = prepared.normalized_payload();
+        for _warm in [false, true] {
+            for (polarity, expected) in [
+                (Polarity::Positive, "failed"),
+                (Polarity::Negative, "passed"),
+            ] {
+                // 1 report + 2 faces + 1 pair + unchanged 32768 predicate debit.
+                for limit in [32772, 32771] {
+                    let budget = Budget::new(limit);
+                    let mut context = EvaluationContext::new(
+                        &subjects,
+                        Capability::ToHaveSpatialRelationships,
+                        "engagement",
+                        &payload,
+                        &budget,
+                        None,
+                    );
+                    let result = crate::result::finish(
+                        "engagement",
+                        Capability::ToHaveSpatialRelationships,
+                        polarity,
+                        evaluate(&prepared, &mut context),
+                    )
+                    .unwrap();
+                    let result: serde_json::Value =
+                        serde_json::from_slice(&crate::codec::encode(&result).unwrap()).unwrap();
+                    assert_eq!(budget.used(), 32772);
+                    if limit == 32771 {
+                        assert_eq!(result["status"], "refused");
+                        assert_eq!(result["diagnostics"][0]["code"], "MATCHER_TIMEOUT");
+                    } else {
+                        assert_eq!(result["status"], expected, "{result}");
+                        let decision = &result["evidence"]["witnesses"]["relationships"][0]
+                            ["final"]["witnesses"][0]["decision"];
+                        assert_eq!(decision["depth"]["numerator"], "16");
+                        assert_eq!(decision["depth"]["denominator"], "1");
+                    }
+                }
+            }
+        }
+        // An earlier row may retain 128 KiB while this fixed-size pair is
+        // evaluated. Its charge stays separate from the sequential scratch.
+        for (prior_bytes, fits) in [(128 * 1024, true), (200 * 1024, false)] {
+            let budget = Budget::new(32772);
+            let mut context = EvaluationContext::new(
+                &subjects,
+                Capability::ToHaveSpatialRelationships,
+                "engagement",
+                &payload,
+                &budget,
+                None,
+            );
+            assert!(context.brep_facts().is_ok());
+            assert!(context
+                .set_cylindrical_band_output_bytes(prior_bytes)
+                .is_ok());
+            let relationship = &prepared.relationships[0];
+            let (a, b) = relationship.resolved.as_ref().unwrap();
+            let a = endpoints(a, &[None], "subject").ok().unwrap();
+            let b = endpoints(b, &[None], "target").ok().unwrap();
+            let proof = prove_continuous_insertion(relationship, &a, &b, &mut context);
+            assert_eq!(budget.used(), 32772);
+            if fits {
+                let proof = proof
+                    .ok()
+                    .expect("128 KiB prior output plus local engagement fits");
+                assert!(!proof.positive);
+            } else {
+                assert!(
+                    matches!(proof, Err(ProofError::Refused(_))),
+                    "caller charges must still enforce 256 KiB"
+                );
+            }
+        }
+    }
+
     #[test]
     fn required_trim_requests_charge_before_query_at_two_and_three_units() {
-        let brep = TrimControl(std::cell::Cell::new(0));
+        let brep = TrimControl {
+            calls: std::cell::Cell::new(0),
+            bands: vec![],
+        };
         let selection = Selection {
             status: SelectionStatus::Resolved,
             entities: vec![Entity {
@@ -2787,7 +3138,7 @@ mod tests {
             for limit in [2, 3] {
                 let budget = crate::budget::Budget::new(limit);
                 budget.charge(1).unwrap(); // Required logical report request.
-                let before = brep.0.get();
+                let before = brep.calls.get();
                 let left = resolve_bore_evidence(&selection, Some(&brep), true, &budget);
                 let right = resolve_bore_evidence(&selection, Some(&brep), true, &budget);
                 assert!(left[0].as_ref().unwrap().is_ok());
@@ -2798,14 +3149,14 @@ mod tests {
                         BackendErrorKind::BudgetExceeded { limit: 2, used: 3 }
                     );
                     assert_eq!(
-                        brep.0.get() - before,
+                        brep.calls.get() - before,
                         1,
                         "rejected demand never queries the connector"
                     );
                 } else {
                     let region = right[0].as_ref().unwrap().as_ref().unwrap();
                     assert_eq!((region.from, region.to), (0.0, 10.0));
-                    assert_eq!(brep.0.get() - before, 2);
+                    assert_eq!(brep.calls.get() - before, 2);
                 }
             }
         }

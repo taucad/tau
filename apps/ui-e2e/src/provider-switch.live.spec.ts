@@ -154,6 +154,12 @@ for (const [name, first, second] of pairs) {
       (receipt) => receipt.model.providerId === first.providerId || receipt.model.providerId === second.providerId,
       4,
     );
+    // Written before the receipt assertions, so a failing verdict still leaves
+    // the rows it judged on disk instead of only in the failure message.
+    await target.writeArtifact(
+      `provider-switch-live-${first.providerId}-to-${second.providerId}.json`,
+      `${JSON.stringify({ from: first, to: second, turn, invokedModels, settled }, null, 2)}\n`,
+    );
     expect(new Set(settled.map((receipt) => receipt.model.providerId))).toEqual(
       new Set([first.providerId, second.providerId]),
     );
@@ -161,9 +167,5 @@ for (const [name, first, second] of pairs) {
     // attribution did not. Matching by provider also sweeps in the API's own
     // name and commit generation, which `attributionFaults` leaves alone.
     expect(attributionFaults(settled, turn)).toEqual([]);
-    await target.writeArtifact(
-      `provider-switch-live-${first.providerId}-to-${second.providerId}.json`,
-      `${JSON.stringify({ from: first, to: second, turn, invokedModels, settled }, null, 2)}\n`,
-    );
   }, 900_000);
 }

@@ -176,6 +176,13 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
     return;
   }
   const usage = await expectSettledReceipts(isGeminiReceipt, 6);
+  // Written before the receipt assertions, so a failing verdict still leaves the
+  // rows it judged on disk instead of only in the failure message; the terminal
+  // operations are appended below once they are read.
+  await target.writeArtifact(
+    'gemini-browser-agent-host-live-evidence.json',
+    `${JSON.stringify({ modelId, turn, usage }, null, 2)}\n`,
+  );
   for (const receipt of usage) {
     expect(receipt.model.providerId).toBe('vertexai');
   }

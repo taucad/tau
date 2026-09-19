@@ -13,7 +13,8 @@ import { expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
-import { classifyReceipts, turnIdentityFromUrl } from '#support/usage-receipt.js';
+import type { StoredProjectConfig } from '#support/project-storage-state.js';
+import { chatIdFromUrl, classifyReceipts } from '#support/usage-receipt.js';
 import type { TurnIdentity, UsageReceipt } from '#support/usage-receipt.js';
 
 /** A catalog row a live spec drives: the selector/cookie id and the provider that bills it. */
@@ -51,12 +52,32 @@ const withPageText = async (message: string, assertion: () => Promise<void>): Pr
 };
 
 /**
+ * This device's record of the project the running spec created.
+ *
+ * `use-project-manager.tsx` writes the row through `setProjectFileSystemConfig`
+ * before `createProject` resolves — so before the navigation these specs wait
+ * for — and keys it by the durable project id, which is the same id
+ * `useProject()` hands the agent host as `authority.projectId`. Each live test
+ * creates exactly one project, so the newest row is that project.
+ */
+const activeProjectConfig = async (): Promise<StoredProjectConfig> => {
+  const storage = await readProjectStorageState();
+  const config = storage.configs.at(-1);
+  if (!config) {
+    throw new Error('The live project has no filesystem configuration.');
+  }
+  return config;
+};
+
+/**
  * Sign a funded test account in, pin the model and kernel, and open a new project's chat.
  *
  * @param options - The account email, the catalog model the first turn runs on, and the project name.
  * @returns The project and chat the turns will run in — the same two ids the
- * browser host sends as `x-tau-project-id`/`x-tau-chat-id`, read here while the
- * route is pinned rather than after later navigation has moved it.
+ * browser host sends as `x-tau-project-id`/`x-tau-chat-id`. The chat comes from
+ * the URL while the route is pinned; the project comes from this device's
+ * project record, because the URL carries the project's *slug* and the host
+ * attributes to the id that slug resolves to (`chatIdFromUrl`).
  */
 export const openLiveChat = async (options: {
   readonly email: string;
@@ -86,7 +107,9 @@ export const openLiveChat = async (options: {
   await target.waitFor(() => document.querySelector('[aria-label="Ask Tau to build anything..."]') !== null, null, {
     timeout: 60_000,
   });
-  return turnIdentityFromUrl(await target.currentUrl());
+  const chatId = chatIdFromUrl(await target.currentUrl());
+  const config = await activeProjectConfig();
+  return { projectId: config.projectId, chatId };
 };
 
 /**
@@ -250,11 +273,5 @@ export const expectSettledReceipts = async (
 };
 
 /** The live project's physical file tree, read through the backend its durable config names. */
-export const readActiveProjectTree = async (): Promise<Readonly<Record<string, string>>> => {
-  const storage = await readProjectStorageState();
-  const config = storage.configs.at(-1);
-  if (!config) {
-    throw new Error('The live project has no filesystem configuration.');
-  }
-  return readProjectTree(config);
-};
+export const readActiveProjectTree = async (): Promise<Readonly<Record<string, string>>> =>
+  readProjectTree(await activeProjectConfig());

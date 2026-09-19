@@ -45,6 +45,7 @@ describe('Morph fast-apply architecture', () => {
     const morphApiKey = process.env.MORPH_API_KEY;
     process.env.MORPH_API_KEY = '';
     try {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the imported classes' own exported names
       const [{ Test }, { AppModule }] = await Promise.all([import('@nestjs/testing'), import('#app.module.js')]);
       const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot(getEnvironment())] }).compile();
       await moduleRef.close();

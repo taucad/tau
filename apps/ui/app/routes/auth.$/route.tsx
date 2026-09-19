@@ -1,12 +1,15 @@
-import { Link, useParams } from 'react-router';
+import { useEffect } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useSession } from '@better-auth-ui/react';
 import { Auth } from '#components/auth/auth.js';
 import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
 import { MagicLinkVerify } from '#components/auth/magic-link-verify.js';
-import { VerifyEmail } from '#components/auth/verify-email.js';
+import { sanitizeVerifyEmailRedirectTo, VerifyEmail } from '#components/auth/verify-email.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
 import { DesignStory } from '#components/geometry/splash/design-story.js';
+import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import type { ShellAuthHandoff } from '#providers/auth-provider.js';
 import { callDesktopShell, useShellAuthHandoff } from '#providers/auth-provider.js';
@@ -28,6 +31,20 @@ export const handle: Handle = {
  * @returns The handoff panel.
  */
 function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): React.JSX.Element | undefined {
+  /* Main only announces that the session changed; the link a signed-out window
+     was holding (`redirectTo`, e.g. a `tau://invitations/…` arrival) is opened
+     here, or the person is left on this panel with a session and nowhere to go. */
+  const { data: session } = useSession(authClient);
+  const [searchParameters] = useSearchParams();
+  const navigate = useNavigate();
+  const redirectTo = sanitizeVerifyEmailRedirectTo(searchParameters.get('redirectTo') ?? undefined);
+  const isSignedIn = handoff.action === 'signIn' && Boolean(session);
+  useEffect(() => {
+    if (isSignedIn) {
+      void navigate(redirectTo, { replace: true });
+    }
+  }, [isSignedIn, navigate, redirectTo]);
+
   if (!handoff.isBridgeAvailable) {
     return (
       <div className='w-full max-w-md text-center'>

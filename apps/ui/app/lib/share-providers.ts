@@ -11,6 +11,7 @@ import { tauShareProvider, tauShareProviderDescriptor } from '@taucad/share/tau'
 import { authClient } from '#lib/auth-client.js';
 import { builtinShareProvider, builtinShareProviderDescriptor } from '#lib/builtin-share-provider.js';
 import { ENV } from '#environment.config.js';
+import { shareOrigin } from '#lib/share-origin.js';
 
 export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: directShareProviderDescriptor, load: async () => directShareProvider },
@@ -319,7 +320,7 @@ export const createBrowserShareProviderContext = (): BrowserShareProviderContext
   const archiveUrl = `${ENV.TAU_API_URL}/v1/repositories/archive`;
   const artifactCodec = createShareArtifactWorkerCodec();
   return {
-    origin: globalThis.location.origin,
+    origin: shareOrigin(),
     archiveUrl,
     artifactCodec,
     fetch: globalThis.fetch.bind(globalThis),

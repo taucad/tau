@@ -28,6 +28,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
+import { tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
 import { Loader } from '#components/ui/loader.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
@@ -68,8 +69,6 @@ export type ProjectRouteNoticeSpec = Readonly<{
 const projectsPath = '/projects';
 /* D1: the trashed view behind one query parameter. W6 replaces this literal with the shared helper. */
 const projectsTrashPath = '/projects?trash=1';
-/* No download page exists in this repo, so the docs site is the canonical desktop destination. */
-const tauDesktopUrl = 'https://docs.tau.new';
 
 const projectsAction: ProjectRouteNoticeAction = { label: 'Go to projects', run: 'projects', icon: Hammer };
 const backAction: ProjectRouteNoticeAction = { label: 'Go back', run: 'back', icon: ArrowLeft };
@@ -305,7 +304,7 @@ export const useProjectRouteNoticeActions = (projectId: string | undefined): ((r
           return;
         }
         case 'desktop': {
-          globalThis.open(tauDesktopUrl, '_blank', 'noopener,noreferrer');
+          globalThis.open(tauDesktopDownloadUrl, '_blank', 'noopener,noreferrer');
         }
       }
     },

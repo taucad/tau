@@ -13,8 +13,12 @@ const originalUncaught = new Set(process.listeners('uncaughtException'));
 const originalUnhandled = new Set(process.listeners('unhandledRejection'));
 
 const state = vi.hoisted(() => ({
-  appListeners: new Map<string, Array<(event: { preventDefault(): void }) => void>>(),
+  appListeners: new Map<string, Array<(...args: unknown[]) => void>>(),
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  /* Held open by the deep-link cases so a link can arrive before `ready`. */
+  ready: undefined as Promise<void> | undefined,
+  authHandleCallback: vi.fn(async () => undefined),
+  protocolClient: [] as unknown[][],
   resolveFork: undefined as
     | undefined
     | ((context: Record<string, string>) => {
@@ -60,10 +64,14 @@ const app = {
   isPackaged: false,
   dock: { setIcon: vi.fn() },
   requestSingleInstanceLock: vi.fn(() => true),
-  whenReady: vi.fn(async () => undefined),
+  whenReady: vi.fn(async () => state.ready),
+  setAsDefaultProtocolClient: vi.fn((...args: unknown[]) => {
+    state.protocolClient.push(args);
+    return true;
+  }),
   getPath: vi.fn((name: string) => (name === 'userData' ? state.userData : join(state.userData, name))),
   getVersion: vi.fn(() => 'test'),
-  on: vi.fn((event: string, listener: (event: { preventDefault(): void }) => void) => {
+  on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
     const listeners = state.appListeners.get(event) ?? [];
     listeners.push(listener);
     state.appListeners.set(event, listeners);
@@ -95,6 +103,8 @@ const fakeWindow = {
     setWindowOpenHandler: vi.fn(),
   },
   isDestroyed: vi.fn(() => false),
+  isMinimized: vi.fn(() => false),
+  restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
   show: vi.fn(),
   focus: vi.fn(),
@@ -177,7 +187,7 @@ vi.mock('#main/auth-service.js', () => ({
     token: vi.fn(() => undefined),
     onChange: vi.fn(),
     dispose: vi.fn(),
-    handleCallback: vi.fn(),
+    handleCallback: state.authHandleCallback,
     signIn: vi.fn(),
     signOut: vi.fn(),
   })),
@@ -251,6 +261,9 @@ afterEach(async () => {
   state.sentToRenderer.length = 0;
   state.autoQuiesce = true;
   state.acpDiscovery = undefined;
+  state.ready = undefined;
+  state.protocolClient.length = 0;
+  state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
   state.runtimePrewarm.mockClear();
@@ -508,6 +521,136 @@ describe('desktop main compute owner', () => {
       });
       dialog.showMessageBox.mockResolvedValue({ response: 0 });
       state.servicesQuiesce.mockResolvedValue({ status: 'quiesced' });
+    },
+    bootMilliseconds,
+  );
+});
+
+/*
+ * `tau://` deep links (R4).
+ *
+ * A link is a *window navigation*, not a new IPC channel: main validates the
+ * identifier and loads the matching in-app route exactly the way an Open With
+ * file loads `/import?desktop-open=1`. The sign-in callback is the exception —
+ * it is redeemed in main and never reaches the renderer.
+ */
+describe('desktop main deep links', () => {
+  const bootMilliseconds = 30_000;
+
+  const boot = async (): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-links-'));
+    await import('#main/main.js');
+  };
+
+  const bootAndWait = async (): Promise<void> => {
+    await boot();
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalled();
+    });
+    fakeWindow.loadURL.mockClear();
+    fakeWindow.focus.mockClear();
+  };
+
+  const listener = (event: string): ((...args: unknown[]) => void) => state.appListeners.get(event)!.at(-1)!;
+
+  it(
+    'registers the app as the tau scheme handler',
+    async () => {
+      await bootAndWait();
+
+      expect(state.protocolClient).toContainEqual(['tau']);
+    },
+    bootMilliseconds,
+  );
+
+  /* On macOS the link that launched the app is delivered before `ready`, so a
+   * handler installed after `whenReady()` silently loses it. */
+  it(
+    'should load a link that arrived before the window existed',
+    async () => {
+      const ready = Promise.withResolvers<void>();
+      state.ready = ready.promise;
+      await boot();
+      await vi.waitFor(() => {
+        expect(state.appListeners.get('open-url')).toBeDefined();
+      });
+      const preventDefault = vi.fn();
+
+      listener('open-url')({ preventDefault }, 'tau://invitations/queued-token');
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      ready.resolve();
+
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/invitations/queued-token');
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should load and focus a share link delivered as a second-instance argument',
+    async () => {
+      await bootAndWait();
+
+      listener('second-instance')({}, ['/Applications/Tau.app', 'tau://s/direct#v=2&jwe=a.b.c.d.e']);
+
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/s/direct#v=2&jwe=a.b.c.d.e');
+      });
+      expect(fakeWindow.focus).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should load an import link delivered by open-url',
+    async () => {
+      await bootAndWait();
+
+      listener('open-url')({ preventDefault: vi.fn() }, 'tau://i/github.com/taucad/tau-examples');
+
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/import/github.com/taucad/tau-examples');
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should refuse and log a foreign link, loading nothing',
+    async () => {
+      await bootAndWait();
+
+      listener('open-url')({ preventDefault: vi.fn() }, 'tau://projects/../../etc/passwd');
+
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('warn', 'deep-link.refused', expect.anything());
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      /* The person clicked something and the app came forward; it has to say so
+       * by being in front rather than doing nothing at all. */
+      expect(fakeWindow.focus).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should redeem a sign-in callback in main and never navigate the renderer to it',
+    async () => {
+      await bootAndWait();
+
+      listener('open-url')({ preventDefault: vi.fn() }, 'tau://auth/callback?ott=A1b2C3d4&state=dGhlLXN0YXRl');
+
+      await vi.waitFor(() => {
+        expect(state.authHandleCallback).toHaveBeenCalledWith({
+          kind: 'auth-callback',
+          oneTimeToken: 'A1b2C3d4',
+          state: 'dGhlLXN0YXRl',
+        });
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );

@@ -878,6 +878,37 @@ describe('projectAgentHostEvent', () => {
     });
   });
 
+  /* The same rewrite carries every classified provider failure now, not only an
+   * exhausted account: a live stream Vertex cuts on quota arrives as
+   * `RATE_LIMITED` behind the relayed 200. Both halves of the table matter —
+   * the 200 rows are the cards a mid-stream frame must reach, and the failure
+   * statuses beside them are the pre-stream cards this must leave alone. */
+  it.each([
+    { code: 'RATE_LIMITED', status: 200, category: 'rate_limit' },
+    { code: 'RATE_LIMITED', status: 429, category: 'rate_limit' },
+    { code: 'UPSTREAM_REJECTED', status: 200, category: 'server' },
+    { code: 'UPSTREAM_REJECTED', status: 502, category: 'server' },
+    { code: 'PROVIDER_UNAVAILABLE', status: 503, category: 'overloaded' },
+    /* The one code the gateway answers with two statuses — 503 when it
+     * classified the refusal, 502 for a body-less provider response — so the
+     * status is the only thing that tells those cards apart and the code cannot
+     * name one. Its mid-stream frame reads as the generic card until the
+     * gateway answers it one way. */
+    { code: 'PROVIDER_UNAVAILABLE', status: 502, category: 'server' },
+    { code: 'PROVIDER_UNAVAILABLE', status: 200, category: 'generic' },
+  ])('should project $code behind HTTP $status as the $category card', ({ code, status, category }) => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code, status, message: 'Resource exhausted. Please try again later.' },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toMatchObject({ category, code, httpStatus: status });
+  });
+
   it("should carry an external agent's stop details through to the persisted ChatError without a status", () => {
     const details = {
       agentId: 'codex',

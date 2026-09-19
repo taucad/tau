@@ -6,6 +6,7 @@ import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@tauc
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { errorCategory } from '@taucad/types/constants';
+import type { ErrorCategory } from '@taucad/types';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
@@ -14,6 +15,29 @@ type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended
 type AssistantProviderMessage = Extract<ProviderMessage, { readonly role: 'assistant' }>;
 type UserProviderMessage = Extract<ProviderMessage, { readonly role: 'user' }>;
 type JsonValue = ProviderMessage['content'];
+
+/**
+ * The category a gateway code names, whatever status carried it.
+ *
+ * The gateway rewrites a classified provider failure into a Tau frame once the
+ * stream is already open, so a mid-stream failure rides the relayed response's
+ * own 200: `httpStatusToCategory(200)` answers the generic card, and a quota
+ * cut mid-turn reads as an unexplained error instead of a rate limit. Each code
+ * here answers exactly one pre-stream status too — `RATE_LIMITED` 429,
+ * `UPSTREAM_REJECTED` 502, the other two 503 — so naming the card from the code
+ * leaves every pre-stream failure rendering exactly as it did.
+ *
+ * `PROVIDER_UNAVAILABLE` is deliberately absent although it rides the same
+ * frame: the gateway answers it 503 on every classified path but 502 for a
+ * body-less provider response, so its two pre-stream cards disagree and only
+ * the status tells them apart. Naming one from the code would change the other.
+ */
+const gatewayCodeCategories = new Map<string, ErrorCategory>([
+  ['INSUFFICIENT_CREDIT', errorCategory.credits],
+  ['PROVIDER_ACCOUNT_EXHAUSTED', errorCategory.overloaded],
+  ['RATE_LIMITED', errorCategory.rateLimit],
+  ['UPSTREAM_REJECTED', errorCategory.server],
+]);
 
 const errorText = (value: unknown, fallback: string): string => {
   if (typeof value === 'string') {
@@ -25,25 +49,20 @@ const errorText = (value: unknown, fallback: string): string => {
     // keyed on, and a host refusal such as `NO_EVICTABLE_HISTORY` carries
     // neither an HTTP status nor structured fields.
     if (typeof code === 'string') {
-      // The gateway code is authoritative; the status is only a fallback for uncoded failures.
+      // The gateway code is authoritative; the status is only the fallback for
+      // codes that name no category of their own.
       const category =
-        code === 'INSUFFICIENT_CREDIT'
-          ? errorCategory.credits
-          : /* The provider-account refusal is a 503 pre-stream but rides a 200
-             * response when the gateway rewrites an in-stream error frame, so
-             * the code names the category the status cannot. */
-            code === 'PROVIDER_ACCOUNT_EXHAUSTED'
-            ? errorCategory.overloaded
-            : typeof status === 'number'
-              ? httpStatusToCategory(status)
-              : /* `rateLimit` is the external agent's *stop* card, and that card
-                 * is keyed on the stop details. A limit refused before the
-                 * adapter classified anything carries the code alone, and
-                 * claiming the category without the details it needs dropped the
-                 * person onto a card with no "Try again" (R3-F4). */
-                code === 'EXTERNAL_AGENT_LIMIT_REACHED' && externalAgentStopSchema.safeParse(details).success
-                ? errorCategory.rateLimit
-                : errorCategory.generic;
+        gatewayCodeCategories.get(code) ??
+        (typeof status === 'number'
+          ? httpStatusToCategory(status)
+          : /* `rateLimit` is the external agent's *stop* card, and that card is
+             * keyed on the stop details. A limit refused before the adapter
+             * classified anything carries the code alone, and claiming the
+             * category without the details it needs dropped the person onto a
+             * card with no "Try again" (R3-F4). */
+            code === 'EXTERNAL_AGENT_LIMIT_REACHED' && externalAgentStopSchema.safeParse(details).success
+            ? errorCategory.rateLimit
+            : errorCategory.generic);
       return JSON.stringify({
         category,
         title: errorCategoryTitles[category],

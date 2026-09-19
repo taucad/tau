@@ -85,10 +85,7 @@ const usableArtifact = (format: 'step' | 'glb', artifact: ExportFile): boolean =
   if (artifact.bytes.byteLength === 0) {
     return false;
   }
-  const lowerName = artifact.name.toLowerCase();
-  return format === 'step'
-    ? (lowerName.endsWith('.step') || lowerName.endsWith('.stp')) && artifact.mimeType === 'application/step'
-    : lowerName.endsWith('.glb') && artifact.mimeType === 'model/gltf-binary';
+  return format === 'step' ? artifact.mimeType === 'application/step' : artifact.mimeType === 'model/gltf-binary';
 };
 
 /**

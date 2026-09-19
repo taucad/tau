@@ -22,6 +22,7 @@ import {
   createLiveToolRegistry,
   hasLiveCredential,
   liveCadSystemPrompt,
+  liveCompletionCeiling,
   liveCredentialName,
   liveSessionModel,
   runWithRateLimitRetry,
@@ -122,8 +123,6 @@ const scriptedResults = (invocation: HostToolInvocation): HostToolResult =>
         isError: true,
       };
 
-/** Cheap legs keep the smallest completion budget that still fits a tool loop with thinking. */
-const economyMaxTokens = 4096;
 /** Anthropic's reasoning floor is a thinking budget rather than an effort word. */
 const economyThinkingBudget = 1024;
 /**
@@ -158,7 +157,7 @@ const legModel = (modelId: string, contextWindow?: number, maxTokens?: number): 
         : { ...declared, effort: 'low' };
   return {
     ...identity,
-    maxTokens: maxTokens ?? economyMaxTokens,
+    maxTokens: maxTokens ?? liveCompletionCeiling(modelId),
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(reasoning === undefined ? {} : { reasoning }),
   };

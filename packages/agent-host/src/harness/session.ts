@@ -84,7 +84,20 @@ const zeroUsage: Usage = {
 // 16,384 with a per-call raise up to the route ceiling (Q2).
 const defaultRequestedMaxTokens = 16_384;
 
-const requestedMaxTokens = (ceiling: number, requested: number | undefined): number =>
+/**
+ * The completion ceiling one turn asks the provider for.
+ *
+ * A ceiling is a limit, not a spend: the provider bills what it generates, and
+ * on a reasoning model this budget has to cover thinking as well as the answer.
+ * Exported so a harness can send what a real turn sends instead of restating
+ * the number.
+ *
+ * @param ceiling - The route's own maximum output tokens.
+ * @param requested - A per-call raise, bounded by that ceiling.
+ * @returns The `maxTokens` the provider request carries.
+ * @public
+ */
+export const requestedMaxTokens = (ceiling: number, requested: number | undefined): number =>
   Math.min(requested ?? defaultRequestedMaxTokens, ceiling);
 
 const modelFor = (options: AgentSessionModel): Model<Api> => ({

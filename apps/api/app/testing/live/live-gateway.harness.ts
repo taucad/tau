@@ -7,7 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { Auth } from 'better-auth';
-import { createAgentSession, createGatewayModelTransport } from '@taucad/agent-host';
+import { createAgentSession, createGatewayModelTransport, requestedMaxTokens } from '@taucad/agent-host';
 import type {
   AgentSession,
   AgentSessionModel,
@@ -151,6 +151,22 @@ export const liveSessionModel = (modelId: string): AgentSessionModel => {
     ...(reasoning === undefined ? {} : { reasoning }),
   };
 };
+
+/**
+ * The completion ceiling a production turn asks for on one catalog row.
+ *
+ * Both live suites send this rather than a cheaper test-only number. A ceiling
+ * is a limit, not a spend — the provider bills the tokens it actually generates
+ * — so a lower one buys nothing and, on a reasoning row, can end the turn on
+ * `length` with the whole budget spent on thinking and no answer at all. Cost
+ * discipline in these suites belongs in the prompts, which ask for short
+ * answers.
+ *
+ * @param modelId - Tau catalog model id.
+ * @returns What `createAgentSession` would put on the provider request.
+ */
+export const liveCompletionCeiling = (modelId: string): number =>
+  requestedMaxTokens(row(modelId).details.maxTokens, undefined);
 
 /**
  * The real CAD system prompt a browser turn carries.

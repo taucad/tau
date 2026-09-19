@@ -5,34 +5,14 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { PublicationOwnerSnapshot } from '@taucad/types';
 import * as schema from '#database/schema.js';
+import { databaseReachable } from '#testing/database-reachable.js';
 
 const rawDatabaseEnv = process.env.DATABASE_URL;
 const databaseConnectionString =
   typeof rawDatabaseEnv === 'string' && rawDatabaseEnv.trim().length > 0 ? rawDatabaseEnv.trim() : undefined;
 
-async function isPostgresReachable(connectionString: string): Promise<boolean> {
-  const probeClient = postgres(connectionString, {
-    max: 1,
-    /** Seconds before the client aborts a connect attempt. */
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- `postgres` expects snake_case socket options
-    connect_timeout: 3,
-  });
-  try {
-    await probeClient`SELECT 1`;
-    return true;
-  } catch {
-    return false;
-  } finally {
-    try {
-      await probeClient.end({ timeout: 1 });
-    } catch {
-      // Ignore shutdown errors (e.g. connect never established).
-    }
-  }
-}
-
 const publicationSchemaDbReachable = databaseConnectionString
-  ? await isPostgresReachable(databaseConnectionString)
+  ? await databaseReachable(databaseConnectionString)
   : false;
 
 describe.skipIf(!publicationSchemaDbReachable)('publication schema (integration)', () => {

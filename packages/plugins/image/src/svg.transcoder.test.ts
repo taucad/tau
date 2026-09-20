@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import type * as Nanoraster from 'nanoraster';
 import type { encodeRgbaWebp } from 'nanoraster';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { ExportFile } from '@taucad/runtime/types';
@@ -100,7 +101,7 @@ describe('SVG image transcoder', () => {
   });
 
   it('encodes the shared rendered pixels through the installed native WebP backend', async () => {
-    const { encodeRgbaWebp } = await vi.importActual<typeof import('nanoraster')>('nanoraster');
+    const { encodeRgbaWebp } = await vi.importActual<typeof Nanoraster>('nanoraster');
     backendMock.encodeRgbaWebp.mockImplementationOnce(encodeRgbaWebp);
 
     const rendered = await renderSvgWebp(fixture, {

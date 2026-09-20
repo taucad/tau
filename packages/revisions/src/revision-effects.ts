@@ -1461,9 +1461,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       writeRevision: fromAuthorityPromise<Readonly<{ revisionId: string }>, CheckoutWriteRevisionActorInput>(
         async ({ input }) => {
           const held = cuts.take(input.cutId);
-          if (held === undefined) {
-            throw new RevisionPortError('ENGINE_FAILED', 'The cut this revision would record is no longer held.');
-          }
           /*
            * A request that names no lease is not a request made in a vacuum.
            *
@@ -1639,9 +1636,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         Readonly<{ checkoutId: string; captureId: string; baseRevisionId: string | undefined }>
       >(async ({ input }) => {
         const agent = captures.take(input.captureId);
-        if (agent === undefined) {
-          throw new RevisionPortError('ENGINE_FAILED', 'The captured turn tree is no longer held.');
-        }
         const place = await placeOf(input.checkoutId);
         const base =
           input.baseRevisionId === undefined
@@ -1714,9 +1708,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       applyPlan: fromAuthorityPromise<RestoreApplyPlanActorOutput, Readonly<{ checkoutId: string; planId: string }>>(
         async ({ input }) => {
           const plan = plans.take(input.planId);
-          if (plan === undefined) {
-            throw new RevisionPortError('ENGINE_FAILED', 'The restore plan is no longer held.');
-          }
           const place = await placeOf(plan.checkoutId);
           /* The checkout tracks the restored revision's branch, or nothing when
            * no branch names it — detached (A2). */

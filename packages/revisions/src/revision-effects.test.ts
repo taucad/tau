@@ -24,6 +24,7 @@ import type { RootedFileSystem } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
@@ -515,6 +516,35 @@ describe('settling a turn', () => {
 });
 
 describe('restore, through the machine that owns it', () => {
+  it('should materialize original bytes from a pointerised revision tree', async () => {
+    const original = 'solid bracket\nendsolid bracket\n';
+    const { port, actors, filesystem } = await fixture({ 'models/bracket.step': original });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: cut.cutId,
+      treeId: cut.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+    const { pointer } = lfsPointerFor(new TextEncoder().encode(original));
+    expect(await filesystem.readFile(`.git/${lfsObjectPath(pointer.oid)}`, 'utf8')).toBe(original);
+
+    await filesystem.writeFile('models/bracket.step', 'solid changed\nendsolid changed\n');
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: 'live',
+      target: written.revisionId,
+    });
+    await run(actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+
+    expect(await filesystem.readFile('models/bracket.step', 'utf8')).toBe(original);
+  }, 30_000);
+
   it('plans a restore, applies it under confirmation, and puts the tree back', async () => {
     const release = vi.fn();
     const onApplyingTree = vi.fn(() => release);

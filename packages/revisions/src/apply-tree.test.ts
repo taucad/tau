@@ -25,9 +25,14 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { walk } from '@taucad/filesystem/content-ops';
 import type { FileMode, FileStatEntry, RootedFileSystem } from '@taucad/filesystem';
 
+import { captureRevisionTree, ImmutableRevisionTree } from '#algorithms/index.js';
+import { createApplyTreeEffects } from '#apply-tree.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import type { Checkout } from '#revision-port.js';
+import { RevisionPortError } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors } from '#revision-effects.js';
+import { tauRevisionPolicy } from '#workspace-config.js';
 
 const roots: string[] = [];
 
@@ -85,6 +90,8 @@ type CountingOptions = Readonly<{
   batch?: boolean;
   /** Which mutation, in call order, fails instead of running. */
   failMutation?: (sequence: number) => boolean;
+  /** Fold provider paths the way a case-insensitive filesystem does. */
+  caseInsensitive?: boolean;
 }>;
 
 /**
@@ -108,6 +115,7 @@ const countingCheckout = (
     }
     return operation();
   };
+  const pathOf = (path: string): string => (options.caseInsensitive === true ? path.toLowerCase() : path);
   const statTree = async (path: string): Promise<FileStatEntry[]> => {
     const stats: FileStatEntry[] = [];
     for await (const entry of walk(real, path)) {
@@ -128,11 +136,11 @@ const countingCheckout = (
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- one assertion for an overloaded read, as the capture suite does.
     readFile: (async (path: string, encoding?: 'utf8') => {
       counts.reads += 1;
-      return encoding === undefined ? real.readFile(path) : real.readFile(path, encoding);
+      return encoding === undefined ? real.readFile(pathOf(path)) : real.readFile(pathOf(path), encoding);
     }) as RootedFileSystem['readFile'],
     readFileStream: (path: string, streamOptions?: Parameters<NodeFsProvider['readFileStream']>[1]) => {
       counts.reads += 1;
-      return real.readFileStream(path, streamOptions);
+      return real.readFileStream(pathOf(path), streamOptions);
     },
     readdir: async (path: string): Promise<string[]> => {
       if (path === '') {
@@ -142,19 +150,23 @@ const countingCheckout = (
     },
     writeFile: async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
       counts.writeFile += 1;
-      await mutate('writeFile', async () => real.writeFile(path, data));
+      await mutate('writeFile', async () => real.writeFile(pathOf(path), data));
     },
-    rename: async (from: string, to: string): Promise<void> => mutate('rename', async () => real.rename(from, to)),
-    unlink: async (path: string): Promise<void> => mutate('unlink', async () => real.unlink(path)),
+    rename: async (from: string, to: string): Promise<void> =>
+      mutate('rename', async () => real.rename(pathOf(from), pathOf(to))),
+    unlink: async (path: string): Promise<void> => mutate('unlink', async () => real.unlink(pathOf(path))),
+    exists: async (path: string): Promise<boolean> => real.exists(pathOf(path)),
     setFileMode: async (path: string, mode: FileMode): Promise<void> =>
-      mutate('setFileMode', async () => real.setFileMode(path, mode)),
+      mutate('setFileMode', async () => real.setFileMode(pathOf(path), mode)),
     ...(options.statAge === undefined ? {} : { statTree }),
     ...(options.batch === true
       ? {
           writeFiles: async (files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void> => {
             counts.writeFiles += 1;
             await mutate('writeFiles', async () =>
-              Promise.all(Object.entries(files).map(async ([path, { content }]) => real.writeFile(path, content))),
+              Promise.all(
+                Object.entries(files).map(async ([path, { content }]) => real.writeFile(pathOf(path), content)),
+              ),
             );
           },
         }
@@ -188,7 +200,15 @@ const trustedStats: CountingOptions = { statAge: 60_000, batch: true };
 const project = async (
   files: Readonly<Record<string, string>>,
   options: CountingOptions = trustedStats,
-): Promise<Readonly<{ tree: NodeFsProvider; counts: Counts; reset: () => void; open: () => RevisionActors }>> => {
+): Promise<
+  Readonly<{
+    tree: NodeFsProvider;
+    checkout: RootedFileSystem;
+    counts: Counts;
+    reset: () => void;
+    open: () => RevisionActors;
+  }>
+> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-apply-tree-'));
   roots.push(root);
   const tree = new NodeFsProvider(root);
@@ -200,6 +220,7 @@ const project = async (
   const port = createIsomorphicGitRevisionPort({ filesystem: tree });
   return {
     tree,
+    checkout,
     counts,
     reset,
     open: () =>
@@ -211,6 +232,44 @@ const project = async (
         filesystem: async () => checkout,
       }),
   };
+};
+
+const liveCheckout: Checkout = {
+  id: 'live',
+  projectId: 'project-1',
+  root: '',
+  kind: 'live',
+  branch: 'main',
+  baseRevisionId: undefined,
+};
+
+/** The extracted apply primitive over the counting checkout used by the crash rows. */
+const materializer = (checkout: RootedFileSystem) => {
+  let temporary = 0;
+  return createApplyTreeEffects({
+    useFileSystem: async (_place, operation) => operation(checkout),
+    capture: async () =>
+      captureRevisionTree(checkout, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
+    onApplyingTree: undefined,
+    policy: tauRevisionPolicy.policy,
+    withCheckoutFence: async (_checkoutId, operation) => operation(),
+    recordedTree: async (tree) => tree,
+    formatOf: async () => 'sha1',
+    temporarySibling: (path) => {
+      temporary += 1;
+      const separator = path.lastIndexOf('/');
+      const directory = separator === -1 ? '' : path.slice(0, separator + 1);
+      const name = path.slice(separator + 1);
+      return `${directory}.${name}.0.00000000-0000-4000-8000-${String(temporary).padStart(12, '0')}.tmp`;
+    },
+    unlinkIfPresent: async (live, path) => {
+      await live.unlink(path).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+      });
+    },
+  }).materializeTree;
 };
 
 /** Cut the live checkout and answer the tree id the store would record. */
@@ -348,6 +407,62 @@ describe('what a settlement walks', () => {
     expect(counts.writeFiles).toBe(1);
     expect(counts.writeFile).toBe(0);
   }, 30_000);
+});
+
+describe('a large apply', () => {
+  it('should apply 2,000 changed files in one staged batch and leave no temporary sibling', async () => {
+    const context = await project({});
+    const target = new ImmutableRevisionTree(
+      Array.from({ length: 2000 }, (_, index) => [
+        `src/file-${String(index).padStart(4, '0')}.ts`,
+        `export const value = ${String(index)};\n`,
+      ]),
+    );
+    context.reset();
+
+    const result = await materializer(context.checkout)(liveCheckout, target, {
+      before: new ImmutableRevisionTree([]),
+    });
+
+    expect(result.paths).toHaveLength(2000);
+    expect(context.counts.writeFiles).toBe(1);
+    expect(context.counts.writeFile).toBe(0);
+    expect(context.counts.calls.filter((call) => call === 'setFileMode')).toHaveLength(2000);
+    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(2000);
+    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(2000);
+    expect(context.counts.reads).toBe(2000);
+    expect(context.counts.rootListings).toBe(1);
+    expect(litterIn(await filesOf(context.tree))).toEqual([]);
+  }, 120_000);
+});
+
+describe('a case-insensitive checkout', () => {
+  it('should refuse a recorded case collision without changing the working copy', async () => {
+    const context = await project({ 'keep.txt': 'before\n' }, { ...trustedStats, caseInsensitive: true });
+    const before = await captureRevisionTree(context.checkout);
+    const collision = new ImmutableRevisionTree([
+      ['Part.ts', 'upper\n'],
+      ['part.ts', 'lower\n'],
+    ]);
+    context.reset();
+
+    let failure: unknown;
+    try {
+      await materializer(context.checkout)(liveCheckout, collision, { before });
+      expect.fail('the case collision should have been refused');
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(RevisionPortError);
+    expect(failure).toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+      message: 'Tracked paths collide on a supported filesystem: Part.ts, part.ts',
+    });
+    expect(context.counts.mutations).toBe(0);
+    expect(await filesOf(context.tree)).toEqual(['keep.txt']);
+    expect(await context.tree.readFile('keep.txt', 'utf8')).toBe('before\n');
+  });
 });
 
 describe('reopening a project an apply died in', () => {

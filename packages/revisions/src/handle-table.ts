@@ -4,6 +4,8 @@
  * Moved out of `revision-effects.ts` unchanged (W10.1): it was module-level
  * there already and depends on nothing in `createRevisionActors`.
  */
+import { RevisionPortError } from '#revision-port.js';
+
 /**
  * How many handles one table keeps.
  *
@@ -18,7 +20,7 @@ export const createHandles = <T>(
   prefix: string,
 ): Readonly<{
   put: (scope: string, value: T) => string;
-  take: (id: string) => T | undefined;
+  take: (id: string) => T;
 }> => {
   const values = new Map<string, Readonly<{ scope: string; value: T }>>();
   const byScope = new Map<string, string>();
@@ -52,6 +54,12 @@ export const createHandles = <T>(
       }
       return id;
     },
-    take: (id) => forget(id)?.value,
+    take: (id) => {
+      const held = forget(id);
+      if (held === undefined) {
+        throw new RevisionPortError('ENGINE_FAILED', `The ${prefix} handle is no longer held.`);
+      }
+      return held.value;
+    },
   };
 };

@@ -38,11 +38,13 @@ const input = (utf8, hex) => {
  * This reads fixture data only; it never derives expectations from an engine.
  * @param originalBytes - Exact early-corpus.json bytes.
  * @param profileBytes - Exact current-profile-01/plan-corpus.json bytes.
+ * @param bindingProfile - Declared constructor configuration, independent of observed output.
  * @returns Current inputs/expectations in original order and both authority digests.
  * @internal
- * @type {(originalBytes: Uint8Array, profileBytes: Uint8Array) => Promise<Corpus & { originalSha256: string, profileSha256: string }>}
+ * @type {(originalBytes: Uint8Array, profileBytes: Uint8Array, bindingProfile?: 'core-only' | 'full-backend') => Promise<Corpus & { originalSha256: string, profileSha256: string, bindingProfile: 'core-only' | 'full-backend' }>}
  */
-export const joinCurrentCorpus = async (originalBytes, profileBytes) => {
+export const joinCurrentCorpus = async (originalBytes, profileBytes, bindingProfile = 'core-only') => {
+  requireMatch(['core-only', 'full-backend'].includes(bindingProfile), 'binding profile');
   requireMatch((await digest(originalBytes)) === originalSha256, 'original corpus SHA-256');
   requireMatch((await digest(profileBytes)) === profileSha256, 'current profile SHA-256');
   const original = /** @type {Corpus} */ (JSON.parse(new TextDecoder().decode(originalBytes)));
@@ -102,16 +104,52 @@ export const joinCurrentCorpus = async (originalBytes, profileBytes) => {
         (record.expectedUtf8 !== undefined || record.id === 'plan/unavailable/analyzeBrep/evaluatePlan')
           ? [original.meshes[0].id]
           : record.ingest;
+      let { expectedUtf8 } = bound;
+      if (bindingProfile === 'full-backend' && record.id === 'a1/raw/initialize') {
+        // Full bindings unconditionally compose OCCT and Manifold via runtime create_engine.
+        // Replace only these two declared booleans; retain all other canonical bytes verbatim.
+        const coreBackends = '"backends":{"brep":false,"csg":false}';
+        if (expectedUtf8?.split(coreBackends).length !== 2) {
+          throw new Error('Current conformance binding mismatch: core backend presence');
+        }
+        expectedUtf8 = expectedUtf8.replace(coreBackends, '"backends":{"brep":true,"csg":true}');
+      }
       return {
         ...record,
         inputUtf8: bound.effectiveInputUtf8,
         inputHex: bound.effectiveInputHex,
-        expectedUtf8: bound.expectedUtf8,
+        expectedUtf8,
         expectedCode: bound.expectedCode,
         expectedMessage: bound.expectedMessage,
         ingest,
       };
     }),
   );
-  return { ...original, meshes, records, originalSha256, profileSha256 };
+  return { ...original, meshes, records, originalSha256, profileSha256, bindingProfile };
+};
+
+/**
+ * Resolve an exact ordered allowlist before constructing any engine.
+ * Equivalent canonical groups are either wholly selected or wholly omitted.
+ * @internal
+ * @type {(corpus: Corpus, recordIds?: string[]) => CorpusRecord[]}
+ */
+export const selectCorpusRecords = (corpus, recordIds) => {
+  if (recordIds === undefined) {
+    return corpus.records;
+  }
+  requireMatch(recordIds.length > 0 && new Set(recordIds).size === recordIds.length, 'nonempty unique selection');
+  const byId = new Map(corpus.records.map((record) => [record.id, record]));
+  const selected = recordIds.map((id) => {
+    const record = byId.get(id);
+    if (record === undefined) {
+      throw new Error(`Unknown conformance record: ${id}`);
+    }
+    return record;
+  });
+  const ids = new Set(recordIds);
+  for (const group of corpus.equivalentCanonicalGroups) {
+    requireMatch(!group.some((id) => ids.has(id)) || group.every((id) => ids.has(id)), 'complete equivalent group');
+  }
+  return selected;
 };

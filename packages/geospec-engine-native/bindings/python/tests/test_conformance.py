@@ -13,11 +13,12 @@ PROFILE_PATH = Path(__file__).parents[3] / "rust/tests/fixtures/current-profile-
 PROFILE_BYTES = PROFILE_PATH.read_bytes()
 
 
-def load_current_corpus():
+def load_current_corpus(binding_profile="core-only"):
     """Join accepted fixture bytes by ID; never derive expectations from native output."""
     original_hash = "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476"
     profile_hash = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d"
     digest = lambda data: hashlib.sha256(data).hexdigest()
+    assert binding_profile in ("core-only", "full-backend")
     assert digest(CORPUS_BYTES) == original_hash
     assert digest(PROFILE_BYTES) == profile_hash
     original, profile = json.loads(CORPUS_BYTES), json.loads(PROFILE_BYTES)
@@ -54,16 +55,23 @@ def load_current_corpus():
         for key in ("expectedUtf8", "expectedCode", "expectedMessage"):
             if key in bound:
                 joined[key] = bound[key]
+        if binding_profile == "full-backend" and record["id"] == "a1/raw/initialize":
+            # Runtime create_engine always supplies OCCT and Manifold. Preserve other bytes.
+            core_backends = '"backends":{"brep":false,"csg":false}'
+            assert joined["expectedUtf8"].count(core_backends) == 1
+            joined["expectedUtf8"] = joined["expectedUtf8"].replace(
+                core_backends, '"backends":{"brep":true,"csg":true}'
+            )
         # Same fresh-admission rule as rust/tests/plan_conformance.rs.
         if not record["ingest"] and record["operation"] in ("evaluatePlan", "processRequest") and (
             "expectedUtf8" in record or record["id"] == "plan/unavailable/analyzeBrep/evaluatePlan"
         ):
             joined["ingest"] = [original["meshes"][0]["id"]]
         records.append(joined)
-    return {**original, "meshes": meshes, "records": records}
+    return {**original, "meshes": meshes, "records": records, "bindingProfile": binding_profile}
 
 
-CORPUS = load_current_corpus()
+CORPUS = load_current_corpus("full-backend")
 MESHES = {mesh["id"]: mesh for mesh in CORPUS["meshes"]}
 
 
@@ -169,6 +177,7 @@ if __name__ == "__main__":
         {
             "corpusSha256": hashlib.sha256(CORPUS_BYTES).hexdigest(),
             "currentProfileSha256": hashlib.sha256(PROFILE_BYTES).hexdigest(),
+            "bindingProfile": CORPUS["bindingProfile"],
             "records": observations,
         },
         ensure_ascii=False,

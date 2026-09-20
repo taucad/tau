@@ -772,6 +772,14 @@
         "forwardAllArgs": false
       }
     },
+    "check-conformance-profile": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test packages/geospec-engine-native/bindings/node/current-profile.test.mjs",
+        "forwardAllArgs": false
+      }
+    },
     "check-delivery-environment": {
       "executor": "nx:run-commands",
       "cache": false,

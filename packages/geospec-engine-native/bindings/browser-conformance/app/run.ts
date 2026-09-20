@@ -1,6 +1,6 @@
 import { Engine, canonicalize, initialize } from '@taucad/geospec-engine-native';
 // oxlint-disable-next-line no-restricted-imports -- Package-owned browser runner shares the pinned fixture join.
-import { joinCurrentCorpus } from '../../../conformance/current-profile.mjs';
+import { joinCurrentCorpus, selectCorpusRecords } from '../../../conformance/current-profile.mjs';
 
 type CorpusRecord = {
   id: string;
@@ -141,11 +141,17 @@ const readCorpus = async () => {
   if (!original.ok || !profile.ok) {
     throw new Error(`Unable to read conformance authorities: ${original.status}/${profile.status}`);
   }
-  return joinCurrentCorpus(new Uint8Array(await original.arrayBuffer()), new Uint8Array(await profile.arrayBuffer()));
+  return joinCurrentCorpus(
+    new Uint8Array(await original.arrayBuffer()),
+    new Uint8Array(await profile.arrayBuffer()),
+    'full-backend',
+  );
 };
 
 const run = async () => {
   const corpus = await readCorpus();
+  const recordIds = new URL(location.href).searchParams.get('ids')?.split(',');
+  const selected = selectCorpusRecords(corpus, recordIds);
   await initialize();
   const wasmUrl = performance
     .getEntriesByType('resource')
@@ -162,7 +168,7 @@ const run = async () => {
 
   const meshes = new Map(corpus.meshes.map((mesh) => [mesh.id, mesh]));
   const results: CorpusResult[] = [];
-  for (const record of corpus.records) {
+  for (const record of selected) {
     const engine = new Engine();
     try {
       const admissions = [];
@@ -240,20 +246,22 @@ const run = async () => {
   }
 
   const resultsById = new Map(results.map((result) => [result.id, result]));
-  const equivalentCanonicalGroups = corpus.equivalentCanonicalGroups.map((ids) => {
-    const group = ids.map((id) => resultsById.get(id));
-    const expected = group.map((result) => result?.expectedUtf8);
-    const actual = group.map((result) => result?.actualUtf8);
-    return {
-      ids,
-      expectedUtf8: expected,
-      actualUtf8: actual,
-      passed:
-        group.every((result) => result?.passed === true) &&
-        expected.every((value) => value === expected[0]) &&
-        actual.every((value) => value === actual[0]),
-    };
-  });
+  const equivalentCanonicalGroups = corpus.equivalentCanonicalGroups
+    .filter((ids) => ids.every((id) => resultsById.has(id)))
+    .map((ids) => {
+      const group = ids.map((id) => resultsById.get(id));
+      const expected = group.map((result) => result?.expectedUtf8);
+      const actual = group.map((result) => result?.actualUtf8);
+      return {
+        ids,
+        expectedUtf8: expected,
+        actualUtf8: actual,
+        passed:
+          group.every((result) => result?.passed === true) &&
+          expected.every((value) => value === expected[0]) &&
+          actual.every((value) => value === actual[0]),
+      };
+    });
   const mismatches = results.filter((result) => !result.passed);
   return {
     schemaVersion: 1,
@@ -262,7 +270,9 @@ const run = async () => {
     corpus: {
       sha256: corpus.originalSha256,
       currentProfileSha256: corpus.profileSha256,
+      bindingProfile: corpus.bindingProfile,
       records: corpus.records.length,
+      selectedRecords: selected.length,
     },
     wasmAsset: { url: wasmUrl, sha256: wasmSha256 },
     admissions: results.reduce((count, result) => count + result.admissions.length, 0),

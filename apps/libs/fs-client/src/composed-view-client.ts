@@ -1,6 +1,7 @@
 import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
 import { isWorkspaceMutationError, WorkspaceMutationError } from '@taucad/filesystem';
 import type { FileTreeNode } from '@taucad/filesystem';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient, WorkspaceAuthorityClient } from '#file-system-client.js';
 import { resolveAuthorityPath } from '@taucad/utils/path';
 import { rootedPathOf } from '#rooted-content-client.js';
@@ -25,7 +26,7 @@ export type ComposedViewProxy = {
   readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
   provenance(path: string): Promise<FileProvenance>;
   /** ZIP one subtree of the view; `{ versionedOnly }` keeps the bytes that are the project. */
-  archive(path: string, options?: { versionedOnly?: boolean }): Promise<Blob>;
+  archive(path: string, options?: ContentExportFilter): Promise<Blob>;
   /** Search this view's root from its own index; the mask is applied before the cap. */
   search(query: string, options?: { maxResults?: number; includeDirectories?: boolean }): Promise<FileStatEntry[]>;
   /** Recursively stat one directory of the view from the same index. */
@@ -528,7 +529,7 @@ export const createComposedViewClient = (input: {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.exists(path);
     },
-    getZippedDirectory: async (absolutePath: string, options?: { versionedOnly?: boolean }) => {
+    getZippedDirectory: async (absolutePath: string, options?: ContentExportFilter) => {
       const relative = viewPath(absolutePath);
       if (relative === undefined) {
         throw new Error(`No rooted view serves ${absolutePath}; a scoped archive is the /files browser's own call`);

@@ -43,7 +43,7 @@ type BrowserRow = {
   cohort: string;
   expected: {
     admissionUtf8: string;
-    bytes: ExpectedBytes;
+    bytes?: ExpectedBytes;
     error: null | { message: string; name: string };
     independent: null | IndependentBytes;
     status: string;
@@ -51,6 +51,11 @@ type BrowserRow = {
   id: string;
   ingest: { primary: Asset; requestUtf8: string; resources: Asset[] };
   invocation: Invocation;
+  protocolControl?: {
+    expectedError: { code: string; message: string; name: string };
+    kind: string;
+    publicApi: string;
+  };
   subjectHash: string;
   warmup?: { expectedStatus: 'failed' | 'passed'; invocation: Invocation };
 };
@@ -76,6 +81,7 @@ type ByteComparison = {
 
 type ErrorRecord = {
   assertionError: boolean;
+  code?: string;
   constructorName: string | null;
   message: string;
   name: string;
@@ -109,6 +115,14 @@ type CellResult = {
   direct?: ExpectedBytes & { diagnostics: unknown[]; status: string };
   id: string;
   passed: boolean;
+  protocolControl?: {
+    direct: { error: ErrorRecord | null; matched: boolean };
+    kind: 'direct-canonical-plan-rejection';
+    publicApi: {
+      availability: 'unavailable';
+      reason: 'GeoSpec query API exposes ancillary capabilities with positive polarity only.';
+    };
+  };
   public?: ExpectedBytes & { calls: RecorderCall[]; diagnostics: unknown[]; error: ErrorRecord | null; status: string };
   runtimeFailure?: ErrorRecord & { phase: string };
   warmup?: { direct?: WarmupResult; public?: WarmupResult };
@@ -134,7 +148,9 @@ const queryCapabilities = new Set<GeoSpecQueryCapability>([
   'analyzeBrep',
   'inspectGeometry',
   'analyzeMeshOverlap',
+  'queryPmi',
 ]);
+const directOnlyNegativeCapabilities = new Set(['analyzeMesh', 'analyzeBrep', 'inspectGeometry', 'analyzeMeshOverlap']);
 
 const sha256 = async (bytes: ByteArray): Promise<string> =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
@@ -156,16 +172,20 @@ const compareBytes = async (actual: ByteArray, expectedUtf8: string): Promise<By
   };
 };
 
-const errorRecord = (error: unknown): ErrorRecord => ({
-  assertionError: error instanceof GeoSpecAssertionError,
-  constructorName:
-    typeof error === 'object' && error !== null && typeof error.constructor.name === 'string'
-      ? error.constructor.name
-      : null,
-  message: error instanceof Error ? error.message : String(error),
-  name: error instanceof Error ? error.name : typeof error,
-  stack: error instanceof Error ? (error.stack ?? null) : null,
-});
+const errorRecord = (error: unknown): ErrorRecord => {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  return {
+    assertionError: error instanceof GeoSpecAssertionError,
+    ...(typeof code === 'string' ? { code } : {}),
+    constructorName:
+      typeof error === 'object' && error !== null && typeof error.constructor.name === 'string'
+        ? error.constructor.name
+        : null,
+    message: error instanceof Error ? error.message : String(error),
+    name: error instanceof Error ? error.name : typeof error,
+    stack: error instanceof Error ? (error.stack ?? null) : null,
+  };
+};
 
 const jsonRecord = (value: unknown, label: string): Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -379,6 +399,42 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
         throw new Error(`M2 direct warmup did not succeed for ${row.id}.`);
       }
     }
+    if (row.protocolControl !== undefined) {
+      phase = 'direct-canonical-plan-rejection';
+      if (
+        row.protocolControl.kind !== 'direct-canonical-plan-rejection' ||
+        row.protocolControl.publicApi !== 'unavailable-negative-query' ||
+        row.invocation.polarity !== 'negative' ||
+        !directOnlyNegativeCapabilities.has(row.invocation.capability)
+      ) {
+        throw new Error(`M2 protocol control is invalid for ${row.id}.`);
+      }
+      let directError: ErrorRecord | undefined;
+      try {
+        engine.canonicalPlan(encoder.encode(row.authoredRequestUtf8));
+      } catch (error) {
+        directError = errorRecord(error);
+      }
+      const expected = row.protocolControl.expectedError;
+      const matched =
+        directError?.name === expected.name &&
+        directError.code === expected.code &&
+        directError.message === expected.message;
+      cell.protocolControl = {
+        direct: { error: directError ?? null, matched },
+        kind: 'direct-canonical-plan-rejection',
+        publicApi: {
+          availability: 'unavailable',
+          reason: 'GeoSpec query API exposes ancillary capabilities with positive polarity only.',
+        },
+      };
+      cell.passed = cell.admission.equal && matched;
+      return cell;
+    }
+    const expectedBytes = row.expected.bytes;
+    if (expectedBytes === undefined) {
+      throw new Error(`M2 canonical report bytes are missing for ${row.id}.`);
+    }
     phase = 'direct';
     const canonicalPlanBytes = Uint8Array.from(engine.canonicalPlan(encoder.encode(row.authoredRequestUtf8)));
     const directBytes: ExpectedBytes = {
@@ -432,8 +488,8 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
       error: publicError,
       status: publicReport.status,
     };
-    const directFrozen = exactMap(directBytes, row.expected.bytes);
-    const publicFrozen = exactMap(publicBytes, row.expected.bytes);
+    const directFrozen = exactMap(directBytes, expectedBytes);
+    const publicFrozen = exactMap(publicBytes, expectedBytes);
     const publicDirect = exactMap(publicBytes, directBytes);
     const independent =
       row.expected.independent === null ? null : independentMap(directBytes, row.expected.independent);

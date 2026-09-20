@@ -1100,6 +1100,11 @@ describe('useCadChatClient', () => {
 
   it('should call actions.editMessage with the rebuilt content, and admit its own turn, when edit fires', async () => {
     const chat = mock<Chat<MyUIMessage>>();
+    /* An edit rewinds to a message the transcript holds: `turnIntentOf` refuses
+     * one whose message is absent, because there is no rewind point to lease
+     * against (T3-D5). A fixture with no transcript was asserting an admission
+     * the product no longer makes. */
+    chat.messages = [{ id: 'msg_99', role: 'user', parts: [{ type: 'text', text: 'original' }] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);

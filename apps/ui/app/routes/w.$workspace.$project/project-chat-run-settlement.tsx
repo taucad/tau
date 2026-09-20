@@ -61,9 +61,16 @@ const retireUnsubstantiatedRun = async (input: {
  * claim that names no run.
  */
 const isRetirableClaim = (
-  store: Pick<ChatSessionStore, 'getStatus' | 'getDurableRunState'>,
+  store: Pick<ChatSessionStore, 'getStatus' | 'getDurableRunState' | 'holdsTurn'>,
   chatId: string,
 ): boolean => {
+  /* First, and from the turn's own owner. The AI SDK status is `ready` for the
+   * whole admission window — the dispatch is deferred by a microtask and no
+   * bytes have flowed — so a claim for the run being admitted *right now* read
+   * as retirable, and discovery released its lease under it (T3-D9). */
+  if (store.holdsTurn(chatId)) {
+    return false;
+  }
   const status = store.getStatus(chatId);
   if (status === 'submitted' || status === 'streaming') {
     return false;

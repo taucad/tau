@@ -186,26 +186,41 @@ export const resetChatTurnServices = (): void => {
 };
 
 /**
+ * Upper bound on waiting for a chat's route to publish a turn service.
+ * Milliseconds.
+ */
+const turnServiceWaitTimeout = 30_000;
+
+/**
  * Wait until this chat has published the named service.
  *
  * The chat's seeded first turn is requested from inside the store's own chat
  * loader, one render before the route that publishes these services has
  * mounted. Whoever knows when the condition clears does the waiting (the
- * publisher's topic), so nothing polls and nothing times out on another owner's
- * state; the abort signal of the invoking state is the only bound.
+ * publisher's topic), so nothing polls.
+ *
+ * Bounded as well as aborted (I6). Only the *focused* chat mounts the
+ * `ChatTurnHost` that publishes an admission, while the sidebar seeds a turn
+ * for any acquired chat with an eligible startup request — so for a chat that
+ * never gets focus this condition can never clear, and the unbounded wait left
+ * the turn in `queued.admitting` forever, pinning the session with `runHeld`
+ * and putting nothing on the row to click (T3-D4). An unbounded wait is only
+ * sound when the condition is guaranteed to clear; this one is not, so it
+ * expires and the turn fails visibly instead.
  */
 const awaitTurnService = async <T>(
   registry: Map<string, T>,
   chatId: string,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<T | undefined> => {
   const present = registry.get(chatId);
-  if (present !== undefined || signal.aborted) {
+  if (present !== undefined || signal?.aborted === true) {
     return present;
   }
   return new Promise<T | undefined>((resolve) => {
     const finish = (value: T | undefined): void => {
-      signal.removeEventListener('abort', onAbort);
+      globalThis.clearTimeout(serviceExpiry);
+      signal?.removeEventListener('abort', onAbort);
       unsubscribe();
       resolve(value);
     };
@@ -221,7 +236,8 @@ const awaitTurnService = async <T>(
       },
       interestedIn: (event) => event.chatId === chatId,
     });
-    signal.addEventListener('abort', onAbort, { once: true });
+    const serviceExpiry = globalThis.setTimeout(onAbort, turnServiceWaitTimeout);
+    signal?.addEventListener('abort', onAbort, { once: true });
     const late = registry.get(chatId);
     if (late !== undefined) {
       finish(late);
@@ -248,16 +264,21 @@ export const chatTurnAdmission = fromSafeAsync<
   }
   const turn = await admit(input.gesture);
   if (signal.aborted) {
-    await settlementsByChat
-      .get(input.chatId)?.({
-        chatId: input.chatId,
-        runId: turn.runId,
-        leaseTurnId: turn.leaseTurnId,
-        outcome: 'cancelled',
-      })
-      .catch((error: unknown) => {
-        console.error('[chatTurnAdmission] an abandoned lease was not released', error);
-      });
+    /* Under a bound of its own, not this actor's signal: that signal is already
+     * aborted, and the abort is often a dispose, which deletes this chat's turn
+     * services in the same breath. Reading the registry directly meant the
+     * release was an optional call on `undefined` — a silent no-op that left
+     * the checkout leased and `admitted` forever, so every later turn of the
+     * chat waited fifteen seconds and died on a stale claim (T3-D2). */
+    const settle = await awaitTurnService(settlementsByChat, input.chatId);
+    await settle?.({
+      chatId: input.chatId,
+      runId: turn.runId,
+      leaseTurnId: turn.leaseTurnId,
+      outcome: 'cancelled',
+    }).catch((error: unknown) => {
+      console.error('[chatTurnAdmission] an abandoned lease was not released', error);
+    });
     throw new Error('This turn was replaced before it started.');
   }
   return { type: 'turnAdmitted', turn };

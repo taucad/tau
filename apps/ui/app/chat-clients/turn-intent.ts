@@ -82,6 +82,9 @@ const retainedBefore = (messages: readonly MyUIMessage[], messageId: string | un
  * @param messages - The chat's transcript, oldest first.
  * @param gesture - The verb being admitted.
  * @returns The host trigger and the turn id this admission leases.
+ * @throws When an `edit` names a message the transcript no longer holds; that
+ * turn has no rewind point, and admitting one leases a checkout nothing can
+ * dispatch or release.
  * @public
  */
 export const turnIntentOf = (messages: readonly MyUIMessage[], gesture: TurnGesture): TurnIntent => {
@@ -89,6 +92,16 @@ export const turnIntentOf = (messages: readonly MyUIMessage[], gesture: TurnGest
     return { trigger: 'submit', leaseTurnId: gesture.messageId };
   }
   if (gesture.kind === 'edit') {
+    /* An edit is admitted seconds after the gesture — host availability, the
+     * model catalog, and, for a gesture queued behind a live turn, that turn's
+     * settlement. The transcript can be replaced in between (a reattach rebuilds
+     * it; a stop truncates its tail). Clamping the missing index to 0 made this
+     * total by leasing a checkout for a rewind point that does not exist, and
+     * the dispatcher then had nothing to edit and returned: no run, no banner,
+     * the lease held forever. There is no such turn, so refuse it. */
+    if (!messages.some((message) => message.id === gesture.messageId)) {
+      throw new Error('That message is no longer in this chat, so it cannot be edited.');
+    }
     return {
       trigger: 'edit',
       leaseTurnId: gesture.messageId,

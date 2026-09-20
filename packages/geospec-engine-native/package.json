@@ -85,7 +85,7 @@
     "#*.js": "./src/*.ts",
     "#*": "./src/*",
     "#native-binding": {
-      "types": "./bindings/node/generated/index.d.ts",
+      "types": "./bindings/node/types/generated/index.d.ts",
       "node": "./bindings/node/generated/index.js"
     },
     "#bench/*": "./bench/*.ts",

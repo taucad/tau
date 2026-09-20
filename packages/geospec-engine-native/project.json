@@ -204,6 +204,9 @@
         "forwardAllArgs": false
       }
     },
+    "typecheck": {
+      "inputs": ["default", "^production", "{projectRoot}/bindings/node/types/generated/index.d.ts"]
+    },
     "build-node": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -211,7 +214,8 @@
         "commands": [
           "node -e 'const fs=require(\"node:fs\");for(const path of [\"packages/geospec-engine-native/bindings/node/generated/index.js\",\"packages/geospec-engine-native/bindings/node/generated/index.d.ts\",\"packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node\"])fs.rmSync(path,{force:true})'",
           "GEOSPEC_PRODUCER_ROUTE=nx-build-node-release-v1 GEOSPEC_PRODUCER_CARGO_CWD=\"$PWD/packages/geospec-engine-native\" GEOSPEC_PRODUCER_MANIFEST=\"${GEOSPEC_NODE_MANIFEST:-bindings/node/Cargo.toml}\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 pnpm --dir packages/geospec-engine-native exec napi build --manifest-path \"${GEOSPEC_NODE_MANIFEST:-bindings/node/Cargo.toml}\" --target aarch64-apple-darwin --release --esm --platform --js index.js --dts index.d.ts --output-dir bindings/node/generated --target-dir \"$PWD/node_modules/.cache/geospec-engine-native/node-target\" -- --locked",
-          "node -e 'const fs=require(\"node:fs\");for(const path of [\"packages/geospec-engine-native/bindings/node/generated/index.js\",\"packages/geospec-engine-native/bindings/node/generated/index.d.ts\",\"packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node\"]){if(fs.statSync(path).size===0)throw new Error(\"Empty NAPI output: \"+path)}'"
+          "node -e 'const fs=require(\"node:fs\");for(const path of [\"packages/geospec-engine-native/bindings/node/generated/index.js\",\"packages/geospec-engine-native/bindings/node/generated/index.d.ts\",\"packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node\"]){if(fs.statSync(path).size===0)throw new Error(\"Empty NAPI output: \"+path)}'",
+          "cmp packages/geospec-engine-native/bindings/node/types/generated/index.d.ts packages/geospec-engine-native/bindings/node/generated/index.d.ts"
         ],
         "parallel": false,
         "forwardAllArgs": false

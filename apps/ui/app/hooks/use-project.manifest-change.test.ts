@@ -3,7 +3,12 @@ import { mock } from 'vitest-mock-extended';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
-import { createProjectManifestChangeObserver, resolveScopedProjectManifest } from '#hooks/use-project.js';
+import {
+  createProjectManifestChangeObserver,
+  parameterRecordFingerprint,
+  resolveScopedProjectManifest,
+  shouldDispatchParameterSettlement,
+} from '#hooks/use-project.js';
 
 const project = (name: string): ProjectManifest =>
   projectToManifest({
@@ -106,5 +111,45 @@ describe('resolveScopedProjectManifest', () => {
     await expect(resolveScopedProjectManifest({ contentService, projectId: project('Current').id })).rejects.toThrow(
       `Cannot read tau.json`,
     );
+  });
+});
+
+describe('parameter record dispatch', () => {
+  it('should stage a record whose bytes changed and whose values did not', () => {
+    const encoder = new TextEncoder();
+    const millimetres = encoder.encode(
+      JSON.stringify({
+        activeGroup: 'default',
+        groups: { default: { values: { width: 21 }, units: { '/width': 'mm' } } },
+      }),
+    );
+    const inches = encoder.encode(
+      JSON.stringify({
+        activeGroup: 'default',
+        groups: { default: { values: { width: 21 }, units: { '/width': 'in' } } },
+      }),
+    );
+
+    expect(parameterRecordFingerprint(millimetres)).not.toBe(parameterRecordFingerprint(inches));
+  });
+
+  it('should not dispatch for a foreign record change', () => {
+    expect(shouldDispatchParameterSettlement(undefined)).toBe(false);
+    expect(
+      shouldDispatchParameterSettlement({
+        status: 'committed',
+        requestId: 'no-op',
+        revision: { manifestRevision: 'manifest' },
+        write: 'authority-no-op',
+      }),
+    ).toBe(false);
+    expect(
+      shouldDispatchParameterSettlement({
+        status: 'committed',
+        requestId: 'own-write',
+        revision: { manifestRevision: 'manifest' },
+        write: 'applied',
+      }),
+    ).toBe(true);
   });
 });

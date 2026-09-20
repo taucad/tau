@@ -27,7 +27,6 @@ type ParametersNumberFieldProperties = {
   readonly onTextChange: (text: string) => void;
   readonly onEnter?: () => void;
   readonly onEscape?: () => void;
-  readonly onStep?: (direction: -1 | 1, modifiers: { shift: boolean }) => void;
   readonly onFocusChange: (isFocused: boolean) => void;
 };
 
@@ -94,7 +93,6 @@ export const ParametersNumberField = ({
   onTextChange,
   onEnter,
   onEscape,
-  onStep,
   onFocusChange,
 }: ParametersNumberFieldProperties): React.JSX.Element => {
   const descriptionId = React.useId();
@@ -131,7 +129,6 @@ export const ParametersNumberField = ({
         onInputChange={onTextChange}
         onInputEnter={onEnter}
         onInputEscape={onEscape}
-        onStep={onStep}
         onFocusChange={onFocusChange}
       />
       {diagnostic ? (

@@ -112,7 +112,6 @@ const createParameterCommit = (
   return {
     target: { authority: 'test', root: '/', entry: 'main.ts' },
     group: 'default',
-    editorInstance: 'test-editor',
     calls,
     draft: (pointer) => drafts.get(pointer),
     setDraft: (pointer, draft) => {
@@ -139,7 +138,7 @@ const createParameterCommit = (
 
 const fireSliderPointerEvent = (
   element: HTMLElement,
-  type: 'pointercancel' | 'pointerdown' | 'pointermove',
+  type: 'pointercancel' | 'pointerdown' | 'pointermove' | 'pointerup',
   { clientX, pointerId = 1 }: { readonly clientX: number; readonly pointerId?: number },
 ): void => {
   const event = new MouseEvent(type, {
@@ -647,7 +646,7 @@ describe('ParametersNumber', () => {
       expect(screen.queryByText(/changed to/)).not.toBeInTheDocument();
     });
 
-    it('offers a conflict affordance when the field moves under a dirty draft', async () => {
+    it('should overwrite the changed value on Enter after a conflict', async () => {
       const user = userEvent.setup();
       const parameterCommit = createParameterCommit();
       const row = (value: number): React.JSX.Element => (
@@ -672,6 +671,9 @@ describe('ParametersNumber', () => {
 
       expect(field).toHaveValue('12');
       expect(screen.getByText(/changed to 30 elsewhere/)).toBeVisible();
+
+      await user.keyboard('{Enter}');
+      expect(parameterCommit.calls[0]?.base).toMatchObject({ pointer: '/width', value: 30 });
 
       await user.keyboard('{Escape}');
       expect(screen.queryByText(/changed to/)).not.toBeInTheDocument();
@@ -734,7 +736,7 @@ describe('ParametersNumber', () => {
       expect(field).toHaveValue('10');
     });
 
-    it('reports a refused final commit instead of showing the value as entered', async () => {
+    it('should show the saved value and keep the typed text after a refused commit', async () => {
       const user = userEvent.setup();
       const parameterCommit = createParameterCommit(() => ({
         status: 'rejected',
@@ -761,6 +763,8 @@ describe('ParametersNumber', () => {
       await user.keyboard('{Enter}');
 
       expect(await screen.findByText('The field changed since this edit began.')).toBeVisible();
+      expect(field).toHaveValue('10');
+      expect(parameterCommit.draft('/width')).toEqual({ text: '12', valid: true });
     });
 
     it('stays silent when a newer edit displaced this one before it was applied', async () => {
@@ -870,7 +874,7 @@ describe('ParametersNumber', () => {
         name: 'safe-integer representation',
         projection: { constraints: {}, representation: 'safe-integer' },
         text: String(Number.MAX_SAFE_INTEGER + 1),
-        diagnostic: 'Input does not preserve a safe integer in the native unit.',
+        diagnostic: 'Enter a whole number.',
       },
     ])('rejects transient $name without a geometry update', async ({ projection, text, diagnostic }) => {
       const user = userEvent.setup();
@@ -952,53 +956,167 @@ describe('ParametersNumber', () => {
       expect(input).toHaveValue('21');
     });
 
-    it('commits at most one transient value per animation frame while dragging', async () => {
+    it('forwards the newest drag sample directly to the scrub lane', () => {
+      const scrub = vi.fn();
+      const parameterCommit = { ...createParameterCommit(), scrub };
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor='length'
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Dragged width'
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 10 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 20 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 30 });
+
+      expect(scrub).toHaveBeenCalledTimes(3);
+      expect(scrub).toHaveBeenLastCalledWith({ pointer: '/width', value: 16 });
+    });
+
+    it('sends source-unit scrub text for only the dragged field', () => {
+      const scrub = vi.fn();
+      const parameterCommit = { ...createParameterCommit(), scrub };
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={20}
+            defaultValue={20}
+            descriptor='length'
+            units={createUnits('in', 'in')}
+            sourceUnit='in'
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 25 });
+
+      expect(scrub).toHaveBeenLastCalledWith({ pointer: '/value', value: '30 in' });
+    });
+
+    it('restores the committed record when a scrub releases at its base', () => {
+      const endScrub = vi.fn();
+      const parameterCommit = { ...createParameterCommit(), scrub: vi.fn(), endScrub };
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor='length'
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 10 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointerup', { clientX: 0 });
+
+      expect(parameterCommit.calls).toHaveLength(0);
+      expect(endScrub).toHaveBeenCalledWith(true);
+    });
+
+    it('should send one final after a scrub and nothing after it', () => {
+      const scrub = vi.fn();
+      const endScrub = vi.fn();
+      const parameterCommit = { ...createParameterCommit(), scrub, endScrub };
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor='length'
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 25 });
+      fireSliderPointerEvent(sliderInput, 'pointerup', { clientX: 25 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 50 });
+
+      expect(scrub).toHaveBeenCalledOnce();
+      expect(parameterCommit.calls).toHaveLength(1);
+      expect(parameterCommit.calls[0]).toMatchObject({ pressure: 'final', value: 15 });
+      expect(endScrub).toHaveBeenCalledWith(false);
+    });
+
+    it('should commit a fractional drag on a field whose default is 0', () => {
       const parameterCommit = createParameterCommit();
-      const frames: Array<() => void> = [];
-      const requestFrame = vi
-        .spyOn(globalThis, 'requestAnimationFrame')
-        .mockImplementation((callback: FrameRequestCallback) => {
-          frames.push(() => {
-            callback(0);
-          });
-          return frames.length;
-        });
-      vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
-      try {
-        const { container } = render(
-          <TestWrapper>
-            <ParametersNumber
-              value={10}
-              defaultValue={10}
-              descriptor='length'
-              fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
-              parameterCommit={parameterCommit}
-              enableContinualOnChange
-              onChange={vi.fn()}
-              aria-label='Dragged width'
-            />
-          </TestWrapper>,
-        );
-        const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
-        Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={0}
+            defaultValue={0}
+            min={-1}
+            max={1}
+            descriptor='length'
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
 
-        fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
-        fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 10 });
-        fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 20 });
-        fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 30 });
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 10 });
+      fireSliderPointerEvent(sliderInput, 'pointerup', { clientX: 10 });
 
-        expect(requestFrame).toHaveBeenCalledTimes(1);
-        expect(parameterCommit.calls).toHaveLength(0);
+      expect(parameterCommit.calls[0]).toMatchObject({ value: 0.2, pressure: 'final' });
+    });
 
-        act(() => {
-          frames.pop()?.();
-        });
+    it('should step a declared integer field by whole numbers from a default of 0', () => {
+      const parameterCommit = createParameterCommit();
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={0}
+            defaultValue={0}
+            min={0}
+            max={10}
+            step={0.25}
+            fieldProjection={{
+              ...testProjection('length', defaultUnits),
+              representation: 'safe-integer',
+            }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
 
-        expect(parameterCommit.calls).toHaveLength(1);
-        expect(parameterCommit.calls[0]?.pressure).toBe('transient');
-      } finally {
-        vi.restoreAllMocks();
-      }
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 63 });
+      fireSliderPointerEvent(sliderInput, 'pointerup', { clientX: 63 });
+
+      expect(parameterCommit.calls[0]).toMatchObject({ value: 6, pressure: 'final' });
     });
 
     it('should update value when typing in input', async () => {

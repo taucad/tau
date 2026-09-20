@@ -1,5 +1,4 @@
 // @vitest-environment node
-/* eslint-disable @typescript-eslint/naming-convention -- test data uses filenames as object keys */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
@@ -30,7 +29,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     vi.restoreAllMocks();
   });
 
-  it('should send initializeModel to cadRef after prepareFiles completes', async () => {
+  it('should render the first frame with the initial parameters', async () => {
     const mockClient = createMockAppRuntimeClient();
 
     const providedCadMachine = cadMachine.provide({
@@ -84,8 +83,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
       content: { includeEdges: true },
+      parameters: { width: 42 },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();
@@ -169,8 +168,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
       content: { includeEdges: true },
+      parameters: { width: 42 },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();
@@ -345,8 +344,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
       content: { includeEdges: true },
+      parameters: { width: 42 },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();
@@ -476,8 +475,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
       content: { includeEdges: true },
+      parameters: { width: 42 },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();

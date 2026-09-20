@@ -19,7 +19,11 @@ const mockCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
       units: { length: 'mm' },
+      activeKernelId: 'test',
+      capabilities: { renderCapabilities: { test: { cancellation: 'cooperative' } } },
       parameterManifest: {
+        revision: 'manifest',
+        identity: { resolution: {} },
         defaults: { width: 10, height: 20 },
         legacyProjection: {
           status: 'usable',
@@ -33,7 +37,9 @@ const mockCadRef = {
         },
       },
     },
+    hasTag: () => false,
   })),
+  send: vi.fn(),
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
 const mockCadRef2 = {
@@ -41,6 +47,8 @@ const mockCadRef2 = {
     context: {
       units: { length: 'm' },
       parameterManifest: {
+        revision: 'manifest-2',
+        identity: { resolution: {} },
         defaults: { radius: 5 },
         legacyProjection: {
           status: 'usable',
@@ -72,17 +80,16 @@ const mockParameterSnapshots = new Map<
   Readonly<{
     entry: FileParameterEntry;
     identity: Readonly<{
-      sourceRevision: string;
       manifestRevision: string;
-      valueRevision: string;
-      dependencyRevision: string;
     }>;
   }>
 >();
 const mockParameterActors = new Map<
   string,
-  { getSnapshot: () => unknown; subscribe: () => { unsubscribe: () => void } }
+  { getSnapshot: () => unknown; subscribe: () => { unsubscribe: () => void }; send: ReturnType<typeof vi.fn> }
 >();
+let mockParameterState: 'ready' | 'disconnected' | 'uncertain' = 'ready';
+const mockParameterActorSend = vi.fn();
 const mockParameterService = {
   snapshot: (entryPath: string) => {
     let entry = mockParameterEntries.get(entryPath) ?? mockEmptyParameterEntries.get(entryPath);
@@ -101,10 +108,7 @@ const mockParameterService = {
       entry,
       manifest: { revision: 'manifest' },
       identity: {
-        sourceRevision: 'source',
         manifestRevision: 'manifest',
-        valueRevision: 'value',
-        dependencyRevision: 'dependency',
       },
     };
     mockParameterSnapshots.set(entryPath, snapshot);
@@ -116,16 +120,21 @@ const mockParameterService = {
     let actor = mockParameterActors.get(entryPath);
     if (actor === undefined) {
       actor = {
-        getSnapshot: () => ({ context: { current: mockParameterService.snapshot(entryPath) }, matches: () => false }),
+        getSnapshot: () => ({
+          context: {
+            current: mockParameterService.snapshot(entryPath),
+            diagnostic: { code: 'WRITE_UNCERTAIN', message: 'The last write could not be confirmed.' },
+          },
+          matches: (value: { open?: string }) => value.open === mockParameterState,
+        }),
         subscribe: () => ({ unsubscribe: () => undefined }),
+        send: mockParameterActorSend,
       };
       mockParameterActors.set(entryPath, actor);
     }
     return actor;
   },
   target: (entry: string) => ({ authority: 'browser-filesystem', root: '/test', entry }),
-  input: vi.fn(),
-  submit: vi.fn(),
 };
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -237,6 +246,7 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
     filterTerm,
     onParametersChange,
     units,
+    parameterEdit,
   }: {
     parameters: Record<string, unknown>;
     className?: string;
@@ -244,6 +254,7 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
     filterTerm?: string;
     onParametersChange: (params: Record<string, unknown>) => void;
     units: { length: { displaySymbol: string } };
+    parameterEdit?: { kind: 'authoritative'; commit: { scrub?: (field: { pointer: string; value: string }) => void } };
   }) => (
     <div
       data-testid='parameters-component'
@@ -261,6 +272,13 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
         }}
       >
         Change
+      </button>
+      <button
+        type='button'
+        data-testid='scrub-param'
+        onClick={() => parameterEdit?.commit.scrub?.({ pointer: '/width', value: '21 in' })}
+      >
+        Scrub
       </button>
     </div>
   ),
@@ -422,6 +440,9 @@ describe('ChatParameters', () => {
     mockSetGeometryUnitParameters.mockClear();
     mockSwitchParameterGroup.mockClear();
     mockPaneSetExpanded.mockClear();
+    mockParameterState = 'ready';
+    mockParameterActorSend.mockClear();
+    vi.mocked(mockCadRef.send).mockClear();
     mockParameterEntries = new Map<string, FileParameterEntry>([
       [
         'main.ts',
@@ -545,6 +566,16 @@ describe('ChatParameters', () => {
     expect(params).toEqual({ width: 15 });
   });
 
+  it('should offer Retry while the write outcome is uncertain', async () => {
+    mockParameterState = 'uncertain';
+    mockGeometryUnits.set('main.ts', mockCadRef);
+
+    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mockParameterActorSend).toHaveBeenCalledWith({ type: 'resolve', resolution: {} });
+  });
+
   it('calls setGeometryUnitParameters when parameters change', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
@@ -556,6 +587,23 @@ describe('ChatParameters', () => {
       expect.objectContaining({ defaults: { width: 10, height: 20 } }),
       { width: 42 },
     );
+  });
+
+  it('should send only the dragged source-unit field through the scrub lane', () => {
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    mockGeometryUnits.set('main.ts', mockCadRef);
+
+    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('scrub-param'));
+
+    expect(mockCadRef.send).toHaveBeenCalledWith({
+      type: 'scrubParameters',
+      parameters: { width: '21 in' },
+    });
+    requestFrame.mockRestore();
   });
 
   it('shows empty message when no geometry units', async () => {

@@ -89,20 +89,17 @@ async function createBlankFile(parentPath: string, name: string): Promise<string
   return createdPath;
 }
 
-async function createRootBlankFile(name: string): Promise<string> {
-  const rootFile = treeItem('package.json');
-  await target.click(rootFile);
-  await target.expectAttribute(rootFile, 'aria-selected', 'true', 15_000);
-  const createButton = fileActions().getByRole('button', { name: 'Create new file' });
-  await target.focus(createButton);
-  await target.press(createButton, 'Enter');
-  await target.click(selectors.getByRole('menuitem', { name: 'Blank' }));
-  const input = filesPane().getByPlaceholder('New File');
-  await target.fill(input, name);
-  await target.press(input, 'Enter');
-  await expectFilesPane();
-  await target.expectVisible(treeItem(name));
-  return name;
+/**
+ * Put a new file at the project root, which re-lists the root.
+ *
+ * Duplicate, not the toolbar: the toolbar creates beside the active file, and a
+ * file row is not a selection target, so it cannot be aimed at the root.
+ */
+async function duplicateRootFile(path: string, copyPath: string): Promise<string> {
+  await openContextMenu(path);
+  await target.click(selectors.getByRole('menuitem', { name: 'Duplicate' }));
+  await target.expectVisible(treeItem(copyPath), 15_000);
+  return copyPath;
 }
 
 async function openContextMenu(path: string): Promise<void> {
@@ -443,7 +440,7 @@ test.describe('project file tree', () => {
 
   test('should keep bundled dependencies after creating a root file', async () => {
     await openSeededProject();
-    const createdPath = await createRootBlankFile('zz-e2e-root-refresh.txt');
+    const createdPath = await duplicateRootFile('package.json', 'package copy.json');
 
     await target.expectVisible(treeItem('node_modules'));
 

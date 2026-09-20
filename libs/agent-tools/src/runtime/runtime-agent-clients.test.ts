@@ -504,8 +504,10 @@ describe('createRuntimeParameterAgentClient', () => {
       path: '.tau/parameters/main.py.json',
       bytes: null,
     });
+    let persisted = current;
     const commit = vi.fn(async ({ input }: { input: { proposed: typeof current } }) => {
       await gate;
+      persisted = structuredClone(input.proposed);
       return { status: 'applied', content: input.proposed.bytes! } as const;
     });
     const loads = vi.fn();
@@ -535,7 +537,7 @@ describe('createRuntimeParameterAgentClient', () => {
       pressure: 'final',
       operation: { kind: 'replace-group-values', group: 'default', values: { width: 5 } },
     } as const;
-    return { actor, adapter, request, current, commit, loads };
+    return { actor, adapter, request, current, commit, loads, persisted: () => persisted };
   };
 
   it('preserves operation identity and the complete business outcome', async () => {
@@ -549,6 +551,41 @@ describe('createRuntimeParameterAgentClient', () => {
       outcome: { status: 'rejected', requestId: 'agent:1', code: 'STALE_MANIFEST' },
     });
     expect(commit).not.toHaveBeenCalled();
+    actor.stop();
+  });
+
+  it('should evaluate an immediate kernel result after the parameter write settles', async () => {
+    const { actor, adapter, request, persisted } = await fixture();
+    const evaluate = vi.fn<RuntimeAgentClient['evaluate']>(async () => {
+      const width = persisted().entry.groups['default']?.values['width'];
+      if (typeof width !== 'number') {
+        throw new TypeError('Expected the settled width to be numeric');
+      }
+      return {
+        success: true,
+        data: { format: 'gltf', content: glb(), hash: `width:${width}` },
+        issues: [{ type: 'runtime', code: 'RUNTIME', severity: 'error', message: `width:${width}` }],
+      };
+    });
+    const clients = createRuntimeAgentClients({
+      runtime: {
+        evaluate,
+        export: vi.fn(async () => ({ success: true, data: [], issues: [] })),
+      },
+      exportImage: vi.fn(async () => undefined),
+      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+    });
+
+    await expect(adapter.applyParameterOperation(request)).resolves.toMatchObject({
+      success: true,
+      outcome: { status: 'committed' },
+    });
+    await expect(clients.kernelClient.getKernelResult('main.py')).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      kernelIssues: [{ message: 'width:5' }],
+    });
+    expect(evaluate).toHaveBeenCalledOnce();
     actor.stop();
   });
 

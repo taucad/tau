@@ -54,7 +54,7 @@ export const createApplyTreeEffects = (
     withCheckoutFence: <Result>(checkoutId: string, operation: () => Promise<Result>) => Promise<Result>;
     recordedTree: (tree: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>;
     formatOf: () => Promise<ObjectFormat>;
-    temporarySibling: (path: string) => string;
+    temporarySibling: (path: string, role: 'staged' | 'backup') => string;
     unlinkIfPresent: (live: RevisionFileSystem, path: string) => Promise<void>;
   }>,
 ): Readonly<{
@@ -179,7 +179,7 @@ export const createApplyTreeEffects = (
         for (const path of removedPaths) {
           signal?.throwIfAborted();
           const expected = liveFiles.get(path);
-          const backup = temporarySibling(path);
+          const backup = temporarySibling(path, 'backup');
           // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
           await live.rename(path, backup);
           // oxlint-disable-next-line no-await-in-loop -- the moved bytes prove what the rename removed.
@@ -195,14 +195,18 @@ export const createApplyTreeEffects = (
           // oxlint-disable-next-line no-await-in-loop -- the revision retains the removed bytes; the temporary copy is no longer needed.
           await live.unlink(backup);
         }
-        const stagedFiles = changedFiles.map(([path, entry]) => ({ path, entry, staged: temporarySibling(path) }));
+        const stagedFiles = changedFiles.map(([path, entry]) => ({
+          path,
+          entry,
+          staged: temporarySibling(path, 'staged'),
+        }));
         signal?.throwIfAborted();
         await stageFiles(live, stagedFiles);
         try {
           for (const { path, entry, staged } of stagedFiles) {
             signal?.throwIfAborted();
             const current = liveFiles.get(path);
-            const backup = current === undefined ? undefined : temporarySibling(path);
+            const backup = current === undefined ? undefined : temporarySibling(path, 'backup');
             let published = false;
             try {
               if (live.setFileMode !== undefined) {

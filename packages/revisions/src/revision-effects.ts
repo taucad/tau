@@ -829,19 +829,27 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const headOf = async (place: Checkout): Promise<string | undefined> =>
     place.baseRevisionId ?? (place.branch === undefined ? undefined : await port.readRef(place.branch));
 
-  /*
-   * `.<name>.0.<uuid>.tmp` — the sibling `applyTree` stages and backs up
-   * through. The minter and the matcher sit together, and a pin mints a name
-   * and matches it, so the sweep below cannot drift from what an interrupted
-   * apply actually left behind (W8f).
-   */
-  const temporarySibling = (path: string): string => {
+  /* Tau-owned siblings carry their role in the reserved name, so recovery can
+   * distinguish unpublished staging bytes from the only copy of a backup. */
+  const temporarySibling = (path: string, role: 'staged' | 'backup'): string => {
     const separator = path.lastIndexOf('/');
     const directory = separator === -1 ? '' : path.slice(0, separator + 1);
     const name = path.slice(separator + 1);
-    return `${directory}.${name}.0.${randomUuid()}.tmp`;
+    return `${directory}.${name}.tau-${role}.${randomUuid()}.tmp`;
   };
-  const temporarySiblingPattern = /^\..+\.0\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.tmp$/u;
+  const temporarySiblingPattern =
+    /^\.(.+)\.tau-(staged|backup)\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.tmp$/u;
+  const parseTemporarySibling = (
+    path: string,
+  ): Readonly<{ originalPath: string; role: 'staged' | 'backup' }> | undefined => {
+    const separator = path.lastIndexOf('/');
+    const directory = separator === -1 ? '' : path.slice(0, separator + 1);
+    const match = temporarySiblingPattern.exec(path.slice(separator + 1));
+    const role = match?.[2];
+    return match === null || (role !== 'staged' && role !== 'backup')
+      ? undefined
+      : { originalPath: `${directory}${match[1]!}`, role };
+  };
 
   /**
    * Remove the staged and backup siblings a killed apply left behind.
@@ -860,9 +868,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     swept.add(place.id);
     try {
       for await (const entry of walk(live, '', { admits: (path) => policy.classify(path).versioned })) {
-        if (entry.kind === 'file' && temporarySiblingPattern.test(entry.relativePath.split('/').at(-1) ?? '')) {
-          // oxlint-disable-next-line no-await-in-loop -- litter is removed as the walk reaches it, not held in a list.
-          await unlinkIfPresent(live, entry.relativePath);
+        const temporary = entry.kind === 'file' ? parseTemporarySibling(entry.relativePath) : undefined;
+        if (temporary !== undefined) {
+          // oxlint-disable-next-line no-await-in-loop -- each sibling is recovered as the walk reaches it.
+          const originalPresent = await live.exists(temporary.originalPath);
+          // oxlint-disable-next-line no-await-in-loop -- a backup is the only copy when its original is absent.
+          await (temporary.role === 'backup' && !originalPresent
+            ? live.rename(entry.relativePath, temporary.originalPath)
+            : unlinkIfPresent(live, entry.relativePath));
         }
       }
     } catch (error) {
@@ -878,7 +891,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
-  /** Remove one path, tolerating one that is already gone. */
+  /**
+   * Remove one path, tolerating one that is already gone.
+   *
+   * @param live - The checkout tree.
+   * @param path - Root-relative path to remove.
+   * @returns When removal or the not-found result settles.
+   */
   const unlinkIfPresent = async (live: RevisionFileSystem, path: string): Promise<void> => {
     await live.unlink(path).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -887,19 +906,31 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     });
   };
 
-  /** Capture one already-open checkout filesystem. */
+  /**
+   * Capture one already-open checkout filesystem.
+   *
+   * @param rooted - The checkout tree.
+   * @param basis - Recorded modes to inherit where the provider has none.
+   * @param captureOptions - This checkout's memo and whether reuse is safe.
+   * @returns The complete versioned tree.
+   */
   const captureFileSystem = async (
     rooted: RevisionFileSystem,
     basis: ImmutableRevisionTree | undefined,
-    memo: CaptureMemo,
+    captureOptions: Readonly<{ memo: CaptureMemo; bypassMemo: boolean }>,
   ): Promise<ImmutableRevisionTree> => {
     /* The reading comes first, so a file whose timestamp the stats then report
      * as this recent is racily clean and is read rather than trusted (EQ7). */
     const observedAt = now();
+    const memoOptions = captureOptions.memo.unchanged(
+      await rooted.statTree?.('', { admits: (path) => policy.classify(path).versioned }),
+      observedAt,
+    );
     const tree = await captureRevisionTree(rooted, {
-      exclude: (path) => !policy.classify(path).versioned,
+      exclude: (path) => !policy.classify(path).versioned || parseTemporarySibling(path) !== undefined,
       inheritedMode: (path) => basis?.mode(path),
-      ...memo.unchanged(await rooted.statTree?.('', { admits: (path) => policy.classify(path).versioned }), observedAt),
+      reuse: captureOptions.bypassMemo ? undefined : memoOptions.reuse,
+      onRead: memoOptions.onRead,
     });
     const collisions = caseCollisions(tree);
     if (collisions.length > 0) {
@@ -911,8 +942,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return tree;
   };
 
-  /* The versioned tree of one checkout: every path the registry versions. */
-  const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
+  const captureCheckout = async (
+    place: Checkout,
+    modeBasis: ImmutableRevisionTree | undefined,
+    bypassMemo: boolean,
+  ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
       await sweepTemporarySiblings(place, rooted);
       return captureFileSystem(
@@ -922,9 +956,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             const head = await headOf(place);
             return head === undefined ? undefined : port.readTree(revisionId(head));
           })()),
-        memoOf(place.id),
+        { memo: memoOf(place.id), bypassMemo },
       );
     });
+  /* The versioned tree of one checkout: every path the registry versions. */
+  const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
+    captureCheckout(place, modeBasis, false);
+  /* A decision that discards or replaces a working copy on the strength of
+   * "nothing here is unrevisioned" never trusts metadata an external replacement
+   * can preserve (same size, restored mtime). The turn's own captures keep the
+   * memo: that is git's racy-index limit, and re-reading every file twice a turn
+   * is what the memo exists to stop. */
+  const captureFresh = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
+    captureCheckout(place, modeBasis, true);
 
   /* The tree object id of one revision, as the store recorded it. */
   const treeIdOf = async (revision: string | undefined): Promise<string | undefined> => {
@@ -1362,7 +1406,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (target === undefined) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This project has no files open to merge into.');
     }
-    const live = await capture(target);
+    const live = await captureFresh(target);
     const headTreeId = await treeIdOf(await headOf(target));
     if (headTreeId !== revisionTreeId(await recordedTree(live), await formatOf())) {
       throw new RevisionPortError(
@@ -1685,7 +1729,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (tree === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', `No recorded revision to restore: ${target}`);
           }
-          const live = await capture(place);
+          const live = await captureFresh(place);
           const headTree = head === undefined ? undefined : await port.readTree(revisionId(head));
           const removed = live.entries().filter(({ path }) => !tree.has(path));
           const graph = await port.log();
@@ -1755,7 +1799,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         const place = await placeOf(input.id);
         const headTreeId = await treeIdOf(await headOf(place));
-        if (headTreeId !== revisionTreeId(await recordedTree(await capture(place)), await formatOf())) {
+        if (headTreeId !== revisionTreeId(await recordedTree(await captureFresh(place)), await formatOf())) {
           throw new RevisionPortError(
             'CHECKOUT_CONFLICT',
             'This branch has changes that are not in a revision yet. Save a revision before discarding it.',
@@ -1809,7 +1853,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           return { needsConfirmation: false };
         }
         const headTreeId = await treeIdOf(await headOf(live));
-        const dirty = headTreeId !== revisionTreeId(await recordedTree(await capture(live)), await formatOf());
+        const dirty = headTreeId !== revisionTreeId(await recordedTree(await captureFresh(live)), await formatOf());
         return dirty
           ? {
               needsConfirmation: true,

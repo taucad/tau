@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 
+import { revisionId } from '#algorithms/index.js';
 import { sameRevisionStatus, versionedChangePaths } from '#revision-projection.js';
 import type { RevisionStatusProjection } from '#project-revisions.machine.js';
 
@@ -30,56 +31,260 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     headRevisionId: 'rev-1',
     follow: 'chat',
     attention: 0,
-    restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
+    restore: { asking: true, busy: true, removedPathCount: 1, dirty: true, revisionNumber: 2 },
     remote: {
-      kind: 'none',
-      url: undefined,
-      phase: 'none',
-      storage: undefined,
-      overQuota: [],
-      error: undefined,
-      reason: undefined,
-      fetchOnly: false,
-      provider: undefined,
-      repositoryId: undefined,
-      quota: undefined,
+      kind: 'tau',
+      url: 'https://example.test/repo.git',
+      phase: 'connected',
+      storage: { used: 1, quota: 2 },
+      overQuota: ['big.stl'],
+      error: 'Storage is full.',
+      reason: 'quota',
+      fetchOnly: true,
+      provider: 'github',
+      repositoryId: 'repo-1',
+      quota: { remainingBytes: 3, shortfallBytes: 4 },
     } as const,
-    publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined } as const,
+    publish: {
+      phase: 'success',
+      tags: [
+        {
+          name: 'v1',
+          revisionId: revisionId('rev-1'),
+          note: 'First version',
+          actor: { kind: 'user', id: 'user-1', name: 'Ada' },
+          createdAt: 1,
+        },
+      ],
+      publicationId: 'publication-1',
+      shareUrl: 'https://tau.new/p/publication-1',
+      error: 'Previous publish failed.',
+    } as const,
     sync: {
-      state: 'noRemote',
-      pendingCount: 0,
-      online: true,
-      conflictRef: undefined,
-      error: undefined,
-      reason: undefined,
+      state: 'failed',
+      pendingCount: 1,
+      online: false,
+      conflictRef: 'refs/heads/conflict',
+      error: 'Sign in again.',
+      reason: 'unauthorized',
     } as const,
-    branches: [],
-    branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
-    conflicts: [],
+    branches: [
+      {
+        name: 'main',
+        head: 'rev-1',
+        checkoutId: 'checkout-1',
+        checkoutRoot: '/projects/proj_1',
+        leaseChatIds: ['chat-1'],
+      },
+    ],
+    branchVerb: { busy: true, asking: true, operation: 'switch', branch: 'feature', question: 'Replace these files?' },
+    conflicts: [
+      {
+        revisionId: 'rev-conflict',
+        branch: 'feature',
+        labels: { ours: 'main', theirs: 'feature' },
+        paths: [{ path: 'main.ts', openable: true, side: 'mine' }],
+        busy: false,
+        ready: true,
+      },
+    ],
   });
 
-  it('repaints the Sync region when the remote connects and nothing else moves', () => {
-    const connected = { ...base(), remote: { ...base().remote, kind: 'tau', phase: 'connected' } as const };
+  const variations: ReadonlyArray<readonly [string, (status: RevisionStatusProjection) => RevisionStatusProjection]> = [
+    ['projectId', (status) => ({ ...status, projectId: 'proj_2' })],
+    ['checkoutId', (status) => ({ ...status, checkoutId: 'checkout-2' })],
+    ['checkoutRoot', (status) => ({ ...status, checkoutRoot: '/checkouts/checkout-2' })],
+    ['branch', (status) => ({ ...status, branch: 'feature' })],
+    ['projectDirty', (status) => ({ ...status, projectDirty: true })],
+    ['dirty', (status) => ({ ...status, dirty: true })],
+    ['minting', (status) => ({ ...status, minting: true })],
+    ['headRevisionId', (status) => ({ ...status, headRevisionId: 'rev-2' })],
+    ['follow', (status) => ({ ...status, follow: 'pinned' })],
+    ['attention', (status) => ({ ...status, attention: 1 })],
+    ['restore.asking', (status) => ({ ...status, restore: { ...status.restore, asking: false } })],
+    ['restore.busy', (status) => ({ ...status, restore: { ...status.restore, busy: false } })],
+    [
+      'restore.removedPathCount',
+      (status) => ({
+        ...status,
+        restore: { ...status.restore, removedPathCount: 2 },
+      }),
+    ],
+    ['restore.dirty', (status) => ({ ...status, restore: { ...status.restore, dirty: false } })],
+    ['restore.revisionNumber', (status) => ({ ...status, restore: { ...status.restore, revisionNumber: 3 } })],
+    ['remote.kind', (status) => ({ ...status, remote: { ...status.remote, kind: 'git' } })],
+    ['remote.url', (status) => ({ ...status, remote: { ...status.remote, url: 'https://example.test/other.git' } })],
+    ['remote.phase', (status) => ({ ...status, remote: { ...status.remote, phase: 'failed' } })],
+    ['remote.storage.used', (status) => ({ ...status, remote: { ...status.remote, storage: { used: 2, quota: 2 } } })],
+    [
+      'remote.storage.quota',
+      (status) => ({
+        ...status,
+        remote: { ...status.remote, storage: { used: 1, quota: 3 } },
+      }),
+    ],
+    ['remote.overQuota', (status) => ({ ...status, remote: { ...status.remote, overQuota: ['other.stl'] } })],
+    [
+      'remote.quota.remainingBytes',
+      (status) => ({
+        ...status,
+        remote: { ...status.remote, quota: { remainingBytes: 5, shortfallBytes: 4 } },
+      }),
+    ],
+    [
+      'remote.quota.shortfallBytes',
+      (status) => ({
+        ...status,
+        remote: { ...status.remote, quota: { remainingBytes: 3, shortfallBytes: 5 } },
+      }),
+    ],
+    ['remote.error', (status) => ({ ...status, remote: { ...status.remote, error: 'Another failure.' } })],
+    ['remote.reason', (status) => ({ ...status, remote: { ...status.remote, reason: 'rejected' } })],
+    ['remote.fetchOnly', (status) => ({ ...status, remote: { ...status.remote, fetchOnly: false } })],
+    ['remote.provider', (status) => ({ ...status, remote: { ...status.remote, provider: undefined } })],
+    ['remote.repositoryId', (status) => ({ ...status, remote: { ...status.remote, repositoryId: 'repo-2' } })],
+    ['publish.phase', (status) => ({ ...status, publish: { ...status.publish, phase: 'error' } })],
+    [
+      'publish.tags.name',
+      (status) => ({
+        ...status,
+        publish: { ...status.publish, tags: [{ ...status.publish.tags[0]!, name: 'v2' }] },
+      }),
+    ],
+    [
+      'publish.tags.revisionId',
+      (status) => ({
+        ...status,
+        publish: { ...status.publish, tags: [{ ...status.publish.tags[0]!, revisionId: revisionId('rev-2') }] },
+      }),
+    ],
+    [
+      'publish.tags.note',
+      (status) => ({
+        ...status,
+        publish: { ...status.publish, tags: [{ ...status.publish.tags[0]!, note: 'Second version' }] },
+      }),
+    ],
+    [
+      'publish.tags.actor',
+      (status) => ({
+        ...status,
+        publish: {
+          ...status.publish,
+          tags: [{ ...status.publish.tags[0]!, actor: { kind: 'agent', id: 'model-1' } }],
+        },
+      }),
+    ],
+    [
+      'publish.tags.createdAt',
+      (status) => ({
+        ...status,
+        publish: { ...status.publish, tags: [{ ...status.publish.tags[0]!, createdAt: 2 }] },
+      }),
+    ],
+    [
+      'publish.publicationId',
+      (status) => ({
+        ...status,
+        publish: { ...status.publish, publicationId: 'publication-2' },
+      }),
+    ],
+    [
+      'publish.shareUrl',
+      (status) => ({
+        ...status,
+        publish: { ...status.publish, shareUrl: 'https://tau.new/p/publication-2' },
+      }),
+    ],
+    ['publish.error', (status) => ({ ...status, publish: { ...status.publish, error: 'Another failure.' } })],
+    ['sync.state', (status) => ({ ...status, sync: { ...status.sync, state: 'queued' } })],
+    ['sync.pendingCount', (status) => ({ ...status, sync: { ...status.sync, pendingCount: 2 } })],
+    ['sync.online', (status) => ({ ...status, sync: { ...status.sync, online: true } })],
+    ['sync.conflictRef', (status) => ({ ...status, sync: { ...status.sync, conflictRef: 'refs/heads/other' } })],
+    ['sync.error', (status) => ({ ...status, sync: { ...status.sync, error: 'Another failure.' } })],
+    ['sync.reason', (status) => ({ ...status, sync: { ...status.sync, reason: 'quota' } })],
+    ['branches.name', (status) => ({ ...status, branches: [{ ...status.branches[0]!, name: 'feature' }] })],
+    ['branches.head', (status) => ({ ...status, branches: [{ ...status.branches[0]!, head: 'rev-2' }] })],
+    [
+      'branches.checkoutId',
+      (status) => ({
+        ...status,
+        branches: [{ ...status.branches[0]!, checkoutId: 'checkout-2' }],
+      }),
+    ],
+    [
+      'branches.checkoutRoot',
+      (status) => ({
+        ...status,
+        branches: [{ ...status.branches[0]!, checkoutRoot: '/checkouts/checkout-2' }],
+      }),
+    ],
+    [
+      'branches.leaseChatIds',
+      (status) => ({
+        ...status,
+        branches: [{ ...status.branches[0]!, leaseChatIds: ['chat-2'] }],
+      }),
+    ],
+    ['branchVerb.busy', (status) => ({ ...status, branchVerb: { ...status.branchVerb, busy: false } })],
+    ['branchVerb.asking', (status) => ({ ...status, branchVerb: { ...status.branchVerb, asking: false } })],
+    ['branchVerb.operation', (status) => ({ ...status, branchVerb: { ...status.branchVerb, operation: 'merge' } })],
+    ['branchVerb.branch', (status) => ({ ...status, branchVerb: { ...status.branchVerb, branch: 'other' } })],
+    ['branchVerb.question', (status) => ({ ...status, branchVerb: { ...status.branchVerb, question: 'Continue?' } })],
+    [
+      'conflicts.revisionId',
+      (status) => ({
+        ...status,
+        conflicts: [{ ...status.conflicts[0]!, revisionId: 'rev-other' }],
+      }),
+    ],
+    ['conflicts.branch', (status) => ({ ...status, conflicts: [{ ...status.conflicts[0]!, branch: 'other' }] })],
+    [
+      'conflicts.labels.ours',
+      (status) => ({
+        ...status,
+        conflicts: [{ ...status.conflicts[0]!, labels: { ...status.conflicts[0]!.labels!, ours: 'other' } }],
+      }),
+    ],
+    [
+      'conflicts.labels.theirs',
+      (status) => ({
+        ...status,
+        conflicts: [{ ...status.conflicts[0]!, labels: { ...status.conflicts[0]!.labels!, theirs: 'other' } }],
+      }),
+    ],
+    [
+      'conflicts.paths.path',
+      (status) => ({
+        ...status,
+        conflicts: [{ ...status.conflicts[0]!, paths: [{ ...status.conflicts[0]!.paths[0]!, path: 'other.ts' }] }],
+      }),
+    ],
+    [
+      'conflicts.paths.openable',
+      (status) => ({
+        ...status,
+        conflicts: [{ ...status.conflicts[0]!, paths: [{ ...status.conflicts[0]!.paths[0]!, openable: false }] }],
+      }),
+    ],
+    [
+      'conflicts.paths.side',
+      (status) => ({
+        ...status,
+        conflicts: [{ ...status.conflicts[0]!, paths: [{ ...status.conflicts[0]!.paths[0]!, side: 'theirs' }] }],
+      }),
+    ],
+    ['conflicts.busy', (status) => ({ ...status, conflicts: [{ ...status.conflicts[0]!, busy: true }] })],
+    ['conflicts.ready', (status) => ({ ...status, conflicts: [{ ...status.conflicts[0]!, ready: false }] })],
+  ];
 
+  it('should compare equal projections structurally', () => {
     expect(sameRevisionStatus(base(), base())).toBe(true);
-    expect(sameRevisionStatus(base(), connected)).toBe(false);
   });
 
-  it.each([
-    ['phase', { phase: 'connecting' } as const],
-    ['url', { url: 'https://example.test/repo.git' }],
-    ['storage', { storage: { used: 1, quota: 2 } }],
-    ['overQuota', { overQuota: ['big.stl'] }],
-    ['error', { error: 'refused' }],
-  ])('repaints when remote.%s moves on its own', (_field, patch) => {
-    expect(sameRevisionStatus(base(), { ...base(), remote: { ...base().remote, ...patch } })).toBe(false);
-  });
-
-  it('repaints when the restore confirmation or the publish dialog moves on its own', () => {
-    expect(sameRevisionStatus(base(), { ...base(), restore: { ...base().restore, asking: true } })).toBe(false);
-    expect(sameRevisionStatus(base(), { ...base(), publish: { ...base().publish, phase: 'choosingVersion' } })).toBe(
-      false,
-    );
+  it.each(variations)('should repaint when %s moves on its own', (_field, vary) => {
+    const status = base();
+    expect(sameRevisionStatus(status, vary(status))).toBe(false);
   });
 });
 

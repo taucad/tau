@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { pathRegistry } from '@taucad/filesystem/path-registry';
+import * as fs from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { assert, asyncProperty, boolean, constantFrom, oneof, record, stringMatching, tuple } from 'fast-check';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { isIgnored } from 'isomorphic-git';
+import { pathRegistry, tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -13,6 +20,16 @@ import { parseRevisionCommitMessage, revisionCommitMessage } from '#revision-hea
 import type { RevisionTrailer } from '#revision-headers.js';
 
 describe('generated ignore file', () => {
+  let ignoreRoot: string;
+
+  beforeAll(async () => {
+    ignoreRoot = await mkdtemp(join(tmpdir(), 'tau-generated-ignore-'));
+    await mkdir(join(ignoreRoot, '.git'));
+    await writeFile(join(ignoreRoot, '.gitignore'), generatedIgnoreContent(undefined));
+  });
+
+  afterAll(async () => rm(ignoreRoot, { recursive: true, force: true }));
+
   it('excludes every unversioned path and keeps the versioned generated files', () => {
     const content = generatedIgnoreContent(undefined);
     for (const entry of generatedIgnoreEntries(pathRegistry)) {
@@ -62,6 +79,24 @@ describe('generated ignore file', () => {
         atRoot: !row.versioned && row.match === 'root',
       });
     }
+  });
+
+  it('should agree with the generated ignore block for generated project paths', async () => {
+    const rowPath = record({ row: constantFrom(...pathRegistry), nested: boolean() }).map(({ row, nested }) => {
+      const path = `${nested ? 'vendor/' : ''}${row.prefix}`;
+      return row.directory ? `${path}/entry.txt` : path;
+    });
+    const authoredPath = tuple(
+      stringMatching(/^[a-z][a-z0-9_-]{0,12}$/u),
+      stringMatching(/^[a-z][a-z0-9_-]{0,12}$/u),
+    ).map(([directory, name]) => `src/${directory}/${name}.ts`);
+
+    await assert(
+      asyncProperty(oneof(rowPath, authoredPath), async (path) => {
+        const excluded = await isIgnored({ fs, dir: ignoreRoot, filepath: path });
+        expect(tauPathPolicy.classify(path).versioned).toBe(!excluded);
+      }),
+    );
   });
 
   /* G0-8: a trailing `/` restricts a gitignore pattern to directories, and a

@@ -22,9 +22,6 @@ export const assertMaterializableRevisionTree = (
       throw new RevisionPortError('UNSUPPORTED_OPERATION', `Tracked path is reserved by Tau: ${path}`);
     }
     const portable = path.normalize('NFC').toLowerCase();
-    if (!policy.classify(portable).versioned) {
-      throw new RevisionPortError('UNSUPPORTED_OPERATION', `Tracked path aliases a path reserved by Tau: ${path}`);
-    }
     const collision = portablePaths.get(portable);
     if (collision !== undefined && collision !== path) {
       throw new RevisionPortError(

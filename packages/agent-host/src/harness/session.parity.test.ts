@@ -681,7 +681,7 @@ describe('pi full-turn parity fixture', () => {
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"kind":"safeguard"');
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"pruning":"preserve-until-compaction"');
     expect(JSON.stringify(transport.requests[0]?.messages)).toContain('<system-reminder>');
-    expect(JSON.stringify(transport.requests[1]?.messages)).not.toContain('<system-reminder>');
+    expect(JSON.stringify(transport.requests[1]?.messages)).toContain('<system-reminder>');
     expect(compactions).toContain('tool_result_clearing');
     expect(new Set(transport.requests.map((request) => request.attemptId)).size).toBe(transport.requests.length);
     expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(transport.requests.length);
@@ -690,12 +690,16 @@ describe('pi full-turn parity fixture', () => {
         (event) =>
           event.type === 'message.envelope-replaced' &&
           event.replacement.role === 'tool-output' &&
-          event.replacement.content === '[Old tool result content cleared]',
+          event.replacement.content ===
+            '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
       ),
     ).toHaveLength(2);
     expect(
       transport.requests[0]?.messages.some(
-        (message) => message.role === 'tool-output' && message.content === '[Old tool result content cleared]',
+        (message) =>
+          message.role === 'tool-output' &&
+          message.content ===
+            '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
       ),
     ).toBe(true);
     expect(events.filter((event) => event.type === 'run.lifecycle').map((event) => event.state)).toEqual([
@@ -1187,7 +1191,7 @@ describe('pi full-turn parity fixture', () => {
     await session.close();
   });
 
-  it('should fail the turn on a length-terminated compaction summary before persisting it', async () => {
+  it('should replace a length-terminated compaction summary with a durable placeholder', async () => {
     const initial: AgentLogEvent[] = Array.from({ length: 8 }, (_, sequence) => ({
       version: 1,
       leaderEpoch: 'history-epoch',
@@ -1240,20 +1244,25 @@ describe('pi full-turn parity fixture', () => {
     });
     const snapshot = await session.snapshot();
     const events = await log.read();
-    // A compaction failure fails the turn, not the chat: the prompt resolves and
-    // the coded refusal is the run's terminal detail. The truncated summary is
-    // never persisted and never sent a second time.
+    // A truncated summary is not trustworthy, so compaction persists the same
+    // deterministic placeholder used for every summarizer failure and lets the
+    // provider turn proceed.
     const terminal = events.findLast((event) => event.type === 'run.lifecycle');
-    expect(terminal?.type === 'run.lifecycle' && terminal.state).toBe('failed');
-    expect(terminal?.type === 'run.lifecycle' && terminal.detail?.code).toBe('SUMMARY_REQUIRED');
+    expect(terminal?.type === 'run.lifecycle' && terminal.state).toBe('completed');
     expect(JSON.stringify(snapshot.messages)).not.toContain('partial summary');
-    expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(0);
-    expect(requests).toHaveLength(1);
+    expect(JSON.stringify(snapshot.messages)).toContain(
+      'The project files are the source of truth for the current work.',
+    );
+    const compacted = events.filter((event) => event.type === 'history.compacted');
+    expect(compacted).toHaveLength(1);
+    expect(compacted[0]?.type === 'history.compacted' && compacted[0].details?.summary).toBe('placeholder');
+    expect(requests).toHaveLength(2);
     expect(requests[0]?.invocationPurpose).toBe('compaction');
+    expect(requests[1]?.invocationPurpose).toBe('generation');
     // Compaction spend belongs to the chat that caused it, like its generation.
     expect(requests[0]?.chatId).toBe('chat-summary-stop');
-    expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(1);
-    expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(2);
     await session.close();
   });
 });

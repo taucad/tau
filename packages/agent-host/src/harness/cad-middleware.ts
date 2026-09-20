@@ -63,18 +63,20 @@ export const normalizeLatexDelimiters = (text: string): string => {
 
 /** Port of Tau's final-response LaTeX delimiter middleware. @public */
 export const latexDelimiterMiddleware: ModelCallMiddleware = async (request, next) =>
-  mapFinalAssistant(await next(request), (message) => ({
-    ...message,
-    content: message.content.map((block) => {
+  mapFinalAssistant(await next(request), (message) => {
+    const content = message.content.map((block) => {
       if (block.type === 'text') {
-        return { ...block, text: normalizeLatexDelimiters(block.text) };
+        const text = normalizeLatexDelimiters(block.text);
+        return text === block.text ? block : { ...block, text };
       }
       if (block.type === 'thinking') {
-        return { ...block, thinking: normalizeLatexDelimiters(block.thinking) };
+        const thinking = normalizeLatexDelimiters(block.thinking);
+        return thinking === block.thinking ? block : { ...block, thinking };
       }
       return block;
-    }),
-  }));
+    });
+    return content.every((block, index) => block === message.content[index]) ? message : { ...message, content };
+  });
 
 /** Model-visible skill catalogue item supplied by the host client. @public */
 export type ClientSkill = {

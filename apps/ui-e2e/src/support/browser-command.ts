@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type {
+  AgentHostGatewayFixtureOptions,
   TargetClickOptions,
   TargetCookie,
   TargetDiagnostics,
@@ -496,16 +497,16 @@ const writeScriptedTurn = async (options: {
 };
 /* eslint-enable @typescript-eslint/naming-convention -- The Anthropic wire fixture ends here. */
 
-export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly GatewayScriptTurn[]]> = async (
-  commandContext,
-  script = browserHostScript,
-) => {
+export const uiInstallAgentHostGatewayFixture: BrowserCommand<
+  [script?: readonly GatewayScriptTurn[], options?: AgentHostGatewayFixtureOptions]
+> = async (commandContext, script = browserHostScript, options = {}) => {
   const session = sessionFor(commandContext);
   session.agentHostGatewayRequests.length = 0;
   session.agentHostApiRequests.length = 0;
   session.agentHostGatewayRelease = undefined;
   session.agentHostGatewayFailure = undefined;
   let requestIndex = 0;
+  let scriptIndex = 0;
   const headers = {
     'access-control-allow-credentials': 'true',
     'access-control-allow-headers': 'accept,content-type',
@@ -542,7 +543,8 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
         for await (const chunk of request) {
           body.push(String(chunk));
         }
-        session.agentHostGatewayRequests.push(JSON.parse(body.join('')));
+        const payload = JSON.parse(body.join('')) as { readonly tools?: readonly unknown[] };
+        session.agentHostGatewayRequests.push(payload);
         const { agentHostGatewayFailure } = session;
         if (agentHostGatewayFailure) {
           // A coded provider refusal, not a dropped socket: the browser host
@@ -573,12 +575,20 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
           'x-tau-operation-id': `browser-host-e2e-operation-${String(currentRequest)}`,
         });
         response.flushHeaders();
+        /* A compaction summary is the one call the host sends with no tools
+         * (`compactionModelsWithTransport`, `session.ts`) and it lands between
+         * the agent's own calls, so answering it off-script keeps the turn walk
+         * aligned; `summary: ''` is the summariser failure a turn must survive.
+         * Without the option the fixture behaves exactly as it did. */
+        const isSummaryRequest = options.summary !== undefined && (payload.tools?.length ?? 0) === 0;
         // The walk wraps: a retried turn replays the script from the top, which
         // is what the rewind vertical in `browser-agent-host.spec.ts` asserts on.
         await writeScriptedTurn({
           currentRequest,
           session,
-          turn: script[currentRequest % script.length]!,
+          turn: isSummaryRequest
+            ? { text: options.summary, usage: { inputTokens: 40, outputTokens: 10 } }
+            : script[scriptIndex++ % script.length]!,
           writeEvent,
         });
         response.end();
@@ -607,7 +617,14 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
   const catalog = Object.values(modelList)
     .flatMap((entries) => Object.values(entries))
     .filter((entry) => isModelListEntryEnabled(entry))
-    .map((entry) => modelListEntryToModel(entry));
+    // The window a row advertises is the compaction budget `agentHostConfig`
+    // hands the host, so overriding it is how a vertical crosses the compaction
+    // threshold on scripted usage instead of on real megabytes.
+    .map((entry) => {
+      const model = modelListEntryToModel(entry);
+      const { contextWindow } = options;
+      return contextWindow === undefined ? model : { ...model, details: { ...model.details, contextWindow } };
+    });
   await session.context.route(/\/v1\/models(?:\?|$)/u, async (route) => {
     await route.fulfill({
       status: 200,

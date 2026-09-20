@@ -27,6 +27,8 @@ type ChatErrorPausedTurnProps = {
   readonly guidance?: string;
   /** Offer the composer's model picker ahead of Resume (S6). */
   readonly canSwitchModel?: boolean;
+  /** Keep the destructive replay available after the safer Resume action. */
+  readonly canTryAgain?: boolean;
   /** The raw failure payload, kept behind a disclosure below the copy. */
   readonly raw?: string;
 };
@@ -35,10 +37,11 @@ type ChatErrorPausedTurnProps = {
  * A model call that failed with the turn intact.
  *
  * A resumable one reads the same way every time: the provider's words, the
- * promise that the turn is saved, and one **Resume**, which re-issues that one
- * call with every settled tool result still in the history. The verb states the
+ * promise that the turn is saved, and **Resume**, which re-issues that one call
+ * with every settled tool result still in the history. The verb states the
  * behaviour, so a failure the host rules unrecoverable makes no promise and
- * keeps *Try again* — the gesture it will actually get.
+ * keeps *Try again* — the gesture it will actually get. Callers may retain a
+ * separate replay action after Resume.
  */
 export const ChatErrorPausedTurn = memo(function ({
   className,
@@ -48,9 +51,10 @@ export const ChatErrorPausedTurn = memo(function ({
   icon = CircleAlert,
   guidance,
   canSwitchModel = false,
+  canTryAgain = false,
   raw,
 }: ChatErrorPausedTurnProps): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { continueChat, regenerate } = useChatActions();
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   return (
@@ -82,7 +86,7 @@ export const ChatErrorPausedTurn = memo(function ({
             </ChatModelSelector>
           ) : null}
           <Button
-            variant='outline'
+            variant={resumable && canTryAgain ? 'default' : 'outline'}
             size='sm'
             onClick={() => {
               continueChat();
@@ -91,6 +95,12 @@ export const ChatErrorPausedTurn = memo(function ({
             {resumable ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}
             {resumable ? 'Resume' : 'Try again'}
           </Button>
+          {resumable && canTryAgain ? (
+            <Button variant='outline' size='sm' onClick={regenerate}>
+              <RefreshCcw className='size-3.5' />
+              Try again
+            </Button>
+          ) : null}
         </>
       }
     >

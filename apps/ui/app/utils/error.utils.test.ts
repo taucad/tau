@@ -65,23 +65,28 @@ describe('parseErrorForPersistence', () => {
     expect(parsed.message).not.toContain('91,123');
   });
 
-  it('should tell the person to start a new chat when nothing can be evicted', () => {
+  it.each([
+    ['SESSION_LOG_INTEGRITY', 'This chat hit a problem while Tau was tidying its history.'],
+    ['SUMMARY_REQUIRED', 'This chat hit a problem while Tau was tidying its history.'],
+    ['NO_EVICTABLE_HISTORY', 'Tau could not make room for the next step.'],
+    ['CIRCUIT_BREAKER_OPEN', 'Tau could not make room for the next step.'],
+  ])('should replace the raw %s host sentence with actionable copy', (code, message) => {
+    const rawMessage = `Internal host sentence for ${code}`;
     const parsed = parseErrorForPersistence(
       new Error(
         JSON.stringify({
           category: errorCategory.generic,
           title: 'Something went wrong',
-          message: 'Context is oversized but has no safe history to evict.',
-          code: 'NO_EVICTABLE_HISTORY',
+          message: rawMessage,
+          code,
         }),
       ),
     );
 
-    expect(parsed.code).toBe('NO_EVICTABLE_HISTORY');
-    expect(parsed.message).toBe(
-      "This chat's first message is too large to continue. Start a new chat and attach less.",
-    );
-    expect(parsed.raw).toContain('Context is oversized but has no safe history to evict.');
+    expect(parsed.code).toBe(code);
+    expect(parsed.message).toBe(message);
+    expect(parsed.message).not.toContain(rawMessage);
+    expect(parsed.raw).toContain(rawMessage);
   });
 });
 

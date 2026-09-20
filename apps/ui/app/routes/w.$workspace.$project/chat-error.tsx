@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatHistoryTidyFailureMessage, chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
@@ -39,8 +39,11 @@ const pausedTurnCodes = new Set([
   'WORKER_CRASHED',
 ]);
 
-/** Refusals only a new conversation clears. */
+/** Compaction refusals described as a chat-length problem. */
 const chatTooLongCodes = new Set(['NO_EVICTABLE_HISTORY', 'CIRCUIT_BREAKER_OPEN']);
+
+/** Compaction failures whose plain-language recovery is the same kept turn. */
+const chatHistoryTidyFailureCodes = new Set(['SESSION_LOG_INTEGRITY', 'SUMMARY_REQUIRED']);
 
 /**
  * Attempts to format a string as pretty-printed JSON.
@@ -92,6 +95,19 @@ function codedErrorCard({
     return <ChatErrorProviderAccount className={className} description={error.message} details={error.details} />;
   }
 
+  if (chatHistoryTidyFailureCodes.has(code)) {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        reason={chatHistoryTidyFailureMessage}
+        resumable={resumable}
+        guidance='Resume to continue without losing your work.'
+        canTryAgain
+        {...raw}
+      />
+    );
+  }
+
   if (pausedTurnCodes.has(code)) {
     return (
       <ChatErrorPausedTurn
@@ -122,7 +138,7 @@ function codedErrorCard({
   }
 
   if (chatTooLongCodes.has(code)) {
-    return <ChatErrorTooLong className={className} />;
+    return <ChatErrorTooLong className={className} resumable={resumable} />;
   }
 
   // Another tab holds this chat's log. Taking it back is a leadership protocol,

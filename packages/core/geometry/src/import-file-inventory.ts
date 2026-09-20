@@ -21,7 +21,7 @@ export type ImportFileInventory = {
 const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 const parentDirectory = (path: string): string => {
   const separator = path.lastIndexOf('/');
-  return separator < 0 ? '' : path.slice(0, separator);
+  return separator === -1 ? '' : path.slice(0, separator);
 };
 const extension = (path: string): string => basename(path).split('.').pop()?.toLowerCase() ?? '';
 const isNotFound = (error: unknown): boolean => {

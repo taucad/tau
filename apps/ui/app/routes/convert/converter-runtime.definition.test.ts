@@ -5,12 +5,9 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { createConverterSource } from '@taucad/converter/contracts';
-import {
-  converterExportFormats,
-  converterImportFormats,
-  converterRuntime,
-  type ConverterRuntimeClient,
-} from '#routes/convert/converter-runtime.definition.js';
+import { base64ToUint8Array } from 'uint8array-extras';
+import { converterExportFormats, converterImportFormats, converterRuntime } from '@taucad/converter/runtime';
+import type { ConverterRuntimeClient } from '@taucad/converter/runtime';
 import cubeGlbBase64 from '#routes/_index/assets/gear-8.glb?base64';
 
 vi.mock('draco3dgltf', () => ({
@@ -51,7 +48,7 @@ describe('converter runtime definition', () => {
     client = createRuntimeClient<typeof converterRuntime>({
       transport: inProcessTransport({ runtime: converterRuntime, fileSystem: fromMemoryFs() }),
     });
-    const bytes = Uint8Array.from(atob(cubeGlbBase64), (character) => character.charCodeAt(0));
+    const bytes = base64ToUint8Array(cubeGlbBase64);
     const outcome = await client.render({ source: { files: { 'cube.glb': bytes }, entry: 'cube.glb' } });
     expect(outcome.superseded).toBe(false);
     expect(outcome.superseded || outcome.geometry.success).toBe(true);

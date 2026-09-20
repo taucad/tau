@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// oxlint-disable-next-line import/no-unassigned-import -- extends Vitest matchers for DOM assertions.
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

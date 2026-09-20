@@ -55,11 +55,7 @@ import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { createConverterSource } from '@taucad/converter/contracts';
 import type { ConverterSource } from '@taucad/converter/contracts';
-import type {
-  ConverterExportFormat,
-  ConverterImportFormat,
-  ConverterRuntimeClient,
-} from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterExportFormat, ConverterImportFormat, ConverterRuntimeClient } from '@taucad/converter/runtime';
 import { createConverterClient } from '#runtime/converter-client-options.js';
 import { beginConverterOperation, createActiveConverterClient } from '#routes/convert/converter-client-lifecycle.js';
 

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// oxlint-disable-next-line import/no-unassigned-import -- extends Vitest matchers for DOM assertions.
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -18,7 +19,7 @@ const routeMocks = vi.hoisted(() => ({
 
 vi.mock('react-router', () => ({
   Link: ({ children, to, ...properties }: React.ComponentProps<'a'> & { readonly to: string }) => (
-    <a {...properties} href={to}>
+    <a {...properties} href={to} rel='noreferrer'>
       {children}
     </a>
   ),
@@ -32,7 +33,7 @@ vi.mock('@better-auth-ui/react', () => ({
 }));
 
 vi.mock('#components/auth/auth-email-draft.js', () => ({
-  AuthEmailDraftProvider: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  AuthEmailDraftProvider: ({ children }: React.PropsWithChildren): React.ReactNode => children,
 }));
 
 vi.mock('#components/auth/auth.js', () => ({
@@ -49,9 +50,9 @@ vi.mock('#components/auth/verify-email.js', async (importOriginal) => ({
 }));
 
 vi.mock('@taucad/ui/components/tooltip', () => ({
-  Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  Tooltip: ({ children }: React.PropsWithChildren): React.ReactNode => children,
   TooltipContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  TooltipTrigger: ({ children }: React.PropsWithChildren): React.ReactNode => children,
 }));
 
 vi.mock('#components/ui/utils/client-only.js', () => ({

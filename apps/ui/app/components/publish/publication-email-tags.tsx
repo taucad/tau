@@ -32,6 +32,7 @@ export type PublicationEmailTagsFieldProps = {
   readonly label: string;
   readonly emails: string[];
   readonly onEmailsChange: (emails: string[]) => void;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop.
   readonly disabled?: boolean;
   readonly placeholder?: string;
   readonly className?: string;

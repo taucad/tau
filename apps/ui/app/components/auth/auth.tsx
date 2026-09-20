@@ -42,13 +42,9 @@ const authViewComponents: Partial<Record<AuthView, ComponentType<AuthProps>>> = 
  *   2. Plugin fallbacks (`plugin.fallbackViews.auth.signIn`) when password auth is off.
  *   3. Built-in views.
  *
- * @param path - Route path used to resolve an auth view when `view` is not provided
- * @param socialLayout - Social layout to apply to sign-in/sign-up/magic-link views
- * @param socialPosition - Position for social buttons (`"top"` or `"bottom"`)
- * @param view - Explicit auth view to render (e.g., `"signIn"`, `"signUp"`)
  * @returns The React element for the resolved authentication view
  */
-export function Auth({ className, path, socialLayout, socialPosition, view }: AuthProps) {
+export function Auth({ className, path, socialLayout, socialPosition, view }: AuthProps): React.ReactNode {
   const { basePaths, emailAndPassword, plugins, viewPaths, navigate } = useAuth();
 
   if (!view && !path) {
@@ -61,7 +57,7 @@ export function Auth({ className, path, socialLayout, socialPosition, view }: Au
   // forgotPassword, resetPassword) have no meaning. Redirect them to signIn,
   // where a plugin's `fallbackViews.auth.signIn` (e.g. magic link) takes
   // over as the primary entry point.
-  const shouldRedirectToSignIn = !emailAndPassword?.enabled && authView && passwordOnlyViewsSet.has(authView);
+  const shouldRedirectToSignIn = !emailAndPassword.enabled && authView && passwordOnlyViewsSet.has(authView);
 
   useEffect(() => {
     if (shouldRedirectToSignIn) {
@@ -102,7 +98,7 @@ export function Auth({ className, path, socialLayout, socialPosition, view }: Au
   // 2. Plugin fallbacks — only when the built-in `signIn` isn't viable
   //    (password auth is off). Used by `magicLinkPlugin` to render the
   //    magic-link form as the primary passwordless sign-in surface.
-  if (authView === 'signIn' && !emailAndPassword?.enabled) {
+  if (authView === 'signIn' && !emailAndPassword.enabled) {
     let Fallback: ComponentType<AuthProps> | undefined;
     for (const plugin of plugins) {
       const candidate = plugin.fallbackViews?.auth?.signIn;

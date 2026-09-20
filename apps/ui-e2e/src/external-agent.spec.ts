@@ -122,9 +122,10 @@ describe('external agent (AV-5)', () => {
           )
           .toBe(1);
       } catch (error) {
+        const recorded = await durableEvents();
         console.error(
           '[AV-5 live] durable events:',
-          (await durableEvents()).slice(-20).map((event) => ({
+          recorded.slice(-20).map((event) => ({
             type: event.type,
             state: event.state,
             phase: event.phase,

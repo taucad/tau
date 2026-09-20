@@ -171,7 +171,8 @@ describe.runIf(gitOnPath)('revisionsCommand', () => {
     await runCommand(command, { rawArgs: ['tag', 'v1', '--project', project] });
     const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
     try {
-      expect((await revisions.log())[0]?.tags).toContain('v1');
+      const rows = await revisions.log();
+      expect(rows[0]?.tags).toContain('v1');
     } finally {
       await revisions.close();
     }

@@ -62,7 +62,7 @@ describe('getRetryDelay', () => {
     });
 
     it('honours random() = just-under-1 (jitter approaches 25 %)', () => {
-      const result = getRetryDelay(2, { random: () => 0.999_999 });
+      const result = getRetryDelay(2, { random: () => 0.999999 });
       expect(result).toBeGreaterThan(1249);
       expect(result).toBeLessThan(1250);
     });

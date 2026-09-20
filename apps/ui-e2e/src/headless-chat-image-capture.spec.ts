@@ -700,7 +700,7 @@ test('capture edges retain the shared 800-pixel reference through the attachment
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   await dismissCookies();
   await waitForRenderedGeometry('gltf');
-  await setViewerCamera({ position: [-0.000_02, 0, 0.3], target: [-0.000_02, 0, 0.002], fov: 35, zoom: 1 });
+  await setViewerCamera({ position: [-0.00002, 0, 0.3], target: [-0.00002, 0, 0.002], fov: 35, zoom: 1 });
 
   await withPresentationBridge('setPresentation', { surfaces: true, lines: true });
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));

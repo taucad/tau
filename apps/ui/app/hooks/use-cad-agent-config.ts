@@ -43,6 +43,7 @@ const pendingAvailability: BrowserAgentHostProjectAvailability = { status: 'pend
 /** `ResolvedModel.provider` falls back to this sentinel until the catalog loads. */
 const isModelResolved = (providerKind: string): boolean => providerKind !== unknownIconId;
 
+/* eslint-disable @typescript-eslint/naming-convention -- the keys are the host's own capability-probe codes. */
 /** Capability-probe codes rendered as the reason the user reads. */
 const capabilityReasons = {
   WORKER_UNAVAILABLE: 'This browser cannot start the worker Tau runs the agent in.',
@@ -51,6 +52,7 @@ const capabilityReasons = {
   STORAGE_NOT_WRITABLE: 'This project’s storage cannot hold a durable agent log.',
   SYNC_ACCESS_HANDLE_UNAVAILABLE: 'This browser cannot append to the agent log in this project’s storage.',
 } as const;
+/* eslint-enable @typescript-eslint/naming-convention -- back to Tau-authored names. */
 
 /** Upper bound on waiting for a capability probe before a dispatch refuses. Milliseconds. */
 const availabilityWaitTimeout = 20_000;

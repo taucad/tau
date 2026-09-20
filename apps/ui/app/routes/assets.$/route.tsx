@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
   // Throwing a `Response` is the React Router idiom for short-circuiting a
   // route with an HTTP status — the framework rethrows it with the correct
   // headers/body.
-  // oxlint-disable-next-line typescript-eslint(only-throw-error) -- React Router loader Response-throw idiom
+  // oxlint-disable-next-line typescript/only-throw-error -- React Router loader Response-throw idiom
   throw new Response(`Asset not found: ${url.pathname}`, {
     status: 404,
     statusText: 'Not Found',
@@ -43,6 +43,6 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<Response>
  * Component is unreachable — `loader` always throws — but React Router still
  * requires a default export when the route is registered.
  */
-// oxlint-disable-next-line typescript-eslint(no-restricted-types) -- intentional null return for unreachable component
+// oxlint-disable-next-line typescript/no-restricted-types -- intentional null return for unreachable component
 const AssetsNotFound = (): null => null;
 export default AssetsNotFound;

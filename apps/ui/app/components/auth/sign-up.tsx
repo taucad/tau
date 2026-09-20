@@ -20,6 +20,7 @@ import { AdditionalField } from '#components/auth/additional-field.js';
 import { ProviderButtons } from '#components/auth/provider-buttons.js';
 import type { SocialLayout } from '#components/auth/provider-buttons.js';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
+import { authErrorMessage } from '#utils/auth-error.utils.js';
 
 export type SignUpProps = {
   className?: string;
@@ -36,12 +37,9 @@ export type SignUpProps = {
  * - On failure, displays error toasts
  * - Manages a pending state while the request is in-flight
  *
- * @param className - Additional CSS classes applied to the outer container
- * @param socialLayout - Social layout to apply to the component
- * @param socialPosition - Social position to apply to the component
  * @returns The sign-up form React element.
  */
-export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: SignUpProps) {
+export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: SignUpProps): React.JSX.Element {
   const {
     additionalFields,
     authClient,
@@ -68,11 +66,11 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
     onError: (error) => {
       setPassword('');
       setConfirmPassword('');
-      toast.error(error.error?.message ?? error.message);
+      toast.error(authErrorMessage(error));
       resetFetchOptions();
     },
     onSuccess: () => {
-      if (emailAndPassword?.requireEmailVerification) {
+      if (emailAndPassword.requireEmailVerification) {
         toast.success(localization.auth.verifyYourEmail);
         navigate({ to: `${basePaths.auth}/${viewPaths.auth.signIn}` });
       } else {
@@ -101,14 +99,14 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
     confirmPassword?: string;
   }>({});
 
-  const handleSubmit = async (e: SyntheticEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-    const formData = new FormData(e.currentTarget);
+    const formData = new FormData(event.currentTarget);
     // `emailAndPassword.name === false` hides the name field and submits "".
     const name = (formData.get('name') as string | undefined) ?? '';
 
-    if (emailAndPassword?.confirmPassword && password !== confirmPassword) {
+    if (emailAndPassword.confirmPassword && password !== confirmPassword) {
       toast.error(localization.auth.passwordsDoNotMatch);
       setPassword('');
       setConfirmPassword('');
@@ -148,7 +146,7 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
     });
   };
 
-  const showSeparator = emailAndPassword?.enabled && socialProviders && socialProviders.length > 0;
+  const showSeparator = emailAndPassword.enabled && socialProviders && socialProviders.length > 0;
 
   return (
     <Card className={cn('w-full max-w-sm', className)}>
@@ -170,7 +168,7 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
             </>
           )}
 
-          {emailAndPassword?.enabled && (
+          {emailAndPassword.enabled && (
             <form onSubmit={handleSubmit}>
               <FieldGroup>
                 {emailAndPassword.name !== false && (
@@ -191,12 +189,12 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                           name: undefined,
                         }));
                       }}
-                      onInvalid={(e) => {
-                        e.preventDefault();
+                      onInvalid={(event) => {
+                        event.preventDefault();
 
                         setFieldErrors((previous) => ({
                           ...previous,
-                          name: (e.target as HTMLInputElement).validationMessage,
+                          name: (event.target as HTMLInputElement).validationMessage,
                         }));
                       }}
                       aria-invalid={Boolean(fieldErrors.name)}
@@ -218,20 +216,20 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                     placeholder={localization.auth.emailPlaceholder}
                     required
                     disabled={isPending}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setEmailDraft(e.target.value);
+                    onChange={(event) => {
+                      setEmail(event.target.value);
+                      setEmailDraft(event.target.value);
                       setFieldErrors((previous) => ({
                         ...previous,
                         email: undefined,
                       }));
                     }}
-                    onInvalid={(e) => {
-                      e.preventDefault();
+                    onInvalid={(event) => {
+                      event.preventDefault();
 
                       setFieldErrors((previous) => ({
                         ...previous,
-                        email: (e.target as HTMLInputElement).validationMessage,
+                        email: (event.target as HTMLInputElement).validationMessage,
                       }));
                     }}
                     aria-invalid={Boolean(fieldErrors.email)}
@@ -257,8 +255,8 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                       type={isPasswordVisible ? 'text' : 'password'}
                       autoComplete='new-password'
                       value={password}
-                      onChange={(e) => {
-                        setPassword(e.target.value);
+                      onChange={(event) => {
+                        setPassword(event.target.value);
                         setFieldErrors((previous) => ({
                           ...previous,
                           password: undefined,
@@ -266,15 +264,15 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                       }}
                       placeholder={localization.auth.passwordPlaceholder}
                       required
-                      minLength={emailAndPassword?.minPasswordLength}
-                      maxLength={emailAndPassword?.maxPasswordLength}
+                      minLength={emailAndPassword.minPasswordLength}
+                      maxLength={emailAndPassword.maxPasswordLength}
                       disabled={isPending}
-                      onInvalid={(e) => {
-                        e.preventDefault();
+                      onInvalid={(event) => {
+                        event.preventDefault();
 
                         setFieldErrors((previous) => ({
                           ...previous,
-                          password: (e.target as HTMLInputElement).validationMessage,
+                          password: (event.target as HTMLInputElement).validationMessage,
                         }));
                       }}
                       aria-invalid={Boolean(fieldErrors.password)}
@@ -296,7 +294,7 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                   <FieldError>{fieldErrors.password}</FieldError>
                 </Field>
 
-                {emailAndPassword?.confirmPassword && (
+                {emailAndPassword.confirmPassword && (
                   <Field data-invalid={Boolean(fieldErrors.confirmPassword)}>
                     <Label htmlFor='confirmPassword'>{localization.auth.confirmPassword}</Label>
 
@@ -307,8 +305,8 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                         type={isConfirmPasswordVisible ? 'text' : 'password'}
                         autoComplete='new-password'
                         value={confirmPassword}
-                        onChange={(e) => {
-                          setConfirmPassword(e.target.value);
+                        onChange={(event) => {
+                          setConfirmPassword(event.target.value);
 
                           setFieldErrors((previous) => ({
                             ...previous,
@@ -317,15 +315,15 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                         }}
                         placeholder={localization.auth.confirmPasswordPlaceholder}
                         required
-                        minLength={emailAndPassword?.minPasswordLength}
-                        maxLength={emailAndPassword?.maxPasswordLength}
+                        minLength={emailAndPassword.minPasswordLength}
+                        maxLength={emailAndPassword.maxPasswordLength}
                         disabled={isPending}
-                        onInvalid={(e) => {
-                          e.preventDefault();
+                        onInvalid={(event) => {
+                          event.preventDefault();
 
                           setFieldErrors((previous) => ({
                             ...previous,
-                            confirmPassword: (e.target as HTMLInputElement).validationMessage,
+                            confirmPassword: (event.target as HTMLInputElement).validationMessage,
                           }));
                         }}
                         aria-invalid={Boolean(fieldErrors.confirmPassword)}
@@ -392,7 +390,7 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
           )}
         </div>
 
-        {emailAndPassword?.enabled && (
+        {emailAndPassword.enabled && (
           <div className='mt-4 flex w-full flex-col items-center gap-3'>
             <FieldDescription className='text-center'>
               {localization.auth.alreadyHaveAnAccount}{' '}

@@ -54,12 +54,15 @@ export type OpenrscadUsdzParityResult = {
   readonly serverLog?: string;
 };
 
-declare module 'vitest/browser' {
-  // oxlint-disable-next-line typescript/consistent-type-definitions -- Module augmentation must merge Vitest's interface.
-  interface BrowserCommands {
-    runOpenrscadUsdzParity(): Promise<OpenrscadUsdzParityResult>;
-  }
-}
+/**
+ * The commands this suite registers, named so the spec can bind them onto
+ * Vitest's `server.commands`. `BrowserCommands` is declared inside the `vitest`
+ * copy `@vitest/browser-playwright` resolves rather than the one this package
+ * does, so a module augmentation never merges; the spec intersects instead.
+ */
+export type OpenrscadBrowserCommands = {
+  runOpenrscadUsdzParity(): Promise<OpenrscadUsdzParityResult>;
+};
 
 /**
  * Node-only reachability in a browser bundle.
@@ -169,6 +172,7 @@ export const runOpenrscadUsdzParity: BrowserCommand<never[], OpenrscadUsdzParity
 
   let report: OpenrscadBrowserReport;
   try {
+    await page.addInitScript((text) => Reflect.set(globalThis, '__openrscadBrowserSource', text), source);
     const response = await page.goto(openrscadBaseURL, { waitUntil: 'domcontentloaded' });
     if (!response) {
       throw new Error('The OpenRSCAD preview navigation did not return a document response.');
@@ -190,7 +194,7 @@ export const runOpenrscadUsdzParity: BrowserCommand<never[], OpenrscadUsdzParity
     if (!exported.success) {
       throw new Error(`Native usdz export failed: ${exported.issues.map((issue) => issue.message).join('; ')}`);
     }
-    const nativeBytes = exported.data[0].bytes;
+    const nativeBytes = exported.data[0]!.bytes;
     await writeFile(join(workspace, 'native.usdz'), nativeBytes);
     const browserBytes = report.usdzBase64 === undefined ? undefined : Buffer.from(report.usdzBase64, 'base64');
     if (browserBytes) {
@@ -209,7 +213,7 @@ export const runOpenrscadUsdzParity: BrowserCommand<never[], OpenrscadUsdzParity
         if (!glb.success) {
           throw new Error(`${name} → glb failed: ${glb.issues.map((issue) => issue.message).join('; ')}`);
         }
-        return summarize(glb.data[0].bytes);
+        return summarize(glb.data[0]!.bytes);
       };
       const nativeBackend = await nativeTracker.backend();
 

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- VM paths and module specifiers are object keys here. */
 import { describe, expect, it, vi } from 'vitest';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from 'geospec/engine';
 import { geoSpecEngineImplementation } from '#register.js';

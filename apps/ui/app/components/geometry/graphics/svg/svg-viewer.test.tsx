@@ -221,8 +221,7 @@ describe('SvgViewer', () => {
 
     const cameraViewEvent = mocks.graphicsSend.mock.calls
       .map(([payload]) => payload)
-      .filter((payload) => payload.type === 'cameraViewChanged')
-      .at(-1);
+      .findLast((payload) => payload.type === 'cameraViewChanged');
     expect(cameraViewEvent?.verticalSpan).toBe(9);
   });
 

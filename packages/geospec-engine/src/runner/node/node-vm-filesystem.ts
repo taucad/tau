@@ -69,7 +69,7 @@ const nearestExistingPath = async (target: string): Promise<string> => {
       await lstat(candidate);
       return candidate;
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
+      const { code } = error as NodeJS.ErrnoException;
       if (code !== 'ENOENT' && code !== 'ENOTDIR') {
         throw error;
       }
@@ -112,7 +112,7 @@ export const createNodeVmFileSystem = (root: string): VmFileSystem => {
         await readFile(await at(path));
         return true;
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
+        const { code } = error as NodeJS.ErrnoException;
         if (code === 'ENOENT' || code === 'ENOTDIR') {
           return false;
         }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- `isWebGPUBackend` is Three's own renderer flag. */
 import { describe, expect, it } from 'vitest';
 import { resolveShaderFixtureBackend } from '#routes/[__e2e].shader-fixture/route.js';
 

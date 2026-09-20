@@ -1,6 +1,3 @@
-// oxlint-disable-next-line import/no-unassigned-import -- Monaco registers the installed Python language by side effect.
-import 'monaco-editor/esm/vs/basic-languages/python/python.contribution.js';
-
 import { codeLanguages } from '@taucad/types/constants';
 import type * as Monaco from 'monaco-editor';
 import type { ActivationResult, LanguageContribution } from '#lib/monaco-language-registry.js';

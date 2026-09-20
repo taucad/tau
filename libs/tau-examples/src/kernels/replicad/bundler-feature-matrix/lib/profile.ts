@@ -1,1 +1,1 @@
-export const profileScale: number = 1;
+export const profileScale = 1;

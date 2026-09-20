@@ -22,12 +22,13 @@ import { Spinner } from '#components/ui/spinner.js';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 
 export type DeleteApiKeyDialogProps = {
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors Radix Dialog's controlled `open` prop API.
   open: boolean;
   onOpenChange: (open: boolean) => void;
   apiKey: ListedApiKey;
 };
 
-export function DeleteApiKeyDialog({ open, onOpenChange, apiKey }: DeleteApiKeyDialogProps) {
+export function DeleteApiKeyDialog({ open, onOpenChange, apiKey }: DeleteApiKeyDialogProps): React.JSX.Element {
   const { authClient, localization } = useAuth();
   const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin);
   const preview = `${apiKey.start}${'*'.repeat(16)}`;

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- GeoSpec file paths are object keys here. */
 import { describe, expect, it } from 'vitest';
 import type {
   GeoSpecPoolHostMessage,

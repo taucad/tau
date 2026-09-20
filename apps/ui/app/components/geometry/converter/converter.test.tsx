@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import type * as FileUtilsModule from '@taucad/utils/file';
-import type { ConverterExportFormat } from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterExportFormat } from '@taucad/converter/runtime';
 import { isConfiguredConverterFormat } from '#components/geometry/converter/converter-utils.js';
 
 /* oxlint-disable react-js/boolean-prop-naming -- mocks the controlled Checkbox prop API. */

@@ -21,6 +21,7 @@ import { Label } from '@taucad/ui/components/label';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '#components/ui/spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { authErrorMessage } from '#utils/auth-error.utils.js';
 
 export type ChangePasswordProps = {
   className?: string;
@@ -35,7 +36,7 @@ export type ChangePasswordProps = {
  *
  * @returns A JSX element containing the change-password or set-password card
  */
-export function ChangePassword({ className }: ChangePasswordProps) {
+export function ChangePassword({ className }: ChangePasswordProps): React.JSX.Element {
   const { authClient, emailAndPassword, localization } = useAuth();
   const { data: session } = useSession(authClient);
   const { data: accounts, isPending: isAccountsPending } = useListAccounts(authClient);
@@ -116,7 +117,7 @@ function ChangePasswordForm({
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      toast.error(error.error?.message ?? error.message);
+      toast.error(authErrorMessage(error));
     },
     onSuccess: () => {
       setCurrentPassword('');
@@ -135,8 +136,8 @@ function ChangePasswordForm({
     confirmPassword?: string;
   }>({});
 
-  const handleSubmit = (e: SyntheticEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleSubmit = (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
     if (emailAndPassword.confirmPassword && newPassword !== confirmPassword) {
       setCurrentPassword('');
@@ -171,8 +172,8 @@ function ChangePasswordForm({
                   autoComplete='current-password'
                   placeholder={localization.settings.currentPasswordPlaceholder}
                   value={currentPassword}
-                  onChange={(e) => {
-                    setCurrentPassword(e.target.value);
+                  onChange={(event) => {
+                    setCurrentPassword(event.target.value);
 
                     setFieldErrors((previous) => ({
                       ...previous,
@@ -181,12 +182,12 @@ function ChangePasswordForm({
                   }}
                   disabled={isPending}
                   required
-                  onInvalid={(e) => {
-                    e.preventDefault();
+                  onInvalid={(event) => {
+                    event.preventDefault();
 
                     setFieldErrors((previous) => ({
                       ...previous,
-                      currentPassword: (e.target as HTMLInputElement).validationMessage,
+                      currentPassword: (event.target as HTMLInputElement).validationMessage,
                     }));
                   }}
                   aria-invalid={Boolean(fieldErrors.currentPassword)}
@@ -212,8 +213,8 @@ function ChangePasswordForm({
                     autoComplete='new-password'
                     placeholder={localization.auth.newPasswordPlaceholder}
                     value={newPassword}
-                    onChange={(e) => {
-                      setNewPassword(e.target.value);
+                    onChange={(event) => {
+                      setNewPassword(event.target.value);
 
                       setFieldErrors((previous) => ({
                         ...previous,
@@ -224,11 +225,11 @@ function ChangePasswordForm({
                     maxLength={emailAndPassword.maxPasswordLength}
                     disabled={isPending}
                     required
-                    onInvalid={(e) => {
-                      e.preventDefault();
+                    onInvalid={(event) => {
+                      event.preventDefault();
                       setFieldErrors((previous) => ({
                         ...previous,
-                        newPassword: (e.target as HTMLInputElement).validationMessage,
+                        newPassword: (event.target as HTMLInputElement).validationMessage,
                       }));
                     }}
                     aria-invalid={Boolean(fieldErrors.newPassword)}
@@ -271,8 +272,8 @@ function ChangePasswordForm({
                       autoComplete='new-password'
                       placeholder={localization.auth.confirmPasswordPlaceholder}
                       value={confirmPassword}
-                      onChange={(e) => {
-                        setConfirmPassword(e.target.value);
+                      onChange={(event) => {
+                        setConfirmPassword(event.target.value);
 
                         setFieldErrors((previous) => ({
                           ...previous,
@@ -283,12 +284,12 @@ function ChangePasswordForm({
                       maxLength={emailAndPassword.maxPasswordLength}
                       disabled={isPending}
                       required
-                      onInvalid={(e) => {
-                        e.preventDefault();
+                      onInvalid={(event) => {
+                        event.preventDefault();
 
                         setFieldErrors((previous) => ({
                           ...previous,
-                          confirmPassword: (e.target as HTMLInputElement).validationMessage,
+                          confirmPassword: (event.target as HTMLInputElement).validationMessage,
                         }));
                       }}
                       aria-invalid={Boolean(fieldErrors.confirmPassword)}

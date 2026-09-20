@@ -1,4 +1,4 @@
-import type { ConverterRuntimeClient } from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterRuntimeClient } from '@taucad/converter/runtime';
 
 export type ConverterOperationGeneration = { current: number };
 

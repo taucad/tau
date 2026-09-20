@@ -176,7 +176,9 @@ export function WorkspaceSelector({
                 <button
                   type='button'
                   className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
-                  onClick={() => void recover()}
+                  onClick={() => {
+                    void recover();
+                  }}
                 >
                   {recovery.kind === 'grant' ? <ShieldAlert /> : <Unplug />}
                   {recoveryLabel}
@@ -187,7 +189,9 @@ export function WorkspaceSelector({
             <button
               type='button'
               className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
-              onClick={() => void connect()}
+              onClick={() => {
+                void connect();
+              }}
             >
               <Plus />
               Connect a folder…

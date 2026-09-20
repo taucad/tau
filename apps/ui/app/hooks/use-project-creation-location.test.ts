@@ -60,7 +60,7 @@ vi.mock('#constants/browser.constants.js', () => ({
         id: options?.id,
         mode: options?.mode ?? 'readwrite',
       });
-      return { backend: 'webaccess' as const, handle };
+      return { backend: 'webaccess', handle };
     },
   }),
   webAccessDirectoryPicker: () =>

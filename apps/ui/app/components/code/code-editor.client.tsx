@@ -314,7 +314,14 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
           <Button
             type='button'
             onClick={() => {
-              void configureMonaco().catch(() => undefined);
+              // async-iife: bootstrap -- a click handler cannot await; the snapshot carries the outcome.
+              void (async () => {
+                try {
+                  await configureMonaco();
+                } catch {
+                  // `configureMonaco` records the failure on the configuration snapshot.
+                }
+              })();
             }}
           >
             <RefreshCw />

@@ -82,7 +82,13 @@ const TimeoutRuntimeHarness = (): ReactElement => {
           {errorMessage}
         </p>
       ) : null}
-      <button type='button' disabled={isRunning} onClick={() => void runBlockingRender()}>
+      <button
+        type='button'
+        disabled={isRunning}
+        onClick={() => {
+          void runBlockingRender();
+        }}
+      >
         Run blocking render
       </button>
     </section>

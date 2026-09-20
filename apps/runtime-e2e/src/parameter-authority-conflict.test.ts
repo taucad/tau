@@ -89,7 +89,17 @@ it('admits one writer across two actual Node transport clients and refreshes the
           fingerprint: `writer:${index}`,
           pressure: 'final',
           expected: snapshots[index]!.context.current!.identity,
-          operation: { kind: 'replace-group-values', group: 'default', values: { width: 20 + index } },
+          // Only `base` decides a conflict: the loser re-plans against the winner's bytes and is refused
+          // because the field it edited from 10 has moved.
+          base: { pointer: '/width', value: 10 },
+          operation: {
+            kind: 'native-value',
+            group: 'default',
+            parameterId: snapshots[index]!.context.current!.manifest.bindings['/width']!.parameter.value,
+            resource: snapshots[index]!.context.current!.manifest.bindings['/width']!.schema.resource,
+            pointer: '/width',
+            value: 20 + index,
+          },
         }),
       ),
     );

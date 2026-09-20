@@ -100,26 +100,25 @@ const run = async (input, supplemental, observation = 'passed') => {
     Uint8Array,
     crypto: webcrypto,
     canonicalize: (bytes) => bytes,
-    createGeoSpecAssertionClient: () => ({
-      expectGeo: () => ({
-        toHaveVolume: () => {
-          const report = {
-            canonicalClaim: encode(claim),
-            canonicalPlan: encode(plan),
-            canonicalResult: encode(canonicalResult),
-            status,
-            diagnostics: [],
-          };
-          if (publicFailure === 'structured') {
-            throw new InertGeoSpecAssertionError(report);
-          }
-          if (publicFailure === 'unexpected') {
-            throw new Error('Ordinary unrelated host error.');
-          }
-          return report;
-        },
-      }),
-    }),
+    createGeoSpecAssertionClient: () => {
+      const report = () => {
+        const captured = {
+          canonicalClaim: encode(claim),
+          canonicalPlan: encode(plan),
+          canonicalResult: encode(canonicalResult),
+          status,
+          diagnostics: [],
+        };
+        if (publicFailure === 'structured') {
+          throw new InertGeoSpecAssertionError(captured);
+        }
+        if (publicFailure === 'unexpected') {
+          throw new Error('Ordinary unrelated host error.');
+        }
+        return captured;
+      };
+      return { expectGeo: () => ({ toHaveVolume: report }), query: report };
+    },
     fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) }),
   });
   vm.runInContext(code, context);
@@ -177,12 +176,12 @@ void test('should preserve default complete-golden authority and exact supplied 
   assert.equal(nullableDefault.runtimeFailure.phase, 'expected-authority');
 });
 
-void test('should load explicit nullable supplemental authority without replacing it with candidate bytes', async () => {
+const loadRow = async (input) => {
   const folder = await mkdtemp(join(tmpdir(), 'geospec-browser-authority-'));
   try {
     const asset = Buffer.from('ordinary inert host asset');
     await writeFile(join(folder, 'asset'), asset);
-    const inputRow = structuredClone(row);
+    const inputRow = structuredClone(input);
     inputRow.ingest.primary = { source: 'asset', byteLength: asset.length, sha256: hash(asset), url: '' };
     const metadata = {
       schemaVersion: 1,
@@ -193,13 +192,17 @@ void test('should load explicit nullable supplemental authority without replacin
     const bytes = JSON.stringify(metadata);
     const path = join(folder, 'inputs.json');
     await writeFile(path, bytes);
-    const loaded = await loadSupplementalBrowserInputs(path, hash(bytes));
-    assert.deepEqual(loaded.metadata.rows[0].expected, expected);
-    assert.equal(loaded.metadata.expectedRowCount, 1);
-    assert.equal(loaded.assets.size, 1);
+    return await loadSupplementalBrowserInputs(path, hash(bytes));
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
+};
+
+void test('should load explicit nullable supplemental authority without replacing it with candidate bytes', async () => {
+  const loaded = await loadRow(row);
+  assert.deepEqual(loaded.metadata.rows[0].expected, expected);
+  assert.equal(loaded.metadata.expectedRowCount, 1);
+  assert.equal(loaded.assets.size, 1);
 });
 
 const failedRow = {
@@ -251,4 +254,102 @@ void test('should reject an unrelated error class despite independently expected
   assert.equal(captured.runtimeFailure.message, `M2 public assertion returned no report for ${failedRow.id}.`);
   assert.equal(captured.cleanup.released, true);
   assert.equal(captured.cleanup.closeCalled, true);
+});
+
+const queryRow = {
+  ...row,
+  invocation: { ...row.invocation, capability: 'analyzeBrep', arguments: [], payload: null },
+};
+
+for (const status of ['passed', 'failed']) {
+  void test(`should accept an independently ${status} positive query report without an assertion error`, async () => {
+    const input = { ...queryRow, expected: { ...expected, status } };
+    const loaded = await loadRow(input);
+    assert.deepEqual(loaded.metadata.rows[0].expected, input.expected);
+    const captured = await run(input, true, status);
+    assert.equal(captured.passed, true);
+    assert.equal(captured.comparison.status, true);
+    assert.equal(captured.comparison.errorClass, true);
+    assert.equal(captured.public.error, null);
+    assert.equal(captured.direct.canonicalResultUtf8, result(status));
+    assert.equal(captured.public.canonicalResultUtf8, result(status));
+    assert.equal(captured.comparison.directFrozen.canonicalResultUtf8, null);
+    assert.equal(captured.comparison.publicDirect.canonicalResultUtf8, true);
+    assert.equal(captured.cleanup.released, true);
+    assert.equal(captured.cleanup.closeCalled, true);
+  });
+}
+
+const failedQuery = { ...queryRow, expected: { ...expected, status: 'failed' } };
+
+void test('should reject the wrong query verdict while preserving both reports', async () => {
+  const captured = await run(failedQuery, true, 'passed');
+  assert.equal(captured.passed, false);
+  assert.equal(captured.comparison.status, false);
+  assert.equal(captured.comparison.errorClass, true);
+  assert.equal(captured.direct.canonicalResultUtf8, result('passed'));
+  assert.equal(captured.public.canonicalResultUtf8, result('passed'));
+  assert.equal(captured.cleanup.released, true);
+  assert.equal(captured.cleanup.closeCalled, true);
+});
+
+void test('should reject an assertion error for a normally returned failed query report', async () => {
+  const captured = await run(failedQuery, true, { status: 'failed', publicFailure: 'structured' });
+  assert.equal(captured.passed, false);
+  assert.equal(captured.comparison.status, true);
+  assert.equal(captured.comparison.errorClass, false);
+  assert.equal(captured.public.error.name, 'GeoSpecAssertionError');
+  assert.equal(captured.public.canonicalResultUtf8, result('failed'));
+  assert.equal(captured.cleanup.released, true);
+  assert.equal(captured.cleanup.closeCalled, true);
+});
+
+void test('should keep nullable failed authority restricted to the matching public error contract', async () => {
+  const inputs = [
+    { ...row, expected: failedQuery.expected },
+    { ...failedQuery, invocation: { ...failedQuery.invocation, polarity: 'negative' } },
+    { ...failedQuery, expected: failedRow.expected },
+  ];
+  await Promise.all(
+    inputs.map(async (input) => {
+      await assert.rejects(loadRow(input), {
+        name: 'Error',
+        message: `Supplemental browser row ${input.id} has unavailable authority without a known verdict and matching assertion-error expectation.`,
+      });
+      const captured = await run(input, true, 'failed');
+      assert.equal(captured.passed, false);
+      assert.equal(captured.runtimeFailure.phase, 'expected-authority');
+      assert.equal(captured.runtimeFailure.name, 'Error');
+      assert.equal(
+        captured.runtimeFailure.message,
+        `M2 unavailable authority requires a supplemental independently known verdict and matching error expectation: ${input.id}.`,
+      );
+    }),
+  );
+  const matcher = await run(failedRow, true, 'failed');
+  assert.equal(matcher.passed, false);
+  assert.equal(matcher.comparison.status, true);
+  assert.equal(matcher.comparison.errorClass, false);
+  assert.equal(matcher.public.canonicalResultUtf8, result('failed'));
+});
+
+void test('should accept failed query warmups on both routes without weakening matcher warmups', async () => {
+  const input = { ...failedQuery, warmup: { expectedStatus: 'failed', invocation: queryRow.invocation } };
+  const captured = await run(input, true, 'failed');
+  assert.equal(captured.passed, true);
+  for (const route of [captured.warmup.direct, captured.warmup.public]) {
+    assert.equal(route.succeeded, true);
+    assert.equal(route.error, null);
+    assert.equal(route.report.canonicalResultUtf8, result('failed'));
+  }
+  const matcher = await run(
+    { ...failedRow, warmup: { expectedStatus: 'failed', invocation: row.invocation } },
+    true,
+    'failed',
+  );
+  assert.equal(matcher.passed, false);
+  assert.equal(matcher.warmup.direct.succeeded, false);
+  assert.equal(matcher.runtimeFailure.phase, 'warmup-direct');
+  assert.equal(matcher.cleanup.released, true);
+  assert.equal(matcher.cleanup.closeCalled, true);
 });

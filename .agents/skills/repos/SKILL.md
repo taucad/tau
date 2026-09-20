@@ -130,7 +130,7 @@ For these maintained sources, read the Tau-side maintenance owner before enterin
 | OpenCascade.js / libcascade | [Bindings, builds and release evidence](../../../docs/architecture/dependency-maintenance/opencascade-js.md)    |
 | Replicad                    | [Geometry and consumer contracts](../../../docs/architecture/dependency-maintenance/replicad.md)                |
 | libassimp                   | [Native/WASM and package maintenance](../../../docs/architecture/dependency-maintenance/libassimp.md)           |
-| Tau Cloud                   | [Deployment, storage and environment ownership](../../../docs/architecture/dependency-maintenance/tau-cloud.md) |
+| Tau Cloud                   | [Checkout route](../../../docs/architecture/dependency-maintenance/tau-cloud.md); operations in `docs/handbooks/cloud/`                     |
 
 1. Run `pnpm repos list --json` and search the merged view.
 2. Clone a tracked source with `pnpm repos clone <name>`.

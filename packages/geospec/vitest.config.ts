@@ -9,7 +9,6 @@ export const substrateCoverageSourcePolicy = {
     'src/**/__evidence-snapshots__/**',
     'src/**/__fixtures__/**',
     'src/**/*.test-support.ts',
-    'src/**/types.ts',
     'src/**/runner-types.ts',
     'src/runner/pool/pool-messages.ts',
   ],

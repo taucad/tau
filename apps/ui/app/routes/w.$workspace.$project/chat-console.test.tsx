@@ -37,9 +37,9 @@ vi.mock('#components/panes/paneview-header.js', () => ({
 }));
 
 vi.mock('@taucad/ui/components/tooltip', () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }): React.JSX.Element => <>{children}</>,
+  Tooltip: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
   TooltipContent: () => null,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }): React.JSX.Element => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
 
 vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
@@ -160,6 +160,7 @@ vi.mock('dockview-react', async () => {
   };
 });
 
+// oxlint-disable-next-line typescript/consistent-type-assertions -- the console never reads this actor; it only forwards the reference.
 const cadRef = {} as ActorRefFrom<typeof cadMachine>;
 
 describe('ChatConsole', () => {

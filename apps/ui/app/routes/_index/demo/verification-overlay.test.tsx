@@ -9,8 +9,9 @@ import { VerificationOverlay } from '#routes/_index/demo/verification-overlay.js
 let mockBoxEdgeMetres = 0.1;
 
 vi.mock('three/addons', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the `three/addons` export name.
   GLTFLoader: class {
-    async parseAsync(): Promise<{ scene: THREE.Object3D }> {
+    public async parseAsync(): Promise<{ scene: THREE.Object3D }> {
       const scene = new THREE.Group();
       scene.add(new THREE.Mesh(new THREE.BoxGeometry(mockBoxEdgeMetres, mockBoxEdgeMetres, mockBoxEdgeMetres)));
       return { scene };

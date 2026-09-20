@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Spinner } from '#components/ui/spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
+import { authErrorMessage } from '#utils/auth-error.utils.js';
 
 export type SignOutProps = {
   className?: string;
@@ -22,8 +23,7 @@ export function SignOut({ className }: SignOutProps): React.JSX.Element {
 
   const { mutate: signOut } = useSignOut(authClient, {
     onError: (error) => {
-      const detailed: unknown = error.error?.message;
-      toast.error(typeof detailed === 'string' ? detailed : error.message);
+      toast.error(authErrorMessage(error));
 
       navigate({
         to: `${basePaths.auth}/${viewPaths.auth.signIn}`,

@@ -6,9 +6,8 @@
  * while local option authoring remains projected from the exact browser runtime.
  */
 
-import type { RuntimeClient } from '@taucad/runtime';
+import type { RuntimeClient, ComputeBinding } from '@taucad/runtime';
 import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
-import type { ComputeBinding } from '@taucad/runtime';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';

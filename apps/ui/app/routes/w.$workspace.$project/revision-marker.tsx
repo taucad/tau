@@ -67,6 +67,7 @@ export function FileRow({
   readonly file: RevisionDiffEntry;
   readonly revisionId: string;
   readonly compareAgainst: 'parent' | 'checkout';
+  // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
   const [isComparing, setIsComparing] = useState(false);
 
@@ -106,6 +107,7 @@ function FileComparison({
   readonly revisionId: string;
   readonly path: string;
   readonly compareAgainst: 'parent' | 'checkout';
+  // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
   const { original, modified, isLoading, isLoaded, error, retry } = useRevisionFileComparison(
     revisionId,

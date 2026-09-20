@@ -90,7 +90,9 @@ export function PublicationTopbar({
             variant='ghost'
             aria-label='Copy link'
             className='max-sm:size-8 max-sm:px-0'
-            onClick={() => void copyShareUrl()}
+            onClick={() => {
+              void copyShareUrl();
+            }}
           >
             <Link2 className='size-3.5 sm:mr-1.5' aria-hidden />
             <span className='hidden sm:inline'>Copy link</span>

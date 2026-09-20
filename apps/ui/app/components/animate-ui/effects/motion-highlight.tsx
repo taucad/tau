@@ -268,6 +268,7 @@ function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightPro
   };
 
   return (
+    // oxlint-disable-next-line react/jsx-no-constructed-context-values -- copied from animate-ui
     <MotionHighlightContext.Provider value={contextValue}>
       {enabled
         ? controlledItems

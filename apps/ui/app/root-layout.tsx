@@ -29,9 +29,8 @@ import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skele
 import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
+import { authErrorMessage, betterFetchErrorBodyMessage } from '#utils/auth-error.utils.js';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
-
-export { useCloudPaymentActionReturn as usePaymentActionReturn };
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -39,36 +38,11 @@ export type RootLoaderData = {
   readonly theme: ThemeWithSystem;
 };
 
-/**
- * Extracts a human-readable string from the `error.error.message` payload of a
- * `BetterFetchError` (e.g. `"You can't unlink your last account"`). Falls back
- * to the outer `Error.message` when the inner shape is missing.
- *
- * `BetterFetchError.error` is typed as `any` upstream, so we duck-type the
- * shape here to satisfy the linter without dragging in unsafe-argument noise.
- */
-const extractAuthErrorMessage = (error: Error): string => {
-  const fromBody = extractBetterFetchErrorBodyMessage(error);
-  return fromBody ?? error.message;
-};
-
-const extractBetterFetchErrorBodyMessage = (error: unknown): string | undefined => {
-  if (!error || typeof error !== 'object') {
-    return undefined;
-  }
-  const candidate = (error as { error?: unknown }).error;
-  if (!candidate || typeof candidate !== 'object' || !('message' in candidate)) {
-    return undefined;
-  }
-  const { message } = candidate as { message?: unknown };
-  return typeof message === 'string' ? message : undefined;
-};
-
 export const handleQueryError = (error: unknown, metadata: Readonly<Record<string, unknown>> | undefined): void => {
   if (metadata?.['handlesErrorLocally'] === true) {
     return;
   }
-  const message = extractBetterFetchErrorBodyMessage(error);
+  const message = betterFetchErrorBodyMessage(error);
   if (message !== undefined) {
     toast.error(message);
   }
@@ -121,7 +95,7 @@ export function RootLayout({
     // precedence and override this default, so we never double-toast.
     client.setMutationDefaults([], {
       onError: (error) => {
-        toast.error(extractAuthErrorMessage(error));
+        toast.error(authErrorMessage(error));
       },
     });
 

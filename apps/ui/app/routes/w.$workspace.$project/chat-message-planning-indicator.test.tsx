@@ -13,7 +13,8 @@ import type { MyUIMessage } from '@taucad/chat';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import type { ChatRetrySnapshot } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
-import type { ChatSidebarState, ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 
 type SelectorState = {
   status: 'submitted' | 'streaming' | 'ready' | 'error';

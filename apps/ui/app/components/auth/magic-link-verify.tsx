@@ -21,6 +21,7 @@ type MagicLinkVerifyClient = {
         readonly token: string;
         readonly callbackURL: string;
       };
+      // oxlint-disable-next-line typescript/no-restricted-types -- Better Auth answers a successful call with `error: null`.
     }) => Promise<{ readonly error?: { readonly message?: string } | null }>;
   };
 };

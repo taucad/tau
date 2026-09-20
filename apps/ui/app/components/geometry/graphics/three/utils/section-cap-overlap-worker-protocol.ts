@@ -74,7 +74,7 @@ export type SectionCapWorkerSuccessResponse = Readonly<{
   stripeColors: Float32Array;
   patternStrengths: Float32Array;
   stripeAxes: Float32Array;
-  regionKinds: Uint8Array;
+  regionKinds: Uint8Array<ArrayBuffer>;
   indices: Uint32Array;
   overlapDebug: SectionCapOverlapDebugSummary;
   overlapCounters: Pick<

@@ -2,7 +2,7 @@ import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
-import type { ConverterExportFormat } from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterExportFormat } from '@taucad/converter/runtime';
 
 type FormatSelectorProperties = {
   readonly formats: readonly ConverterExportFormat[];

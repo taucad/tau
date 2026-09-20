@@ -479,7 +479,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const alpha = await fixture.open('alpha');
     await settle(20);
     const root = await fixture.root('alpha');
-    const before = (await root.log()).length;
+    const beforeRows = await root.log();
+    const before = beforeRows.length;
 
     await project.writeFile('main.scad', 'cube(20);');
     fixture.announce('alpha', ['main.scad']);
@@ -493,7 +494,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       answer = alpha.frames.find((frame) => (frame.type === 'result' || frame.type === 'error') && frame.id === 77);
       if (answer !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- read the log at the instant the frame landed.
-        rowsWhenAnswered = (await root.log()).length;
+        const rowsAtAnswer = await root.log();
+        rowsWhenAnswered = rowsAtAnswer.length;
       }
     }
 

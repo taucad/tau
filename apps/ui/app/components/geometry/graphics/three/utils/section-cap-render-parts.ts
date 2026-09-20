@@ -17,8 +17,6 @@ import type {
 import type { SectionCapBooleanOperations } from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-backend.js';
 import type { SectionCapBooleanDebugSink } from '#components/geometry/graphics/three/utils/section-cap-performance-debug.js';
 
-export { sectionCapOverlapBaseHex, sectionCapOverlapStripeHex };
-
 export type SectionCapRenderableSource = Readonly<{
   sourceKey: string;
   sourcePolygon: CapMultiPolygon;

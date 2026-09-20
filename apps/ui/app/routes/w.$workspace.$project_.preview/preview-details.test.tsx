@@ -120,7 +120,7 @@ describe('PreviewDetails', () => {
   it('should render the dynamic export grid instead of legacy static download buttons', () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(<PreviewDetails project={baseProject} hasGeometry={true} cadRef={cadRef} />);
+      render(<PreviewDetails project={baseProject} hasGeometry cadRef={cadRef} />);
 
       expect(screen.getByText('Mesh')).toBeInTheDocument();
       expect(screen.getByText('BREP')).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe('PreviewDetails', () => {
   it('should call kernelClient.export and download as project.name.format when a pill is clicked', async () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(<PreviewDetails project={baseProject} hasGeometry={true} cadRef={cadRef} />);
+      render(<PreviewDetails project={baseProject} hasGeometry cadRef={cadRef} />);
 
       fireEvent.click(screen.getByRole('button', { name: /stl/i }));
 
@@ -174,7 +174,7 @@ describe('PreviewDetails', () => {
   it('should render the project description when provided', () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(<PreviewDetails project={baseProject} hasGeometry={true} cadRef={cadRef} />);
+      render(<PreviewDetails project={baseProject} hasGeometry cadRef={cadRef} />);
 
       expect(screen.getByText('A pot')).toBeInTheDocument();
     } finally {
@@ -185,9 +185,7 @@ describe('PreviewDetails', () => {
   it('should render the project tags when provided', () => {
     const cadRef = createCadActor(createCapabilities());
     try {
-      render(
-        <PreviewDetails project={{ ...baseProject, tags: ['ceramic', 'mug'] }} hasGeometry={true} cadRef={cadRef} />,
-      );
+      render(<PreviewDetails project={{ ...baseProject, tags: ['ceramic', 'mug'] }} hasGeometry cadRef={cadRef} />);
 
       expect(screen.getByText('ceramic')).toBeInTheDocument();
       expect(screen.getByText('mug')).toBeInTheDocument();

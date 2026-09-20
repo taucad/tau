@@ -27,9 +27,9 @@ describe('applySectionCapStyleToPackedBuffers', () => {
       stripeFrequency: 2,
       stripeWidth: 0.2,
     });
-    const firstNormalBaseColor = [...buffers.baseColors.slice(0, 3)];
-    const firstOverlapBaseColor = [...buffers.baseColors.slice(3, 6)];
-    const firstOverlapStripeColor = [...buffers.stripeColors.slice(3, 6)];
+    const firstNormalBaseColor = buffers.baseColors.slice(0, 3);
+    const firstOverlapBaseColor = buffers.baseColors.slice(3, 6);
+    const firstOverlapStripeColor = buffers.stripeColors.slice(3, 6);
 
     applySectionCapStyleToPackedBuffers(buffers, {
       tintHex: 0x99_66_33,
@@ -37,9 +37,9 @@ describe('applySectionCapStyleToPackedBuffers', () => {
       stripeWidth: 0.2,
     });
 
-    expect([...buffers.baseColors.slice(0, 3)]).not.toEqual(firstNormalBaseColor);
-    expect([...buffers.baseColors.slice(3, 6)]).toEqual(firstOverlapBaseColor);
-    expect([...buffers.stripeColors.slice(3, 6)]).toEqual(firstOverlapStripeColor);
+    expect(buffers.baseColors.slice(0, 3)).not.toEqual(firstNormalBaseColor);
+    expect(buffers.baseColors.slice(3, 6)).toEqual(firstOverlapBaseColor);
+    expect(buffers.stripeColors.slice(3, 6)).toEqual(firstOverlapStripeColor);
     expect(new Set(buffers.patternStrengths)).toEqual(new Set([1]));
   });
 });

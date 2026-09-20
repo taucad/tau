@@ -7,7 +7,8 @@ import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
 import { chatStatusLabel, selectChatStatus } from '#hooks/use-sidebar-status.js';
-import type { ChatSidebarState, ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
 
 export type AgentProjectionState = 'waiting' | 'running' | 'error' | 'idle';

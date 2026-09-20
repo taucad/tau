@@ -17,6 +17,7 @@ export const warmMonaco = (): void => {
     return;
   }
   isWarming = true;
+  // async-iife: bootstrap -- warming is fire-and-forget; a failure just re-arms the flag.
   void (async () => {
     try {
       const { configureMonaco } = await import('#lib/monaco.lib.client.js');

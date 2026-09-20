@@ -98,6 +98,38 @@ fn run_query_order(first: TessellationProfile, second: TessellationProfile, labe
 }
 
 #[test]
+fn streamed_compound_validation_preserves_original_and_meshed_facts() {
+    let document = Document::from_step(&fixture("two-cube-assembly.step")).unwrap();
+    let nominal = document.facts().unwrap();
+    let report = document.reported_facts_and_mesh().unwrap();
+    assert!(nominal.shape.valid);
+    assert!(report.facts.shape.valid);
+    assert_eq!(nominal.shape.topology.solids, 2);
+    assert_eq!(nominal.shape.topology.faces, 12);
+    assert_eq!(report.facts.shape.bounds.min, SOURCE_REPORTED_WHOLE_MIN);
+    assert_eq!(report.facts.shape.bounds.max, SOURCE_REPORTED_WHOLE_MAX);
+    assert_eq!(report.mesh.triangles.len(), 24);
+
+    let mut reported_shape = report.facts.shape.clone();
+    // The established reporting bounds include tolerance; all other shape
+    // facts must remain equal after independent validation of the meshed copy.
+    reported_shape.bounds = nominal.shape.bounds;
+    assert_eq!(reported_shape, nominal.shape);
+    assert_eq!(
+        reported_shape.volume.to_bits(),
+        nominal.shape.volume.to_bits()
+    );
+    assert_eq!(
+        reported_shape.surface_area.to_bits(),
+        nominal.shape.surface_area.to_bits()
+    );
+    assert_eq!(
+        reported_shape.center_of_mass.map(f64::to_bits),
+        nominal.shape.center_of_mass.map(f64::to_bits)
+    );
+}
+
+#[test]
 fn original_validation_reuse_preserves_complete_facts_across_query_orders() {
     let bytes = fixture("two-cube-assembly.step");
     let expected = geospec_engine_native_core::backend::brep::ValidityFacts {

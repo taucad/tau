@@ -17,6 +17,7 @@
 
 import { Topic } from '@taucad/events';
 import {
+  admissionMilliseconds,
   awaitSyncSettled,
   createProjectRevisionsActor,
   describeTurnRelease,
@@ -25,15 +26,23 @@ import {
 } from '@taucad/revisions/revision-effects';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
+import {
+  sameRevisionStatus,
+  versionedChangePaths as classifiedChangePaths,
+} from '@taucad/revisions/revision-projection';
 import type { BranchOperation } from '@taucad/revisions/branch-machine';
-import type {
-  PublishDraft,
-  PublishPublicationActorInput,
-  PublishPublicationActorOutput,
-} from '@taucad/revisions/publish-machine';
+import type { PublishDraft } from '@taucad/revisions/publish-machine';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
-import { classify } from '@taucad/filesystem/path-registry';
-import { readRevisionDiff, readRevisionLog, registerProjectFailureMessage, tauRemoteUrl } from '@taucad/revisions';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import {
+  publishFailureMessage,
+  publishOverHttp,
+  readRevisionDiff,
+  readRevisionLog,
+  registerProjectFailureMessage,
+  registerProjectOverHttp,
+  tauRemoteUrl,
+} from '@taucad/revisions';
 import type {
   GitRemoteCredential,
   RevisionDiffEntry,
@@ -51,34 +60,19 @@ import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad
 import type { ChangeEvent } from '@taucad/types';
 
 /**
- * The versioned paths one content-change event touches inside one project.
+ * The versioned paths one content-change event touches inside this project.
  *
- * One call per bus event, whatever its path count: the root mints one
- * `generation` per `changed`, and the checkout compares that counter across a
- * mint, so a seam that split an event into several would make a write that
- * landed during a mint invisible (F9, F4). Paths are returned
- * project-relative, which is the namespace the revision tree speaks.
+ * The rule itself is `@taucad/revisions`' (W10.5) and takes the classifier it
+ * reads; this worker composes Tau's own layout, so its callers pass the event
+ * and the route and nothing else.
  *
  * @param event - One authority-level change event.
  * @param projectRoot - The project's route, e.g. `/projects/p1`.
  * @returns Every versioned project-relative path the event touched.
  * @public
  */
-export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] => {
-  const absolute =
-    'path' in event
-      ? [event.path]
-      : 'oldPath' in event
-        ? [event.oldPath, event.newPath]
-        : 'sourcePath' in event
-          ? [event.sourcePath, event.targetPath]
-          : [];
-  const prefix = `${projectRoot}/`;
-  return absolute
-    .filter((path) => path.startsWith(prefix))
-    .map((path) => path.slice(prefix.length))
-    .filter((path) => path !== '' && classify(path).versioned);
-};
+export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] =>
+  classifiedChangePaths(event, projectRoot, tauPathPolicy);
 
 /**
  * A command the page sends to one project's revision root.
@@ -447,242 +441,6 @@ export type WorkerProjectRevisionsOptions = Readonly<{
   apiBaseUrl?: () => string | undefined;
 }>;
 
-/** How long an admission waits for its turn to take its lease. */
-const admissionMilliseconds = 30_000;
-
-/**
- * Record one publication on Tau Cloud (S32, A21).
- *
- * The worker makes the request rather than the page, because the worker is
- * where the machine that ordered it lives; the session is a cookie, so
- * `credentials: 'include'` is the whole of the credential (I8) and nothing is
- * written under a project.
- *
- * @param apiBaseUrl - The API origin the page named, if any.
- * @param input - The pointer and the settings the dialog collected.
- * @returns The publication's id and the link to copy.
- * @throws Error When this document is not signed in, or the API refused.
- */
-const publishToTauCloud = async (
-  apiBaseUrl: string | undefined,
-  input: PublishPublicationActorInput,
-): Promise<PublishPublicationActorOutput> => {
-  if (apiBaseUrl === undefined) {
-    throw new Error('Sign in to publish this project.');
-  }
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/publications`, {
-    method: 'POST',
-    credentials: 'include',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire.
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => undefined);
-    const code =
-      typeof (body as { code?: unknown } | undefined)?.code === 'string' ? (body as { code: string }).code : undefined;
-    throw Object.assign(new Error(publishFailureMessage(response.status, code)), { code });
-  }
-  const body = (await response.json()) as Readonly<{ id?: string; urls?: Readonly<{ share?: string; view?: string }> }>;
-  const url = body.urls?.share ?? body.urls?.view;
-  if (body.id === undefined || url === undefined) {
-    throw new Error('Tau Cloud answered without a link for this publication.');
-  }
-  return { publicationId: body.id, url };
-};
-
-/**
- * Registers this project on Tau Cloud, from the page's own session (P51).
- *
- * Connecting is the verb that makes the project exist on the remote: until the
- * `project` row is written, both git advertisements answer `404`. `PUT` because
- * a retried *Connect* must be one request, not two rows (the API's insert is
- * `onConflictDoNothing`). The page's cookie is the credential, so nothing is
- * carried through the module.
- *
- * @param apiBaseUrl - The API origin the page named, if any.
- * @param projectId - The project being connected.
- * @param name - The project name from its versioned manifest, when readable.
- * @throws Error When this document is not signed in, or the API refused.
- */
-const registerOnTauCloud = async (
-  apiBaseUrl: string | undefined,
-  projectId: string,
-  name: string | undefined,
-): Promise<void> => {
-  if (apiBaseUrl === undefined) {
-    throw new Error('Sign in to back this project up to Tau Cloud.');
-  }
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}`, {
-    method: 'PUT',
-    credentials: 'include',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire.
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(name === undefined ? {} : { name }),
-  });
-  if (!response.ok) {
-    /* One owner for this copy (C6, contract §5). The hand-written ladder here
-     * mapped 403 to "belongs to another account" — which the API answers 404
-     * for — while 403 is the project ceiling, and 429/400 fell through to
-     * "Try again." */
-    const answered = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown; message?: unknown }>;
-    throw new Error(
-      registerProjectFailureMessage(
-        response.status,
-        typeof answered.code === 'string' ? answered.code : undefined,
-        typeof answered.message === 'string' ? answered.message : undefined,
-      ),
-    );
-  }
-};
-
-/**
- * What a refused publish says, in the operator's words (A18).
- *
- * @param status - The HTTP status the API answered.
- * @param code - Its error code, when it named one.
- * @returns A sentence a person can act on.
- */
-const publishFailureMessage = (status: number, code: string | undefined): string => {
-  if (status === 401) {
-    return 'Sign in to publish this project.';
-  }
-  if (code === 'ENTITLEMENT_REQUIRED') {
-    return 'Private links need the Pro plan.';
-  }
-  if (code === 'MISSING_ENTRY_PATH') {
-    return 'This version does not contain the file this project opens with.';
-  }
-  if (status === 413 || code === 'PAYLOAD_TOO_LARGE') {
-    return 'This version is larger than a shared link may be.';
-  }
-  return 'Tau Cloud could not publish this project. Try again.';
-};
-
-/**
- * One branch row as the string a reader would see.
- *
- * @param row - The facet row.
- * @returns Its visible fields, joined.
- */
-const branchKey = (row: RevisionStatusProjection['branches'][number]): string =>
-  [row.name, row.head ?? '', row.checkoutId ?? '', row.checkoutRoot ?? '', ...row.leaseChatIds].join('\u0000');
-
-/**
- * Whether two branch facets say the same thing.
- *
- * The rows are rebuilt on every transition, so identity is never the answer;
- * the pane re-renders only when a name, head, checkout or chat chip moves.
- *
- * @param left - The published rows.
- * @param right - The rows the machine would publish now.
- * @returns True when nothing a reader can see has changed.
- */
-const sameBranches = (
-  left: RevisionStatusProjection['branches'],
-  right: RevisionStatusProjection['branches'],
-): boolean => left.map((row) => branchKey(row)).join('\u0001') === right.map((row) => branchKey(row)).join('\u0001');
-
-/**
- * Whether two conflict-card sets say the same thing (W10).
- *
- * Every visible field, including each file's chosen side: the card is the one
- * surface where a person's own click is the state, so a projection that compared
- * only the revision ids would never repaint after *Keep mine*.
- *
- * @param left - The published cards.
- * @param right - The cards the machine would publish now.
- * @returns True when nothing a reader can see has changed.
- */
-/**
- * Whether two string lists say the same thing (P28: settled values only).
- *
- * @param left - The published list.
- * @param right - The candidate list.
- * @returns Whether a reader would see the same list.
- */
-const sameStrings = (left: readonly string[], right: readonly string[]): boolean =>
-  left.length === right.length && left.every((value, index) => value === right[index]);
-
-const sameConflicts = (
-  left: RevisionStatusProjection['conflicts'],
-  right: RevisionStatusProjection['conflicts'],
-): boolean => {
-  const key = (card: RevisionStatusProjection['conflicts'][number]): string =>
-    [
-      card.revisionId,
-      card.branch ?? '',
-      card.labels?.ours ?? '',
-      card.labels?.theirs ?? '',
-      String(card.busy),
-      String(card.ready),
-      ...card.paths.map((row) => `${row.path}\u0002${String(row.openable)}\u0002${row.side ?? ''}`),
-    ].join('\u0000');
-  return left.map((card) => key(card)).join('\u0001') === right.map((card) => key(card)).join('\u0001');
-};
-
-/**
- * Whether two projections say the same thing to a reader (P28, P52).
- *
- * Every settled field a surface renders, and nothing that ticks. A field left
- * out here is a surface that never repaints: `remote.*` was missing, so
- * *Connect Tau Cloud* moved `phase` none → connecting → connected and the Sync
- * region kept drawing the disconnected state (W18 DEF-6).
- *
- * @param left - The published projection.
- * @param right - The candidate projection.
- * @returns Whether the page would draw the same thing.
- * @public
- */
-export const sameRevisionStatus = (left: RevisionStatusProjection, right: RevisionStatusProjection): boolean =>
-  left.checkoutId === right.checkoutId &&
-  left.checkoutRoot === right.checkoutRoot &&
-  left.branch === right.branch &&
-  left.projectDirty === right.projectDirty &&
-  left.dirty === right.dirty &&
-  left.minting === right.minting &&
-  left.headRevisionId === right.headRevisionId &&
-  left.follow === right.follow &&
-  left.attention === right.attention &&
-  left.branchVerb.busy === right.branchVerb.busy &&
-  left.branchVerb.asking === right.branchVerb.asking &&
-  left.branchVerb.branch === right.branchVerb.branch &&
-  /* The Sync row and the header chip are settled values (A38, P28), so this is
-   * the whole of what a reader can see change about sync. */
-  left.sync.state === right.sync.state &&
-  left.sync.pendingCount === right.sync.pendingCount &&
-  left.sync.online === right.sync.online &&
-  left.sync.conflictRef === right.sync.conflictRef &&
-  /* P52/DEF-6: the Sync region renders the *connection*, not only the push
-   * queue. Without these, `Connect Tau Cloud` moved `remote.phase` from
-   * `none` to `connecting` to `connected` and the page never repainted
-   * unless some unrelated field happened to move at the same time. */
-  left.remote.phase === right.remote.phase &&
-  left.remote.kind === right.remote.kind &&
-  left.remote.url === right.remote.url &&
-  left.remote.storage?.used === right.remote.storage?.used &&
-  left.remote.storage?.quota === right.remote.storage?.quota &&
-  left.remote.error === right.remote.error &&
-  sameStrings(left.remote.overQuota, right.remote.overQuota) &&
-  /* The same gap, in the two other facets the projection carries and a
-   * surface reads: the restore confirmation (S19) and the Publish dialog
-   * (S32). One comparator, every settled facet. */
-  left.restore.asking === right.restore.asking &&
-  left.restore.busy === right.restore.busy &&
-  left.restore.removedPathCount === right.restore.removedPathCount &&
-  left.restore.dirty === right.restore.dirty &&
-  left.restore.revisionNumber === right.restore.revisionNumber &&
-  left.publish.phase === right.publish.phase &&
-  left.publish.publicationId === right.publish.publicationId &&
-  left.publish.shareUrl === right.publish.shareUrl &&
-  left.publish.error === right.publish.error &&
-  sameStrings(
-    left.publish.tags.map((tag) => tag.name),
-    right.publish.tags.map((tag) => tag.name),
-  ) &&
-  sameBranches(left.branches, right.branches) &&
-  sameConflicts(left.conflicts, right.conflicts);
-
 /**
  * Start one project's revision tree in this worker.
  *
@@ -782,9 +540,23 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Registration still makes an empty or incomplete local project
          * recoverable; the API's fallback name is honest until tau.json exists. */
       }
-      await registerOnTauCloud(options.apiBaseUrl?.(), id, name);
+      const apiBaseUrl = options.apiBaseUrl?.();
+      if (apiBaseUrl === undefined) {
+        /* No origin means no session: the same sentence the API's own 401
+         * answers, from the one ladder both hosts read (C6). */
+        throw new Error(registerProjectFailureMessage(401));
+      }
+      await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
     },
-    publishPublication: async (input) => publishToTauCloud(options.apiBaseUrl?.(), input),
+    publishPublication: async (input) => {
+      const apiBaseUrl = options.apiBaseUrl?.();
+      if (apiBaseUrl === undefined) {
+        throw new Error(publishFailureMessage(401));
+      }
+      /* The document's session is the whole credential (I8): nothing is carried
+       * through this module and nothing is written under the project. */
+      return publishOverHttp(apiBaseUrl, { kind: 'cookie' }, input);
+    },
     onPlacement: (placement) => {
       if (placement.status === 'refused') {
         refuseAdmission(placement.runId, placement.reason);

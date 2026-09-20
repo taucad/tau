@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fc from 'fast-check';
 
 import type { FileStat, FileStatEntry } from '@taucad/types';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { bufferToStream } from '#backend/stream-utils.js';
 import { composeView, maskedPathCode } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
+import { createWorkspaceFileService } from '#testing/workspace-service-harness.js';
 import type { ComposedViewOverlay } from '#composed-view.js';
 import type { FileReadStreamOptions, WatchEvent, WatchRequest } from '#types.js';
 
@@ -483,6 +485,45 @@ describe('composeView agent mask', () => {
  * one instance of the port, not a dependency of the mask.
  */
 describe('composeView path policy', () => {
+  it('should classify generated project views only by project-relative path', async () => {
+    const context = await createWorkspaceFileService();
+    const segment = fc
+      .array(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789_-'), { minLength: 1, maxLength: 10 })
+      .map((characters) => characters.join(''));
+
+    try {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789'), { minLength: 21, maxLength: 21 }),
+          segment,
+          fc.array(segment, { minLength: 1, maxLength: 4 }),
+          async (projectCharacters, providerBasePath, pathSegments) => {
+            const projectId = `proj_${projectCharacters.join('')}`;
+            const path = pathSegments.join('/');
+            await context.provider.mkdir(providerBasePath, { recursive: true });
+            await context.provider.writeFile(`${providerBasePath}/${path}`, 'project data');
+            await context.service.configureProjectRoots({
+              projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:0', providerBasePath }],
+              roots: [],
+            });
+            const classify = vi.fn(tauPathPolicy.classify);
+            const view = composeView(
+              { filesystem: context.service.createRootedFileSystem(`/projects/${projectId}`) },
+              { consumer: 'agent', policy: { classify } },
+            );
+
+            await expect(view.readFile(path, 'utf8')).resolves.toBe('project data');
+            expect(classify).toHaveBeenCalledWith(path);
+            expect(classify.mock.calls.every(([classified]) => !classified.startsWith('/'))).toBe(true);
+            expect(classify.mock.calls.every(([classified]) => !classified.includes(projectId))).toBe(true);
+          },
+        ),
+      );
+    } finally {
+      context.service.dispose();
+    }
+  });
+
   it('should mask by the injected policy rather than by the Tau registry', async () => {
     await provider.writeFile('secret/key.pem', 'private\n');
     await provider.writeFile('.git/HEAD', 'ref: refs/heads/main\n');

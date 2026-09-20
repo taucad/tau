@@ -1,6 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import * as fc from 'fast-check';
 import type { FileStatEntry } from '@taucad/types';
 import { directoryConcurrency } from '#concurrency.js';
 import type { ProviderRegistry } from '#provider-registry.js';
@@ -109,6 +110,58 @@ describe('TreeIndex', () => {
   });
 
   describe('incremental updates', () => {
+    it('should equal a fresh build after a generated mutation sequence', () => {
+      const paths = ['a.ts', 'src/b.ts', 'src/c.ts', 'lib/d.ts'] as const;
+      const command = fc.record({
+        operation: fc.constantFrom('write', 'delete', 'rename'),
+        path: fc.constantFrom(...paths),
+        target: fc.constantFrom(...paths),
+        size: fc.integer({ min: 0, max: 10_000 }),
+      });
+
+      fc.assert(
+        fc.property(fc.array(command, { maxLength: 100 }), (commands) => {
+          const incremental = new TreeIndex();
+          const files = new Map<string, number>();
+
+          for (const { operation, path, target, size } of commands) {
+            if (operation === 'write') {
+              files.set(path, size);
+              incremental.addFile(path, { size, mtimeMs: size, contentKind: 'binary' });
+            } else if (operation === 'delete') {
+              files.delete(path);
+              incremental.removeFile(path);
+            } else {
+              const previous = files.get(path);
+              if (previous !== undefined) {
+                files.delete(path);
+                files.set(target, previous);
+              }
+              incremental.rename(path, target);
+            }
+          }
+
+          const fresh = new TreeIndex();
+          fresh.build(
+            [...files].map(([path, size]) => ({
+              path,
+              type: 'file',
+              size,
+              mtimeMs: size,
+              contentKind: 'binary',
+            })),
+          );
+          const comparable = (index: TreeIndex) =>
+            index
+              .getDirectoryStat('')
+              .map(({ path, size, type }) => ({ path, size, type }))
+              .toSorted((left, right) => left.path.localeCompare(right.path));
+
+          expect(comparable(incremental)).toEqual(comparable(fresh));
+        }),
+      );
+    });
+
     it('should add a file and create intermediate directories', () => {
       tree.build([]);
 

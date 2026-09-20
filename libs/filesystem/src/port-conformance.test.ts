@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { FileSystemProvider } from '#types.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import { ChangeEventBus } from '#change-event-bus.js';
+import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { MountTable } from '#mount-table.js';
 import { ProviderRegistry } from '#provider-registry.js';
@@ -31,6 +32,7 @@ import { tauPathPolicy } from '#path-registry.js';
 
 const projectId = 'proj_ccccccccccccccccccccc';
 const projectRoute = `/projects/${projectId}`;
+let databaseSequence = 0;
 
 /** The same tree under every layer, seeded below the surface under test. */
 const seeded = {
@@ -79,9 +81,12 @@ const porcelainMethods = [
 const openServices: WorkspaceFileService[] = [];
 
 /** A workspace authority with one mounted project, seeded through the authority. */
-const seededProject = async (storageRootKey: string): Promise<WorkspaceFileService> => {
-  const providerRegistry = new ProviderRegistry();
-  const scope = { backend: 'memory', storageRootKey } as const;
+const seededProject = async (backend: 'memory' | 'indexeddb'): Promise<WorkspaceFileService> => {
+  const providerRegistry = new ProviderRegistry({ databasePrefix: `port-conformance-${databaseSequence++}` });
+  const scope =
+    backend === 'memory'
+      ? ({ backend, storageRootKey: `memory:conformance-${databaseSequence++}` } as const)
+      : ({ backend } as const);
   const provider = await providerRegistry.getProvider(scope);
   const mountTable = new MountTable();
   mountTable.mount('/', provider, { class: 'authored', ...scope });
@@ -103,13 +108,19 @@ const seededProject = async (storageRootKey: string): Promise<WorkspaceFileServi
   return service;
 };
 
-const layers: readonly Layer[] = [
+const layers: readonly Layer[] = (['memory', 'indexeddb'] as const).flatMap((backend) => [
   {
-    name: 'storage provider',
+    name: `${backend} storage provider`,
     masksControlPlane: false,
     hasPorcelain: false,
     open: async () => {
-      const provider = new MemoryProvider();
+      const provider =
+        backend === 'memory'
+          ? new MemoryProvider()
+          : new DirectIdbProvider(`port-conformance-provider-${databaseSequence++}`);
+      if (provider instanceof DirectIdbProvider) {
+        await provider.initialize();
+      }
       for (const [path, content] of Object.entries(seeded)) {
         // oxlint-disable-next-line no-await-in-loop -- Deterministic seed order keeps the fixture readable.
         await provider.writeFile(path, content);
@@ -123,30 +134,32 @@ const layers: readonly Layer[] = [
     },
   },
   {
-    name: 'rooted view',
+    name: `${backend} rooted view`,
     masksControlPlane: false,
     hasPorcelain: true,
     open: async () => {
-      const service = await seededProject('memory:conformance-rooted');
+      const service = await seededProject(backend);
       return { port: service.createRootedFileSystem(projectRoute), dispose: () => undefined };
     },
   },
-  {
-    name: 'composed user view',
-    masksControlPlane: true,
-    hasPorcelain: true,
-    open: async () => {
-      const service = await seededProject('memory:conformance-composed');
-      return {
-        port: composeView(
-          { filesystem: service.createRootedFileSystem(projectRoute) },
-          { consumer: 'user', policy: tauPathPolicy },
-        ),
-        dispose: () => undefined,
-      };
-    },
-  },
-];
+  ...(['user', 'agent'] as const).map(
+    (consumer): Layer => ({
+      name: `${backend} composed ${consumer} view`,
+      masksControlPlane: true,
+      hasPorcelain: true,
+      open: async () => {
+        const service = await seededProject(backend);
+        return {
+          port: composeView(
+            { filesystem: service.createRootedFileSystem(projectRoute) },
+            { consumer, policy: tauPathPolicy },
+          ),
+          dispose: () => undefined,
+        };
+      },
+    }),
+  ),
+]);
 
 afterEach(() => {
   for (const service of openServices.splice(0)) {

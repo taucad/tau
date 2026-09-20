@@ -661,6 +661,21 @@ describe('DirectIdbProvider', () => {
   });
 
   describe('readdirWithStats', () => {
+    it('should list 10,000 entries with no stat calls and one IndexedDB transaction', async () => {
+      const rows = 10_000;
+      await Promise.all(
+        Array.from({ length: rows }, async (_, index) => provider.writeFile(`wide/file-${index}.txt`, 'row')),
+      );
+      const stat = vi.spyOn(provider, 'stat');
+      const transaction = vi.spyOn(IDBDatabase.prototype, 'transaction');
+
+      const entries = await provider.readdirWithStats('wide');
+
+      expect(entries).toHaveLength(rows);
+      expect(stat).not.toHaveBeenCalled();
+      expect(transaction.mock.calls.filter(([, mode]) => mode === 'readonly')).toHaveLength(1);
+    });
+
     it('should return entries with type, size, and mtime', async () => {
       await provider.writeFile('src/index.ts', 'export {}');
       await provider.mkdir('src/utils');

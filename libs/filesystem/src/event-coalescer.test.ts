@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fc from 'fast-check';
 import { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
 import { getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
 import type { ChangeEvent } from '#types.js';
@@ -15,6 +16,31 @@ const renamed = (oldPath: string, newPath: string): ChangeEvent => ({
 });
 
 describe('coalesceChangeEvents (pure)', () => {
+  it('should preserve the generated final state of every path', () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            path: fc.constantFrom('/a.txt', '/b.txt', '/nested/c.txt', '/nested/d.txt'),
+            exists: fc.boolean(),
+          }),
+          { minLength: 1, maxLength: 100 },
+        ),
+        (facts) => {
+          const events = facts.map(({ path, exists }) => (exists ? written(path) : deleted(path)));
+          const expected = new Map(facts.map(({ path, exists }) => [path, exists]));
+          const actual = new Map(
+            coalesceChangeEvents(events).flatMap((event) =>
+              'path' in event ? ([[event.path, event.type === 'fileWritten']] as const) : [],
+            ),
+          );
+
+          expect(actual).toEqual(expected);
+        },
+      ),
+    );
+  });
+
   it('should pass through single events unchanged', () => {
     const events = [written('/a.txt')];
     expect(coalesceChangeEvents(events)).toEqual(events);

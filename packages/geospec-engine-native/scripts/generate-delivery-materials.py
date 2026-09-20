@@ -833,13 +833,20 @@ def mixed_producer_recipe(mixed):
         return ''.join('"${' + replacements[p] + '}"' if p in replacements else shlex.quote(p)
                        for p in pattern.split(value) if p) or "''"
     environment = mixed_environment(c)
-    env_command = 'env -i ' + ' '.join(word(f'{k}={v}') for k, v in environment.items())
+    # Successor invocation controls, not retroactive recorded producer evidence.
+    job_keys = ['GEOSPEC_OCCT_JOBS', 'EMCC_CORES', 'CARGO_BUILD_JOBS']
+    control_keys = {*job_keys, 'GIT_CEILING_DIRECTORIES'}
+    controls = ' '.join(f'{key}="${{GEOSPEC_OCCT_JOBS:-2}}"' for key in job_keys)
+    controls += (' GIT_CEILING_DIRECTORIES="${GEOSPEC_RELINK_ROOT}:'
+                 '${GEOSPEC_MIXED_PREP}:${GEOSPEC_MIXED_BUILD}"')
+    env_command = 'env -i ' + ' '.join(word(f'{k}={v}') for k, v in environment.items()
+                                      if k not in control_keys) + ' ' + controls
     commands = [' '.join(word(v) for v in [item['executable'], *item['args']]) for item in mixed['commands']]
     prefix_environment = {**c['environment'], **{k: v for k, v in mixed['prefix']['environment'].items()
                                                if k.startswith('GEOSPEC_OCCT_')}}
     prefix_environment['GEOSPEC_OCCT_CACHE'] = c['preparationCache'] + '/occt-mixed'
-    prefix_environment['GEOSPEC_OCCT_JOBS'] = '2'
-    prefix_command = 'env -i ' + ' '.join(word(f'{k}={v}') for k, v in prefix_environment.items())
+    prefix_command = 'env -i ' + ' '.join(word(f'{k}={v}') for k, v in prefix_environment.items()
+                                         if k not in control_keys) + ' ' + controls
     prefix_command += ' ' + ' '.join(word(v) for v in mixed['prefix']['command'])
     fetch_commands = [[c['cargo'], 'fetch', '--locked', '--manifest-path', str(PACKAGE / relative)]
                       for relative in ['bindings/emscripten/Cargo.toml', 'native/runtime/Cargo.toml']]
@@ -874,6 +881,11 @@ cp "$GEOSPEC_RELINK_ROOT/receipts/mixed-sdk-package-lock.json" "$GEOSPEC_MIXED_S
         'claim': 'Standalone relocated reconstruction recipe, not an observed successor build or byte equality promise.',
         'producer': mixed['attribution'],
         'recordedEnvironment': environment, 'recordedCommands': mixed['commands'],
+        'standaloneExecutionControls': {
+            'jobs': 'GEOSPEC_OCCT_JOBS (default 2) selects outer OCCT, Emscripten and Cargo jobs.',
+            'gitCeilings': 'Absolute GEOSPEC_RELINK_ROOT, GEOSPEC_MIXED_PREP and GEOSPEC_MIXED_BUILD; source must remain beneath the extracted kit root.',
+            'scope': 'Prospective standalone controls only; original recorded environment is unchanged.',
+        },
         'recordedEmscriptenConfig': config,
         'requiredExportedVariables': sorted(set(replacements.values()) | {'GEOSPEC_RELINK_ROOT', 'GEOSPEC_MIXED_NPM_CLI'}),
         'externalPrerequisites': [

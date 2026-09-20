@@ -1417,10 +1417,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     now: () => now().getTime(),
   });
   const continueWithoutPreparation = agent.continue.bind(agent);
-  agent.continue = async () => {
-    await compaction.prepareTurn();
-    await continueWithoutPreparation();
-  };
   agent.transformContext = async (messages) => safeguards.transformContext(messages);
   agent.streamFunction = composeModelCallMiddleware(base, [
     asMiddleware(compaction.wrapStreamFn),
@@ -1435,7 +1431,37 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   let turnId = initialHistory.findLast((message) => message.role === 'user')?.id ?? options.runId;
   let terminalRecorded = state === 'completed' || state === 'failed' || state === 'cancelled';
   let abortRequested = false;
+  const runAbortController = new AbortController();
   const wasAbortRequested = (): boolean => abortRequested;
+  const cancelBeforeRun = async (): Promise<void> => {
+    if (terminalRecorded) {
+      return;
+    }
+    state = 'cancelled';
+    await record.append({ type: 'run.lifecycle', state });
+    terminalRecorded = true;
+  };
+  const prepareStartOfTurn = async (): Promise<boolean> => {
+    try {
+      await compaction.prepareTurn(runAbortController.signal);
+    } catch (error) {
+      if (!runAbortController.signal.aborted) {
+        throw error;
+      }
+      await cancelBeforeRun();
+      return false;
+    }
+    if (runAbortController.signal.aborted) {
+      await cancelBeforeRun();
+      return false;
+    }
+    return true;
+  };
+  agent.continue = async () => {
+    if (await prepareStartOfTurn()) {
+      await continueWithoutPreparation();
+    }
+  };
   agent.subscribe(async (event) => {
     await appendAgentEvent({ event, record, toolInputIds, committedMessageIds, createId });
     if (event.type !== 'agent_end') {
@@ -1501,7 +1527,10 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         clientContext: options.clientContext,
         recentSkills: options.recentSkills,
       });
-      await compaction.prepareTurn();
+      if (!(await prepareStartOfTurn())) {
+        onAdmitted?.();
+        return;
+      }
       const retainedHistory = await record.history();
       const retainedMessageIds = retainedHistory.map((retained) => retained.id);
       await record.append({
@@ -1547,6 +1576,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     },
     abort: () => {
       abortRequested = true;
+      runAbortController.abort();
       agent.abort();
     },
     snapshot: async () => {

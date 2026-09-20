@@ -101,8 +101,12 @@ describe('Compaction', () => {
     const compacted = await compaction.prepareTurn();
 
     expect(compacted.slice(0, 2).map((message) => JSON.stringify(message))).toEqual([
-      expect.stringContaining('[Old tool result content cleared]'),
-      expect.stringContaining('[Old tool result content cleared]'),
+      expect.stringContaining(
+        '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
+      ),
+      expect.stringContaining(
+        '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
+      ),
     ]);
     expect(compacted.slice(-5)).toEqual(agent.state.messages.slice(-5));
     expect(agent.state.messages).toEqual(compacted);
@@ -138,7 +142,7 @@ describe('Compaction', () => {
 
     const compacted = await compaction.prepareTurn();
 
-    expect(JSON.stringify(compacted.slice(0, 2))).toContain('[Old tool result content cleared]');
+    expect(JSON.stringify(compacted.slice(0, 2))).toContain('re-run with a narrower request');
     expect(compacted.at(-1)).toEqual(messages.at(-1));
     expect(summarize).not.toHaveBeenCalled();
   });
@@ -598,6 +602,70 @@ describe('Compaction', () => {
       'Repeated compaction could not restore provider headroom; start a new thread.',
     ]);
     expect(JSON.stringify(failures[2]?.diagnostics)).toContain('CIRCUIT_BREAKER_OPEN');
+  });
+
+  it('should not count placeholder summaries as circuit-breaker strikes', async () => {
+    const messages: AgentMessage[] = [
+      ...evictableHistory(8),
+      { role: 'user', content: 'x'.repeat(22_800), timestamp: 100 },
+    ];
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages },
+    });
+    const compaction = installCompaction({
+      agent,
+      record: recordFor(messages),
+      projectHistory: async () => messages,
+      contextWindow: 8192,
+      summarize: async () => '',
+    });
+    const failures: AssistantMessage[] = [];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // oxlint-disable-next-line no-await-in-loop -- Each placeholder refusal is one independent pass.
+      await compaction.prepareTurn();
+      // oxlint-disable-next-line no-await-in-loop -- The failure marker closes before the next pass.
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, {
+        messages: messages as Context['messages'],
+      });
+      // oxlint-disable-next-line no-await-in-loop -- The stream result is the observable breaker verdict.
+      failures.push(await stream.result());
+    }
+
+    expect(failures.map((failure) => failure.errorMessage)).toEqual([
+      'Compaction summary could not restore provider headroom.',
+      'Compaction summary could not restore provider headroom.',
+      'Compaction summary could not restore provider headroom.',
+    ]);
+    expect(JSON.stringify(failures.map((failure) => failure.diagnostics))).not.toContain('CIRCUIT_BREAKER_OPEN');
+  });
+
+  it('should timestamp a summary after its evicted prefix and before a future-dated retained tail', async () => {
+    const messages: UserMessage[] = Array.from({ length: 8 }, (_, index) => ({
+      role: 'user',
+      content: `${index}-${'x'.repeat(4000)}`,
+      timestamp: index === 7 ? 10_000 : index,
+    }));
+    const appended: Array<Parameters<SessionRecord['append']>[0]> = [];
+    const compaction = installCompaction({
+      agent: new Agent({
+        streamFn: () => createAssistantMessageEventStream(),
+        initialState: { model: stubModel, messages },
+      }),
+      record: recordFor(messages, async (event) => {
+        appended.push(event);
+      }),
+      projectHistory: async () => messages,
+      contextWindow: 8192,
+      summarize: async () => 'Earlier work.',
+      now: () => 100,
+    });
+
+    await compaction.prepareTurn();
+
+    const compacted = appended.find((event) => event.type === 'history.compacted');
+    expect(compacted?.type === 'history.compacted' ? compacted.summary.metadata?.timestamp : undefined).toBe(100);
   });
 
   it('should compact the durable projection when live state has no registered identities', async () => {

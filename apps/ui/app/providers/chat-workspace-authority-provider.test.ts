@@ -47,6 +47,8 @@ const revisionRoot = vi.hoisted(() => ({
   commands: [] as WorkerRevisionCommand[],
   admitted: [] as Array<{ turnId: string; chatId: string; runId: string; checkoutId?: string }>,
   refuse: undefined as string | undefined,
+  /** Where the root places the turn; the project itself unless a test says otherwise. */
+  placement: undefined as { checkoutId: string; root: string; baseRevisionId: string } | undefined,
   /** Set by a test to keep an admission in flight while the page sends. */
   hold: undefined as PromiseWithResolvers<void> | undefined,
   /** Listeners the provider registered for the root's host-attested facts (W5). */
@@ -99,7 +101,9 @@ vi.mock('#hooks/use-revision-status.js', () => ({
         if (revisionRoot.refuse !== undefined) {
           throw Object.assign(new Error(revisionRoot.refuse), { code: 'REVISION_PREPARE_FAILED' });
         }
-        return { checkoutId: 'live', root: '/projects/project_test', baseRevisionId: 'rev-base' };
+        return (
+          revisionRoot.placement ?? { checkoutId: 'live', root: '/projects/project_test', baseRevisionId: 'rev-base' }
+        );
       },
       send: (command: WorkerRevisionCommand) => revisionRoot.commands.push(command),
       close: () => undefined,
@@ -118,6 +122,8 @@ const capabilities: ProviderCapabilities = {
 
 type Fixture = {
   readonly project: RootedFileSystem;
+  /** A linked checkout's own files, mounted beside the project as the worker mounts one. */
+  readonly linked: RootedFileSystem;
   readonly written: string[];
   readonly dispose: () => void;
 };
@@ -138,6 +144,12 @@ const fixture = (): Fixture => {
     class: 'authored',
     backend: 'memory',
     storageRootKey: 'memory:w3d-provider-test',
+  });
+  mountTable.mount('/checkouts/checkout-branch', provider, {
+    class: 'authored',
+    backend: 'memory',
+    storageRootKey: 'memory:w3d-provider-test',
+    providerBasePath: '.tau/checkouts/project_test/checkout-branch',
   });
   const eventBus = new ChangeEventBus();
   const service = new WorkspaceFileService({
@@ -165,6 +177,7 @@ const fixture = (): Fixture => {
   };
   const created: Fixture = {
     project,
+    linked: service.createRootedFileSystem('/checkouts/checkout-branch'),
     written,
     dispose: () => {
       service.dispose();
@@ -187,7 +200,7 @@ const createBridgePort = (project: RootedFileSystem): ReturnType<typeof createFi
   return createFileSystemBridgePort(handlers as Parameters<typeof createFileSystemBridgePort>[0]);
 };
 
-const bindFileManager = (project: RootedFileSystem): void => {
+const bindFileManager = (project: RootedFileSystem, linked?: RootedFileSystem): void => {
   hookState.fileManager = {
     client: client(vi.fn(async () => false)),
     backendType: 'memory',
@@ -199,7 +212,8 @@ const bindFileManager = (project: RootedFileSystem): void => {
           proxy: undefined,
           worker: workerStub,
           /* The rooted bridge the authority reads capabilities and bytes over. */
-          openFileSystemBridge: () => createBridgePort(project),
+          openFileSystemBridge: (root?: string) =>
+            createBridgePort(root === '/checkouts/checkout-branch' && linked !== undefined ? linked : project),
         },
       }),
       subscribe: () => ({ unsubscribe: () => undefined }),
@@ -214,6 +228,7 @@ beforeEach(() => {
   revisionRoot.commands.length = 0;
   revisionRoot.admitted.length = 0;
   revisionRoot.refuse = undefined;
+  revisionRoot.placement = undefined;
   chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
   browserWorkspaceAuthorityTestApi.reset();
 });
@@ -249,6 +264,30 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     });
     /* No revision mode on the wire: placement is non-branching by default. */
     expect(prepared.execution).not.toHaveProperty('mode');
+  });
+
+  /* The lease names the checkout; the files have to be that checkout's too. A
+     branch turn that was handed the project's bridge wrote its work into the
+     project, and the branch's own cut then found nothing to record. */
+  it('should hand a turn placed on a branch that branch’s files, not the project’s', async () => {
+    const { project, linked } = fixture();
+    bindFileManager(project, linked);
+    revisionRoot.placement = {
+      checkoutId: 'checkout-branch',
+      root: '/checkouts/checkout-branch',
+      baseRevisionId: 'rev-base',
+    };
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const prepared = await act(async () => result.current.prepare('chat_1', { turnId: 'turn_1' }));
+    const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+    const proxy = createFileSystemBridgeProxy(prepared.openFileSystemBridge());
+    await proxy.ready;
+    await proxy.writeFile('proof.txt', 'made on the branch');
+    proxy.dispose();
+
+    expect(await linked.readFile('proof.txt', 'utf8')).toBe('made on the branch');
+    expect(await project.exists('proof.txt')).toBe(false);
   });
 
   /* I7. Open-time discovery has to build a host client before it knows what the

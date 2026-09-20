@@ -862,6 +862,30 @@
         "command": "python3 -B packages/geospec-engine-native/quality/gate.py --inventory-sha256 \"$GEOSPEC_COVERAGE_INVENTORY_SHA256\" --receipts out/reports/coverage/packages/geospec-engine-native/receipts.json",
         "forwardAllArgs": false
       }
+    },
+    "prepare-legacy-reference": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/prepare-legacy-reference.mts verify-fixture",
+        "forwardAllArgs": false
+      },
+      "configurations": {
+        "stage": {
+          "command": "node packages/geospec-engine-native/scripts/prepare-legacy-reference.mts stage"
+        },
+        "verify-installed": {
+          "command": "node packages/geospec-engine-native/scripts/prepare-legacy-reference.mts verify-installed \"${GEOSPEC_LEGACY_REFERENCE_ROOT:?Set the staged legacy reference root}\""
+        }
+      }
+    },
+    "typecheck-legacy-reference": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "pnpm exec tsgo -p packages/geospec-engine-native/scripts/tsconfig.json",
+        "forwardAllArgs": false
+      }
     }
   }
 }

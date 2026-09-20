@@ -8,6 +8,7 @@ import {
   MountTable,
   ProviderRegistry,
   ResourceQueue,
+  RootedFileSystemError,
   tagEventOrigin,
   WorkspaceFileService,
   WorkspaceMutationError,
@@ -1649,7 +1650,10 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     try {
       await proxy.ready;
       expect(proxy.hello.payload).toMatchObject({ state: 'unavailable', error: { code: 'ROOT_UNAVAILABLE' } });
-      await expect(proxy.readFile('main.ts')).rejects.toMatchObject({ code: 'ROOT_UNAVAILABLE' });
+      await expect(proxy.readFile('main.ts')).rejects.toMatchObject({
+        code: 'ROOT_UNAVAILABLE',
+        message: 'The requested filesystem root is unavailable.',
+      });
       expect(handlerForRoot).not.toHaveBeenCalled();
     } finally {
       cleanup();
@@ -1662,7 +1666,11 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     try {
       await proxy.ready;
       expect(proxy.hello.payload).toMatchObject({ state: 'unavailable', error: { code: 'ROOT_UNAVAILABLE' } });
-      await expect(proxy.readFile('main.ts')).rejects.toMatchObject({ code: 'ROOT_UNAVAILABLE' });
+      /* Absent and unknown are the same refusal, down to the message (CI2). */
+      await expect(proxy.readFile('main.ts')).rejects.toMatchObject({
+        code: 'ROOT_UNAVAILABLE',
+        message: 'The requested filesystem root is unavailable.',
+      });
       expect(handlerForRoot).not.toHaveBeenCalled();
     } finally {
       cleanup();
@@ -1684,6 +1692,76 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       user.cleanup();
       agent.cleanup();
       workingCopy.cleanup();
+    }
+  });
+
+  /*
+   * G0-12: the refusal the hello states is the refusal the caller gets. A
+   * `VirtualPathError` from `resolveAuthorityPath` used to reach the client as
+   * itself while the hello said `ROOT_UNAVAILABLE`.
+   */
+  const connectThrowingHandler = (
+    error: unknown,
+  ): { readonly proxy: FileSystemBridgeProxy; readonly cleanup: () => void } => {
+    const handle = exposeFileSystem(
+      {},
+      {
+        handlerForRoot: () => {
+          throw error;
+        },
+      },
+    );
+    const channel = new MessageChannel();
+    messageHandlers.at(-1)!(
+      new MessageEvent('message', {
+        data: {
+          v: fileSystemBridgeProtocolVersion,
+          type: filesystemBridgeConnectMessageType,
+          port: channel.port1,
+          root: '/projects/alpha',
+          consumer: 'agent',
+        },
+      }),
+    );
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
+    return {
+      proxy,
+      cleanup: () => {
+        proxy.dispose();
+        handle.cleanup();
+        channel.port1.close();
+      },
+    };
+  };
+
+  it('should answer the refusal its hello states when the rooted handler throws another error', async () => {
+    const { proxy, cleanup } = connectThrowingHandler(
+      Object.assign(new Error('VIRTUAL_PATH: /projects/../alpha'), { code: 'VIRTUAL_PATH' }),
+    );
+
+    try {
+      await proxy.ready;
+      expect(proxy.hello.payload).toMatchObject({ state: 'unavailable', error: { code: 'ROOT_UNAVAILABLE' } });
+      await expect(proxy.readFile('main.ts')).rejects.toMatchObject({
+        code: 'ROOT_UNAVAILABLE',
+        message: 'The requested filesystem root is unavailable.',
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('should carry a stale rooted filesystem to the caller as itself', async () => {
+    const { proxy, cleanup } = connectThrowingHandler(new RootedFileSystemError('ESTALE'));
+
+    try {
+      await proxy.ready;
+      await expect(proxy.readFile('main.ts')).rejects.toMatchObject({
+        code: 'ESTALE',
+        message: 'The rooted filesystem is stale and must be reopened.',
+      });
+    } finally {
+      cleanup();
     }
   });
 });

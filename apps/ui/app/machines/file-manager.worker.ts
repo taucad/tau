@@ -302,6 +302,9 @@ exposeFileSystem(fileService, {
      */
     return withReadContentOps(view, tauPathPolicy);
   },
+  /* The same layout the views above enforce, so a masked connection is not told
+   * about a path it may not read (CI1). */
+  policy: tauPathPolicy,
   changeEventBus: eventBus,
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),

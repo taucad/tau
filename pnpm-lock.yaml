@@ -1572,6 +1572,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:packages/core/geometry
+      '@taucad/geospec-engine-native':
+        specifier: workspace:*
+        version: link:packages/geospec-engine-native
       '@taucad/nx':
         specifier: workspace:*
         version: link:tools/nx
@@ -1707,6 +1710,9 @@ importers:
       eslint-plugin-unicorn:
         specifier: 'catalog:'
         version: 63.0.0(eslint@9.32.0(jiti@2.7.0)(supports-color@10.2.2))
+      geospec:
+        specifier: workspace:*
+        version: link:packages/geospec
       gray-matter:
         specifier: 'catalog:'
         version: 4.0.3

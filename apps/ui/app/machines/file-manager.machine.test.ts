@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createActor } from 'xstate';
 import type * as FsBridge from '@taucad/fs-bridge';
 import type { ProjectRootConfiguration } from '@taucad/filesystem';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 const workerTestState = vi.hoisted(() => {
@@ -15,7 +17,8 @@ const workerTestState = vi.hoisted(() => {
     dispatchEvent: (event: Event) => void;
     options: { name?: string } | undefined;
   }> = [];
-  return { instances };
+  const rootedProxyDisposals: Array<ReturnType<typeof vi.fn>> = [];
+  return { instances, rootedProxyDisposals };
 });
 
 vi.mock('#machines/file-manager.worker.js?worker', () => ({
@@ -76,18 +79,22 @@ vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
   openFileSystemBridge: (worker: Worker, options?: { root?: string }) => mockOpenFileSystemBridge(worker, options),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
-  createFileSystemBridgeProxy: vi.fn(() => ({
-    configureProjectRoots: mockConfigureProjectRoots,
-    mount: mockMount,
-    unmount: mockUnmount,
-    getDirectoryStat: vi.fn(async () => []),
-    readShallowDirectory: vi.fn(async () => []),
-    readDirectory: async (path: string) => mockWorkspaceReadDirectory(path),
-    readdirWithStats: async (path: string) => mockViewReaddirWithStats(path),
-    stat: async (path: string) => mockWorkspaceStat(path),
-    dispose: vi.fn(),
-    listen: vi.fn(() => vi.fn()),
-  })),
+  createFileSystemBridgeProxy: vi.fn(() => {
+    const dispose = vi.fn();
+    workerTestState.rootedProxyDisposals.push(dispose);
+    return {
+      configureProjectRoots: mockConfigureProjectRoots,
+      mount: mockMount,
+      unmount: mockUnmount,
+      getDirectoryStat: vi.fn(async () => []),
+      readShallowDirectory: vi.fn(async () => []),
+      readDirectory: async (path: string) => mockWorkspaceReadDirectory(path),
+      readdirWithStats: async (path: string) => mockViewReaddirWithStats(path),
+      stat: async (path: string) => mockWorkspaceStat(path),
+      dispose,
+      listen: vi.fn(() => vi.fn()),
+    };
+  }),
 }));
 
 const mockGetProjectFileSystemConfig =
@@ -143,6 +150,7 @@ describe('fileManagerMachine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     workerTestState.instances.length = 0;
+    workerTestState.rootedProxyDisposals.length = 0;
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockGetWorkspace.mockResolvedValue(undefined);
@@ -536,7 +544,6 @@ describe('fileManagerMachine', () => {
       root: '/projects/project-a',
       consumer: 'working-copy',
     });
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
     expect(workerTestState.instances[0]?.postMessage).toHaveBeenCalledWith(
       // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
       expect.objectContaining({ type: 'computeStoreConnect', projectId: 'project-a' }),
@@ -1340,6 +1347,57 @@ describe('fileManagerMachine', () => {
       });
 
       actor.stop();
+    });
+
+    it('should dispose post-open services when initialization is cancelled', async () => {
+      let releaseListing = (): void => undefined;
+      let markListingStarted = (): void => undefined;
+      const listingGate = new Promise<void>((resolve) => {
+        releaseListing = resolve;
+      });
+      const listingStarted = new Promise<void>((resolve) => {
+        markListingStarted = resolve;
+      });
+      const listDirectory = vi.spyOn(FileTreeService.prototype, 'listDirectory').mockImplementation(async () => {
+        markListingStarted();
+        await listingGate;
+        return [];
+      });
+      const disposeContent = vi.spyOn(FileContentService.prototype, 'dispose');
+      const disposeTree = vi.spyOn(FileTreeService.prototype, 'dispose');
+      const disposeChannel = vi.spyOn(WorkerChangeChannel.prototype, 'dispose');
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-a',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-a',
+        },
+      });
+
+      try {
+        actor.start();
+        await listingStarted;
+        expect(mockOpenFileSystemBridge).toHaveBeenCalledTimes(2);
+
+        actor.stop();
+        releaseListing();
+
+        await vi.waitFor(() => {
+          expect(disposeContent).toHaveBeenCalledOnce();
+          expect(disposeTree).toHaveBeenCalledOnce();
+          expect(disposeChannel).toHaveBeenCalledOnce();
+          expect(workerTestState.rootedProxyDisposals.slice(-2).map((dispose) => dispose.mock.calls.length)).toEqual([
+            1, 1,
+          ]);
+        });
+      } finally {
+        releaseListing();
+        actor.stop();
+        listDirectory.mockRestore();
+        disposeContent.mockRestore();
+        disposeTree.mockRestore();
+        disposeChannel.mockRestore();
+      }
     });
   });
 

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createProjectGraphAsync, readCachedProjectGraph, type ProjectGraph } from '@nx/devkit';
+import { createProjectGraphAsync, readCachedProjectGraph } from '@nx/devkit';
+import type { ProjectGraph } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
 import { publishable, workspace } from '@taucad/nx';
 
@@ -21,7 +22,7 @@ const projectGraph = async (): Promise<ProjectGraph> => {
   try {
     return readCachedProjectGraph();
   } catch {
-    return await createProjectGraphAsync();
+    return createProjectGraphAsync();
   }
 };
 
@@ -37,7 +38,7 @@ describe('release publish workflow', () => {
       'Assert pnpm is the publisher',
       'Dry-run the dependency-ordered publish',
       'Publish the release train',
-    ].map(stepIndex);
+    ].map((name) => stepIndex(name));
 
     expect(order).not.toContain(-1);
     expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -54,7 +55,7 @@ describe('release publish workflow', () => {
   });
 
   it('reads the Nx Cloud cache the CI run wrote', () => {
-    expect(workflow).toContain('NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}');
+    expect(workflow).toContain(`NX_CLOUD_ACCESS_TOKEN: \${{ secrets.NX_CLOUD_ACCESS_TOKEN }}`);
   });
 
   it('gives every publishable an ordered, pkgcheck-gated publish target', async () => {

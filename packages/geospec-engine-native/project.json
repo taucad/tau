@@ -3,8 +3,11 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/geospec-engine-native",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "host:darwin-arm64"],
   "targets": {
+    "test": {
+      "dependsOn": ["build", "check-ci-artifacts", "check-delivery-environment", "check-conformance-profile"]
+    },
     "test-rust": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -256,6 +259,7 @@
     "assemble-package": {
       "executor": "nx:run-commands",
       "cache": false,
+      "dependsOn": ["build"],
       "options": {
         "command": "bash packages/geospec-engine-native/scripts/assemble-package.sh",
         "forwardAllArgs": false
@@ -764,11 +768,23 @@
         "forwardAllArgs": false
       }
     },
+    "require-geospec-delivery": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs verify-delivery",
+        "forwardAllArgs": false
+      }
+    },
     "check-ci-artifacts": {
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "node --test packages/geospec-engine-native/scripts/ci-artifacts.test.mjs",
+        "commands": [
+          "node --test packages/geospec-engine-native/scripts/ci-artifacts.test.mjs",
+          "python3 -B packages/geospec-engine-native/scripts/test_native_proof.py"
+        ],
+        "parallel": false,
         "forwardAllArgs": false
       }
     },

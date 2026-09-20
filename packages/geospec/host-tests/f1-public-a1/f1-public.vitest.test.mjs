@@ -1,5 +1,5 @@
-import { createGeoSpecAssertionClient } from '@taucad/geospec/assertion-client';
-import { createGeoSpecVitestAdapter } from '@taucad/geospec/vitest';
+import { createGeoSpecAssertionClient } from 'geospec/assertion-client';
+import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { Engine, canonicalize } from '@taucad/geospec-engine-native/node';
 import { expect, it } from 'vitest';
 

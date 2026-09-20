@@ -5,8 +5,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { readFixture } from '../fixtures/read-fixture.mjs';
 
 /** @typedef {import('@taucad/runtime/types').JSONValue} JSONValue */
-/** @typedef {import('@taucad/geospec/assertion-client').GeoSpecCanonicalClaimReport} GeoSpecCanonicalClaimReport */
-/** @typedef {import('@taucad/geospec/assertion-client').GeoSpecNativeEngine} GeoSpecNativeEngine */
+/** @typedef {import('geospec/assertion-client').GeoSpecCanonicalClaimReport} GeoSpecCanonicalClaimReport */
+/** @typedef {import('geospec/assertion-client').GeoSpecNativeEngine} GeoSpecNativeEngine */
 /** @typedef {string | Uint8Array<ArrayBuffer>} ByteSource */
 /** @typedef {(input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>} Canonicalize */
 /** @typedef {{ byteLength: number, sha256: string, utf8: string }} ByteRecord */

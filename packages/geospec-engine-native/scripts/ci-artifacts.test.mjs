@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import process from 'node:process';
 // oxlint-disable-next-line no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export.
-import { prepareArtifacts, verifyArtifacts } from './ci-artifacts.mjs';
+import { prepareArtifacts, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
 
 await test('complete transport relocates, rejects missing/stale bytes, and never loads a product', (context) => {
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
@@ -33,6 +33,9 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   put(join(producer, snapshotPath), 'fixture declaration\n');
   put(join(producer, bindingPath), 'fixture source\n');
   put(join(producer, packagePath, 'scripts/ci-artifacts.mjs'), 'fixture inventory script');
+  put(join(producer, packagePath, 'scripts/collect-native-proof.py'), 'inert collector source');
+  put(join(producer, packagePath, 'scripts/test_native_proof.py'), 'inert positive fixture source');
+  put(join(producer, packagePath, 'project.json'), JSON.stringify({ targets: { 'build-node': { fixture: true } } }));
   put(join(producer, packagePath, 'rust/target/untracked-output'), 'not source');
   put(join(producer, 'mixed-cache/attempt-0/commands.json'), 'old attempt must not be selected');
   let revision = 'a'.repeat(40);
@@ -55,15 +58,52 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   let changeSource = false;
   let omitReceipt = false;
   let omitCommands = false;
+  let observations = 0;
+  let pythonFetches = 0;
   let attempt = 0;
   context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {cwd: string, env: {GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string}}) => {status: number}} */ (
+    /** @type {(executable: string, args: string[], options: {cwd: string, env: {CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string}}) => {status: number}} */ (
       executable,
       args,
       options,
     ) => {
+      if (executable === 'rustup') {
+        assert.deepEqual(args, [
+          'run',
+          '1.88',
+          'cargo',
+          'fetch',
+          '--locked',
+          '--manifest-path',
+          join(producer, packagePath, 'bindings/python/Cargo.toml'),
+        ]);
+        assert.equal(options.cwd, producer);
+        assert.equal(options.env.CARGO_HOME, join(producer, 'assembly-cargo-home'));
+        assert.equal(observations, 1);
+        assert.ok(!targets.includes('assemble-package'));
+        pythonFetches += 1;
+        return { status: 0 };
+      }
+      if (executable === 'python3') {
+        observations += 1;
+        assert.equal(args[1], join(producer, packagePath, 'scripts/collect-native-proof.py'));
+        /** @type {unknown} */
+        const invocationData = JSON.parse(readFileSync(args[3], 'utf8'));
+        const invocation =
+          /** @type {{exitCode: number, environment: {CARGO_TARGET_DIR: string}, addon: {sha256: string}}} */ (
+            invocationData
+          );
+        assert.equal(invocation.exitCode, 0);
+        assert.ok(invocation.environment.CARGO_TARGET_DIR.includes('/ci-node-target-'));
+        assert.equal(
+          invocation.addon.sha256,
+          digest(readFileSync(join(producer, generatedPath, 'geospec-engine-native.darwin-arm64.node'))),
+        );
+        put(join(args[4], 'identity-source-proof.json'), JSON.stringify({ fixture: 'inert same-build proof' }));
+        return { status: 0 };
+      }
       assert.equal(executable, 'pnpm');
       assert.deepEqual(args.slice(0, 2), ['nx', 'run']);
       assert.equal(options.cwd, producer);
@@ -71,6 +111,19 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
       assert.ok(command);
       const target = command.replace('geospec-engine-native:', '');
       targets.push(target);
+      if (target === 'assemble-package') {
+        // Nx owns the target's build dependency. The real input inventory must already verify.
+        verifyArtifacts(producer);
+        assert.equal(observations, 1);
+        assert.equal(pythonFetches, 1);
+        assert.equal(options.env.CARGO_HOME, join(producer, 'assembly-cargo-home'));
+        assert.equal(options.env.GEOSPEC_MIXED_INPUTS, join(producer, transportPath, 'mixed-inputs.json'));
+        const assembly = join(producer, 'fresh-assembly');
+        for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
+          put(join(assembly, 'tarballs', name), `inert ${name}`);
+        }
+        return { status: 0, stdout: `ASSEMBLY_ROOT=${assembly}\n` };
+      }
       if (target === 'build-node') {
         assert.equal(options.env.GEOSPEC_NODE_MANIFEST, 'bindings/node/Cargo.toml');
         assert.equal(
@@ -169,7 +222,11 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   );
   // No environment override may redirect even mocked preparation outside scratch.
   const previousEnvironment = process.env;
-  process.env = { ...process.env, GEOSPEC_DELIVERY_CACHE: undefined };
+  process.env = {
+    ...process.env,
+    GEOSPEC_DELIVERY_CACHE: undefined,
+    CARGO_HOME: join(producer, 'assembly-cargo-home'),
+  };
   context.after(() => {
     process.env = previousEnvironment;
   });
@@ -182,6 +239,7 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
     'build-node',
     'prepare-delivery:inputs',
     'build-wasm',
+    'assemble-package',
   ]);
   assert.equal(inventory.artifacts.length, 5);
   for (const [name, original] of [
@@ -195,7 +253,17 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   rmSync(join(consumer, 'mixed-cache'), { recursive: true });
   rmSync(join(consumer, 'node_modules'), { recursive: true });
   assert.deepEqual(verifyArtifacts(consumer), inventory);
-  assert.equal(targets.length, 6, 'verification must not invoke a producer');
+  assert.deepEqual(verifyDelivery(consumer), inventory);
+  assert.equal(targets.length, 7, 'verification must not invoke a producer');
+  assert.equal(observations, 1, 'verification must not observe a native module');
+  assert.equal(pythonFetches, 1, 'verification must not fetch Cargo material');
+  for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
+    const path = join(consumer, transportPath, 'assembly/tarballs', name);
+    const bytes = readFileSync(path);
+    put(path, 'other assembly');
+    assert.throws(() => verifyDelivery(consumer), /archive\/proof hashes or workflow run differ/);
+    put(path, bytes);
+  }
   for (const file of inventory.artifacts) {
     const path = join(consumer, file.path);
     const bytes = readFileSync(path);

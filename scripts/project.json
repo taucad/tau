@@ -96,6 +96,44 @@
         "command": "node --import tsx scripts/src/update-license-deps.mts --check"
       }
     },
+    "prepare-geospec-test-consumer": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": [
+        {
+          "target": "build",
+          "projects": [
+            "cache-core",
+            "project-core",
+            "units",
+            "parameters",
+            "runtime",
+            "bundler-core",
+            "esbuild",
+            "geospec"
+          ]
+        }
+      ],
+      "options": {
+        "command": "node scripts/src/prepare-geospec-test-consumer.ts \"${GEOSPEC_NATIVE_ASSEMBLY_ROOT:?Supply the reviewed ASSEMBLY_ROOT}\" out/artifacts/geospec-test-consumer/receipt.json",
+        "forwardAllArgs": false
+      }
+    },
+    "check-geospec-test-consumer": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test scripts/src/prepare-geospec-test-consumer.check.ts",
+        "forwardAllArgs": false
+      }
+    },
+    "plan-geospec-ci": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node scripts/src/plan-geospec-ci.ts"
+      }
+    },
     "validate-workflows": {
       "executor": "nx:run-commands",
       "options": {

@@ -9,6 +9,7 @@ on:
     branches-ignore:
       - production
 env:
+  pnpm_config_verify_deps_before_run: warn
   NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
   TAU_API_URL: http://localhost:4000
   TAU_WEBSOCKET_URL: ws://localhost:4001
@@ -37,6 +38,8 @@ jobs:
       api: ${{ steps.plan.outputs.api }}
       e2e: ${{ steps.plan.outputs.e2e }}
       size: ${{ steps.plan.outputs.size }}
+      geospec-required: ${{ steps.geospec.outputs.geospec-required }}
+      geospec-darwin-tests: ${{ steps.geospec.outputs.geospec-darwin-tests }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -71,6 +74,43 @@ jobs:
             fi
           done
 
+      # --graph expands dependencies without executing any selected task. In
+      # particular, an affected consumer can reach an unaffected native build.
+      - name: Plan artifact prerequisites from expanded tasks
+        id: geospec
+        env:
+          PLAN_API: ${{ steps.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push') }}
+          PLAN_E2E: ${{ steps.plan.outputs.e2e == 'true' }}
+          PLAN_SIZE: ${{ github.event_name == 'pull_request' && steps.plan.outputs.size == 'true' }}
+          PLAN_PERFORMANCE: ${{ github.event_name == 'pull_request' && vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true' }}
+          PLAN_BILLING: ${{ github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && steps.plan.outputs.api == 'true') }}
+          PLAN_LIVE: ${{ github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && steps.plan.outputs.e2e == 'true') }}
+        run: |
+          mkdir -p out/artifacts/geospec-native-engine/plan
+          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart lint-benchmark-entry typecheck-benchmark-entry test-benchmark-entry test-benchmark-statistics check-ci-artifacts check-delivery-environment check-conformance-profile check-geospec-test-consumer test-m3-verdicts check-coverage-gate prepare-legacy-reference typecheck-legacy-reference --graph=out/artifacts/geospec-native-engine/plan/affected.json
+          pnpm nx affected -t test --exclude tag:scope:api --graph=out/artifacts/geospec-native-engine/plan/tests.json
+          if [ "$PLAN_E2E" = true ]; then
+            pnpm nx affected -t test:e2e test:e2e:development test:e2e:webgpu --graph=out/artifacts/geospec-native-engine/plan/e2e.json
+          fi
+          if [ "$PLAN_API" = true ]; then
+            pnpm nx run-many -t test --projects tag:scope:api --graph=out/artifacts/geospec-native-engine/plan/api-tests.json
+            pnpm nx run-many -t test:server-modes test:models test:git test:billing-foundation --graph=out/artifacts/geospec-native-engine/plan/api.json
+          fi
+          if [ "$PLAN_SIZE" = true ]; then
+            # size:build builds every project with a size configuration.
+            pnpm nx run-many -t size --graph=out/artifacts/geospec-native-engine/plan/size-report.json
+          fi
+          if [ "$PLAN_PERFORMANCE" = true ]; then
+            pnpm nx run-many -t performance-gate benchmark compare-benchmarks --graph=out/artifacts/geospec-native-engine/plan/performance.json
+          fi
+          if [ "$PLAN_BILLING" = true ]; then
+            pnpm nx run-many -t test:billing-stripe --graph=out/artifacts/geospec-native-engine/plan/billing.json
+          fi
+          if [ "$PLAN_LIVE" = true ]; then
+            pnpm nx run-many -t test:e2e:desktop:live --graph=out/artifacts/geospec-native-engine/plan/live.json
+          fi
+          pnpm nx run scripts:plan-geospec-ci -- out/artifacts/geospec-native-engine/plan/*.json
+
   # Every workspace invariant is a `scripts:validate-*` target; `scripts:validate`
   # is the wildcard umbrella over all of them (frontmatter, workspace root,
   # project names and tags, tsgo runtime references, quickstart budget, license
@@ -89,8 +129,114 @@ jobs:
       - name: Run workspace validators
         run: pnpm nx run scripts:validate
 
+  geospec-producer:
+    name: Produce current GeoSpec artifacts
+    needs: [plan]
+    if: needs.plan.outputs.geospec-required == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+
+      - name: Setup producer Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.14'
+
+      # The hosted label is not a capacity qualification. Fail before source/SDK
+      # downloads if the existing sources/tools/prefixes reserve (19 GiB) is unavailable.
+      - name: Check producer host, capacity and installed tools
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("GeoSpec producer capacity unavailable");'
+          python3 -c 'import sys; assert sys.version_info >= (3, 12); print(sys.version)'
+          cmake --version
+          ninja --version
+          xcrun --find clang++
+
+      - name: Setup selected CPython 3.13 tooling
+        id: python313
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13.14'
+          update-environment: false
+
+      - name: Setup selected CPython 3.14 tooling
+        id: python314
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.7'
+          update-environment: false
+
+      - name: Provision pinned Python wrapper tooling
+        env:
+          GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
+          GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tomllib
+
+          project = Path('packages/geospec-engine-native/bindings/python/pyproject.toml')
+          requirements = tomllib.loads(project.read_text())['build-system']['requires']
+          assert len(requirements) == 1 and re.fullmatch(r'maturin==[0-9]+\.[0-9]+\.[0-9]+', requirements[0])
+          for selector, name in [('GEOSPEC_PYTHON313', 'python-venv'), ('GEOSPEC_PYTHON314', 'python314-venv')]:
+              environment = Path('node_modules/.cache/geospec-engine-native') / name
+              subprocess.run([os.environ[selector], '-m', 'venv', str(environment)], check=True)
+              subprocess.run([str(environment / 'bin/python'), '-m', 'pip', 'install',
+                              '--disable-pip-version-check', '--only-binary=:all:', '--no-deps', requirements[0]], check=True)
+              subprocess.run([str(environment / 'bin/python'), '--version'], check=True)
+              subprocess.run([str(environment / 'bin/maturin'), '--version'], check=True)
+          PYTHON
+
+      - name: Install the selected native Rust toolchain
+        run: |
+          rustup toolchain install 1.88 --profile minimal
+          rustup run 1.88 rustc --version
+
+      - name: Prepare complete current-source transport
+        run: pnpm nx run-many -t prepare-geospec-ci-artifacts --parallel=1
+
+      - name: Upload complete current-source transport
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            packages/geospec-engine-native/bindings/node/generated/index.d.ts
+            packages/geospec-engine-native/bindings/node/generated/index.js
+            packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node
+            packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.mjs
+            packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm
+            out/artifacts/geospec-native-engine/ci
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare current installed GeoSpec consumer
+        if: needs.plan.outputs.geospec-darwin-tests == 'true'
+        env:
+          GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
+        run: |
+          pnpm nx run-many -t require-geospec-delivery --parallel=1
+          pnpm nx run scripts:prepare-geospec-test-consumer
+          node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
+
+      - name: Run complete affected Darwin host suites
+        if: needs.plan.outputs.geospec-darwin-tests == 'true'
+        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api --skip-nx-cache
+
   affected:
     name: Run affected tasks
+    needs: [plan, geospec-producer]
+    if: always()
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
@@ -98,6 +244,17 @@ jobs:
       actions: 'read'
       pull-requests: 'read'
     steps:
+      # Preserve failure in this existing required job when a needed producer
+      # (including its host suites) fails. An unneeded producer may be skipped.
+      - name: Require artifact producer success
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
+          PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
+        run: |
+          test "$PLAN_RESULT" = success
+          if [ "$PRODUCER_REQUIRED" = true ]; then test "$PRODUCER_RESULT" = success; fi
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -105,6 +262,21 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24' }}
+
+      - &download-geospec
+        name: Download same-run GeoSpec transport
+        if: needs.plan.outputs.geospec-required == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          path: .
+
+      - &verify-geospec
+        name: Verify GeoSpec transport against this checkout
+        if: needs.plan.outputs.geospec-required == 'true'
+        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
 
       # Native kernel workers run inside the operating-system sandbox on every host,
       # including CI; a Linux runner needs the Bubblewrap toolchain and capability-bearing
@@ -143,23 +315,31 @@ jobs:
       - name: Run affected tasks
         run: |
           pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart
-          pnpm nx affected -t test --exclude tag:scope:api
+          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64
 
-      - name: Select affected benchmark statistics
+      - name: Select affected Python checks
         id: benchmark-statistics
         run: |
           projects=$(pnpm nx show projects --affected --with-target test-benchmark-statistics --json | tail -1)
+          delivery_projects=$(pnpm nx show projects --affected --with-target check-delivery-environment --json | tail -1)
+          verdict_projects=$(pnpm nx show projects --affected --with-target test-m3-verdicts --json | tail -1)
           if [ "$projects" = '[]' ]; then
             echo "required=false" >> "$GITHUB_OUTPUT"
           else
             echo "required=true" >> "$GITHUB_OUTPUT"
           fi
+          if [ "$projects" != '[]' ] || [ "$delivery_projects" != '[]' ] || [ "$verdict_projects" != '[]' ]; then
+            echo "python-required=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Setup benchmark analysis Python
-        if: steps.benchmark-statistics.outputs.required == 'true'
+      - name: Setup affected checks Python
+        if: steps.benchmark-statistics.outputs.python-required == 'true'
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12.14'
+
+      - name: Check affected pure artifact and delivery helpers
+        run: pnpm nx affected -t check-ci-artifacts check-delivery-environment check-conformance-profile check-geospec-test-consumer test-m3-verdicts
 
       - name: Prepare benchmark statistics dependencies
         if: steps.benchmark-statistics.outputs.required == 'true'
@@ -189,14 +369,20 @@ jobs:
   e2e:
     name: Browser end-to-end
     runs-on: ubuntu-latest
-    needs: [plan]
-    if: needs.plan.outputs.e2e == 'true'
+    needs: [plan, geospec-producer]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.e2e == 'true')
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - *download-geospec
+      - *verify-geospec
 
       - name: Install Chromium for Vitest Browser
         run: pnpm exec playwright install --with-deps chromium
@@ -236,14 +422,20 @@ jobs:
   webgpu-hardware:
     name: WebGPU hardware qualification
     runs-on: [self-hosted, tau-webgpu]
-    needs: [plan]
-    if: needs.plan.outputs.e2e == 'true'
+    needs: [plan, geospec-producer]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.e2e == 'true')
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - *download-geospec
+      - *verify-geospec
 
       - name: Install managed Chromium for Vitest Browser
         run: pnpm exec playwright install chromium
@@ -269,8 +461,11 @@ jobs:
   size-report:
     name: Bundle size report
     runs-on: ubuntu-latest
-    needs: [plan]
-    if: github.event_name == 'pull_request' && needs.plan.outputs.size == 'true'
+    needs: [plan, geospec-producer]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (github.event_name == 'pull_request' && needs.plan.outputs.size == 'true')
     permissions:
       pull-requests: write
     steps:
@@ -279,6 +474,9 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - *download-geospec
+      - *verify-geospec
 
       - name: Check bundle sizes
         uses: andresz1/size-limit-action@94bc357df29c36c8f8d50ea497c3e225c3c95d1d # v1.8.0
@@ -293,8 +491,12 @@ jobs:
         run: pnpm nx run scripts:validate-workspace-root
 
   performance:
+    needs: [plan, geospec-producer]
     name: Runtime performance gates
-    if: github.event_name == 'pull_request' && vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true'
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (github.event_name == 'pull_request' && vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true')
     runs-on: [self-hosted, tau-benchmark]
     steps:
       - name: Checkout
@@ -304,6 +506,9 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - *download-geospec
+      - *verify-geospec
 
       - name: Run invariant and microbenchmark gates
         env:
@@ -424,14 +629,20 @@ jobs:
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
-    needs: [plan]
-    if: needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push')
+    needs: [plan, geospec-producer]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - *download-geospec
+      - *verify-geospec
 
       - name: Prepare API env file
         run: cp apps/api/.env.example apps/api/.env
@@ -502,8 +713,11 @@ jobs:
   billing-e2e:
     name: Billing e2e (Stripe test mode)
     runs-on: ubuntu-latest
-    needs: [plan]
-    if: (github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.api == 'true')
+    needs: [plan, geospec-producer]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      ((github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.api == 'true'))
     concurrency:
       group: stripe-test-account
       cancel-in-progress: false
@@ -525,6 +739,9 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - *download-geospec
+      - *verify-geospec
 
       - name: Install Stripe CLI
         run: |
@@ -554,8 +771,11 @@ jobs:
   desktop-e2e-live:
     name: Desktop live LLM (launcher 2)
     runs-on: ubuntu-latest
-    needs: [plan]
-    if: (github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.e2e == 'true')
+    needs: [plan, geospec-producer]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      ((github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.e2e == 'true'))
     env:
       OPENAI_API_KEY: ${{ secrets.TAU_E2E_OPENAI_API_KEY }}
       TAU_E2E_WEBGPU_PROFILE: software
@@ -576,6 +796,17 @@ jobs:
       - name: Setup Nx Environment
         if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
+
+      - name: Download same-run GeoSpec transport
+        if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          path: .
+
+      - name: Verify GeoSpec transport against this checkout
+        if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true'
+        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
 
       - name: Prepare API env file
         if: steps.gate.outputs.enabled == 'true'

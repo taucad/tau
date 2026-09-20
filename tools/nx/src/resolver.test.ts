@@ -116,6 +116,28 @@ describe('publishable()', () => {
 });
 
 describe('validateTags()', () => {
+  it('should allow no host or one valid host and reject unknown or duplicate hosts', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('portable', ['scope:shared', 'type:package'], undefined),
+          project('darwin', ['scope:shared', 'type:package', 'host:darwin-arm64'], undefined),
+          project('unknown-host', ['scope:shared', 'type:package', 'host:other'], undefined),
+          project('two-hosts', ['scope:shared', 'type:package', 'host:darwin-arm64', 'host:darwin-arm64'], undefined),
+          project('host-without-scope', ['type:package', 'host:darwin-arm64'], undefined),
+          project('host-without-type', ['scope:shared', 'host:darwin-arm64'], undefined),
+          project('host-without-layer', ['scope:ui', 'type:app-lib', 'host:darwin-arm64'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-host: unknown tag "host:other" (host: must be one of darwin-arm64)',
+      'fixture/two-hosts: expected exactly one host: tag, found host:darwin-arm64, host:darwin-arm64',
+      'fixture/host-without-scope: expected exactly one scope: tag, found none',
+      'fixture/host-without-type: expected exactly one type: tag, found none',
+      'fixture/host-without-layer: expected exactly one layer: tag, found none',
+    ]);
+  });
+
   it('accepts every project in the workspace, inferred ones included', () => {
     expect(validateTags(live)).toEqual([]);
   });

@@ -26,7 +26,7 @@ pnpm --dir "$PACKAGE_ROOT" exec napi create-npm-dirs --cwd "$STAGED_ROOT" --npm-
 
 node --input-type=module - "$PACKAGE_ROOT" "$STAGED_ROOT" <<'JS'
 import { copyFileSync, cpSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 const [source, stage] = process.argv.slice(2);
 for (const directory of readdirSync(join(stage, 'npm'))) {
   const target = join(stage, 'npm', directory);
@@ -35,7 +35,11 @@ for (const directory of readdirSync(join(stage, 'npm'))) {
   copyFileSync(join(source, 'LICENSE'), join(target, 'LICENSE'));
   copyFileSync(join(source, 'NOTICE'), join(target, 'NOTICE'));
   cpSync(join(source, 'licenses'), join(target, 'licenses'), { recursive: true });
-  manifest.files = [...new Set([...(manifest.files ?? ['*.node']), 'NOTICE', 'licenses'])];
+  const licenses = readdirSync(join(source, 'licenses'), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(source, join(entry.parentPath, entry.name)).split(sep).join('/'))
+    .sort();
+  manifest.files = [...new Set([...(manifest.files ?? [manifest.main]), 'NOTICE', ...licenses])];
   writeFileSync(join(target, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 JS

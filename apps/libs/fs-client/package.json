@@ -133,6 +133,7 @@
     "@taucad/utils": "workspace:*"
   },
   "devDependencies": {
+    "fast-check": "catalog:",
     "@testing-library/react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

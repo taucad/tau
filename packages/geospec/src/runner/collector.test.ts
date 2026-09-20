@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createGeoSpec, describe as geoDescribe, expectGeo, geoSpecMatcherNames, it as geoIt, test } from '#index.js';
+import {
+  createGeoSpec,
+  describe as geoDescribe,
+  expectGeo,
+  expectNativeGeo,
+  geoSpecMatcherNames,
+  it as geoIt,
+  test,
+} from '#index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 import { decodeGeoSpecCanonicalJson, geoSpecEngineProtocolVersion, toGeoSpecProtocolJson } from '#engine/protocol.js';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
@@ -332,6 +340,49 @@ describe('expectGeo proxy', () => {
     expect(collector.tests[0]?.assertions[0]?.diagnostics).toStrictEqual([failure]);
   });
 
+  it('should settle every pending assertion after an ordinary callback rejection', async () => {
+    const second = Promise.withResolvers<void>();
+    let calls = 0;
+    registerProtocol({
+      capability: 'toHaveSpatialRelationships',
+      submitClaims: async (request) => {
+        const call = ++calls;
+        if (call === 2) {
+          await second.promise;
+        }
+        return claimResult(request, call === 1 ? [failure] : []);
+      },
+    });
+
+    const collector = createCollector();
+    collector.it('relationships', () => {
+      collector.expectGeo(subject).toHaveSpatialRelationships({ relationships: [] });
+      collector.expectGeo(subject).toHaveSpatialRelationships({ relationships: [] });
+      throw new Error('body failed');
+    });
+    let completed = false;
+    const observeCompletion = async (): Promise<void> => {
+      await collector.waitForCompletion(1000);
+      completed = true;
+    };
+    const completion = observeCompletion();
+    await vi.waitFor(() => {
+      expect(calls).toBe(2);
+    });
+    await Promise.resolve();
+
+    expect(completed).toBe(false);
+    second.resolve();
+    await completion;
+
+    expect(collector.tests[0]?.status).toBe('failed');
+    expect(collector.tests[0]?.diagnostics.map((diagnostic) => diagnostic.message)).toStrictEqual([
+      'body failed',
+      failure.message,
+    ]);
+    expect(collector.tests[0]?.assertions.map((assertion) => assertion.passed)).toStrictEqual([false, true]);
+  });
+
   it('should answer GEOSPEC_ENGINE_UNAVAILABLE when no engine backs the matcher', async () => {
     const collector = createCollector();
     collector.it('volume', () => {
@@ -372,6 +423,38 @@ describe('expectGeo proxy', () => {
 });
 
 describe('authoring helpers', () => {
+  it('should reject the native helper when the active collector is legacy', () => {
+    installCollector(createCollector());
+
+    expect(() => expectNativeGeo({ contentHash: 'sha256:test' })).toThrow(
+      'Native expectGeo requires a collector configured with nativeAssertions.',
+    );
+  });
+
+  it('should reject the legacy helper while retaining native suite registration', async () => {
+    const passthrough = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => input;
+    const collector = createCollector({
+      nativeAssertions: {
+        canonicalize: passthrough,
+        engine: { canonicalPlan: passthrough, evaluatePlan: passthrough, processRequest: passthrough },
+      },
+    });
+    installCollector(collector);
+
+    geoDescribe('native helpers', () => {
+      geoIt('registers', () => undefined);
+    });
+    expect(() => expectGeo('legacy subject')).toThrow(
+      'Legacy expectGeo is unavailable in native mode. Import expectNativeGeo from geospec.',
+    );
+    expect(expectNativeGeo({ subjectHash: 'a'.repeat(64) })).toHaveProperty('toBeWatertight');
+
+    await collector.waitForCompletion();
+    expect(collector.tests.map(({ name, status }) => ({ name, status }))).toStrictEqual([
+      { name: 'registers', status: 'passed' },
+    ]);
+  });
+
   it('should delegate the module-scoped helpers to the installed collector', async () => {
     const collector = createCollector();
     installCollector(collector);

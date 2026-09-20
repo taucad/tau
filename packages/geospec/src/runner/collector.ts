@@ -12,8 +12,19 @@
  * @module
  */
 
-import { createGeoSpecMatcherMethods } from '#assertion-client/index.js';
-import type { GeoSpecAuthoringInvocation } from '#assertion-client/index.js';
+import {
+  createGeoSpecMatcherMethods,
+  createGeoSpecNativeMatcherMethods,
+  createGeoSpecAssertionClient,
+  GeoSpecAssertionError as NativeAssertionError,
+} from '#assertion-client/index.js';
+import type {
+  GeoSpecAuthoringInvocation,
+  GeoSpecAssertionClientOptions,
+  GeoSpecNativeSubject,
+  GeoSpecNativeAuthoringInvocation,
+  GeoSpecCanonicalClaimReport,
+} from '#assertion-client/index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 import type { GeoSpecMatcherName } from '#engine/matchers.js';
 import {
@@ -36,7 +47,7 @@ import {
   resolveMatcherWorkUnitBudget,
   withMatcherBudget,
 } from '#runner/matcher-budget.js';
-import type { GeoSpecAssertion, GeoSpecMatcher, GeoSpecTestCase } from '#runner/types.js';
+import type { GeoSpecAssertion, GeoSpecMatcher, GeoSpecTestCase, GeoSpecNativeRunnerMatcher } from '#runner/types.js';
 
 type GeoSpecTestFunction = () => unknown | PromiseLike<unknown>;
 
@@ -56,8 +67,24 @@ export type GeoSpecCollector = {
   waitForCompletion(testTimeout?: number, testNamePattern?: GeoSpecTestNamePattern): Promise<void>;
 };
 
+/** Native collector surface for hosts that explicitly supply a native engine. @public */
+export type GeoSpecNativeCollector = Omit<GeoSpecCollector, 'expectGeo'> & {
+  expectGeo(subject: GeoSpecNativeSubject): GeoSpecNativeRunnerMatcher;
+};
+
+/** Per-module collector configuration; native subject/engine lifetime stays with the host. @public */
+export type GeoSpecCollectorOptions = {
+  matcherWallBackstop?: number;
+  forensic?: boolean;
+  nativeAssertions?: GeoSpecAssertionClientOptions;
+};
+
 export const collectorGlobalKey = '__GEOSPEC_COLLECTOR__';
 const geospecGlobal = globalThis as typeof globalThis & Record<string, unknown>;
+const nativeCollectorMarker: unique symbol = Symbol('GeoSpecNativeCollector');
+type RuntimeGeoSpecNativeCollector = GeoSpecNativeCollector & { readonly [nativeCollectorMarker]: true };
+const isRuntimeGeoSpecNativeCollector = (value: unknown): value is RuntimeGeoSpecNativeCollector =>
+  typeof value === 'object' && value !== null && Reflect.get(value, nativeCollectorMarker) === true;
 
 const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
   typeof value === 'object' &&
@@ -293,18 +320,19 @@ const recordAssertion = (assertion: GeoSpecAssertion, diagnostics: GeometryDiagn
   return assertion;
 };
 
-const withTimeout = async (promise: Promise<unknown>, testTimeout?: number): Promise<void> => {
+class GeoSpecTestTimeoutError extends Error {}
+
+const withTimeout = async <Result>(promise: Promise<Result>, testTimeout?: number): Promise<Result> => {
   if (testTimeout === undefined) {
-    await promise;
-    return;
+    return promise;
   }
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([
+    return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
         timeoutHandle = setTimeout(() => {
-          reject(new Error(`GeoSpec test timed out after ${testTimeout}ms.`));
+          reject(new GeoSpecTestTimeoutError(`GeoSpec test timed out after ${testTimeout}ms.`));
         }, testTimeout);
       }),
     ]);
@@ -316,12 +344,71 @@ const withTimeout = async (promise: Promise<unknown>, testTimeout?: number): Pro
   }
 };
 
+const recordRejectedSettlements = (
+  settled: ReadonlyArray<PromiseSettledResult<unknown>>,
+  recordFailure: (error: unknown) => void,
+): void => {
+  for (const result of settled) {
+    if (result.status === 'rejected') {
+      recordFailure(result.reason);
+    }
+  }
+};
+
+const settlePendingAssertions = async (
+  settlement: Promise<Array<PromiseSettledResult<unknown>>>,
+  options: {
+    callbackTimedOut: boolean;
+    native: boolean;
+    recordFailure: (error: unknown) => void;
+    testTimeout?: number;
+  },
+): Promise<Array<PromiseSettledResult<unknown>> | undefined> => {
+  if (options.native && options.callbackTimedOut) {
+    return settlement;
+  }
+  try {
+    return await withTimeout(settlement, options.testTimeout);
+  } catch (error) {
+    options.recordFailure(error);
+    return options.native ? settlement : undefined;
+  }
+};
+
 export const getCollector = (): GeoSpecCollector => {
   const collector = geospecGlobal[collectorGlobalKey];
   if (!isGeoSpecCollector(collector)) {
     throw new Error('GeoSpec collector is not active. Run the module through runGeoSpecModule().');
   }
 
+  return collector;
+};
+
+/**
+ * Read the active collector only when it uses the legacy assertion path.
+ *
+ * @returns The active legacy collector.
+ * @throws When the active collector uses native assertions.
+ */
+export const getLegacyCollector = (): GeoSpecCollector => {
+  const collector = getCollector();
+  if (isRuntimeGeoSpecNativeCollector(collector)) {
+    throw new Error('Legacy expectGeo is unavailable in native mode. Import expectNativeGeo from geospec.');
+  }
+  return collector;
+};
+
+/**
+ * Read the active collector only when it was created in native assertion mode.
+ *
+ * @returns The active native collector.
+ * @throws When the active collector uses the legacy assertion path.
+ */
+export const getNativeCollector = (): GeoSpecNativeCollector => {
+  const collector = geospecGlobal[collectorGlobalKey];
+  if (!isRuntimeGeoSpecNativeCollector(collector)) {
+    throw new Error('Native expectGeo requires a collector configured with nativeAssertions.');
+  }
   return collector;
 };
 
@@ -342,7 +429,20 @@ const isGeoSpecTestCase = (value: unknown): value is GeoSpecTestCase =>
  * @returns A fresh collector instance.
  */
 /** @public */
-export const createCollector = (options?: { matcherWallBackstop?: number; forensic?: boolean }): GeoSpecCollector => {
+export function createCollector(
+  options: GeoSpecCollectorOptions & { nativeAssertions: GeoSpecAssertionClientOptions },
+): GeoSpecNativeCollector;
+export function createCollector(options?: GeoSpecCollectorOptions & { nativeAssertions?: undefined }): GeoSpecCollector;
+export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecCollector | GeoSpecNativeCollector;
+/**
+ * Create the collector for the explicitly selected engine mode.
+ * @param options - Legacy execution settings or a native assertion client configuration.
+ * @returns A fresh collector whose matcher surface matches the selected mode.
+ * @public
+ */
+export function createCollector(options?: GeoSpecCollectorOptions): GeoSpecCollector | GeoSpecNativeCollector {
+  const nativeClient =
+    options?.nativeAssertions === undefined ? undefined : createGeoSpecAssertionClient(options.nativeAssertions);
   const execution: GeoSpecExecutionOptions = {
     forensic: options?.forensic ?? false,
     matcherWallBackstop: options?.matcherWallBackstop ?? defaultMatcherWallBackstop,
@@ -351,7 +451,7 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
   const tests: GeoSpecTestCase[] = [];
   const definitionPending: Array<Promise<unknown>> = [];
   const scheduled: Array<{ test: GeoSpecTestCase; function_: GeoSpecTestFunction }> = [];
-  const pendingAssertions = new WeakMap<GeoSpecTestCase, Array<Promise<void>>>();
+  const pendingAssertions = new WeakMap<GeoSpecTestCase, Array<Promise<unknown>>>();
   let activeTest: GeoSpecTestCase | undefined;
   let executed = false;
 
@@ -385,11 +485,12 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
     });
   };
 
+  // oxlint-disable-next-line typescript/promise-function-async -- Return the exact tracked promise, so unawaited native calls have no unobserved wrapper rejection.
   const recordAsyncAssertion = (
     test: GeoSpecTestCase,
     assertion: GeoSpecAssertion,
     evaluate: () => Promise<GeometryDiagnostic[]>,
-  ): GeoSpecAssertion => {
+  ): Promise<GeoSpecAssertion> => {
     const pending = (async () => {
       // R1: asynchronous matchers get the same duration stamp as the sync choke point.
       const startedAt = performance.now();
@@ -404,11 +505,16 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
       if (diagnostics.length > 0) {
         throw new GeoSpecAssertionError(diagnostics);
       }
+      return assertion;
     })();
+    // Observe immediately even when authors leave a native assertion unawaited.
+    // The original rejection remains tracked and is surfaced at test completion.
+    // oxlint-disable-next-line promise/prefer-await-to-then -- Attach a rejection observer synchronously; retain the original verdict-bearing promise below.
+    const observed = pending.catch(() => undefined);
     const existing = pendingAssertions.get(test) ?? [];
-    existing.push(pending);
+    existing.push(pending, observed);
     pendingAssertions.set(test, existing);
-    return assertion;
+    return pending;
   };
 
   const recordInvocation = (invocation: GeoSpecAuthoringInvocation): GeoSpecAssertion => {
@@ -425,9 +531,10 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
     const descriptor = geoSpecMatcherDescriptors[invocation.matcher];
 
     if (descriptor.mode === 'async') {
-      return recordAsyncAssertion(activeTest, assertion, async () => [
+      void recordAsyncAssertion(activeTest, assertion, async () => [
         ...(await invokeMatcherWithBudget(invocation, execution)),
       ]);
+      return assertion;
     }
 
     // R1/R13: the sync choke point stamps the duration and brackets the
@@ -451,7 +558,7 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
     }
   };
 
-  return {
+  const collector: GeoSpecCollector = {
     describe(name, function_) {
       suite.push(name);
       try {
@@ -515,7 +622,15 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
         return;
       }
       executed = true;
-      await withTimeout(Promise.allSettled(definitionPending), testTimeout);
+      const definitionSettlement = Promise.allSettled(definitionPending);
+      try {
+        await withTimeout(definitionSettlement, testTimeout);
+      } catch (error) {
+        if (nativeClient !== undefined) {
+          await definitionSettlement;
+        }
+        throw error;
+      }
       for (const scheduledTest of scheduled) {
         if (!matchesGeoSpecTestName(scheduledTest.test, testNamePattern)) {
           continue;
@@ -524,14 +639,50 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
         const previousTest = activeTest;
         activeTest = scheduledTest.test;
         const startedAt = performance.now();
+        const failures: unknown[] = [];
+        const recordFailure = (error: unknown): void => {
+          if (!failures.some((failure) => Object.is(failure, error))) {
+            failures.push(error);
+          }
+        };
         try {
-          // oxlint-disable-next-line no-await-in-loop -- GeoSpec CAD tests run serially so model-loader state and native resources cannot cross-wire.
-          await withTimeout(Promise.resolve(scheduledTest.function_()), testTimeout);
-          // oxlint-disable-next-line no-await-in-loop -- Assertions must settle before the next CAD test mutates runner bindings.
-          await withTimeout(Promise.all(pendingAssertions.get(scheduledTest.test) ?? []), testTimeout);
-        } catch (error) {
-          scheduledTest.test.status = 'failed';
-          scheduledTest.test.diagnostics.push(...createErrorDiagnostics(error));
+          let callbackPending: Promise<unknown> | undefined;
+          try {
+            callbackPending = Promise.resolve(scheduledTest.function_());
+            // oxlint-disable-next-line no-await-in-loop -- GeoSpec CAD tests run serially so model-loader state and native resources cannot cross-wire.
+            await withTimeout(callbackPending, testTimeout);
+          } catch (error) {
+            recordFailure(error);
+          }
+          if (nativeClient !== undefined && callbackPending !== undefined) {
+            // A reporting timeout does not transfer ownership of native work.
+            // Keep the active test installed while its real callback settles so
+            // late assertions remain attached to this test before host cleanup.
+            // oxlint-disable-next-line no-await-in-loop -- Native ownership must drain before the serial runner advances.
+            recordRejectedSettlements(await Promise.allSettled([callbackPending]), recordFailure);
+          }
+          const callbackTimedOut = failures.some((failure) => failure instanceof GeoSpecTestTimeoutError);
+          if (nativeClient !== undefined || !callbackTimedOut) {
+            const assertionSettlement = Promise.allSettled(pendingAssertions.get(scheduledTest.test) ?? []);
+            // A callback timeout already establishes the verdict. Native mode
+            // still drains real assertion settlement without another timer.
+            // oxlint-disable-next-line no-await-in-loop -- Assertions must settle before the serial runner advances.
+            const settled = await settlePendingAssertions(assertionSettlement, {
+              callbackTimedOut,
+              native: nativeClient !== undefined,
+              recordFailure,
+              ...(testTimeout === undefined ? {} : { testTimeout }),
+            });
+            if (settled !== undefined) {
+              recordRejectedSettlements(settled, recordFailure);
+            }
+          }
+          if (failures.length > 0) {
+            scheduledTest.test.status = 'failed';
+            for (const failure of failures) {
+              scheduledTest.test.diagnostics.push(...createErrorDiagnostics(failure));
+            }
+          }
         } finally {
           activeTest = previousTest;
           scheduledTest.test.durationMs = performance.now() - startedAt;
@@ -541,7 +692,76 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
 
     tests,
   };
-};
+  if (nativeClient === undefined) {
+    return collector;
+  }
+  // oxlint-disable-next-line typescript/promise-function-async -- Preserve the already-observed promise returned by recordAsyncAssertion.
+  const recordNativeInvocation = (invocation: GeoSpecNativeAuthoringInvocation): Promise<GeoSpecAssertion> => {
+    if (!isGeoSpecTestCase(activeTest)) {
+      throw new Error('expectGeo() must be called inside it().');
+    }
+    const assertion: GeoSpecAssertion = {
+      kind: 'kind' in invocation ? invocation.kind : invocation.matcher,
+      subject: invocation.subject,
+      expected: invocation.expected,
+    };
+    activeTest.assertions.push(assertion);
+    return recordAsyncAssertion(activeTest, assertion, async () => {
+      const { subject } = invocation;
+      if (
+        typeof subject !== 'object' ||
+        subject === null ||
+        (!('contentHash' in subject && typeof subject.contentHash === 'string') &&
+          !('subjectHash' in subject && typeof subject.subjectHash === 'string'))
+      ) {
+        throw new TypeError('Native expectGeo requires an admitted contentHash or subjectHash identity.');
+      }
+      const methods = nativeClient.expectGeo(subject as GeoSpecNativeSubject);
+      const chain = invocation.polarity === 'negative' ? methods.not : methods;
+      // The shared authoring registry already supplies each method's argument tuple.
+      const method = chain[invocation.matcher] as (
+        ...arguments_: readonly unknown[]
+      ) => Promise<GeoSpecCanonicalClaimReport>;
+      let report: GeoSpecCanonicalClaimReport;
+      try {
+        report = await method(...invocation.arguments);
+      } catch (error) {
+        if (!(error instanceof NativeAssertionError)) {
+          throw error;
+        }
+        report = error.report;
+      }
+      assertion.nativeReport = report;
+      if (report.status === 'passed') {
+        return [];
+      }
+      const diagnostics = report.diagnostics.map((diagnostic) =>
+        diagnosticForTransport(diagnosticFromWire(diagnostic)),
+      );
+      return diagnostics.length > 0
+        ? diagnostics
+        : [
+            {
+              code: 'GEOSPEC_NATIVE_ASSERTION_FAILED',
+              severity: 'error',
+              message: `Native claim '${report.claimId}' ended with status '${report.status}'.`,
+              details: { claimId: report.claimId, status: report.status },
+            },
+          ];
+    });
+  };
+  const nativeCollector: GeoSpecNativeCollector = {
+    ...collector,
+    expectGeo(subject: GeoSpecNativeSubject) {
+      return Object.assign(
+        createGeoSpecNativeMatcherMethods({ invoke: recordNativeInvocation, polarity: 'positive', subject }),
+        { not: createGeoSpecNativeMatcherMethods({ invoke: recordNativeInvocation, polarity: 'negative', subject }) },
+      );
+    },
+  };
+  Object.defineProperty(nativeCollector, nativeCollectorMarker, { value: true });
+  return nativeCollector;
+}
 
 /**
  * Clear runner globals after a module finishes.
@@ -557,6 +777,6 @@ export const clearCollectorGlobals = (): void => {
  * @param collector - Collector for the active run.
  */
 /** @public */
-export const installCollector = (collector: GeoSpecCollector): void => {
+export const installCollector = (collector: GeoSpecCollector | GeoSpecNativeCollector): void => {
   geospecGlobal[collectorGlobalKey] = collector;
 };

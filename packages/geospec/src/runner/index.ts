@@ -5,6 +5,7 @@
  */
 
 export { GeoSpecAssertionError, clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
+export type { GeoSpecCollector, GeoSpecNativeCollector, GeoSpecCollectorOptions } from '#runner/collector.js';
 export { chargeBudget, checkBudget } from '#runner/matcher-budget.js';
 export {
   compileGeoSpecTestNamePattern,
@@ -45,6 +46,7 @@ export type {
   GeoSpecFilletFeatureExpectation,
   GeoSpecMassExpectation,
   GeoSpecMatcher,
+  GeoSpecNativeRunnerMatcher,
   GeoSpecMeshIntegrityExpectation,
   GeoSpecMinimumWallThicknessExpectation,
   GeoSpecModuleBundleCache,

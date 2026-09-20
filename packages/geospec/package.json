@@ -41,6 +41,7 @@
     "./model": "./src/model/index.ts",
     "./proofs": "./src/proofs/index.ts",
     "./runner": "./src/runner/index.ts",
+    "./runner/native": "./src/runner/native/index.ts",
     "./runner/node": "./src/runner/node/index.ts",
     "./runner/web": "./src/runner/web/index.ts",
     "./runner/worker": "./src/runner/worker/index.ts",
@@ -95,6 +96,11 @@
         "types": "./dist/runner/index.d.mts",
         "import": "./dist/runner/index.mjs",
         "default": "./dist/runner/index.mjs"
+      },
+      "./runner/native": {
+        "types": "./dist/runner/native/index.d.mts",
+        "import": "./dist/runner/native/index.mjs",
+        "default": "./dist/runner/native/index.mjs"
       },
       "./runner/node": {
         "types": "./dist/runner/node/index.d.mts",

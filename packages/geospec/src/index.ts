@@ -4,8 +4,8 @@
  * @module
  */
 
-export { createGeoSpec, describe, expectGeo, geoSpecMatcherNames, it, test } from '#create-geospec.js';
-export type { GeoSpec } from '#create-geospec.js';
+export { createGeoSpec, describe, expectGeo, expectNativeGeo, geoSpecMatcherNames, it, test } from '#create-geospec.js';
+export type { GeoSpec, GeoSpecNativeAuthoringSubject } from '#create-geospec.js';
 export type { GeoSpecUnit } from '#geometry-unit.js';
 
 export type {
@@ -24,6 +24,7 @@ export type {
   GeoSpecConnectedComponentsExpectation,
   GeoSpecGeometrySelector,
   GeoSpecMatcher,
+  GeoSpecNativeRunnerMatcher,
   GeoSpecMassExpectation,
   GeoSpecMeshIntegrityExpectation,
   GeoSpecNoDiagnosticsExpectation,

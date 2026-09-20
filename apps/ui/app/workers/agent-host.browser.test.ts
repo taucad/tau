@@ -245,7 +245,7 @@ it('reclaims an abandoned transactional writer lock after winning attach takeove
   }
 });
 
-it('detects a dead leader and proactively reattaches the follower from its durable cursor', async () => {
+it('detects a dead leader, takes its log over and records the run it left as abandoned', async () => {
   const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
   provider = fileSystemProvider;
   await fileSystemProvider.initialize();
@@ -319,13 +319,17 @@ it('detects a dead leader and proactively reattaches the follower from its durab
     await expect(follower.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
       leadership: { role: 'follower' },
     });
+    /* I4: the follower takes the log over and *records* what it found. It never
+     * drives the dead leader's run — that would ask the provider again for a
+     * turn nobody asked to repeat — so the run ends `failed`/`RUN_ABANDONED`
+     * and waits for the person's Resume. */
     const terminal = Promise.withResolvers<void>();
     const unsubscribe = follower.subscribe((eventChatId, eventItem) => {
       if (
         eventChatId === chatId &&
         eventItem.runId === runId &&
         eventItem.type === 'run.lifecycle' &&
-        eventItem.state === 'completed'
+        eventItem.state === 'failed'
       ) {
         terminal.resolve();
       }
@@ -333,7 +337,7 @@ it('detects a dead leader and proactively reattaches the follower from its durab
     leaderWorker.terminate();
 
     const outcome = await Promise.race([
-      terminal.promise.then(() => 'completed'),
+      terminal.promise.then(() => 'abandoned'),
       new Promise<'timeout'>((resolve) => {
         globalThis.setTimeout(() => {
           resolve('timeout');
@@ -341,10 +345,10 @@ it('detects a dead leader and proactively reattaches the follower from its durab
       }),
     ]);
     unsubscribe();
-    expect(outcome).toBe('completed');
+    expect(outcome).toBe('abandoned');
     await expect(follower.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
       leadership: { role: 'leader' },
-      snapshot: { runId, state: 'completed' },
+      snapshot: { runId, state: 'failed', failure: { code: 'RUN_ABANDONED' } },
     });
   } finally {
     leaderWorker.terminate();

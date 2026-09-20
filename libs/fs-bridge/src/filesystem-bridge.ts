@@ -636,6 +636,11 @@ export type CoalescerFactory = (
  * language planes read because they must not see the overlays composed above
  * it (architecture V6). An absent or unknown value is refused — no code path
  * treats absence as a value.
+ *
+ * `'agent'` means the agent's tools **and any executor of the code the agent
+ * writes**: a kernel runtime, the GeoSpec runner and Quick Look's runtime client
+ * all name it, so agent-authored project code can neither read the control plane
+ * nor rewrite the records Tau keeps itself (invariant CI1, W14).
  * @public
  */
 export type RootedBridgeConsumer = ComposedViewConsumer | 'working-copy';

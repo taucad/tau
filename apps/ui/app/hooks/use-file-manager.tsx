@@ -827,8 +827,9 @@ export function FileManagerProvider({
         if (contentService === undefined) {
           throw new FileManagerNotReadyError('proxy-timeout');
         }
-        /* The runtime reads the checkout itself, never a consumer's view (G6). */
-        return openRootedFileSystemBridge(rootDirectory, 'working-copy');
+        /* Quick Look and the RPC handlers run this runtime over project code the
+         * agent wrote, so it reads the agent's view, not the working copy (CI1, W14). */
+        return openRootedFileSystemBridge(rootDirectory, 'agent');
       }),
     // A successful service initialization is the host's existing binding
     // identity. Rotating the opaque filesystem here makes every owner keyed

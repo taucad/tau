@@ -301,7 +301,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * D1): this provider is the checkout, and what the agent sees over it is
      * the composed view. The skill resolver below reads the disk directly and
      * mutates nothing. */
-    const provider = options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot);
+    const provider =
+      options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot, { policy: tauPathPolicy });
     const view = composeView(
       { filesystem: provider },
       {

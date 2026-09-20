@@ -13,6 +13,8 @@ import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import type { AgentSessionModel, ExternalAgentDescriptor } from '@taucad/agent-host';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
 import { admitParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
@@ -34,7 +36,7 @@ import type { HostMcpEndpoint } from '#mcp-server.js';
 import { startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
 import { createHostToolRegistry } from '#agent-tools.js';
-import type { HostSystemSkillBundle } from '#agent-tools.js';
+import type { HostSystemSkillBundle, HostToolFileSystem } from '#agent-tools.js';
 import { hostControlInboundSchema, pairingResponseSchema, pairingTokenResponseSchema } from '#host.schemas.js';
 import type { HostControlInbound, HostControlOutbound } from '#host.schemas.js';
 import {
@@ -492,6 +494,19 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     return new NodeFsProviderClient(filesystem.channel, workspaceRoot);
   };
 
+  /**
+   * The agent's view of one admitted root, for whatever executes project code.
+   *
+   * Typed as {@link HostToolFileSystem} for the same reason the tool registry is:
+   * the client arms its watcher asynchronously, a shape `WatchableFileSystem`
+   * does not describe, and a view composes over the provider's unwatched face
+   * while the bridge keeps serving the client's own watch.
+   */
+  const executorViewFor = (workspaceRoot: string) => {
+    const checkout: HostToolFileSystem = providerForAgentRoot(workspaceRoot);
+    return composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
+  };
+
   const closeAgentRuntime = (
     workspaceRoot: string,
     pending: Promise<ReturnType<typeof createRuntimeClient>> | undefined,
@@ -619,7 +634,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         return createRuntimeClient({
           transport: webSocketTransport({
             url: child.url,
-            fileSystem: fromFileSystemBridge(() => createFileSystemBridgePort(providerForAgentRoot(workspaceRoot))),
+            /* The runtime child executes project code the agent wrote, so it reads
+             * the agent's view of the checkout and never the working copy, which
+             * only the parameter authority and the revisions engine below hold
+             * (invariant CI1, W14). */
+            fileSystem: fromFileSystemBridge(() => createFileSystemBridgePort(executorViewFor(workspaceRoot))),
             createSocket: (url) =>
               new WebSocket(url, { headers: { authorization: `Bearer ${child.authorizationToken}` } }),
             ...(options.agent?.compute
@@ -792,6 +811,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const stopServer = serveNodeFsProvider(toNodeFsPort(ports.port1), {
       authority,
       allowRoot: (root) => admittedRoots.has(root),
+      /* A checkout on disk can hold a symlink, so an ordinary name may not
+       * resolve into a path the views above hide (CI1). */
+      policy: tauPathPolicy,
     });
     agentFileSystem = {
       channel: new NodeFsChannel(toNodeFsPort(ports.port2)),

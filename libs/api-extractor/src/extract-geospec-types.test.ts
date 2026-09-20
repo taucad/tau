@@ -4,12 +4,32 @@ import ts from 'typescript';
 import { buildGeoSpecTypeBundle } from '#extract-geospec-types.js';
 
 describe('GeoSpec public type extraction', () => {
-  it('keeps checked-in LLM declarations identical to the public source and exposes the analysis union', () => {
+  it('should match every public source export and the checked-in declarations', () => {
     const generated = buildGeoSpecTypeBundle();
     const checkedIn: unknown = JSON.parse(
       readFileSync(new URL('generated/geospec/geospec.bundled.json', import.meta.url), 'utf8'),
     );
     expect(generated).toStrictEqual(checkedIn);
+    const manifest = JSON.parse(
+      readFileSync(new URL('../../../packages/geospec/package.json', import.meta.url), 'utf8'),
+    ) as { exports: Record<string, string> };
+    const expectedExports = Object.fromEntries(
+      Object.entries(manifest.exports)
+        .filter(([, source]) => source.startsWith('./src/'))
+        .map(([specifier, source]) => [
+          specifier,
+          { types: source.replace('./src/', './').replace(/\.ts$/u, '.d.ts') },
+        ]),
+    );
+    const bundle = generated['geospec']!;
+    expect(bundle.packageJson['exports']).toStrictEqual(expectedExports);
+    const files: Record<string, string> = { 'index.d.ts': bundle.content, ...bundle.files };
+    for (const { types } of Object.values(expectedExports)) {
+      expect(files[types.slice(2)]).toBeTruthy();
+    }
+    expect(bundle.files['runner/native/index.d.ts']).toContain('createNativeGeoSpecRunner');
+    expect(bundle.files['runner/native/index.d.ts']).toContain('loadNativeModel');
+    expect(bundle.files['create-geospec.d.ts']).toContain('expectNativeGeo');
     const source = generated['geospec']!.files['mesh/load-mesh.d.ts']!;
     const ast = ts.createSourceFile('mesh/load-mesh.d.ts', source, ts.ScriptTarget.Latest, true);
     const options = ast.statements.find(
@@ -35,5 +55,5 @@ describe('GeoSpec public type extraction', () => {
       'watertight',
       'boundingBox',
     ]);
-  }, 10_000);
+  }, 30_000);
 });

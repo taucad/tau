@@ -146,6 +146,29 @@ describe('awaitWhileLeaderLives', () => {
     vi.useRealTimers();
   });
 
+  /* The other half of the T4-11 trade: liveness is the only bound, so a live
+   * leader that never answers is waited on forever. That is why answering every
+   * command it receives is the leader's obligation, not the follower's timer. */
+  it('never settles while a live leader leaves a command unanswered', async () => {
+    vi.useFakeTimers();
+    let lastSeenAt = Date.now();
+    const waiting = awaitWhileLeaderLives({
+      response: Promise.withResolvers<string>().promise,
+      lastSeenAt: () => lastSeenAt,
+      heartbeatTimeout: 3500,
+      now: () => Date.now(),
+    });
+
+    for (let beat = 0; beat < 30; beat += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- Each beat must land before the next timer fires.
+      await vi.advanceTimersByTimeAsync(1000);
+      lastSeenAt = Date.now();
+    }
+
+    await expect(Promise.race([waiting, Promise.resolve('still waiting')])).resolves.toBe('still waiting');
+    vi.useRealTimers();
+  });
+
   it('gives up when this follower has never heard from a leader', async () => {
     vi.useFakeTimers();
     const waiting = awaitWhileLeaderLives({

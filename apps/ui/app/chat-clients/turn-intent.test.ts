@@ -59,4 +59,15 @@ describe('turnIntentOf', () => {
       retainedMessageIds: ['u1', 'a1'],
     });
   });
+
+  /* T3-D5: an edit is admitted seconds after the gesture — a reattach rebuilds
+   * the transcript and a stop truncates its tail. Clamping the missing index to
+   * 0 leased a checkout and minted a run id for a rewind point that does not
+   * exist, and the dispatcher then returned silently: lifecycle wedged in
+   * `invoking`, lease held forever. A turn with no rewind point is refused. */
+  it('should refuse an edit for a message the transcript no longer holds', () => {
+    expect(() => turnIntentOf(refusedSecondTurn, { kind: 'edit', messageId: 'gone' })).toThrow(
+      /no longer in this chat/u,
+    );
+  });
 });

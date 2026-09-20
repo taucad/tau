@@ -17,6 +17,8 @@ const harness = {
   status: 'ready' as 'ready' | 'submitted' | 'streaming' | 'error',
   durableRunId: undefined as string | undefined,
   durableRunState: 'terminal' as 'active' | 'terminal' | 'reattaching' | undefined,
+  /** What the chat's own turn owner says it is holding (T3-D9). */
+  holdsTurn: false,
   finalize: vi.fn(),
   discard: vi.fn(),
   retireClaim: vi.fn(),
@@ -60,6 +62,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
     getStatus: () => harness.status,
     getDurableRunState: () => harness.durableRunState,
     getDurableRunId: () => harness.durableRunId,
+    holdsTurn: () => harness.holdsTurn,
     get: () => session,
     releaseDurableRun: harness.releaseDurableRun,
     retainDurableRun: harness.retainDurableRun,
@@ -91,6 +94,7 @@ describe('ProjectChatRunSettlement', () => {
   beforeEach(() => {
     harness.workspace = workspace;
     harness.status = 'ready';
+    harness.holdsTurn = false;
     harness.durableRunId = 'run_1';
     harness.durableRunState = 'terminal';
     harness.browserRun = {
@@ -265,6 +269,32 @@ describe('ProjectChatRunSettlement', () => {
     });
     expect(harness.retireClaim).not.toHaveBeenCalled();
     expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  /**
+   * T3-D9. `isRetirableClaim` asked the AI SDK's status, which is `ready` for
+   * the whole admission window — the dispatch is deferred by a microtask and no
+   * bytes have flowed. So between `turnAdmitted` and the request actually
+   * starting, a claim naming the *new* run was retirable while a stale
+   * `browserRuns` entry named an older one, and discovery released the lease
+   * under the live turn. §16 moved the turn to the chat's actor; the predicate
+   * asks that owner.
+   */
+  it('should not retire a claim whose chat owner is holding the turn', async () => {
+    harness.status = 'ready';
+    harness.holdsTurn = true;
+    harness.durableRunId = undefined;
+    harness.durableRunState = undefined;
+    harness.workspace = { ...workspace, runId: 'run_2' };
+    harness.browserRun = { runId: 'run_1', state: 'completed', eventCount: 3, turnId: 'turn_1' };
+    harness.reclaimAll.mockResolvedValue([{ ...workspace, runId: 'run_2' }]);
+
+    render(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.retainDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_2', state: 'active' });
+    });
+    expect(harness.retireClaim).not.toHaveBeenCalled();
   });
 
   it('should run discovery once per mount, not when the authority changes identity', async () => {

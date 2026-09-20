@@ -569,20 +569,32 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
    * released the fresh admission, and the root answered that with a
    * `turn.failed` recorded under a run the host had not admitted yet. A
    * settlement names one run; if that is not the run this chat currently holds,
-   * the claim is somebody else's and the settlement is over.
+   * the claim is somebody else's and this release must not take it.
+   *
+   * It must not answer as though it had, either. Refusing with a `console.warn`
+   * told the settlement its lease was retired when it was still held, so no
+   * owner ever retried it and every later turn of that chat waited out the
+   * admission bound and died on *"still holding a workspace"* (T3-amp). The
+   * refusal is thrown, so the turn's settlement fails visibly and its owner can
+   * retry; only discovery, which reads the claim and then retires it, tolerates
+   * the rollover.
    */
   const drop = useCallback(
     (chatId: string, command: 'turnCompleted' | 'turnAbandoned', runId: string | undefined): void => {
       const current = state.turns.get(chatId) ?? state.placing.get(chatId);
       if (current === undefined) {
+        /* Nothing is held: a daemon-placed turn leases nothing here, and a
+         * claim already retired cannot be retired twice. */
         return;
       }
       const currentRunId = 'prepared' in current ? current.prepared.runId : current.runId;
       if (currentRunId !== runId) {
-        console.warn(
-          `[chatWorkspaceAuthority] ${command} for run ${runId ?? '(none)'} does not name chat ${chatId}'s current run ${currentRunId ?? '(none)'}; the lease is left held.`,
+        throw Object.assign(
+          new Error(
+            `${command} for run ${runId ?? '(none)'} does not name chat ${chatId}'s current run ${currentRunId ?? '(none)'}.`,
+          ),
+          { code: 'CHAT_CLAIM_RUN_MISMATCH' },
         );
-        return;
       }
       state.turns.delete(chatId);
       state.placing.delete(chatId);
@@ -742,7 +754,15 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         drop(chatId, 'turnAbandoned', runId);
       },
       retireClaim: async (chatId, runId) => {
-        drop(chatId, 'turnAbandoned', runId);
+        try {
+          drop(chatId, 'turnAbandoned', runId);
+        } catch (error) {
+          /* Discovery reads `reclaimAll` and then retires, so the claim can
+           * roll over in between — and a claim that rolled over is a live turn
+           * this retirement must not touch. Nothing is leaked by leaving it:
+           * the turn that holds it settles it. */
+          console.warn('[chatWorkspaceAuthority] a claim rolled over before discovery could retire it', error);
+        }
       },
       subscribe: (listener) => {
         state.listeners.add(listener);

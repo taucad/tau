@@ -172,6 +172,8 @@ export type ChatSessionMachineContext = Readonly<{
   pendingGesture: ChatTurnGesture | undefined;
   /** How the live turn ended, read by `settleTurn` and by the state it lands in. */
   outcome: ChatTurnOutcome | undefined;
+  /** Whether this turn's settlement has already been retried once (T3-D6). */
+  settlementRetried: boolean;
 }>;
 
 /** One host-attested outcome, kept correlated through the UI state machine. @public */
@@ -289,6 +291,7 @@ export const chatSessionMachine = setup({
     hasOwnTurn: ({ context }) => context.turn !== undefined,
     hasNoOwnTurn: ({ context }) => context.turn === undefined,
     hasPendingGesture: ({ context }) => context.pendingGesture !== undefined,
+    canRetrySettlement: ({ context }) => !context.settlementRetried,
     settledAsFailed: ({ context }) => context.outcome === 'failed',
     settledAsCancelled: ({ context }) => context.outcome === 'cancelled',
     placementChanged: ({ context, event }) =>
@@ -364,10 +367,20 @@ export const chatSessionMachine = setup({
     }),
     adoptTurn: assign(({ context, event }) =>
       event.type === 'turnAdmitted'
-        ? { turn: event.turn, pendingGesture: undefined, failureReason: undefined, activeRunId: event.turn.runId }
+        ? {
+            turn: event.turn,
+            pendingGesture: undefined,
+            failureReason: undefined,
+            settlementRetried: false,
+            /* A `continue` resumes the run the host already has and mints none,
+             * so its turn carries no run id. Adopting that `undefined` as the
+             * chat's run identity dropped every host-attested observation and
+             * left `settleTurn` with nothing to name (T3-D7). */
+            activeRunId: event.turn.runId ?? context.activeRunId,
+          }
         : { turn: context.turn },
     ),
-    clearTurn: assign({ turn: undefined, outcome: undefined }),
+    clearTurn: assign({ turn: undefined, outcome: undefined, settlementRetried: false }),
     adoptSettlementTarget: assign(({ context, event }) =>
       event.type === 'reconcileSettlement'
         ? { activeRunId: event.runId, outcome: event.outcome }
@@ -385,6 +398,16 @@ export const chatSessionMachine = setup({
       failureReason: ({ context, event }) =>
         event.type === 'runLifecycle' && event.phase === 'failed' ? event.reason : context.failureReason,
     }),
+    /* Not `recordActorFailure`: the lease was never released — that is what
+     * failed — so the turn is what the retry and any later reconciliation name,
+     * and the queued gesture is the person's next message (T3-D6). */
+    recordSettlementFailure: assign({
+      failureReason: ({ context, event }) => {
+        const failure: unknown = 'error' in event ? event.error : undefined;
+        return failure instanceof Error ? failure.message : (context.failureReason ?? 'the turn could not be settled');
+      },
+    }),
+    recordSettlementRetry: assign({ settlementRetried: true }),
     recordActorFailure: assign({
       failureReason: ({ context, event }) => {
         const failure: unknown = 'error' in event ? event.error : undefined;
@@ -427,6 +450,7 @@ export const chatSessionMachine = setup({
     turn: undefined,
     pendingGesture: undefined,
     outcome: undefined,
+    settlementRetried: false,
   }),
   type: 'parallel',
   on: {
@@ -461,12 +485,6 @@ export const chatSessionMachine = setup({
         /* No session, no run. */
         idle: {
           on: {
-            /* V5: discovery substantiates a run only for a chat that is
-             * holding nothing. Anywhere else it would retire a live turn. */
-            adoptRun: {
-              target: '#chat-session.run.running.reconnecting',
-              actions: ['adoptDiscoveredRun', 'announce'],
-            },
             reconcileSettlement: reconcileSettlementTransition,
           },
         },
@@ -615,10 +633,21 @@ export const chatSessionMachine = setup({
                     actions: ['clearTurn', 'clearPendingSettlement', 'announce'],
                   },
                 ],
-                onError: {
-                  target: '#chat-session.run.failed',
-                  actions: ['recordActorFailure', 'announce'],
-                },
+                onError: [
+                  {
+                    /* One retry, in place: a settlement that rejected left the
+                     * lease held and — when the failure cleared the turn — left
+                     * nothing that could ever name the run holding it. */
+                    guard: 'canRetrySettlement',
+                    target: 'settling',
+                    reenter: true,
+                    actions: ['recordSettlementRetry', 'recordSettlementFailure', 'announce'],
+                  },
+                  {
+                    target: '#chat-session.run.failed',
+                    actions: ['recordSettlementFailure', 'announce'],
+                  },
+                ],
               },
             },
             /* A run this page did not admit: its outcome is the host's to
@@ -773,6 +802,19 @@ export const chatSessionMachine = setup({
         /* Reload discovery can substantiate a run for a chat that never left
          * `idle` on this page (`retainDurableRun`). */
         durableRunState: { guard: 'isReattaching', target: '.running.reconnecting', actions: 'announce' },
+        /*
+         * V5: discovery substantiates a run only for a chat that is holding
+         * nothing — anywhere else it would retire a live turn. The guard is
+         * what says that; restricting it to `idle` as well meant a chat whose
+         * machine had already reached `done`, `failed` or `stopped` while a run
+         * of that chat was still live elsewhere never adopted it, and the next
+         * gesture leased a second checkout over the live one (T3-D10).
+         */
+        adoptRun: {
+          guard: 'hasNoOwnTurn',
+          target: '.running.reconnecting',
+          actions: ['adoptDiscoveredRun', 'announce'],
+        },
         /*
          * *Close* on a chat (A35, P63).
          *

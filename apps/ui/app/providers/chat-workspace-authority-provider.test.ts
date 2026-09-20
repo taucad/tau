@@ -341,11 +341,35 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     await act(async () => result.current.discard('chat_roll', first.runId));
     const second = await act(async () => result.current.prepare('chat_roll', { turnId: 'turn_roll_2' }));
     /* The first run's settlement, decided while the second turn is already
-     * placed. It may not reach the second turn's lease. */
-    await act(async () => result.current.finalize('chat_roll', first.runId));
+     * placed. It may not reach the second turn's lease — and it may not answer
+     * its caller as though the lease were released either: refusing with a
+     * `console.warn` left the settlement believing it had retired a lease that
+     * was still held, so nothing ever retried and every later turn of the chat
+     * died on the stale claim (T3-amp). */
+    await expect(act(async () => result.current.finalize('chat_roll', first.runId))).rejects.toThrow(
+      /does not name chat/u,
+    );
 
     expect(revisionRoot.commands).toEqual([{ command: 'turnAbandoned', turnId: 'turn_roll_1' }]);
     expect(result.current.get('chat_roll')).toMatchObject({ runId: second.runId });
+  });
+
+  /* Discovery is the one caller that may name a run the claim is not: it reads
+   * `reclaimAll` and then retires, and the claim can roll over in between. It
+   * tolerates the refusal; a settlement does not. */
+  it('should let discovery retire a claim that rolled over without failing', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const first = await act(async () => result.current.prepare('chat_retire', { turnId: 'turn_retire_1' }));
+    await act(async () => result.current.discard('chat_retire', first.runId));
+    const second = await act(async () => result.current.prepare('chat_retire', { turnId: 'turn_retire_2' }));
+
+    await act(async () => result.current.retireClaim('chat_retire', first.runId));
+
+    expect(revisionRoot.commands).toEqual([{ command: 'turnAbandoned', turnId: 'turn_retire_1' }]);
+    expect(result.current.get('chat_retire')).toMatchObject({ runId: second.runId });
   });
 
   it('should keep its context value identity-stable across a chats refetch', async () => {

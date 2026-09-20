@@ -254,6 +254,26 @@ describe('MountTable', () => {
     });
   });
 
+  describe('prefixes', () => {
+    /* W7c: the index's boundary check reads this once per open root per mutation
+     * fact, and it was a fresh `listMounts().map()` array every time. */
+    it('should hand out one cached list until a mount changes', () => {
+      mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory' });
+      const cached = mountTable.prefixes;
+
+      expect(mountTable.prefixes).toBe(cached);
+
+      mountTable.mount('/node_modules', nodeModulesProvider, { class: 'authored', backend: 'memory' });
+
+      expect(mountTable.prefixes).not.toBe(cached);
+      expect(mountTable.prefixes).toEqual(['/node_modules', '/']);
+
+      mountTable.unmount('/node_modules');
+
+      expect(mountTable.prefixes).toEqual(['/']);
+    });
+  });
+
   describe('dispose', () => {
     it('should clear all mounts', () => {
       mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory' });

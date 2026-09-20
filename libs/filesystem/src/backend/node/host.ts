@@ -351,6 +351,9 @@ const runOperation = async (
     case 'readdir': {
       return provider.readdir(request.path);
     }
+    case 'readdirWithStats': {
+      return provider.readdirWithStats(request.path);
+    }
     case 'stat': {
       return provider.stat(request.path);
     }

@@ -23,6 +23,7 @@ import path from 'node:path';
 import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
 import type {
@@ -178,6 +179,27 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       rows.map(async (entry) => entry.isSymbolicLink() && (await this._refusesLaunderedLink(canonical, entry.name))),
     );
     return rows.filter((_, index) => refused[index] !== true).map(({ name }) => name);
+  }
+
+  /**
+   * Batched readdir + stat, so a cold index build pays one call per directory
+   * instead of one per file — the whole saving on the port client, where each of
+   * those was a round trip.
+   *
+   * Composed from this provider's own two primitives on purpose: the listing
+   * keeps its temp-file and laundered-link refusals, each row keeps the stat
+   * `_resolve` and the content sniff would have given it, and the answer is
+   * `readdir` + `stat` by construction rather than by a second implementation.
+   *
+   * @param path_ - Absolute directory path to enumerate.
+   * @returns Each entry's name paired with its stat metadata.
+   */
+  public async readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>> {
+    const names = await this.readdir(path_);
+    return mapConcurrent(names, statConcurrency, async (name) => ({
+      name,
+      ...(await this.stat(joinRooted(path_, name))),
+    }));
   }
 
   public async stat(path_: string): Promise<FileStat> {

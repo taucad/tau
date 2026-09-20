@@ -684,3 +684,25 @@ describe('composeView mutating porcelain', () => {
     expect(view.canMove).toBeUndefined();
   });
 });
+
+describe('composeView listing cost', () => {
+  /* Budget row (W7d): a listing classifies each row once. It asked two or three
+   * times per row — the visible filter, then the row's provenance, each a fresh
+   * regex and a scan of the registry's rows — which is what made a wide
+   * directory expensive before any byte was read. */
+  it('should classify each row of a wide listing once', async () => {
+    const rows = 10_000;
+    await Promise.all(
+      Array.from({ length: rows }, async (_, row) => provider.writeFile(`wide/file${row}.ts`, 'export {};\n')),
+    );
+    const classify = vi.fn(tauPathPolicy.classify);
+    const view = composeView({ filesystem: provider }, { consumer: 'agent', policy: { classify } });
+
+    const listing = await view.readdirWithStats('wide');
+
+    expect(listing).toHaveLength(rows);
+    /* The directory itself is classified before the provider is touched at all
+     * (the mask is checked first, always), so its own call rides along. */
+    expect(classify.mock.calls.length).toBeLessThanOrEqual(rows + 1);
+  });
+});

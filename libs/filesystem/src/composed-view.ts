@@ -38,6 +38,7 @@ import type {
   DirectoryEntry,
   FileReadStreamOptions,
   FileSystemProvider,
+  PathClassification,
   PathPolicy,
   WatchEvent,
   WatchRequest,
@@ -170,6 +171,14 @@ export const maskedPathCode = 'WORKSPACE_MASKED_PATH';
 /** Epoch zero: an overlay entry has no history, so it must not look freshly written. */
 const immutableMtimeMs = 0;
 
+/**
+ * Classifications one view remembers. Wide enough that a single listing — the
+ * widest thing that asks for the same path twice — never evicts its own rows;
+ * small enough that a long-lived view holding one per path it ever touched is
+ * still bounded.
+ */
+const classificationMemoEntries = 32_768;
+
 const fileSystemError = (code: string, message: string, extra?: Record<string, unknown>): never => {
   throw Object.assign(new Error(message), { code, ...extra });
 };
@@ -220,9 +229,31 @@ const ancestorsOf = (path: string): string[] => {
  */
 export const composeView = (checkout: ComposedViewCheckout, options: ComposedViewOptions): ComposedView => {
   const base = checkout.filesystem;
-  const { classify } = options.policy;
   const overlays = options.overlays ?? [];
   const masked = options.consumer === 'agent';
+
+  /*
+   * One classification per path per view. The policy's answer is a pure
+   * function of the path, and the same path is asked for two or three times
+   * within one operation: a listing filters every row for visibility and then
+   * asks each row for its provenance, and each of those was a fresh regex plus
+   * a scan of the registry's rows. Cleared wholesale instead of evicted one
+   * entry at a time — the bound only has to outlast one listing, and the whole
+   * map goes with the view.
+   */
+  const classifications = new Map<string, PathClassification>();
+  const classify = (path: string): PathClassification => {
+    const known = classifications.get(path);
+    if (known !== undefined) {
+      return known;
+    }
+    const classification = options.policy.classify(path);
+    if (classifications.size >= classificationMemoEntries) {
+      classifications.clear();
+    }
+    classifications.set(path, classification);
+    return classification;
+  };
 
   /** The policy's answer, refused before any provider I/O: the control plane is in no view (A1, P30). */
   const readablePath = (path: string): string => {
@@ -472,6 +503,13 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           }
         }
       }
+    }
+    /* One route for the whole listing whenever no overlay reaches into this
+     * directory: an overlay that touches any child touches the parent too — its
+     * root is then at or below it — so resolving each row again can only find
+     * the project. */
+    if (!overlays.some((overlay) => overlayTouches(overlay.root, target))) {
+      return rows.map((row) => ({ ...row, provenance: projectProvenance(joinRelativePath(target, row.name)) }));
     }
     return Promise.all(
       rows.map(async (row) => {

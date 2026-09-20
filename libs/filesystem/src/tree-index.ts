@@ -617,14 +617,29 @@ export class TreeIndexes {
   }
 
   /**
-   * Drop every index; the next query rebuilds from its provider.
+   * Drop every index the change at `absolutePath` can have invalidated: the ones
+   * rooted at or under it, whose own tree is what changed, **and** the one that
+   * covers it — a path under a removed prefix falls through to whichever broader
+   * mount now takes it, and that mount's index was scanned while the boundary
+   * still hid the subtree. Every other root stays warm.
    *
-   * ponytail: every topology change clears all of them, because evicting one
-   * root is not enough — paths under a removed prefix fall through to whichever
-   * broader mount now covers them, and that mount's index was scanned while the
-   * boundary still hid the subtree. A targeted eviction would have to drop the
-   * prefix *and* its new coverer; add one when a measurement says the cold
-   * rebuild costs more than the bookkeeping.
+   * @param absolutePath - The mount prefix that changed, or the path a
+   * half-finished mutation left untrustworthy.
+   */
+  public evict(absolutePath: string): void {
+    const changed = normalizePath(absolutePath);
+    for (const root of this._byRoot.keys()) {
+      if (treeRelative(changed, root) !== undefined || treeRelative(root, changed) !== undefined) {
+        this._byRoot.delete(root);
+      }
+    }
+  }
+
+  /**
+   * Drop every index; the next query rebuilds from its provider. For disposal
+   * and for the reset facts that mean the whole tree may have moved under us
+   * (a lost observer, a remote checkout swap) — a change with a path uses
+   * {@link evict}.
    */
   public clear(): void {
     this._byRoot.clear();

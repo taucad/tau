@@ -2,6 +2,11 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileSystemProvider } from '#types.js';
+import { ChangeEventBus } from '#change-event-bus.js';
+import { MountTable } from '#mount-table.js';
+import { ProviderRegistry } from '#provider-registry.js';
+import { ResourceQueue } from '#resource-queue.js';
+import { WorkspaceFileService } from '#workspace-file-service.js';
 import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
@@ -113,7 +118,102 @@ const appendFile = async (
   await append.call(provider, path, data);
 };
 
+/** One authority over `provider` mounted at `/`, so an index build can be counted through it. */
+const authorityOver = (provider: FileSystemProvider): WorkspaceFileService => {
+  const mountTable = new MountTable();
+  mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'conformance:0' });
+  return new WorkspaceFileService({
+    providerRegistry: new ProviderRegistry({ databasePrefix: `provider-conformance-${databaseSequence++}` }),
+    resourceQueue: new ResourceQueue(),
+    eventBus: new ChangeEventBus(),
+    mountTable,
+  });
+};
+
+const scanMethods = new Set(['readdirWithStats', 'readdirEntries', 'readdir', 'stat']);
+
+/**
+ * `provider` with every read a cold index build can make counted at its
+ * boundary: what a provider delegates to itself is its own business, what the
+ * authority asks it for is the budget.
+ */
+const countingProvider = (provider: FileSystemProvider): { counted: FileSystemProvider; calls: () => number } => {
+  let calls = 0;
+  const counted = new Proxy(provider, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target) as unknown;
+      if (typeof value !== 'function') {
+        return value;
+      }
+      const method = value as (...call: unknown[]) => unknown;
+      if (!scanMethods.has(property as string)) {
+        return method.bind(target);
+      }
+      return (...args: unknown[]): unknown => {
+        calls += 1;
+        return method.apply(target, args);
+      };
+    },
+  });
+  return { counted, calls: () => calls };
+};
+
 describe.each(providers)('$name provider path-tree conformance', ({ create }) => {
+  /* W7a: `readdirWithStats` is what keeps an index build off one `stat` per
+   * file, so every provider has to answer it — and answer exactly what the
+   * unbatched pair answers, or the index it fills is a second truth. */
+  it('should answer readdirWithStats exactly as readdir plus stat does', async () => {
+    const provider = await create();
+    try {
+      await provider.writeFile('dir/one.txt', 'one');
+      await provider.writeFile('dir/two.bin', new Uint8Array([0, 159]));
+      await provider.mkdir('dir/nested');
+
+      expect(typeof provider.readdirWithStats).toBe('function');
+      const batched = await provider.readdirWithStats!('dir');
+      const names = await provider.readdir('dir');
+      expect(batched.map(({ name }) => name).toSorted()).toEqual(names.toSorted());
+      const unbatched = await Promise.all(
+        batched.map(async ({ name }) => ({ name, ...(await provider.stat(`dir/${name}`)) })),
+      );
+      expect(batched).toEqual(unbatched);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  /* Budget row (W7a): a cold index build asks each directory once. One
+   * `stat`-class call per file is what it cost on a provider without the batch,
+   * and it is the whole reason a 6,000-file project took seconds to index.
+   *
+   * The count is per directory and says nothing about how wide each one is, so
+   * the fixture is 200 files rather than the budget's 1,000: on the two node
+   * providers a thousand of them is a thousand fsyncs, and a multi-second
+   * fixture behind a fixed timeout is the flaky wall-clock gate EQ5 forbids. */
+  it('should build an index with one stat-class call per directory', async () => {
+    const provider = await create();
+    const directories = 10;
+    const filesPerDirectory = 20;
+    try {
+      for (let directory = 0; directory < directories; directory++) {
+        // oxlint-disable-next-line no-await-in-loop -- One directory's writes at a time keeps handle pressure bounded.
+        await Promise.all(
+          Array.from({ length: filesPerDirectory }, async (_, file) =>
+            provider.writeFile(`dir${directory}/file${file}.ts`, `export const file = ${file};\n`),
+          ),
+        );
+      }
+      const { counted, calls } = countingProvider(provider);
+
+      const stats = await authorityOver(counted).createRootedFileSystem('/').statTree!('');
+
+      expect(stats).toHaveLength(directories * filesPerDirectory);
+      expect(calls()).toBeLessThanOrEqual(directories + 1);
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('creates a missing file and its parents when appending', async () => {
     const provider = await create();
     try {

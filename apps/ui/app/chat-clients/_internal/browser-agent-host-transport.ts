@@ -290,6 +290,21 @@ export const getBrowserAgentHostAttachment = (chatId: string): BrowserAgentHostA
   attachedRuns.get(chatId);
 
 /**
+ * The host's last word about this chat's run.
+ *
+ * Two sources, one fact. `browserRuns` is what a stream of *this document*
+ * published, so it is the fresher of the two while one is open and empty both
+ * before the first stream of a reloaded page and after the settlement that
+ * retires the record. The attachment is the host's own answer, recorded on
+ * every attach and on every snapshot a `start` or `resume` returned, and
+ * nothing retires it.
+ */
+const hostRunRecord = (
+  chatId: string,
+): Readonly<{ runId: string; state: BrowserRunState; failure?: HostRunSnapshot['failure'] }> | undefined =>
+  browserRuns.get(chatId) ?? attachedRuns.get(chatId)?.snapshot;
+
+/**
  * Whether this chat's turns are placed on a browser-hosted agent at all.
  *
  * Distinguishes "no run to reattach to" from "this placement never registers
@@ -298,24 +313,37 @@ export const getBrowserAgentHostAttachment = (chatId: string): BrowserAgentHostA
 export const isBrowserAgentHostPlaced = (chatId: string): boolean => registrations.has(chatId);
 
 /**
- * Whether a reattach could still pick this chat's run back up.
+ * The run a *Try again* on this chat would continue, or `undefined` when there
+ * is nothing left to continue and the turn has to be dispatched afresh.
  *
- * A reattach replays the log and stops where the run stopped, so a chat whose
- * run entry settlement has already retired is unrecoverable by resuming — the
- * turn has to be dispatched afresh instead. A terminal run is the same, with
- * one exception: a run the gateway *refused* (no credit) never reached the
+ * A reattach replays the log and stops where the run stopped, so a run the host
+ * no longer holds is unrecoverable by resuming. A terminal run is the same,
+ * with one exception: a run the gateway *refused* (no credit) never reached the
  * provider, so its history is whole and the host can continue it at the one
- * call it could not fund. Regenerating that instead would rewind the turn and
- * pay a second time for tool work the customer already paid for.
+ * call it could not fund.
+ *
+ * The admission needs the run id as well as the verdict: a continuation is the
+ * same attempt's successor, so its lease and its host request name the run the
+ * host already holds (I1). Read from {@link hostRunRecord} rather than from the
+ * page's own record, whose lifetime settlement owns — that is why *Try again*
+ * after a credit refusal judged the run non-resumable and rewound the turn,
+ * paying a second time for tool work the customer had already paid for.
+ *
+ * @param chatId - The chat being continued.
+ * @returns The run id to continue, or `undefined`.
+ * @public
  */
-export const isBrowserAgentHostRunResumable = (chatId: string): boolean => {
-  const run = browserRuns.get(chatId);
-  return run !== undefined && (!terminal(run.state) || refusedResumably(chatId));
+export const resumableBrowserAgentHostRunId = (chatId: string): string | undefined => {
+  const run = hostRunRecord(chatId);
+  if (run === undefined) {
+    return undefined;
+  }
+  return !terminal(run.state) || (run.state === 'failed' && isResumableRunFailure(run.failure)) ? run.runId : undefined;
 };
 
 /** Whether the run this chat ended on stopped on a refusal a resume can continue. */
 const refusedResumably = (chatId: string): boolean => {
-  const run = browserRuns.get(chatId);
+  const run = hostRunRecord(chatId);
   return run?.state === 'failed' && isResumableRunFailure(run.failure);
 };
 
@@ -339,7 +367,30 @@ const setBrowserAgentHostRun = (chatId: string, run: BrowserAgentHostRun): void 
   boundRunIds.set(chatId, run.runId);
 };
 
-export const clearBrowserAgentHostRun = (chatId: string): void => {
+/**
+ * Let go of this chat's run record now that its turn has settled.
+ *
+ * Retired, not erased. The record carries two facts with different lifetimes:
+ * the page's live bookkeeping for a turn in flight, which the settlement ends,
+ * and whether the host can still continue the run, which it does not. Dropping
+ * both made *Try again* on a credit refusal a full re-admission — a new lease,
+ * a new run id and a rewind that pays a second time for tool work the customer
+ * already paid for (T3-D8) — so a terminal failure the host can continue stays,
+ * and the next stream for that run republishes over it.
+ *
+ * @param chatId - The chat whose turn settled.
+ * @param runId - The run that settled; a record naming another run is a newer
+ *   turn's and is left alone.
+ * @public
+ */
+export const retireBrowserAgentHostRun = (chatId: string, runId: string | undefined): void => {
+  const run = browserRuns.get(chatId);
+  if (run !== undefined && runId !== undefined && run.runId !== runId) {
+    return;
+  }
+  if (run !== undefined && refusedResumably(chatId)) {
+    return;
+  }
   browserRuns.delete(chatId);
   boundRunIds.delete(chatId);
 };
@@ -620,6 +671,22 @@ const userMessage = <Message extends UIMessage>(messages: readonly Message[]): U
 const lifecycleState = (event: AgentLogEvent): BrowserRunState | undefined =>
   event.type === 'run.lifecycle' ? event.state : undefined;
 
+/**
+ * The refusal a terminal lifecycle row carries, which decides resumability.
+ *
+ * A `RunFailureDetail` states its message but need not carry a code, while a
+ * snapshot's failure names both: `isResumableRunFailure` decides on the code,
+ * so an uncoded row is a failure nobody can offer a recovery for. It answers
+ * nothing rather than a refusal that cannot be judged.
+ */
+const lifecycleFailure = (event: AgentLogEvent | AgentLiveEvent): HostRunSnapshot['failure'] => {
+  if (!('leaderEpoch' in event) || event.type !== 'run.lifecycle' || event.state !== 'failed') {
+    return undefined;
+  }
+  const { detail } = event;
+  return detail?.code === undefined ? undefined : { ...detail, code: detail.code };
+};
+
 const terminal = (state: BrowserRunState): boolean =>
   state === 'completed' || state === 'failed' || state === 'cancelled';
 
@@ -709,7 +776,7 @@ const createHostStream = <Message extends UIMessage>(input: {
      * client. Held past the readable stream on every exit, a stop and a refusal
      * included, which is what makes "exactly one settlement per admitted run"
      * hold rather than depend on the root answering first (V10, F6). */
-    const holdWriterForSettlement = input.admission !== undefined;
+    let holdWriterForSettlement = input.admission !== undefined;
     /* Set once the completed path has spent its loud bound on the settlement,
      * so the quiet grace below is only ever the stop's and the refusal's. */
     let lateSettlementAwaited = false;
@@ -781,6 +848,12 @@ const createHostStream = <Message extends UIMessage>(input: {
         durableUserMessage = projectedUser;
       }
       state = lifecycleState(event) ?? state;
+      /* The terminal row carries the refusal, and throwing it away left the
+       * record saying `failed` with nothing to judge: resumability read
+       * `isResumableRunFailure(undefined)` for every run whose failure arrived
+       * as an event rather than in a snapshot, so a live credit refusal was
+       * judged unrecoverable and *Try again* rewound the turn. */
+      failure = lifecycleFailure(event) ?? failure;
       eventCount += 1;
       publishRun();
       await enqueueChunks(projectAgentHostEvent(event, streamedBlocks));
@@ -840,13 +913,26 @@ const createHostStream = <Message extends UIMessage>(input: {
       const next = await hostClient.tail({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
       return [...batch.events, ...(await collectLog(hostClient, next))];
     };
-    const reconcileSnapshot = (snapshot: HostRunSnapshot | undefined): boolean => {
+    const reconcileSnapshot = (snapshot: HostRunSnapshot | undefined, reopens = false): boolean => {
       if (!snapshot || snapshot.runId !== runId) {
         return false;
       }
-      state = snapshot.state;
+      /* The host's own answer about this run, wherever it came from: `start`
+       * and `resume` return one too, and a reader that only ever saw the
+       * *attach* snapshot would answer a same-document *Try again* from the
+       * state the chat was in before this run existed. */
+      recordAttachedRun(input.chatId, { snapshot, takeover: attachedRuns.get(input.chatId)?.takeover === true });
+      /* A snapshot answers the *admission*, so a run the gateway refused at its
+       * model call has already ended by the time `start` resolves. Adopting the
+       * snapshot's state wholesale rewound the record to `running` and erased
+       * the refusal the terminal row carried, which is what made the page
+       * answer a later *Try again* from a run it thought was still going. Only
+       * a resume legitimately reopens a run this stream saw end. */
+      if (reopens || !terminal(state)) {
+        state = snapshot.state;
+      }
       turnId = snapshot.turnId;
-      failure = snapshot.failure;
+      failure = snapshot.failure ?? failure;
       const snapshotUser =
         snapshot.messages.find(
           (message): message is UserProviderMessage => message.role === 'user' && message.id === snapshot.turnId,
@@ -866,6 +952,12 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (batch.snapshot) {
         recordAttachedRun(input.chatId, { snapshot: batch.snapshot, takeover: batch.takeover === true });
       }
+      /* This attach took the chat over from a driver that is gone, so the run
+       * it found has no owner and this page is about to settle it (I7). That
+       * settlement needs a durable writer, and only this stream's client is
+       * one — a read-only reattach otherwise closes it the moment the replay
+       * ends, and the reconciled `turn.failed` reaches nobody. */
+      holdWriterForSettlement ||= batch.takeover === true;
       // The log's own snapshot names the run this chat ends on — the only source
       // for a reattach whose in-memory binding a reload dropped. The host answers
       // one for every non-empty log (and takes a non-terminal run over first).
@@ -1045,7 +1137,7 @@ const createHostStream = <Message extends UIMessage>(input: {
         }
         const snapshot = await operation;
         await projection;
-        reconcileSnapshot(snapshot);
+        reconcileSnapshot(snapshot, true);
       }
       if (!terminal(state) && !cancelled) {
         await terminalEvent.promise;

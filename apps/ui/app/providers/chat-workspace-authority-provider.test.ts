@@ -354,6 +354,39 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     expect(result.current.get('chat_roll')).toMatchObject({ runId: second.runId });
   });
 
+  /*
+   * I1: a continuation is a second attempt at the run the host already holds,
+   * so it names that run when it takes its lease. Reusing a claim keyed by a
+   * *different* run would fence its writes under the wrong id and make its
+   * settlement name a run `drop` is not holding — so the claim is either that
+   * run's, or the continuation is refused.
+   */
+  it('should lease a continuation under the run it names, and refuse another turn’s claim', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const held = await act(async () => result.current.prepare('chat_continue', { turnId: 'turn_continue' }));
+
+    // The same run continued: the claim it already holds is the one it wants.
+    await expect(
+      act(async () => result.current.prepare('chat_continue', { turnId: 'turn_continue', runId: held.runId })),
+    ).resolves.toMatchObject({ runId: held.runId });
+
+    await expect(
+      act(async () => result.current.prepare('chat_continue', { turnId: 'turn_continue', runId: 'run_somebody_else' })),
+    ).rejects.toMatchObject({ code: 'CHAT_CLAIM_RUN_MISMATCH' });
+
+    // A fresh lease carries the run the caller named rather than minting one.
+    await act(async () => result.current.discard('chat_continue', held.runId));
+    const continued = await act(async () =>
+      result.current.prepare('chat_continue', { turnId: 'turn_continue', runId: 'run_host_holds' }),
+    );
+
+    expect(continued.runId).toBe('run_host_holds');
+    expect(revisionRoot.admitted.at(-1)).toMatchObject({ turnId: 'turn_continue', runId: 'run_host_holds' });
+  });
+
   /* Discovery is the one caller that may name a run the claim is not: it reads
    * `reclaimAll` and then retires, and the claim can roll over in between. It
    * tolerates the refusal; a settlement does not. */

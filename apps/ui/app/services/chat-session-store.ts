@@ -1712,7 +1712,14 @@ export class ChatSessionStore {
     const chat = createChatInstance({
       chatId,
       onFinish: ({ messages, isAbort, isError, isDisconnect }) => {
-        const durableRunId = session.durableRunId ?? getBoundDurableChatRunId(chatId);
+        /* The host's run first, this page's memory second. The stream that just
+         * ended resolved the run from the chat's durable log, and after a
+         * reload that is the *only* source — `durableRunId` is whatever reload
+         * discovery retained from a workspace claim, which on a reattached chat
+         * names a different run or none at all, so a settlement keyed on it
+         * reconciled the wrong run or no run (T2-D4). `#syncRunPhase` already
+         * reads the two in this order. */
+        const durableRunId = getBoundDurableChatRunId(chatId) ?? session.durableRunId;
         if (durableRunId && !isDisconnect) {
           session.durableRunId = durableRunId;
           session.durableRunState = 'terminal';
@@ -2125,10 +2132,20 @@ export class ChatSessionStore {
     if (getHostTurnSettlement(session.chatId)?.runId === outcome.runId) {
       return;
     }
+    /* How the *run* ended, not how this document's stream ended. A reattach
+     * over an abandoned or already-terminal run closes cleanly — nothing
+     * aborted and nothing errored — so reading the SDK's flags settled a run
+     * the host had recorded `failed` as though it had completed, and the page
+     * would have asked the root to record the dead turn's writes as a
+     * revision. The stream's flags still decide for a run this document drove,
+     * where the host record is this same stream's. */
+    const host = getBrowserAgentHostRun(session.chatId);
+    const hostOutcome =
+      host?.runId === outcome.runId && (host.state === 'failed' || host.state === 'cancelled') ? host.state : undefined;
     session.stateActorRef?.send({
       type: 'reconcileSettlement',
       runId: outcome.runId,
-      outcome: outcome.isAbort ? 'cancelled' : outcome.isError ? 'failed' : 'completed',
+      outcome: hostOutcome ?? (outcome.isAbort ? 'cancelled' : outcome.isError ? 'failed' : 'completed'),
     });
   }
 

@@ -70,4 +70,19 @@ describe('turnIntentOf', () => {
       /no longer in this chat/u,
     );
   });
+
+  /* I1: a continuation is a second *attempt* at the same turn, so it leases the
+   * same message the first attempt leased. It used to be a lease-less special
+   * case in the turn host, which is why a resumed run's writes were unfenced,
+   * its completion minted no revision and nothing settled it. */
+  it('should continue the last turn over its own lease, rewinding nothing', () => {
+    expect(turnIntentOf(refusedSecondTurn, { kind: 'continue' })).toEqual({
+      trigger: 'resume',
+      leaseTurnId: 'u2',
+    });
+  });
+
+  it('should continue a transcript with no user message without a lease', () => {
+    expect(turnIntentOf([], { kind: 'continue' })).toEqual({ trigger: 'resume', leaseTurnId: undefined });
+  });
 });

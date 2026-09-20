@@ -125,6 +125,28 @@ function codedErrorCard({
     return <ChatErrorTooLong className={className} />;
   }
 
+  /* Not a failure: the host was asked to continue a run it no longer holds —
+   * it was already settled, or it ended in a way a resume cannot pick up. The
+   * turn is whole and nothing was spent, so the card says so and offers the
+   * one thing that does work, which is running the turn again. */
+  if (code === 'RESUME_UNAVAILABLE') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={Bot}
+        title='Nothing left to continue'
+        description={error.message}
+        actions={
+          <Button variant='outline' size='sm' onClick={onTryAgain}>
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
+
   // Another tab holds this chat's log. Taking it back is a leadership protocol,
   // not an error action (ruling Q6), and reloading already follows that tab.
   if (code === 'LEADERSHIP_LOST') {

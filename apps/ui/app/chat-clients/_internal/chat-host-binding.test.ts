@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
 import {
+  armChatTurnHold,
   chatTurnAdmission,
+  chatTurnSettlement,
   publishChatTurnAdmission,
   publishChatTurnSettlement,
+  releaseChatTurnHold,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurn, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
@@ -88,6 +91,68 @@ describe('chatTurnAdmission', () => {
    * `undefined` — the lease stayed `admitted` with nothing left that could
    * release it, and every later turn of the chat died on the stale claim.
    */
+  /*
+   * F3/F4. The two states a browser row most needs to observe are the two it
+   * cannot hold open from outside: `run.queued.admitting` lasts microseconds,
+   * and `run.finishing.*` starts after the stream the row is watching has
+   * already closed. These holds are what let a row park a page in each, make
+   * its gesture or its reload land there, and then let it carry on.
+   */
+  it('should park an admission until its debug hold is released', async () => {
+    const admitted: string[] = [];
+    publishChatTurnAdmission('chat-held-admission', async () => {
+      admitted.push('admitted');
+      return turn;
+    });
+    armChatTurnHold('admission');
+
+    const actor = createActor(chatTurnAdmission, {
+      input: { chatId: 'chat-held-admission', gesture: { kind: 'regenerate' } },
+    });
+    actor.start();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(admitted).toEqual([]);
+
+    releaseChatTurnHold('admission');
+
+    await vi.waitFor(() => {
+      expect(admitted).toEqual(['admitted']);
+    });
+    actor.stop();
+  });
+
+  it('should park a settlement until its debug hold is released', async () => {
+    const settlements: ChatTurnSettlementInput[] = [];
+    publishChatTurnSettlement('chat-held-settlement', async (input) => {
+      settlements.push(input);
+    });
+    armChatTurnHold('settlement');
+
+    const input: ChatTurnSettlementInput = {
+      chatId: 'chat-held-settlement',
+      runId: 'run-1',
+      leaseTurnId: 'user-1',
+      outcome: 'completed',
+    };
+    const actor = createActor(chatTurnSettlement, { input });
+    actor.start();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(settlements).toEqual([]);
+
+    releaseChatTurnHold('settlement');
+
+    await vi.waitFor(() => {
+      expect(settlements).toEqual([input]);
+    });
+    actor.stop();
+  });
+
   it('should wait for the settlement publisher before giving up on an abandoned lease', async () => {
     const settlements: ChatTurnSettlementInput[] = [];
 

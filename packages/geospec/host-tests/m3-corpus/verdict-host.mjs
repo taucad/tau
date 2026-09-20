@@ -23,6 +23,8 @@ const row = {
   id: 'ordinary-box-volume',
   claimId: claim.claimId,
   matcher: true,
+  identityField: 'subjectHash',
+  expectedIdentity: 'source-bound',
   expected: {
     status: 'passed',
     canonicalPlan: { status: 'success', canonicalUtf8: plan },
@@ -43,7 +45,7 @@ const outcome = (status = 'passed') => ({
     canonicalResult: { utf8: JSON.stringify({ results: [{ claimId: claim.claimId, status }] }) },
   },
   error: status === 'passed' ? null : { assertionError: true, structuredGeoSpec: { claimId: claim.claimId, status } },
-  stages: { cleanup: { status: 'released' } },
+  stages: { cleanup: { status: 'released', close: 'closed' } },
 });
 // Identity bytes suffice for this ASCII fixture: the verdict assertions do not test canonicalization.
 const context = vm.createContext({
@@ -248,4 +250,127 @@ void test('should make the actual offline comparator exit unsuccessfully for all
   assert.equal(scope.process.exitCode, 1);
   assert.equal(captured.length, 1);
   assert.equal(captured[0].hardFailures.filter((failure) => failure.failure === 'expected-status').length, 4);
+});
+
+const installedContext = (backend, state = 'ready') => {
+  const calls = [];
+  class InertEngine {
+    constructor() {
+      if (state === 'uncreated') {
+        throw new Error('Inert construction failure.');
+      }
+      calls.push('created');
+    }
+    releaseSubject(input) {
+      assert.equal(JSON.parse(input.toString()).subjectHandle, 'inert-handle');
+      calls.push('released');
+      return Buffer.from('{"result":{"released":true}}');
+    }
+    close() {
+      calls.push('close');
+      if (state === 'close-error') {
+        throw new Error('Inert close failure.');
+      }
+    }
+  }
+  const scope = vm.createContext({
+    Buffer,
+    Error,
+    Engine: InertEngine,
+    GeoSpecAssertionError: class extends Error {},
+    ProtocolError: class extends Error {},
+    backend,
+    CANONICAL_PROFILE: 'inert-profile',
+    byteRecord: (bytes) => ({ utf8: bytes.toString() }),
+    campaignRegistryVersion: () => 'inert-registry',
+    initializeCase: () =>
+      state === 'initialization-error'
+        ? { error: true, record: { error: { name: 'Error', message: 'Inert initialization failure.' } } }
+        : { record: {} },
+    admitCase: () => ({
+      subject: { subjectHash: 'source-bound' },
+      handle: 'inert-handle',
+      record: {},
+      handleCall: { record: {} },
+    }),
+    standaloneEvaluation: async () => ({ error: null, report: outcome().report, calls: [] }),
+    vitestEvaluation: async () => ({ error: null, report: outcome().report, calls: [] }),
+  });
+  vm.runInContext(
+    ['errorRecord', 'callRecord', 'releaseCase', 'attachCleanup', 'runInstalledRow']
+      .map((name) => declaration(name))
+      .join('\n') + '\nglobalThis.runRow = runInstalledRow;',
+    scope,
+  );
+  return { scope, calls };
+};
+
+for (const backend of ['native', 'mixed']) {
+  void test(`should release and close the actual ${backend} installed row before qualification`, async () => {
+    const { scope, calls } = installedContext(backend);
+    const captured = structuredClone(await scope.runRow(row, 'javascript-standalone'));
+    assert.deepEqual(calls, ['created', 'released', 'close']);
+    assert.deepEqual(captured.report, outcome().report);
+    assert.equal(captured.stages.cleanup.status, 'released');
+    assert.equal(captured.stages.cleanup.close, 'closed');
+    assert.equal(captured.stages.cleanup.call.output.utf8, '{"result":{"released":true}}');
+    assert.equal(context.compare(row, captured).hardFailures.length, 0);
+  });
+
+  void test(`should capture ${backend} close errors without accepting the ordinary report`, async () => {
+    const { scope, calls } = installedContext(backend, 'close-error');
+    const captured = structuredClone(await scope.runRow(row, 'javascript-standalone'));
+    assert.deepEqual(calls, ['created', 'released', 'close']);
+    assert.deepEqual(captured.report, outcome().report);
+    assert.equal(captured.stages.cleanup.status, 'released');
+    assert.equal(captured.stages.cleanup.close, 'close-error');
+    assert.equal(captured.stages.cleanup.closeError.name, 'Error');
+    assert.equal(captured.stages.cleanup.closeError.message, 'Inert close failure.');
+    assert.ok(context.compare(row, captured).hardFailures.includes('cleanup'));
+  });
+}
+
+void test('should record an uncreated engine and close an initialized engine without inventing a release', async () => {
+  const uncreated = installedContext('native', 'uncreated');
+  const failure = structuredClone(await uncreated.scope.runRow(row, 'javascript-standalone'));
+  assert.deepEqual(uncreated.calls, []);
+  assert.equal(failure.routeState, 'harness-error');
+  assert.equal(failure.error.name, 'Error');
+  assert.equal(failure.error.message, 'Inert construction failure.');
+  assert.deepEqual(failure.stages.cleanup, { status: 'not-acquired', close: 'not-created' });
+  assert.ok(context.compare(row, failure).hardFailures.includes('cleanup'));
+  const initialized = installedContext('native', 'initialization-error');
+  const early = structuredClone(await initialized.scope.runRow(row, 'javascript-standalone'));
+  assert.deepEqual(initialized.calls, ['created', 'close']);
+  assert.equal(early.routeState, 'initialization-error');
+  assert.deepEqual(early.error, { name: 'Error', message: 'Inert initialization failure.' });
+  assert.deepEqual(early.stages.cleanup, { status: 'not-acquired', close: 'closed' });
+});
+
+void test('should require new JavaScript close evidence while preserving Python cleanup semantics', () => {
+  const historical = outcome();
+  historical.stages.cleanup.close = 'not-exported-by-node-engine';
+  assert.ok(context.compare(row, historical).hardFailures.includes('cleanup'));
+  const python = { ...outcome(), route: 'python3.13-standalone' };
+  python.stages.cleanup = { status: 'released', close: 'GeoSpecEngine.close', error: null };
+  assert.equal(context.compare(row, python).hardFailures.length, 0);
+  python.stages.cleanup.status = 'cleanup-error';
+  assert.ok(context.compare(row, python).hardFailures.includes('cleanup'));
+});
+
+void test('should reject a close error at the actual campaign gate and persist its complete raw report', async () => {
+  const { scope, captured } = campaignContext('passed');
+  const installed = installedContext('native', 'close-error');
+  scope.runInstalledRow = installed.scope.runRow;
+  await assert.rejects(() => scope.routes.runCampaign('javascript-standalone', 'inert-output'), {
+    name: 'AssertionError',
+    message: /Installed campaign did not satisfy/,
+  });
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].value.rows.length, 2);
+  for (const value of captured[0].value.rows) {
+    assert.deepEqual(value.report, outcome().report);
+    assert.equal(value.stages.cleanup.closeError.message, 'Inert close failure.');
+    assert.ok(value.comparison.hardFailures.includes('cleanup'));
+  }
 });

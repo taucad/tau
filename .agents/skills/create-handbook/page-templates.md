@@ -45,6 +45,16 @@ Every factual statement carries one of three marks. Use the words, in bold, or a
 
 ## service
 
+**A service that is only planned** — chartered, not deployed — uses the same template with three
+changes, and invents nothing observed:
+
+- `status: draft`, and `environments` names the environments it is *planned for*, not where it runs.
+- Every row of **Where it runs** and of **What it talks to** is marked `planned`, with the charter
+  cited. There is no `observed` mark on a page for something that does not exist yet.
+- **Commands and consoles**, **Secrets (names)** and **Declared vs observed** say what does not exist
+  yet rather than carrying a placeholder command or an invented variable name; **Open items** names
+  the decision that would make the page `active`.
+
 ````markdown
 ---
 title: '<Service>'
@@ -73,11 +83,17 @@ sources:
 | staging | <where> | <count> | declared |
 | prod-us | <where> | <count> | observed <UTC timestamp> |
 
+<!-- A planned service: status: draft, every row below and above marked `planned` with the charter cited. -->
+| <environment it is planned for> | <where it would run> | <not deployed> | planned |
+
 ## What it talks to
 
 | Peer | Protocol | Direction | Auth | Credential name |
 | --- | --- | --- | --- | --- |
 | <peer> | <https / postgres / redis> | <in / out / both> | <how> | `<VARIABLE_NAME>` |
+
+<!-- A planned service: add a Mark column and set every peer row to `planned`. -->
+| <planned peer> | <protocol> | <direction> | <how it would authenticate> | <none set yet> |
 
 ## What it depends on
 
@@ -325,7 +341,8 @@ recorded acceptance · `P` dated or post-launch obligation, mirrored in the cale
 State: `open` · `done` (evidence recorded) · `accepted` (operator accepted the risk; the reason is
 copied to `known-gaps.md`) · `superseded` (points to the replacing row).
 
-Rows are never deleted and IDs are never reused. Agents add rows, reopen rows and set `done` with
+Rows are never deleted and IDs are never reused: a new row takes the next unused integer in its area
+prefix, counting every ID the area has ever carried. Agents add rows, reopen rows and set `done` with
 evidence; only the operator sets `accepted`, changes a `Gate` or signs off.
 
 ## <Area>

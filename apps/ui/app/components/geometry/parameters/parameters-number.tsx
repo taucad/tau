@@ -181,17 +181,17 @@ export function ParametersNumber({
     native: number,
     pressure: 'transient' | 'final',
     options: Readonly<{ base: EditBase; retainedText?: string }>,
-  ): void => {
+  ): Promise<boolean> | undefined => {
     const { base: submittedBase, retainedText } = options;
     if (commit === undefined) {
       onChange(native);
-      return;
+      return undefined;
     }
     // The sidecar write is what re-renders the model, so an authoritative row reports no value here.
     // It does report a refusal: a transient value is superseded by design, and so is a final one a
     // newer edit displaced before it was applied, but anything else the authority refused must not
     // look entered.
-    const settle = async (): Promise<void> => {
+    const settle = async (): Promise<boolean> => {
       try {
         const outcome = await commit.commit({
           pointer: instancePointer,
@@ -214,7 +214,7 @@ export function ParametersNumber({
         if (pressure === 'final' && outcome !== undefined) {
           if (outcome.status === 'committed' || outcome.status === 'cancelled-before-apply') {
             setLocalValue(undefined);
-            return;
+            return true;
           }
           const authority = authorityRef.current;
           setLocalValue(undefined);
@@ -224,35 +224,34 @@ export function ParametersNumber({
             setDraftText('');
             commit.setDraft(instancePointer, { text: retainedText, valid: true });
           }
-          commit.endScrub?.(true);
           setInputDiagnostic('message' in outcome ? outcome.message : 'The parameter could not be saved.');
         }
       } catch (error) {
         setInputDiagnostic(error instanceof Error ? error.message : 'The parameter could not be saved.');
       }
+      return false;
     };
-    // async-iife: bootstrap -- an input handler cannot return the authority's settlement.
-    void settle();
+    return settle();
   };
 
   /** Enter a value from the slider or the stepper; text entry goes through {@link commitText}. */
-  const commitValue = (next: number): boolean => {
+  const commitValue = (next: number): Promise<boolean> | undefined => {
     const native = toNative(next);
     const diagnostic = validateParameterInputValue(binding, native);
     if (diagnostic !== undefined) {
       setLocalValue(undefined);
       setInputDiagnostic(diagnostic.message);
-      return false;
+      return undefined;
     }
     setInputDiagnostic(undefined);
     retainDraft('', true);
     setLocalValue({ value: displayValue(native, binding, displayUnit), authorityValue });
     if (!Object.is(native, editBase.value)) {
-      send(native, 'final', { base: editBase });
+      const final = send(native, 'final', { base: editBase });
       setBase({ value: native, binding, authorityValue });
-      return true;
+      return final;
     }
-    return false;
+    return undefined;
   };
 
   const commitText = (): void => {
@@ -288,7 +287,7 @@ export function ParametersNumber({
       Math.abs(native.value.value - submittedBase.value) >
         Number.EPSILON * Math.max(1, Math.abs(native.value.value), Math.abs(submittedBase.value)) * 8
     ) {
-      send(native.value.value, 'final', { base: submittedBase, retainedText });
+      void send(native.value.value, 'final', { base: submittedBase, retainedText });
       setBase({ value: native.value.value, binding, authorityValue });
     }
   };
@@ -373,14 +372,20 @@ export function ParametersNumber({
         }
       }}
       onSliderRelease={(next) => {
-        const committed = commitValue(next);
-        commit?.endScrub?.(!committed);
+        const final = commitValue(next);
+        if (final === undefined) {
+          void commit?.endScrub?.();
+        } else {
+          void commit?.endScrub?.(final);
+        }
       }}
       onSliderCancel={() => {
-        commit?.endScrub?.(true);
+        void commit?.endScrub?.();
         revert();
       }}
-      onValueChange={commitValue}
+      onValueChange={(next) => {
+        void commitValue(next);
+      }}
       onTextChange={(text) => {
         if (draftRef.current === '' && text !== '') {
           setBase(currentBase);

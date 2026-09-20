@@ -55,8 +55,8 @@ export type ParameterCommit = Readonly<{
    * and the model re-renders on release.
    */
   scrub?(field: Readonly<{ pointer: string; value: JSONValue }>): void;
-  /** End a drag and restore the committed render when no final commit follows. */
-  endScrub?(restore: boolean): void;
+  /** End a drag. Its final resolves `true` only when the authoritative value no longer needs restoring. */
+  endScrub?(final?: Promise<boolean>): Promise<void>;
 }>;
 
 export type ParameterEdit =

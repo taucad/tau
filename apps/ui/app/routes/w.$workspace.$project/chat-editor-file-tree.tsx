@@ -2086,6 +2086,10 @@ function TreeItem({
   onCopyToProject,
   onForeignDrop,
 }: TreeItemProps): React.JSX.Element {
+  // `item` is a stable handle onto the tree's mutable state, so memoizing on its identity freezes
+  // `aria-expanded`, selection and the chevron at their first value — in compiled builds only, which
+  // is why no jsdom suite sees it: https://headless-tree.lukasbach.com/guides/react-compiler/
+  'use no memo';
   const itemLevel = item.getItemMeta().level;
   const paddingLeft = itemLevel * 16 + 8;
   const isSelected = item.isSelected();

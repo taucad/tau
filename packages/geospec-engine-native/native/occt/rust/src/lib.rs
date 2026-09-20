@@ -906,6 +906,10 @@ unsafe fn copied_string(
     if status != ffi::BUFFER_TOO_SMALL && status != ffi::OK {
         check(status, &error)?;
     }
+    // Empty output is complete after the sizing call; do not repeat its computation.
+    if size.length == 0 {
+        return Ok(String::new());
+    }
     let mut bytes = vec![0u8; size.length.saturating_add(1)];
     let mut output = ffi::StringBuffer {
         data: bytes.as_mut_ptr().cast(),
@@ -915,6 +919,65 @@ unsafe fn copied_string(
     check(call(&mut output, error.raw()), &error)?;
     bytes.truncate(output.length);
     String::from_utf8(bytes).map_err(|_| backend_error("OCCT returned non-UTF-8 text."))
+}
+
+#[cfg(test)]
+mod copied_string_tests {
+    use super::{copied_string, ffi};
+
+    #[test]
+    fn empty_text_keeps_scalar_payload_after_one_call() {
+        for status in [ffi::BUFFER_TOO_SMALL, ffi::OK] {
+            let mut calls = 0;
+            let mut scalar_payload = 0;
+            let text = unsafe {
+                copied_string(|output, _error| {
+                    calls += 1;
+                    scalar_payload = 4096;
+                    let output = &mut *output;
+                    assert!(output.data.is_null());
+                    assert_eq!(output.capacity, 0);
+                    output.length = 0;
+                    status
+                })
+            }
+            .unwrap();
+            assert_eq!(text, "");
+            assert_eq!(calls, 1);
+            assert_eq!(scalar_payload, 4096);
+        }
+    }
+
+    #[test]
+    fn nonempty_text_keeps_exact_payload_after_two_calls() {
+        let expected = "part-0000: μm".as_bytes();
+        let mut calls = 0;
+        let mut scalar_payload = 0;
+        let text = unsafe {
+            copied_string(|output, _error| {
+                calls += 1;
+                scalar_payload = 4096;
+                let output = &mut *output;
+                output.length = expected.len();
+                if output.data.is_null() {
+                    assert_eq!(output.capacity, 0);
+                    return ffi::BUFFER_TOO_SMALL;
+                }
+                assert_eq!(output.capacity, expected.len() + 1);
+                std::ptr::copy_nonoverlapping(
+                    expected.as_ptr(),
+                    output.data.cast::<u8>(),
+                    expected.len(),
+                );
+                *output.data.add(expected.len()) = 0;
+                ffi::OK
+            })
+        }
+        .unwrap();
+        assert_eq!(text.as_bytes(), expected);
+        assert_eq!(calls, 2);
+        assert_eq!(scalar_payload, 4096);
+    }
 }
 
 unsafe fn copied_string_bounded(

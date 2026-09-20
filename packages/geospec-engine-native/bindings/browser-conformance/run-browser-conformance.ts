@@ -212,8 +212,8 @@ const run = async (): Promise<void> => {
         allow: [
           applicationDirectory,
           currentProfileDirectory,
-          packedPackageDirectory,
-          ...(suite === 'm2' ? [geospecPackageDirectory, m2ApplicationDirectory] : []),
+          await realpath(packedPackageDirectory),
+          ...(suite === 'm2' ? [await realpath(geospecPackageDirectory), m2ApplicationDirectory] : []),
         ],
       },
     },

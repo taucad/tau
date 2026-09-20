@@ -509,7 +509,7 @@ describe('compaction safety regressions', () => {
     const session = await createSession({
       file,
       transport,
-      tools: toolRegistry('inspect', () => 'small result'),
+      tools: toolRegistry('inspect', () => 'x'.repeat(400)),
       summarize: async () => 'Earlier fixed-overhead turn.',
       onCompaction: (outcome) => {
         compacted = outcome;
@@ -519,12 +519,14 @@ describe('compaction safety regressions', () => {
 
     const snapshot = await session.snapshot();
     expect(snapshot.failure).toBeUndefined();
+    expect(compacted?.tier).toBe('summarization');
     expect(compacted?.messages.reduce((total, message) => total + estimateTokens(message), 0)).toBeLessThan(
       compactionBudget,
     );
     const log = await file.open();
     const events = await log.read();
     expect(events.some((event) => event.type === 'history.compacted')).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('Tool result exceeded the context window');
     await log.close();
     await session.close();
   });

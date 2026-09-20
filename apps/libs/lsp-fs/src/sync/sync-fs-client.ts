@@ -155,7 +155,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     readFileText(fileName: string): string | undefined {
       const target = resolveTarget(fileName);
       if (target.absolutePath === undefined) {
-        emitTranslationFailure('readFile', fileName, target.translationError ?? 'translation failed');
+        emitTranslationFailure('readFile', fileName, target.translationError);
         return undefined;
       }
 
@@ -214,7 +214,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     fileExists(fileName: string): boolean {
       const target = resolveTarget(fileName);
       if (target.absolutePath === undefined) {
-        emitTranslationFailure('fileExists', fileName, target.translationError ?? 'translation failed');
+        emitTranslationFailure('fileExists', fileName, target.translationError);
         return false;
       }
 
@@ -271,7 +271,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     directoryExists(fileName: string): boolean {
       const target = resolveTarget(fileName);
       if (target.absolutePath === undefined) {
-        emitTranslationFailure('directoryExists', fileName, target.translationError ?? 'translation failed');
+        emitTranslationFailure('directoryExists', fileName, target.translationError);
         return false;
       }
 
@@ -316,7 +316,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     getDirectories(directoryName: string): string[] {
       const target = resolveTarget(directoryName);
       if (target.absolutePath === undefined) {
-        emitTranslationFailure('listDirectories', directoryName, target.translationError ?? 'translation failed');
+        emitTranslationFailure('listDirectories', directoryName, target.translationError);
         return [];
       }
 
@@ -396,7 +396,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     getScriptVersionForPath(fileName: string): string | undefined {
       const target = resolveTarget(fileName);
       if (target.absolutePath === undefined) {
-        emitTranslationFailure('statMtimeVersion', fileName, target.translationError ?? 'translation failed');
+        emitTranslationFailure('statMtimeVersion', fileName, target.translationError);
         return undefined;
       }
 

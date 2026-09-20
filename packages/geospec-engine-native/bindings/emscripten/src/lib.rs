@@ -94,21 +94,6 @@ impl InputAllocations {
         }
     }
 
-    fn get_mut(&mut self, pointer: u32, length: u32) -> Option<&mut [u8]> {
-        match (pointer, length) {
-            (0, 0) => Some(&mut []),
-            (0, _) => None,
-            _ => {
-                let bytes = self.entries.get_mut(&pointer)?;
-                if bytes.len() == length as usize {
-                    Some(bytes.as_mut())
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
     fn take(&mut self, pointer: u32, length: u32) -> Option<Vec<u8>> {
         match (pointer, length) {
             (0, 0) => Some(Vec::new()),
@@ -191,23 +176,6 @@ fn adopt_inputs(descriptors: Option<&[InputBuffer]>) -> Option<Vec<Vec<u8>>> {
     valid.then_some(inputs)
 }
 
-fn copy(bytes: &[u8], output: u32, capacity: u32) -> u32 {
-    let Ok(length) = u32::try_from(bytes.len()) else {
-        return 0;
-    };
-    if length > capacity {
-        return 0;
-    }
-    INPUTS.with(|inputs| {
-        let mut inputs = inputs.borrow_mut();
-        let Some(output) = inputs.get_mut(output, capacity) else {
-            return 0;
-        };
-        output[..bytes.len()].copy_from_slice(bytes);
-        length
-    })
-}
-
 fn invoke_engine(
     engine: u32,
     input: u32,
@@ -279,6 +247,18 @@ pub extern "C" fn geospec_engine_native_canonicalize(input: u32, input_length: u
             "invalid-request",
             "GeoSpec control input allocation is missing.",
         )
+    })
+}
+
+/// Non-mutating cumulative engine diagnostics. Snapshot copy traffic is excluded.
+#[no_mangle]
+pub extern "C" fn geospec_engine_native_observations(engine: u32) -> u32 {
+    ENGINES.with(|engines| {
+        let engines = engines.borrow();
+        match engines.get(engine) {
+            Some(engine) => result(Ok(engine.observations())),
+            None => failure("invalid-request", "GeoSpec engine handle is missing."),
+        }
     })
 }
 
@@ -455,18 +435,17 @@ fn result_length(result: u32, access: fn(&AbiResult) -> Option<&[u8]>) -> u32 {
     })
 }
 
-fn result_copy(
-    result: u32,
-    output: u32,
-    capacity: u32,
-    access: fn(&AbiResult) -> Option<&[u8]>,
-) -> u32 {
+/// Private synchronous wasm32 borrow, valid until the result is dropped.
+/// The pointer does not transfer ownership and must never be freed as an input.
+fn result_pointer(result: u32, access: fn(&AbiResult) -> Option<&[u8]>) -> u32 {
     RESULTS.with(|results| {
         results
             .borrow()
             .get(result)
             .and_then(access)
-            .map_or(0, |bytes| copy(bytes, output, capacity))
+            .filter(|bytes| !bytes.is_empty())
+            .and_then(|bytes| u32::try_from(bytes.as_ptr() as usize).ok())
+            .unwrap_or(0)
     })
 }
 
@@ -476,12 +455,8 @@ pub extern "C" fn geospec_engine_native_result_length(result: u32) -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn geospec_engine_native_result_copy(
-    result: u32,
-    output: u32,
-    capacity: u32,
-) -> u32 {
-    result_copy(result, output, capacity, success_bytes)
+pub extern "C" fn geospec_engine_native_result_pointer(result: u32) -> u32 {
+    result_pointer(result, success_bytes)
 }
 
 #[no_mangle]
@@ -490,12 +465,8 @@ pub extern "C" fn geospec_engine_native_result_code_length(result: u32) -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn geospec_engine_native_result_code_copy(
-    result: u32,
-    output: u32,
-    capacity: u32,
-) -> u32 {
-    result_copy(result, output, capacity, failure_code)
+pub extern "C" fn geospec_engine_native_result_code_pointer(result: u32) -> u32 {
+    result_pointer(result, failure_code)
 }
 
 #[no_mangle]
@@ -504,12 +475,8 @@ pub extern "C" fn geospec_engine_native_result_message_length(result: u32) -> u3
 }
 
 #[no_mangle]
-pub extern "C" fn geospec_engine_native_result_message_copy(
-    result: u32,
-    output: u32,
-    capacity: u32,
-) -> u32 {
-    result_copy(result, output, capacity, failure_message)
+pub extern "C" fn geospec_engine_native_result_message_pointer(result: u32) -> u32 {
+    result_pointer(result, failure_message)
 }
 
 /// Drop one owned success/error result.

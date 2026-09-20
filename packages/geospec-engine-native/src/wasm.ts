@@ -1,5 +1,5 @@
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
-import { callHost, toHostBytes } from '#host-types.js';
+import { callHost } from '#host-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves in-package contract types.
 import type { HostBytes, HostEngine, HostSubjectLifecycle } from '#host-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
@@ -31,6 +31,14 @@ export const initialize = async (input?: WasmInput): Promise<void> => {
 export class Engine implements HostEngine, HostSubjectLifecycle {
   readonly #inner = new MixedWasmBinding();
 
+  /**
+   * Read cumulative observations outside canonical geometry results.
+   * @returns Owned diagnostic bytes; snapshot traffic does not count itself.
+   */
+  public observations(): HostBytes {
+    return callHost(() => this.#inner.observations());
+  }
+
   /** Release the retained engine and its native geometry. */
   public close(): void {
     this.#inner.close();
@@ -43,7 +51,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact response bytes.
    */
   public ingestMesh(request: HostBytes, mesh: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.ingestMesh(request, mesh)));
+    return callHost(() => this.#inner.ingestMesh(request, mesh));
   }
 
   /**
@@ -54,7 +62,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact response bytes.
    */
   public ingestSubject(request: HostBytes, primary: HostBytes, resources: WasmResources): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.ingestSubject(request, primary, resources)));
+    return callHost(() => this.#inner.ingestSubject(request, primary, resources));
   }
 
   /**
@@ -63,7 +71,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact subject-handle response bytes.
    */
   public subjectHandle(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.subjectHandle(request)));
+    return callHost(() => this.#inner.subjectHandle(request));
   }
 
   /**
@@ -72,7 +80,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact release response bytes.
    */
   public releaseSubject(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.releaseSubject(request)));
+    return callHost(() => this.#inner.releaseSubject(request));
   }
 
   /**
@@ -81,7 +89,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact response bytes.
    */
   public processRequest(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.processRequest(request)));
+    return callHost(() => this.#inner.processRequest(request));
   }
 
   /**
@@ -90,7 +98,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact plan bytes.
    */
   public canonicalPlan(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.canonicalPlan(request)));
+    return callHost(() => this.#inner.canonicalPlan(request));
   }
 
   /**
@@ -99,7 +107,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact response bytes.
    */
   public evaluatePlan(plan: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.evaluatePlan(plan)));
+    return callHost(() => this.#inner.evaluatePlan(plan));
   }
 }
 
@@ -109,4 +117,4 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
  * @returns Exact canonical JSON bytes.
  * @public
  */
-export const canonicalize = (input: HostBytes): HostBytes => callHost(() => toHostBytes(canonicalizeMixedWasm(input)));
+export const canonicalize = (input: HostBytes): HostBytes => callHost(() => canonicalizeMixedWasm(input));

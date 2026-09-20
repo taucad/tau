@@ -259,35 +259,30 @@ const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): voi
 
 export const getBrowserAgentHostRun = (chatId: string): BrowserAgentHostRun | undefined => browserRuns.get(chatId);
 
-/** What the host said about a chat's run the last time this tab attached to it. */
-export type BrowserAgentHostAttachment = Readonly<{
-  snapshot: HostRunSnapshot;
-  /**
-   * This attach took the chat over from a driver that is gone, and the run it
-   * found still wants the page: one the host has just recorded abandoned, or
-   * one left non-terminal. @see getBrowserAgentHostAttachment
-   */
-  takeover: boolean;
+/**
+ * What the host last said about a chat's run, as its two readers need it.
+ *
+ * The verdict, not the transcript: this map holds one entry per chat opened in
+ * the tab and nothing evicts it, so keeping whole `HostRunSnapshot`s here —
+ * `messages` and all — grew without bound for the length of the session. Its
+ * neighbours (`finalizedTurns`, `latestSettlementByChat`) are capped for the
+ * same reason; three fields per chat need no cap.
+ */
+type AttachedRun = Readonly<{
+  runId: string;
+  state: BrowserRunState;
+  failure?: HostRunSnapshot['failure'];
 }>;
 
-const attachedRuns = new Map<string, BrowserAgentHostAttachment>();
+const attachedRuns = new Map<string, AttachedRun>();
 
-const recordAttachedRun = (chatId: string, attachment: BrowserAgentHostAttachment): void => {
-  attachedRuns.set(chatId, attachment);
+const recordAttachedRun = (chatId: string, snapshot: HostRunSnapshot): void => {
+  attachedRuns.set(chatId, {
+    runId: snapshot.runId,
+    state: snapshot.state,
+    ...(snapshot.failure === undefined ? {} : { failure: snapshot.failure }),
+  });
 };
-
-/**
- * The host's own answer about this chat's run, from the last attach.
- *
- * `browserRuns` is what a *stream of this document* published, so it is empty
- * on the first read after a reload and is cleared the moment a settlement
- * retires the record — which is why resumability read from it judged *Try
- * again* on a credit refusal non-resumable and rewound the turn instead of
- * continuing it. This is the same fact read from the authority: the run the
- * chat's durable log ends on, with the typed failure the host recorded for it.
- */
-export const getBrowserAgentHostAttachment = (chatId: string): BrowserAgentHostAttachment | undefined =>
-  attachedRuns.get(chatId);
 
 /**
  * The host's last word about this chat's run.
@@ -299,10 +294,7 @@ export const getBrowserAgentHostAttachment = (chatId: string): BrowserAgentHostA
  * every attach and on every snapshot a `start` or `resume` returned, and
  * nothing retires it.
  */
-const hostRunRecord = (
-  chatId: string,
-): Readonly<{ runId: string; state: BrowserRunState; failure?: HostRunSnapshot['failure'] }> | undefined =>
-  browserRuns.get(chatId) ?? attachedRuns.get(chatId)?.snapshot;
+const hostRunRecord = (chatId: string): AttachedRun | undefined => browserRuns.get(chatId) ?? attachedRuns.get(chatId);
 
 /**
  * Whether this chat's turns are placed on a browser-hosted agent at all.
@@ -921,7 +913,7 @@ const createHostStream = <Message extends UIMessage>(input: {
        * and `resume` return one too, and a reader that only ever saw the
        * *attach* snapshot would answer a same-document *Try again* from the
        * state the chat was in before this run existed. */
-      recordAttachedRun(input.chatId, { snapshot, takeover: attachedRuns.get(input.chatId)?.takeover === true });
+      recordAttachedRun(input.chatId, snapshot);
       /* A snapshot answers the *admission*, so a run the gateway refused at its
        * model call has already ended by the time `start` resolves. Adopting the
        * snapshot's state wholesale rewound the record to `running` and erased
@@ -950,7 +942,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       attaching ??= [];
       const batch = await hostClient.attach({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
       if (batch.snapshot) {
-        recordAttachedRun(input.chatId, { snapshot: batch.snapshot, takeover: batch.takeover === true });
+        recordAttachedRun(input.chatId, batch.snapshot);
       }
       /* This attach took the chat over from a driver that is gone, so the run
        * it found has no owner and this page is about to settle it (I7). That

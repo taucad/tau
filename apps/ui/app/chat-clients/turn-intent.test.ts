@@ -82,7 +82,14 @@ describe('turnIntentOf', () => {
     });
   });
 
-  it('should continue a transcript with no user message without a lease', () => {
-    expect(turnIntentOf([], { kind: 'continue' })).toEqual({ trigger: 'resume', leaseTurnId: undefined });
+  /* W10-B. A lease-less continuation is not a lease-less special case any more
+   * — `prepare` falls back to the *run id* as the lease's turn id, so the
+   * attempt fences its writes under a turn no message has, and the settlement
+   * names a turn id the saved-turn card can never match. The error card renders
+   * over an empty transcript (`chat-history.tsx`, `groups.length === 0`) while
+   * the host record that makes *Try again* a continuation survives a reload, so
+   * this is a button a person can press. There is no turn to continue: say so. */
+  it('should refuse a continuation of a transcript with no user message', () => {
+    expect(() => turnIntentOf([], { kind: 'continue' })).toThrow(/nothing to continue/u);
   });
 });

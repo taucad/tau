@@ -287,6 +287,44 @@ describe('ProjectChatRunSettlement', () => {
     expect(harness.finalize).not.toHaveBeenCalled();
   });
 
+  /**
+   * W10-2. The chat's claim has rolled on to a newer run — a second view, a
+   * `prepare` that landed while this run was finishing — so this run holds no
+   * lease here at all. `prepare`, `finalize` and `discard` all refuse a claim
+   * they are not holding (`CHAT_CLAIM_RUN_MISMATCH`, the refusal T3-amp added
+   * so a settlement learns its lease was *not* retired), and calling one
+   * anyway threw away the durable settlement, the hold release and the run
+   * record with it — then the one retry repeated the same deterministic throw.
+   */
+  it('settles a run the chat no longer holds a claim for without touching the newer claim', async () => {
+    const mismatch = Object.assign(new Error('run_1 does not name chat_1’s current run run_2.'), {
+      code: 'CHAT_CLAIM_RUN_MISMATCH',
+    });
+    harness.reclaim.mockResolvedValue({ ...workspace, runId: 'run_2' });
+    harness.prepare.mockRejectedValue(mismatch);
+    harness.finalize.mockRejectedValue(mismatch);
+    harness.discard.mockRejectedValue(mismatch);
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn();
+
+    await waitFor(() => {
+      expect(harness.persistBrowserTurnSettlement).toHaveBeenCalledWith({
+        type: 'turn.failed',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        turnId: 'turn_1',
+        checkoutId: undefined,
+        reason: 'The turn ended before it recorded a revision.',
+      });
+    });
+    expect(harness.prepare).not.toHaveBeenCalled();
+    expect(harness.finalize).not.toHaveBeenCalled();
+    expect(harness.discard).not.toHaveBeenCalled();
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+    expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
+  });
+
   /* A turn this page admitted settles through its own lease; the root emits
    * that settlement, so writing a second one here would be a duplicate. */
   it('leaves a turn it leased itself to the revision root', async () => {

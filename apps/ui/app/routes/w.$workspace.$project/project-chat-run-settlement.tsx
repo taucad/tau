@@ -219,17 +219,34 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
       }
       const localRun = getBrowserAgentHostRun(chatId);
       const attested = getHostFinalizedTurns().some((settlement) => settlement.runId === runId);
-      /* A run this page adopted rather than admitted: the document that leased
-       * it is gone, and the root's epoch sweep retired that lease on open. So
-       * every branch below has to say what it does about a settlement with no
-       * lease behind it, rather than silently releasing nothing (E3, I7). */
+      /* Three answers, not two, because the claim is keyed by chat and this
+       * settlement names a run. This page holds *this run's* lease; it holds
+       * none, because the document that leased it is gone and the root's epoch
+       * sweep retired it on open (E3, I7); or the chat's claim has rolled on to
+       * a newer run — a second view, or a `prepare` that landed while this run
+       * was finishing.
+       *
+       * The last one is nobody's to settle here. `prepare`, `finalize` and
+       * `discard` all refuse a claim naming another run (`CHAT_CLAIM_RUN_MISMATCH`,
+       * the refusal T3-amp added so a settlement learns its lease was *not*
+       * retired) — and this run holds no lease here, so there is nothing to
+       * retire and nothing to learn. Asking anyway threw away everything below:
+       * the durable settlement, the hold release and the run record, after
+       * which the one retry repeated the same deterministic throw. */
       const held = await workspaceAuthority.reclaim(chatId);
       const adopted = held?.runId !== runId;
+      const rolledOn = held !== undefined && adopted;
       /* Publish only a run this page saw complete and the host has not already
        * attested. Everything else — a refusal, a stop, a run whose host log
        * this tab does not own, and a settlement the host already recorded —
        * releases the hold without asking for a revision over newer live edits. */
-      if (!attested && outcome === 'completed' && localRun?.runId === runId && localRun.state === 'completed') {
+      if (
+        !rolledOn &&
+        !attested &&
+        outcome === 'completed' &&
+        localRun?.runId === runId &&
+        localRun.state === 'completed'
+      ) {
         if (adopted) {
           /* E3: the run completed and the page died inside the settlement
            * window, so the agent's writes are sitting in the checkout with
@@ -250,7 +267,9 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
         }
         await workspaceAuthority.finalize(chatId, runId);
       } else {
-        await workspaceAuthority.discard(chatId, runId);
+        if (!rolledOn) {
+          await workspaceAuthority.discard(chatId, runId);
+        }
         if (adopted && !attested) {
           /* No lease, so the root retired nothing and will emit no settlement
            * of its own — and a run with no settlement is one every later open

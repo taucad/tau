@@ -633,6 +633,56 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
+  /* W10-1: discovery must not reach *into* a turn this chat is taking. The
+   * guard `hasNoOwnTurn` is true for the whole admission window — the lease is
+   * taken before `turn` exists — so an `adoptRun` sent from `#bindSessionOwner`
+   * (a rebind with a live `browserRuns` entry) stopped the admission actor and
+   * took the person's parked message with it. */
+  it('should ignore adoptRun while an admission is in flight', async () => {
+    const admitted = Promise.withResolvers<ChatTurn>();
+    const script = turnActors({ admit: async () => admitted.promise });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    expect(runState(actor)).toBe('queued.admitting');
+
+    actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
+
+    expect(runState(actor)).toBe('queued.admitting');
+    admitted.resolve(turnOf('run-1', 'user-1'));
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+    expect(actor.getSnapshot().context.turn).toEqual(turnOf('run-1', 'user-1'));
+
+    actor.stop();
+  });
+
+  /* The same guard from the other end. A reconciled settlement runs in
+   * `finishing.settling` holding no turn of its own, so `hasNoOwnTurn` is true
+   * there too — and adopting over it abandons the `settleTurn` that is the
+   * adopted run's only settlement. */
+  it('should ignore adoptRun while a reconciled run is settling', async () => {
+    const released = Promise.withResolvers<void>();
+    const script = turnActors({ settle: async () => released.promise });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-reloaded' });
+    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
+    expect(runState(actor)).toBe('finishing.settling');
+
+    actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
+
+    expect(runState(actor)).toBe('finishing.settling');
+    released.resolve();
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('done');
+    });
+    expect(script.settlements).toHaveLength(1);
+
+    actor.stop();
+  });
+
   /* T3-D6. A rejected settlement shared `recordActorFailure` with a rejected
    * admission, which clears `turn`, `pendingGesture` and `outcome`. There the
    * clearing is right — the cleared gesture *is* the one that failed and

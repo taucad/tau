@@ -119,7 +119,17 @@ export const turnIntentOf = (messages: readonly MyUIMessage[], gesture: TurnGest
     /* The same turn, continued: the run id is the host's own and the rewind
      * point is nothing, so the only thing left to derive is which message's
      * lease this attempt takes — the one the first attempt took. */
-    return { trigger: 'resume', leaseTurnId: messages.findLast((message) => message.role === 'user')?.id };
+    const continuing = messages.findLast((message) => message.role === 'user')?.id;
+    if (continuing === undefined) {
+      /* No user message, no turn. The error card renders over an empty
+       * transcript while the host record behind *Try again* survives a reload,
+       * so this is reachable — and admitting it leases under `prepare`'s
+       * fallback key, the run id, which fences the continuation's writes under
+       * a turn no message has and names a turn id in the settlement that the
+       * saved-turn card can never match. Refused visibly instead (I1). */
+      throw new Error('This chat has nothing to continue from yet.');
+    }
+    return { trigger: 'resume', leaseTurnId: continuing };
   }
   if (gesture.kind === 'edit') {
     /* An edit is admitted seconds after the gesture — host availability, the

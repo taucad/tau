@@ -309,6 +309,14 @@ export const chatTurnAdmission = fromSafeAsync<
   { readonly type: 'turnAdmitted'; readonly turn: ChatTurn },
   { readonly chatId: string; readonly gesture: ChatTurnGesture }
 >(async ({ input, signal }) => {
+  /* Held from here, because the release below runs *after* this admission ends
+   * — which is after the dispose that usually aborts it, and dispose empties
+   * this registry (`clearChatTurnServices`). Looking the publisher up on the
+   * abort path then found nothing and waited out the bound for a publisher
+   * that is never coming back, leaving the lease held: T3-D2's leak, one
+   * registry read later. A published settlement is a function; a reference to
+   * it cannot be deleted out from under the release. */
+  const publishedSettle = settlementsByChat.get(input.chatId);
   const admit = await awaitTurnService(admissionsByChat, input.chatId, signal);
   if (admit === undefined) {
     throw new Error('This chat is not ready to run a turn yet.');
@@ -316,13 +324,14 @@ export const chatTurnAdmission = fromSafeAsync<
   await awaitChatTurnHold('admission');
   const turn = await admit(input.gesture);
   if (signal.aborted) {
-    /* Under a bound of its own, not this actor's signal: that signal is already
-     * aborted, and the abort is often a dispose, which deletes this chat's turn
-     * services in the same breath. Reading the registry directly meant the
-     * release was an optional call on `undefined` — a silent no-op that left
-     * the checkout leased and `admitted` forever, so every later turn of the
-     * chat waited fifteen seconds and died on a stale claim (T3-D2). */
-    const settle = await awaitTurnService(settlementsByChat, input.chatId);
+    /* The publisher this admission started with, or — for a chat whose route
+     * had not published one yet — a wait under a bound of its own, not this
+     * actor's signal: that signal is already aborted. Reading the registry
+     * directly meant the release was an optional call on `undefined` — a
+     * silent no-op that left the checkout leased and `admitted` forever, so
+     * every later turn of the chat waited fifteen seconds and died on a stale
+     * claim (T3-D2). */
+    const settle = publishedSettle ?? (await awaitTurnService(settlementsByChat, input.chatId));
     await settle?.({
       chatId: input.chatId,
       runId: turn.runId,

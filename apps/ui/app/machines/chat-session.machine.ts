@@ -255,6 +255,26 @@ const reconcileSettlementTransition = {
   actions: ['adoptSettlementTarget', 'announce'],
 } as const;
 
+/**
+ * Take on a run of this chat that is live somewhere else (V5).
+ *
+ * Accepted from the states that are holding nothing *and* doing nothing: a
+ * chat whose machine is idle, or has reached a terminal row while one of its
+ * runs is still in flight elsewhere — navigate away and back mid-run (T3-D10).
+ * Not from the states in between. `hasNoOwnTurn` alone does not say that: it is
+ * true for the whole admission window, because the lease is taken before
+ * `turn` exists, and true again in the `finishing.settling` a *reconciled*
+ * settlement runs in. Handled at the root it was honoured in both, and
+ * discovery then stopped the actor that owned the work — the admission of a
+ * gesture `#bindSessionOwner` had flushed one statement earlier, or the only
+ * settlement an adopted run will ever get.
+ */
+const adoptRunTransition = {
+  guard: 'hasNoOwnTurn',
+  target: '#chat-session.run.running.reconnecting',
+  actions: ['adoptDiscoveredRun', 'announce'],
+} as const;
+
 export const chatSessionMachine = setup({
   types: {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
@@ -486,6 +506,7 @@ export const chatSessionMachine = setup({
         idle: {
           on: {
             reconcileSettlement: reconcileSettlementTransition,
+            adoptRun: adoptRunTransition,
           },
         },
         queued: {
@@ -704,9 +725,9 @@ export const chatSessionMachine = setup({
             reconcileSettlement: reconcileSettlementTransition,
           },
         },
-        done: {},
-        failed: { on: { reconcileSettlement: reconcileSettlementTransition } },
-        stopped: { on: { reconcileSettlement: reconcileSettlementTransition } },
+        done: { on: { adoptRun: adoptRunTransition } },
+        failed: { on: { reconcileSettlement: reconcileSettlementTransition, adoptRun: adoptRunTransition } },
+        stopped: { on: { reconcileSettlement: reconcileSettlementTransition, adoptRun: adoptRunTransition } },
       },
       on: {
         /* The one way a turn starts. Every verb sends this and nothing else;
@@ -802,19 +823,6 @@ export const chatSessionMachine = setup({
         /* Reload discovery can substantiate a run for a chat that never left
          * `idle` on this page (`retainDurableRun`). */
         durableRunState: { guard: 'isReattaching', target: '.running.reconnecting', actions: 'announce' },
-        /*
-         * V5: discovery substantiates a run only for a chat that is holding
-         * nothing — anywhere else it would retire a live turn. The guard is
-         * what says that; restricting it to `idle` as well meant a chat whose
-         * machine had already reached `done`, `failed` or `stopped` while a run
-         * of that chat was still live elsewhere never adopted it, and the next
-         * gesture leased a second checkout over the live one (T3-D10).
-         */
-        adoptRun: {
-          guard: 'hasNoOwnTurn',
-          target: '.running.reconnecting',
-          actions: ['adoptDiscoveredRun', 'announce'],
-        },
         /*
          * *Close* on a chat (A35, P63).
          *

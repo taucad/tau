@@ -63,7 +63,6 @@ const index = buildSelectorIndex({
         },
       ],
     },
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- occurrence paths are the map keys.
     'root.child': { faces: [] },
   },
 });

@@ -292,7 +292,7 @@ describe('createThreeCameraRig', () => {
       view: createCameraView({
         ...initialView,
         requestedVerticalFieldOfView: 45,
-        direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+        direction: [0.6123724357, -0.6123724357, 0.5],
         viewport: { width: 768, height: 576, pixelRatio: 1 },
       }),
       bounds: fittedBounds,
@@ -302,10 +302,10 @@ describe('createThreeCameraRig', () => {
     rig.actorRef.start();
 
     expect(rig.perspectiveCamera.position.distanceTo(new Vector3(...fittedView.target))).toBeCloseTo(
-      35.808_573_937_594_36,
+      35.80857393759436,
       10,
     );
-    expect(rig.perspectiveCamera.zoom).toBeCloseTo(1.078_034_861_982_213_3, 10);
+    expect(rig.perspectiveCamera.zoom).toBeCloseTo(1.0780348619822133, 10);
     expect(rig.orthographicCamera.zoom).toBe(1);
     const projectedCorners = [
       [0, 0, 0],
@@ -317,10 +317,10 @@ describe('createThreeCameraRig', () => {
       [0, 14, 8],
       [20, 14, 8],
     ].map((point) => new Vector3(...(point as [number, number, number])).project(rig.perspectiveCamera));
-    expect(projectedCorners[1]!.x).toBeCloseTo(0.151_130_912_782_328_93, 10);
+    expect(projectedCorners[1]!.x).toBeCloseTo(0.15113091278232893, 10);
     expect(projectedCorners[1]!.y).toBeCloseTo(-0.9, 10);
-    expect(projectedCorners[7]!.x).toBeCloseTo(0.733_907_379_246_009_8, 10);
-    expect(projectedCorners[7]!.y).toBeCloseTo(0.195_649_892_264_690_48, 10);
+    expect(projectedCorners[7]!.x).toBeCloseTo(0.7339073792460098, 10);
+    expect(projectedCorners[7]!.y).toBeCloseTo(0.19564989226469048, 10);
     expect(projectedCorners.every(({ x, y }) => Math.abs(x) <= 0.9 + 1e-12 && Math.abs(y) <= 0.9 + 1e-12)).toBe(true);
     rig.dispose();
   });

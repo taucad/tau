@@ -954,6 +954,31 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     admissions.set(input.runId, pending);
     turns.set(input.runId, input.turnId);
     const bound = setTimeout(() => {
+      if (!admissions.has(input.runId)) {
+        return;
+      }
+      /*
+       * The root is told, not only the caller (T4-02).
+       *
+       * An admission the root is still holding — buffered before the registry
+       * answered, or queued behind the turn id a running turn holds (V8) —
+       * outlives this wait: the root replays it later, the turn it spawns takes
+       * the checkout's lease, and nothing is left to send it `turnCompleted`,
+       * so the checkout reads as held for the life of the process and every
+       * save on it records nothing. A lease has no heartbeat by policy (§8),
+       * so this host giving up is the only liveness signal it has.
+       */
+      actor.send({ type: 'turnAbandoned', turnId: input.turnId, runId: input.runId });
+      /*
+       * And the run id becomes admittable again, as it does on every other way
+       * an admission ends (`turnReleased`, a failed `execute`).
+       *
+       * `execute` skips admission for a run it has already admitted, so a
+       * client retrying the run id this bound just refused went straight to the
+       * launcher: the agent ran with no lease, unfenced, and its turn recorded
+       * no revision (I-EDIT).
+       */
+      turns.delete(input.runId);
       refuseAdmission(input.runId, 'it was never leased.');
     }, admissionMilliseconds);
     /* No wait for the registry: the root holds an admission that arrives before
@@ -1607,7 +1632,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
              * not hold one for the life of the host. */
             const turnId = turns.get(command.runId);
             if (turnId !== undefined) {
-              actor.send({ type: 'turnAbandoned', turnId });
+              /* Named by run as well as by turn: an edit reuses the message id
+               * the previous run leased, so the verb must not end whichever run
+               * holds that turn id now. */
+              actor.send({ type: 'turnAbandoned', turnId, runId: command.runId });
               turns.delete(command.runId);
             }
             options.checkouts?.delete(command.runId);

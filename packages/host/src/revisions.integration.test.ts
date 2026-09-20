@@ -14,7 +14,7 @@ import { chmod, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
@@ -872,6 +872,148 @@ for (const row of ports) {
        * `admissionMilliseconds`, so a run that only the timer settles fails
        * here rather than passing slowly. */
     }, 20_000);
+
+    /*
+     * The two rows that follow run on one port, and deliberately.
+     *
+     * They need the host's 30 s patience to elapse, which means faking the
+     * clock — and a fake clock also fires the native port's own `git lfs` start
+     * deadline, failing the row for a reason that has nothing to do with what
+     * it asserts. What it asserts is `packages/host` bookkeeping — the
+     * `admissions` and `turns` maps around one `admitTurn` — which is identical
+     * whichever port records underneath. One port proves it; every other row in
+     * this describe still runs on both.
+     */
+    const clockSafePort = row.name === 'isomorphic-git';
+
+    /**
+     * One turn the host stopped waiting for, on a registry that answers too late.
+     *
+     * The root buffers an admission that arrives before the registry has
+     * answered and replays it the moment it does (A38) — here, after the host's
+     * 30 s patience has expired and the caller has been refused. That is where
+     * both rows below start, with the registry released and the run refused.
+     *
+     * @returns The harness whose `run-1` the bound gave up on.
+     */
+    const refusedByTheBound = async (): Promise<Harness> => {
+      const registry = Promise.withResolvers<void>();
+      const held = await harness(row.create, {
+        wrapPort: (port) => ({
+          ...port,
+          listCheckouts: async () => {
+            await registry.promise;
+            return (await port.listCheckouts?.()) ?? [];
+          },
+        }),
+      });
+
+      /*
+       * Only `setTimeout` is faked, and the real one is kept: `execute` reads
+       * the chat record off the real disk before it admits anything, so the
+       * bound this row fires does not exist yet when the clock is first
+       * advanced. Each step sleeps for real to let that read land, then jumps
+       * the host's patience again, so whichever step arms the bound, the next
+       * one fires it.
+       */
+      const realSetTimeout = globalThis.setTimeout;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const refused = expect(startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' })).rejects.toMatchObject({
+          code: 'REVISION_PREPARE_FAILED',
+        });
+        for (let step = 0; step < 40; step += 1) {
+          vi.advanceTimersByTime(5000);
+          // oxlint-disable-next-line no-await-in-loop -- one real pause per step, by design.
+          await new Promise<void>((resolve) => {
+            realSetTimeout(resolve, 25);
+          });
+        }
+        await refused;
+      } finally {
+        /* Real timers before the registry lands: everything the root starts on
+         * its first announcement schedules its own, and a fake clock advancing
+         * through them proves nothing these rows are about. */
+        vi.useRealTimers();
+      }
+
+      registry.resolve();
+      return held;
+    };
+
+    /*
+     * T4-02, the daemon leg: the host's patience is bounded, the root's queue
+     * is not.
+     *
+     * The replay happens after the caller has been refused: a turn spawns,
+     * takes the checkout's lease, and nothing is left to send it
+     * `turnCompleted`, so the checkout reads as held for the life of the
+     * process and every later save on it records nothing. A lease has no
+     * heartbeat by policy (§8), so this host giving up is the only liveness
+     * signal it has — it has to tell the root, not only its caller.
+     */
+    it.runIf(clockSafePort)(
+      'abandons an admission its own bound refused, rather than leasing the checkout for nobody',
+      async () => {
+        const held = await refusedByTheBound();
+
+        /* The lease an orphan takes lands a few ticks after the registry does, so
+         * this polls for it: the row fails the moment one appears rather than
+         * passing on a race. */
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- polling for the lease this row must never see.
+          const leased = await held.leaseIds();
+          if (leased.length > 0) {
+            break;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- polling is sequential by definition.
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 100);
+          });
+        }
+
+        expect(await held.leaseIds()).toEqual([]);
+      },
+      30_000,
+    );
+
+    /*
+     * The other half of the same give-up: the run id has to become admittable
+     * again.
+     *
+     * `execute` skips admission for a run it has already admitted
+     * (`turns.has(runId)`), which is how a turn's own later commands stay out
+     * of the placement path. Every other way an admission ends drops that
+     * record — the release announcement does, the failed `execute` does — but
+     * the bound did not, so a client retrying the run id it was just refused
+     * went straight to the launcher: the agent ran with no lease, wrote into
+     * the live checkout unfenced, and its turn recorded no revision at all.
+     * That is the one thing a host may never do (I-EDIT).
+     */
+    it.runIf(clockSafePort)(
+      'admits a retry of the run its bound refused, rather than running it with no lease',
+      async () => {
+        const held = await refusedByTheBound();
+
+        await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+
+        /* The settlement lands after `execute` resolves: the launcher's terminal
+         * marker is what completes the turn. */
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          if (held.events.some((event) => event.type === 'turn.finalized' && event.runId === 'run-1')) {
+            break;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- polling is sequential by definition.
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 100);
+          });
+        }
+
+        const finalized = held.events.flatMap((event) => (event.type === 'turn.finalized' ? [event.runId] : []));
+        expect(finalized).toEqual(['run-1']);
+      },
+      30_000,
+    );
   });
 }
 

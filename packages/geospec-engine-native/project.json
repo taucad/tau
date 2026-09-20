@@ -863,6 +863,32 @@
         "forwardAllArgs": false
       }
     },
+    "prepare-delivery": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py check",
+        "forwardAllArgs": false
+      },
+      "configurations": {
+        "sources": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py sources"
+        },
+        "tools": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py tools"
+        },
+        "prefixes": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py prefixes"
+        },
+        "inputs": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py inputs"
+        },
+        "verify": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py verify"
+        }
+      }
+    },
     "prepare-legacy-reference": {
       "executor": "nx:run-commands",
       "cache": false,

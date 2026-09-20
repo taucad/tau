@@ -9,11 +9,18 @@ type Input = { path: string; sha256: string };
 type Closure = {
   schema: string;
   sourceRoot: string;
+  sourceRevision: string;
+  output: string;
+  cache: string;
+  preparationCache: string;
+  rustPrefix: string;
+  sdkPrefix: string;
   rustc: string;
   cargo: string;
   emxx: string;
   emcc: string;
   emar: string;
+  tools: Record<string, string>;
   environment: Record<string, string>;
   occtPrefix: string;
   libraries: string[];
@@ -22,32 +29,69 @@ type Closure = {
 };
 
 const root = resolve(import.meta.dirname, '../../..');
-const cache = resolve(
-  process.env['GEOSPEC_MIXED_CACHE'] ??
-    resolve(root, 'node_modules/.cache/geospec-engine-native/matcher-full-mixed-build'),
-);
 const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+const verifiedTool = (closure: Closure, name: string): string => {
+  const executable = closure.tools[name];
+  if (executable === undefined) {
+    throw new Error(`Prepared closure does not select ${name}.`);
+  }
+  const input = closure.inputs.find((candidate) => candidate.path === executable);
+  if (input === undefined || digest(readFileSync(executable)) !== input.sha256) {
+    throw new Error(`Prepared ${name} bytes changed.`);
+  }
+  return executable;
+};
 
 const main = (): void => {
-  const manifestPath = process.env['GEOSPEC_MIXED_INPUTS'];
-  if (!manifestPath) {
-    throw new Error('Set GEOSPEC_MIXED_INPUTS to a verified geospec-mixed-build-inputs-v1 JSON closure.');
-  }
+  const manifestPath =
+    process.env['GEOSPEC_MIXED_INPUTS'] ??
+    resolve(
+      process.env['GEOSPEC_DELIVERY_CACHE'] ?? resolve(root, 'node_modules/.cache/geospec-engine-native/delivery'),
+      'mixed-inputs.json',
+    );
   const manifestBytes = readFileSync(manifestPath);
   const closure = JSON.parse(manifestBytes.toString()) as Closure;
-  const linkOptimization = closure.linkOptimization ?? 'O0';
+  if (closure.schema !== 'geospec-mixed-build-inputs-v2' || closure.sourceRoot !== root) {
+    throw new Error('Run prepare-delivery.py inputs for this checkout after the source freeze.');
+  }
+  const python = verifiedTool(closure, 'python3');
+  const validation = spawnSync(
+    python,
+    [
+      '-B',
+      resolve(root, 'packages/geospec-engine-native/scripts/prepare-delivery.py'),
+      'verify',
+      '--manifest',
+      resolve(manifestPath),
+    ],
+    {
+      cwd: root,
+      /* eslint-disable @typescript-eslint/naming-convention -- Exact preparation environment variable names. */
+      env: {
+        ...closure.environment,
+        GEOSPEC_DELIVERY_CACHE: closure.preparationCache,
+        GEOSPEC_DELIVERY_RUST_PREFIX: closure.rustPrefix,
+        GEOSPEC_DELIVERY_EMSDK_PREFIX: closure.sdkPrefix,
+      },
+      /* eslint-enable @typescript-eslint/naming-convention -- Resume ordinary property naming after external environment keys. */
+      encoding: 'utf8',
+      maxBuffer: 4 * 1024 ** 2,
+      timeout: 5 * 60_000,
+    },
+  );
+  if (validation.status !== 0) {
+    throw new Error(`Delivery closure verification failed: ${validation.stderr || validation.error}`);
+  }
+  const { linkOptimization, output, cache } = closure;
   if (linkOptimization !== 'O0' && linkOptimization !== 'O3') {
     throw new Error('Mixed link optimization must be O0 or O3.');
   }
   const packageRoot = resolve(closure.sourceRoot, 'packages/geospec-engine-native');
-  const output = process.env['GEOSPEC_MIXED_OUTPUT'] ?? resolve(packageRoot, 'bindings/emscripten/generated');
-  if (closure.schema !== 'geospec-mixed-build-inputs-v1' || closure.libraries.length === 0) {
-    throw new Error('Invalid mixed build closure.');
-  }
-  for (const input of closure.inputs) {
-    if (digest(readFileSync(input.path)) !== input.sha256) {
-      throw new Error(`Mixed build input hash mismatch: ${input.path}`);
-    }
+  if (
+    (process.env['GEOSPEC_MIXED_OUTPUT'] !== undefined && resolve(process.env['GEOSPEC_MIXED_OUTPUT']) !== output) ||
+    (process.env['GEOSPEC_MIXED_CACHE'] !== undefined && resolve(process.env['GEOSPEC_MIXED_CACHE']) !== cache)
+  ) {
+    throw new Error('Build output/cache must match the prepared closure.');
   }
   const space = statfsSync(root);
   if (space.bavail * space.bsize < 6 * 1024 ** 3) {
@@ -59,7 +103,6 @@ const main = (): void => {
   mkdirSync(runDirectory);
   /* eslint-disable @typescript-eslint/naming-convention -- Exact Rust, Cargo and cc-rs environment keys. */
   const environment = {
-    ...process.env,
     ...closure.environment,
     RUSTC: closure.rustc,
     GEOSPEC_OCCT_PREFIX: closure.occtPrefix,
@@ -93,7 +136,7 @@ const main = (): void => {
     throw new Error('Wrong selected Rust nightly.');
   }
   const emVersion = run('emscripten-version', closure.emxx, ['--version']);
-  if (!emVersion.includes('6.0.5')) {
+  if (!emVersion.includes('6.0.5') || !emVersion.includes('1db513782be24469589d7cb8a1f1834e9a33f271')) {
     throw new Error('Wrong selected Emscripten version.');
   }
   const binding = readFileSync(resolve(packageRoot, 'bindings/emscripten/src/lib.rs'));
@@ -147,11 +190,19 @@ const main = (): void => {
     const bytes = readFileSync(path);
     return { path, bytes: bytes.length, sha256: digest(bytes) };
   });
+  for (const input of closure.inputs.filter((input) => input.path.startsWith(`${packageRoot}/`))) {
+    if (digest(readFileSync(input.path)) !== input.sha256) {
+      throw new Error(`Source changed during the build: ${input.path}`);
+    }
+  }
   writeFileSync(
     resolve(runDirectory, 'build-receipt.json'),
     `${JSON.stringify(
       {
         manifestSha256: digest(manifestBytes),
+        sourceRoot: closure.sourceRoot,
+        sourceRevision: closure.sourceRevision,
+        output,
         bindingSha256: digest(binding),
         rustVersion,
         emVersion,

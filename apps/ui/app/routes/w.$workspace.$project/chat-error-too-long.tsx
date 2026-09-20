@@ -13,8 +13,8 @@ import { chatTooLongMessage } from '#utils/error.utils.js';
  * up on trying (`CIRCUIT_BREAKER_OPEN`).
  *
  * A limit is a state, not an error, so this reads as a neutral notice. When the
- * host retained the run, Resume keeps its work; replay and a new chat remain
- * available after that safer action.
+ * host retained the run, Resume keeps its work and replay remains available
+ * after that safer action. An unresumable refusal can only start a new chat.
  */
 export const ChatErrorTooLong = memo(function ({
   className,
@@ -50,10 +50,12 @@ export const ChatErrorTooLong = memo(function ({
               Resume
             </Button>
           ) : null}
-          <Button variant='outline' size='sm' onClick={regenerate}>
-            <RefreshCcw className='size-3.5' />
-            Try again
-          </Button>
+          {resumable ? (
+            <Button variant='outline' size='sm' onClick={regenerate}>
+              <RefreshCcw className='size-3.5' />
+              Try again
+            </Button>
+          ) : null}
           <Button
             variant='outline'
             size='sm'

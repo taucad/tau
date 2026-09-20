@@ -103,6 +103,7 @@ function codedErrorCard({
         resumable={resumable}
         guidance='Resume to continue without losing your work.'
         canTryAgain
+        {...raw}
       />
     );
   }

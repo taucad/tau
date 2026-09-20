@@ -260,6 +260,14 @@ describe('compaction safety regressions', () => {
       );
     }
     expect(terminal).toMatchObject({ type: 'run.lifecycle', state: 'completed' });
+    const compactedRequest = transport.requests.find((request) =>
+      request.messages.some((message) => JSON.stringify(message.content).includes('<summary>')),
+    );
+    const userIndex = compactedRequest?.messages.findIndex((message) => message.id === 'live-user') ?? -1;
+    const summaryIndex =
+      compactedRequest?.messages.findIndex((message) => JSON.stringify(message.content).includes('<summary>')) ?? -1;
+    expect(userIndex).toBeGreaterThanOrEqual(0);
+    expect(summaryIndex).toBeGreaterThan(userIndex);
     await log.close();
     await session.close();
   });
@@ -527,6 +535,37 @@ describe('compaction safety regressions', () => {
     const events = await log.read();
     expect(events.some((event) => event.type === 'history.compacted')).toBe(true);
     expect(JSON.stringify(events)).not.toContain('Tool result exceeded the context window');
+    await log.close();
+    await session.close();
+  });
+
+  it('should persist maximal compaction when a large usage anchor leaves no attainable message budget', async () => {
+    const file = createMemoryEventLogFile();
+    await seedMessages(file, [
+      { id: 'anchored-user', role: 'user', content: 'u'.repeat(400) },
+      assistant('usage-anchor', [{ type: 'text', text: 'Done.' }], 7900),
+    ]);
+    const summarize = vi.fn(async () => 'Paid maximal summary. '.repeat(40));
+    const transport = new ScriptedTransport(() => [
+      { type: 'text-delta', text: 'provider accepted the reduced request' },
+      { type: 'completed', stopReason: 'stop' },
+    ]);
+    const session = await createSession({ file, transport, summarize });
+
+    await session.prompt({ id: 'anchored-next', role: 'user', content: 'continue' });
+
+    const snapshot = await session.snapshot();
+    expect(snapshot.failure).toBeUndefined();
+    expect(transport.requests).toHaveLength(1);
+    const log = await file.open();
+    const events = await log.read();
+    const compacted = events.find((event) => event.type === 'history.compacted');
+    expect(compacted).toMatchObject({
+      type: 'history.compacted',
+      details: { summary: 'generated', overBudget: true },
+    });
+    expect(compacted?.type === 'history.compacted' ? compacted.evictedMessageIds.length : 0).toBeGreaterThan(0);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
   });

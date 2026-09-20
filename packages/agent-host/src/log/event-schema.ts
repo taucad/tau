@@ -50,6 +50,7 @@ const compactionTraceSchema = z.looseObject({
   summarizerUsage: usageSchema.nullable(),
   summarizerError: z.string().optional(),
   summary: z.enum(['generated', 'placeholder']).optional(),
+  overBudget: z.boolean().optional(),
   discardedOverflowError: z.string().optional(),
 });
 const metadataSchema = z

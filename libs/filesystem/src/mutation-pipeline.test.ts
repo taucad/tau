@@ -361,6 +361,33 @@ describe('WorkspaceFileService', () => {
   // ---------------------------------------------------------------------------
 
   describe('bulkMove', () => {
+    it('should serialize recursive removal behind an overlapping bulk move', async () => {
+      await service.writeFile('/batch/a.txt', 'a');
+      await service.writeFile('/batch/b.txt', 'b');
+      const firstRename = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const rename = rootProvider.rename.bind(rootProvider);
+      vi.spyOn(rootProvider, 'rename').mockImplementationOnce(async (source, target) => {
+        firstRename.resolve();
+        await release.promise;
+        return rename(source, target);
+      });
+
+      const moving = service.bulkMove([
+        { source: '/batch/a.txt', target: '/done/a.txt' },
+        { source: '/batch/b.txt', target: '/done/b.txt' },
+      ]);
+      await firstRename.promise;
+      const removing = service.rmdir('/batch', { recursive: true });
+      release.resolve();
+      const [result] = await Promise.all([moving, removing]);
+
+      expect(result.failed).toEqual([]);
+      await expect(service.readFile('/done/a.txt', 'utf8')).resolves.toBe('a');
+      await expect(service.readFile('/done/b.txt', 'utf8')).resolves.toBe('b');
+      await expect(service.exists('/batch')).resolves.toBe(false);
+    });
+
     it('moves every edit when all succeed', async () => {
       await service.writeFile('/a.txt', 'a');
       await service.writeFile('/b.txt', 'b');
@@ -422,21 +449,12 @@ describe('WorkspaceFileService', () => {
       await service.writeFile('/a.txt', 'original');
       await service.writeFile('/b.txt', 'blocked');
       await service.writeFile('/dst/b.txt', 'collision');
-      const originalMove = service.move.bind(service);
-      let moveCount = 0;
-      vi.spyOn(service, 'move').mockImplementation(async (source, target, context) => {
-        const stat = await originalMove(source, target, context);
-        moveCount += 1;
-        if (moveCount === 1) {
-          await service.writeFile(target, 'peer update');
-        }
-        return stat;
-      });
 
       const result = await service.bulkMove([
         { source: '/a.txt', target: '/dst/a.txt' },
         { source: '/b.txt', target: '/dst/b.txt' },
       ]);
+      await service.writeFile('/dst/a.txt', 'peer update');
 
       expect(result.moved.map(({ edit }) => edit.source)).toEqual(['/a.txt']);
       expect(result.failed.map(({ edit }) => edit.source)).toEqual(['/b.txt']);

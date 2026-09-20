@@ -440,6 +440,69 @@ describe('WorkspaceFileService', () => {
   // ---------------------------------------------------------------------------
 
   describe('cold build', () => {
+    it('should retry a cold scan invalidated by a concurrent rename', async () => {
+      await service.writeFile('/old.ts', 'old');
+      const scanned = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const readdirWithStats = provider.readdirWithStats!.bind(provider);
+      vi.spyOn(provider, 'readdirWithStats').mockImplementation(async (path) => {
+        const entries = await readdirWithStats(path);
+        if (path === '') {
+          scanned.resolve();
+          await release.promise;
+        }
+        return entries;
+      });
+
+      const rooted = service.createRootedFileSystem('/');
+      const pending = rooted.statTree!('');
+      await scanned.promise;
+      await service.move('/old.ts', '/new.ts');
+      release.resolve();
+
+      await expect(pending).resolves.toMatchObject([{ path: 'new.ts' }]);
+      await expect(rooted.statTree!('')).resolves.toMatchObject([{ path: 'new.ts' }]);
+    });
+
+    it('should discard a cold scan when its captured mount is replaced', async () => {
+      const projectId = 'proj_coldcoldcoldcoldcoldc';
+      const root = `/projects/${projectId}`;
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:project:old', providerBasePath: projectId }],
+        roots: [],
+      });
+      const oldRoot = service.createRootedFileSystem(root);
+      await oldRoot.writeFile('old.ts', 'old');
+      const oldProvider = await providerRegistry.getProvider({
+        backend: 'memory',
+        storageRootKey: 'memory:project:old',
+      });
+      const scanned = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const readdirWithStats = oldProvider.readdirWithStats!.bind(oldProvider);
+      vi.spyOn(oldProvider, 'readdirWithStats').mockImplementation(async (path) => {
+        const entries = await readdirWithStats(path);
+        if (path === projectId) {
+          scanned.resolve();
+          await release.promise;
+        }
+        return entries;
+      });
+
+      const pending = oldRoot.statTree!('');
+      await scanned.promise;
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:project:new', providerBasePath: projectId }],
+        roots: [],
+      });
+      const replacement = service.createRootedFileSystem(root);
+      await replacement.writeFile('new.ts', 'new');
+      release.resolve();
+
+      await expect(pending).rejects.toMatchObject({ code: 'ESTALE' });
+      await expect(replacement.statTree!('')).resolves.toMatchObject([{ path: 'new.ts' }]);
+    });
+
     /* Budget row (W7b): the walk lists sibling directories from one bounded
      * pool. Fully sequential, a 500-directory project pays 500 round trips in
      * series, which is the whole cold-index latency on a port or on IndexedDB. */

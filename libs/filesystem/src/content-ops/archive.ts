@@ -34,8 +34,8 @@ export type ArchiveOptions = WalkOptions & {
  *
  * Each file is read as the walk reaches it and handed straight to the ZIP
  * writer — there is no whole-tree map in front of it — and the running total is
- * checked as it goes, so the writer never receives more than the ceiling plus
- * the file that crossed it.
+ * checked before and after each read, so the writer never receives more than
+ * the ceiling.
  *
  * @param filesystem - Provider, rooted filesystem or composed view to read through.
  * @param path       - Root-relative directory to archive; `''` is the surface's own root.
@@ -50,17 +50,26 @@ export async function archive(filesystem: ContentFileSystem, path: string, optio
   const ceiling = options?.maxBytes ?? archiveByteCeiling;
   const zip = new JSZip();
   let archivedBytes = 0;
+  const refuse = (): never => {
+    throw Object.assign(new Error(`Archive of '${path}' exceeds its ${String(ceiling)}-byte ceiling.`), {
+      code: archiveTooLargeCode,
+    });
+  };
   for await (const { relativePath, kind } of walk(filesystem, path, options)) {
     if (kind !== 'file') {
       continue;
     }
+    const filePath = joinRelativePath(path, relativePath);
+    // oxlint-disable-next-line no-await-in-loop -- One file is preflighted immediately before its read.
+    const declared = await filesystem.stat(filePath);
+    if (declared.size > ceiling - archivedBytes) {
+      refuse();
+    }
     // oxlint-disable-next-line no-await-in-loop -- One file resident at a time is the point of the ceiling.
-    const content = await filesystem.readFile(joinRelativePath(path, relativePath));
+    const content = await filesystem.readFile(filePath);
     archivedBytes += content.byteLength;
     if (archivedBytes > ceiling) {
-      throw Object.assign(new Error(`Archive of '${path}' exceeds its ${String(ceiling)}-byte ceiling.`), {
-        code: archiveTooLargeCode,
-      });
+      refuse();
     }
     zip.file(relativePath, content);
   }

@@ -267,6 +267,14 @@ export type BulkMoveResult = {
   failed: ReadonlyArray<{ edit: BulkMoveEdit; error: WorkspaceMutationError }>;
 };
 
+type ResolvedMoveEdit = {
+  readonly edit: BulkMoveEdit;
+  readonly source: string;
+  readonly target: string;
+  readonly sourceResolution: MountResolution;
+  readonly targetResolution: MountResolution;
+};
+
 export { causeToMutationError, isProjectDirectoryPath };
 
 /**
@@ -315,33 +323,43 @@ export class MutationPipeline {
    * Move many paths sequentially and report every completed and failed edit.
    * Completed edits are never rolled back over newer peer data.
    *
-   * @param move - The single-path move its own boundary resolves; the authority's and a rooted view's differ only there.
-   * @param edits - Source → target pairs.
+   * @param edits - Resolved source → target pairs.
+   * @param context - Optional mutation source metadata for change-bus subscribers.
    * @returns The {@link BulkMoveResult} describing successes + the failure (if any).
    */
   public async bulkMove(
-    move: (source: string, target: string) => Promise<FileStat>,
-    edits: readonly BulkMoveEdit[],
+    edits: readonly ResolvedMoveEdit[],
+    context?: WorkspaceMutationContext,
   ): Promise<BulkMoveResult> {
     if (edits.length === 0) {
       return { moved: [], failed: [] };
     }
 
-    const completed: Array<{ edit: BulkMoveEdit; stat: FileStat }> = [];
-    const failed: Array<{ edit: BulkMoveEdit; error: WorkspaceMutationError }> = [];
-
-    for (const edit of edits) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Result order and dependent edits require sequential moves.
-        const stat = await move(edit.source, edit.target);
-        completed.push({ edit, stat });
-      } catch (error) {
-        const mutationError = causeToMutationError(error, edit.source, edit.target);
-        failed.push({ edit, error: mutationError });
-      }
-    }
-
-    return { moved: completed, failed };
+    const operations = edits.flatMap(({ source, target, sourceResolution, targetResolution }) => [
+      { path: source, resolution: sourceResolution },
+      { path: target, resolution: targetResolution },
+    ]);
+    const locks = this.batchLockPaths(operations);
+    return this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async () => {
+        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
+        const completed: Array<{ edit: BulkMoveEdit; stat: FileStat }> = [];
+        const failed: Array<{ edit: BulkMoveEdit; error: WorkspaceMutationError }> = [];
+        for (const resolved of edits) {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- Result order and dependent edits require sequential moves.
+            const stat = await this.moveResolvedUnlocked({ ...resolved, context });
+            completed.push({ edit: resolved.edit, stat });
+          } catch (error) {
+            failed.push({
+              edit: resolved.edit,
+              error: causeToMutationError(error, resolved.edit.source, resolved.edit.target),
+            });
+          }
+        }
+        return { moved: completed, failed };
+      }),
+    );
   }
 
   /**
@@ -834,103 +852,120 @@ export class MutationPipeline {
     ]);
     return this._crossTabCoordinator.withLocks(lockPaths, async () =>
       this._resourceQueue.queueForMany(lockPaths, async () => {
-        let mutationBegan = false;
-        let incompleteCrossProviderDirectoryCopy = false;
-        try {
-          await this.refreshMutationProviders([sourceResolution, targetResolution]);
-          this._assertNoDescendantMounts(source, 'move');
-          this._assertNoDescendantMounts(target, 'move');
-          const sourceStat = await sourceResolution.provider.stat(sourceResolution.path);
-          const targetExists = await targetResolution.provider.exists(targetResolution.path);
-          if (targetExists) {
-            const error = new Error(`EEXIST: target already exists '${target}'`);
-            (error as NodeJS.ErrnoException).code = 'EEXIST';
-            throw error;
-          }
-
-          mutationBegan = true;
-          if (sourceResolution.provider === targetResolution.provider) {
-            await sourceResolution.provider.rename(sourceResolution.path, targetResolution.path);
-          } else if (sourceStat.type === 'dir') {
-            incompleteCrossProviderDirectoryCopy = true;
-            await this._copyDirectoryAcrossProviders(
-              sourceResolution.provider,
-              sourceResolution.path,
-              targetResolution.provider,
-              targetResolution.path,
-            );
-            incompleteCrossProviderDirectoryCopy = false;
-            await this.removeRecursive(sourceResolution.provider, sourceResolution.path);
-          } else {
-            const data = await sourceResolution.provider.readFile(sourceResolution.path);
-            await targetResolution.provider.writeFile(targetResolution.path, data);
-            await sourceResolution.provider.unlink(sourceResolution.path);
-          }
-
-          const sourceIsCurrent = this.isCurrentResolution(source, sourceResolution);
-          const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
-          if (sourceIsCurrent && targetIsCurrent) {
-            this._filePool()?.invalidate(source);
-            this._filePool()?.invalidate(target);
-            this._treeIndexes.rename(source, target);
-          } else if (sourceIsCurrent || targetIsCurrent) {
-            this._filePool()?.clear();
-            this._treeIndexes.evict(source);
-            this._treeIndexes.evict(target);
-          }
-
-          const resultingStat = await targetResolution.provider.stat(targetResolution.path);
-          this.emitChangeEvent(
-            sourceStat.type === 'dir'
-              ? {
-                  type: 'directoryRenamed',
-                  oldPath: source,
-                  newPath: target,
-                  backend: sourceResolution.backend,
-                }
-              : {
-                  type: 'fileRenamed',
-                  oldPath: source,
-                  newPath: target,
-                  backend: sourceResolution.backend,
-                },
-            context,
-            {
-              operations: [
-                { path: source, resolution: sourceResolution },
-                { path: target, resolution: targetResolution },
-              ],
-            },
-          );
-          this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-
-          return resultingStat;
-        } catch (error) {
-          if (incompleteCrossProviderDirectoryCopy && (await targetResolution.provider.exists(targetResolution.path))) {
-            await this.removeRecursive(targetResolution.provider, targetResolution.path);
-          }
-          if (mutationBegan) {
-            const operations = [
-              { path: source, resolution: sourceResolution },
-              { path: target, resolution: targetResolution },
-            ];
-            const globallyVisible = operations.some((operation) =>
-              this.isCurrentResolution(operation.path, operation.resolution),
-            );
-            if (globallyVisible) {
-              this._filePool()?.clear();
-              this._treeIndexes.evict(source);
-              this._treeIndexes.evict(target);
-            }
-            for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
-              this.emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
-            }
-            this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-          }
-          throw error;
-        }
+        await this.refreshMutationProviders([sourceResolution, targetResolution]);
+        return this.moveResolvedUnlocked({ source, target, sourceResolution, targetResolution, context });
       }),
     );
+  }
+
+  /** Run one move while the caller already owns its complete lock set. */
+  public async moveResolvedUnlocked({
+    source,
+    target,
+    sourceResolution,
+    targetResolution,
+    context,
+  }: {
+    source: string;
+    target: string;
+    sourceResolution: MountResolution;
+    targetResolution: MountResolution;
+    context?: WorkspaceMutationContext;
+  }): Promise<FileStat> {
+    let mutationBegan = false;
+    let incompleteCrossProviderDirectoryCopy = false;
+    try {
+      this._assertNoDescendantMounts(source, 'move');
+      this._assertNoDescendantMounts(target, 'move');
+      const sourceStat = await sourceResolution.provider.stat(sourceResolution.path);
+      const targetExists = await targetResolution.provider.exists(targetResolution.path);
+      if (targetExists) {
+        const error = new Error(`EEXIST: target already exists '${target}'`);
+        (error as NodeJS.ErrnoException).code = 'EEXIST';
+        throw error;
+      }
+
+      mutationBegan = true;
+      if (sourceResolution.provider === targetResolution.provider) {
+        await sourceResolution.provider.rename(sourceResolution.path, targetResolution.path);
+      } else if (sourceStat.type === 'dir') {
+        incompleteCrossProviderDirectoryCopy = true;
+        await this._copyDirectoryAcrossProviders(
+          sourceResolution.provider,
+          sourceResolution.path,
+          targetResolution.provider,
+          targetResolution.path,
+        );
+        incompleteCrossProviderDirectoryCopy = false;
+        await this.removeRecursive(sourceResolution.provider, sourceResolution.path);
+      } else {
+        const data = await sourceResolution.provider.readFile(sourceResolution.path);
+        await targetResolution.provider.writeFile(targetResolution.path, data);
+        await sourceResolution.provider.unlink(sourceResolution.path);
+      }
+
+      const sourceIsCurrent = this.isCurrentResolution(source, sourceResolution);
+      const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
+      if (sourceIsCurrent && targetIsCurrent) {
+        this._filePool()?.invalidate(source);
+        this._filePool()?.invalidate(target);
+        this._treeIndexes.rename(source, target);
+      } else if (sourceIsCurrent || targetIsCurrent) {
+        this._filePool()?.clear();
+        this._treeIndexes.evict(source);
+        this._treeIndexes.evict(target);
+      }
+
+      const resultingStat = await targetResolution.provider.stat(targetResolution.path);
+      this.emitChangeEvent(
+        sourceStat.type === 'dir'
+          ? {
+              type: 'directoryRenamed',
+              oldPath: source,
+              newPath: target,
+              backend: sourceResolution.backend,
+            }
+          : {
+              type: 'fileRenamed',
+              oldPath: source,
+              newPath: target,
+              backend: sourceResolution.backend,
+            },
+        context,
+        {
+          operations: [
+            { path: source, resolution: sourceResolution },
+            { path: target, resolution: targetResolution },
+          ],
+        },
+      );
+      this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
+
+      return resultingStat;
+    } catch (error) {
+      if (incompleteCrossProviderDirectoryCopy && (await targetResolution.provider.exists(targetResolution.path))) {
+        await this.removeRecursive(targetResolution.provider, targetResolution.path);
+      }
+      if (mutationBegan) {
+        const operations = [
+          { path: source, resolution: sourceResolution },
+          { path: target, resolution: targetResolution },
+        ];
+        const globallyVisible = operations.some((operation) =>
+          this.isCurrentResolution(operation.path, operation.resolution),
+        );
+        if (globallyVisible) {
+          this._filePool()?.clear();
+          this._treeIndexes.evict(source);
+          this._treeIndexes.evict(target);
+        }
+        for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
+          this.emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
+        }
+        this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
+      }
+      throw error;
+    }
   }
 
   public async mkdirResolved({

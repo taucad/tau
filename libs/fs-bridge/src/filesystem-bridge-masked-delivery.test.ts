@@ -7,7 +7,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChangeEventBus } from '@taucad/filesystem';
+import {
+  ChangeEventBus,
+  MountTable,
+  policyAtRoot,
+  ProviderRegistry,
+  ResourceQueue,
+  WorkspaceFileService,
+} from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ChangeEvent } from '@taucad/types';
 import type { RootedBridgeConsumer } from '@taucad/fs-bridge';
@@ -244,4 +253,135 @@ describe('exposeFileSystem scoped delivery cost', () => {
       }
     }
   });
+});
+
+describe('exposeFileSystem workspace-root masking', () => {
+  let messageHandlers: Array<(event: MessageEvent) => void>;
+
+  beforeEach(() => {
+    messageHandlers = [];
+    vi.stubGlobal('self', {
+      addEventListener: (_type: string, handler: (event: MessageEvent) => void) => {
+        messageHandlers.push(handler);
+      },
+      removeEventListener: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['user', 'agent'] as const)(
+    'should enforce the project mask through a workspace-root %s connection',
+    async (consumer) => {
+      const registry = new ProviderRegistry();
+      const provider = await registry.getProvider({
+        backend: 'memory',
+        storageRootKey: `memory:workspace-root-mask-${consumer}`,
+      });
+      await provider.writeFile('home.txt', new TextEncoder().encode('home'));
+      await provider.writeFile('projects/alpha/main.ts', new TextEncoder().encode('main'));
+      // eslint-disable-next-line no-restricted-syntax -- Exact retired spelling reproduces the reviewed bridge bypass.
+      const reserved = ['.tau', 'revisions', 'secret'].join('/');
+      await provider.writeFile(`projects/alpha/${reserved}`, new TextEncoder().encode('secret'));
+      const mounts = new MountTable();
+      mounts.mount('/', provider, {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: `memory:workspace-root-mask-${consumer}`,
+      });
+      mounts.mount(root, provider, {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: `memory:workspace-root-mask-${consumer}`,
+        providerBasePath: 'projects/alpha',
+      });
+      const bus = new ChangeEventBus();
+      const service = new WorkspaceFileService({
+        providerRegistry: registry,
+        resourceQueue: new ResourceQueue(),
+        eventBus: bus,
+        mountTable: mounts,
+      });
+      const handle = exposeFileSystem(
+        {},
+        {
+          changeEventBus: bus,
+          policy: tauPathPolicy,
+          handlerForRoot: (scopeRoot, context, scopeConsumer) => {
+            const filesystem = service.createRootedFileSystem(scopeRoot, context);
+            const policy = policyAtRoot(tauPathPolicy, scopeRoot);
+            const view =
+              scopeConsumer === 'working-copy'
+                ? filesystem
+                : composeView({ filesystem }, { consumer: scopeConsumer, policy });
+            return withReadContentOps(view, policy);
+          },
+        },
+      );
+      const connect = (scopeRoot: string) => {
+        const channel = new MessageChannel();
+        messageHandlers.at(-1)!(
+          new MessageEvent('message', {
+            data: {
+              v: fileSystemBridgeProtocolVersion,
+              type: filesystemBridgeConnectMessageType,
+              port: channel.port1,
+              root: scopeRoot,
+              consumer,
+            },
+          }),
+        );
+        const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
+        return { channel, proxy };
+      };
+      const workspace = connect('/');
+      const project = connect(root);
+      const received: ChangeEvent[] = [];
+      const stop = workspace.proxy.listen('fileChanged', (event) => received.push(event as ChangeEvent));
+      const hidden = `projects/alpha/${reserved}`;
+
+      try {
+        await Promise.all([workspace.proxy.ready, project.proxy.ready]);
+        await expect(workspace.proxy.readFile('home.txt', 'utf8')).resolves.toBe('home');
+        await expect(workspace.proxy.readFile('projects/alpha/main.ts', 'utf8')).resolves.toBe('main');
+        await expect(workspace.proxy.readFile(hidden, 'utf8')).rejects.toMatchObject({
+          code: 'EPERM',
+        });
+        await expect(workspace.proxy.writeFile(hidden, 'changed')).rejects.toMatchObject({
+          code: 'EPERM',
+        });
+        await expect(
+          workspace.proxy.readdir(`projects/alpha/${reserved.slice(0, reserved.lastIndexOf('/'))}`),
+        ).rejects.toMatchObject({
+          code: 'EPERM',
+        });
+        await expect(workspace.proxy.stat(hidden)).rejects.toMatchObject({ code: 'EPERM' });
+        await expect(
+          workspace.proxy.archive(`projects/alpha/${reserved.slice(0, reserved.lastIndexOf('/'))}`),
+        ).rejects.toMatchObject({
+          code: 'EPERM',
+        });
+        await expect(project.proxy.readFile(reserved, 'utf8')).rejects.toMatchObject({
+          code: 'EPERM',
+        });
+
+        bus.emit(written(`/projects/alpha/${reserved}`));
+        bus.emit(written('/projects/alpha/main.ts'));
+        await vi.waitFor(() => {
+          expect(received).toContainEqual(written('projects/alpha/main.ts'));
+        });
+        expect(received).not.toContainEqual(written(`projects/alpha/${reserved}`));
+      } finally {
+        stop();
+        workspace.proxy.dispose();
+        project.proxy.dispose();
+        handle.cleanup();
+        service.dispose();
+        workspace.channel.port1.close();
+        project.channel.port1.close();
+      }
+    },
+  );
 });

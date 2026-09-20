@@ -29,6 +29,7 @@ import {
   ChangeEventBus,
   EventCoalescer,
   MountTable,
+  policyAtRoot,
   ProviderRegistry,
   ResourceQueue,
   WorkspaceFileService,
@@ -289,14 +290,12 @@ exposeFileSystem(workspaceBridgeService(fileService), {
    */
   handlerForRoot: (root, context, consumer) => {
     const filesystem = fileService.createRootedFileSystem(root, context);
+    const policy = policyAtRoot(tauPathPolicy, root);
     /* A skill bundle belongs to a checkout, not to the dependency mount: the
      * mount is opened as its own root since W11, and composing the overlay there
      * would grow an `.agents` row inside `node_modules`. */
     const overlays = root === dependencyMountRoot ? [] : [systemSkillsOverlay()];
-    const view =
-      consumer === 'working-copy'
-        ? filesystem
-        : composeView({ filesystem }, { consumer, overlays, policy: tauPathPolicy });
+    const view = consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, overlays, policy });
     /*
      * The read content operations run here, over the view the connection asked
      * for (charter D2); `search` and `statTree` are already on it, answered from
@@ -305,7 +304,7 @@ exposeFileSystem(workspaceBridgeService(fileService), {
      * `writeFiles` and the four preflights — which the pipeline executes as one
      * batch and the view mask-checks before any provider I/O (D4).
      */
-    return withReadContentOps(view, tauPathPolicy);
+    return withReadContentOps(view, policy);
   },
   /* The same layout the views above enforce, so a masked connection is not told
    * about a path it may not read (CI1). */

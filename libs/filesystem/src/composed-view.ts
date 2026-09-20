@@ -43,6 +43,7 @@ import type {
   WatchEvent,
   WatchRequest,
 } from '#types.js';
+import { bufferToStream } from '#backend/stream-utils.js';
 import type { TreeSearchOptions } from '#tree-index.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import type { WorkspaceMutationError } from '#workspace-errors.js';
@@ -865,27 +866,33 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       : {
           readFileStream: (path: string, streamOptions?: FileReadStreamOptions) => {
             /*
-             * One stream for both routes: `readFile` already resolves the route,
-             * the mask and the overlay's declared length, so the requested
-             * window is a slice of what it answers. The mask itself still
-             * refuses synchronously, before any stream exists.
-             *
-             * ponytail: a project file is buffered whole instead of keeping the
-             * base's chunking. No consumer of a composed view streams yet; give
-             * the project route back to `base.readFileStream` when one does.
+             * A project file rides the base's own stream, exactly as `readFile`
+             * hands that route to the base; only an overlay entry is buffered,
+             * because the overlay serves whole bytes against a declared length.
+             * The route is asked once, on the first pull, and the mask still
+             * refuses synchronously — before any stream exists.
              */
             const target = readablePath(canonical(path));
+            let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
             return new ReadableStream<Uint8Array<ArrayBuffer>>({
-              async start(controller) {
+              async pull(controller) {
                 streamOptions?.signal?.throwIfAborted();
-                const bytes = await readFile(target);
+                if (reader === undefined) {
+                  const route = await routeFor(target);
+                  reader =
+                    route.kind === 'overlay'
+                      ? bufferToStream(await readFile(target), streamOptions).getReader()
+                      : base.readFileStream!(target, streamOptions).getReader();
+                }
+                const result = await reader.read();
                 streamOptions?.signal?.throwIfAborted();
-                const from = streamOptions?.position ?? 0;
-                controller.enqueue(
-                  bytes.subarray(from, streamOptions?.length === undefined ? undefined : from + streamOptions.length),
-                );
-                controller.close();
+                if (result.done) {
+                  controller.close();
+                } else {
+                  controller.enqueue(result.value);
+                }
               },
+              cancel: async (reason) => reader?.cancel(reason),
             });
           },
         }),

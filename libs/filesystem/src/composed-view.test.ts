@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FileStat, FileStatEntry } from '@taucad/types';
 import { MemoryProvider } from '#backend/memory-provider.js';
+import { bufferToStream } from '#backend/stream-utils.js';
 import { composeView, maskedPathCode } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { ComposedViewOverlay } from '#composed-view.js';
-import type { WatchEvent, WatchRequest } from '#types.js';
+import type { FileReadStreamOptions, WatchEvent, WatchRequest } from '#types.js';
 
 const encoder = new TextEncoder();
 const contents = {
@@ -210,13 +211,22 @@ describe('composeView optional provider members', () => {
   const streaming = () => {
     const refresh = vi.fn(async (_prefixes?: readonly string[]) => undefined);
     const base = Object.assign(Object.create(provider) as MemoryProvider, {
-      readFileStream: (path: string) =>
-        new ReadableStream<Uint8Array<ArrayBuffer>>({
-          async start(controller) {
-            controller.enqueue(await provider.readFile(path));
-            controller.close();
+      /* A provider honours the requested window itself, as every real one does
+       * through `bufferToStream`; the wrapper forwards it rather than slicing. */
+      readFileStream: (path: string, streamOptions?: FileReadStreamOptions) => {
+        let inner: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+        return new ReadableStream<Uint8Array<ArrayBuffer>>({
+          async pull(controller) {
+            inner ??= bufferToStream(await provider.readFile(path), streamOptions).getReader();
+            const chunk = await inner.read();
+            if (chunk.done) {
+              controller.close();
+            } else {
+              controller.enqueue(chunk.value);
+            }
           },
-        }),
+        });
+      },
       refresh,
     });
     return {
@@ -248,6 +258,30 @@ describe('composeView optional provider members', () => {
     );
     expect(await collect(view.readFileStream!('main.ts', { position: 7 }))).toBe('export {};\n'.slice(7));
     await expect(collect(view.readFileStream!('main.ts', { signal: AbortSignal.abort() }))).rejects.toThrow();
+  });
+
+  /* A project file rides the provider's own stream: the wrapper buffered every
+   * route whole, so a chunked provider arrived as one chunk (W9b). */
+  it('should stream a project file through the provider chunks the base emits', async () => {
+    const base = Object.assign(Object.create(provider) as MemoryProvider, {
+      readFileStream: (path: string) =>
+        new ReadableStream<Uint8Array<ArrayBuffer>>({
+          async start(controller) {
+            const bytes = await provider.readFile(path);
+            controller.enqueue(bytes.subarray(0, 4));
+            controller.enqueue(bytes.subarray(4));
+            controller.close();
+          },
+        }),
+    });
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    const chunks: number[] = [];
+    for await (const chunk of view.readFileStream!('main.ts') as unknown as AsyncIterable<Uint8Array<ArrayBuffer>>) {
+      chunks.push(chunk.byteLength);
+    }
+
+    expect(chunks).toEqual([4, 'export {};\n'.length - 4]);
   });
 
   it('should answer readdirEntries from the merged listing', async () => {

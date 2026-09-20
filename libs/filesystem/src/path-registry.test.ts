@@ -5,6 +5,14 @@ import type { PathRegistryRow } from '#path-registry.js';
 /** A path inside the family a row names, so the table drives its own test. */
 const memberOf = (row: PathRegistryRow): string => (row.directory ? `${row.prefix}/child/leaf.bin` : row.prefix);
 
+/** The one answer every control-plane row gives. */
+const controlPlane = Object.freeze({
+  class: 'control-plane',
+  versioned: false,
+  agentAccess: 'hidden',
+  watch: 'none',
+} as const);
+
 describe('path registry', () => {
   it.each(pathRegistry.map((row) => [row.prefix, row] as const))('classifies everything under %s', (_prefix, row) => {
     const { class: storageClass, versioned, agentAccess, watch } = classify(memberOf(row));
@@ -69,6 +77,89 @@ describe('path registry', () => {
       });
     },
   );
+
+  /* G0-3: `classify` takes the first matching row, so a row that matched at the
+   * project root used to claim a control plane nested inside it — the cache row
+   * for `node_modules`, and the authored `.tau/skills` and `.tau/parameters`
+   * rows, which made a vendored store *versioned* and captured into every
+   * revision. The control plane answers before the family it sits inside. */
+  it.each([
+    'node_modules/pkg/.git/hooks/pre-commit',
+    '.tau/skills/x/.git/config',
+    '.tau/parameters/x/.git/config',
+    'exports/x/.git/config',
+    '.tau/chats/x/.git/config',
+  ])('should answer the control plane for %s rather than the family it sits inside', (path) => {
+    expect(classify(path)).toStrictEqual(controlPlane);
+  });
+
+  /* What the answer above rests on, stated where a reordering would break it. */
+  it('should order the control-plane rows before every other row', () => {
+    const rows = pathRegistry.filter((row) => row.class === 'control-plane');
+
+    expect(pathRegistry.slice(0, rows.length)).toStrictEqual(rows);
+  });
+
+  /* G0-1, G0-5: every filesystem a `NodeFsProvider` runs on folds case, and
+   * Win32 folds trailing dots and spaces as well, so each of these spellings
+   * opens the real store while a byte comparison calls it the user's content.
+   * The fold is unconditional: a genuinely separate `.GIT` directory on a
+   * case-sensitive disk being hidden is the fail-closed answer, and asking the
+   * provider would make the mask depend on where the project sits. */
+  it.each([
+    '.Git/config',
+    '.GIT/config',
+    '.giT',
+    '/.Git/config',
+    'vendor/lib/.Git/hooks/pre-commit',
+    'vendor/lib/.GIT',
+    '.git.',
+    '.git ',
+    'vendor/.GIT. ',
+    'vendor/.git./hooks/pre-commit',
+    '.JJ',
+    'a/b/.Jj/x',
+    '.jj.',
+    /* `.tau/binding.json` names the store this project is bound to, so a
+     * spelling the filesystem folds onto it is the same control file. */
+    '.TAU/Binding.JSON',
+    'packages/kernel/.Tau/binding.json',
+  ])('should fold %s onto the control plane on every filesystem', (path) => {
+    expect(classify(path)).toStrictEqual(controlPlane);
+  });
+
+  /* The fold is the control plane's alone: a user's `Exports` directory and
+   * their `Cafe/` are their content, whatever case they typed. Normalization is
+   * in the fold for the reason `portable-tree.ts` applies it, not because it can
+   * change an answer — all three prefixes are ASCII, which normalization never
+   * rewrites, so a decomposed path answers by its segments alone. */
+  it.each(['Exports/model.step', 'Café/README.md', '.GitHub/workflows/ci.yml'])(
+    'should leave %s on the authored default rather than folding it onto a row',
+    (path) => {
+      expect(classify(path)).toStrictEqual(unlistedPathClassification);
+    },
+  );
+
+  it('should classify a decomposed path by its segments', () => {
+    expect(classify('café/.git/config')).toStrictEqual(controlPlane);
+    expect(classify('café/main.ts')).toStrictEqual(unlistedPathClassification);
+  });
+
+  /* A prefix collision is not a fold: these are ordinary names that merely start
+   * or end like a control-plane one, and git needs the first four in the tree. */
+  it.each([
+    '.github/workflows/ci.yml',
+    '.gitignore',
+    '.gitattributes',
+    '.gitmodules',
+    'x.git',
+    '.git-foo',
+    '.gitx',
+    'a.git.b',
+    'src/.git.old/config',
+  ])('should leave %s outside the control plane', (path) => {
+    expect(classify(path)).toStrictEqual(unlistedPathClassification);
+  });
 
   /* PP3: a control-plane row matches a path segment, never a root, so its answer
    * cannot depend on how deep the repository sits. */

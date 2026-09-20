@@ -4,6 +4,7 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { generatedGitattributesPath, generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
 import type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
 
 const encoder = new TextEncoder();
@@ -86,6 +87,74 @@ const storeWithRemote = async (
   await port.setRemote({ name: remote, url: 'https://api.tau.new/v1/git/p1.git' });
   return port;
 };
+
+/*
+ * G0-9: the generated block used to be written on every open, whatever it said,
+ * so a project created before a row changed kept the stale block until somebody
+ * wrote the file by hand — and a current project's working copy was rewritten
+ * every time the authority opened it. `init` is the open seam
+ * (`revision-effects.ensureStore` calls it once per authority), so the merge is
+ * the migration and the comparison is what stops it repeating.
+ */
+describe('the generated block on open', () => {
+  const generatedPaths = new Set([generatedIgnorePath, generatedGitattributesPath]);
+
+  /** A provider that counts which of the two generated files `init` writes. */
+  const counting = (): Readonly<{ filesystem: FileSystemProvider; written: string[] }> => {
+    const provider = new MemoryProvider();
+    providers.push(provider);
+    const written: string[] = [];
+    return {
+      written,
+      filesystem: Object.assign(provider, {
+        writeFile: async (path: string, ...rest: never[]) => {
+          if (generatedPaths.has(path)) {
+            written.push(path);
+          }
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the spy forwards the provider's own overloads.
+          return (MemoryProvider.prototype.writeFile as (...args: unknown[]) => Promise<void>).call(
+            provider,
+            path,
+            ...rest,
+          );
+        },
+      }),
+    };
+  };
+
+  const stale = `# mine
+*.log
+# BEGIN Tau generated — derived content is never versioned
+/.git/
+/.jj/
+/.tau/binding.json
+node_modules/
+# END Tau generated
+`;
+
+  it('should replace a stale generated block once and keep the hand-written lines', async () => {
+    const { filesystem, written } = counting();
+    await filesystem.writeFile(generatedIgnorePath, stale);
+    written.length = 0;
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+
+    await port.init({ author });
+
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(generatedIgnoreContent('# mine\n*.log\n'));
+    expect(written).toStrictEqual([generatedIgnorePath, generatedGitattributesPath]);
+  });
+
+  it('should write nothing when the project is already current', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+    await port.init({ author });
+    written.length = 0;
+
+    await port.init({ author });
+
+    expect(written).toStrictEqual([]);
+  });
+});
 
 describe('isomorphic-git remote refusals (N1)', () => {
   const push = async (port: ReturnType<typeof createIsomorphicGitRevisionPort>, remote: string): Promise<unknown> =>

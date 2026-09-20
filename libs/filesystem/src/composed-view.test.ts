@@ -362,6 +362,41 @@ describe('composeView agent mask', () => {
     expect(await view.readFile('.tau/chats/chat-1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
   });
 
+  /* G0-1, G0-5: this provider is case-sensitive, so `.Git` is a directory of its
+   * own here — and on the disks a `NodeFsProvider` actually runs on it is the
+   * project's own store. The view refuses it for both consumers at every depth,
+   * so the answer never depends on the filesystem underneath. */
+  it.each(['user', 'agent'] as const)(
+    'should refuse a case-folded control plane for the %s consumer',
+    async (consumer) => {
+      await provider.mkdir('.Git', { recursive: true });
+      await provider.writeFile('.Git/config', '[remote "origin"]\n');
+      await provider.mkdir('vendor/.GIT', { recursive: true });
+      await provider.writeFile('vendor/.GIT/config', '[remote "origin"]\n');
+      const view = composeView({ filesystem: provider }, { consumer, policy: tauPathPolicy });
+
+      expect(await view.readdir('')).not.toContain('.Git');
+      await expect(view.readFile('.Git/config', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.readFile('vendor/.GIT/config', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.writeFile('.Git/config', 'forged')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(view.writeFile('vendor/.GIT/hooks/pre-commit', 'forged')).rejects.toMatchObject({ code: 'EPERM' });
+    },
+  );
+
+  /* G0-3: the cache row matched `node_modules` first, so a dependency's own
+   * store was the agent's to read and write. */
+  it('should refuse a repository vendored inside the cache', async () => {
+    await provider.mkdir('node_modules/pkg/.git', { recursive: true });
+    await provider.writeFile('node_modules/pkg/.git/config', '[remote "origin"]\n');
+    const view = agentView();
+
+    expect(await view.readdir('node_modules/pkg')).not.toContain('.git');
+    await expect(view.readFile('node_modules/pkg/.git/config', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.writeFile('node_modules/pkg/.git/hooks/pre-commit', 'forged')).rejects.toMatchObject({
+      code: 'EPERM',
+    });
+  });
+
   it('should show the user consumer the records the agent may not write, and no control plane (P30)', async () => {
     const view = userView();
 

@@ -49,6 +49,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { agentHostConfig, createRunBody, dialAgentHost, hostAdmission } from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
+import { useFeature } from '#flags/use-feature.js';
 import { createAgentHostClient, createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -79,6 +80,7 @@ export function ChatTurnHost(): ReactNode {
   const syncProjectRoots = fileManager?.workspace.syncProjectRoots;
   const workspaceAuthority = useOptionalChatWorkspaceAuthority();
   const computeMode = useComputeReuseMode();
+  const nativeGeoSpec = useFeature('nativeGeoSpec');
   const { resolveModel } = useModels();
   const { admitWorkspace, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   const resolveModelRef = useRef(resolveModel);
@@ -230,12 +232,13 @@ export function ChatTurnHost(): ReactNode {
             systemPromptBlocks: config.systemPromptBlocks,
             model: config.model,
             runtimeConfig: createUiRuntimeConfig(ENV),
+            geoSpecEngine: nativeGeoSpec ? 'native' : 'legacy',
             testingEnabled: config.testingEnabled,
           });
         },
       };
     },
-    [activeChatId, computeMode, fileManagerRef, projectId, store, syncProjectRoots, workspaceAuthority],
+    [activeChatId, computeMode, fileManagerRef, nativeGeoSpec, projectId, store, syncProjectRoots, workspaceAuthority],
   );
 
   const composeRef = useRef(composeRegistration);

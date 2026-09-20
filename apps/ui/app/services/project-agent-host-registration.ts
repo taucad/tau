@@ -1,5 +1,6 @@
 import { desktopBridge, isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
+import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
 
 export type ProjectAgentHostRegistration = Readonly<{ release: () => Promise<void> }>;
@@ -30,7 +31,11 @@ export const registerProjectAgentHost = async (
   const workspaceRoot = await desktopWorkspaceRoot(projectId);
   await bridge.agentHost.retain(workspaceRoot, projectId, attachmentId);
   try {
-    const client = await openAgentHostChannel('desktop', { workspaceRoot, projectId });
+    const client = await openAgentHostChannel('desktop', {
+      workspaceRoot,
+      projectId,
+      geoSpecEngine: isFeatureEnabled('nativeGeoSpec') ? 'native' : 'legacy',
+    });
     try {
       const response = await client.execute({
         type: 'tail',

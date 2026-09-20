@@ -832,6 +832,16 @@ const bootstrapElectronApp = async (): Promise<void> => {
         refuse('services.invalid-compute-mode');
         return;
       }
+      if (
+        concern === 'agentHost' &&
+        resolved['geoSpecEngine'] !== undefined &&
+        resolved['geoSpecEngine'] !== 'legacy' &&
+        resolved['geoSpecEngine'] !== 'native'
+      ) {
+        log.log('error', 'services.invalid-geospec-engine');
+        refuse('services.invalid-geospec-engine');
+        return;
+      }
       const port = services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {

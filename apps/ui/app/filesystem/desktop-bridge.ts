@@ -47,12 +47,12 @@ type DesktopShell = {
     }): Promise<DesktopQuickLookResult>;
     close(): void;
   };
-  /** Ask main to broker a port for one concern; answered by a relayed message. */
-  requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
   readonly agentHost: {
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
   };
+  /** Ask main to broker a port for one concern; answered by a relayed message. */
+  requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
 };
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
@@ -92,6 +92,13 @@ export const reportDesktopQuiesced = (forced: boolean): void => {
  * The desktop seam, as `apps/ui` consumes it.
  * @public
  */
+export type DesktopAgentHostConnectInput = {
+  readonly workspaceRoot: string;
+  readonly projectId: string;
+  readonly computeMode: 'off' | 'memory' | 'durable';
+  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
+};
+
 export type DesktopBridge = {
   readonly runtimeKernelIds: readonly string[];
   readonly nodeFs: {
@@ -120,7 +127,7 @@ export type DesktopBridge = {
      * over a WebSocket. Main refuses a root the user never granted, and the
      * promise then never settles rather than resolving onto a port to nowhere.
      */
-    connect(workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
+    connect(input: DesktopAgentHostConnectInput): Promise<MessagePort>;
     /** Keep launcher 2 alive for one project session in this renderer. */
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     /** Release that hold and await launcher shutdown when it was the last one. */
@@ -216,8 +223,13 @@ export const desktopBridge = (): DesktopBridge | undefined => {
       connect: async () => connectServices('nodeFs'),
     },
     agentHost: {
-      connect: async (workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable') =>
-        connectServices('agentHost', { workspaceRoot, projectId, computeMode }),
+      connect: async ({ workspaceRoot, projectId, computeMode, geoSpecEngine }) =>
+        connectServices('agentHost', {
+          workspaceRoot,
+          projectId,
+          computeMode,
+          ...(geoSpecEngine === undefined ? {} : { geoSpecEngine }),
+        }),
       retain: async (workspaceRoot, projectId, attachmentId) =>
         shell.agentHost.retain(workspaceRoot, projectId, attachmentId),
       release: async (workspaceRoot, projectId, attachmentId) =>

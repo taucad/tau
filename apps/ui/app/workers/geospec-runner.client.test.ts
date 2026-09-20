@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { rpcExecutionTimeout } from '@taucad/chat/constants';
+import { createChatToolRegistry } from '@taucad/agent-tools/registry';
+import { mock } from 'vitest-mock-extended';
+import type { RpcFileSystem } from '@taucad/chat/rpc';
 import type { openFileSystemBridge as OpenFileSystemBridgeFunction } from '@taucad/fs-bridge';
 import { createGeoSpecWorkerRpcClient, geoSpecClientWorstCaseTimeout } from '#workers/geospec-runner.client.js';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
@@ -136,59 +139,77 @@ describe('createGeoSpecWorkerRpcClient', () => {
     expect(geoSpecClientWorstCaseTimeout).toBeLessThan(rpcExecutionTimeout);
   });
 
-  it('should reuse one worker across repeated successful test runs', async () => {
-    const fileManagerWorker = new FakeFileManagerWorker();
-    const geoSpecWorker = new FakeGeoSpecWorker();
-    const createWorker = vi.fn(() => geoSpecWorker as unknown as Worker);
-    const client = createGeoSpecWorkerRpcClient({
-      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
-      runtimeConfig,
-      createWorker,
-    });
+  it.each([undefined, 'legacy', 'native'] as const)(
+    'should reuse one %s worker across repeated successful test runs',
+    async (geoSpecEngine) => {
+      const fileManagerWorker = new FakeFileManagerWorker();
+      const geoSpecWorker = new FakeGeoSpecWorker();
+      const createWorker = vi.fn(() => geoSpecWorker as unknown as Worker);
+      const client = createGeoSpecWorkerRpcClient({
+        openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
+        runtimeConfig,
+        geoSpecEngine,
+        createWorker,
+      });
 
-    const args = {
-      files: ['main.geospec.ts'],
-      testNamePattern: 'should pass',
-      testTimeout: 5000,
-    };
-    const first = await client.runTests(args);
-    const second = await client.runTests(args);
+      const registry = createChatToolRegistry({
+        fileSystemFor: () => mock<RpcFileSystem>(),
+        geospec: client,
+        geospecAuthoringMode: geoSpecEngine,
+        testingEnabled: true,
+      });
+      const description = registry.list().find((tool) => tool.name === 'test_model')?.description;
+      const native = geoSpecEngine === 'native';
+      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
+      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
+      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
+      expect(createWorker).not.toHaveBeenCalled();
 
-    expect(first).toEqual(expect.objectContaining({ success: true, passed: 1, total: 1 }));
-    expect(second).toEqual(expect.objectContaining({ success: true, passed: 1, total: 1 }));
-    expect(createWorker).toHaveBeenCalledTimes(1);
-    expect(fileManagerWorker.postMessage).toHaveBeenCalledOnce();
-    const bridgeCall = fileManagerPostMessageCall(fileManagerWorker, 0);
-    expect(bridgeCall[0].type).toBe(filesystemBridgeConnectMessageType);
-    expect(bridgeCall[0].port).toBeDefined();
-    expect(bridgeCall[1]).toEqual([bridgeCall[0].port]);
+      const args = {
+        files: ['main.geospec.ts'],
+        testNamePattern: 'should pass',
+        testTimeout: 5000,
+      };
+      const first = await client.runTests(args);
+      const second = await client.runTests(args);
 
-    const [initializeMessage, initializeTransferables] = geoSpecPostMessageCall(geoSpecWorker, 0);
-    expect(initializeMessage.type).toBe('initialize');
-    if (initializeMessage.type !== 'initialize') {
-      throw new Error('Expected initialize message.');
-    }
-    expect(initializeMessage.runtimeConfig).toEqual(runtimeConfig);
-    expect(initializeMessage.fileSystemPort).toBeDefined();
-    expect(initializeTransferables).toEqual([initializeMessage.fileSystemPort]);
+      expect(first).toEqual(expect.objectContaining({ success: true, passed: 1, total: 1 }));
+      expect(second).toEqual(expect.objectContaining({ success: true, passed: 1, total: 1 }));
+      expect(createWorker).toHaveBeenCalledTimes(1);
+      expect(fileManagerWorker.postMessage).toHaveBeenCalledOnce();
+      const bridgeCall = fileManagerPostMessageCall(fileManagerWorker, 0);
+      expect(bridgeCall[0].type).toBe(filesystemBridgeConnectMessageType);
+      expect(bridgeCall[0].port).toBeDefined();
+      expect(bridgeCall[1]).toEqual([bridgeCall[0].port]);
 
-    const [firstRunMessage, firstRunTransferables] = geoSpecPostMessageCall(geoSpecWorker, 1);
-    const [secondRunMessage, secondRunTransferables] = geoSpecPostMessageCall(geoSpecWorker, 2);
-    expect(firstRunMessage.type).toBe('run');
-    expect(secondRunMessage.type).toBe('run');
-    if (firstRunMessage.type !== 'run' || secondRunMessage.type !== 'run') {
-      throw new Error('Expected run messages.');
-    }
-    expect(firstRunMessage.args).toEqual(args);
-    expect(secondRunMessage.args).toEqual(args);
-    expect(firstRunMessage.sessionId).toBe(initializeMessage.sessionId);
-    expect(secondRunMessage.sessionId).toBe(initializeMessage.sessionId);
-    expect(firstRunTransferables).toBeUndefined();
-    expect(secondRunTransferables).toBeUndefined();
-    expect(geoSpecWorker.terminate).not.toHaveBeenCalled();
+      const [initializeMessage, initializeTransferables] = geoSpecPostMessageCall(geoSpecWorker, 0);
+      expect(initializeMessage.type).toBe('initialize');
+      if (initializeMessage.type !== 'initialize') {
+        throw new Error('Expected initialize message.');
+      }
+      expect(initializeMessage.runtimeConfig).toEqual(runtimeConfig);
+      expect(initializeMessage.geoSpecEngine).toBe(geoSpecEngine ?? 'legacy');
+      expect(initializeMessage.fileSystemPort).toBeDefined();
+      expect(initializeTransferables).toEqual([initializeMessage.fileSystemPort]);
 
-    await client.close();
-  });
+      const [firstRunMessage, firstRunTransferables] = geoSpecPostMessageCall(geoSpecWorker, 1);
+      const [secondRunMessage, secondRunTransferables] = geoSpecPostMessageCall(geoSpecWorker, 2);
+      expect(firstRunMessage.type).toBe('run');
+      expect(secondRunMessage.type).toBe('run');
+      if (firstRunMessage.type !== 'run' || secondRunMessage.type !== 'run') {
+        throw new Error('Expected run messages.');
+      }
+      expect(firstRunMessage.args).toEqual(args);
+      expect(secondRunMessage.args).toEqual(args);
+      expect(firstRunMessage.sessionId).toBe(initializeMessage.sessionId);
+      expect(secondRunMessage.sessionId).toBe(initializeMessage.sessionId);
+      expect(firstRunTransferables).toBeUndefined();
+      expect(secondRunTransferables).toBeUndefined();
+      expect(geoSpecWorker.terminate).not.toHaveBeenCalled();
+
+      await client.close();
+    },
+  );
 
   it('should close the persistent worker explicitly without changing the run result shape', async () => {
     const fileManagerWorker = new FakeFileManagerWorker();

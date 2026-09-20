@@ -201,6 +201,7 @@ type CreateTransportStreamOptions = {
     | ((purpose: 'generation' | 'compaction', modelId: string, signal: AbortSignal) => Promise<string>)
     | undefined;
   readonly bindInvocation?: ((attemptId: string, metadata: ProviderMessageMetadata) => Promise<void>) | undefined;
+  readonly completedAttempts?: Set<string> | undefined;
   readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
 };
 
@@ -618,6 +619,7 @@ export const createTransportStreamFunction =
         if (terminalReason === 'pending') {
           throw new Error('Model transport cannot complete with a pending stop reason.');
         }
+        options.completedAttempts?.add(attemptId);
         const stopReason = terminalReason;
         partial = {
           ...partial,
@@ -1190,7 +1192,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       });
     }
   };
-  const completedCompactionAttempts = new Set<string>();
+  const completedAttempts = new Set<string>();
   const prepareInvocation = async (
     purpose: 'generation' | 'compaction',
     modelId: string,
@@ -1205,7 +1207,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         (event) => event.type === 'model.invocation-bound' && event.attemptId === prepared.attemptId,
       );
       const completed =
-        (prepared.purpose === 'compaction' && completedCompactionAttempts.has(prepared.attemptId)) ||
+        completedAttempts.has(prepared.attemptId) ||
         events.slice(preparedIndex + 1).some((event) => {
           if (prepared.purpose === 'compaction') {
             return event.type === 'history.compacted';
@@ -1261,6 +1263,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     createId,
     documents: () => documents,
     ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
+    completedAttempts,
     committedContext: () => committedContext,
     usePostCompactionContext: () => restoreRecentSkillContent,
     systemPromptBlocks: () => options.systemPromptBlocks,
@@ -1403,12 +1406,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           createId,
           documents: () => documents,
           ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
-          completedAttempts: completedCompactionAttempts,
+          completedAttempts,
         }),
     onSummary: () => {
-      completedCompactionAttempts.clear();
+      completedAttempts.clear();
       restoreRecentSkillContent = true;
     },
+    settleDiscardedToolCalls: settlePrestartedTools,
     onCompaction: options.onCompaction,
     now: () => now().getTime(),
   });

@@ -574,7 +574,7 @@ describe('compaction safety regressions', () => {
         });
       },
     },
-  ])('should use a placeholder eviction when the summarizer $failure', async ({ summarize }) => {
+  ])('should use a placeholder eviction when the summarizer $failure', async ({ failure, summarize }) => {
     const file = createMemoryEventLogFile();
     await seedMessages(
       file,
@@ -610,6 +610,12 @@ describe('compaction safety regressions', () => {
     expect(placeholder).toContain(`${compacted.evictedMessageIds.length} message`);
     expect(placeholder).toMatch(/turn/iu);
     expect(placeholder).toMatch(/project files/iu);
+    if (placeholder.includes('summary provider rejected')) {
+      throw new Error('The placeholder must not expose the provider failure in model-visible history.');
+    }
+    if (failure === 'rejects') {
+      expect(compacted.details?.summarizerError).toBe('summary provider rejected');
+    }
     expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
@@ -649,6 +655,7 @@ describe('compaction safety regressions', () => {
     const events = await log.read();
     const compacted = events.find((event) => event.type === 'history.compacted');
     expect(compacted).toMatchObject({ type: 'history.compacted' });
+    expect(compacted?.details?.summarizerError).toBe('Summarization failed: Compaction summary emitted a tool call.');
     expect(JSON.stringify(compacted)).toMatch(/project files/iu);
     expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
     await log.close();
@@ -684,6 +691,164 @@ describe('compaction safety regressions', () => {
     const events = await log.read();
     expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
     await log.close();
+    await session.close();
+  });
+
+  it('should propagate a run abort returned by the transport summarizer', async () => {
+    const file = createMemoryEventLogFile();
+    await seedMessages(
+      file,
+      Array.from(
+        { length: 8 },
+        (_, index): ProviderMessage => ({
+          id: `transport-abort-user-${index}`,
+          role: 'user',
+          content: `${index}-${'a'.repeat(4000)}`,
+        }),
+      ),
+    );
+    const controller = new AbortController();
+    const transport = new ScriptedTransport((_call, request) => {
+      if (request.systemPrompt.startsWith('You are a context summarization assistant')) {
+        controller.abort();
+        return [{ type: 'completed', stopReason: 'aborted' }];
+      }
+      return [{ type: 'completed', stopReason: 'stop' }];
+    });
+    const session = await createSession({ file, transport });
+
+    await expect(session.agent.prepareNextTurn?.(controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+
+    const log = await file.open();
+    const events = await log.read();
+    expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
+    await log.close();
+    await session.close();
+  });
+
+  it('should complete a funded overflow retry and settle its prestarted tool pair', async () => {
+    const file = createMemoryEventLogFile();
+    await seedMessages(
+      file,
+      Array.from(
+        { length: 4 },
+        (_, index): ProviderMessage => ({
+          id: `funded-overflow-user-${index}`,
+          role: 'user',
+          content: `${index}-${'f'.repeat(1000)}`,
+        }),
+      ),
+    );
+    const requests: ModelStreamRequest[] = [];
+    let generationCalls = 0;
+    const transport: ModelTransport = {
+      usesBillingAttempt: () => true,
+      lookupAttempt: async () => undefined,
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        requests.push(request);
+        await request.onInvocationBound?.({
+          operationId: `operation-${request.attemptId}`,
+          status: 'pending',
+        });
+        if (request.invocationPurpose === 'compaction') {
+          yield { type: 'text-delta', text: 'Earlier funded work.' };
+          yield { type: 'completed', stopReason: 'stop' };
+          return;
+        }
+        generationCalls++;
+        if (generationCalls === 1) {
+          yield {
+            type: 'tool-input',
+            toolCallId: 'overflow-tool-call',
+            toolName: 'inspect',
+            input: { targetFile: 'overflow.ts' },
+          };
+          yield { type: 'usage', usage: usage(contextWindow) };
+          yield { type: 'completed', stopReason: 'length' };
+          return;
+        }
+        yield { type: 'text-delta', text: 'Recovered after compaction.' };
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    const session = await createSession({
+      file,
+      transport,
+      tools: toolRegistry('inspect', () => ({ inspected: true })),
+    });
+
+    await session.prompt({ id: 'funded-overflow-next', role: 'user', content: 'continue' });
+
+    const snapshot = await session.snapshot();
+    expect(snapshot.failure).toBeUndefined();
+    expect(requests.map((request) => request.invocationPurpose)).toEqual(['generation', 'compaction', 'generation']);
+    const toolInputs = snapshot.messages.filter(
+      (message) => message.role === 'tool-input' && message.toolCallId === 'overflow-tool-call',
+    );
+    const toolOutputs = snapshot.messages.filter(
+      (message) => message.role === 'tool-output' && message.toolCallId === 'overflow-tool-call',
+    );
+    expect(toolInputs).toHaveLength(1);
+    expect(toolOutputs).toHaveLength(1);
+    const log = await file.open();
+    const events = await log.read();
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    expect(events.some((event) => event.type === 'history.compacted')).toBe(true);
+    await log.close();
+    await session.close();
+  });
+
+  it('should not duplicate live messages when the between-turn projection rejects once', async () => {
+    const file = createMemoryEventLogFile();
+    const stored = await file.open();
+    let readsBeforeFailure: number | undefined;
+    const eventLog: EventLogAppender = {
+      ...stored,
+      read: async () => {
+        if (readsBeforeFailure === 0) {
+          readsBeforeFailure = undefined;
+          throw new Error('projection read rejected once');
+        }
+        if (readsBeforeFailure !== undefined) {
+          readsBeforeFailure--;
+        }
+        return stored.read();
+      },
+    };
+    const transport = new ScriptedTransport((call) =>
+      call === 1
+        ? [
+            {
+              type: 'tool-input',
+              toolCallId: 'projection-call',
+              toolName: 'inspect',
+              input: {},
+            },
+            { type: 'completed', stopReason: 'toolUse' },
+          ]
+        : [{ type: 'completed', stopReason: 'stop' }],
+    );
+    const baseTools = toolRegistry('inspect');
+    const tools: ToolRegistry = {
+      list: baseTools.list,
+      invoke: vi.fn(async (invocation: Parameters<ToolRegistry['invoke']>[0]) => {
+        const result = await baseTools.invoke(invocation);
+        readsBeforeFailure = 1;
+        return result;
+      }),
+    };
+    const session = await createSession({ file, transport, tools, eventLog });
+
+    await session.prompt({ id: 'projection-user', role: 'user', content: 'inspect once' });
+
+    const liveFailureMessages = session.agent.state.messages.filter(
+      (message) => message.role === 'assistant' && message.errorMessage === 'projection read rejected once',
+    );
+    expect(liveFailureMessages).toHaveLength(1);
+    expect(await session.snapshot()).toMatchObject({
+      state: 'failed',
+      failure: { code: 'SESSION_LOG_INTEGRITY', message: 'projection read rejected once' },
+    });
     await session.close();
   });
 });

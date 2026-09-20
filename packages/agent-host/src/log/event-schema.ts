@@ -48,6 +48,7 @@ const compactionTraceSchema = z.strictObject({
   evicted: z.number().int().nonnegative(),
   summarizerAttempts: z.number().int().nonnegative(),
   summarizerUsage: usageSchema.nullable(),
+  summarizerError: z.string().optional(),
   summary: z.enum(['generated', 'placeholder']).optional(),
   discardedOverflowError: z.string().optional(),
 });

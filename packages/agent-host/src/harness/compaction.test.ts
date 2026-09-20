@@ -227,17 +227,19 @@ describe('Compaction', () => {
     expect(append).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'history.compacted',
-        evictedMessageIds: ['message-1', 'message-2'],
+        evictedMessageIds: ['message-1', 'message-2', 'message-3'],
       }),
     );
     expect(agent.state.messages).toEqual(prepared?.context?.messages);
   });
 
-  it('should preserve only the newest safety block verbatim across two compactions', async () => {
+  it('should preserve every safety block but only the newest reminder across two compactions', async () => {
     const file = createMemoryEventLogFile();
     const log = await file.open();
     const oldSafety = '<safety>old safety rule</safety>';
     const newestSafety = '<safety>newest safety rule</safety>';
+    const oldReminder = '<system-reminder>old reminder</system-reminder>';
+    const newestReminder = '<system-reminder>newest reminder</system-reminder>';
     const seeded: AgentLogEvent[] = Array.from({ length: 10 }, (_, sequence) => ({
       version: 1,
       leaderEpoch: 'seed-epoch',
@@ -248,7 +250,7 @@ describe('Compaction', () => {
       message: {
         id: `safety-${sequence}`,
         role: 'user',
-        content: `${sequence === 0 ? oldSafety : sequence === 4 ? newestSafety : ''}${'x'.repeat(4000)}`,
+        content: `${sequence === 0 ? oldSafety : sequence === 4 ? newestSafety : ''}${sequence === 1 ? oldReminder : sequence === 5 ? newestReminder : ''}${'x'.repeat(4000)}`,
       },
     }));
     for (const event of seeded) {
@@ -299,7 +301,10 @@ describe('Compaction', () => {
 
     const history = JSON.stringify(await record.history());
     expect(history).toContain(newestSafety);
-    expect(history).not.toContain(oldSafety);
+    expect(history).toContain(oldSafety);
+    expect(history).toContain(newestReminder);
+    expect(history).not.toContain(oldReminder);
+    expect(history.match(new RegExp(oldSafety, 'gu'))).toHaveLength(1);
     expect(history.match(new RegExp(newestSafety, 'gu'))).toHaveLength(1);
     const events = await record.events();
     expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(2);
@@ -327,7 +332,69 @@ describe('Compaction', () => {
 
     await compaction.prepareTurn();
 
-    expect(summarize.mock.calls[0]?.[0].messages).toHaveLength(4);
+    expect(summarize.mock.calls[0]?.[0].messages).toHaveLength(5);
+  });
+
+  it('should leave enough tier-two headroom for one typical assistant turn', async () => {
+    const file = createMemoryEventLogFile();
+    const log = await file.open();
+    for (let sequence = 0; sequence < 8; sequence++) {
+      // oxlint-disable-next-line no-await-in-loop -- The fixture seeds one ordered log.
+      await log.append({
+        version: 1,
+        leaderEpoch: 'headroom-seed',
+        sequence,
+        recordedAt: '2026-09-20T00:00:00.000Z',
+        runId: 'headroom-seed-run',
+        type: 'message.appended',
+        message: {
+          id: `headroom-${sequence}`,
+          role: 'user',
+          content: `${sequence}-${'h'.repeat(4000)}`,
+        },
+      });
+    }
+    const record = await createSessionRecord({
+      log,
+      runId: 'headroom-run',
+      leaderEpoch: 'headroom-epoch',
+      createId: (() => {
+        let id = 0;
+        return () => `headroom-generated-${id++}`;
+      })(),
+      now: () => '2026-09-20T00:00:01.000Z',
+    });
+    const projectHistory = async () => {
+      const history = await record.history();
+      return history
+        .map((message) => providerMessageToPi(message, stubModel, record.messages))
+        .filter((message): message is AgentMessage => message !== undefined);
+    };
+    const agent = new Agent({
+      streamFn: () => createAssistantMessageEventStream(),
+      initialState: { model: stubModel, messages: await projectHistory() },
+    });
+    const compaction = installCompaction({
+      agent,
+      record,
+      projectHistory,
+      contextWindow: 8192,
+      summarize: async () => 'Earlier work.',
+    });
+
+    await compaction.prepareTurn();
+    await record.append({
+      type: 'message.appended',
+      message: piMessageToProvider(
+        { ...answeredTurn(0, 100), content: [{ type: 'text', text: 'Typical assistant turn. '.repeat(100) }] },
+        record.messages,
+      ),
+    });
+    await compaction.prepareTurn();
+
+    const events = await record.events();
+    expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(1);
+    await log.close();
   });
 
   it('uses pi summary prompts, update context, serialization clamp, and Tau file-operation mappings', async () => {
@@ -450,7 +517,7 @@ describe('Compaction', () => {
     const prepared = await compaction.prepareTurn();
 
     expect(JSON.stringify(prepared)).toContain(
-      'Compaction could not summarize 2 messages spanning 2 turns. The project files are the source of truth for the current work.',
+      'Compaction could not summarize 3 messages spanning 3 turns. The project files are the source of truth for the current work.',
     );
     const compacted = appended.find((event) => event.type === 'history.compacted');
     expect(compacted?.type === 'history.compacted' && compacted.details?.summary).toBe('placeholder');
@@ -499,6 +566,38 @@ describe('Compaction', () => {
     expect(diagnostics).toContain('"tokensAfter":');
     expect(diagnostics).toContain('"evicted":');
     expect(diagnostics).toContain('"summarizerUsage":null');
+  });
+
+  it('should open the circuit breaker after three completed summaries cannot restore headroom', async () => {
+    const messages = evictableHistory(8);
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages },
+    });
+    const compaction = installCompaction({
+      agent,
+      record: recordFor(messages),
+      projectHistory: async () => messages,
+      contextWindow: 8192,
+      summarize: async () => 'summary-too-large-'.repeat(3000),
+    });
+    const failures: AssistantMessage[] = [];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // oxlint-disable-next-line no-await-in-loop -- Each headroom verdict is one circuit-breaker strike.
+      await compaction.prepareTurn();
+      // oxlint-disable-next-line no-await-in-loop -- The stream exposes that attempt's coded failure.
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, { messages });
+      // oxlint-disable-next-line no-await-in-loop -- The terminal result must settle before the next strike.
+      failures.push(await stream.result());
+    }
+
+    expect(failures.map((failure) => failure.errorMessage)).toEqual([
+      'Compaction summary could not restore provider headroom.',
+      'Compaction summary could not restore provider headroom.',
+      'Repeated compaction could not restore provider headroom; start a new thread.',
+    ]);
+    expect(JSON.stringify(failures[2]?.diagnostics)).toContain('CIRCUIT_BREAKER_OPEN');
   });
 
   it('should compact the durable projection when live state has no registered identities', async () => {
@@ -630,13 +729,13 @@ describe('Compaction', () => {
       'assistant-2',
       'input-2',
       'output-2',
+      'assistant-3',
+      'input-3',
+      'output-3',
     ]);
     expect(compacted.evictedMessageIds).not.toContain('input-5');
     expect(reduceEventLog(compactedEvents).map((message) => message.id)).toEqual([
       'generated-0',
-      'assistant-3',
-      'input-3',
-      'output-3',
       'assistant-4',
       'input-4',
       'output-4',
@@ -671,9 +770,6 @@ describe('Compaction', () => {
 
     expect(requests[0]?.messages.map((message) => message.id)).toEqual([
       'generated-0',
-      'assistant-3',
-      'input-3',
-      'output-3',
       'assistant-4',
       'input-4',
       'output-4',
@@ -685,7 +781,6 @@ describe('Compaction', () => {
       'turn-after-tier-2',
     ]);
     expect(requests[0]?.messages.filter((message) => message.role === 'tool-input')).toEqual([
-      expect.objectContaining({ id: 'input-3', toolCallId: 'call-3', toolName: 'edit_file' }),
       expect.objectContaining({ id: 'input-4', toolCallId: 'call-4', toolName: 'edit_file' }),
       expect.objectContaining({ id: 'input-5', toolCallId: 'call-5', toolName: 'edit_file' }),
     ]);

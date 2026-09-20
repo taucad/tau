@@ -192,6 +192,7 @@ export type CompactionTrace = {
   readonly summarizerAttempts: number;
   // oxlint-disable-next-line typescript/no-restricted-types -- Null is the durable JSON value for an attempted summarizer with no reported usage.
   readonly summarizerUsage: Usage | null;
+  readonly summarizerError?: string | undefined;
   readonly summary?: 'generated' | 'placeholder' | undefined;
   readonly discardedOverflowError?: string | undefined;
 };

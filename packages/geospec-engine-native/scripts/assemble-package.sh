@@ -20,6 +20,13 @@ ASSEMBLY_ROOT="$(mktemp -d "$ASSEMBLY_CACHE/assembly-XXXXXX")"
 STAGED_ROOT="$ASSEMBLY_ROOT/root"
 mkdir -p "$STAGED_ROOT" "$ASSEMBLY_ROOT/tarballs"
 
+NODE_BINARY="$PACKAGE_ROOT/bindings/node/generated/geospec-engine-native.darwin-arm64.node"
+NODE_INSTALL_NAME="$(otool -D "$NODE_BINARY" | tail -n +2)"
+if [[ "$NODE_INSTALL_NAME" != '@rpath/geospec-engine-native.node' ]]; then
+  printf 'Unexpected Node binary install name: %s\n' "$NODE_INSTALL_NAME" >&2
+  exit 1
+fi
+
 pnpm --dir "$PACKAGE_ROOT" pack --out "$ASSEMBLY_ROOT/source-pack.tgz"
 tar -xzf "$ASSEMBLY_ROOT/source-pack.tgz" -C "$STAGED_ROOT" --strip-components=1
 pnpm --dir "$PACKAGE_ROOT" exec napi create-npm-dirs --cwd "$STAGED_ROOT" --npm-dir npm

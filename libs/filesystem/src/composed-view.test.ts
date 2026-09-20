@@ -5,6 +5,7 @@ import { MemoryProvider } from '#backend/memory-provider.js';
 import { composeView, maskedPathCode } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { ComposedViewOverlay } from '#composed-view.js';
+import type { WatchEvent, WatchRequest } from '#types.js';
 
 const encoder = new TextEncoder();
 const contents = {
@@ -682,6 +683,223 @@ describe('composeView mutating porcelain', () => {
     expect(view.copyTree).toBeUndefined();
     expect(view.move).toBeUndefined();
     expect(view.canMove).toBeUndefined();
+  });
+});
+
+/*
+ * G0b-1: the explicit `watch` is a second event stream on the same view. The
+ * bridge masks its own broadcast; this one reaches the wire for a rooted agent
+ * connection, and on the node composed views (host daemon, desktop) it is the
+ * only stream there is, with no bridge in front of it.
+ */
+describe('composeView watch mask', () => {
+  /** The memory provider with a watch surface, so the mask is the only variable. */
+  const watchable = () => {
+    const stop = vi.fn();
+    const subscriptions: Array<{ request: WatchRequest; handler: (event: WatchEvent) => void }> = [];
+    const base = Object.assign(new MemoryProvider(), {
+      watch: (request: WatchRequest, handler: (event: WatchEvent) => void) => {
+        subscriptions.push({ request, handler });
+        return stop;
+      },
+    });
+    return { base, subscriptions, stop };
+  };
+
+  it('should drop every hidden path from a recursive subscription', () => {
+    const { base, subscriptions } = watchable();
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+    const received: WatchEvent[] = [];
+
+    view.watch!({ paths: [''], recursive: true }, (event) => {
+      received.push(event);
+    });
+    for (const path of [
+      'src/main.ts',
+      '.git/HEAD',
+      'vendor/x/.git/HEAD',
+      '.tau/binding.json',
+      `${skillsRoot}/demo/SKILL.md`,
+    ]) {
+      subscriptions[0]!.handler({ type: 'change', path });
+    }
+    subscriptions[0]!.handler({ type: 'delete', path: '.git/index' });
+    subscriptions[0]!.handler({ type: 'reset' });
+
+    expect(received).toStrictEqual([
+      { type: 'change', path: 'src/main.ts' },
+      { type: 'change', path: `${skillsRoot}/demo/SKILL.md` },
+      { type: 'reset' },
+    ]);
+  });
+
+  it('should refuse a hidden request path before the base is subscribed', () => {
+    const { base, subscriptions } = watchable();
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    expect(() => view.watch!({ paths: ['.git'] }, () => undefined)).toThrow(
+      expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }),
+    );
+    expect(() => view.watch!({ paths: ['src', 'vendor/x/.git'] }, () => undefined)).toThrow(
+      expect.objectContaining({ code: 'EPERM' }),
+    );
+    expect(subscriptions).toStrictEqual([]);
+  });
+
+  /* Degraded exactly as the bridge's `scopeEventToRoot` degrades an event whose
+   * other end left the root: the visible end survives as a create or a delete. */
+  it('should deliver only the visible end of a rename', () => {
+    const { base, subscriptions, stop } = watchable();
+    const view = composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy });
+    const received: WatchEvent[] = [];
+
+    const unsubscribe = view.watch!({ paths: [''], recursive: true }, (event) => {
+      received.push(event);
+    });
+    const { handler } = subscriptions[0]!;
+    handler({ type: 'rename', oldPath: '.git/HEAD', newPath: 'src/leaked.ts' });
+    handler({ type: 'rename', oldPath: 'src/leaked.ts', newPath: '.git/HEAD' });
+    handler({ type: 'rename', oldPath: '.git/HEAD', newPath: '.git/ORIG_HEAD' });
+    handler({ type: 'rename', oldPath: 'src/a.ts', newPath: 'src/b.ts' });
+
+    expect(received).toStrictEqual([
+      { type: 'change', path: 'src/leaked.ts' },
+      { type: 'delete', path: 'src/leaked.ts' },
+      { type: 'rename', oldPath: 'src/a.ts', newPath: 'src/b.ts' },
+    ]);
+    /* The base's own disposer is what the caller gets back, so a `watch` that
+     * answers a promise of one — `NodeFsProviderClient` — still works. */
+    expect(unsubscribe).toBe(stop);
+  });
+});
+
+/*
+ * G0b-2, CI1: "no consumer can write beneath one" has to include removing one.
+ * A recursive removal and a directory move reach paths nobody named, so the mask
+ * cannot answer from the operand alone.
+ */
+describe('composeView subtree-wide mutations', () => {
+  /** A base that records the removals and moves the view passes down. */
+  const recursive = () =>
+    Object.assign(new MemoryProvider(), {
+      rmdir: vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => undefined),
+      move: vi.fn(
+        async (): Promise<FileStat> => ({ type: 'file', size: 0, mtimeMs: 0, contentKind: 'text', lineCount: 0 }),
+      ),
+    });
+
+  const seedVendoredStore = async (base: MemoryProvider): Promise<void> => {
+    await base.writeFile('vendor/dep/.git/config', '[remote "origin"]\n');
+    await base.writeFile('vendor/dep/index.js', 'module.exports = 1;\n');
+    await base.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
+  };
+
+  it.each(['user', 'agent'] as const)(
+    'should refuse the %s consumer a recursive removal of the project root, before anything is deleted',
+    async (consumer) => {
+      const base = recursive();
+      await seedVendoredStore(base);
+      const view = composeView({ filesystem: base }, { consumer, policy: tauPathPolicy });
+
+      await expect(view.rmdir('', { recursive: true })).rejects.toMatchObject({
+        code: 'EPERM',
+        reason: maskedPathCode,
+      });
+      expect(base.rmdir).not.toHaveBeenCalled();
+      expect(await base.readFile('.git/HEAD', 'utf8')).toBe('ref: refs/heads/main\n');
+    },
+  );
+
+  it('should refuse an agent a recursive removal of a directory holding a nested store', async () => {
+    const base = recursive();
+    await seedVendoredStore(base);
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await expect(view.rmdir('vendor', { recursive: true })).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: maskedPathCode,
+    });
+    expect(base.rmdir).not.toHaveBeenCalled();
+  });
+
+  /* A person deleting a vendored folder must not be left with an undeletable
+   * one: the removal carries the nested store with its directory. */
+  it('should let the user consumer remove a directory holding a nested store', async () => {
+    const base = recursive();
+    await seedVendoredStore(base);
+    const view = composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy });
+
+    await view.rmdir('vendor', { recursive: true });
+
+    expect(base.rmdir).toHaveBeenCalledWith('vendor', { recursive: true });
+  });
+
+  it('should pass an ordinary recursive removal straight down', async () => {
+    const base = recursive();
+    await base.writeFile('src/lib/helper.ts', 'export const helper = 1;\n');
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await view.rmdir('src', { recursive: true });
+    /* A non-recursive removal empties one directory, so it has no subtree to
+     * walk and pays nothing. */
+    await view.rmdir('src/lib');
+
+    expect(base.rmdir.mock.calls).toStrictEqual([
+      ['src', { recursive: true }],
+      ['src/lib', undefined],
+    ]);
+  });
+
+  /* Records are already read-only to an agent, and that answer is unchanged: the
+   * subtree walk is not what refuses this one. */
+  it('should keep the records refusal an agent already had', async () => {
+    const base = recursive();
+    await base.writeFile('exports/part.stl', 'solid part\n');
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await expect(view.rmdir('exports', { recursive: true })).rejects.toMatchObject({ code: 'EROFS' });
+    await composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy }).rmdir('exports', {
+      recursive: true,
+    });
+    expect(base.rmdir).toHaveBeenCalledOnce();
+  });
+
+  it('should refuse an agent a move of a directory holding a nested store', async () => {
+    const base = recursive();
+    await seedVendoredStore(base);
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await expect(view.move!('vendor', 'vendored')).rejects.toMatchObject({ code: 'EPERM', reason: maskedPathCode });
+    expect(base.move).not.toHaveBeenCalled();
+
+    await composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy }).move!('vendor', 'vendored');
+    expect(base.move).toHaveBeenCalledOnce();
+  });
+
+  it('should refuse an agent a rename of a directory holding a nested store', async () => {
+    const base = recursive();
+    await seedVendoredStore(base);
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await expect(view.rename('vendor', 'vendored')).rejects.toMatchObject({ code: 'EPERM', reason: maskedPathCode });
+    expect(await base.readFile('vendor/dep/index.js', 'utf8')).toBe('module.exports = 1;\n');
+
+    await composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy }).rename('vendor', 'vendored');
+    expect(await base.readFile('vendored/dep/index.js', 'utf8')).toBe('module.exports = 1;\n');
+  });
+
+  it('should refuse an agent a bulk move whose source holds a nested store', async () => {
+    const base = Object.assign(recursive(), { bulkMove: vi.fn(async () => ({ moved: [], failed: [] })) });
+    await seedVendoredStore(base);
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await expect(
+      view.bulkMove!([
+        { source: 'vendor', target: 'vendored' },
+        { source: 'src/a.ts', target: 'src/b.ts' },
+      ]),
+    ).rejects.toMatchObject({ code: 'EPERM', reason: maskedPathCode });
+    expect(base.bulkMove).not.toHaveBeenCalled();
   });
 });
 

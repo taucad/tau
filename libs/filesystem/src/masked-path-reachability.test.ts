@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -9,8 +9,9 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
-import { composeView } from '#composed-view.js';
+import { composeView, maskedPathCode } from '#composed-view.js';
 import type { ComposedView } from '#composed-view.js';
+import type { WatchEvent } from '#types.js';
 import { contents } from '#content-ops/contents.js';
 import { withReadContentOps } from '#content-ops/read-ops.js';
 import { classify, tauPathPolicy } from '#path-registry.js';
@@ -153,6 +154,68 @@ describe('masked path reachability through the authority-global surface', () => 
       expect(Object.keys(await physically(projectRoute, `backup-${consumer}`))).not.toContain(nested);
     },
   );
+
+  /* G0b-2: hiding a path is not the same as refusing to delete beneath it. The
+   * bytes are read back through the unmasked surface, so a refusal that deleted
+   * first cannot pass. */
+  it('should refuse an agent a recursive removal that would reach a nested control plane', async () => {
+    const view = projectView('agent');
+
+    await expect(view.rmdir('src', { recursive: true })).rejects.toMatchObject({ code: 'EPERM' });
+
+    expect(Object.keys(await physically(projectRoute))).toContain('src/.git/config');
+  });
+
+  /* And the person's own removal takes it: a vendored folder must not become
+   * undeletable because a store sits inside it. */
+  it('should carry a nested control plane away with the directory the user removes', async () => {
+    const view = projectView('user');
+
+    await view.rmdir('src', { recursive: true });
+
+    expect(Object.keys(await physically(projectRoute)).filter((path) => path.startsWith('src/'))).toEqual([]);
+  });
+
+  /* The project's own control plane and records sit at the view root, so the one
+   * removal that would take them is refused for every consumer. */
+  it.each(['user', 'agent'] as const)(
+    'should refuse the %s consumer a recursive removal of the project root',
+    async (consumer) => {
+      await expect(projectView(consumer).rmdir('', { recursive: true })).rejects.toMatchObject({
+        code: 'EPERM',
+        reason: maskedPathCode,
+      });
+
+      expect(hiddenAmong(Object.keys(await physically(projectRoute)))).toEqual(hiddenPaths.toSorted());
+    },
+  );
+
+  /* G0b-1: the explicit `watch` is the second event stream over these bytes, and
+   * on a node composed view it is the only one — no bridge sits in front of it to
+   * mask the broadcast. */
+  it('should keep every hidden path out of the view’s own watch stream', async () => {
+    vi.useFakeTimers();
+    const received: WatchEvent[] = [];
+    const view = projectView('agent');
+    const unsubscribe = view.watch!({ paths: [''], recursive: true }, (event) => {
+      received.push(event);
+    });
+
+    try {
+      await service.writeFile(`${projectRoute}/.git/HEAD`, 'ref: refs/heads/other');
+      await service.writeFile(`${projectRoute}/src/.git/config`, '[remote "forged"]');
+      await service.writeFile(`${projectRoute}/src/main.ts`, 'export const part = 2;');
+      await vi.advanceTimersByTimeAsync(75);
+    } finally {
+      unsubscribe();
+      vi.useRealTimers();
+    }
+
+    expect(received).toEqual([{ type: 'change', path: 'src/main.ts' }]);
+    expect(() => view.watch!({ paths: ['.git'] }, () => undefined)).toThrow(
+      expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }),
+    );
+  });
 
   /* Flipped by W4: the search a consumer reaches is `search` on the rooted
    * surface, over that root's own index, and the view's policy refuses a hidden

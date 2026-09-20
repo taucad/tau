@@ -885,7 +885,7 @@ export const agentHostRefusalCodes = [
   'CHAT_RUN_LIVE',
   /** A reservation, an active run or a durable lifecycle already holds this run id. Carries `runId`; never retry — attach, or answer with its settlement. */
   'RUN_ID_TAKEN',
-  /** Nothing on this chat can be continued; the card says so instead of appearing to do nothing. */
+  /** Nothing on this chat can be continued. Minted by the transport that asked for the resume, never thrown here: `resume` answers an uncontinuable chat with its history unchanged, and the caller that pressed Resume turns that into this refusal so the card says so instead of appearing to do nothing. */
   'RESUME_UNAVAILABLE',
   /** A non-terminal run whose executing host is gone, as {@link TauAgentHost.markAbandoned} records it. Offer Resume. */
   'RUN_ABANDONED',
@@ -1042,12 +1042,43 @@ const lastInterruptResolution = (events: readonly AgentLogEvent[], runId: string
   };
 };
 
-const pendingToolInputs = (messages: readonly ProviderMessage[]) => {
+/**
+ * Every call this history left without a result, however it was recorded.
+ *
+ * A dispatched call is durable twice — the `toolCall` block the model wrote and
+ * the `tool-input` row the dispatch adds — and a host that died between the two
+ * leaves only the block. A provider refuses an unanswered call, so a resume has
+ * to answer each pending id once, whichever row still carries it.
+ *
+ * @param messages - The reduced history the resume starts from.
+ * @returns One entry per unanswered call, in the order the history holds them.
+ */
+const pendingToolCalls = (messages: readonly ProviderMessage[]) => {
   const outputs = new Set(messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])));
-  return messages.filter(
-    (message): message is Extract<ProviderMessage, { readonly role: 'tool-input' }> =>
-      message.role === 'tool-input' && !outputs.has(message.toolCallId),
-  );
+  const pending = new Map<string, { readonly toolCallId: string; readonly toolName: string }>();
+  const callsOf = (message: ProviderMessage) => {
+    if (message.role === 'tool-input') {
+      return [{ toolCallId: message.toolCallId, toolName: message.toolName }];
+    }
+    const blocks: readonly JsonValue[] =
+      message.role === 'assistant' && Array.isArray(message.content) ? message.content : [];
+    return blocks.flatMap((block) =>
+      isJsonObject(block) &&
+      block['type'] === 'toolCall' &&
+      typeof block['id'] === 'string' &&
+      typeof block['name'] === 'string'
+        ? [{ toolCallId: block['id'], toolName: block['name'] }]
+        : [],
+    );
+  };
+  for (const message of messages) {
+    for (const call of callsOf(message)) {
+      if (!outputs.has(call.toolCallId)) {
+        pending.set(call.toolCallId, call);
+      }
+    }
+  }
+  return [...pending.values()];
 };
 
 /**
@@ -1112,6 +1143,18 @@ const failureMarkerClearance = (messages: readonly ProviderMessage[]): SessionEv
   if (!marker) {
     return undefined;
   }
+  /* Only a message that is provably the failure marker may be retracted or
+   * rewritten: an assistant turn without the diagnostic is somebody's real
+   * output, wherever it sits. A resumable failure is no longer only a gateway
+   * refusal — `RUN_ABANDONED` is one too, and its tail is the agent's committed
+   * work, so retracting it loses that work and asks the provider again from the
+   * user turn. */
+  const isMarker = marker.metadata?.diagnostics?.some(
+    (diagnostic) => isJsonObject(diagnostic) && diagnostic['type'] === transportFailureDiagnosticType,
+  );
+  if (!isMarker) {
+    return undefined;
+  }
   if (messages.at(-1) === marker) {
     return {
       type: 'history.rewound',
@@ -1119,13 +1162,7 @@ const failureMarkerClearance = (messages: readonly ProviderMessage[]): SessionEv
       retainedMessageIds: messages.slice(0, -1).map((message) => message.id),
     };
   }
-  /* Behind the tail, only a message that is provably the failure marker may be
-   * rewritten: an ordinary assistant turn that happens to be the last one is
-   * somebody's real output. */
-  const isMarker = marker.metadata?.diagnostics?.some(
-    (diagnostic) => isJsonObject(diagnostic) && diagnostic['type'] === transportFailureDiagnosticType,
-  );
-  const replacement = isMarker ? settledMarkerEnvelope(marker, messages) : undefined;
+  const replacement = settledMarkerEnvelope(marker, messages);
   return replacement === undefined
     ? undefined
     : { type: 'message.envelope-replaced', messageId: marker.id, replacement };
@@ -2295,13 +2332,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
 
         const history = reduceEventLog(events);
-        const missingOutputs = pendingToolInputs(history);
+        const missingOutputs = pendingToolCalls(history);
         const disconnectedOutputs = missingOutputs.map(
-          (message): ProviderMessage => ({
+          (call): ProviderMessage => ({
             id: createId(),
             role: 'tool-output',
-            toolCallId: message.toolCallId,
-            toolName: message.toolName,
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
             content: {
               errorCode: 'CLIENT_DISCONNECTED',
               message: 'The prior host stopped before this tool returned. Verify state before retrying.',

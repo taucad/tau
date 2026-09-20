@@ -2318,6 +2318,97 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await host.close();
   });
 
+  /** A run whose page died mid-turn, as `markAbandoned` leaves it. */
+  const abandonedAfter = (tail: ProviderMessage): readonly SeededLogEvent[] => [
+    { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+    { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+    { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+    { type: 'message.appended', runId: 'run-1', message: tail },
+    {
+      type: 'run.lifecycle',
+      runId: 'run-1',
+      state: 'failed',
+      detail: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
+    },
+  ];
+
+  it('resumes an abandoned run from the agent work its tail already holds', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(
+      file,
+      abandonedAfter({ id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'Half an answer.' }] }),
+    );
+    const requests: ModelStreamRequest[] = [];
+    const host = silentHost(file, 'abandoned-tail', {
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        requests.push(request);
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    });
+
+    /* `RUN_ABANDONED` is resumable, so the terminal branch runs the failure
+     * marker's clearance over a tail that is not a marker at all: the agent's
+     * own committed text. Rewinding it loses the work and asks — and pays for —
+     * the turn a second time. */
+    const resumed = await host.resume('chat-abandoned-tail');
+    const events = await readLog(file);
+
+    expect(events.filter((event) => event.type === 'history.rewound')).toHaveLength(0);
+    expect(resumed.at(-1)).toMatchObject({ id: 'assistant-1', content: [{ type: 'text', text: 'Half an answer.' }] });
+    expect(requests).toHaveLength(0);
+    await host.close();
+  });
+
+  it("answers an abandoned run's unanswered tool call instead of retracting it", async () => {
+    const file = createMemoryLogFile();
+    await seedLog(
+      file,
+      abandonedAfter({
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Reading main.ts.' },
+          { type: 'toolCall', id: 'call-read', name: 'read_file', arguments: { targetFile: 'main.ts' } },
+        ],
+      }),
+    );
+    const requests: ModelStreamRequest[] = [];
+    const invoke = vi.fn(async () => ({ content: 'must-not-run', isError: false }));
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            yield { type: 'text-delta', text: 'Recovered.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: 'abandoned-call',
+      }),
+    );
+
+    const resumed = await host.resume('chat-abandoned-call');
+    const events = await readLog(file);
+
+    expect(events.filter((event) => event.type === 'history.rewound')).toHaveLength(0);
+    expect(resumed.find((message) => message.id === 'assistant-1')).toMatchObject({
+      content: [{ type: 'text' }, { type: 'toolCall', id: 'call-read' }],
+    });
+    /* The dangling call gets the same synthetic result the tool-input path
+     * gets: a provider refuses an unanswered call, and the tool itself is never
+     * re-run. */
+    expect(resumed.find((message) => message.role === 'tool-output')).toMatchObject({
+      toolCallId: 'call-read',
+      isError: true,
+      content: { errorCode: 'CLIENT_DISCONNECTED' },
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    await host.close();
+  });
+
   it('reopens a settled run whose refusal is resumable, and refuses one that is not', async () => {
     const reopenFile = createMemoryLogFile();
     await seedLog(reopenFile, [

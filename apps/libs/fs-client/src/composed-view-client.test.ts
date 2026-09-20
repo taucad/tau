@@ -434,6 +434,21 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     });
   });
 
+  /* G0b-7: only a resolved row is remembered. The first root listing now runs
+   * inside `initializeServicesActor`, so one transient authority error there — or
+   * one listing that raced the mount — used to cost the session its
+   * `node_modules` row for good, with no recovery path. */
+  it('should list the dependency mount on a later listing when the first probe failed', async () => {
+    const { client, authority } = await harness();
+    vi.mocked(authority.stat).mockRejectedValueOnce(new Error('the authority is not ready'));
+
+    const first = await client.readDirectory(root);
+    const second = await client.readDirectory(root);
+
+    expect(first.map(({ name }) => name)).not.toContain('node_modules');
+    expect(second.filter(({ name }) => name === 'node_modules')).toHaveLength(1);
+  });
+
   /* The OPFS mount is fail-soft: a profile where it never came up must not grow
    * a row for a directory nothing serves. */
   it('should omit the dependency mount row when the mount is not there', async () => {

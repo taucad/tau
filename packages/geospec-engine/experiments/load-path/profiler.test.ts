@@ -69,13 +69,10 @@ describe('load-path canonical per-test profiler', () => {
         successfulInvocations: 1,
         failedInvocations: 0,
       });
-      expect(result.runs).toEqual([
-        expect.objectContaining({
-          exitCode: 0,
-          stdoutBytes: expect.any(Number),
-          stderrBytes: expect.any(Number),
-        }),
-      ]);
+      expect(result.runs).toHaveLength(1);
+      expect(result.runs[0]?.exitCode).toBe(0);
+      expect(result.runs[0]?.stdoutBytes).toBeTypeOf('number');
+      expect(result.runs[0]?.stderrBytes).toBeTypeOf('number');
       expect(result.summary.buckets.nodeCli?.count).toBe(1);
     } finally {
       await rm(projectPath, { recursive: true, force: true });

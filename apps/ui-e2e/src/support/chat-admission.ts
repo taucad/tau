@@ -8,6 +8,8 @@
  * Finding 10; T5 defect 4).
  */
 import { expect } from 'vitest';
+import { agentHostRefusalCodes } from '@taucad/agent-host';
+import type { AgentHostRefusalCode } from '@taucad/agent-host';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
@@ -88,34 +90,11 @@ export const expectLogInvariant = async (chatId: string, expected: number | Chat
     });
 };
 
-/*
- * W1: this is `agentHostRefusalCodes` (`packages/agent-host/src/host/tau-agent-host.ts`),
- * re-exported as the wire contract by `libs/chat/src/types/agent-host-refusal.types.ts`.
- * Swap these two declarations for
- *
- *   import { agentHostRefusalCodes } from '@taucad/chat';
- *   export { agentHostRefusalCodes as admissionRefusalCodes };
- *
- * once that module resolves — the point of a union is that a new code is
- * excluded here by construction, which a copy cannot do. It is still a copy
- * only because W1 landed after this file and does not typecheck yet
- * (`Cannot find module '@taucad/agent-host'`). The ten names are identical.
- */
-export const admissionRefusalCodes = [
-  'CHAT_RUN_LIVE',
-  'RUN_ID_TAKEN',
-  'RESUME_UNAVAILABLE',
-  'RUN_ABANDONED',
-  'HISTORY_PREFIX_INVALID',
-  'SETTLEMENT_CONFLICT',
-  'SETTLEMENT_WITHOUT_RUN',
-  'TURN_ALREADY_LEASED',
-  'LEADERSHIP_LOST',
-  'NO_RUN_ADMITTED',
-] as const;
+/* The host owns the union, so a new code is excluded here by construction. */
+export const admissionRefusalCodes = agentHostRefusalCodes;
 
 /** One way an admission is refused. */
-export type AdmissionRefusalCode = (typeof admissionRefusalCodes)[number];
+export type AdmissionRefusalCode = AgentHostRefusalCode;
 
 /*
  * W1/W5: refusals that still travel as prose only. Each ended a turn as *Work

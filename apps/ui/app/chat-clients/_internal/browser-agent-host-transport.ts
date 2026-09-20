@@ -175,14 +175,48 @@ export const recordHostFinalizedTurn = (event: TurnFinalizedEvent): void => {
   recordHostTurnSettlement(event);
 };
 
-/** Persist a browser revision root's settlement through the active chat-log writer. */
+/**
+ * Persist a browser revision root's settlement into the chat's durable log.
+ *
+ * Through the stream that is driving the run when there is one. When there is
+ * not, through a client opened for this one write: a settlement is not always
+ * produced while a stream is open. E3's finalise-on-return runs from chat-open
+ * reconciliation, *after* the reattach that discovered the completed,
+ * unsettled run has closed — so the revision was minted and the log recorded
+ * nothing, and every later open reconciled the same run again and minted
+ * another one. The chat's registration is the same host the stream would have
+ * used, so this writes to the same log.
+ *
+ * @param event - The settlement the revision root produced.
+ * @returns Whether it reached the log.
+ * @public
+ */
 export const persistBrowserTurnSettlement = async (event: HostTurnSettlement): Promise<boolean> => {
   const active = activeClients.get(event.chatId);
-  if (active?.client.recordSettlement === undefined) {
+  if (active?.client.recordSettlement !== undefined) {
+    await active.client.recordSettlement(event);
+    return true;
+  }
+  const registration = registrations.get(event.chatId);
+  if (registration === undefined) {
     return false;
   }
-  await active.client.recordSettlement(event);
-  return true;
+  /* A writer this document cannot open is "no writer", not a refusal: the
+   * caller reads a throw as "the log rejected this settlement" and records it
+   * as attested. */
+  const client = await registration.createClient().catch((error: unknown) => {
+    console.warn('[browserAgentHost] no settlement writer could be opened', event.chatId, error);
+    return undefined;
+  });
+  if (client?.recordSettlement === undefined) {
+    return false;
+  }
+  try {
+    await client.recordSettlement(event);
+    return true;
+  } finally {
+    await client.close().catch(() => undefined);
+  }
 };
 
 /**
@@ -729,6 +763,10 @@ const createHostStream = <Message extends UIMessage>(input: {
   /* Consumed the moment the stream is created, so a later reattach this caller
    * did not ask for never inherits it. @see requestBrowserAgentHostResume */
   const driveResume = requestedResumes.delete(input.chatId);
+  /* Decided here, once, because the replay below republishes the very record
+   * `refusedResumably` reads — and because the replay needs the answer before
+   * the resume branch that acts on it. */
+  const continuesRefusedRun = driveResume && refusedResumably(input.chatId);
   const priorSettlement = clientSettlements.get(input.chatId);
   const settlement = Promise.withResolvers<void>();
   clientSettlements.set(input.chatId, settlement.promise);
@@ -767,16 +805,22 @@ const createHostStream = <Message extends UIMessage>(input: {
      * instant `resume` answered — the page settled the reopened attempt as
      * failed and the reply the host went on to produce reached nobody (I1). */
     let terminalEvent = Promise.withResolvers<void>();
-    const turnSettlement = Promise.withResolvers<void>();
-    /* This stream admitted the run, so its turn *will* be settled by the chat's
-     * session actor — and the writer that settlement needs is this stream's
-     * client. Held past the readable stream on every exit, a stop and a refusal
-     * included, which is what makes "exactly one settlement per admitted run"
-     * hold rather than depend on the root answering first (V10, F6). */
-    let holdWriterForSettlement = input.admission !== undefined;
+    /* Re-armed for the same reason, and it is keyed on the *attempt*: the
+     * replay republishes the previous attempt's settlement under this same run
+     * id, so a continuation's gate was resolved before its own attempt began. */
+    let turnSettlement = Promise.withResolvers<void>();
+    /* This stream drives the run — it admitted it, or it is continuing it — so
+     * its turn *will* be settled by the chat's session actor, and the writer
+     * that settlement needs is this stream's client. Held past the readable
+     * stream on every exit, a stop and a refusal included, which is what makes
+     * "exactly one settlement per attempt" hold rather than depend on the root
+     * answering first (I1, V10, F6). */
+    let holdWriterForSettlement = input.admission !== undefined || continuesRefusedRun;
     /* Set once the completed path has spent its loud bound on the settlement,
      * so the quiet grace below is only ever the stop's and the refusal's. */
     let lateSettlementAwaited = false;
+    /** Cleared the moment the continuation is issued; see {@link enqueueEvent}. */
+    let replayingContinuedFailure = continuesRefusedRun;
     let isRunPublished = false;
     const publishRun = (): void => {
       if (runId === undefined) {
@@ -853,8 +897,20 @@ const createHostStream = <Message extends UIMessage>(input: {
       failure = lifecycleFailure(event) ?? failure;
       eventCount += 1;
       publishRun();
-      await enqueueChunks(projectAgentHostEvent(event, streamedBlocks));
-      if (terminal(state)) {
+      /* The failure this stream is about to continue is the *previous*
+       * attempt's, not this request's outcome. `run.lifecycle: failed`
+       * projects to an `error` chunk and the AI SDK rethrows the first one it
+       * reads, so replaying it ended the resume's request before `resume` had
+       * answered: the page settled the reopened attempt `turn.failed` and the
+       * cancelled readable cancelled the run the host was still executing
+       * (I1). The person is already looking at that failure — it is the card
+       * they pressed Resume on. Only the replay is silenced; the reopened
+       * attempt's own failure is this request's outcome and is reported. */
+      const continued = replayingContinuedFailure && event.type === 'run.lifecycle' && event.state === 'failed';
+      if (!continued) {
+        await enqueueChunks(projectAgentHostEvent(event, streamedBlocks));
+      }
+      if (terminal(state) && !continued) {
         terminalEvent.resolve();
       }
     };
@@ -1115,7 +1171,7 @@ const createHostStream = <Message extends UIMessage>(input: {
         } else {
           reconcileSnapshot(snapshot);
         }
-      } else if (driveResume && !refusedResumably(input.chatId) && terminal(state)) {
+      } else if (driveResume && !continuesRefusedRun && terminal(state)) {
         /* Resume was asked for and there is nothing to continue. The flag is
          * one-shot and was consumed at stream creation, so the silent branch
          * this replaces left the person having pressed Resume with the stream
@@ -1125,12 +1181,19 @@ const createHostStream = <Message extends UIMessage>(input: {
           'RESUME_UNAVAILABLE' satisfies AgentHostRefusalCode,
           'This turn has nothing left to continue. Send it again to start a new one.',
         );
-      } else if (driveResume && refusedResumably(input.chatId)) {
+      } else if (continuesRefusedRun) {
         // The turn the gateway refused, continued at the call it could not
         // fund. The host owns that continuation — it reattaches the session
         // from its own durable log — so the tool results already paid for are
         // replayed rather than run again, and its events arrive on the
         // subscription this stream is already writing.
+        /* The replay above just republished the previous attempt's settlement
+         * under this run id. This attempt has its own, and the writer it needs
+         * is this client. */
+        turnSettlement = Promise.withResolvers<void>();
+        // Everything the log already held is projected; what follows is this
+        // attempt's, failure included.
+        replayingContinuedFailure = false;
         const operation = client.resume(input.chatId);
         if (cancelled) {
           cancelRun();

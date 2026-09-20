@@ -8,6 +8,7 @@ Exit: 0 success; 1 assertion failure. Tool discovery and execution are mocked.
 import ast
 from contextlib import ExitStack
 from copy import deepcopy
+import hashlib
 import importlib.util
 import json
 import os
@@ -223,6 +224,134 @@ class PreparationContractTest(unittest.TestCase):
     def verify(self):
         return prepare.verify_prefix(self.prefix, self.contract())
 
+    def sdk_support_fixture(self):
+        sdk = self.root / 'sdk'
+        self.stack.enter_context(patch.object(prepare, 'SDK', sdk))
+        self.env['EM_CACHE'] = str(self.cache / 'em-cache')
+        contents = {
+            sdk / 'bin/clang': 'compiler', sdk / 'lib/library': 'support',
+            sdk / 'emscripten/tools/cache/required.py': 'genuine support named cache',
+            sdk / 'emscripten/cache/unused.js': 'unused derived output',
+            Path(self.env['EM_CACHE']) / 'sysroot/include/header.h': 'selected header',
+        }
+        for path, value in contents.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value)
+        roots = {f'sdk/{name}': sdk / name for name in ['bin', 'lib', 'emscripten']}
+        self.context['supportPayloads']['mixed'] = prepare.support_payload(roots)
+        receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
+        prepare.write_json(self.receipt_path, receipt)
+        self.evidence_path = self.root / 'retained-mixed-inputs.json'
+        rows = {path for root in roots.values() for path in prepare.files(root)}
+        rows.update([self.receipt_path, Path(self.env['EM_CONFIG'])])
+        prepare.write_json(self.evidence_path, {
+            'schema': 'geospec-mixed-build-inputs-v2', 'sdkPrefix': str(sdk),
+            'environment': dict(self.env),
+            'inputs': [{'path': str(path), 'sha256': prepare.digest(path)} for path in sorted(rows)],
+        })
+        self.context['supportPayloads']['mixed'] = prepare.support_payload(roots, prepare.unused_sdk_cache(self.env))
+        self.stack.enter_context(patch.dict(os.environ, GEOSPEC_OCCT_SUPPORT_INPUTS=str(self.evidence_path)))
+        return contents, receipt
+
+    def test_should_reconstruct_support_in_historical_path_component_order(self):
+        root = self.root / 'support'
+        recorded = {root / 'a.py': 'a' * 64, root / 'a/child.py': 'b' * 64}
+        # Path sorting puts the directory component "a" before "a.py";
+        # lexicographic full-string sorting reverses these historical rows.
+        rows = [{'path': 'sdk/a/child.py', 'sha256': 'b' * 64},
+                {'path': 'sdk/a.py', 'sha256': 'a' * 64}]
+        expected = hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(prepare.support_payload({'sdk': root}, recorded=recorded),
+                         {'roots': {'sdk': str(root)}, 'files': 2, 'sha256': expected})
+
+    def test_should_migrate_unused_default_cache_without_rewriting_historical_receipt(self):
+        contents, receipt = self.sdk_support_fixture()
+        original = self.receipt_path.read_bytes()
+        unused = prepare.SDK / 'emscripten/cache/unused.js'
+        unused.unlink()
+        result = self.verify()
+        migration = result['supportMigration']
+        self.assertFalse(migration['prefixRebuilt'])
+        self.assertEqual(migration['schema'], 'geospec-sdk-support-migration-v2')
+        self.assertEqual(migration['originalReceipt']['sha256'], prepare.digest(self.receipt_path))
+        self.assertEqual(migration['originalSupport'], receipt['supportPayload'])
+        self.assertEqual(migration['excludedFiles'], 1)
+        self.assertEqual(migration['effectiveSupport']['files'], 3)
+        self.assertEqual(self.receipt_path.read_bytes(), original)
+        # Recheck current support from actual inert bytes, including another directory named cache.
+        self.assertIn(prepare.SDK / 'emscripten/tools/cache/required.py', contents)
+        self.assertEqual(prepare.support_payload(migration['originalSupport']['roots'],
+                                                prepare.unused_sdk_cache(self.env)),
+                         migration['effectiveSupport'])
+
+    def test_should_carry_migration_and_selected_cache_through_actual_manifest_functions(self):
+        self.sdk_support_fixture()
+        roots = [prepare.SDK / name for name in ['bin', 'lib', 'emscripten']]
+        roots.append(Path(self.env['EM_CACHE']))
+        with ExitStack() as mocked:
+            replacements = {
+                'prepare_sources': None, 'validate_tools': None, 'prefix_context': self.context,
+                'tool_paths': self.paths, 'environment': self.env, 'input_roots': roots,
+                'source_files': {self.recipe_path, self.builder}, 'libraries': [self.library],
+            }
+            for name, value in replacements.items():
+                mocked.enter_context(patch.object(prepare, name, return_value=value))
+            mocked.enter_context(patch.object(prepare, 'run', side_effect=lambda command, *args, **kwargs:
+                                              '{"packages": []}' if 'metadata' in command else 'inert-head'))
+            prepare.prepare_inputs(self.paths, self.env)
+            manifest_path = self.cache / 'mixed-inputs.json'
+            manifest = json.loads(manifest_path.read_text())
+            selected = {row['path']: row['sha256'] for row in manifest['inputs']}
+            self.assertIn(str(Path(self.env['EM_CACHE']) / 'sysroot/include/header.h'), selected)
+            self.assertIn(str(prepare.SDK / 'emscripten/tools/cache/required.py'), selected)
+            self.assertNotIn(str(prepare.SDK / 'emscripten/cache/unused.js'), selected)
+            self.assertNotIn(str(self.evidence_path), selected)
+            self.assertEqual(manifest['prefixSupportMigration']['evidence']['sha256'],
+                             prepare.digest(self.evidence_path))
+            # Original external evidence is genuinely unavailable. Reconstruct the
+            # receipt aggregate from carried rows, not from a migration summary.
+            transported = self.root / 'transport-mixed-inputs.json'
+            transported.write_bytes(manifest_path.read_bytes())
+            self.evidence_path.unlink()
+            migration = json.loads(transported.read_text())['prefixSupportMigration']
+            carried = {Path(row['path']): row['sha256'] for row in migration['supportEvidence']['inputs']}
+            original = json.loads(self.receipt_path.read_text())
+            self.assertEqual(prepare.support_payload(original['supportPayload']['roots'], recorded=carried),
+                             original['supportPayload'])
+            with patch.dict(os.environ, {}, clear=True):
+                prepare.verify_manifest(transported)
+            self.assertEqual(prepare.digest(transported), prepare.digest(manifest_path))
+
+    def test_should_require_explicit_external_cache_for_support_projection(self):
+        self.sdk_support_fixture()
+        for value in ['', 'relative', str(prepare.SDK / 'emscripten/cache'),
+                      str(prepare.SDK / 'emscripten'), str(prepare.SDK / 'emscripten/cache/nested')]:
+            with self.subTest(cache=value), self.assertRaisesRegex(ValueError, 'EM_CACHE'):
+                prepare.unused_sdk_cache({**self.env, 'EM_CACHE': value})
+        alias = self.root / 'cache-alias'
+        alias.symlink_to(prepare.SDK / 'emscripten/cache', target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'EM_CACHE'):
+            prepare.unused_sdk_cache({**self.env, 'EM_CACHE': str(alias)})
+
+    def test_should_bind_historical_rows_receipt_and_projected_membership(self):
+        self.sdk_support_fixture()
+        evidence_bytes = self.evidence_path.read_bytes()
+        evidence = json.loads(evidence_bytes)
+        for change, message in [
+            ({'inputs': evidence['inputs'] + [evidence['inputs'][0]]}, 'duplicate'),
+            ({'inputs': [r for r in evidence['inputs'] if r['path'] != str(self.receipt_path)]}, 'receipt hash'),
+            ({'inputs': [r for r in evidence['inputs'] if not r['path'].endswith('unused.js')]}, 'aggregate'),
+            ({'environment': {**self.env, 'EM_CACHE': '/other-cache'}}, 'EM_CACHE differs'),
+        ]:
+            with self.subTest(message=message):
+                prepare.write_json(self.evidence_path, {**evidence, **change})
+                with self.assertRaisesRegex(ValueError, message):
+                    self.verify()
+                self.evidence_path.write_bytes(evidence_bytes)
+        self.context['supportPayloads']['mixed']['sha256'] = 'different-current-support'
+        with self.assertRaisesRegex(ValueError, 'Projected SDK support'):
+            self.verify()
+
     def test_should_preserve_original_recipe_and_receipt_after_native_only_selection_change(self):
         receipt_bytes = self.receipt_path.read_bytes()
         recipe_bytes = self.original_recipe.read_bytes()
@@ -379,6 +508,20 @@ class MixedRecipeMaterialTest(unittest.TestCase):
         self.stack.enter_context(patch.object(materials, 'mixed_tool_licenses', return_value=[]))
 
     def test_should_retain_selected_original_recipe_and_hash_reference_in_archive(self):
+        # Exercise the unchanged material copier with a carried historical rowset,
+        # not just a path/hash reference to an unavailable external manifest.
+        roots = {'sdk/bin': str(self.root / 'sdk/bin')}
+        rows = [{'path': str(self.root / 'sdk/bin/clang'), 'sha256': 'a' * 64}]
+        support = prepare.support_payload(roots, recorded={Path(r['path']): r['sha256'] for r in rows})
+        materials.write_json(self.receipt, {'recipeSha256': materials.digest(self.original), 'supportPayload': support})
+        self.closure['prefixSupportMigration'] = {
+            'schema': 'geospec-sdk-support-migration-v2',
+            'originalReceipt': {'path': str(self.receipt), 'sha256': materials.digest(self.receipt)},
+            'supportEvidence': {'schema': 'geospec-sdk-support-evidence-v1', 'inputs': rows},
+        }
+        inputs_path = self.root / 'current-mixed-inputs.json'
+        materials.write_json(inputs_path, self.closure)
+        self.mixed['paths']['inputs'] = inputs_path
         original = self.original.read_bytes()
         receipt = self.receipt.read_bytes()
         result = materials.copy_mixed_material(self.output, self.mixed)
@@ -392,6 +535,14 @@ class MixedRecipeMaterialTest(unittest.TestCase):
         with tarfile.open(archive) as bundle:
             with bundle.extractfile(materials.SOURCE_RELINK_ROOT + '/' + selected['path']) as member:
                 self.assertEqual(member.read(), original)
+            with bundle.extractfile(materials.SOURCE_RELINK_ROOT + '/receipts/mixed-inputs.json') as member:
+                carried = json.load(member)['prefixSupportMigration']
+            with bundle.extractfile(materials.SOURCE_RELINK_ROOT + '/receipts/mixed-prefix-receipt.json') as member:
+                prefix_bytes = member.read()
+            self.assertEqual(hashlib.sha256(prefix_bytes).hexdigest(), carried['originalReceipt']['sha256'])
+            prefix_support = json.loads(prefix_bytes)['supportPayload']
+            recorded = {Path(r['path']): r['sha256'] for r in carried['supportEvidence']['inputs']}
+            self.assertEqual(prepare.support_payload(prefix_support['roots'], recorded=recorded), prefix_support)
         self.assertEqual(self.original.read_bytes(), original)
         self.assertEqual(self.receipt.read_bytes(), receipt)
 

@@ -173,6 +173,7 @@ const main = (): void => {
     '-sSUPPORT_LONGJMP=emscripten',
     '-sMODULARIZE=1',
     '-sEXPORT_ES6=1',
+    '-sINCOMING_MODULE_JS_API=["locateFile","wasmBinary"]',
     '-sENVIRONMENT=web,worker,node',
     '-sINVOKE_RUN=0',
     '-sALLOW_MEMORY_GROWTH=1',

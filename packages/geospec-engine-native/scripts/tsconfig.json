@@ -7,7 +7,7 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "files": ["prepare-legacy-reference.mts"],
+  "files": ["prepare-legacy-reference.mts", "build-mixed-wasm.mts"],
   "include": [],
   "references": []
 }

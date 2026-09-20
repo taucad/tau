@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym. */
 import { resolve } from 'node:path';
-import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
+import { playwrightProvider } from './support/playwright-provider.ts';
 import {
   reactCaptureTargetDiagnostics,
   reactClickTarget,
@@ -34,7 +34,7 @@ export default defineConfig({
       headless: true,
       // Artifact requirement: child-context and Electron trace attachments must survive target teardown.
       api: { allowWrite: true },
-      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
+      provider: playwrightProvider({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       commands: {
         reactCaptureTargetDiagnostics,
         reactClickTarget,

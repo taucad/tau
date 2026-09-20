@@ -1,9 +1,9 @@
 import { resolve } from 'node:path';
 
-import { playwright } from '@vitest/browser-playwright';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { defineConfig } from 'vitest/config';
+import { playwrightProvider } from './support/playwright-provider.ts';
 
 export default defineConfig({
   root: resolve(import.meta.dirname, 'apps/react-router'),
@@ -41,7 +41,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
+      provider: playwrightProvider({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium', name: 'bundlers-isolated' }],
     },
   },

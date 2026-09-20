@@ -1,7 +1,7 @@
 /* oxlint-disable tau-lint/no-bare-time-identifier, typescript/consistent-type-definitions, typescript/no-restricted-types, typescript/promise-function-async, unicorn/no-await-expression-member -- Module augmentation and null DOM evidence mirror stable upstream contracts; direct command returns avoid redundant async frames. */
 import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
-import { server } from 'vitest/browser';
+import { server as vitestServer } from 'vitest/browser';
 import type { ReactE2ETargetMetadata } from './targets.js';
 
 export type ReactProvidedTarget = {
@@ -48,39 +48,49 @@ declare module 'vitest' {
   }
 }
 
-declare module 'vitest/browser' {
-  interface BrowserCommands {
-    reactCaptureTargetDiagnostics(): Promise<ReactTargetDiagnostics>;
-    reactClickTarget(selector: string): Promise<void>;
-    reactCloseTarget(): Promise<void>;
-    reactEditExternalElectronWorkspace(): Promise<void>;
-    reactFillTarget(selector: string, value: string): Promise<void>;
-    reactGetTargetSession(): Promise<ReactTargetSession>;
-    reactNavigateTarget(path: string): Promise<Readonly<Record<string, string>>>;
-    reactOpenTarget(targetId: string): Promise<ReactTargetSession>;
-    reactReadTarget(selector: string): Promise<ReactTargetState>;
-  }
-}
+/**
+ * The commands `vitest.config.ts` registers for this suite.
+ *
+ * Vitest's `BrowserCommands` is declared inside the `vitest` copy pnpm installs
+ * for `@vitest/browser-playwright`'s peer context rather than the one this
+ * project resolves, so a `declare module 'vitest/browser'` augmentation never
+ * merges and every `server.commands.*` call types as `any`. Binding the type
+ * to the server locally is what `apps/ui-e2e/src/support/external-target.ts` does.
+ */
+export type ReactBrowserCommands = {
+  reactCaptureTargetDiagnostics(): Promise<ReactTargetDiagnostics>;
+  reactClickTarget(selector: string): Promise<void>;
+  reactCloseTarget(): Promise<void>;
+  reactEditExternalElectronWorkspace(): Promise<void>;
+  reactFillTarget(selector: string, value: string): Promise<void>;
+  reactGetTargetSession(): Promise<ReactTargetSession>;
+  reactNavigateTarget(path: string): Promise<Readonly<Record<string, string>>>;
+  reactOpenTarget(targetId: string): Promise<ReactTargetSession>;
+  reactReadTarget(selector: string): Promise<ReactTargetState>;
+};
+
+/** Vitest's browser server with this suite's commands bound onto it. */
+export const reactServer = vitestServer as typeof vitestServer & { readonly commands: ReactBrowserCommands };
 
 const selectorFor = (locator: Locator | string): string => (typeof locator === 'string' ? locator : locator.selector);
 
 export const currentReactTarget = (): ReactProvidedTarget => inject('reactE2ETarget');
 
-export const currentTargetSession = (): Promise<ReactTargetSession> => server.commands.reactGetTargetSession();
+export const currentTargetSession = (): Promise<ReactTargetSession> => reactServer.commands.reactGetTargetSession();
 
 export const clickTarget = async (locator: Locator | string): Promise<void> => {
-  await server.commands.reactClickTarget(selectorFor(locator));
+  await reactServer.commands.reactClickTarget(selectorFor(locator));
 };
 
 export const fillTarget = async (locator: Locator | string, value: string): Promise<void> => {
-  await server.commands.reactFillTarget(selectorFor(locator), value);
+  await reactServer.commands.reactFillTarget(selectorFor(locator), value);
 };
 
 export const navigateTarget = (path = '/'): Promise<Readonly<Record<string, string>>> =>
-  server.commands.reactNavigateTarget(path);
+  reactServer.commands.reactNavigateTarget(path);
 
 export const readTarget = (locator: Locator | string): Promise<ReactTargetState> =>
-  server.commands.reactReadTarget(selectorFor(locator));
+  reactServer.commands.reactReadTarget(selectorFor(locator));
 
 export const expectTargetCount = async (locator: Locator | string, count: number): Promise<void> => {
   await expect.poll(async () => (await readTarget(locator)).count).toBe(count);
@@ -135,5 +145,5 @@ export const expectTargetInspection = (): void => {
 };
 
 export const editExternalElectronWorkspace = async (): Promise<void> => {
-  await server.commands.reactEditExternalElectronWorkspace();
+  await reactServer.commands.reactEditExternalElectronWorkspace();
 };

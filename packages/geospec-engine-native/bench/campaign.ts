@@ -6,7 +6,7 @@ import { measurementMembers } from '#bench/measurements';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { readHashed, sha256, compareProductReports } from '#bench/lib';
-import type { Artifact, ProductBenchmarkConfig } from '#bench/lib';
+import type { Artifact, ProductBenchmarkConfig, ProductRoute } from '#bench/lib';
 
 /**
  * Q7 modes are distinct state contracts, not labels for fresh processes.
@@ -69,7 +69,12 @@ export type ProductCampaign = {
   /** Declared sampled parent/descendant RSS cadence and final reap deadline, milliseconds. */
   rss?: { samplePeriod: number; reapDeadline: number };
   /** Milliseconds; warm setup and post-ACK cleanup/reap are separate from the public report budget. */
-  deadlines?: { startup: number; cleanup: number };
+  deadlines?: {
+    startup: number;
+    cleanup: number;
+    /** Frozen legacy complete-report observation bound, milliseconds; not a successor promotion bar. */
+    legacyReport?: number;
+  };
   /** Pinned analysis runtime, separate from product Python consumers. */
   analysis?: { python: Artifact; numpyVersion: string };
   /**
@@ -141,6 +146,32 @@ export type CampaignObservation = {
 };
 
 const explicitlyTrue = (value: unknown): boolean => value === true;
+
+const validLegacyReportDeadline = (value: number | undefined): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 2_147_483_647;
+
+/**
+ * Select the actual route's observation deadline without changing successor budgets.
+ * @internal
+ * @param input - Frozen case, actual backend and explicit legacy observation bound.
+ * @returns Public report deadline in milliseconds.
+ */
+export const campaignReportDeadline = (input: {
+  item: CampaignCase;
+  backend: ProductRoute['backend'];
+  legacyReport?: number;
+}): number => {
+  if (input.backend === 'legacy') {
+    assert.ok(
+      validLegacyReportDeadline(input.legacyReport),
+      'Legacy report deadline must be a positive timer-safe integer.',
+    );
+    return input.legacyReport;
+  }
+  return (
+    (input.item.sampleBudgetNs ?? { ordinary: 2e9, scale: 5e9, suite: 300e9, microcase: 0 }[input.item.class]) / 1e6
+  );
+};
 
 const modes = new Set<CampaignMode>([
   'cold-process',
@@ -426,6 +457,14 @@ export const campaignInputGaps = (config: ProductBenchmarkConfig, campaign: Prod
     campaign.deadlines.cleanup <= 0
   ) {
     gaps.push('finite startup and cleanup/reap deadlines absent');
+  }
+  if (
+    campaign.cases.some((item) =>
+      [item.baseline, item.candidate].some((name) => config.routes[name]?.backend === 'legacy'),
+    ) &&
+    !validLegacyReportDeadline(campaign.deadlines?.legacyReport)
+  ) {
+    gaps.push('explicit positive timer-safe legacy report observation deadline absent');
   }
   gaps.push(...campaign.cases.flatMap((item) => caseInputGaps(config, item)));
   return gaps;

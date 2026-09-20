@@ -14,6 +14,7 @@ import {
   campaignGates,
   campaignIdentity,
   campaignInputGaps,
+  campaignReportDeadline,
   campaignSchedule,
   campaignStatistics,
   reportPlantNs,
@@ -355,9 +356,13 @@ export const runProductCampaign = async ({
                   : undefined,
               reservationExpiresAt: Date.parse(environment.validUntil),
               deadlines: {
-                report:
-                  (item.sampleBudgetNs ?? { ordinary: 2e9, scale: 5e9, suite: 300e9, microcase: 0 }[item.class]) / 1e6,
-                ...campaign.deadlines!,
+                report: campaignReportDeadline({
+                  item,
+                  backend: config.routes[row.routeName]!.backend,
+                  legacyReport: campaign.deadlines!.legacyReport,
+                }),
+                startup: campaign.deadlines!.startup,
+                cleanup: campaign.deadlines!.cleanup,
               },
               routeName: row.routeName,
               workload: item.workload,

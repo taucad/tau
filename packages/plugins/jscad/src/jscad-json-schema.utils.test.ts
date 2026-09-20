@@ -335,13 +335,13 @@ describe('convertParameterDefinitionsToJsonSchema', () => {
   });
 
   describe('type inference from default value', () => {
-    it('should infer integer type from integer default', () => {
+    it('should infer number type from a whole-number default', () => {
       const definitions: JscadParameterDefinition[] = [{ name: 'count', initial: 42 }];
 
       const result = convertParameterDefinitionsToJsonSchema(definitions);
 
       expect(result.properties?.['count']).toEqual({
-        type: 'integer',
+        type: 'number',
         default: 42,
       });
     });

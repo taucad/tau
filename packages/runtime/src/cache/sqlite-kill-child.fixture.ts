@@ -61,32 +61,27 @@ if (process.argv[1]?.endsWith('sqlite-kill-child.fixture.ts') === true) {
     process.stdout.write(
       `${JSON.stringify(await session.put({ entries: [entry], generation: session.generation, durability: 'disposable' }))}\n`,
     );
-    await session.close();
-    await store.dispose();
-    process.exit(0);
-  }
-  if (roundsArgument === 'metadata-clear') {
+  } else if (roundsArgument === 'metadata-clear') {
     process.stdout.write(`${JSON.stringify(await (await store.control({ workspace: 'kill-test' })).clear({}))}\n`);
-    await session.close();
-    await store.dispose();
-    process.exit(0);
-  }
-  process.stdout.write('READY\n');
+  } else {
+    process.stdout.write('READY\n');
 
-  for (let round = 0; round < Number(roundsArgument); round += 1) {
-    const entries = await Promise.all(
-      Array.from({ length: Number(batchArgument) }, async (_unused, index) =>
-        killTestEntry(round, index, Number(payloadArgument)),
-      ),
-    );
-    const put = await session.put({ entries, generation: session.generation, durability: 'disposable' });
-    if (put.status !== 'committed') {
-      process.stdout.write(`REFUSED ${round} ${put.status}\n`);
-      break;
+    for (let round = 0; round < Number(roundsArgument); round += 1) {
+      const entries = await Promise.all(
+        Array.from({ length: Number(batchArgument) }, async (_unused, index) =>
+          killTestEntry(round, index, Number(payloadArgument)),
+        ),
+      );
+      const put = await session.put({ entries, generation: session.generation, durability: 'disposable' });
+      if (put.status !== 'committed') {
+        process.stdout.write(`REFUSED ${round} ${put.status}\n`);
+        break;
+      }
+      process.stdout.write(`COMMITTED ${round}\n`);
     }
-    process.stdout.write(`COMMITTED ${round}\n`);
+    process.stdout.write('DONE\n');
   }
-  process.stdout.write('DONE\n');
+
   await session.close();
   await store.dispose();
 }

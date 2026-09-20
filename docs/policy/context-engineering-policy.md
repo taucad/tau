@@ -3,7 +3,7 @@ title: 'Context Engineering Policy'
 description: 'Comprehensive guide to optimizing system prompts, tool definitions, and context pipelines for LLM agents. Covers foundational principles, placement framework, cache economics, compaction safety, subagent criteria, untrusted content, and eval discipline.'
 status: active
 created: '2026-03-09'
-updated: '2026-09-05'
+updated: '2026-09-20'
 related:
   - docs/policy/filesystem-context-policy.md
   - docs/research/transcript-search-architecture.md
@@ -377,6 +377,7 @@ Order of escalation as the window fills:
 
 - Safety- and governance-relevant instructions live in the **system prompt or a pinned/memory channel**, never only in conversation history.
 - The compaction pipeline must preserve pinned content (Tau: `keepContextTags`) verbatim, and a regression test must assert survival of `<safety>`-class instructions across a compaction cycle.
+- The compaction pipeline's engineering invariants (decide over the durable log, atomic persist, always-evicting cut, degrade instead of refuse, resumable failures) are owned by `docs/policy/filesystem-context-policy.md` §5.
 
 ### Evolving Contexts (ACE Framework, Zhang 2025)
 

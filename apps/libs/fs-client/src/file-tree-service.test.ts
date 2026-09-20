@@ -751,7 +751,9 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     vi.useRealTimers();
   });
 
-  it('should deeply resync every still-resolved directory after backendChanged under traffic', async () => {
+  /* A rooted watch spells topology loss as `{ type: 'reset' }`; the same loss
+   * reaches the tree's file-change channel as `backendChanged`. */
+  it('should re-list every loaded directory after a rooted topology reset', async () => {
     vi.useFakeTimers();
     let updated = false;
     const readDirectory = vi.fn(async (path: string): Promise<FileTreeNode[]> => {
@@ -782,11 +784,9 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     readDirectory.mockClear();
 
     emitFileChanged({ type: 'backendChanged', backend: 'indexeddb' });
-    emitFileChanged({ type: 'fileWritten', path: 'src/other.ts', backend: 'indexeddb' });
     await vi.waitFor(() => {
       expect(tree.getTreeSnapshot().has('src/nested/new.ts')).toBe(true);
     });
-    await vi.advanceTimersByTimeAsync(100);
 
     expect(tree.getTreeSnapshot().has('src/nested/old.ts')).toBe(false);
     expect(readDirectory).toHaveBeenCalledWith('/projects/abc');

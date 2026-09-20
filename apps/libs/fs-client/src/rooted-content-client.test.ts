@@ -1,11 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
+import { array, assert, constant, constantFrom, oneof, property, stringMatching, tuple } from 'fast-check';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { createRootedContentClient } from '#rooted-content-client.js';
+import { joinPath } from '@taucad/utils/path';
+import { createRootedContentClient, rootedPathOf } from '#rooted-content-client.js';
 import type { RootedConnection, RootedFiles } from '#rooted-content-client.js';
 
 const encoder = new TextEncoder();
+
+const segmentArbitrary = stringMatching(/^[a-z][a-z0-9_-]{0,15}$/u);
+const relativePathArbitrary = array(segmentArbitrary, { maxLength: 5 }).map((segments) => segments.join('/'));
+const rootedAddressArbitrary = oneof(
+  tuple(
+    constant('/'),
+    relativePathArbitrary.filter((path) => !/^(?:projects|checkouts|previews)\/[a-z][a-z0-9_-]*(?:\/|$)/u.test(path)),
+  ).map(([root, path]) => ({ root, path })),
+  tuple(constantFrom('projects', 'checkouts', 'previews'), segmentArbitrary, relativePathArbitrary).map(
+    ([family, id, path]) => ({ root: `/${family}/${id}`, path }),
+  ),
+);
 
 /** One recording connection per root, so a row can assert both the root and the namespace. */
 const recordingOpener = (): {
@@ -59,6 +73,16 @@ const callsOn = (files: RootedFiles | undefined, member: keyof RootedFiles): unk
 };
 
 describe('rooted content client', () => {
+  it('should recover generated roots and paths after joining them', () => {
+    assert(
+      property(rootedAddressArbitrary, ({ root, path }) => {
+        const absolutePath = path === '' ? root : joinPath(root, path);
+
+        expect(rootedPathOf(absolutePath)).toEqual({ root, path });
+      }),
+    );
+  });
+
   it('should ask Home for a path the product grammar does not claim', async () => {
     const opener = recordingOpener();
     const client = createRootedContentClient({ open: opener.open }).files('working-copy');

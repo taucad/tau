@@ -89,6 +89,22 @@ async function createBlankFile(parentPath: string, name: string): Promise<string
   return createdPath;
 }
 
+async function createRootBlankFile(name: string): Promise<string> {
+  const rootFile = treeItem('package.json');
+  await target.click(rootFile);
+  await target.expectAttribute(rootFile, 'aria-selected', 'true', 15_000);
+  const createButton = fileActions().getByRole('button', { name: 'Create new file' });
+  await target.focus(createButton);
+  await target.press(createButton, 'Enter');
+  await target.click(selectors.getByRole('menuitem', { name: 'Blank' }));
+  const input = filesPane().getByPlaceholder('New File');
+  await target.fill(input, name);
+  await target.press(input, 'Enter');
+  await expectFilesPane();
+  await target.expectVisible(treeItem(name));
+  return name;
+}
+
 async function openContextMenu(path: string): Promise<void> {
   await expectFilesPane();
   await target.click(treeItem(path), { button: 'right' });
@@ -423,5 +439,14 @@ test.describe('project file tree', () => {
     await expectNoMenuItem('Delete');
     await expectNoMenuItem('Download as ZIP');
     await target.expectVisible(selectors.getByRole('menuitem', { name: 'Copy Path' }));
+  });
+
+  test('should keep bundled dependencies after creating a root file', async () => {
+    await openSeededProject();
+    const createdPath = await createRootBlankFile('zz-e2e-root-refresh.txt');
+
+    await target.expectVisible(treeItem('node_modules'));
+
+    await deletePath(createdPath);
   });
 });

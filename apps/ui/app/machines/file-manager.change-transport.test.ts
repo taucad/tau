@@ -194,6 +194,19 @@ describe('the file manager change transport (charter D12, W12b)', () => {
  * every one of its own writes as somebody else's (gate G-D, H1).
  */
 describe('the Home file manager change transport (charter D12, gate G-D H1)', () => {
+  it('should mask the Home file manager initial listing', async () => {
+    const { client, openRooted } = await createHarness('/');
+    const workingCopy = await openRooted('working-copy');
+    await workingCopy.writeFile('visible.scad', 'cube(1);');
+    await workingCopy.mkdir('.git', { recursive: true });
+    await workingCopy.writeFile('.git/HEAD', 'ref: refs/heads/main');
+
+    const rows = await client.readDirectory('/');
+
+    expect(rows.map(({ name }) => name)).toContain('visible.scad');
+    expect(rows.map(({ name }) => name)).not.toContain('.git');
+  });
+
   it('should not announce the Home file manager its own write as an external change', async () => {
     const { client, announced, peer } = await createHarness('/');
 

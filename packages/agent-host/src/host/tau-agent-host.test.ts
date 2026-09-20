@@ -2318,6 +2318,81 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await host.close();
   });
 
+  /** One assistant message as the stream wrapper leaves it when a call is refused. */
+  const refusalMarker = (id: string, code: string): ProviderMessage => ({
+    id,
+    role: 'assistant',
+    content: [],
+    metadata: {
+      diagnostics: [
+        {
+          type: 'tau.model-transport-failure',
+          timestamp: 1,
+          error: { name: 'GatewayModelTransportError', message: 'The stream dropped.', code },
+          details: { status: 200, refusal: { routeId: 'route' } },
+        },
+      ],
+    },
+  });
+
+  it("names this run's failure after an older run left its marker in the history", async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      { type: 'message.appended', runId: 'run-1', message: refusalMarker('assistant-1', 'NETWORK_ERROR') },
+      {
+        type: 'run.lifecycle',
+        runId: 'run-1',
+        state: 'failed',
+        detail: { code: 'NETWORK_ERROR', message: 'The stream dropped.' },
+      },
+      /* A plain resend rather than a Resume: nothing rewinds run-1's marker, so
+       * it is still the newest diagnostic the chat's history holds. */
+      { type: 'message.appended', runId: 'run-2', message: { id: 'turn-2', role: 'user', content: 'Second.' } },
+      { type: 'run.lifecycle', runId: 'run-2', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-2', state: 'running' },
+    ]);
+    const host = silentHost(file, 'stale-marker');
+
+    const marked = await host.markAbandoned('chat-stale-marker');
+
+    /* A snapshot's failure is a fact about the run it names: the page keys the
+     * saved-turn card and `isResumableRunFailure` off it, so an older run's
+     * refusal leaking in shows the wrong card for this one. */
+    expect(marked).toMatchObject({ runId: 'run-2', state: 'failed' });
+    expect(marked?.failure).toEqual({
+      code: 'RUN_ABANDONED',
+      message: 'The host executing this run is gone. Resume the turn to continue it.',
+    });
+    await host.close();
+  });
+
+  it("prefers a run's own transport diagnostic to the codeless detail its terminal row carries", async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      { type: 'message.appended', runId: 'run-1', message: refusalMarker('assistant-1', 'RATE_LIMITED') },
+      /* What the host's own catch records for a throw that carried no code:
+       * the transport's status and refusal fields live only on the marker. */
+      { type: 'run.lifecycle', runId: 'run-1', state: 'failed', detail: { message: 'The stream dropped.' } },
+    ]);
+    const host = silentHost(file, 'own-marker');
+
+    const described = await host.snapshot('chat-own-marker');
+
+    expect(described.failure).toEqual({
+      code: 'RATE_LIMITED',
+      message: 'The stream dropped.',
+      status: 200,
+      details: { routeId: 'route' },
+    });
+    await host.close();
+  });
+
   /** A run whose page died mid-turn, as `markAbandoned` leaves it. */
   const abandonedAfter = (tail: ProviderMessage): readonly SeededLogEvent[] => [
     { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },

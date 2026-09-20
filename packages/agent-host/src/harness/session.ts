@@ -62,7 +62,7 @@ import {
   providerMessageToPi,
   toJsonValue,
   toolInputToProvider,
-  transportFailureFromProviderMessages,
+  transportFailureOfRun,
 } from '#harness/session-record.js';
 import type { AttachmentReader, MessageIdentities, SessionLogEvent, SessionRecord } from '#harness/session-record.js';
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
@@ -947,8 +947,9 @@ const appendAgentEvent = async (options: {
 const runFailureDetail = async (
   final: AgentMessage | undefined,
   record: SessionRecord,
+  runId: string,
 ): Promise<RunFailureDetail | undefined> => {
-  const typed = transportFailureFromProviderMessages(await record.history());
+  const typed = transportFailureOfRun({ events: await record.events(), messages: await record.history(), runId });
   if (typed) {
     return typed;
   }
@@ -1447,7 +1448,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     // Without this the durable log said only "failed": the typed transport code
     // and its message were stranded on the assistant message's diagnostics, and
     // every client could render was a generic host-failure string.
-    const detail = state === 'failed' ? await runFailureDetail(final, record) : undefined;
+    const detail = state === 'failed' ? await runFailureDetail(final, record, options.runId) : undefined;
     await record.append({
       type: 'run.lifecycle',
       state,
@@ -1545,7 +1546,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     },
     snapshot: async () => {
       const messages = await record.history();
-      const failure = transportFailureFromProviderMessages(messages);
+      const failure = transportFailureOfRun({ events: await record.events(), messages, runId: options.runId });
       return {
         chatId: options.chatId,
         runId: options.runId,

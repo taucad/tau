@@ -109,9 +109,9 @@ export default function main() {
 
     const baseColor = await getMaterialBaseColor(result);
     // JSCAD default is sRGB [0.8, 0.8, 0.8, 1] → linear ≈ 0.6038
-    expect(baseColor[0]).toBeCloseTo(0.603_827, 2);
-    expect(baseColor[1]).toBeCloseTo(0.603_827, 2);
-    expect(baseColor[2]).toBeCloseTo(0.603_827, 2);
+    expect(baseColor[0]).toBeCloseTo(0.603827, 2);
+    expect(baseColor[1]).toBeCloseTo(0.603827, 2);
+    expect(baseColor[2]).toBeCloseTo(0.603827, 2);
     expect(baseColor[3]).toBeCloseTo(1, 2);
   });
 });

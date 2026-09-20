@@ -3,6 +3,7 @@ import {
   campaignSchedule,
   campaignStatistics,
   campaignInputGaps,
+  campaignReportDeadline,
   reportPlantNs,
   validateCampaignObservation,
 } from '#bench/campaign';
@@ -132,6 +133,92 @@ const campaignCase: CampaignCase = {
   metrics: ['firstActionableReportNs', 'suiteReportNs'],
   expected: {},
 };
+
+await test('should separate legacy observation allowance from every successor class deadline', () => {
+  for (const [workloadClass, expected] of [
+    ['ordinary', 2000],
+    ['scale', 5000],
+    ['suite', 300_000],
+    ['microcase', 25],
+  ] as const) {
+    const item = {
+      ...campaignCase,
+      class: workloadClass,
+      sampleBudgetNs: workloadClass === 'microcase' ? 25e6 : undefined,
+    };
+    assert.equal(campaignReportDeadline({ item, backend: 'legacy', legacyReport: 300_000 }), 300_000);
+    for (const backend of ['native', 'mixed'] as const) {
+      assert.equal(campaignReportDeadline({ item, backend }), expected);
+      assert.equal(campaignReportDeadline({ item, backend, legacyReport: 300_000 }), expected);
+    }
+  }
+});
+
+await test('should select observation deadlines by actual route for AB/BA, A/A and planted arms', () => {
+  for (const backend of ['native', 'mixed'] as const) {
+    for (const axis of ['reference-vs-native', 'native-base-vs-candidate'] as const) {
+      const item: CampaignCase = { ...campaignCase, axis, class: 'scale' };
+      const routes = {
+        [item.baseline]: axis === 'reference-vs-native' ? 'legacy' : backend,
+        [item.candidate]: backend,
+      } as const;
+      for (const block of campaignSchedule([item])) {
+        const arms = [...block.order.map((arm) => block.routes[arm]), ...block.plants.map(() => block.routes.A)];
+        for (const name of arms) {
+          const actualBackend = routes[name]!;
+          assert.equal(
+            campaignReportDeadline({ item, backend: actualBackend, legacyReport: 300_000 }),
+            actualBackend === 'legacy' ? 300_000 : 5000,
+          );
+        }
+      }
+    }
+  }
+});
+
+await test('should require an explicit timer-safe legacy allowance only for selected legacy routes', () => {
+  const config: ProductBenchmarkConfig = {
+    schemaVersion: 2,
+    source: 'synthetic',
+    workspaceRoot: '/',
+    broadFixtures: { path: '/unused', sha256: 'unused' },
+    routes: {
+      legacy: {
+        state: 'unavailable',
+        consumer: 'standalone',
+        backend: 'legacy',
+        profile: 'original',
+        comparison: 'inert',
+        reason: 'not executed',
+      },
+    },
+    workloads: [{ id: 'box', kind: 'common-tetrahedron-bounds' }],
+    repeats: 1,
+    campaignGate: { provisional: true, releaseCampaign: false, reason: 'host-only' },
+    toolchain: {},
+  };
+  const campaign: ProductCampaign = {
+    id: 'host-only',
+    ready: false,
+    frozenProducts: false,
+    environment: { path: '/unused', sha256: 'unused' },
+    freeze: [],
+    seeds: [11, 22, 33, 44],
+    cases: [{ ...campaignCase, axis: 'reference-vs-native', baseline: 'legacy' }],
+    gates: {},
+    deadlines: { startup: 120_000, cleanup: 30_000 },
+  };
+  const gap = 'explicit positive timer-safe legacy report observation deadline absent';
+  for (const legacyReport of [undefined, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 0.5, 2_147_483_648]) {
+    campaign.deadlines = { startup: 120_000, cleanup: 30_000, legacyReport };
+    assert.ok(campaignInputGaps(config, campaign).includes(gap));
+  }
+  campaign.deadlines = { startup: 120_000, cleanup: 30_000, legacyReport: 300_000 };
+  assert.equal(campaignInputGaps(config, campaign).includes(gap), false);
+  campaign.cases = [campaignCase];
+  campaign.deadlines = { startup: 120_000, cleanup: 30_000 };
+  assert.equal(campaignInputGaps(config, campaign).includes(gap), false);
+});
 
 await test('should freeze 120 alternating product and A/A pairs without discarding cold samples', () => {
   const schedule = campaignSchedule([campaignCase]);

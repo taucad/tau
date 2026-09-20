@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import type { Browser, BrowserType } from 'playwright';
 import { createServer } from 'vite';
+// oxlint-disable-next-line no-restricted-imports -- Runner and browser use the same pinned data-only selection.
+import { joinCurrentCorpus, selectCorpusRecords } from '../../conformance/current-profile.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Executable test fixture loads its nonpublished sibling input owner.
 import { loadM2BrowserInputs, loadSupplementalBrowserInputs } from './m2-inputs.ts';
 
@@ -20,7 +22,9 @@ type BrowserPageReport = {
   admissions?: number;
   total?: number;
   wasmAsset: { sha256: string | null };
-  equivalentCanonicalGroups?: Array<{ passed: boolean }>;
+  equivalentCanonicalGroups?: Array<{ ids: string[]; passed: boolean }>;
+  corpus?: { records: number; selectedRecords: number; bindingProfile: string };
+  results?: Array<{ id: string }>;
 };
 
 type BrowserCompletion = { report: BrowserPageReport } | { error: string };
@@ -90,6 +94,14 @@ const run = async (): Promise<void> => {
   if (suite !== 'early' && suite !== 'm2') {
     throw new TypeError(`Unknown browser conformance suite: ${suite}.`);
   }
+  const idsArgument = argument('--ids');
+  if (process.argv.includes('--ids') && idsArgument === undefined) {
+    throw new TypeError('--ids requires a comma-separated allowlist.');
+  }
+  if (suite !== 'early' && idsArgument !== undefined) {
+    throw new TypeError('--ids selects engine records in the early suite only.');
+  }
+  const recordIds = idsArgument?.split(',');
   const inputPath = argument('--inputs') ?? process.env['GEOSPEC_CONFORMANCE_INPUTS'];
   const inputSha256 = argument('--inputs-sha256') ?? process.env['GEOSPEC_CONFORMANCE_INPUTS_SHA256'];
   if ((inputPath === undefined) !== (inputSha256 === undefined)) {
@@ -146,6 +158,15 @@ const run = async (): Promise<void> => {
     assertionExport === undefined ? undefined : await realpath(resolve(geospecPackageDirectory, assertionExport));
   const corpusText = await readFile(corpusPath, 'utf8');
   const profileText = suite === 'early' ? await readFile(profilePath, 'utf8') : undefined;
+  const corpus =
+    profileText === undefined
+      ? undefined
+      : await joinCurrentCorpus(Buffer.from(corpusText), Buffer.from(profileText), 'full-backend');
+  const selected = corpus === undefined ? [] : selectCorpusRecords(corpus, recordIds);
+  const selectedIds = selected.map(({ id }) => id);
+  const expectedAdmissions = selected.reduce((count, record) => count + record.ingest.length, 0);
+  const expectedGroups =
+    corpus?.equivalentCanonicalGroups.filter((ids) => ids.every((id) => selectedIds.includes(id))) ?? [];
   const m2Inputs =
     suite === 'm2'
       ? supplementalInput === undefined
@@ -293,7 +314,11 @@ const run = async (): Promise<void> => {
             }),
           );
         }
-        await page.goto(url, { waitUntil: 'load' });
+        const pageUrl = new URL(url);
+        if (idsArgument !== undefined) {
+          pageUrl.searchParams.set('ids', idsArgument);
+        }
+        await page.goto(pageUrl.href, { waitUntil: 'load' });
         await page.waitForFunction(
           () =>
             (
@@ -382,6 +407,17 @@ const run = async (): Promise<void> => {
     const report = {
       schemaVersion: 1,
       suite,
+      ...(suite === 'early'
+        ? {
+            selection: {
+              ids: selectedIds,
+              records: selected.length,
+              admissions: expectedAdmissions,
+              equivalentCanonicalGroups: expectedGroups,
+              bindingProfile: corpus?.bindingProfile,
+            },
+          }
+        : {}),
       consumerDirectory: packedConsumerDirectory,
       route: {
         import: '@taucad/geospec-engine-native',
@@ -432,9 +468,15 @@ const run = async (): Promise<void> => {
         );
       }
       return (
-        result.report.passed !== 320 ||
+        result.report.passed !== selected.length ||
         result.report.failed !== 0 ||
-        result.report.admissions !== 124 ||
+        result.report.admissions !== expectedAdmissions ||
+        result.report.corpus?.records !== corpus?.records.length ||
+        result.report.corpus?.selectedRecords !== selected.length ||
+        result.report.corpus.bindingProfile !== 'full-backend' ||
+        JSON.stringify(result.report.results?.map(({ id }) => id)) !== JSON.stringify(selectedIds) ||
+        JSON.stringify(result.report.equivalentCanonicalGroups?.map(({ ids }) => ids)) !==
+          JSON.stringify(expectedGroups) ||
         result.report.wasmAsset.sha256 !== packageArtifacts[wasmBinaryPath] ||
         (result.report.equivalentCanonicalGroups ?? []).some((group) => !group.passed)
       );

@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 // oxlint-disable-next-line no-restricted-imports -- Package-owned conformance fixtures share one pinned input join.
-import { joinCurrentCorpus } from '../../conformance/current-profile.mjs';
+import { joinCurrentCorpus, selectCorpusRecords } from '../../conformance/current-profile.mjs';
 
 /** @typedef {{ id: string, operation: 'canonicalize' | 'ingestMesh' | 'processRequest' | 'canonicalPlan' | 'evaluatePlan', inputUtf8?: string, inputHex?: string, ingest: string[], meshHex?: string, expectedUtf8?: string, expectedCode?: string, expectedMessage?: string }} CorpusRecord */
 /** @typedef {{ close?: () => void, ingestMesh: (request: Uint8Array, mesh: Uint8Array) => Uint8Array, processRequest: (request: Uint8Array) => Uint8Array, canonicalPlan: (request: Uint8Array) => Uint8Array, evaluatePlan: (plan: Uint8Array) => Uint8Array }} BindingEngine */
@@ -89,17 +89,8 @@ const compareBytes = (actual, expectedUtf8) => {
 
 /** @type {(options: { binding: Binding, host: string, artifacts?: string[], output?: string, recordIds?: string[] }) => Promise<CorpusReport>} */
 export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, recordIds }) => {
-  const corpus = await joinCurrentCorpus(await readFile(corpusUrl), await readFile(profileUrl));
-  const selected =
-    recordIds === undefined
-      ? corpus.records
-      : recordIds.map((id) => {
-          const record = corpus.records.find((entry) => entry.id === id);
-          if (record === undefined) {
-            throw new Error(`Unknown conformance record: ${id}`);
-          }
-          return record;
-        });
+  const corpus = await joinCurrentCorpus(await readFile(corpusUrl), await readFile(profileUrl), 'full-backend');
+  const selected = selectCorpusRecords(corpus, recordIds);
   const meshes = new Map(corpus.meshes.map((mesh) => [mesh.id, mesh]));
   /** @type {CorpusResult[]} */
   const results = [];
@@ -195,6 +186,7 @@ export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, re
       sha256: corpus.originalSha256,
       currentProfilePath: fileURLToPath(profileUrl),
       currentProfileSha256: corpus.profileSha256,
+      bindingProfile: corpus.bindingProfile,
       records: corpus.records.length,
       selectedRecords: selected.length,
     },

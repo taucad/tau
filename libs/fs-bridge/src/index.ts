@@ -1,5 +1,6 @@
 export {
   bindMutationContextForPort,
+  consumableBytes,
   createFileSystemBridgeProxy,
   createFileSystemBridgePort,
   createTransferredFileSystemBridgeProxy,

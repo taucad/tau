@@ -18,6 +18,7 @@ import type {
   StorageRootConfig,
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
+import { consumableBytes } from '@taucad/fs-bridge';
 import type { CadAgentExecution, Chat } from '@taucad/chat';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -903,12 +904,20 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           await pinHomeStorageBackend(operation.backend);
         }
         const scope = await pendingStorageToScope(operation);
-        result = await fileManager.client.commitPendingProjectDirectory({
-          providerBasePath: operation.providerBasePath,
-          scope,
-          files: Object.fromEntries(Object.entries(operation.files).filter(([path]) => path !== 'tau.json')),
-          manifest: serializeProjectManifest(operation.manifest),
-        });
+        /* The bytes are handed over: this attempt owns them, and a retry reads
+         * the durable pending operation again (`getPendingProjectOperations`),
+         * so the bridge transfers them instead of copying the whole import. */
+        result = await fileManager.client.commitPendingProjectDirectory(
+          Object.assign(
+            {
+              providerBasePath: operation.providerBasePath,
+              scope,
+              files: Object.fromEntries(Object.entries(operation.files).filter(([path]) => path !== 'tau.json')),
+              manifest: serializeProjectManifest(operation.manifest),
+            },
+            { [consumableBytes]: true },
+          ),
+        );
       } catch (error) {
         throw new PendingProjectRecoveryError(
           error instanceof WorkspaceDirectoryRequiredError ? 'workspace-unavailable' : 'filesystem-error',

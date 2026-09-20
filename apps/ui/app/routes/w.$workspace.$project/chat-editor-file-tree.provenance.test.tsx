@@ -119,9 +119,9 @@ beforeEach(() => {
     file('.agents/skills/cad-openscad/SKILL.md', overlay(bundleIdentity)),
     directory('.tau', project(true)),
     directory('.tau/chats', project(false)),
-    /* The mount root is synthesized by the tree service, so only the rows the
-     * composed client lists inside it carry the mount's provenance (a2 C2). */
-    directory('node_modules'),
+    /* The root listing carries the mount as one stamped row (close-out W3), so
+     * the lock and the dashed rail are anchored by provenance, not by a path. */
+    directory('node_modules', dependency),
     directory('node_modules/three', dependency),
     file('node_modules/three/index.d.ts', dependency),
     file('main.scad', project(true)),

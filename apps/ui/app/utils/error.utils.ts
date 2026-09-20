@@ -21,9 +21,11 @@ const textDecoder = new TextDecoder();
  */
 export const chatTurnNotStartedCode = 'CHAT_TURN_NOT_STARTED';
 
-/** Copy for the agent host's `NO_EVICTABLE_HISTORY` compaction refusal. */
-const noEvictableHistoryMessage =
-  "This chat's first message is too large to continue. Start a new chat and attach less.";
+/** Plain copy for compaction failures that leave the chat's history intact. */
+export const chatHistoryTidyFailureMessage = 'This chat hit a problem while Tau was tidying its history.';
+
+/** Plain copy for compaction failures caused by an oversized chat. */
+export const chatTooLongMessage = 'Tau could not make room for the next step.';
 
 /**
  * Client-side transport failure (request never reaches the API as structured JSON).
@@ -214,12 +216,15 @@ function parseError(error: Error): ChatError {
   // Parse structured ChatError from API
   const parsed = tryParseChatError(error.message);
   if (parsed) {
-    // The host's own sentence names its internals ("no safe history to evict"),
-    // which tells the person nothing they can act on. Keep it in `raw` and say
-    // what the only recovery is.
-    return parsed.code === 'NO_EVICTABLE_HISTORY'
-      ? { ...parsed, message: noEvictableHistoryMessage, raw: parsed.raw ?? error.message }
-      : parsed;
+    const compactionMessage =
+      parsed.code === 'SESSION_LOG_INTEGRITY' || parsed.code === 'SUMMARY_REQUIRED'
+        ? chatHistoryTidyFailureMessage
+        : parsed.code === 'NO_EVICTABLE_HISTORY' || parsed.code === 'CIRCUIT_BREAKER_OPEN'
+          ? chatTooLongMessage
+          : undefined;
+    return compactionMessage === undefined
+      ? parsed
+      : { ...parsed, message: compactionMessage, raw: parsed.raw ?? error.message };
   }
 
   const decodedProviderError = tryDecodeProviderError(error.message);

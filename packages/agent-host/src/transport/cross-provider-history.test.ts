@@ -112,6 +112,7 @@ const variants = [
   'errored',
   'attachment',
   'thinkingOnly',
+  'compacted',
 ] as const;
 type Variant = (typeof variants)[number];
 
@@ -202,6 +203,15 @@ const historyFor = (source: WireFamily, variant: Variant): readonly ProviderMess
     content: 'now add the hole',
     metadata: { timestamp: 6 },
   };
+  if (variant === 'compacted') {
+    const summary: ProviderMessage = {
+      id: 'summary-1',
+      role: 'user',
+      content: '<summary>Earlier CAD work was compacted.</summary>',
+      metadata: { timestamp: 0 },
+    };
+    return [summary, calling, ...results];
+  }
   if (variant === 'orphan') {
     // The call was never answered and the person typed again.
     return [opening, calling, followUp];

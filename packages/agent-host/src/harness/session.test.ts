@@ -245,14 +245,15 @@ describe('start-of-turn compaction refusal', () => {
       event.type === 'run.lifecycle' && event.state === 'failed' ? [event.detail?.code] : [],
     );
 
-    expect(failures).toEqual(['NO_EVICTABLE_HISTORY', 'NO_EVICTABLE_HISTORY']);
-    // The refusal never escalates to the circuit breaker, and both turns are
-    // committed, so the chat keeps taking turns.
+    expect(failures).toEqual(['NO_EVICTABLE_HISTORY']);
+    // Only the one-message history is unevictable. The next turn supplies a
+    // valid cut, so the chat compacts it and reaches the provider.
     expect(JSON.stringify(events)).not.toContain('CIRCUIT_BREAKER_OPEN');
     expect(
       events.flatMap((event) => (event.type === 'turn.history-projection-committed' ? [event.message.id] : [])),
     ).toEqual(['user-after-oversized', 'user-next']);
     expect(firstTransport.requests).toEqual([]);
+    expect(secondTransport.requests).toHaveLength(1);
     await log.close();
   });
 });

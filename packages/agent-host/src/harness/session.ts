@@ -201,6 +201,7 @@ type CreateTransportStreamOptions = {
     | ((purpose: 'generation' | 'compaction', modelId: string, signal: AbortSignal) => Promise<string>)
     | undefined;
   readonly bindInvocation?: ((attemptId: string, metadata: ProviderMessageMetadata) => Promise<void>) | undefined;
+  readonly completedAttempts?: Set<string> | undefined;
   readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
 };
 
@@ -618,6 +619,7 @@ export const createTransportStreamFunction =
         if (terminalReason === 'pending') {
           throw new Error('Model transport cannot complete with a pending stop reason.');
         }
+        options.completedAttempts?.add(attemptId);
         const stopReason = terminalReason;
         partial = {
           ...partial,
@@ -642,7 +644,7 @@ export const createTransportStreamFunction =
               createProviderMetadataDiagnostic(durableMetadata, partial.timestamp),
             ],
           };
-          options.identities.set(partial, options.identities.id(partial), durableMetadata);
+          options.identities.set(partial, messageId, durableMetadata);
         }
         if (stopReason === 'error' || stopReason === 'aborted') {
           output.push({ type: 'error', reason: stopReason, error: partial });
@@ -672,7 +674,7 @@ export const createTransportStreamFunction =
             ...(failure.diagnostics ?? []),
             createProviderMetadataDiagnostic(durableMetadata, failure.timestamp),
           ];
-          options.identities.set(failure, options.identities.id(failure), durableMetadata);
+          options.identities.set(failure, messageId, durableMetadata);
         }
         output.push({ type: 'error', reason, error: failure });
       }
@@ -701,6 +703,7 @@ const compactionModelsWithTransport = (options: {
   readonly createId: () => string;
   readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
+  readonly completedAttempts?: Set<string> | undefined;
   /** The session's side table, so a summarised document keeps its name (P32). */
   readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
@@ -792,6 +795,7 @@ const compactionModelsWithTransport = (options: {
             timestamp: Date.now(),
           };
         }
+        options.completedAttempts?.add(attemptId);
         return {
           role: 'assistant',
           content: [{ type: 'text', text: summary }],
@@ -1013,6 +1017,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       const hydrated = providerMessageToPi(message, model, record.messages);
       return hydrated ? [hydrated] : [];
     });
+  const projectHistory = async (): Promise<AgentMessage[]> =>
+    hydrateHistory(await materializeHistory(await record.history()));
   const initialMessages = hydrateHistory(await materializeHistory(initialHistory));
   const committedMessageIds = new Set(initialHistory.map((message) => message.id));
   const toolInputIds = new Map(
@@ -1186,6 +1192,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       });
     }
   };
+  const completedAttempts = new Set<string>();
   const prepareInvocation = async (
     purpose: 'generation' | 'compaction',
     modelId: string,
@@ -1199,22 +1206,24 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       const bound = events.find(
         (event) => event.type === 'model.invocation-bound' && event.attemptId === prepared.attemptId,
       );
-      const completed = events.slice(preparedIndex + 1).some((event) => {
-        if (prepared.purpose === 'compaction') {
-          return event.type === 'history.compacted';
-        }
-        const message =
-          event.type === 'message.appended'
-            ? event.message
-            : event.type === 'message.envelope-replaced'
-              ? event.replacement
-              : undefined;
-        return (
-          message?.role === 'assistant' &&
-          message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
-          message.metadata.tauInternal['attemptId'] === prepared.attemptId
-        );
-      });
+      const completed =
+        completedAttempts.has(prepared.attemptId) ||
+        events.slice(preparedIndex + 1).some((event) => {
+          if (prepared.purpose === 'compaction') {
+            return event.type === 'history.compacted';
+          }
+          const message =
+            event.type === 'message.appended'
+              ? event.message
+              : event.type === 'message.envelope-replaced'
+                ? event.replacement
+                : undefined;
+          return (
+            message?.role === 'assistant' &&
+            message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
+            message.metadata.tauInternal['attemptId'] === prepared.attemptId
+          );
+        });
       if (!completed) {
         const transport = options.modelTransport;
         const recovered = await transport.lookupAttempt?.(prepared.attemptId, signal);
@@ -1254,6 +1263,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     createId,
     documents: () => documents,
     ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
+    completedAttempts,
     committedContext: () => committedContext,
     usePostCompactionContext: () => restoreRecentSkillContent,
     systemPromptBlocks: () => options.systemPromptBlocks,
@@ -1381,6 +1391,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const compaction = installCompaction({
     agent,
     record,
+    projectHistory,
     contextWindow: effectiveModel.contextWindow,
     summarize: options.summarize,
     models: options.summarize
@@ -1395,32 +1406,62 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           createId,
           documents: () => documents,
           ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
+          completedAttempts,
         }),
     onSummary: () => {
+      completedAttempts.clear();
       restoreRecentSkillContent = true;
     },
+    settleDiscardedToolCalls: settlePrestartedTools,
     onCompaction: options.onCompaction,
     now: () => now().getTime(),
   });
-  agent.transformContext = async (messages, signal) => {
-    const safeguarded = await safeguards.transformContext(messages);
-    const compacted = await compaction.transformContext(messages, signal);
-    return safeguarded.length === messages.length ? compacted : [...compacted, ...safeguarded.slice(messages.length)];
-  };
+  const continueWithoutPreparation = agent.continue.bind(agent);
+  agent.transformContext = async (messages) => safeguards.transformContext(messages);
   agent.streamFunction = composeModelCallMiddleware(base, [
+    asMiddleware(compaction.wrapStreamFn),
     createToolResultTrimmerMiddleware({
       allowImageBlocks: options.allowImageBlocks,
     }),
     asMiddleware(safeguards.wrapStreamFn),
     latexDelimiterMiddleware,
-    asMiddleware(compaction.wrapStreamFn),
   ]);
 
   let state = lastLifecycleState(initialEvents, options.runId);
   let turnId = initialHistory.findLast((message) => message.role === 'user')?.id ?? options.runId;
   let terminalRecorded = state === 'completed' || state === 'failed' || state === 'cancelled';
   let abortRequested = false;
+  const runAbortController = new AbortController();
   const wasAbortRequested = (): boolean => abortRequested;
+  const cancelBeforeRun = async (): Promise<void> => {
+    if (terminalRecorded) {
+      return;
+    }
+    state = 'cancelled';
+    await record.append({ type: 'run.lifecycle', state });
+    terminalRecorded = true;
+  };
+  const prepareStartOfTurn = async (): Promise<boolean> => {
+    try {
+      await compaction.prepareTurn(runAbortController.signal);
+    } catch (error) {
+      if (!runAbortController.signal.aborted) {
+        throw error;
+      }
+      await cancelBeforeRun();
+      return false;
+    }
+    if (runAbortController.signal.aborted) {
+      await cancelBeforeRun();
+      return false;
+    }
+    return true;
+  };
+  agent.continue = async () => {
+    if (await prepareStartOfTurn()) {
+      await continueWithoutPreparation();
+    }
+  };
   agent.subscribe(async (event) => {
     await appendAgentEvent({ event, record, toolInputIds, committedMessageIds, createId });
     if (event.type !== 'agent_end') {
@@ -1486,8 +1527,10 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         clientContext: options.clientContext,
         recentSkills: options.recentSkills,
       });
-      const beforeCompaction = await record.history();
-      await compaction.prepareTurn(hydrateHistory(await materializeHistory(beforeCompaction)));
+      if (!(await prepareStartOfTurn())) {
+        onAdmitted?.();
+        return;
+      }
       const retainedHistory = await record.history();
       const retainedMessageIds = retainedHistory.map((retained) => retained.id);
       await record.append({
@@ -1522,7 +1565,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       }
       agent.state.systemPrompt = committedContext.systemPrompt;
       agent.state.messages = hydrateHistory(await materializeHistory(await record.history()));
-      await agent.continue();
+      await continueWithoutPreparation();
     },
     steer: (message) => {
       agent.steer({
@@ -1533,6 +1576,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     },
     abort: () => {
       abortRequested = true;
+      runAbortController.abort();
       agent.abort();
     },
     snapshot: async () => {

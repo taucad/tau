@@ -105,6 +105,22 @@ describe('ToolResultTrimmer', () => {
 });
 
 describe('LatexDelimiterNormalizer', () => {
+  it('returns the same assistant object when no delimiter changes', async () => {
+    const upstream = dummyStream();
+    const message: AssistantMessage = {
+      ...assistant('plain text'),
+      content: [
+        { type: 'thinking', thinking: 'plain reasoning' },
+        { type: 'text', text: 'plain text' },
+      ],
+    };
+    const transformed = await latexDelimiterMiddleware(request({ messages: [] }), async () => upstream);
+    upstream.push({ type: 'start', partial: message });
+    upstream.push({ type: 'done', reason: 'stop', message });
+
+    expect(await transformed.result()).toBe(message);
+  });
+
   it('rewrites final text and thinking while preserving code spans', async () => {
     const upstream = dummyStream();
     const transformed = await latexDelimiterMiddleware(request({ messages: [] }), async () => upstream);

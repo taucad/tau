@@ -691,6 +691,35 @@ describe('useCadChatClient', () => {
     expect(options?.systemPromptBlocks[1]?.cacheControl).toBeUndefined();
   });
 
+  /*
+   * A bodyless Resume names no admission, so the host falls back to the model
+   * its worker was initialised with — this registration's. Composed once, at
+   * chat open, that was the model live when the chat was focused: not the one
+   * the failed attempt ran on, and not the one the INVALID_REQUEST card just
+   * told the person to change. A resume runs on the model selected *now*,
+   * exactly as a send would.
+   */
+  it('creates the client for a resume on the model selected now, not the one the registration composed on', async () => {
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    const view = renderClient();
+    await bindChatHost();
+    // The person changes the model on the refusal card and presses Resume. The
+    // placement does not move, so nothing re-composes the registration.
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-retry' } }));
+    view.rerender({});
+    await browserHostHarness.registration!.createClient();
+
+    expect(browserHostHarness.createClient.mock.calls[0]?.[0]?.model).toMatchObject({
+      id: 'openai-gpt-retry',
+      contextWindow: 64_000,
+    });
+  });
+
   it('places a Tau Host turn on the daemon channel, claiming no browser workspace', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();

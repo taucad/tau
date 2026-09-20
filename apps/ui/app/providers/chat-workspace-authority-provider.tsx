@@ -747,6 +747,18 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       if (current) {
         return current.prepared;
       }
+      /* Mirrors `prepare`'s own reuse: the claim is recorded only once
+       * `admitTurn` answers, so an attach composed while the placement is still
+       * in flight would fall through to the chain below and hand the turn's own
+       * worker a checkout that is not the turn's. */
+      /* Mirrors `prepare`'s own reuse: the claim is recorded only once
+       * `admitTurn` answers, so an attach composed while the placement is still
+       * in flight would fall through to the chain below and hand the turn's own
+       * worker a checkout that is not the turn's. */
+      const inFlight = state.pending.get(chatId);
+      if (inFlight) {
+        return inFlight;
+      }
       const chat = await getChat(chatId);
       /* The checkout this chat's turns land on, in the order `prepare` itself
        * resolves it — minus the `admitTurn` that would lease it. The root's own

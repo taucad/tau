@@ -282,6 +282,8 @@ type InternalSession = ChatSession & {
   durableRunState: 'reattaching' | 'active' | 'terminal' | undefined;
   /** Host this session has already reattached to; see `reattachHostChat`. */
   reattachedHostId: string | undefined;
+  /** Host a reattach named while the chat was still loading; see `reattachHostChat`. */
+  pendingReattachHostId: string | undefined;
   /**
    * This load dispatched the chat's seeded first turn, so the host stream is
    * this page's own and there is nothing to reattach to; see
@@ -592,8 +594,11 @@ export class ChatSessionStore {
    *
    * The host's log is the authority (PH19) and the transport resolves the run
    * from it, so the trigger here is the *placement*, not a run id. Idempotent
-   * per host: the caller is the host registration effect, which re-runs
-   * whenever the per-turn agent config changes.
+   * per host, and there is no second pass: the caller is the host binding,
+   * which composes once per placement. A request that lands while the chat's
+   * row is still being read is therefore held rather than dropped — the chat's
+   * view mounts as soon as it is focused, long before its load settles, and a
+   * dropped one left the durable log unattached for the life of the page (I7).
    *
    * A chat whose seeded first turn *this load* dispatched is excluded: that
    * dispatch is already the host stream, and reattaching over it opened a
@@ -606,17 +611,21 @@ export class ChatSessionStore {
    */
   public reattachHostChat(input: { readonly chatId: string; readonly hostId: string }): void {
     const session = this.#sessions.get(input.chatId);
-    if (
-      !session ||
-      session.reattachedHostId === input.hostId ||
-      session.seededDispatch ||
-      session.status !== 'ready' ||
-      session.persistenceActorRef.getSnapshot().context.isLoadingChat
-    ) {
-      // Marked only when it actually reattaches, so a later registration pass
-      // still reattaches a chat that was loading or busy on this one.
+    if (!session || session.reattachedHostId === input.hostId || session.seededDispatch) {
       return;
     }
+    if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
+      /* Held, not dropped. @see flushPendingReattach */
+      session.pendingReattachHostId = input.hostId;
+      return;
+    }
+    session.pendingReattachHostId = undefined;
+    if (session.status !== 'ready') {
+      // A chat already running a turn is already attached to its host; this one
+      // is genuinely nothing to do, and resuming over it opens a second stream.
+      return;
+    }
+    // Marked only when it actually reattaches.
     session.reattachedHostId = input.hostId;
     queueMicrotask(() => {
       if (this.#sessions.get(input.chatId) === session) {
@@ -2075,6 +2084,7 @@ export class ChatSessionStore {
       durableRunId: undefined,
       durableRunState: undefined,
       reattachedHostId: undefined,
+      pendingReattachHostId: undefined,
       seededDispatch: false,
       activeRunBody: undefined,
       status: chat.status,
@@ -2103,6 +2113,7 @@ export class ChatSessionStore {
 
     lifecycleSubscription = persistenceActorRef.subscribe((snapshot) => {
       this.#syncChatState(session);
+      this.#flushPendingReattach(session);
       const idle = snapshot.matches({ requestLifecycle: 'idle' });
       if (!idle) {
         requestLifecycleWasActive = true;
@@ -2139,6 +2150,22 @@ export class ChatSessionStore {
    *
    * @param session - The chat whose facts moved.
    */
+  /**
+   * Apply a reattach the chat was still loading for.
+   *
+   * Driven from the persistence actor's own snapshots, which is where the
+   * condition that held the request clears. `reattachHostChat` decides again
+   * from scratch: a chat that is still loading simply holds it once more.
+   *
+   * @param session - The session whose load may have settled.
+   */
+  #flushPendingReattach(session: InternalSession): void {
+    const hostId = session.pendingReattachHostId;
+    if (hostId !== undefined) {
+      this.reattachHostChat({ chatId: session.chatId, hostId });
+    }
+  }
+
   #syncChatState(session: InternalSession): void {
     const { lastState, stateActorRef } = session;
     /* Run accounting is not gated on the chat machine: the project session has

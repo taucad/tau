@@ -1225,6 +1225,162 @@ describe('BrowserPlacementChatTransport', () => {
   });
 
   /*
+   * The stream deletes its `activeClients` entry and *then* closes its worker,
+   * which holds the chat's log lock for as long as the close takes. A fallback
+   * writer opened in that window is a second worker contending for the same
+   * lock over a leadership channel keyed on a workspace the first one may not
+   * share — seven seconds of nothing, and a lost settlement.
+   */
+  it('waits for a closing stream to let go of the chat log before it opens a settlement writer', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-close-window';
+    const runId = 'run-close-window';
+    const turnId = 'user-close-window';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-close-window',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'completed' },
+    ] satisfies AgentLogEvent[];
+    const closing = Promise.withResolvers<void>();
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events,
+        snapshot: {
+          chatId,
+          runId,
+          turnId,
+          state: 'completed',
+          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+        } as const,
+      })),
+      recordSettlement: vi.fn(async () => undefined),
+      close: vi.fn(async () => closing.promise),
+    });
+    const createClient = vi.fn(async () => client);
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-close-window',
+        backend: 'opfs',
+        providerBasePath: 'project-close-window',
+      }),
+      createClient,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(reattached!.getReader());
+    await vi.waitFor(() => {
+      expect(client.close).toHaveBeenCalledTimes(1);
+    });
+    const persisted = persistBrowserTurnSettlement({
+      type: 'turn.finalized',
+      chatId,
+      runId,
+      turnId,
+      projectId: 'project-close-window',
+      checkoutId: 'live',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: [runId],
+      revisionId: 'rev-close-window',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The first worker still holds the log; nothing may dial a second one yet.
+    expect(createClient).toHaveBeenCalledTimes(1);
+
+    closing.resolve();
+    await expect(persisted).resolves.toBe(true);
+    expect(createClient).toHaveBeenCalledTimes(2);
+    unregister();
+  });
+
+  /*
+   * A daemon registration builds its client with no `recordSettlement` — the
+   * option is the browser worker's alone — so this branch dialled the daemon
+   * and then walked away from the channel. Every settlement routed to a
+   * daemon-registered chat leaked one.
+   */
+  it('closes the writer it opened for a registration that cannot record settlements', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-writerless-registration';
+    const runId = 'run-writerless-registration';
+    const client = clientFor(chatId, runId);
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-writerless',
+        backend: 'opfs',
+        providerBasePath: 'project-writerless',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    await expect(
+      persistBrowserTurnSettlement({
+        type: 'turn.finalized',
+        chatId,
+        runId,
+        turnId: 'user-writerless',
+        projectId: 'project-writerless',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+        revisionId: 'rev-writerless',
+      }),
+    ).resolves.toBe(false);
+
+    expect(client.close).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  /*
+   * I1/E3: `registrations` is written by the *focused* chat's turn host, while
+   * the settlement root publishes for every chat of the project — so an
+   * unfocused chat's settlement is dropped, and the next open of that chat
+   * reconciles the same run again and mints a second revision. Silence made
+   * that duplicate unattributable.
+   */
+  it('names the chat and run of a settlement it has no registration to write', async () => {
+    installBrowserGlobals();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      persistBrowserTurnSettlement({
+        type: 'turn.finalized',
+        chatId: 'chat-unregistered-settlement',
+        runId: 'run-unregistered-settlement',
+        turnId: 'user-unregistered-settlement',
+        projectId: 'project-unregistered-settlement',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-unregistered-settlement'],
+        revisionId: 'rev-unregistered-settlement',
+      }),
+    ).resolves.toBe(false);
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('no settlement writer') as unknown,
+      'chat-unregistered-settlement',
+      'run-unregistered-settlement',
+    );
+    warn.mockRestore();
+  });
+
+  /*
    * The other half of the same rule: only the *replay* is silent. The reopened
    * attempt's own failure is this request's outcome, and silencing it left the
    * saved-turn card unrendered — a second Resume had nothing to press.
@@ -1430,6 +1586,127 @@ describe('BrowserPlacementChatTransport', () => {
      * two clients. A third call means the hold let go too early and the
      * fallback writer had to cover for it. */
     expect(createClient).toHaveBeenCalledTimes(2);
+    unregister();
+  });
+
+  /*
+   * The other gate the replay resolves, and the race the conditional re-arm
+   * lost. The host appends `run.lifecycle: running` and publishes it *before*
+   * it answers `resume`, so the row is already drained by the time the resume's
+   * snapshot is reconciled: the re-arm's `terminal(state)` reads false, nothing
+   * re-arms, and the stream closed on the previous attempt's gate while the
+   * continuation was still producing the reply — A2's exact symptom, re-armed.
+   */
+  it('keeps a continuation open until the reopened attempt ends, not until its resume answers', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-resume-open';
+    const runId = 'run-resume-open';
+    const turnId = 'user-resume-open';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-resume-open',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const refusal = { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 };
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      { ...base, sequence: 4, type: 'run.lifecycle', state: 'failed', detail: refusal },
+    ] satisfies AgentLogEvent[];
+    const finalized = {
+      type: 'turn.finalized',
+      chatId,
+      runId,
+      turnId,
+      projectId: 'project-resume-open',
+      checkoutId: 'live',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: [runId],
+      revisionId: 'rev-resume-open',
+    } as const satisfies HostTurnSettlement;
+    let notify: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        notify = next;
+        return () => {
+          notify = undefined;
+        };
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 4,
+        endCursor: 4,
+        events,
+        snapshot: {
+          chatId,
+          runId,
+          turnId,
+          state: 'failed',
+          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+          failure: refusal,
+        } as const,
+      })),
+      recordSettlement: vi.fn(async () => undefined),
+      resume: vi.fn(async (resumedChat: string) => {
+        /* The host's own ordering: the reopened attempt is already running and
+         * its row is on the subscription before this command answers. */
+        notify?.(resumedChat, {
+          ...base,
+          leaderEpoch: 'leader-resume-open-2',
+          sequence: 1,
+          type: 'run.lifecycle',
+          state: 'running',
+        });
+        globalThis.setTimeout(() => {
+          notify?.(resumedChat, {
+            ...base,
+            leaderEpoch: 'leader-resume-open-2',
+            sequence: 2,
+            type: 'message.appended',
+            message: {
+              id: 'assistant-resume-open',
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Reply one.' }],
+            },
+          });
+          notify?.(resumedChat, {
+            ...base,
+            leaderEpoch: 'leader-resume-open-2',
+            sequence: 3,
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+          recordHostTurnSettlement(finalized);
+        }, 0);
+        return { chatId, runId, turnId, state: 'running', messages: [] } as const;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-resume-open',
+        backend: 'opfs',
+        providerBasePath: 'project-resume-open',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(reattached!.getReader());
+    requestBrowserAgentHostResume(chatId);
+    const continued = await transport.reconnectToStream({ chatId, metadata: undefined });
+    const reader = continued!.getReader();
+    const chunks: UIMessageChunk[] = [];
+    // oxlint-disable-next-line no-await-in-loop -- reading a stream is sequential by construction.
+    for (let next = await reader.read(); !next.done; next = await reader.read()) {
+      chunks.push(next.value);
+    }
+
+    expect(chunks).toContainEqual({ type: 'text-delta', id: 'assistant-resume-open:text:0', delta: 'Reply one.' });
     unregister();
   });
 

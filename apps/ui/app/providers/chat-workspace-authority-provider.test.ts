@@ -285,6 +285,33 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     expect(revisionRoot.admitted).toHaveLength(1);
   });
 
+  /* The claim is recorded only once `admitTurn` answers, so an attach composed
+     while the placement is still in flight fell through to the fallback chain
+     and handed the turn's own worker a `workspaceId` that is not the turn's —
+     the wrong leadership scope, and the wrong parameter authority. `prepare`
+     already reuses its in-flight operation; so does this. */
+  it('should hand an attach the placement its chat is still taking', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const hold = Promise.withResolvers<void>();
+    revisionRoot.hold = hold;
+    const [prepared, attached] = await act(async () => {
+      const placing = result.current.prepare('chat_inflight', { turnId: 'turn_inflight' });
+      await waitFor(() => {
+        expect(revisionRoot.admitted).toHaveLength(1);
+      });
+      const attaching = result.current.attachment('chat_inflight');
+      hold.resolve();
+      revisionRoot.hold = undefined;
+      return Promise.all([placing, attaching]);
+    });
+
+    expect(attached).toBe(prepared);
+    expect(revisionRoot.admitted).toHaveLength(1);
+  });
+
   /* AC14's second clause: *Ask chat to resolve* is only a real control if the
      turn it seeds can see the conflict. The page binds it to the chat before
      the first turn is placed, and it rides the placement — the turn lands on

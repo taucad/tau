@@ -59,8 +59,9 @@ import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 /**
  * Where a turn with this execution runs.
  *
- * The chat's binding re-registers on this and on nothing else: a model change
- * is read at `createClient` time, so it must not churn the registration.
+ * The chat's binding re-registers on this and on nothing else: `createClient`
+ * reads the live model itself, so a model change must not churn the
+ * registration.
  */
 const placementOf = (execution: CadAgentExecution): string => daemonPlacementOf(execution) ?? execution.kind;
 
@@ -230,11 +231,20 @@ export function ChatTurnHost(): ReactNode {
           if (!capabilities.writable || !capabilities.durability) {
             throw new Error('The active project filesystem is not writable or did not declare durability.');
           }
+          /* The model the person has selected *now*, not the one this
+           * registration was composed on. A bodyless Resume carries no
+           * admission, so the host runs it on whatever its worker was
+           * initialised with — and the card that offers Resume says "change the
+           * model, then resume". Composed once per placement, `execution` is as
+           * old as the chat's focus; the placement invariant is about `kind` and
+           * `hostId`, so a same-kind execution is free to bring its own model. */
+          const liveExecution =
+            agentRef.current.execution.kind === execution.kind ? agentRef.current.execution : execution;
           const config = agentHostConfig({
-            agent: { ...agentRef.current, execution },
+            agent: { ...agentRef.current, execution: liveExecution },
             chatId: activeChatId,
             runId: activeChatId,
-            resolvedModel: resolveModelRef.current(execution.model),
+            resolvedModel: resolveModelRef.current(liveExecution.model),
           });
           return createBrowserAgentHostClient({
             openFileSystemBridge: prepared.openFileSystemBridge,

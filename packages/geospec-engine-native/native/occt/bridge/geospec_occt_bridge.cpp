@@ -577,10 +577,11 @@ bool shape_is_valid(const TopoDS_Shape& shape) {
   return BRepCheck_Analyzer(shape).IsValid();
 }
 
-geospec_occt_shape_facts shape_facts(const TopoDS_Shape& shape) {
+geospec_occt_shape_facts shape_facts(const TopoDS_Shape& shape,
+                                   bool include_optimal_bounds = true) {
   geospec_occt_shape_facts result{};
   result.valid = shape_is_valid(shape) ? 1 : 0;
-  result.bounds = bounds(shape);
+  if (include_optimal_bounds) result.bounds = bounds(shape);
 
   GProp_GProps volume;
   BRepGProp::VolumeProperties(shape, volume);
@@ -817,11 +818,11 @@ void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
     const TopoDS_Face face = TopoDS::Face(faces(index));
     LocatedFaceFacts located;
     located.shape = face;
-    located.facts.face = face_facts(face, static_cast<uint32_t>(index),
-                                   static_cast<uint32_t>(index))
-                             .facts;
-    located.facts.bounds = bounds(face);
-    located.facts.reversed = face.Orientation() == TopAbs_REVERSED ? 1 : 0;
+    const FaceFacts local = face_facts(face, static_cast<uint32_t>(index),
+                                      static_cast<uint32_t>(index));
+    located.facts.face = local.facts;
+    located.facts.bounds = local.bounds;
+    located.facts.reversed = local.reversed;
 
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> face_edges;
     TopExp::MapShapes(face, TopAbs_EDGE, face_edges);
@@ -4934,7 +4935,7 @@ bool build_report(const geospec_occt_document& document,
   mesh_shape(isolated, 0.01, 15.0 * pi / 180.0);
   report.mesh = report_triangle_soup(isolated);
 
-  report.shape = shape_facts(isolated);
+  report.shape = shape_facts(isolated, false);
   report.shape.bounds = reporting_bounds(isolated);
 
   report.occurrences.reserve(document.occurrences.size());

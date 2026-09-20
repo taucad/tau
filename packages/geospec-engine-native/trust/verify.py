@@ -88,6 +88,7 @@ def main():
             "expectedClaimIds",
             "expectedJobChallenge",
             "expectedSubjects",
+            "isolationClass",
             "maxArtifactBytes",
             "maxEnvelopeBytes",
             "numericProfile",
@@ -104,7 +105,12 @@ def main():
         ],
         "MALFORMED_POLICY",
     )
-    require(policy["schema"] == "geospec-trusted-verifier-policy-v2", "MALFORMED_POLICY")
+    require(policy["schema"] == "geospec-trusted-verifier-policy-v3", "MALFORMED_POLICY")
+    require(
+        policy["predicateType"] == "https://taucad.dev/attestation/geospec-trusted-evaluation/v3",
+        "MALFORMED_POLICY",
+    )
+    require(policy["evaluatorMode"] == "signed-local-record" and policy["isolationClass"] == "none", "EVALUATOR_BINDING")
     require(policy["maxArtifactBytes"] == 67108864, "MALFORMED_POLICY")
     require(policy["maxEnvelopeBytes"] == 4194304, "MALFORMED_POLICY")
     envelope_file = pathlib.Path(envelope_path)
@@ -187,11 +193,12 @@ def main():
             "subjects",
         ],
     )
-    require(predicate["schema"] == "geospec-trusted-evaluation-predicate-v2", "MALFORMED_RECORD")
+    require(predicate["schema"] == "geospec-trusted-evaluation-predicate-v3", "MALFORMED_RECORD")
     require(predicate["complete"] is True, "INCOMPLETE_RUN")
     require(predicate["cache"] == {"mode": policy["cacheMode"], "persistent": False}, "CACHE_BINDING")
     require(
-        predicate["evaluator"] == {"id": policy["evaluatorId"], "mode": policy["evaluatorMode"]},
+        predicate["evaluator"]
+        == {"id": policy["evaluatorId"], "isolationClass": "none", "mode": "signed-local-record"},
         "EVALUATOR_BINDING",
     )
     require(

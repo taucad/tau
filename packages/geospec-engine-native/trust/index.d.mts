@@ -33,15 +33,18 @@ export type TrustedEvaluationSigner = {
 export type TrustedVerifierPolicy = TrustedInputDescription & {
   readonly cacheMode: 'disabled';
   readonly evaluatorId: string;
-  readonly evaluatorMode: string;
+  /** Expected execution mode; the current runner enforces this literal. */
+  readonly evaluatorMode: 'signed-local-record';
   readonly expectedJobChallenge: string;
+  /** No OS isolation is enforced by the current runner. */
+  readonly isolationClass: 'none';
   readonly maxArtifactBytes: 67_108_864;
   readonly maxEnvelopeBytes: 4_194_304;
   readonly numericProfile: string;
   readonly payloadType: 'application/vnd.in-toto+json';
-  readonly predicateType: 'https://taucad.dev/attestation/geospec-trusted-evaluation/v2';
+  readonly predicateType: 'https://taucad.dev/attestation/geospec-trusted-evaluation/v3';
   readonly publicKeyPem: string;
-  readonly schema: 'geospec-trusted-verifier-policy-v2';
+  readonly schema: 'geospec-trusted-verifier-policy-v3';
   readonly trustedKeyId: string;
 };
 

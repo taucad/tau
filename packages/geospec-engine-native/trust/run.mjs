@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, createPublicKey, sign as cryptoSign, verify } from 'node:crypto';
 import {
+  closeSync,
   copyFileSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
+  readSync,
   realpathSync,
   rmSync,
   statSync,
@@ -21,7 +25,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const TRUST_ROOT = dirname(fileURLToPath(import.meta.url));
 const PAYLOAD_TYPE = 'application/vnd.in-toto+json';
-const PREDICATE_TYPE = 'https://taucad.dev/attestation/geospec-trusted-evaluation/v2';
+const PREDICATE_TYPE = 'https://taucad.dev/attestation/geospec-trusted-evaluation/v3';
+const EVALUATOR_MODE = 'signed-local-record';
+const ISOLATION_CLASS = 'none';
 const MAX_ENVELOPE_BYTES = 4_194_304;
 const MAX_ARTIFACT_BYTES = 67_108_864;
 const MAX_CANONICAL_BATCH_BYTES = 3 * MAX_ARTIFACT_BYTES;
@@ -30,6 +36,27 @@ const DARWIN_ARM64_PACKAGE = '@taucad/geospec-engine-native-darwin-arm64';
 const DARWIN_ARM64_BINARY = 'geospec-engine-native.darwin-arm64.node';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const readBoundedFile = (path, maximumBytes) => {
+  assert.ok(Number.isSafeInteger(maximumBytes) && maximumBytes >= 0 && maximumBytes <= MAX_ARTIFACT_BYTES);
+  const descriptor = openSync(path, 'r');
+  try {
+    const metadata = fstatSync(descriptor);
+    assert.ok(metadata.isFile(), `${path} must be a regular file`);
+    assert.ok(metadata.size <= maximumBytes, `${path} exceeds input limit`);
+    const bytes = Buffer.alloc(metadata.size);
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const length = readSync(descriptor, bytes, offset, bytes.byteLength - offset, null);
+      assert.ok(length > 0, `${path} changed length during read`);
+      offset += length;
+    }
+    assert.equal(readSync(descriptor, Buffer.alloc(1), 0, 1, null), 0, `${path} changed length during read`);
+    return bytes;
+  } finally {
+    closeSync(descriptor);
+  }
+};
+
 const exactKeys = (value, keys, label) => {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), `${label} must be an object`);
   assert.deepEqual(Object.keys(value).toSorted(), keys.toSorted(), `${label} fields`);
@@ -71,6 +98,8 @@ const runCanonicalizer = (productRoot, inputPath, mode) => {
     maxBuffer: mode === '--batch' ? MAX_CANONICAL_BATCH_BYTES : MAX_ARTIFACT_BYTES,
     timeout: 10_000,
   });
+  assert.ifError(result.error);
+  assert.equal(result.signal, null, 'canonicalizer terminated by signal');
   assert.equal(result.status, 0, Buffer.from(result.stderr ?? []).toString('utf8'));
   return Buffer.from(result.stdout);
 };
@@ -108,16 +137,18 @@ const canonicalizeJsonBatch = (productRoot, records) => {
   }
 };
 
-const canonicalizeValue = (productRoot, value) => {
+const canonicalizeBytes = (productRoot, bytes) => {
   const directory = mkdtempSync(join(tmpdir(), 'geospec-trust-'));
   const input = join(directory, 'input.json');
   try {
-    writeFileSync(input, JSON.stringify(value));
+    writeFileSync(input, bytes);
     return runCanonicalizer(productRoot, input);
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
 };
+
+const canonicalizeValue = (productRoot, value) => canonicalizeBytes(productRoot, Buffer.from(JSON.stringify(value)));
 
 const writeCanonical = ({ directory, name, productRoot, value }) => {
   const bytes = canonicalizeValue(productRoot, value);
@@ -212,11 +243,11 @@ const validatePlan = (plan) => {
 
 const copyBoundFile = ({ destinationPath, expected, planRoot, requestedSourcePath }) => {
   const source = resolve(planRoot, sourcePath(requestedSourcePath, 'subject source path'));
-  const bytes = readFileSync(source);
+  const bytes = readBoundedFile(source, expected.byteLength);
   assert.equal(bytes.byteLength, expected.byteLength, `${requestedSourcePath} byte length`);
   assert.equal(sha256(bytes), expected.sha256, `${requestedSourcePath} digest`);
   mkdirSync(dirname(destinationPath), { recursive: true });
-  copyFileSync(source, destinationPath);
+  writeFileSync(destinationPath, bytes);
   return destinationPath;
 };
 
@@ -325,9 +356,8 @@ const createRunnerManifest = () => ({
 });
 
 const loadPlan = (productRoot, planPath) => {
-  const approvedSource = readFileSync(planPath);
-  assert.ok(approvedSource.byteLength <= 1024 * 1024, 'approved plan exceeds limit');
-  const planBytes = runCanonicalizer(productRoot, planPath);
+  const approvedSource = readBoundedFile(planPath, 1024 * 1024);
+  const planBytes = canonicalizeBytes(productRoot, approvedSource);
   const plan = JSON.parse(planBytes);
   validatePlan(plan);
   const canonicalControls = canonicalizeJsonBatch(productRoot, [
@@ -392,6 +422,7 @@ const validatePolicy = (policy, described, jobChallenge) => {
       'expectedClaimIds',
       'expectedJobChallenge',
       'expectedSubjects',
+      'isolationClass',
       'maxArtifactBytes',
       'maxEnvelopeBytes',
       'numericProfile',
@@ -408,7 +439,7 @@ const validatePolicy = (policy, described, jobChallenge) => {
     ],
     'verification policy',
   );
-  assert.equal(policy.schema, 'geospec-trusted-verifier-policy-v2');
+  assert.equal(policy.schema, 'geospec-trusted-verifier-policy-v3');
   assert.deepEqual(
     {
       approvedPlanSha256: policy.approvedPlanSha256,
@@ -432,7 +463,8 @@ const validatePolicy = (policy, described, jobChallenge) => {
   assert.equal(policy.maxEnvelopeBytes, MAX_ENVELOPE_BYTES);
   assert.equal(policy.expectedJobChallenge, jobChallenge);
   assert.match(policy.evaluatorId, /^[\w.:-]{1,128}$/);
-  assert.match(policy.evaluatorMode, /^[\w.:-]{1,128}$/);
+  assert.equal(policy.evaluatorMode, EVALUATOR_MODE);
+  assert.equal(policy.isolationClass, ISOLATION_CLASS);
 };
 
 const decodeRecordBytes = (entry) => {
@@ -657,6 +689,8 @@ export const evaluateTrustedPlan = async ({
     timeout: plan.requirements.workerDeadlineMs,
   });
   writeFileSync(join(output, 'worker.stderr'), worker.stderr ?? Buffer.alloc(0));
+  assert.ifError(worker.error);
+  assert.equal(worker.signal, null, 'evaluator terminated by signal');
   assert.equal(worker.status, 0, Buffer.from(worker.stderr ?? []).toString('utf8'));
   assert.ok(worker.stdout && worker.stdout.byteLength > 0, 'worker produced no record');
   writeFileSync(join(closure, 'raw-evaluation.json'), worker.stdout);
@@ -714,7 +748,7 @@ export const evaluateTrustedPlan = async ({
         packageName: engine.manifest.package.name,
         packageVersion: engine.manifest.package.version,
       },
-      evaluator: { id: policy.evaluatorId, mode: policy.evaluatorMode },
+      evaluator: { id: policy.evaluatorId, isolationClass: ISOLATION_CLASS, mode: EVALUATOR_MODE },
       profiles: {
         canonical: plan.authority.canonicalProfile,
         numeric: record.initialization.numericProfile,
@@ -728,7 +762,7 @@ export const evaluateTrustedPlan = async ({
       },
       run: { freshChallengeRequired: plan.requirements.freshChallengeRequired, jobChallenge },
       runner: { manifestSha256: sha256(runnerBytes) },
-      schema: 'geospec-trusted-evaluation-predicate-v2',
+      schema: 'geospec-trusted-evaluation-predicate-v3',
       subjects: plan.subjects.map((subject) => ({
         expectedIdentity: subject.expectedIdentity,
         format: subject.format,

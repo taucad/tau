@@ -254,6 +254,9 @@ const unitlessTextParameter = (
     pointer: string,
   ): { pointer: string; text: string } | undefined => {
     if (typeof value === 'string') {
+      if (node && validateJsonSchemaValue({ ...node }, value)) {
+        return undefined;
+      }
       return schemaIsNumeric(node) &&
         resolveParameterBinding(manifest, pointer)?.unit === undefined &&
         unitBearingTextPattern.test(value)
@@ -1702,7 +1705,35 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }): Promise<HashedGeometryResult> {
     return this.enqueueOperation(async () => {
       this.prepareUnobservedFileSystem(true);
-      return this.createGeometryInLane(entry);
+      const dependencyContext: DependencyResolutionContext = {};
+      const owner = await this.createOperationOwner(entry.file, 'render-artifact');
+      const parametersResult = await this.getParametersInLane(entry.file, { dependencyContext, owner });
+      if (!parametersResult.success) {
+        return parametersResult;
+      }
+      const extracted = parametersResult.data;
+      if (extracted.legacyProjection.status !== 'usable') {
+        return createKernelError([
+          {
+            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: extracted.legacyProjection.diagnostics,
+          },
+        ]);
+      }
+      const parameterSchema = extracted.legacyProjection.schema;
+      return this.createGeometryInLane(
+        {
+          ...entry,
+          parameters: mergeParameterDefaults({}, entry.parameters, parameterSchema),
+          parameterDefaults: extracted.defaults,
+          parameterManifest: extracted,
+          parameterSchema,
+        },
+        { dependencyContext, owner },
+      );
     });
   }
 
@@ -1710,9 +1741,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     entry: {
       file: RuntimeFileLocator;
       parameters: Record<string, unknown>;
-      parameterDefaults?: Record<string, unknown>;
-      parameterManifest?: ParameterManifest;
-      parameterSchema?: JSONSchema7;
+      parameterDefaults: Record<string, unknown>;
+      parameterManifest: ParameterManifest;
+      parameterSchema: JSONSchema7;
       options?: Record<string, unknown>;
       content?: RuntimeContentInput;
     },
@@ -2540,9 +2571,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     entry: {
       file: RuntimeFileLocator;
       parameters: Record<string, unknown>;
-      parameterDefaults?: Record<string, unknown>;
-      parameterManifest?: ParameterManifest;
-      parameterSchema?: JSONSchema7;
+      parameterDefaults: Record<string, unknown>;
+      parameterManifest: ParameterManifest;
+      parameterSchema: JSONSchema7;
       options?: Record<string, unknown>;
       content?: RuntimeContentInput;
       export?: {
@@ -2707,10 +2738,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
         : undefined;
       const chainParameters = mergeParameterDefaults({}, handlerInput.parameters, entry.parameterSchema);
-      const unitlessText =
-        entry.parameterManifest && entry.parameterSchema
-          ? unitlessTextParameter(entry.parameterManifest, entry.parameterSchema, chainParameters)
-          : undefined;
+      const unitlessText = unitlessTextParameter(entry.parameterManifest, entry.parameterSchema, chainParameters);
       if (unitlessText) {
         computeSpan.end();
         return createKernelError([
@@ -2724,9 +2752,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
       let resolvedParameters: Readonly<Record<string, unknown>>;
       try {
-        resolvedParameters = entry.parameterManifest
-          ? resolveParameterInputValues(entry.parameterManifest, chainParameters)
-          : chainParameters;
+        resolvedParameters = resolveParameterInputValues(entry.parameterManifest, chainParameters);
       } catch (error) {
         computeSpan.end();
         const diagnostic = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
@@ -2741,11 +2767,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         ]);
       }
       const parameters = mergeParameterDefaults(
-        entry.parameterDefaults ?? {},
+        entry.parameterDefaults,
         { ...resolvedParameters },
         entry.parameterSchema,
       );
-      if (entry.parameterSchema !== undefined && !validateJsonSchemaValue({ ...entry.parameterSchema }, parameters)) {
+      if (!validateJsonSchemaValue({ ...entry.parameterSchema }, parameters)) {
         computeSpan.end();
         return createKernelError([
           {
@@ -4322,10 +4348,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return createKernelError(desiredNativeHandleKey.issues);
     }
     if (!this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key)) {
+      const parametersResult = await this.getParametersInLane(renderArtifact.identity.file, { owner: plan.owner });
+      if (!parametersResult.success) {
+        return parametersResult;
+      }
+      const extracted = parametersResult.data;
+      if (extracted.legacyProjection.status !== 'usable') {
+        return createKernelError([
+          {
+            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: extracted.legacyProjection.diagnostics,
+          },
+        ]);
+      }
       const materialized = await this.materializeRender(
         {
           file: renderArtifact.identity.file,
-          parameters: renderArtifact.identity.parameters,
+          parameters: renderArtifact.identity.nativeBuildInput?.parameters ?? renderArtifact.identity.parameters,
+          parameterDefaults: extracted.defaults,
+          parameterManifest: extracted,
+          parameterSchema: extracted.legacyProjection.schema,
           options: renderArtifact.identity.renderOptions,
           content: plan.route.content,
           export: { ...exportMaterialization, dependency: plan.dependency },

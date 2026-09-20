@@ -82,6 +82,7 @@ const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): string
 };
 
 const blobOids = new WeakMap<Uint8Array<ArrayBuffer>, Readonly<{ format: ObjectFormat; oid: string }>>();
+const treeOids = new WeakMap<ImmutableRevisionTree, Map<ObjectFormat, string>>();
 
 const hashNode = (node: TreeNode, format: ObjectFormat): string => {
   const entries = [
@@ -119,5 +120,14 @@ const hashNode = (node: TreeNode, format: ObjectFormat): string => {
  * @returns Lowercase hexadecimal tree object id.
  * @public
  */
-export const revisionTreeId = (tree: ImmutableRevisionTree, format: ObjectFormat): string =>
-  hashNode(nodeOf(tree), format);
+export const revisionTreeId = (tree: ImmutableRevisionTree, format: ObjectFormat): string => {
+  const held = treeOids.get(tree)?.get(format);
+  if (held !== undefined) {
+    return held;
+  }
+  const oid = hashNode(nodeOf(tree), format);
+  const byFormat = treeOids.get(tree) ?? new Map<ObjectFormat, string>();
+  byFormat.set(format, oid);
+  treeOids.set(tree, byFormat);
+  return oid;
+};

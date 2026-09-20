@@ -127,7 +127,6 @@ describe('captureRevisionTree', () => {
     expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
   });
 
-  /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed fixtures use the empty string for the rooted filesystem root. */
   it('captures a rooted view that has no streaming read by buffering each file', async () => {
     // The browser's `createClientRootedFileSystem` wraps a `FileSystemClient`
     // with no streaming read; requiring one failed every browser-placed chat.
@@ -146,9 +145,7 @@ describe('captureRevisionTree', () => {
       ['nested/keep.txt', 'nested kept'],
     ]);
   });
-  /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after the path-keyed fixtures */
 
-  /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed fixtures use the empty string for the rooted filesystem root. */
   it('rejects required files that vanish, are excluded, or resolve as directories', async () => {
     const filesystem = vanishingFileSystem(
       { '': ['gone.txt', 'excluded.txt', 'directory'], 'excluded.txt': 'hidden', directory: [] },
@@ -169,7 +166,7 @@ describe('captureRevisionTree', () => {
     );
   });
 
-  it('bounds sibling stream reads at the default concurrency', async () => {
+  it('should bound sibling stream reads at the default concurrency', async () => {
     const paths = Array.from({ length: 24 }, (_, index) => `file-${index}.bin`);
     const filesystem = vanishingFileSystem(
       { '': paths, ...Object.fromEntries(paths.map((path) => [path, 'x'])) },
@@ -177,17 +174,28 @@ describe('captureRevisionTree', () => {
     );
     let active = 0;
     let maximumActive = 0;
+    let poolReached = false;
+    const pending: Array<ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>> = [];
     filesystem.readFileStream = () =>
       new ReadableStream<Uint8Array<ArrayBuffer>>({
-        async start(controller) {
+        start(controller) {
           active += 1;
           maximumActive = Math.max(maximumActive, active);
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 1);
-          });
-          controller.enqueue(new Uint8Array([1]));
-          controller.close();
-          active -= 1;
+          if (poolReached) {
+            controller.enqueue(new Uint8Array([1]));
+            controller.close();
+            active -= 1;
+            return;
+          }
+          pending.push(controller);
+          if (pending.length === 16) {
+            poolReached = true;
+            for (const waiting of pending.splice(0)) {
+              waiting.enqueue(new Uint8Array([1]));
+              waiting.close();
+              active -= 1;
+            }
+          }
         },
       });
 
@@ -416,14 +424,12 @@ describe('captureRevisionTree', () => {
 
     expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
   });
-  /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after path-keyed fixtures. */
 });
 
 describe('createCaptureMemo', () => {
-  /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed fixtures use the empty string for the rooted filesystem root. */
   const tree = { '': ['small.ts', 'mesh.stl'], 'small.ts': 'ab', 'mesh.stl': 'solid ' };
-  /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after path-keyed fixtures. */
   const observedAt = 1_000_000;
+  const mebibyte = 1024 * 1024;
   const statsOf = (files: Readonly<Record<string, string>>): FileStatEntry[] =>
     Object.entries(files).map(([path, value]) => ({
       path,
@@ -448,6 +454,36 @@ describe('createCaptureMemo', () => {
     const reused = ['small.ts', 'mesh.stl'].map((path) => second.reuse?.(path)?.byteLength ?? 0);
     expect(reused).toEqual([2, 0]);
     expect(reused.reduce((total, bytes) => total + bytes, 0)).toBeLessThanOrEqual(3);
+  });
+
+  it('should retain at most 64 MiB by default and prune paths absent from the next stat set', () => {
+    const memo = createCaptureMemo();
+    const content = new Uint8Array(32 * mebibyte);
+    const stats: FileStatEntry[] = ['first.bin', 'second.bin', 'third.bin'].map((path) => ({
+      path,
+      name: path,
+      type: 'file',
+      size: path === 'third.bin' ? 1 : content.byteLength,
+      mtimeMs: observedAt - 60_000,
+      contentKind: 'binary',
+    }));
+    const first = memo.unchanged(stats, observedAt);
+    first.onRead?.('first.bin', content);
+    first.onRead?.('second.bin', content);
+    first.onRead?.('third.bin', new Uint8Array(1));
+
+    const warm = memo.unchanged(stats, observedAt);
+    expect(['first.bin', 'second.bin', 'third.bin'].filter((path) => warm.reuse?.(path) !== undefined)).toEqual([
+      'first.bin',
+      'second.bin',
+    ]);
+    expect((warm.reuse?.('first.bin')?.byteLength ?? 0) + (warm.reuse?.('second.bin')?.byteLength ?? 0)).toBe(
+      64 * mebibyte,
+    );
+
+    const pruned = memo.unchanged(stats.slice(1), observedAt);
+    expect(pruned.reuse?.('first.bin')).toBeUndefined();
+    expect(pruned.reuse?.('second.bin')).toBeDefined();
   });
 
   it('should read the file it could not hold again and still read none of the ones it could', async () => {
@@ -484,5 +520,25 @@ describe('createCaptureMemo', () => {
     first.onRead?.('small.ts', new TextEncoder().encode('ab'));
 
     expect(memo.unchanged(stats, observedAt).reuse?.('small.ts')).toBeUndefined();
+  });
+
+  it('should trust a timestamp only after the two-second racy window', async () => {
+    const filesystem = vanishingFileSystem(tree, new Set());
+    const reads = vi.spyOn(filesystem, 'readFileStream');
+    const atBoundary = statsOf({ 'small.ts': 'ab', 'mesh.stl': 'solid ' }).map((stat) => ({
+      ...stat,
+      mtimeMs: observedAt - 2000,
+    }));
+    const boundaryMemo = createCaptureMemo();
+    await captureRevisionTree(filesystem, { ...boundaryMemo.unchanged(atBoundary, observedAt) });
+    await captureRevisionTree(filesystem, { ...boundaryMemo.unchanged(atBoundary, observedAt) });
+    expect(reads).toHaveBeenCalledTimes(4);
+
+    reads.mockClear();
+    const oldEnough = atBoundary.map((stat) => ({ ...stat, mtimeMs: stat.mtimeMs - 1 }));
+    const trustedMemo = createCaptureMemo();
+    await captureRevisionTree(filesystem, { ...trustedMemo.unchanged(oldEnough, observedAt) });
+    await captureRevisionTree(filesystem, { ...trustedMemo.unchanged(oldEnough, observedAt) });
+    expect(reads).toHaveBeenCalledTimes(2);
   });
 });

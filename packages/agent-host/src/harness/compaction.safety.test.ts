@@ -401,8 +401,17 @@ describe('compaction safety regressions', () => {
     const before = serializedEvents(await beforeLog.read());
     await beforeLog.close();
 
-    await expect(session.agent.prepareNextTurn?.()).rejects.toThrow('compaction append rejected');
+    const prepared = await session.agent.prepareNextTurn?.();
     expect(rejectedCompaction).toBe(true);
+    const failureStream = await session.agent.streamFunction(session.agent.state.model as Model<Api>, {
+      systemPrompt: session.agent.state.systemPrompt,
+      messages: (prepared?.context?.messages ?? []) as Context['messages'],
+      tools: session.agent.state.tools,
+    });
+    expect(await failureStream.result()).toMatchObject({
+      stopReason: 'error',
+      errorMessage: 'compaction append rejected',
+    });
 
     const afterLog = await file.open();
     expect(serializedEvents(await afterLog.read())).toBe(before);
@@ -557,6 +566,14 @@ describe('compaction safety regressions', () => {
         throw new DOMException('summary aborted', 'AbortError');
       },
     },
+    {
+      failure: 'cannot fit its input',
+      summarize: async () => {
+        throw Object.assign(new Error('summary input exceeds the model context window'), {
+          code: 'INVALID_REQUEST',
+        });
+      },
+    },
   ])('should use a placeholder eviction when the summarizer $failure', async ({ summarize }) => {
     const file = createMemoryEventLogFile();
     await seedMessages(
@@ -594,6 +611,78 @@ describe('compaction safety regressions', () => {
     expect(placeholder).toMatch(/turn/iu);
     expect(placeholder).toMatch(/project files/iu);
     expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    await log.close();
+    await session.close();
+  });
+
+  it('should use a placeholder eviction when the summarizer emits a tool call', async () => {
+    const file = createMemoryEventLogFile();
+    await seedMessages(
+      file,
+      Array.from(
+        { length: 8 },
+        (_, index): ProviderMessage => ({
+          id: `tool-summary-user-${index}`,
+          role: 'user',
+          content: `${index}-${'t'.repeat(4000)}`,
+        }),
+      ),
+    );
+    const transport = new ScriptedTransport((_call, request) =>
+      request.systemPrompt.startsWith('You are a context summarization assistant')
+        ? [
+            {
+              type: 'tool-input',
+              toolCallId: 'summary-tool-call',
+              toolName: 'read_file',
+              input: { targetFile: 'main.ts' },
+            },
+            { type: 'completed', stopReason: 'toolUse' },
+          ]
+        : [{ type: 'completed', stopReason: 'stop' }],
+    );
+    const session = await createSession({ file, transport });
+
+    await session.prompt({ id: 'tool-summary-next', role: 'user', content: 'continue' });
+
+    const log = await file.open();
+    const events = await log.read();
+    const compacted = events.find((event) => event.type === 'history.compacted');
+    expect(compacted).toMatchObject({ type: 'history.compacted' });
+    expect(JSON.stringify(compacted)).toMatch(/project files/iu);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
+    await log.close();
+    await session.close();
+  });
+
+  it('should propagate the run abort signal instead of replacing it with a placeholder', async () => {
+    const file = createMemoryEventLogFile();
+    await seedMessages(
+      file,
+      Array.from(
+        { length: 8 },
+        (_, index): ProviderMessage => ({
+          id: `abort-user-${index}`,
+          role: 'user',
+          content: `${index}-${'a'.repeat(4000)}`,
+        }),
+      ),
+    );
+    const controller = new AbortController();
+    const session = await createSession({
+      file,
+      transport: new ScriptedTransport(() => [{ type: 'completed', stopReason: 'stop' }]),
+      summarize: async () => {
+        controller.abort();
+        throw new DOMException('run aborted', 'AbortError');
+      },
+    });
+
+    await expect(session.agent.prepareNextTurn?.(controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+
+    const log = await file.open();
+    const events = await log.read();
+    expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
     await log.close();
     await session.close();
   });

@@ -16,9 +16,10 @@ import type {
   StreamFn,
 } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, isContextOverflow } from '@earendil-works/pi-ai';
-import type { Api, AssistantMessage, Model, Models, UserMessage } from '@earendil-works/pi-ai';
+import type { Api, AssistantMessage, Model, Models, Usage, UserMessage } from '@earendil-works/pi-ai';
 import { createTransportFailureDiagnostic, piMessageToProvider } from '#harness/session-record.js';
 import type { SessionRecord } from '#harness/session-record.js';
+import type { CompactionTrace } from '#log/event-types.js';
 
 const clearedToolResultContent = '[Old tool result content cleared]';
 const recentToolResultsToKeep = 5;
@@ -36,14 +37,17 @@ const compactableTools = new Set([
 /** Typed failure used when compaction cannot restore provider headroom. @public */
 export class HostCompactionError extends Error {
   public readonly code: 'SUMMARY_REQUIRED' | 'NO_EVICTABLE_HISTORY' | 'SESSION_LOG_INTEGRITY' | 'CIRCUIT_BREAKER_OPEN';
+  public readonly details?: CompactionTrace | undefined;
 
   public constructor(
     code: 'SUMMARY_REQUIRED' | 'NO_EVICTABLE_HISTORY' | 'SESSION_LOG_INTEGRITY' | 'CIRCUIT_BREAKER_OPEN',
     message: string,
+    details?: CompactionTrace,
   ) {
     super(message);
     this.name = 'HostCompactionError';
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -53,6 +57,7 @@ export type CompactionOutcome = {
   readonly tier?: 'tool_result_clearing' | 'summarization' | undefined;
   readonly cleared: number;
   readonly evicted: number;
+  readonly details?: CompactionTrace | undefined;
 };
 
 /** Host callback that summarizes an evicted provider-history prefix. @public */
@@ -162,6 +167,27 @@ const compactionSettings = (contextWindow: number): CompactionSettings => ({
 
 const messageTokens = (messages: readonly AgentMessage[]): number =>
   messages.reduce((total, message) => total + estimateTokens(message), 0);
+
+const combineUsage = (left: CompactionTrace['summarizerUsage'], right: Usage): Usage => ({
+  input: (left?.input ?? 0) + right.input,
+  output: (left?.output ?? 0) + right.output,
+  cacheRead: (left?.cacheRead ?? 0) + right.cacheRead,
+  cacheWrite: (left?.cacheWrite ?? 0) + right.cacheWrite,
+  ...((left?.cacheWrite1h ?? right.cacheWrite1h) === undefined
+    ? {}
+    : { cacheWrite1h: (left?.cacheWrite1h ?? 0) + (right.cacheWrite1h ?? 0) }),
+  ...((left?.reasoning ?? right.reasoning) === undefined
+    ? {}
+    : { reasoning: (left?.reasoning ?? 0) + (right.reasoning ?? 0) }),
+  totalTokens: (left?.totalTokens ?? 0) + right.totalTokens,
+  cost: {
+    input: (left?.cost.input ?? 0) + right.cost.input,
+    output: (left?.cost.output ?? 0) + right.cost.output,
+    cacheRead: (left?.cost.cacheRead ?? 0) + right.cost.cacheRead,
+    cacheWrite: (left?.cost.cacheWrite ?? 0) + right.cost.cacheWrite,
+    total: (left?.cost.total ?? 0) + right.cost.total,
+  },
+});
 
 const summaryText = (message: AgentMessage): string | undefined => {
   const text = userText(message);
@@ -288,25 +314,30 @@ const lastUserText = (messages: readonly AgentMessage[]): string => {
   return '';
 };
 
-const keepContextTags = (messages: readonly AgentMessage[]): string[] => {
-  const tags = new Set<string>();
+const keepContext = (
+  messages: readonly AgentMessage[],
+): { readonly tags: string[]; readonly messages: ReadonlySet<AgentMessage> } => {
+  const newestByTag = new Map<string, AgentMessage>();
   for (const message of messages) {
     const text = userText(message);
     for (const tag of text.match(/<[a-z][\w:-]*(?:\s[^>]*)?>/giu) ?? []) {
       if (tag.toLowerCase().includes('safety') || tag.toLowerCase().includes('system-reminder')) {
-        tags.add(tag);
+        newestByTag.set(tag, message);
       }
     }
   }
-  return [...tags];
+  return { tags: [...newestByTag.keys()], messages: new Set(newestByTag.values()) };
 };
 
-const preserveDuringCompaction = (message: AgentMessage, tags: readonly string[]): boolean => {
-  if (summaryText(message) !== undefined) {
-    return false;
-  }
-  const text = userText(message);
-  return tags.some((tag) => text.includes(tag));
+const preserveDuringCompaction = (message: AgentMessage, pinned: ReadonlySet<AgentMessage>): boolean =>
+  summaryText(message) === undefined && pinned.has(message);
+
+const placeholderSummary = (messages: readonly AgentMessage[]): string => {
+  const turns = Math.max(
+    1,
+    messages.filter((message) => message.role === 'user' && summaryText(message) === undefined).length,
+  );
+  return `Compaction could not summarize ${messages.length} message${messages.length === 1 ? '' : 's'} spanning ${turns} turn${turns === 1 ? '' : 's'}. The project files are the source of truth for the current work.`;
 };
 
 /** Install two-tier compaction on pi's durable turn and overflow seams. @public */
@@ -388,25 +419,33 @@ export const installCompaction = (
       };
     });
 
-  const persistClearings = async (replacements: ReturnType<typeof prepareClearings>): Promise<void> => {
-    for (const { messageId, replacement } of replacements) {
+  const persistClearings = async (
+    replacements: ReturnType<typeof prepareClearings>,
+    details?: CompactionTrace,
+  ): Promise<void> => {
+    for (const [index, { messageId, replacement }] of replacements.entries()) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Event-log cursor writes must remain ordered.
       await options.record.append({
         type: 'message.envelope-replaced',
         messageId,
         replacement,
+        ...(index === 0 && details ? { details } : {}),
       });
     }
   };
 
   const compact = async ({
     input,
+    lane,
     signal,
     force = false,
+    discardedOverflowError,
   }: {
     readonly input: readonly AgentMessage[];
+    readonly lane: CompactionTrace['lane'];
     readonly signal?: AbortSignal | undefined;
     readonly force?: boolean | undefined;
+    readonly discardedOverflowError?: string | undefined;
   }): Promise<CompactionOutcome> => {
     /*
      * Measure the anchor against the untouched input, even when the overflow
@@ -416,185 +455,288 @@ export const installCompaction = (
      */
     const settings = compactionSettings(options.contextWindow);
     const trigger = contextTokens(input);
+    const fixedOverhead = Math.max(0, trigger.tokens - messageTokens(input));
+    let summarizerAttempts = 0;
+    let summarizerUsage: CompactionTrace['summarizerUsage'] = null;
+    let evictedCount = 0;
+    let tokensAfter = trigger.tokens;
+    let summaryKind: CompactionTrace['summary'];
+    const trace = (tier: CompactionTrace['tier'], cleared: number): CompactionTrace => ({
+      lane,
+      tier,
+      tokensBefore: trigger.tokens,
+      tokensAfter,
+      cleared,
+      evicted: evictedCount,
+      summarizerAttempts,
+      summarizerUsage,
+      ...(summaryKind === undefined ? {} : { summary: summaryKind }),
+      ...(discardedOverflowError === undefined ? {} : { discardedOverflowError }),
+    });
+    const refuse = ({
+      code,
+      message,
+      tier,
+      cleared = 0,
+    }: {
+      readonly code: HostCompactionError['code'];
+      readonly message: string;
+      readonly tier: CompactionTrace['tier'];
+      readonly cleared?: number | undefined;
+    }): never => {
+      strikes = 0;
+      throw new HostCompactionError(code, message, trace(tier, cleared));
+    };
     const oversized = (force && !trigger.anchored) || shouldCompact(trigger.tokens, options.contextWindow, settings);
     if (!force && !oversized) {
       return { messages: [...input], cleared: 0, evicted: 0 };
     }
-    const messageBudget = Math.max(
-      32,
-      options.contextWindow - settings.reserveTokens - Math.max(0, trigger.tokens - messageTokens(input)),
-    );
+    const messageBudget = Math.max(32, options.contextWindow - settings.reserveTokens - fixedOverhead);
     const tierOne = clearOldToolResults(input);
+    const tierOneTokens = fixedOverhead + messageTokens(tierOne.messages);
     if (
       tierOne.cleared.length > 0 &&
       (!force || trigger.anchored) &&
-      messageTokens(tierOne.messages) <= messageBudget
+      tierOneTokens <= options.contextWindow - settings.reserveTokens - settings.keepRecentTokens
     ) {
-      await persistClearings(prepareClearings(tierOne.cleared));
+      tokensAfter = tierOneTokens;
+      const details = trace('tool_result_clearing', tierOne.cleared.length);
+      try {
+        await persistClearings(prepareClearings(tierOne.cleared), details);
+      } catch (error) {
+        if (signal?.aborted) {
+          throw error;
+        }
+        strikes = 0;
+        throw new HostCompactionError(
+          'SESSION_LOG_INTEGRITY',
+          error instanceof Error ? error.message : String(error),
+          details,
+        );
+      }
       strikes = 0;
       const outcome: CompactionOutcome = {
         messages: tierOne.messages,
         tier: 'tool_result_clearing',
         cleared: tierOne.cleared.length,
         evicted: 0,
+        details,
       };
       options.onCompaction?.(outcome);
       return outcome;
     }
 
-    strikes++;
-    if (strikes >= 3) {
-      throw new HostCompactionError(
-        'CIRCUIT_BREAKER_OPEN',
-        'Repeated compaction could not restore provider headroom; start a new thread.',
-      );
+    const tierTwoMessages = input;
+    const keep = keepContext(tierTwoMessages);
+    if (tierTwoMessages.length <= 1) {
+      refuse({
+        code: 'NO_EVICTABLE_HISTORY',
+        message: 'Context is oversized but has no safe history to evict.',
+        tier: 'summarization',
+      });
     }
-    if (!options.summarize && !options.models) {
-      throw new HostCompactionError('SUMMARY_REQUIRED', 'Tier-two compaction requires the session model summarizer.');
-    }
-
-    const tags = keepContextTags(tierOne.messages);
-    if (tierOne.messages.length <= 1) {
-      throw new HostCompactionError('NO_EVICTABLE_HISTORY', 'Context is oversized but has no safe history to evict.');
-    }
-    let cutoff = tokenBudgetCutoff(tierOne.messages, messageBudget);
+    let cutoff = tokenBudgetCutoff(tierTwoMessages, messageBudget);
     let evicted: AgentMessage[] = [];
     let summary: UserMessage;
     let messages: AgentMessage[];
+    let placeholder = !options.summarize && !options.models;
     for (;;) {
-      const prefix = tierOne.messages.slice(0, cutoff);
-      evicted = prefix.filter((message) => !preserveDuringCompaction(message, tags));
+      const prefix = tierTwoMessages.slice(0, cutoff);
+      evicted = prefix.filter((message) => !preserveDuringCompaction(message, keep.messages));
+      evictedCount = evicted.length;
       if (evicted.length === 0) {
-        const later = laterCutoff(tierOne.messages, cutoff);
+        const later = laterCutoff(tierTwoMessages, cutoff);
         if (later !== undefined) {
           cutoff = later;
           continue;
         }
-        throw new HostCompactionError('SUMMARY_REQUIRED', 'Pinned context leaves no history available to summarize.');
+        refuse({
+          code: 'SUMMARY_REQUIRED',
+          message: 'Pinned context leaves no history available to summarize.',
+          tier: 'summarization',
+        });
       }
       const previousSummary = evicted.findLast((message) => summaryText(message) !== undefined);
       const previousSummaryText = previousSummary ? summaryText(previousSummary) : undefined;
       const messagesToSummarize = evicted.filter((message) => message !== previousSummary);
-      let compactedSummary: string;
-      if (options.summarize) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result must widen and summarize the new cut in the same pass.
-        compactedSummary = await options.summarize({
-          messages: messagesToSummarize,
-          query: lastUserText(tierOne.messages.slice(cutoff)),
-          keepContextTags: tags,
-          previousSummary: previousSummaryText,
-          signal,
-        });
-      } else {
-        const sentinel: UserMessage = { role: 'user', content: 'keep', timestamp: now() };
-        const prepared = prepareCompaction(compactionEntries([...evicted, sentinel]), {
-          ...settings,
-          keepRecentTokens: 1,
-        });
-        if (!prepared.ok || !prepared.value) {
-          throw new HostCompactionError(
-            'SUMMARY_REQUIRED',
-            prepared.ok ? 'Pi could not prepare tier-two compaction.' : prepared.error.message,
-          );
+      let compactedSummary = '';
+      if (!placeholder) {
+        summarizerAttempts++;
+        try {
+          if (options.summarize) {
+            // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result must widen and summarize the new cut in the same pass.
+            compactedSummary = await options.summarize({
+              messages: messagesToSummarize,
+              query: lastUserText(tierTwoMessages.slice(cutoff)),
+              keepContextTags: keep.tags,
+              previousSummary: previousSummaryText,
+              signal,
+            });
+          } else {
+            const sentinel: UserMessage = { role: 'user', content: 'keep', timestamp: now() };
+            const prepared = prepareCompaction(compactionEntries([...evicted, sentinel]), {
+              ...settings,
+              keepRecentTokens: 1,
+            });
+            if (prepared.ok && prepared.value) {
+              // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result must widen and summarize the new cut in the same pass.
+              const result = await compactWithPi(
+                {
+                  ...prepared.value,
+                  retainedTail: [],
+                  tokensBefore: estimateContextTokens([...tierTwoMessages]).tokens,
+                  settings,
+                },
+                options.models!,
+                agent.state.model as Model<Api>,
+                undefined,
+                signal,
+              );
+              if (result.ok) {
+                compactedSummary = result.value.summary;
+                if (result.value.usage) {
+                  summarizerUsage = combineUsage(summarizerUsage, result.value.usage);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          if (signal?.aborted) {
+            throw error;
+          }
         }
-        // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result must widen and summarize the new cut in the same pass.
-        const result = await compactWithPi(
-          {
-            ...prepared.value,
-            retainedTail: [],
-            tokensBefore: estimateContextTokens(tierOne.messages).tokens,
-            settings,
-          },
-          options.models!,
-          agent.state.model as Model<Api>,
-          undefined,
-          signal,
-        );
-        if (!result.ok) {
-          throw new HostCompactionError('SUMMARY_REQUIRED', result.error.message);
-        }
-        compactedSummary = result.value.summary;
+        placeholder = compactedSummary === '';
       }
-      if (compactedSummary === '') {
-        throw new HostCompactionError('SUMMARY_REQUIRED', 'Compaction produced an empty summary.');
-      }
+      summaryKind = placeholder ? 'placeholder' : 'generated';
+      compactedSummary = placeholder ? placeholderSummary(evicted) : compactedSummary;
       summary = {
         role: 'user',
         content: [{ type: 'text', text: `<summary>\n${compactedSummary}\n</summary>` }],
         timestamp: now(),
       };
       const evictedSet = new Set(evicted);
-      const firstIndex = tierOne.messages.findIndex((message) => evictedSet.has(message));
-      messages = tierOne.messages.filter((message) => !evictedSet.has(message));
+      const firstIndex = tierTwoMessages.findIndex((message) => evictedSet.has(message));
+      messages = tierTwoMessages.filter((message) => !evictedSet.has(message));
       messages.splice(firstIndex, 0, summary);
+      tokensAfter = fixedOverhead + messageTokens(messages);
       if (messageTokens(messages) <= messageBudget) {
         break;
       }
-      const later = laterCutoff(tierOne.messages, cutoff);
+      const later = laterCutoff(tierTwoMessages, cutoff);
       if (later === undefined) {
-        throw new HostCompactionError('SUMMARY_REQUIRED', 'Compaction summary could not restore provider headroom.');
+        strikes++;
+        const code = strikes >= 3 ? 'CIRCUIT_BREAKER_OPEN' : 'SUMMARY_REQUIRED';
+        const message =
+          code === 'CIRCUIT_BREAKER_OPEN'
+            ? 'Repeated compaction could not restore provider headroom; start a new thread.'
+            : 'Compaction summary could not restore provider headroom.';
+        throw new HostCompactionError(code, message, trace('summarization', 0));
       }
       cutoff = later;
     }
 
-    const evictedSet = new Set(evicted);
-    for (const { original, replacement } of tierOne.cleared) {
-      options.record.messages.transfer(original, replacement);
+    const details = trace('summarization', 0);
+    try {
+      const piIds = evicted.map((message) => projectionId(message));
+      const piIdSet = new Set(piIds);
+      const toolCallIds = new Set(
+        evicted.flatMap((message) => {
+          if (message.role === 'toolResult') {
+            return [message.toolCallId];
+          }
+          return message.role === 'assistant'
+            ? message.content.flatMap((block) => (block.type === 'toolCall' ? [block.id] : []))
+            : [];
+        }),
+      );
+      const history = await options.record.history();
+      const durableIds = history
+        .filter(
+          (message) =>
+            piIdSet.has(message.id) || (message.role === 'tool-input' && toolCallIds.has(message.toolCallId)),
+        )
+        .map((message) => message.id);
+      const projectedDurableIds = history
+        .filter((message) => message.role !== 'tool-input' && durableIds.includes(message.id))
+        .map((message) => message.id);
+      if (
+        piIdSet.size !== projectedDurableIds.length ||
+        projectedDurableIds.some((id) => !piIdSet.has(id)) ||
+        piIds.some((id) => !projectedDurableIds.includes(id))
+      ) {
+        throw new Error('Compaction projection diverged from durable history.');
+      }
+      const durableSummary = piMessageToProvider(summary, options.record.messages);
+      await options.record.append({
+        type: 'history.compacted',
+        evictedMessageIds: durableIds,
+        summary: durableSummary,
+        details,
+      });
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      strikes = 0;
+      throw new HostCompactionError(
+        'SESSION_LOG_INTEGRITY',
+        error instanceof Error ? error.message : String(error),
+        details,
+      );
     }
-    const piIds = evicted.map((message) => projectionId(message));
-    const piIdSet = new Set(piIds);
-    const toolCallIds = new Set(
-      evicted.flatMap((message) => {
-        if (message.role === 'toolResult') {
-          return [message.toolCallId];
-        }
-        return message.role === 'assistant'
-          ? message.content.flatMap((block) => (block.type === 'toolCall' ? [block.id] : []))
-          : [];
-      }),
-    );
-    const history = await options.record.history();
-    const durableIds = history
-      .filter(
-        (message) => piIdSet.has(message.id) || (message.role === 'tool-input' && toolCallIds.has(message.toolCallId)),
-      )
-      .map((message) => message.id);
-    const projectedDurableIds = history
-      .filter((message) => message.role !== 'tool-input' && durableIds.includes(message.id))
-      .map((message) => message.id);
-    if (
-      piIdSet.size !== projectedDurableIds.length ||
-      projectedDurableIds.some((id) => !piIdSet.has(id)) ||
-      piIds.some((id) => !projectedDurableIds.includes(id))
-    ) {
-      throw new Error('Compaction projection diverged from durable history.');
-    }
-    const retainedClearings = tierOne.cleared.filter(({ replacement }) => !evictedSet.has(replacement));
-    const durableSummary = piMessageToProvider(summary, options.record.messages);
-    const clearingEvents = prepareClearings(retainedClearings);
-    await options.record.append({
-      type: 'history.compacted',
-      evictedMessageIds: durableIds,
-      summary: durableSummary,
-    });
-    await persistClearings(clearingEvents);
     strikes = 0;
     options.onSummary?.();
     const outcome: CompactionOutcome = {
       messages,
       tier: 'summarization',
-      cleared: tierOne.cleared.length,
+      cleared: 0,
       evicted: evicted.length,
+      details,
     };
     options.onCompaction?.(outcome);
     return outcome;
   };
 
+  const compactionFailure = ({
+    error,
+    lane,
+    input,
+    signal,
+    discardedOverflowError,
+  }: {
+    readonly error: unknown;
+    readonly lane: CompactionTrace['lane'];
+    readonly input: readonly AgentMessage[];
+    readonly signal?: AbortSignal | undefined;
+    readonly discardedOverflowError?: string | undefined;
+  }): HostCompactionError => {
+    if (signal?.aborted) {
+      throw error;
+    }
+    if (error instanceof HostCompactionError) {
+      return error;
+    }
+    strikes = 0;
+    const { tokens } = contextTokens(input);
+    return new HostCompactionError('SESSION_LOG_INTEGRITY', error instanceof Error ? error.message : String(error), {
+      lane,
+      tier: 'summarization',
+      tokensBefore: tokens,
+      tokensAfter: tokens,
+      cleared: 0,
+      evicted: 0,
+      summarizerAttempts: 0,
+      summarizerUsage: null,
+      ...(discardedOverflowError === undefined ? {} : { discardedOverflowError }),
+    });
+  };
+
   const prepareTurn = async (signal?: AbortSignal): Promise<AgentMessage[]> => {
-    const messages = await options.projectHistory();
-    agent.state.messages = messages;
+    let { messages } = agent.state;
     try {
-      const outcome = await compact({ input: messages, signal });
+      messages = await options.projectHistory();
+      agent.state.messages = messages;
+      const outcome = await compact({ input: messages, lane: 'start_of_turn', signal });
       pendingFailure = undefined;
       agent.state.messages = outcome.messages;
       return outcome.messages;
@@ -606,10 +748,7 @@ export const installCompaction = (
        * seam the between-turn leg uses: the stream wrapper turns
        * it into this turn's coded error message.
        */
-      if (!(error instanceof HostCompactionError)) {
-        throw error;
-      }
-      pendingFailure = error;
+      pendingFailure = compactionFailure({ error, lane: 'start_of_turn', input: messages, signal });
       return messages;
     }
   };
@@ -621,18 +760,16 @@ export const installCompaction = (
       messages: agent.state.messages,
       tools: agent.state.tools,
     };
-    const projected = await options.projectHistory();
-    agent.state.messages = projected;
+    let { messages: projected } = agent.state;
     try {
-      const outcome = await compact({ input: projected, signal });
+      projected = await options.projectHistory();
+      agent.state.messages = projected;
+      const outcome = await compact({ input: projected, lane: 'between_turn', signal });
       pendingFailure = undefined;
       agent.state.messages = outcome.messages;
       return { ...prior, context: { ...priorContext, messages: outcome.messages } };
     } catch (error) {
-      if (!(error instanceof HostCompactionError)) {
-        throw error;
-      }
-      pendingFailure = error;
+      pendingFailure = compactionFailure({ error, lane: 'between_turn', input: projected, signal });
       return { ...prior, context: { ...priorContext, messages: projected } };
     }
   };
@@ -650,12 +787,16 @@ export const installCompaction = (
       if (!isContextOverflow(message, options.contextWindow)) {
         return first;
       }
+      const discardedOverflowError = message.errorMessage;
+      let { messages: projected } = options.agent.state;
       try {
-        const projected = await options.projectHistory();
+        projected = await options.projectHistory();
         const emergency = await compact({
           input: projected,
+          lane: 'overflow',
           signal: streamOptions?.signal,
           force: true,
+          discardedOverflowError,
         });
         options.agent.state.messages = emergency.messages;
         return await base(
@@ -664,10 +805,17 @@ export const installCompaction = (
           streamOptions,
         );
       } catch (error) {
-        if (!(error instanceof HostCompactionError)) {
-          throw error;
-        }
-        return failureStream(model, error, now());
+        return failureStream(
+          model,
+          compactionFailure({
+            error,
+            lane: 'overflow',
+            input: projected,
+            signal: streamOptions?.signal,
+            discardedOverflowError,
+          }),
+          now(),
+        );
       }
     };
 

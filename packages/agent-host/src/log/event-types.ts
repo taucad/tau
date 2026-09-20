@@ -181,11 +181,27 @@ export type MessageAppendedEvent = LogEventBase & {
   readonly message: ProviderMessage;
 };
 
+/** Durable measurements for one compaction attempt. @public */
+export type CompactionTrace = {
+  readonly lane: 'start_of_turn' | 'between_turn' | 'overflow';
+  readonly tier: 'tool_result_clearing' | 'summarization';
+  readonly tokensBefore: number;
+  readonly tokensAfter: number;
+  readonly cleared: number;
+  readonly evicted: number;
+  readonly summarizerAttempts: number;
+  // oxlint-disable-next-line typescript/no-restricted-types -- Null is the durable JSON value for an attempted summarizer with no reported usage.
+  readonly summarizerUsage: Usage | null;
+  readonly summary?: 'generated' | 'placeholder' | undefined;
+  readonly discardedOverflowError?: string | undefined;
+};
+
 /** Replaces one durable provider envelope without moving its message. @public */
 export type MessageEnvelopeReplacedEvent = LogEventBase & {
   readonly type: 'message.envelope-replaced';
   readonly messageId: string;
   readonly replacement: ProviderMessage;
+  readonly details?: CompactionTrace | undefined;
 };
 
 /** Evicts compacted messages and inserts their summary at the first eviction position. @public */
@@ -193,6 +209,7 @@ export type HistoryCompactedEvent = LogEventBase & {
   readonly type: 'history.compacted';
   readonly evictedMessageIds: readonly string[];
   readonly summary: ProviderMessage;
+  readonly details?: CompactionTrace | undefined;
 };
 
 /** User action that admits a new turn. @public */

@@ -509,6 +509,122 @@ describe('createTauAgentHost', () => {
     await host.close();
   });
 
+  it('should clear a compaction failure marker and re-enter start-of-turn compaction on resume', async () => {
+    const file = createMemoryLogFile();
+    const requests: ModelStreamRequest[] = [];
+    let rejectCompactionAppend = true;
+    let call = 0;
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: async () => {
+          const opened = await file.open();
+          return {
+            ...opened,
+            append: async (event) => {
+              if (event.type === 'history.compacted' && rejectCompactionAppend) {
+                rejectCompactionAppend = false;
+                throw new Error('durable compaction append rejected');
+              }
+              return opened.append(event);
+            },
+          };
+        },
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            call++;
+            if (call <= 2) {
+              yield {
+                type: 'tool-input',
+                toolCallId: `compaction-resume-read-${call}`,
+                toolName: 'read_file',
+                input: { targetFile: `completed-${call}.ts` },
+              };
+              yield {
+                type: 'usage',
+                usage: {
+                  input: call === 1 ? 1000 : 3000,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: call === 1 ? 1000 : 3000,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+              };
+              yield { type: 'completed', stopReason: 'toolUse' };
+              return;
+            }
+            if (call === 3) {
+              yield { type: 'text-delta', text: 'completed work' };
+              yield {
+                type: 'usage',
+                usage: {
+                  input: 7000,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: 7000,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+              };
+              yield { type: 'completed', stopReason: 'stop' };
+              return;
+            }
+            yield { type: 'text-delta', text: 'resumed after compaction' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: 'x'.repeat(9000), isError: false })),
+        idPrefix: 'compaction-resume',
+      }),
+      model: { id: 'scripted-g2-model', contextWindow: 8192 },
+      summarize: async () => 'Earlier completed work.',
+    });
+    await host.admit({
+      chatId: 'chat-compaction-resume',
+      runId: 'run-before-compaction',
+      trigger: 'submit',
+      message: { id: 'turn-before-compaction', role: 'user', content: 'Create the model.' },
+    });
+    await host.admit({
+      chatId: 'chat-compaction-resume',
+      runId: 'run-compaction-failed',
+      trigger: 'submit',
+      message: { id: 'turn-compaction-failed', role: 'user', content: 'Keep the completed work and continue.' },
+    });
+
+    const failed = await host.snapshot('chat-compaction-resume');
+    expect(failed).toMatchObject({
+      runId: 'run-compaction-failed',
+      state: 'failed',
+      failure: { code: 'SESSION_LOG_INTEGRITY', message: 'durable compaction append rejected' },
+    });
+    expect(failed.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Compaction failed: durable compaction append rejected' }],
+    });
+
+    const resumed = await host.resume('chat-compaction-resume');
+    const events = await readLog(file);
+    const markerId = failed.messages.at(-1)?.id;
+    const rewind = events.findLast((event) => event.type === 'history.rewound');
+    expect(rewind).toMatchObject({ type: 'history.rewound', trigger: 'retry' });
+    expect(rewind?.type === 'history.rewound' && rewind.retainedMessageIds).not.toContain(markerId);
+    const compacted = events.find((event) => event.type === 'history.compacted');
+    expect(compacted?.type === 'history.compacted' && compacted.details?.lane).toBe('start_of_turn');
+    expect(requests).toHaveLength(4);
+    expect(requests[3]?.messages.filter((message) => message.id === 'turn-compaction-failed')).toHaveLength(1);
+    expect(resumed.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'resumed after compaction' }],
+    });
+    expect(await host.snapshot('chat-compaction-resume')).toMatchObject({
+      runId: 'run-compaction-failed',
+      state: 'completed',
+    });
+    await host.close();
+  });
+
   it('resumes from the real result of a tool that ran before the stream failed', async () => {
     /* The stream starts a tool the moment its call is complete (`prestartTool`),
      * so a failure one frame later leaves a tool that *ran* with no durable
@@ -616,11 +732,11 @@ describe('createTauAgentHost', () => {
       MALFORMED_RESPONSE: true,
       NETWORK_ERROR: true,
       UNKNOWN_GATEWAY_ERROR: false,
-      // Compaction and leadership (R12): a resume would meet the same wall.
-      SUMMARY_REQUIRED: false,
-      NO_EVICTABLE_HISTORY: false,
-      SESSION_LOG_INTEGRITY: false,
-      CIRCUIT_BREAKER_OPEN: false,
+      // Compaction failures resume through start-of-turn reprojection and the degradation ladder.
+      SUMMARY_REQUIRED: true,
+      NO_EVICTABLE_HISTORY: true,
+      SESSION_LOG_INTEGRITY: true,
+      CIRCUIT_BREAKER_OPEN: true,
       LEADERSHIP_LOST: false,
     } as const satisfies Record<GatewayModelErrorCode | HostCompactionError['code'] | 'LEADERSHIP_LOST', boolean>;
     /* eslint-enable @typescript-eslint/naming-convention -- ends the wire-code key exception. */

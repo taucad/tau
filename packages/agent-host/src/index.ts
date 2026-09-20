@@ -81,6 +81,7 @@ export type {
   AgentLogEvent,
   AgentToolChoice,
   AssistantProviderMessage,
+  CompactionTrace,
   HistoryCompactedEvent,
   HistoryRewoundEvent,
   InterruptRecordedEvent,

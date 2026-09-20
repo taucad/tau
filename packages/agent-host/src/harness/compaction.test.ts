@@ -7,7 +7,12 @@ import { installCompaction } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { createAgentSession } from '#harness/session.js';
 import { createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
-import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
+import {
+  createSessionRecord,
+  MessageIdentities,
+  piMessageToProvider,
+  providerMessageToPi,
+} from '#harness/session-record.js';
 import type { SessionRecord } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type { AgentLogEvent, AssistantProviderMessage, UserProviderMessage } from '#log/event-types.js';
@@ -138,6 +143,58 @@ describe('Compaction', () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
+  it('should skip tier-one persistence when clearing does not restore one recent-window of headroom', async () => {
+    const messages: AgentMessage[] = [
+      ...Array.from(
+        { length: 7 },
+        (_, index): AgentMessage => ({
+          role: 'toolResult',
+          toolCallId: `hysteresis-${index}`,
+          toolName: 'read_file',
+          content: [{ type: 'text', text: 'x'.repeat(index < 2 ? 5000 : 4600) }],
+          isError: false,
+          timestamp: index,
+        }),
+      ),
+      { role: 'user', content: 'continue', timestamp: 8 },
+    ];
+    const appended: Array<Parameters<SessionRecord['append']>[0]> = [];
+    const append: SessionRecord['append'] = async (event) => {
+      appended.push(event);
+    };
+    const summarize = vi.fn(async () => 'Tier two restored durable headroom.');
+    const agent = new Agent({
+      streamFn: () => createAssistantMessageEventStream(),
+      initialState: { model: stubModel, messages },
+    });
+    const compaction = installCompaction({
+      agent,
+      record: recordFor(messages, append),
+      projectHistory: async () => messages,
+      contextWindow: 8192,
+      summarize,
+    });
+
+    await compaction.prepareTurn();
+
+    expect(summarize).toHaveBeenCalledOnce();
+    const compacted = appended.find((event) => event.type === 'history.compacted');
+    expect(compacted?.type).toBe('history.compacted');
+    if (compacted?.type !== 'history.compacted') {
+      throw new Error('Expected tier-two compaction to be persisted.');
+    }
+    expect(compacted.details).toMatchObject({
+      lane: 'start_of_turn',
+      tier: 'summarization',
+      summarizerAttempts: 1,
+      summarizerUsage: null,
+    });
+    expect(compacted.details?.tokensBefore).toBeTypeOf('number');
+    expect(compacted.details?.tokensAfter).toBeTypeOf('number');
+    expect(compacted.details?.evicted).toBeTypeOf('number');
+    expect(appended.some((event) => event.type === 'message.envelope-replaced')).toBe(false);
+  });
+
   it('preserves tagged context in durable between-turn compaction', async () => {
     const messages: UserMessage[] = Array.from({ length: 8 }, (_, index) => ({
       role: 'user',
@@ -174,6 +231,79 @@ describe('Compaction', () => {
       }),
     );
     expect(agent.state.messages).toEqual(prepared?.context?.messages);
+  });
+
+  it('should preserve only the newest safety block verbatim across two compactions', async () => {
+    const file = createMemoryEventLogFile();
+    const log = await file.open();
+    const oldSafety = '<safety>old safety rule</safety>';
+    const newestSafety = '<safety>newest safety rule</safety>';
+    const seeded: AgentLogEvent[] = Array.from({ length: 10 }, (_, sequence) => ({
+      version: 1,
+      leaderEpoch: 'seed-epoch',
+      sequence,
+      recordedAt: '2026-09-20T00:00:00.000Z',
+      runId: 'seed-run',
+      type: 'message.appended',
+      message: {
+        id: `safety-${sequence}`,
+        role: 'user',
+        content: `${sequence === 0 ? oldSafety : sequence === 4 ? newestSafety : ''}${'x'.repeat(4000)}`,
+      },
+    }));
+    for (const event of seeded) {
+      // oxlint-disable-next-line no-await-in-loop -- The fixture seeds one ordered log.
+      await log.append(event);
+    }
+    const record = await createSessionRecord({
+      log,
+      runId: 'safety-run',
+      leaderEpoch: 'safety-epoch',
+      createId: (() => {
+        let id = 0;
+        return () => `safety-summary-${id++}`;
+      })(),
+      now: () => '2026-09-20T00:00:01.000Z',
+    });
+    const projectHistory = async () => {
+      const durable = await record.history();
+      return durable
+        .map((message) => providerMessageToPi(message, stubModel, record.messages))
+        .filter((message): message is AgentMessage => message !== undefined);
+    };
+    const initial = await projectHistory();
+    const agent = new Agent({
+      streamFn: () => createAssistantMessageEventStream(),
+      initialState: { model: stubModel, messages: initial },
+    });
+    const compaction = installCompaction({
+      agent,
+      record,
+      projectHistory,
+      contextWindow: 8192,
+      summarize: async () => 'Earlier work.',
+    });
+
+    await compaction.prepareTurn();
+    for (let index = 0; index < 7; index++) {
+      // oxlint-disable-next-line no-await-in-loop -- The second cycle is built as ordered durable history.
+      await record.append({
+        type: 'message.appended',
+        message: piMessageToProvider(
+          { role: 'user', content: `later-${index}-${'y'.repeat(4000)}`, timestamp: 20 + index },
+          record.messages,
+        ),
+      });
+    }
+    await compaction.prepareTurn();
+
+    const history = JSON.stringify(await record.history());
+    expect(history).toContain(newestSafety);
+    expect(history).not.toContain(oldSafety);
+    expect(history.match(new RegExp(newestSafety, 'gu'))).toHaveLength(1);
+    const events = await record.events();
+    expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(2);
+    await log.close();
   });
 
   it('uses pi token-budgeted turn cut points instead of retaining a fixed message count', async () => {
@@ -296,7 +426,7 @@ describe('Compaction', () => {
     expect(JSON.stringify(compacted)).toContain(String.raw`<modified-files>\nedited.ts\n</modified-files>`);
   });
 
-  it("encodes known compaction failures in pi's error stream", async () => {
+  it('uses a placeholder when no compaction summarizer is configured', async () => {
     const messages: UserMessage[] = Array.from({ length: 8 }, (_, index) => ({
       role: 'user',
       content: String(index).repeat(4000),
@@ -306,23 +436,69 @@ describe('Compaction', () => {
       streamFn: () => createAssistantMessageEventStream(),
       initialState: { model: stubModel, messages },
     });
+    const appended: Array<Parameters<SessionRecord['append']>[0]> = [];
+    const append: SessionRecord['append'] = async (event) => {
+      appended.push(event);
+    };
     const compaction = installCompaction({
       agent,
-      record: recordFor(messages),
+      record: recordFor(messages, append),
       projectHistory: async () => messages,
       contextWindow: 8192,
     });
-    const base = vi.fn() as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
 
-    expect(await compaction.prepareTurn()).toEqual(messages);
-    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages });
-    const result = await stream.result();
+    const prepared = await compaction.prepareTurn();
 
-    expect(base).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      stopReason: 'error',
-      errorMessage: 'Tier-two compaction requires the session model summarizer.',
+    expect(JSON.stringify(prepared)).toContain(
+      'Compaction could not summarize 2 messages spanning 2 turns. The project files are the source of truth for the current work.',
+    );
+    const compacted = appended.find((event) => event.type === 'history.compacted');
+    expect(compacted?.type === 'history.compacted' && compacted.details?.summary).toBe('placeholder');
+  });
+
+  it('should not open the circuit breaker after repeated non-headroom refusals', async () => {
+    const messages = evictableHistory(8);
+    const record = recordFor(messages, async (event) => {
+      if (event.type === 'history.compacted') {
+        throw new Error('durable compaction append rejected');
+      }
     });
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages },
+    });
+    const compaction = installCompaction({
+      agent,
+      record,
+      projectHistory: async () => messages,
+      contextWindow: 8192,
+      summarize: async () => 'Summary that cannot be persisted.',
+    });
+    const failures: AssistantMessage[] = [];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // oxlint-disable-next-line no-await-in-loop -- Each refusal must clear before the next attempt.
+      await compaction.prepareTurn();
+      // oxlint-disable-next-line no-await-in-loop -- The failure marker is the observable result of that attempt.
+      const stream = await compaction.wrapStreamFn(dispatchedStream)(stubModel, { messages });
+      // oxlint-disable-next-line no-await-in-loop -- The stream result closes one refusal before the next attempt.
+      failures.push(await stream.result());
+    }
+
+    expect(failures.map((failure) => failure.errorMessage)).toEqual([
+      'durable compaction append rejected',
+      'durable compaction append rejected',
+      'durable compaction append rejected',
+    ]);
+    const diagnostics = JSON.stringify(failures.map((failure) => failure.diagnostics));
+    expect(diagnostics).toContain('SESSION_LOG_INTEGRITY');
+    expect(diagnostics).not.toContain('CIRCUIT_BREAKER_OPEN');
+    expect(diagnostics).toContain('"lane":"start_of_turn"');
+    expect(diagnostics).toContain('"tier":"summarization"');
+    expect(diagnostics).toContain('"tokensBefore":');
+    expect(diagnostics).toContain('"tokensAfter":');
+    expect(diagnostics).toContain('"evicted":');
+    expect(diagnostics).toContain('"summarizerUsage":null');
   });
 
   it('should compact the durable projection when live state has no registered identities', async () => {
@@ -614,10 +790,12 @@ describe('Compaction', () => {
       now: () => new Date('2026-09-01T00:00:00.000Z'),
     });
 
-    await expect(session.prompt({ id: 'turn-fail-closed', role: 'user', content: 'continue' })).rejects.toThrow(
-      'injected durable failure',
-    );
+    await session.prompt({ id: 'turn-fail-closed', role: 'user', content: 'continue' });
     expect(dispatched).toEqual([]);
+    expect(await session.snapshot()).toMatchObject({
+      state: 'failed',
+      failure: { code: 'SESSION_LOG_INTEGRITY', message: 'injected durable failure' },
+    });
     await session.close();
   });
 
@@ -703,7 +881,10 @@ describe('Compaction', () => {
       content: `${index}-${'x'.repeat(4000)}`,
       timestamp: index,
     }));
-    const append = vi.fn(async () => undefined);
+    const appended: Array<Parameters<SessionRecord['append']>[0]> = [];
+    const append: SessionRecord['append'] = async (event) => {
+      appended.push(event);
+    };
     const agent = new Agent({
       streamFn: () => createAssistantMessageEventStream(),
       initialState: { model: stubModel, messages },
@@ -735,6 +916,7 @@ describe('Compaction', () => {
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         },
         stopReason,
+        ...(calls === 1 ? { errorMessage: 'provider overflow response body' } : {}),
         timestamp: 0,
       };
       stream.push({ type: 'start', partial: message });
@@ -747,7 +929,12 @@ describe('Compaction', () => {
 
     expect(result.stopReason).toBe('stop');
     expect(base).toHaveBeenCalledTimes(2);
-    expect(append).toHaveBeenCalledWith(expect.objectContaining({ type: 'history.compacted' }));
+    const compacted = appended.find((event) => event.type === 'history.compacted');
+    expect(compacted?.type === 'history.compacted' ? compacted.details : undefined).toMatchObject({
+      lane: 'overflow',
+      tier: 'summarization',
+      discardedOverflowError: 'provider overflow response body',
+    });
   });
 
   /*

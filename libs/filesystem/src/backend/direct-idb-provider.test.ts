@@ -32,6 +32,7 @@ describe('DirectIdbProvider', () => {
         writable: true,
         quotaBased: true,
         durability: 'transactional-rewrite',
+        coalescesWrites: true,
       });
     });
   });
@@ -118,6 +119,11 @@ describe('DirectIdbProvider', () => {
       };
 
       const failed = provider.writeFile('failed.txt', 'failed');
+      /* Writes issued in one turn share a generation by design, so the later
+       * ones are queued once the failing generation is already in flight. */
+      await vi.waitFor(() => {
+        expect(generation).toBe(1);
+      });
       const second = provider.writeFile('second.txt', 'second');
       const third = provider.writeFile('third.txt', 'third');
       releaseFailure.resolve();

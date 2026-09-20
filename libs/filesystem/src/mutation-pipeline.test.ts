@@ -4,7 +4,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ChangeEventBus } from '#change-event-bus.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import { getEventOrigin } from '#event-origin-registry.js';
-import { createWorkspaceFileService, encoder, waitFor } from '#testing/workspace-service-harness.js';
+import {
+  createIdbWorkspaceFileService,
+  createWorkspaceFileService,
+  encoder,
+  waitFor,
+} from '#testing/workspace-service-harness.js';
 import type { ProjectRootConfig } from '#mount-table.js';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
@@ -558,30 +563,48 @@ describe('WorkspaceFileService', () => {
       }
     });
 
-    it('should use the cross-tab mutation lock for every batch path', async () => {
+    /** The lock set a single-file write of `path` claims, on its own service. */
+    const locksForOneWrite = async (path: string): Promise<readonly string[]> => {
+      const probe = await createWorkspaceFileService();
+      const queueForMany = vi.spyOn(probe.resourceQueue, 'queueForMany');
+      try {
+        await probe.service.writeFile(path, 'probe');
+        return queueForMany.mock.calls.at(-1)?.[0] ?? [];
+      } finally {
+        probe.service.dispose();
+      }
+    };
+
+    /* One lock set for the batch, not one per file — but it must still exclude
+     * every peer writer a per-file set excluded, and still publish each path's
+     * own mutation notification. */
+    it('should hold one cross-tab lock set that conflicts with every batch path', async () => {
       const coordinator = new CrossTabCoordinator();
-      const withMutationLocks = vi.spyOn(coordinator, 'withMutationLocks');
-      const { service: svc } = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+      const notifyMutation = vi.spyOn(coordinator, 'notifyMutation');
+      const { service: svc, resourceQueue } = await createWorkspaceFileService({
+        crossTabCoordinator: coordinator,
+      });
       const pathA = '/batch/a.txt';
       const pathB = '/batch/b.txt';
 
       try {
+        const queueForMany = vi.spyOn(resourceQueue, 'queueForMany');
         await svc.writeFiles({
           [pathA]: { content: 'a' },
           [pathB]: { content: 'b' },
         });
 
-        expect(withMutationLocks).toHaveBeenCalledTimes(2);
-        expect(withMutationLocks).toHaveBeenCalledWith(
-          [pathA, '/batch', 'memory:0:batch/a.txt', 'memory:0:batch', 'memory:0:'],
-          { type: 'write', path: pathA, authority: { storageRootKey: 'memory:0', providerBasePath: '' } },
-          expect.any(Function),
-        );
-        expect(withMutationLocks).toHaveBeenCalledWith(
-          [pathB, '/batch', 'memory:0:batch/b.txt', 'memory:0:batch', 'memory:0:'],
-          { type: 'write', path: pathB, authority: { storageRootKey: 'memory:0', providerBasePath: '' } },
-          expect.any(Function),
-        );
+        expect(queueForMany).toHaveBeenCalledTimes(1);
+        const held = new Set(queueForMany.mock.calls[0]![0]);
+        const ownLockSets = await Promise.all([pathA, pathB].map(async (path) => locksForOneWrite(path)));
+        for (const ownLocks of ownLockSets) {
+          expect(ownLocks.filter((lock) => held.has(lock))).not.toEqual([]);
+        }
+        const authority = { storageRootKey: 'memory:0', providerBasePath: '' };
+        expect(notifyMutation.mock.calls.map(([notification]) => notification)).toEqual([
+          { type: 'write', path: pathA, authority },
+          { type: 'write', path: pathB, authority },
+        ]);
       } finally {
         svc.dispose();
         coordinator.dispose();
@@ -653,9 +676,34 @@ describe('WorkspaceFileService', () => {
       }
     });
 
+    /* Rule 34: the canonical batch lets the IndexedDB provider drain every
+     * admitted write in as few native transactions as possible. Per-file locks
+     * serialised the batch, so each file used to cost its own transaction. */
+    it('should commit a thousand-file batch in one IndexedDB transaction', async () => {
+      const { service: idbService } = await createIdbWorkspaceFileService();
+      const transaction = vi.spyOn(IDBDatabase.prototype, 'transaction');
+
+      try {
+        await idbService.writeFiles(
+          Object.fromEntries(
+            Array.from({ length: 1000 }, (_, index) => [
+              `/bulk/file-${String(index)}.txt`,
+              { content: `row ${index}` },
+            ]),
+          ),
+        );
+
+        const writes = transaction.mock.calls.filter(([, mode]) => mode === 'readwrite');
+        expect(writes).toHaveLength(1);
+      } finally {
+        transaction.mockRestore();
+        idbService.dispose();
+      }
+    });
+
     it('should perform no provider, lock, or event work for an empty batch', async () => {
       const coordinator = new CrossTabCoordinator();
-      const withMutationLocks = vi.spyOn(coordinator, 'withMutationLocks');
+      const withLocks = vi.spyOn(coordinator, 'withLocks');
       const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
       const providerWrite = vi.spyOn(context.provider, 'writeFile');
       const events: ChangeEvent[] = [];
@@ -667,7 +715,7 @@ describe('WorkspaceFileService', () => {
         await context.service.writeFiles({});
 
         expect(providerWrite).not.toHaveBeenCalled();
-        expect(withMutationLocks).not.toHaveBeenCalled();
+        expect(withLocks).not.toHaveBeenCalled();
         expect(events).toEqual([]);
       } finally {
         unsubscribe();

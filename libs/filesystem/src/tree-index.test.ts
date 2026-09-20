@@ -1,6 +1,10 @@
+// oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
+import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { FileStatEntry } from '@taucad/types';
+import { createWorkspaceFileService } from '#testing/workspace-service-harness.js';
 import { TreeIndex, TreeIndexes } from '#tree-index.js';
+import type { WorkspaceFileService } from '#workspace-file-service.js';
 
 type BuildEntry = Parameters<TreeIndex['build']>[0][number];
 
@@ -334,5 +338,111 @@ describe('TreeIndexes', () => {
 
     expect(indexes.get('/a')).toBeUndefined();
     expect(indexes.statTree('/a')).toBeUndefined();
+  });
+});
+
+/**
+ * `TreeIndexes` bookkeeping as the authority drives it: every mutation must
+ * leave the per-root index answering the next `statTree`. W5 moved these rows
+ * here byte-for-byte from the Service spec because the index owns them.
+ */
+describe('WorkspaceFileService', () => {
+  let service: WorkspaceFileService;
+
+  beforeEach(async () => {
+    ({ service } = await createWorkspaceFileService());
+  });
+
+  // ---------------------------------------------------------------------------
+  // In-memory tree integration
+  // ---------------------------------------------------------------------------
+
+  describe('in-memory tree integration', () => {
+    /* The index is read through the rooted surface since W12d, where the view
+     * masks its rows; the invalidation the authority owns is what these pin. */
+    const statTree = async (path: string): Promise<FileStatEntry[]> =>
+      service.createRootedFileSystem('/').statTree!(path);
+
+    it('should reflect writeFile in subsequent statTree', async () => {
+      await service.writeFile('/root/a.txt', 'aaa');
+      await statTree('root');
+
+      await service.writeFile('/root/b.txt', 'bb');
+
+      const stats = await statTree('root');
+      const paths = stats.map((s) => s.path).sort();
+      expect(paths).toEqual(['a.txt', 'b.txt']);
+    });
+
+    it('should reflect mkdir in subsequent statTree', async () => {
+      await service.writeFile('/root/a.txt', 'a');
+      await statTree('root');
+
+      await service.mkdir('/root/sub');
+      await service.writeFile('/root/sub/x.txt', 'x');
+
+      const stats = await statTree('root/sub');
+      expect(stats).toHaveLength(1);
+      expect(stats[0]!.path).toBe('x.txt');
+    });
+
+    it('should reflect unlink in subsequent statTree', async () => {
+      await service.writeFile('/root/a.txt', 'a');
+      await service.writeFile('/root/b.txt', 'b');
+      await statTree('root');
+
+      await service.unlink('/root/a.txt');
+
+      const stats = await statTree('root');
+      expect(stats).toHaveLength(1);
+      expect(stats[0]!.path).toBe('b.txt');
+    });
+
+    it('should reflect a move in subsequent statTree', async () => {
+      await service.writeFile('/root/old.txt', 'data');
+      await statTree('root');
+
+      await service.move('/root/old.txt', '/root/new.txt');
+
+      const stats = await statTree('root');
+      const paths = stats.map((s) => s.path);
+      expect(paths).toContain('new.txt');
+      expect(paths).not.toContain('old.txt');
+    });
+
+    it('should reflect rmdir in subsequent statTree', async () => {
+      await service.mkdir('/root/sub', { recursive: true });
+      await service.writeFile('/root/a.txt', 'a');
+      await statTree('root');
+
+      await service.rmdir('/root/sub');
+
+      const stats = await statTree('root');
+      expect(stats).toHaveLength(1);
+      expect(stats[0]!.path).toBe('a.txt');
+    });
+
+    it('should reflect duplicateFile in subsequent statTree', async () => {
+      await service.writeFile('/root/src.txt', 'copy');
+      await statTree('root');
+
+      await service.createRootedFileSystem('/').duplicate!('root/src.txt', 'root/dst.txt');
+
+      const stats = await statTree('root');
+      const paths = stats.map((s) => s.path).sort();
+      expect(paths).toEqual(['dst.txt', 'src.txt']);
+    });
+
+    it('should reflect a rooted copyTree in subsequent statTree', async () => {
+      await service.writeFile('/root/src/a.txt', 'aaa');
+      await service.writeFile('/root/src/sub/b.txt', 'bb');
+      await statTree('root');
+
+      await service.createRootedFileSystem('/').copyTree!('root/src', 'root/dest');
+
+      const stats = await statTree('root/dest');
+      const paths = stats.map((s) => s.path).sort();
+      expect(paths).toEqual(['a.txt', 'sub/b.txt']);
+    });
   });
 });

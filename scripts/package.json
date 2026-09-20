@@ -19,6 +19,7 @@
     "@taucad/jscad": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/ui": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "ink": "catalog:",
     "ipaddr.js": "catalog:",

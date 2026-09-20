@@ -138,7 +138,7 @@ function Code({
       {html === undefined ? (
         <pre className='overflow-x-auto p-3 text-xs'>{source}</pre>
       ) : (
-        // eslint-disable-next-line react/no-danger -- Shiki output for a local sketch file.
+        // oxlint-disable-next-line react/no-danger -- Shiki output for a local sketch file.
         <div className='api-guide-code overflow-x-auto p-3 text-xs' dangerouslySetInnerHTML={{ __html: html }} />
       )}
     </figure>

@@ -1858,7 +1858,13 @@ export class ChatSessionStore {
               isDisconnect: false,
             });
           };
-          if (requestBody === undefined) {
+          /* A continuation composes no body and needs none: `reconnectToStream`
+           * never reads one, because the host continues the run from its own
+           * durable log. Requiring one refused every *Resume* the person
+           * pressed after a run had ended — `activeRunBody` is the live run's
+           * and the settlement that ended it cleared it — so the turn was
+           * admitted and leased and then silently never dispatched (I1). */
+          if (requestBody === undefined && request.kind !== 'continue') {
             refuse('No agent configuration is available for this chat.');
             return;
           }
@@ -1902,7 +1908,7 @@ export class ChatSessionStore {
               if (isBrowserAgentHostPlaced(chatId)) {
                 requestBrowserAgentHostResume(chatId);
               }
-              void chat.resumeStream({ body: requestBody });
+              void chat.resumeStream(requestBody === undefined ? {} : { body: requestBody });
             }
           }
         };

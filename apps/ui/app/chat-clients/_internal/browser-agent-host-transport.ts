@@ -761,7 +761,12 @@ const createHostStream = <Message extends UIMessage>(input: {
     const seen = new Set<string>();
     const streamedBlocks = new Map();
     let attaching: Array<AgentLogEvent | AgentLiveEvent> | undefined = [];
-    const terminalEvent = Promise.withResolvers<void>();
+    /* Re-armed when a resume reopens the run: a continuation attaches to a log
+     * whose last attempt already ended, so this gate is resolved before the
+     * host is even asked to continue. Left resolved, the stream closed the
+     * instant `resume` answered — the page settled the reopened attempt as
+     * failed and the reply the host went on to produce reached nobody (I1). */
+    let terminalEvent = Promise.withResolvers<void>();
     const turnSettlement = Promise.withResolvers<void>();
     /* This stream admitted the run, so its turn *will* be settled by the chat's
      * session actor — and the writer that settlement needs is this stream's
@@ -920,6 +925,9 @@ const createHostStream = <Message extends UIMessage>(input: {
        * the refusal the terminal row carried, which is what made the page
        * answer a later *Try again* from a run it thought was still going. Only
        * a resume legitimately reopens a run this stream saw end. */
+      if (reopens && terminal(state) && !terminal(snapshot.state)) {
+        terminalEvent = Promise.withResolvers<void>();
+      }
       if (reopens || !terminal(state)) {
         state = snapshot.state;
       }

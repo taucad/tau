@@ -2002,6 +2002,30 @@ describe('ChatSessionStore', () => {
      * decision is in `use-cad-chat-client.test.tsx`.
      */
 
+    /*
+     * I1. The banner's *Resume* is an attempt at a run that has already ended,
+     * so there is no live `activeRunBody` left to fall back on — the settlement
+     * that ended the run cleared it — and `ChatTurnHost` composes no body for a
+     * continuation on purpose (no body, no rewind trigger). Requiring one
+     * refused the dispatch with *"No agent configuration is available"* after
+     * the turn had been admitted and its lease taken, so the chat sat in
+     * `queued.dispatched` and the person's Resume did nothing at all.
+     * `reconnectToStream` reads no body: the host continues the run from its
+     * own durable log.
+     */
+    it('dispatches a bodyless continuation, because a resume carries no run body', async () => {
+      const chatId = 'chat_resume_bodyless';
+      const store = createStore();
+      const session = store.acquire(chatId);
+      const fake = harness.created.at(-1)!;
+
+      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+
+      await vi.waitFor(() => {
+        expect(fake.resumeStream).toHaveBeenCalledOnce();
+      });
+    });
+
     it('does not arm the host resume from a continue no browser host can consume', async () => {
       const chatId = 'chat_resume_request_unplaced';
       const store = createStore();

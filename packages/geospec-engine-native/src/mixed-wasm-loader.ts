@@ -4,7 +4,6 @@ import { appendHostObservationCopies, observeHostCopy, ProtocolError } from '#ho
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package contract type.
 import type { HostBytes, HostCopyObservations } from '#host-types.js';
 
-const bindingSpecifier = '#mixed-wasm-binding';
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 /** Input accepted by the compiled Emscripten module. @public */
@@ -108,7 +107,7 @@ let loadedModule: MixedWasmModule | undefined;
  */
 export const initializeMixedWasm = async (input?: WasmInput): Promise<void> => {
   modulePromise ??= (async () => {
-    const binding = (await import(bindingSpecifier)) as {
+    const binding = (await import('#mixed-wasm-binding')) as {
       readonly default?: unknown;
     };
     if (typeof binding.default !== 'function') {

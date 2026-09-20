@@ -402,7 +402,7 @@ export class MutationPipeline {
             const globallyVisible = this.isCurrentResolution(destination, destinationResolution);
             if (globallyVisible) {
               this._filePool()?.clear();
-              this._treeIndexes.clear();
+              this._treeIndexes.evict(destination);
             }
             this.emitChangeEvent({ type: 'backendChanged', backend: destinationResolution.backend }, context, {
               operations: [{ path: destination, resolution: destinationResolution }],
@@ -811,7 +811,8 @@ export class MutationPipeline {
             this._treeIndexes.rename(source, target);
           } else if (sourceIsCurrent || targetIsCurrent) {
             this._filePool()?.clear();
-            this._treeIndexes.clear();
+            this._treeIndexes.evict(source);
+            this._treeIndexes.evict(target);
           }
 
           const resultingStat = await targetResolution.provider.stat(targetResolution.path);
@@ -851,7 +852,8 @@ export class MutationPipeline {
             );
             if (globallyVisible) {
               this._filePool()?.clear();
-              this._treeIndexes.clear();
+              this._treeIndexes.evict(source);
+              this._treeIndexes.evict(target);
             }
             for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
               this.emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
@@ -1057,7 +1059,13 @@ export class MutationPipeline {
 
   public async refreshMutationProviders(resolutions: readonly MountResolution[]): Promise<void> {
     const providers = new Set(resolutions.map(({ provider }) => provider));
-    // Ponytail: DirectIDB refresh is O(number of keys); add a durable revision only if measurement shows this lock boundary is hot.
+    /* Not cache hygiene: this runs *before* the write, inside the mutation lock,
+     * so a peer tab's committed write is part of what admits ours (the EISDIR and
+     * EEXIST rows in `workspace-file-service-cross-tab.test.ts`). Every provider
+     * that implements `refresh` is one whose projections another writer of the
+     * same bytes can stale, so there is nobody here to skip. The cost — DirectIDB
+     * re-reads its whole key index — is a case for refreshing the mutation's own
+     * key range, which needs its own pin. */
     await Promise.all([...providers].map(async (provider) => provider.refresh?.()));
   }
 
@@ -1286,12 +1294,12 @@ export class MutationPipeline {
     context?: WorkspaceMutationContext,
   ): void {
     // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: full drop, not the path-scoped one `writeFiles` uses. Both callers are
-    // half-finished *recursive* directory mutations, so everything under `path` is
-    // untrustworthy — and neither SharedPool nor TreeIndex can drop a subtree.
-    // Scope it once SharedPool grows a prefix invalidation, if this error path is ever hot.
+    // ponytail: the pool takes a full drop, not the path-scoped one `writeFiles`
+    // uses. Both callers are half-finished *recursive* directory mutations, so
+    // everything under `path` is untrustworthy and SharedPool cannot drop a
+    // subtree. Scope it once SharedPool grows a prefix invalidation.
     this._filePool()?.clear();
-    this._treeIndexes.clear();
+    this._treeIndexes.evict(path);
     const logicalRoot = resolution.entry?.prefix ?? path;
     const rootResolution =
       resolution.entry === undefined ? resolution : { ...resolution, path: resolution.entry.providerBasePath };

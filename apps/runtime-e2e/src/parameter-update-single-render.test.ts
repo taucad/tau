@@ -23,10 +23,33 @@ const mainSource = `
 `;
 const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 
-const delay = async (milliseconds: number): Promise<void> =>
+const nextGeometry = async (
+  subscribe: (handler: (result: HashedGeometryResult) => void) => () => void,
+  predicate: (result: HashedGeometryResult) => boolean = () => true,
+): Promise<HashedGeometryResult> =>
   new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
+    let settled = false;
+    const unsubscribe = subscribe((result) => {
+      if (settled || !predicate(result)) {
+        return;
+      }
+      settled = true;
+      unsubscribe();
+      resolve(result);
+    });
   });
+
+const replicadWidth = async (geometry: HashedGeometryResult): Promise<number | undefined> => {
+  if (!geometry.success || geometry.data.format !== 'gltf') {
+    throw new Error('Expected Replicad to return GLTF geometry');
+  }
+  const bounds = getBoundingBoxFromInspect(await getInspectReport(geometry.data.content));
+  return bounds?.size[0];
+};
+
+const expectReplicadWidth = async (geometry: HashedGeometryResult, width: number): Promise<void> => {
+  expect(await replicadWidth(geometry)).toBeCloseTo(width);
+};
 
 /** Sidecar bytes exactly as `@taucad/parameters` writes them for one committed value. */
 const sidecarBytes = (
@@ -186,11 +209,12 @@ describe('autonomous preview invalidation', () => {
       states.length = 0;
       /* The record is a watched dependency of the render, so the checked write alone brings the
        * geometry up to date. Nothing else forwards the value to the kernel. */
+      const firstUpdate = nextGeometry((handler) => client.on('geometry', handler));
       await service.writeFile(
         `/projects/${projectId}/.tau/parameters/main.ts.json`,
         JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 20 } } } }),
       );
-      await delay(750);
+      await expectReplicadWidth(await firstUpdate, 0.02);
       expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
 
       // Automatic thumbnail generation writes through a separate filesystem
@@ -198,21 +222,24 @@ describe('autonomous preview invalidation', () => {
       // runtime dependency and must not schedule another preview.
       await service.writeFile(`/projects/${projectId}/thumbnail.webp`, new Uint8Array([0x52, 0x49, 0x46, 0x46]));
 
-      // The autonomous file-change debounce is 200 ms. Waiting beyond that
-      // boundary proves whether an additional preview was scheduled.
-      await delay(750);
-
-      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
-
       // GeoSpec source is another ordinary peer write that is unrelated to the
       // active runtime dependency graph. Keeping this separate from the image
       // assertion prevents an artifact-name special case from passing.
       await service.writeFile(`/projects/${projectId}/main.geospec.ts`, 'export {};');
-      await delay(750);
 
-      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
-      expect(parameterFrames).toHaveLength(2);
+      // A second relevant edit is the event barrier for both unrelated writes: once it renders,
+      // every earlier filesystem event has crossed the runtime's watch/debounce queue.
+      const secondUpdate = nextGeometry((handler) => client.on('geometry', handler));
+      await service.writeFile(
+        `/projects/${projectId}/.tau/parameters/main.ts.json`,
+        JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 30 } } } }),
+      );
+      await expectReplicadWidth(await secondUpdate, 0.03);
+
+      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering', 'rendering']);
+      expect(parameterFrames).toHaveLength(3);
       expect(parameterFrames[1]).toStrictEqual(parameterFrames[0]);
+      expect(parameterFrames[2]).toStrictEqual(parameterFrames[0]);
     } finally {
       stopParameters();
       stopStates();
@@ -483,8 +510,9 @@ describe('committed parameter edit', () => {
       await client.render({ source, parameters: {} });
 
       states.length = 0;
+      const updated = nextGeometry((handler) => client.on('geometry', handler));
       await service.writeFile(sidecarPath, sidecarBytes({ width: 30 }));
-      await delay(750);
+      await expectReplicadWidth(await updated, 0.03);
 
       expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
     } finally {
@@ -537,13 +565,18 @@ describe('committed parameter edit', () => {
         if (committed.superseded || !committed.geometry.success) {
           throw new Error('Expected the committed edit to render successfully');
         }
+        await expectReplicadWidth(committed.geometry, 0.02);
 
-        // Past the 75 ms coalescing window and the 200 ms file-change debounce: any watch-driven
-        // second render for the sidecar the dispatch already staged would have landed by now.
-        await delay(750);
+        // A repeated command is the event barrier for the persisted echo: it is issued after the
+        // filesystem delivered that write, so any watch-driven duplicate would precede this one.
+        const barrier = await client.render({ source: { path: 'main.ts' }, parameters: { width: 20 } });
+        if (barrier.superseded || !barrier.geometry.success) {
+          throw new Error('Expected the repeated committed render to succeed');
+        }
+        await expectReplicadWidth(barrier.geometry, 0.02);
 
-        expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
-        expect(parameterFrames).toHaveLength(1);
+        expect(states.filter((state) => state === 'rendering')).toEqual(['rendering', 'rendering']);
+        expect(parameterFrames).toHaveLength(2);
       } finally {
         stopParameters();
         stopStates();

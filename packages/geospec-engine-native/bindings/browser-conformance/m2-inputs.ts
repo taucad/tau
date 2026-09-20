@@ -73,10 +73,10 @@ type F1ResultRow = {
 type M2ExpectedBytes = {
   canonicalClaimUtf8: string;
   canonicalPlanUtf8: string;
-  canonicalResultUtf8: string;
+  canonicalResultUtf8: string | null;
 };
 
-type M2IndependentBytes = { canonicalPlanUtf8: string; canonicalResultUtf8?: string };
+type M2IndependentBytes = { canonicalPlanUtf8: string; canonicalResultUtf8?: string | null };
 
 type M2Asset = {
   byteLength: number;
@@ -100,7 +100,7 @@ export type M2BrowserRow = {
   authoredRequestUtf8: string;
   cohort: string;
   expected: {
-    admissionUtf8: string;
+    admissionUtf8: string | null;
     bytes?: M2ExpectedBytes;
     error: null | { message: string; name: string };
     independent: null | M2IndependentBytes;
@@ -280,9 +280,14 @@ const assertWarmup = (value: unknown, rowId: string): void => {
 
 const assertCanonicalReportRow = (row: M2BrowserRow): void => {
   assertWarmup(row.warmup, row.id);
+  const admissionAuthority: unknown = row.expected.admissionUtf8;
+  if (typeof admissionAuthority !== 'string' && admissionAuthority !== null) {
+    throw new TypeError(`Supplemental browser row ${row.id} has no explicit admission authority.`);
+  }
   if (row.protocolControl !== undefined) {
     const { expectedError, kind, publicApi } = row.protocolControl;
     if (
+      row.expected.admissionUtf8 === null ||
       kind !== 'direct-canonical-plan-rejection' ||
       publicApi !== 'unavailable-negative-query' ||
       row.invocation.polarity !== 'negative' ||
@@ -304,19 +309,32 @@ const assertCanonicalReportRow = (row: M2BrowserRow): void => {
     throw new TypeError(`Supplemental browser row ${row.id} has no canonical report bytes.`);
   }
   for (const key of ['canonicalClaimUtf8', 'canonicalPlanUtf8', 'canonicalResultUtf8'] as const) {
-    if (typeof row.expected.bytes[key] !== 'string') {
+    if (key === 'canonicalResultUtf8' && row.expected.bytes[key] === null) {
+      continue;
+    }
+    if (typeof row.expected.bytes[key] !== 'string' || row.expected.bytes[key].length === 0) {
       throw new TypeError(`Supplemental browser row ${row.id} has no canonical report field ${key}.`);
     }
   }
   if (
     row.expected.independent === null ||
     typeof row.expected.independent.canonicalPlanUtf8 !== 'string' ||
+    row.expected.independent.canonicalPlanUtf8.length === 0 ||
     (row.expected.independent.canonicalResultUtf8 !== undefined &&
+      row.expected.independent.canonicalResultUtf8 !== null &&
       typeof row.expected.independent.canonicalResultUtf8 !== 'string')
   ) {
     throw new Error(
       `Supplemental browser row ${row.id} has no independent plan authority or has an invalid result authority.`,
     );
+  }
+  if (
+    (row.expected.admissionUtf8 === null ||
+      row.expected.bytes.canonicalResultUtf8 === null ||
+      row.expected.independent.canonicalResultUtf8 === null) &&
+    (row.expected.status !== 'passed' || row.expected.error !== null || !/^[\da-f]{64}$/.test(row.subjectHash))
+  ) {
+    throw new Error(`Supplemental browser row ${row.id} has unavailable authority without a known passed subject.`);
   }
 };
 

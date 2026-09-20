@@ -3,7 +3,7 @@ title: 'Netlify Function region (single-region tradeoff)'
 description: Documents the Netlify Terraform `functions_region` field and why Tau stays on a single AWS region for SSR Functions, with future multi-PoP options.
 status: active
 created: '2026-05-06'
-updated: '2026-05-06'
+updated: '2026-09-20'
 category: architecture
 related:
   - docs/research/netlify-production-performance-audit.md
@@ -14,18 +14,13 @@ related:
 
 ## Decision
 
-Tau keeps **one Netlify site per environment** with **standard SSR Functions (Node.js Lambda) in a single AWS region** (default **`us-east-2`**). Distant-PoP latency on cacheable SSR routes is addressed with **Durable / Edge cache** headers (`cdnBackedSsrRouteHeaders` on `/` and `/v/:id`) rather than multi-region Lambda.
+Tau keeps **one Netlify site per environment** with **standard SSR Functions (Node.js Lambda) in a single AWS region**. Distant-PoP latency on cacheable SSR routes is addressed with **Durable / Edge cache** headers (`cdnBackedSsrRouteHeaders` on `/` and `/v/:id`) rather than multi-region Lambda.
 
 ## Terraform reality
 
 The Netlify Terraform resource [`netlify_site_build_settings`](https://registry.terraform.io/providers/netlify/netlify/latest/docs/resources/site_build_settings) exposes **`functions_region`** as a **single string**, not a list. Each Netlify site therefore deploys its Functions bundle to **one** region per configuration change.
 
-Canonical module (not in this repo): `repos/tau-cloud/modules/netlify-site/` — sync via `pnpm repos sync`.
-
-## Operational verification
-
-- After `terraform plan` / `apply` in the relevant stack, confirm the site shows the intended `functions_region` in the Netlify dashboard.
-- Re-run the Sydney 5-shot TTFB matrix from [`docs/research/netlify-production-performance-audit.md`](../research/netlify-production-performance-audit.md) after **SSR bundle** and **cache header** work; use **`pnpm nx run ui:size`** (post-`ui:build`) to ensure the Function artifact stays within budget.
+Which region each Tau environment runs in, and the post-apply check that proves it moved, are operational: they live in Tau's private operations handbook at `docs/handbooks/cloud/system/services/ui.md`, maintained with the `create-handbook` skill. That path resolves only in a checkout that has the private handbook.
 
 ## Future options if single-region becomes a bottleneck
 

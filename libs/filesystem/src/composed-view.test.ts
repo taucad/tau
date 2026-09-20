@@ -346,6 +346,8 @@ describe('composeView provenance', () => {
 
 describe('composeView agent mask', () => {
   beforeEach(async () => {
+    await provider.mkdir('.tau/export', { recursive: true });
+    await provider.writeFile('.tau/export/preferences.json', '{"format":"step"}\n');
     await provider.mkdir('.tau/chats/chat-1', { recursive: true });
     await provider.writeFile('.tau/chats/chat-1/events.jsonl', '{"type":"run.lifecycle"}\n');
     await provider.mkdir('.tau/runs', { recursive: true });
@@ -362,7 +364,7 @@ describe('composeView agent mask', () => {
     const view = agentView();
 
     const controlPlane = await view.readdir('.tau');
-    expect(controlPlane.toSorted()).toStrictEqual(['chats', 'runs']);
+    expect(controlPlane.toSorted()).toStrictEqual(['chats', 'export', 'runs']);
     /* The store moved to the project root under D29, so the listing half of
      * this pin belongs at the root too. */
     expect(await view.readdir('')).not.toContain('.git');
@@ -373,6 +375,11 @@ describe('composeView agent mask', () => {
     expect(await view.exists('.tau/binding.json')).toBe(false);
 
     expect(await view.readFile('.tau/chats/chat-1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
+    expect(await view.readFile('.tau/export/preferences.json', 'utf8')).toBe('{"format":"step"}\n');
+    await expect(view.writeFile('.tau/export/preferences.json', '{}\n')).rejects.toMatchObject({
+      code: 'EROFS',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
     await expect(view.writeFile('.tau/runs/run-1.json', 'forged')).rejects.toMatchObject({
       code: 'EROFS',
       reason: 'WORKSPACE_MASKED_PATH',
@@ -473,10 +480,12 @@ describe('composeView agent mask', () => {
     const view = userView();
 
     const records = await view.readdir('.tau');
-    expect(records.toSorted()).toStrictEqual(['chats', 'runs']);
+    expect(records.toSorted()).toStrictEqual(['chats', 'export', 'runs']);
     expect(await view.exists('.git/HEAD')).toBe(false);
     await expect(view.readFile('.git/HEAD', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
     await expect(view.writeFile('.tau/chats/chat-1/events.jsonl', '')).resolves.toBeUndefined();
+    await expect(view.writeFile('.tau/export/preferences.json', '{"format":"stl"}\n')).resolves.toBeUndefined();
+    expect(await view.readFile('.tau/export/preferences.json', 'utf8')).toBe('{"format":"stl"}\n');
   });
 });
 

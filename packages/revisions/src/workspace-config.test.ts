@@ -125,6 +125,7 @@ describe('generated ignore file', () => {
 /.tau/lockfile.json
 /.tau/chats/
 /.tau/runs/
+/.tau/export/
 /.tau/artifacts/
 /.tau/tool-results/
 /.tau/offloaded-tool-results/

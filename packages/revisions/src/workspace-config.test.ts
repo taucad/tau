@@ -15,7 +15,7 @@ import type { RevisionTrailer } from '#revision-headers.js';
 describe('generated ignore file', () => {
   it('excludes every unversioned path and keeps the versioned generated files', () => {
     const content = generatedIgnoreContent(undefined);
-    for (const entry of generatedIgnoreEntries) {
+    for (const entry of generatedIgnoreEntries(pathRegistry)) {
       expect(content).toContain(entry);
     }
     expect(content).toContain('/.tau/cache/');
@@ -29,9 +29,9 @@ describe('generated ignore file', () => {
   /* The ignore file is derived from the path registry, so the records rows
    * appear and the deleted Jujutsu configuration does not (W1 pin b). */
   it('lists the records rows and no engine configuration', () => {
-    expect(generatedIgnoreEntries).toContain('/.tau/runs/');
-    expect(generatedIgnoreEntries).toContain('/exports/');
-    expect(generatedIgnoreEntries).not.toContain('/.tau/jj-config.toml');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('/.tau/runs/');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('/exports/');
+    expect(generatedIgnoreEntries(pathRegistry)).not.toContain('/.tau/jj-config.toml');
   });
 
   /* PP5: `versioned` agrees with the ignore file — a path is unversioned exactly
@@ -49,8 +49,12 @@ describe('generated ignore file', () => {
    * path out of every tree, and that is the half PP5 exists to protect. */
   it('should exclude every unversioned row as far as it matches, and no versioned one', () => {
     for (const row of pathRegistry) {
-      const anywhere = generatedIgnoreEntries.some((entry) => entry.replace(/\/$/u, '') === `**/${row.prefix}`);
-      const atRoot = generatedIgnoreEntries.some((entry) => entry.replace(/\/$/u, '') === `/${row.prefix}`);
+      const anywhere = generatedIgnoreEntries(pathRegistry).some(
+        (entry) => entry.replace(/\/$/u, '') === `**/${row.prefix}`,
+      );
+      const atRoot = generatedIgnoreEntries(pathRegistry).some(
+        (entry) => entry.replace(/\/$/u, '') === `/${row.prefix}`,
+      );
 
       expect({ prefix: row.prefix, anywhere, atRoot }).toStrictEqual({
         prefix: row.prefix,
@@ -66,10 +70,10 @@ describe('generated ignore file', () => {
    * pattern would not exclude. `node_modules` keeps its slash: a file of that
    * name is not the cache. */
   it('should exclude a control-plane pointer file as well as its directory', () => {
-    expect(generatedIgnoreEntries).toContain('**/.git');
-    expect(generatedIgnoreEntries).toContain('**/.jj');
-    expect(generatedIgnoreEntries).not.toContain('**/.git/');
-    expect(generatedIgnoreEntries).toContain('**/node_modules/');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/.git');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/.jj');
+    expect(generatedIgnoreEntries(pathRegistry)).not.toContain('**/.git/');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/node_modules/');
   });
 
   /* The whole block, literally: it is the one artifact a person reads in their

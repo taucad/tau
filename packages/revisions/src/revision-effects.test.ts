@@ -21,7 +21,7 @@ import { createActor, createMachine } from 'xstate';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RootedFileSystem } from '@taucad/filesystem';
-import { classify } from '@taucad/filesystem/path-registry';
+import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
@@ -1836,4 +1836,53 @@ describe('connecting a remote', () => {
       run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
     ).rejects.toThrow('another account');
   });
+});
+
+/**
+ * EQ6 / W10.6: the layout is data, so revisions read the classifier they are given.
+ *
+ * Four `classify` sites inside the actor closure and one in `portable-tree.ts`
+ * imported Tau's own registry directly, which made the rule "what Tau's layout
+ * says" rather than "what this project's policy says" — the same coupling D6
+ * removed from the composed view in L1.
+ */
+describe('the path policy a project is given', () => {
+  /* Everything under `drawings/` is this policy's derived output; nothing else
+   * is. Tau's own rows say the opposite about all four of these paths, so a
+   * capture that still read the registry cannot pass. */
+  const testPolicy = {
+    classify: (path: string) =>
+      path.startsWith('drawings/') ? { ...unlistedPathClassification, versioned: false } : unlistedPathClassification,
+  };
+
+  it('excludes what that policy says and captures what Tau’s own rows would hide', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (given) => given, {
+      policy: testPolicy,
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await filesystem.writeFile('drawings/plan.dxf', 'DXF\n');
+    await filesystem.writeFile('node_modules/left/index.js', 'module.exports = 1;\n');
+    await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
+
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: cut.cutId,
+      treeId: cut.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+    const tree = await port.readTree(revisionId(written.revisionId));
+    const paths = (tree?.entries() ?? []).map((entry) => entry.path).sort();
+
+    /* This policy's own exclusion holds… */
+    expect(paths).not.toContain('drawings/plan.dxf');
+    /* …and Tau's, which this project never named, does not apply. */
+    expect(paths).toContain('node_modules/left/index.js');
+    expect(paths).toContain('thumbnail.webp');
+  }, 30_000);
 });

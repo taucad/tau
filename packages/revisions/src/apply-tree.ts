@@ -7,7 +7,7 @@
  * capture and the apply is what closes the window `materializeTree` used to
  * refuse (W8c).
  */
-import type { FileMode } from '@taucad/filesystem';
+import type { FileMode, PathPolicy } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
 import { revisionTreeId } from '#git-tree-id.js';
@@ -50,6 +50,7 @@ export const createApplyTreeEffects = (
     useFileSystem: UseCheckoutFileSystem;
     capture: (place: Checkout, modeBasis?: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>;
     onApplyingTree: RevisionActorsOptions['onApplyingTree'];
+    policy: PathPolicy;
     withCheckoutFence: <Result>(checkoutId: string, operation: () => Promise<Result>) => Promise<Result>;
     recordedTree: (tree: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>;
     formatOf: () => Promise<ObjectFormat>;
@@ -75,6 +76,7 @@ export const createApplyTreeEffects = (
     useFileSystem,
     capture,
     onApplyingTree,
+    policy,
     withCheckoutFence,
     recordedTree,
     formatOf,
@@ -161,7 +163,7 @@ export const createApplyTreeEffects = (
     useFileSystem(place, async (live) => {
       const { from, signal } = applyOptions;
       signal?.throwIfAborted();
-      assertMaterializableRevisionTree(target);
+      assertMaterializableRevisionTree(target, policy);
       const liveFiles = new Map(from.entries().map((entry) => [entry.path, entry]));
       const targetFiles = new Map(target.entries().map((entry) => [entry.path, entry]));
       const removedPaths = [...liveFiles.keys()]

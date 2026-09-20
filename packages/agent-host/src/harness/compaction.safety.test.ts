@@ -4,6 +4,7 @@ import type { Api, Context, Model, Usage } from '@earendil-works/pi-ai';
 import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { createAgentSession } from '#harness/session.js';
+import type { AgentSession } from '#harness/session.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { AgentLogEvent, JsonValue, ProviderMessage } from '#log/event-types.js';
 import { reduceEventLog } from '#log/reducer.js';
@@ -165,28 +166,34 @@ const tierOneAndTwoHistory = (): ProviderMessage[] => {
   return messages;
 };
 
-const oversizedTailHistory = (): ProviderMessage[] => {
+const oversizedNewestToolResultHistory = (): ProviderMessage[] => {
   const messages: ProviderMessage[] = [
-    { id: 'tail-user-0', role: 'user', content: 'Start.' },
-    assistant('tail-assistant-0', [{ type: 'text', text: 'First answer.'.repeat(320) }]),
-    { id: 'tail-user-1', role: 'user', content: 'Continue.' },
+    { id: 'tail-summary', role: 'user', content: '<summary>\nEarlier durable work.\n</summary>' },
   ];
   for (let index = 0; index < 4; index++) {
-    const callId = `tail-call-${index}`;
     messages.push(
-      assistant(`tail-assistant-${index + 1}`, [
-        { type: 'toolCall', id: callId, name: 'inspect', arguments: { index } },
-      ]),
-      {
-        id: `tail-output-${index}`,
-        role: 'tool-output',
-        toolCallId: callId,
-        toolName: 'inspect',
-        content: 'r'.repeat(6000),
-        isError: false,
-      },
+      { id: `tail-user-${index}`, role: 'user', content: `Ordinary turn ${index}.` },
+      assistant(`tail-assistant-${index}`, [{ type: 'text', text: `Ordinary answer ${index}.` }]),
     );
   }
+  messages.push(
+    assistant('tail-tool-call', [{ type: 'toolCall', id: 'tail-call', name: 'inspect', arguments: {} }]),
+    {
+      id: 'tail-tool-input',
+      role: 'tool-input',
+      toolCallId: 'tail-call',
+      toolName: 'inspect',
+      content: {},
+    },
+    {
+      id: 'tail-tool-output',
+      role: 'tool-output',
+      toolCallId: 'tail-call',
+      toolName: 'inspect',
+      content: 'r'.repeat(Math.floor(contextWindow * 1.2 * 4)),
+      isError: false,
+    },
+  );
   return messages;
 };
 
@@ -444,23 +451,37 @@ describe('compaction safety regressions', () => {
     await session.close();
   });
 
-  it('should evict earlier turns when the newest tool result exceeds the recent-token budget', async () => {
+  it('should clear one oversized newest tool result before summarizing older turns', async () => {
     const file = createMemoryEventLogFile();
-    await seedMessages(file, oversizedTailHistory());
+    await seedMessages(file, oversizedNewestToolResultHistory());
+    const summarize = vi.fn(async () => 'must not summarize an oversized result');
+    const transport = new ScriptedTransport(() => [
+      { type: 'text-delta', text: 'continued after clearing' },
+      { type: 'completed', stopReason: 'stop' },
+    ]);
     const session = await createSession({
       file,
-      transport: new ScriptedTransport(() => [{ type: 'completed', stopReason: 'stop' }]),
-      summarize: async () => 'Earlier tool loop.',
+      transport,
+      summarize,
     });
     await session.prompt({ id: 'tail-user-next', role: 'user', content: 'continue' });
 
     const snapshot = await session.snapshot();
     expectToolPairs(snapshot.messages);
     expect(snapshot.failure).toBeUndefined();
-    expect(snapshot.messages.some((message) => message.id === 'tail-user-0')).toBe(false);
+    expect(snapshot.messages.map((message) => message.id)).toEqual(
+      expect.arrayContaining(['tail-summary', 'tail-user-0', 'tail-tool-output']),
+    );
+    expect(snapshot.messages.find((message) => message.id === 'tail-tool-output')).toMatchObject({
+      content: '[Tool result exceeded the context window and was cleared; re-run with a narrower request]',
+    });
+    expect(summarize).not.toHaveBeenCalled();
+    expect(JSON.stringify(transport.requests[0]?.messages)).toContain('re-run with a narrower request');
     const log = await file.open();
     const events = await log.read();
-    expect(events.some((event) => event.type === 'history.compacted')).toBe(true);
+    expect(events.filter((event) => event.type === 'message.envelope-replaced')).toHaveLength(1);
+    expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'completed' });
     await log.close();
     await session.close();
   });
@@ -662,35 +683,106 @@ describe('compaction safety regressions', () => {
     await session.close();
   });
 
-  it('should propagate the run abort signal instead of replacing it with a placeholder', async () => {
+  it.each(['prompt', 'resume'] as const)(
+    'should cancel a %s while its start-of-turn transport summarizer is in flight',
+    async (operation) => {
+      const file = createMemoryEventLogFile();
+      await seedMessages(
+        file,
+        Array.from(
+          { length: 8 },
+          (_, index): ProviderMessage => ({
+            id: `abort-user-${index}`,
+            role: 'user',
+            content: `${index}-${'a'.repeat(4000)}`,
+          }),
+        ),
+      );
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let summarizerSignal: AbortSignal | undefined;
+      const transport: ModelTransport = {
+        async *stream(request): AsyncGenerator<ModelStreamEvent> {
+          if (request.invocationPurpose === 'compaction') {
+            summarizerSignal = request.signal;
+            started.resolve();
+            await release.promise;
+            yield { type: 'completed', stopReason: 'aborted' };
+            return;
+          }
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      };
+      const session = await createSession({ file, transport });
+
+      const running =
+        operation === 'prompt'
+          ? session.prompt({ id: 'abort-user-next', role: 'user', content: 'continue' })
+          : session.agent.continue();
+      await started.promise;
+      session.abort();
+      release.resolve();
+      await running;
+
+      expect(summarizerSignal?.aborted).toBe(true);
+      const snapshot = await session.snapshot();
+      expect(snapshot.state).toBe('cancelled');
+      expect(
+        snapshot.messages.filter(
+          (message) => message.role === 'assistant' && Array.isArray(message.content) && message.content.length === 0,
+        ),
+      ).toEqual([]);
+      const log = await file.open();
+      const events = await log.read();
+      expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
+      expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'cancelled' });
+      await log.close();
+      await session.close();
+    },
+  );
+
+  it('should re-check a run abort immediately before appending a compaction', async () => {
     const file = createMemoryEventLogFile();
     await seedMessages(
       file,
       Array.from(
         { length: 8 },
         (_, index): ProviderMessage => ({
-          id: `abort-user-${index}`,
+          id: `late-abort-user-${index}`,
           role: 'user',
           content: `${index}-${'a'.repeat(4000)}`,
         }),
       ),
     );
-    const controller = new AbortController();
+    const stored = await file.open();
+    const current: { session?: AgentSession } = {};
+    let abortOnRead = false;
+    const eventLog: EventLogAppender = {
+      ...stored,
+      read: async () => {
+        if (abortOnRead) {
+          abortOnRead = false;
+          current.session?.abort();
+        }
+        return stored.read();
+      },
+    };
     const session = await createSession({
       file,
+      eventLog,
       transport: new ScriptedTransport(() => [{ type: 'completed', stopReason: 'stop' }]),
       summarize: async () => {
-        controller.abort();
-        throw new DOMException('run aborted', 'AbortError');
+        abortOnRead = true;
+        return 'Summary completed before the stop.';
       },
     });
+    current.session = session;
 
-    await expect(session.agent.prepareNextTurn?.(controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    await session.prompt({ id: 'late-abort-user-next', role: 'user', content: 'continue' });
 
-    const log = await file.open();
-    const events = await log.read();
+    const events = await stored.read();
     expect(events.some((event) => event.type === 'history.compacted')).toBe(false);
-    await log.close();
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'cancelled' });
     await session.close();
   });
 

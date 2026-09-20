@@ -39,7 +39,7 @@ const usageSchema = z
     cost: usageCostSchema,
   })
   .catchall(jsonValueSchema);
-const compactionTraceSchema = z.strictObject({
+const compactionTraceSchema = z.looseObject({
   lane: z.enum(['start_of_turn', 'between_turn', 'overflow']),
   tier: z.enum(['tool_result_clearing', 'summarization']),
   tokensBefore: z.number().nonnegative(),

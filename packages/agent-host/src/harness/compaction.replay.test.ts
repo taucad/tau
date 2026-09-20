@@ -27,7 +27,7 @@ class ReplayTransport implements ModelTransport {
 }
 
 describe('production compaction replay', () => {
-  it('should compact the sanitized production history and complete one tool turn', async () => {
+  it('should reduce the sanitized production history and complete one tool turn', async () => {
     expect(fixture).not.toMatch(/aerodynamic|racing|OpenSCAD/iu);
     const seeded = parseEventLog(fixture);
     expect(seeded).toHaveLength(860);
@@ -68,11 +68,16 @@ describe('production compaction replay', () => {
     const log = await file.open();
     const events = await log.read();
     const replayed = reduceEventLog(events);
-    const compactions = events.filter((event) => event.type === 'history.compacted');
+    const compactions = events.flatMap((event) => {
+      if (event.type !== 'history.compacted' && event.type !== 'message.envelope-replaced') {
+        return [];
+      }
+      return event.details === undefined ? [] : [event];
+    });
     const terminal = events.findLast((event) => event.runId === 'replay-run' && event.type === 'run.lifecycle');
 
     expect(compactions).toHaveLength(1);
-    expect(compactions[0]?.details?.tier).toBe('summarization');
+    expect(compactions[0]?.details?.tier).toBe('tool_result_clearing');
     expect(terminal?.type === 'run.lifecycle' && terminal.state).toBe('completed');
     expect(snapshot.failure).toBeUndefined();
     expect(JSON.stringify(events)).not.toContain('SESSION_LOG_INTEGRITY');

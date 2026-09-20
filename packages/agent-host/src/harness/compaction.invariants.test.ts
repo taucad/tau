@@ -243,6 +243,7 @@ describe('long-session compaction invariants', () => {
     const sizeCoverage = new Set<string>();
     const providerCoverage = new Set<ModelProviderKind>();
     let globalId = 0;
+    const clockStart = Date.now();
 
     for (let step = 0; step < stepCount; step++) {
       const shape = shapes[step % shapes.length]!;
@@ -285,12 +286,15 @@ describe('long-session compaction invariants', () => {
         safeguardThresholds: { identicalCall: 2, identicalErrorTerminate: 100 },
         onCompaction: (outcome) => {
           if (outcome.tier) {
+            if (outcome.tier === 'summarization' && outcome.evicted > 1) {
+              expect(outcome.messages).not.toHaveLength(1);
+            }
             compactions.push(outcome);
             pendingCompactions.push(outcome);
           }
         },
         createId: () => `generated-${globalId++}`,
-        now: () => new Date(Date.UTC(2026, 8, 20, 0, 0, globalId)),
+        now: () => new Date(clockStart + globalId * 1000),
       });
       current.session = session;
 

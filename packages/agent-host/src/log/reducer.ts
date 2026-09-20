@@ -3,6 +3,7 @@ import { parseLogEvent } from '#log/event-schema.js';
 import { createEventSequence } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 
+// Log events are immutable after append; cached ProviderMessage objects are intentionally shared across reductions.
 const parsedEvents = new WeakMap<AgentLogEvent, AgentLogEvent>();
 
 const reducerEvent = (candidate: AgentLogEvent): AgentLogEvent => {
@@ -12,6 +13,7 @@ const reducerEvent = (candidate: AgentLogEvent): AgentLogEvent => {
   }
   const parsed = parseLogEvent(candidate);
   parsedEvents.set(candidate, parsed);
+  parsedEvents.set(parsed, parsed);
   return parsed;
 };
 

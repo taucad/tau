@@ -22,6 +22,8 @@ import type { SessionRecord } from '#harness/session-record.js';
 import type { CompactionTrace } from '#log/event-types.js';
 
 const clearedToolResultContent = '[Old tool result content cleared]';
+const oversizedToolResultContent =
+  '[Tool result exceeded the context window and was cleared; re-run with a narrower request]';
 const recentToolResultsToKeep = 5;
 const compactableTools = new Set([
   'read_file',
@@ -128,7 +130,7 @@ const clearOldToolResults = (
     !(
       message.content.length === 1 &&
       message.content[0]?.type === 'text' &&
-      message.content[0].text === clearedToolResultContent
+      (message.content[0].text === clearedToolResultContent || message.content[0].text === oversizedToolResultContent)
     ) &&
     (forced.has(message) ||
       (compactableTools.has(message.toolName) && message.content.every((block) => block.type !== 'image')))
@@ -150,7 +152,7 @@ const clearOldToolResults = (
     if (!original) {
       return message;
     }
-    const replacement = clearedToolResult(original);
+    const replacement = clearedToolResult(original, forced.has(original));
     cleared.push({ original, replacement });
     return replacement;
   });
@@ -166,11 +168,11 @@ const compactionSettings = (contextWindow: number): CompactionSettings => ({
 const messageTokens = (messages: readonly AgentMessage[]): number =>
   messages.reduce((total, message) => total + estimateTokens(message), 0);
 
-const clearedToolResult = (message: Extract<AgentMessage, { role: 'toolResult' }>): typeof message => ({
+const clearedToolResult = (message: Extract<AgentMessage, { role: 'toolResult' }>, forced = false): typeof message => ({
   ...message,
-  content: [{ type: 'text', text: clearedToolResultContent }],
+  content: [{ type: 'text', text: forced ? oversizedToolResultContent : clearedToolResultContent }],
   details: {
-    content: clearedToolResultContent,
+    content: forced ? oversizedToolResultContent : clearedToolResultContent,
     isError: message.isError,
     substituted: false,
   },
@@ -509,26 +511,16 @@ export const installCompaction = (
       32,
       options.contextWindow - settings.reserveTokens - settings.keepRecentTokens - fixedOverhead,
     );
-    const emergencyClearings = new Set<AgentMessage>();
-    const initialCutoff = tokenBudgetCutoff(input, messageBudget);
-    let retainedTailTokens = messageTokens(input.slice(initialCutoff));
-    for (const message of input
-      .slice(initialCutoff)
-      .toSorted((left, right) => estimateTokens(right) - estimateTokens(left))) {
-      if (retainedTailTokens <= messageBudget) {
-        break;
-      }
-      if (message.role === 'toolResult') {
-        emergencyClearings.add(message);
-        retainedTailTokens -= estimateTokens(message) - estimateTokens(clearedToolResult(message));
-      }
-    }
+    const emergencyClearings = new Set(
+      input.filter((message) => message.role === 'toolResult' && estimateTokens(message) > messageBudget),
+    );
     const tierOne = clearOldToolResults(input, emergencyClearings);
     const tierOneTokens = fixedOverhead + messageTokens(tierOne.messages);
     if (
       tierOne.cleared.length > 0 &&
-      (!force || trigger.anchored) &&
-      tierOneTokens <= options.contextWindow - settings.reserveTokens - settings.keepRecentTokens
+      (emergencyClearings.size > 0 ||
+        ((!force || trigger.anchored) &&
+          tierOneTokens <= options.contextWindow - settings.reserveTokens - settings.keepRecentTokens))
     ) {
       tokensAfter = tierOneTokens;
       const details = trace('tool_result_clearing', tierOne.cleared.length);
@@ -647,7 +639,7 @@ export const installCompaction = (
       summaryKind = placeholder ? 'placeholder' : 'generated';
       compactedSummary = placeholder ? placeholderSummary(evicted) : compactedSummary;
       let latestInputTimestamp = 0;
-      for (const message of tierTwoMessages) {
+      for (const message of evicted) {
         latestInputTimestamp = Math.max(latestInputTimestamp, message.timestamp);
       }
       summary = {
@@ -673,7 +665,7 @@ export const installCompaction = (
             tier: 'summarization',
           });
         }
-        strikes++;
+        strikes = placeholder ? 0 : strikes + 1;
         const code = strikes >= 3 ? 'CIRCUIT_BREAKER_OPEN' : 'SUMMARY_REQUIRED';
         const message =
           code === 'CIRCUIT_BREAKER_OPEN'
@@ -716,6 +708,9 @@ export const installCompaction = (
         throw new Error('Compaction projection diverged from durable history.');
       }
       const durableSummary = piMessageToProvider(summary, options.record.messages);
+      if (signal?.aborted) {
+        throw new DOMException('Compaction aborted', 'AbortError');
+      }
       await options.record.append({
         type: 'history.compacted',
         evictedMessageIds: durableIds,
@@ -837,7 +832,7 @@ export const installCompaction = (
         return first;
       }
       const discardedOverflowError = message.errorMessage;
-      let { messages: projected } = options.agent.state;
+      let projected = [...options.agent.state.messages];
       try {
         await options.settleDiscardedToolCalls?.();
         projected = await options.projectHistory();

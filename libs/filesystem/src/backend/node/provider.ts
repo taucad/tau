@@ -171,12 +171,15 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
      * whole snapshot to ENOENT (seen by the desktop e2e's workspace admission
      * racing a parameter write). Keep it out of every listing. */
     const rows = entries.filter((entry) => !inFlightTemporaryName.test(entry.name));
-    /* A link into a path the mask hides is out of the listing for the same
+    /* A link this provider will not serve is out of the listing for the same
      * reason: `_resolve` refuses it below, and a row every walker then `stat`s
-     * would cost the caller the whole snapshot. Only link rows are probed, so an
-     * ordinary directory pays one `readdir` exactly as before. */
-    const refused = await Promise.all(
-      rows.map(async (entry) => entry.isSymbolicLink() && (await this._refusesLaunderedLink(canonical, entry.name))),
+     * would cost the caller the whole snapshot. Only link rows are probed — an
+     * ordinary directory pays one `readdir` exactly as before — and they are
+     * probed from the same bounded pool as the stats beside them: each probe is
+     * an `lstat` walk plus a `realpath`, and a pnpm `node_modules` is thousands
+     * of rows. */
+    const refused = await mapConcurrent(rows, statConcurrency, async (entry) =>
+      entry.isSymbolicLink() ? this._refusesLaunderedLink(canonical, entry.name) : false,
     );
     return rows.filter((_, index) => refused[index] !== true).map(({ name }) => name);
   }
@@ -620,13 +623,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
   }
 
-  /** Whether this directory row resolves somewhere {@link _resolve} will not serve. */
+  /**
+   * Whether this directory row resolves somewhere {@link _resolve} will not serve.
+   *
+   * Any refusal drops the row, not only the laundered-mask one: a broken link
+   * answers `ENOENT` and one pointing out of the root `PATH_OUTSIDE_ROOT`, and a
+   * row a walker cannot `stat` costs it the whole listing either way (G0b-4).
+   */
   private async _refusesLaunderedLink(directory: string, name: string): Promise<boolean> {
     try {
       await this._resolve(joinRooted(directory, name));
       return false;
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'ELOOP';
+    } catch {
+      return true;
     }
   }
 

@@ -8,9 +8,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { captureRevisionTree } from '#algorithms/revision-capture.js';
+import { captureRevisionTree, createCaptureMemo } from '#algorithms/revision-capture.js';
 import type { RevisionCaptureFileSystem } from '#algorithms/revision-capture.js';
-import type { DirectoryEntry, FileStat } from '@taucad/filesystem';
+import type { DirectoryEntry, FileStat, FileStatEntry } from '@taucad/filesystem';
 
 /**
  * A real filesystem can drop an entry between `readdir` and the `stat` that
@@ -417,4 +417,72 @@ describe('captureRevisionTree', () => {
     expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
   });
   /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after path-keyed fixtures. */
+});
+
+describe('createCaptureMemo', () => {
+  /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed fixtures use the empty string for the rooted filesystem root. */
+  const tree = { '': ['small.ts', 'mesh.stl'], 'small.ts': 'ab', 'mesh.stl': 'solid ' };
+  /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after path-keyed fixtures. */
+  const observedAt = 1_000_000;
+  const statsOf = (files: Readonly<Record<string, string>>): FileStatEntry[] =>
+    Object.entries(files).map(([path, value]) => ({
+      path,
+      name: path,
+      type: 'file',
+      size: value.length,
+      /* Old enough to be outside the racy window, so the guard is not what this asserts. */
+      mtimeMs: observedAt - 60_000,
+      contentKind: 'text',
+      lineCount: 1,
+    }));
+
+  it('should hold no more bytes than its budget over a tree larger than it', () => {
+    const memo = createCaptureMemo({ maximumRetainedBytes: 3 });
+    const stats = statsOf({ 'small.ts': 'ab', 'mesh.stl': 'solid ' });
+
+    const first = memo.unchanged(stats, observedAt);
+    first.onRead?.('small.ts', new TextEncoder().encode('ab'));
+    first.onRead?.('mesh.stl', new TextEncoder().encode('solid '));
+
+    const second = memo.unchanged(stats, observedAt);
+    const reused = ['small.ts', 'mesh.stl'].map((path) => second.reuse?.(path)?.byteLength ?? 0);
+    expect(reused).toEqual([2, 0]);
+    expect(reused.reduce((total, bytes) => total + bytes, 0)).toBeLessThanOrEqual(3);
+  });
+
+  it('should read the file it could not hold again and still read none of the ones it could', async () => {
+    const filesystem = vanishingFileSystem(tree, new Set());
+    /* Capture streams where it can, so the stream is what a read is counted at. */
+    const read = vi.spyOn(filesystem, 'readFileStream');
+    const memo = createCaptureMemo({ maximumRetainedBytes: 3 });
+    const stats = statsOf({ 'small.ts': 'ab', 'mesh.stl': 'solid ' });
+
+    await captureRevisionTree(filesystem, { ...memo.unchanged(stats, observedAt) });
+    read.mockClear();
+    const second = await captureRevisionTree(filesystem, { ...memo.unchanged(stats, observedAt) });
+
+    expect(read.mock.calls.map(([path]) => path)).toEqual(['mesh.stl']);
+    expect(second.get('small.ts')).toStrictEqual(new TextEncoder().encode('ab'));
+    expect(second.get('mesh.stl')).toStrictEqual(new TextEncoder().encode('solid '));
+  });
+
+  it('should hold nothing for a file whose timestamp is inside the racy window, whatever the budget', () => {
+    const memo = createCaptureMemo();
+    const stats: FileStatEntry[] = [
+      {
+        path: 'small.ts',
+        name: 'small.ts',
+        type: 'file',
+        size: 2,
+        mtimeMs: observedAt,
+        contentKind: 'text',
+        lineCount: 1,
+      },
+    ];
+
+    const first = memo.unchanged(stats, observedAt);
+    first.onRead?.('small.ts', new TextEncoder().encode('ab'));
+
+    expect(memo.unchanged(stats, observedAt).reuse?.('small.ts')).toBeUndefined();
+  });
 });

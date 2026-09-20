@@ -1,4 +1,5 @@
 import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, ProjectManifest } from '@taucad/types';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   FileTreeNode,
   MkdirOptions,
@@ -176,7 +177,7 @@ export type FileSystemClient = {
    * project. A physical workspace scope the mount table does not route is the
    * `/files` browser's download and is {@link ScopedStorageClient}'s (charter D5).
    */
-  getZippedDirectory(path: string, options?: { versionedOnly?: boolean }): Promise<Blob>;
+  getZippedDirectory(path: string, options?: ContentExportFilter): Promise<Blob>;
 
   /**
    * Mount a path prefix on a fresh provider instance. Webaccess mounts

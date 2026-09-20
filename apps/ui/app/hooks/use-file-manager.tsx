@@ -20,6 +20,7 @@ import { createRootedContentClient } from '@taucad/fs-client/rooted-content-clie
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError, WorkspaceScope } from '@taucad/filesystem';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
   getHomeStorageBackend,
@@ -313,7 +314,7 @@ type FileManagerContextType = {
    * current root, so an archive taken while a linked checkout is selected is
    * the checkout the workbench is showing.
    */
-  getZippedDirectory: (path: string, options?: { versionedOnly?: boolean }) => Promise<Blob>;
+  getZippedDirectory: (path: string, options?: ContentExportFilter) => Promise<Blob>;
   /**
    * One project's versioned bytes, read through that project's *own* composed
    * view — the snapshot a duplicate journals (authority Rule 12, charter D11).
@@ -1063,7 +1064,7 @@ export function FileManagerProvider({
   );
 
   const getZippedDirectory = useCallback(
-    async (path: string, options?: { versionedOnly?: boolean }): Promise<Blob> => {
+    async (path: string, options?: ContentExportFilter): Promise<Blob> => {
       const { contentService } = await whenServicesReady();
       return contentService.getZippedDirectory(path, options);
     },

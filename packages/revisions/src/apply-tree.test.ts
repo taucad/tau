@@ -25,10 +25,10 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { walk } from '@taucad/filesystem/content-ops';
 import type { FileMode, FileStatEntry, RootedFileSystem } from '@taucad/filesystem';
 
-import { captureRevisionTree, ImmutableRevisionTree } from '#algorithms/index.js';
+import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import type { Checkout } from '#revision-port.js';
+import type { Checkout, RevisionPort } from '#revision-port.js';
 import { RevisionPortError } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors } from '#revision-effects.js';
@@ -92,6 +92,8 @@ type CountingOptions = Readonly<{
   failMutation?: (sequence: number) => boolean;
   /** Fold provider paths the way a case-insensitive filesystem does. */
   caseInsensitive?: boolean;
+  /** Expose linked checkouts through the in-memory port. */
+  linkedCheckouts?: boolean;
 }>;
 
 /**
@@ -205,6 +207,7 @@ const project = async (
     tree: NodeFsProvider;
     checkout: RootedFileSystem;
     counts: Counts;
+    port: RevisionPort;
     reset: () => void;
     open: () => RevisionActors;
   }>
@@ -217,11 +220,15 @@ const project = async (
     await tree.writeFile(path, content);
   }
   const { checkout, counts, reset } = countingCheckout(tree, options);
-  const port = createIsomorphicGitRevisionPort({ filesystem: tree });
+  const port = createIsomorphicGitRevisionPort({
+    filesystem: tree,
+    ...(options.linkedCheckouts === true ? { checkouts: { projectId: 'project-1', root: () => tree } } : {}),
+  });
   return {
     tree,
     checkout,
     counts,
+    port,
     reset,
     open: () =>
       createRevisionActors({
@@ -255,12 +262,12 @@ const materializer = (checkout: RootedFileSystem) => {
     withCheckoutFence: async (_checkoutId, operation) => operation(),
     recordedTree: async (tree) => tree,
     formatOf: async () => 'sha1',
-    temporarySibling: (path) => {
+    temporarySibling: (path, role) => {
       temporary += 1;
       const separator = path.lastIndexOf('/');
       const directory = separator === -1 ? '' : path.slice(0, separator + 1);
       const name = path.slice(separator + 1);
-      return `${directory}.${name}.0.00000000-0000-4000-8000-${String(temporary).padStart(12, '0')}.tmp`;
+      return `${directory}.${name}.tau-${role}.00000000-0000-4000-8000-${String(temporary).padStart(12, '0')}.tmp`;
     },
     unlinkIfPresent: async (live, path) => {
       await live.unlink(path).catch((error: unknown) => {
@@ -299,7 +306,7 @@ const save = async (actors: RevisionActors): Promise<Readonly<{ revisionId: stri
 };
 
 /** Every file in the tree except the store's own, so litter shows up as a path nobody wrote. */
-const filesOf = async (tree: NodeFsProvider): Promise<string[]> => {
+const filesOf = async (tree: RootedFileSystem): Promise<string[]> => {
   const found: string[] = [];
   for await (const entry of walk(tree, '', { admits: (path) => path !== '.git' })) {
     if (entry.kind === 'file') {
@@ -314,7 +321,7 @@ const filesOf = async (tree: NodeFsProvider): Promise<string[]> => {
  * from its matcher would leave a name this still calls litter.
  */
 const litterIn = (found: readonly string[]): string[] =>
-  found.filter((path) => /(?:^|\/)\..+\.\d+\..+\.tmp$/u.test(path));
+  found.filter((path) => /(?:^|\/)\..+\.tau-(?:staged|backup)\..+\.tmp$/u.test(path));
 
 describe('what a cut reads', () => {
   it('should read no file bytes for a cut over a tree nothing has touched', async () => {
@@ -360,6 +367,23 @@ describe('what a cut reads', () => {
     await cut(actors);
 
     expect(counts.reads).toBeGreaterThan(0);
+  }, 30_000);
+
+  it('should refuse to discard a same-size replacement whose mtime is unchanged', async () => {
+    const context = await project({ 'main.ts': 'old!' }, { ...trustedStats, linkedCheckouts: true });
+    const actors = context.open();
+    const base = await save(actors);
+    const linked = await context.port.addCheckout!({ branch: 'side', from: revisionId(base.revisionId) });
+    await run(actors.checkout.cut, { checkoutId: linked.id, trigger: 'save' });
+
+    await context.tree.writeFile('main.ts', 'new!');
+    context.reset();
+
+    await expect(run(actors.checkouts.removeCheckout, { projectId: 'project-1', id: linked.id })).rejects.toThrow(
+      /not in a revision yet/u,
+    );
+    expect(context.counts.reads).toBeGreaterThan(0);
+    expect(await context.tree.readFile('main.ts', 'utf8')).toBe('new!');
   }, 30_000);
 });
 
@@ -466,27 +490,61 @@ describe('a case-insensitive checkout', () => {
 });
 
 describe('reopening a project an apply died in', () => {
-  const orphan = '.main.ts.0.0f9e8d7c-1234-4abc-8def-0123456789ab.tmp';
+  const uuid = '0f9e8d7c-1234-4abc-8def-0123456789ab';
+  const oldPattern = `.main.ts.0.${uuid}.tmp`;
+  const staged = `.main.ts.tau-staged.${uuid}.tmp`;
+  const backup = `.main.ts.tau-backup.${uuid}.tmp`;
   const lookalikes = {
     '.main.ts.0.not-a-uuid.tmp': 'a name of the person’s own\n',
     'main.ts.0.0f9e8d7c-1234-4abc-8def-0123456789ab.tmp': 'no leading dot, so not a sibling\n',
     '.notes.tmp': 'nor this\n',
   };
 
-  it('should sweep the siblings an apply staged before the first capture, and keep every file that only looks like one', async () => {
-    const kept = { 'main.ts': 'export const size = 1;\n', ...lookalikes };
-    const littered = await project({ ...kept, [orphan]: 'bytes an apply never published\n' });
-    const clean = await project(kept);
+  it('should keep a person’s file that matches the old temporary-sibling pattern', async () => {
+    const context = await project({ 'main.ts': 'original\n', [oldPattern]: 'person\n', ...lookalikes });
+
+    await cut(context.open());
+
+    /* Read, not listed: the node provider keeps its own in-flight temp spelling
+     * out of listings, and that spelling is the old pattern. */
+    expect(await context.tree.readFile(oldPattern, 'utf8')).toBe('person\n');
+    expect(await filesOf(context.tree)).toEqual(expect.arrayContaining(Object.keys(lookalikes)));
+  }, 30_000);
+
+  it('should remove a staged sibling before capture', async () => {
+    const clean = await project({ 'main.ts': 'original\n' });
+    const littered = await project({ 'main.ts': 'original\n', [staged]: 'unpublished\n' });
 
     const litteredTreeId = await cut(littered.open());
     const cleanTreeId = await cut(clean.open());
 
-    const found = await filesOf(littered.tree);
-    expect(found).not.toContain(orphan);
-    expect(found).toEqual(expect.arrayContaining(Object.keys(lookalikes)));
-    /* Swept before the first capture, so the revision this cut would record is
-     * the one the project without the litter records. */
+    expect(await filesOf(littered.tree)).not.toContain(staged);
     expect(litteredTreeId).toBe(cleanTreeId);
+  }, 30_000);
+
+  it('should restore a backup sibling when the original is missing', async () => {
+    const clean = await project({ 'main.ts': 'only copy\n' });
+    const interrupted = await project({ [backup]: 'only copy\n' });
+
+    const interruptedTreeId = await cut(interrupted.open());
+    const cleanTreeId = await cut(clean.open());
+
+    expect(await filesOf(interrupted.tree)).toContain('main.ts');
+    expect(await filesOf(interrupted.tree)).not.toContain(backup);
+    expect(await interrupted.tree.readFile('main.ts', 'utf8')).toBe('only copy\n');
+    expect(interruptedTreeId).toBe(cleanTreeId);
+  }, 30_000);
+
+  it('should remove a backup sibling when the original is present', async () => {
+    const clean = await project({ 'main.ts': 'published\n' });
+    const interrupted = await project({ 'main.ts': 'published\n', [backup]: 'old bytes\n' });
+
+    const interruptedTreeId = await cut(interrupted.open());
+    const cleanTreeId = await cut(clean.open());
+
+    expect(await filesOf(interrupted.tree)).not.toContain(backup);
+    expect(await interrupted.tree.readFile('main.ts', 'utf8')).toBe('published\n');
+    expect(interruptedTreeId).toBe(cleanTreeId);
   }, 30_000);
 });
 

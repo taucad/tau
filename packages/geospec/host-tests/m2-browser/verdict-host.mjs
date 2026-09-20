@@ -60,8 +60,17 @@ const row = {
     workUnitBudget: 1,
   },
 };
-const run = async (input, supplemental, status = 'passed') => {
+const run = async (input, supplemental, observation = 'passed') => {
+  const { status, publicFailure } =
+    typeof observation === 'string' ? { status: observation, publicFailure: 'none' } : observation;
   const canonicalResult = result(status);
+  class InertGeoSpecAssertionError extends Error {
+    constructor(report) {
+      super('Ordinary captured assertion diagnostic; no independent message golden.');
+      this.name = 'GeoSpecAssertionError';
+      this.report = report;
+    }
+  }
   class InertEngine {
     ingestSubject() {
       return encode(admission);
@@ -84,7 +93,8 @@ const run = async (input, supplemental, status = 'passed') => {
   }
   const context = vm.createContext({
     Engine: InertEngine,
-    GeoSpecAssertionError: class extends Error {},
+    GeoSpecAssertionError: InertGeoSpecAssertionError,
+    Error,
     TextEncoder,
     TextDecoder,
     Uint8Array,
@@ -92,13 +102,22 @@ const run = async (input, supplemental, status = 'passed') => {
     canonicalize: (bytes) => bytes,
     createGeoSpecAssertionClient: () => ({
       expectGeo: () => ({
-        toHaveVolume: () => ({
-          canonicalClaim: encode(claim),
-          canonicalPlan: encode(plan),
-          canonicalResult: encode(canonicalResult),
-          status,
-          diagnostics: [],
-        }),
+        toHaveVolume: () => {
+          const report = {
+            canonicalClaim: encode(claim),
+            canonicalPlan: encode(plan),
+            canonicalResult: encode(canonicalResult),
+            status,
+            diagnostics: [],
+          };
+          if (publicFailure === 'structured') {
+            throw new InertGeoSpecAssertionError(report);
+          }
+          if (publicFailure === 'unexpected') {
+            throw new Error('Ordinary unrelated host error.');
+          }
+          return report;
+        },
       }),
     }),
     fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) }),
@@ -181,4 +200,55 @@ void test('should load explicit nullable supplemental authority without replacin
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+const failedRow = {
+  ...row,
+  expected: { ...expected, status: 'failed', error: { name: 'GeoSpecAssertionError', message: null } },
+};
+
+void test('should accept independently failed structured reports while retaining unavailable message authority', async () => {
+  const captured = await run(failedRow, true, { status: 'failed', publicFailure: 'structured' });
+  assert.equal(captured.passed, true);
+  assert.equal(captured.comparison.status, true);
+  assert.equal(captured.comparison.errorClass, true);
+  assert.ok(captured.comparison.unavailableFields.includes('error.message'));
+  assert.equal(captured.admission.actual.utf8, admission);
+  assert.equal(captured.admission.expected, null);
+  for (const route of [captured.direct, captured.public]) {
+    assert.equal(route.canonicalClaimUtf8, claim);
+    assert.equal(route.canonicalPlanUtf8, plan);
+    assert.equal(route.canonicalResultUtf8, result('failed'));
+    assert.equal(route.status, 'failed');
+  }
+  assert.equal(captured.public.error.name, 'GeoSpecAssertionError');
+  assert.equal(captured.public.error.assertionError, true);
+  assert.equal(captured.public.error.message, 'Ordinary captured assertion diagnostic; no independent message golden.');
+  assert.equal(failedRow.expected.error.message, null);
+  assert.equal(captured.comparison.directFrozen.canonicalResultUtf8, null);
+  assert.equal(captured.comparison.publicDirect.canonicalResultUtf8, true);
+  assert.equal(captured.cleanup.released, true);
+  assert.equal(captured.cleanup.closeCalled, true);
+});
+
+void test('should reject a passed observation for independently failed authority', async () => {
+  const captured = await run(failedRow, true, 'passed');
+  assert.equal(captured.passed, false);
+  assert.equal(captured.comparison.status, false);
+  assert.equal(captured.comparison.errorClass, false);
+  assert.equal(captured.direct.canonicalResultUtf8, result('passed'));
+  assert.equal(captured.public.canonicalResultUtf8, result('passed'));
+  assert.equal(captured.cleanup.released, true);
+});
+
+void test('should reject an unrelated error class despite independently expected failure', async () => {
+  const captured = await run(failedRow, true, { status: 'failed', publicFailure: 'unexpected' });
+  assert.equal(captured.passed, false);
+  assert.equal(captured.direct.canonicalResultUtf8, result('failed'));
+  assert.equal(captured.public, undefined);
+  assert.equal(captured.runtimeFailure.phase, 'public');
+  assert.equal(captured.runtimeFailure.name, 'Error');
+  assert.equal(captured.runtimeFailure.message, `M2 public assertion returned no report for ${failedRow.id}.`);
+  assert.equal(captured.cleanup.released, true);
+  assert.equal(captured.cleanup.closeCalled, true);
 });

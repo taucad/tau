@@ -946,7 +946,13 @@ cone = startSketchOn(XZ)
         async (_program, _path, options: { signal: AbortSignal }) =>
           new Promise<never>((_resolve, reject) => {
             rejectCommand = reject;
-            options.signal.addEventListener('abort', () => void cancel(), { once: true });
+            options.signal.addEventListener(
+              'abort',
+              () => {
+                void cancel();
+              },
+              { once: true },
+            );
             markCommandPending();
           }),
       );

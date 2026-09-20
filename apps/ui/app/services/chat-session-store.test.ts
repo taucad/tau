@@ -1707,6 +1707,38 @@ describe('ChatSessionStore', () => {
     });
 
     /*
+     * I7. `ChatTurnHost` mounts as soon as a chat is focused, and its binding
+     * publishes once per placement — so a reattach that lands while the chat's
+     * row is still being read has no later pass to catch it. Dropped, the log
+     * was never attached: no `RUN_ABANDONED`, no settlement, and the next open
+     * reconciled the same run again. The condition is the store's, so the
+     * request waits here rather than on a React dependency array.
+     */
+    it('holds a reattach requested while the chat is loading and applies it once, after the load', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      const chatId = 'chat_loading_reattach';
+      const loading = Promise.withResolvers<ChatEntity>();
+      deps.getChat.mockReturnValue(loading.promise);
+      store.setDependencies(deps);
+      const session = store.acquire(chatId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(true);
+      });
+
+      store.reattachHostChat({ chatId, hostId: 'tau' });
+      store.reattachHostChat({ chatId, hostId: 'tau' });
+      await Promise.resolve();
+      expect(harness.created[0]?.resumeStream).not.toHaveBeenCalled();
+
+      loading.resolve(chatRow(chatId, 'project_test', { name: 'Late-loading chat' }));
+
+      await vi.waitFor(() => {
+        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
+      });
+    });
+
+    /*
      * A chat whose seeded first turn this page is dispatching has nothing to
      * reattach to: the dispatch opens the host stream itself. Reattaching
      * anyway opened a *second* one — and on rung 2 that means a second relay

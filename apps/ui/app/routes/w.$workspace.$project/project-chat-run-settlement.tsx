@@ -274,9 +274,10 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
           /* No lease, so the root retired nothing and will emit no settlement
            * of its own — and a run with no settlement is one every later open
            * reconciles again. The outcome is recorded where every other host
-           * settlement lives: the chat's durable log (I1, I7). A writer is
-           * there because the attach that took this chat over holds one; when
-           * it is not, this answers `false` and the next open tries again. */
+           * settlement lives: the chat's durable log (I1, I7). The writer is
+           * whichever stream is driving this chat, or one opened for this single
+           * write; a chat with no registration at all — an unfocused one —
+           * answers `false` and says so, and the next open tries again. */
           await persistBrowserTurnSettlement({
             type: 'turn.failed',
             chatId,

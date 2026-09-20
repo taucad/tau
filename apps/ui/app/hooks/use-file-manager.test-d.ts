@@ -18,6 +18,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { FileManagerProviderProps, useFileManager } from '#hooks/use-file-manager.js';
 import type { WorkspaceScope } from '@taucad/filesystem';
+import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 
 describe('FileManagerProvider props discriminated union', () => {
   it('accepts indexeddb / opfs / memory without a projectId', () => {
@@ -115,18 +116,55 @@ describe('useFileManager surface', () => {
     expectTypeOf<Client>().not.toHaveProperty('canDelete');
   });
 
-  /** Content is the owning root's (W12c); the trusted stores take this one. */
-  it('exposes a rooted content client beside it', () => {
-    expectTypeOf<Context>().toHaveProperty('files');
-    type Files = Context['files'];
-    expectTypeOf<Files>().toHaveProperty('readFile');
-    expectTypeOf<Files>().toHaveProperty('writeFile');
-    expectTypeOf<Files>().toHaveProperty('writeFileChecked');
-    expectTypeOf<Files>().toHaveProperty('rmdir');
-    expectTypeOf<Parameters<Files['unlink']>>().toEqualTypeOf<[path: string]>();
+  /**
+   * H8 / EQ4, asserted where a component would take it (W6).
+   *
+   * Content is the owning root's (W12c), but the whole rooted surface is the
+   * unmasked working copy: a member carrying all of it would hand any component
+   * that reads the context the checkout, `.git/**` mask aside. Each trusted
+   * store takes the slice it is composed with instead, so this fails the moment
+   * one of them is widened back into the full client.
+   */
+  it('carries no unmasked rooted content client', () => {
+    expectTypeOf<Context>().not.toHaveProperty('files');
+    type FullContentMembers = {
+      [Member in keyof Context]-?: Context[Member] extends RootedContentClient ? Member : never;
+    }[keyof Context];
+    expectTypeOf<FullContentMembers>().toEqualTypeOf<never>();
+  });
+
+  /** One `Pick` per trusted-store family, named for the family (W6). */
+  it('hands each trusted store the slice it is composed with', () => {
+    expectTypeOf<Context>().toHaveProperty('recordFiles');
+    type Records = Context['recordFiles'];
+    expectTypeOf<Records>().toHaveProperty('readFile');
+    expectTypeOf<Records>().toHaveProperty('writeFile');
+    expectTypeOf<Records>().toHaveProperty('rmdir');
+    expectTypeOf<Parameters<Records['unlink']>>().toEqualTypeOf<[path: string]>();
     /* Absolute paths, and no `scope`: the root owns the routing. */
-    expectTypeOf<{ recursive: true }>().toExtend<NonNullable<Parameters<Files['rmdir']>[1]>>();
-    expectTypeOf<Files>().not.toHaveProperty('listProjectManifests');
+    expectTypeOf<{ recursive: true }>().toExtend<NonNullable<Parameters<Records['rmdir']>[1]>>();
+    expectTypeOf<Records>().not.toHaveProperty('listProjectManifests');
+    /* A record store never relocates a path nor writes one under a precondition. */
+    expectTypeOf<Records>().not.toHaveProperty('move');
+    expectTypeOf<Records>().not.toHaveProperty('mkdir');
+    expectTypeOf<Records>().not.toHaveProperty('writeFileChecked');
+
+    expectTypeOf<Context>().toHaveProperty('parameterFiles');
+    type ParameterSlice = Context['parameterFiles'];
+    expectTypeOf<ParameterSlice>().toHaveProperty('writeFileChecked');
+    expectTypeOf<ParameterSlice>().toHaveProperty('move');
+    /* The sidecar writes one file at a time, under its own precondition. */
+    expectTypeOf<ParameterSlice>().not.toHaveProperty('writeFile');
+    expectTypeOf<ParameterSlice>().not.toHaveProperty('writeFiles');
+    expectTypeOf<ParameterSlice>().not.toHaveProperty('readdir');
+
+    expectTypeOf<Context>().toHaveProperty('previewFiles');
+    type Preview = Context['previewFiles'];
+    expectTypeOf<Preview>().toHaveProperty('writeFiles');
+    /* An ephemeral preview mount is written whole and never read back. */
+    expectTypeOf<Preview>().not.toHaveProperty('readFile');
+    expectTypeOf<Preview>().not.toHaveProperty('writeFile');
+    expectTypeOf<Preview>().not.toHaveProperty('unlink');
   });
 
   /** The `/files` browser's physical reads: scope required, nothing routed (charter D5). */

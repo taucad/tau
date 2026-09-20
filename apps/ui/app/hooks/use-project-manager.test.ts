@@ -174,7 +174,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     workerChangeChannel: mockWorkerChangeChannel,
     /* Content reaches the root that owns the path (W12); the authority-global
      * surface below it is topology only (charter D5). */
-    files: {
+    recordFiles: {
       writeFiles: mockWriteFiles,
       writeFile: async (path: string, bytes: Uint8Array<ArrayBuffer>) =>
         isAttachmentPath(path) ? mockWriteAttachment(path, bytes) : mockWriteFile(path, bytes),

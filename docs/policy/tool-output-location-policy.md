@@ -170,7 +170,7 @@ The root-hygiene check should permit tracked top-level entries, `.git`, `node_mo
 
 - [ ] Classify the output by lifetime before choosing its path.
 - [ ] Use `node_modules/.cache/<producer>` only for reproducible install-coupled state.
-- [ ] Use `out/reports`, `out/test-results`, or `out/artifacts` for retained run output, including package-owned benchmark tools.
+- [ ] Use `out/reports`, `out/test-results`, or `out/artifacts` for retained run output, including package-owned benchmark tools. `out/incidents/<id>/` is the fallback for an incident record only while its private tree is unreachable; move it there afterwards.
 - [ ] Use platform storage for persistent identity, credentials, and user state.
 - [ ] Keep random and per-run names below a stable parent.
 - [ ] Resolve paths from the workspace root and configure the producer directly.

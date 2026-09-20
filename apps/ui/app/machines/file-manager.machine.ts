@@ -173,7 +173,6 @@ type WorkerInitializedEvent = {
   configuredBackend: FileSystemBackend;
   activeWorkspaceId: string | undefined;
   activeWorkspaceName: string | undefined;
-  initialEntries: FileEntry[];
   contentService: FileContentService;
   treeService: FileTreeService;
   viewClient: ComposedViewClient;
@@ -419,52 +418,6 @@ const initializeServicesActor = fromSafeAsync<
     }
   }
 
-  let initialEntries: FileEntry[] = [];
-  try {
-    const rootPath = context.rootDirectory;
-    const absolutePath = normalizePath(rootPath);
-    if (backend === 'webaccess') {
-      await proxy.pollExternalChanges(absolutePath);
-    }
-    const rootNodes = await proxy.readDirectory(absolutePath);
-    for (const node of rootNodes) {
-      if (node.children !== undefined) {
-        initialEntries.push({
-          path: node.name,
-          name: node.name,
-          type: 'dir',
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-          isDirectoryResolved: false,
-        });
-      } else if (node.contentKind === 'text') {
-        initialEntries.push({
-          path: node.name,
-          name: node.name,
-          type: 'file',
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-          contentKind: 'text',
-          lineCount: node.lineCount,
-        });
-      } else {
-        initialEntries.push({
-          path: node.name,
-          name: node.name,
-          type: 'file',
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-          contentKind: 'binary',
-        });
-      }
-    }
-  } catch {
-    initialEntries = [];
-  }
-
   const filePool = context.filePoolBuffer ? new SharedPool(context.filePoolBuffer) : undefined;
 
   const paths = new WorkspacePathResolver(context.rootDirectory);
@@ -494,6 +447,40 @@ const initializeServicesActor = fromSafeAsync<
   const workerChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
   const client = createComposedViewClient({ workspace: proxy, view: viewProxy, paths });
 
+  /*
+   * The first listing of the root, through the same composition every later
+   * listing of it uses (CI3). Read off the raw workspace surface it showed the
+   * control plane with no provenance, and `initialEntries` marks the root
+   * resolved — so that listing was the one the tree kept (blueprint Finding 3).
+   */
+  let initialEntries: FileEntry[] = [];
+  try {
+    const absolutePath = normalizePath(context.rootDirectory);
+    if (backend === 'webaccess') {
+      await proxy.pollExternalChanges(absolutePath);
+    }
+    const rootNodes = await client.readDirectory(absolutePath);
+    for (const node of rootNodes) {
+      const common = {
+        path: node.name,
+        name: node.name,
+        size: node.size,
+        mtimeMs: node.mtimeMs,
+        isLoaded: false,
+        ...(node.provenance === undefined ? {} : { provenance: node.provenance }),
+      };
+      if (node.children !== undefined) {
+        initialEntries.push({ ...common, type: 'dir', isDirectoryResolved: false });
+      } else if (node.contentKind === 'text') {
+        initialEntries.push({ ...common, type: 'file', contentKind: 'text', lineCount: node.lineCount });
+      } else {
+        initialEntries.push({ ...common, type: 'file', contentKind: 'binary' });
+      }
+    }
+  } catch {
+    initialEntries = [];
+  }
+
   const contentService = new FileContentService({
     proxy: client,
     paths,
@@ -518,11 +505,11 @@ const initializeServicesActor = fromSafeAsync<
 
   treeService.connectToContentService(contentService);
 
-  // Eagerly load `/node_modules` + each package directory through the regular
-  // treeService so the file tree renders the bundled-types subtree without
-  // user interaction (cmd+click was the smoking gun before R1). The mount is
-  // populated by the FM worker before `workerReady`, so these listings always
-  // see the full set of kernel typings.
+  // The root listing carries the mount's own row; eagerly load each package
+  // directory inside it through the regular treeService so the file tree renders
+  // the bundled-types subtree without user interaction (cmd+click was the
+  // smoking gun before R1). The mount is populated by the FM worker before
+  // `workerReady`, so these listings always see the full set of kernel typings.
   try {
     const rootEntries = await treeService.listDirectory(bundledTypesWorkspaceRootSegment, { signal });
     await Promise.all(
@@ -540,7 +527,6 @@ const initializeServicesActor = fromSafeAsync<
     configuredBackend: backend,
     activeWorkspaceId,
     activeWorkspaceName,
-    initialEntries,
     contentService,
     treeService,
     viewClient: client,

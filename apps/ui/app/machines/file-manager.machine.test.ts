@@ -62,6 +62,16 @@ const mockOpenFileSystemBridge = vi.fn((_worker: Worker, _options?: { root?: str
   dispose: vi.fn(),
 }));
 
+/**
+ * The raw workspace surface and the composed view are both bridge proxies, so
+ * one set of doubles serves both: what a listing sees depends on which member
+ * answered it (`readDirectory` is the authority's, `readdirWithStats` the
+ * view's), which is exactly the routing CI3 is about.
+ */
+const mockWorkspaceReadDirectory = vi.fn<(path: string) => Promise<unknown[]>>();
+const mockWorkspaceStat = vi.fn<(path: string) => Promise<unknown>>();
+const mockViewReaddirWithStats = vi.fn<(path: string) => Promise<unknown[]>>();
+
 vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
   openFileSystemBridge: (worker: Worker, options?: { root?: string }) => mockOpenFileSystemBridge(worker, options),
@@ -72,7 +82,9 @@ vi.mock('@taucad/fs-bridge', () => ({
     unmount: mockUnmount,
     getDirectoryStat: vi.fn(async () => []),
     readShallowDirectory: vi.fn(async () => []),
-    readDirectory: vi.fn(async () => []),
+    readDirectory: async (path: string) => mockWorkspaceReadDirectory(path),
+    readdirWithStats: async (path: string) => mockViewReaddirWithStats(path),
+    stat: async (path: string) => mockWorkspaceStat(path),
     dispose: vi.fn(),
     listen: vi.fn(() => vi.fn()),
   })),
@@ -140,6 +152,10 @@ describe('fileManagerMachine', () => {
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
     mockGetHomeStorageBackend.mockResolvedValue('indexeddb');
     mockConfigureProjectRoots.mockResolvedValue(undefined);
+    mockWorkspaceReadDirectory.mockResolvedValue([]);
+    mockViewReaddirWithStats.mockResolvedValue([]);
+    /* No dependency mount in this harness: the OPFS mount is the worker's. */
+    mockWorkspaceStat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     mockDesktopBridge = undefined;
     mockNodeFsConnect.mockClear();
   });
@@ -339,6 +355,61 @@ describe('fileManagerMachine', () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.context.contentService).toBeDefined();
     expect(snapshot.context.treeService).toBeDefined();
+
+    actor.stop();
+  });
+
+  /*
+   * CI3: the first listing of a root is the one the tree keeps until something
+   * re-lists it, so reading it off the raw workspace surface showed the control
+   * plane and the records with no provenance — while every later listing of the
+   * same directory came through the composed view (blueprint Finding 3).
+   */
+  it('should seed the tree from the composed view, without the rows the view masks', async () => {
+    mockWorkspaceReadDirectory.mockImplementation(async (path: string) =>
+      path === '/test'
+        ? [
+            { id: '.git', name: '.git', size: 0, mtimeMs: 1, children: [] },
+            { id: '.tau', name: '.tau', size: 0, mtimeMs: 1, children: [] },
+            { id: 'main.scad', name: 'main.scad', size: 4, mtimeMs: 1, contentKind: 'text', lineCount: 1 },
+          ]
+        : [],
+    );
+    mockViewReaddirWithStats.mockImplementation(async (path: string) =>
+      path === ''
+        ? [
+            {
+              name: '.tau',
+              type: 'dir',
+              size: 0,
+              mtimeMs: 1,
+              provenance: { source: 'project', versioned: false, agentAccess: 'read-only' },
+            },
+            {
+              name: 'main.scad',
+              type: 'file',
+              size: 4,
+              mtimeMs: 1,
+              contentKind: 'text',
+              lineCount: 1,
+              provenance: { source: 'project', versioned: true, agentAccess: 'read-write' },
+            },
+          ]
+        : [],
+    );
+    const actor = createActor(fileManagerMachine, {
+      input: { rootDirectory: '/test', shouldInitializeOnStart: true },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+
+    const tree = actor.getSnapshot().context.treeService!.getTreeSnapshot();
+    expect(tree.has('.git')).toBe(false);
+    expect(tree.get('main.scad')?.provenance).toMatchObject({ source: 'project', versioned: true });
+    expect(tree.get('.tau')?.provenance).toMatchObject({ source: 'project', versioned: false });
 
     actor.stop();
   });

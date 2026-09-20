@@ -112,6 +112,10 @@ const outsideCheckoutProvenance: FileProvenance = Object.freeze({
   agentAccess: 'read-only',
 });
 
+/** The one mount outside every checkout, as the authority and the tree spell it. */
+const dependencyMountName = 'node_modules';
+const dependencyMountPath = `/${dependencyMountName}`;
+
 const treeNode = (row: { name: string } & FileStat): FileTreeNode => {
   const common = {
     id: row.name,
@@ -337,6 +341,31 @@ export const createComposedViewClient = (input: {
     return relatives.find((relative) => provenance.get(relative)?.source !== 'project');
   };
 
+  /**
+   * The dependency mount as one row of the view's root, or `undefined`.
+   *
+   * The mount is a sibling of the checkout, so no view lists it — but a root
+   * listing is authoritative over the root's children, so a listing that omits
+   * the mount is what deletes the row from the tree on every re-list (blueprint
+   * Finding 4). Asked once per client: the worker mounts it before the workspace
+   * is ready and never unmounts it, and the mount is fail-soft — a profile where
+   * it never came up must not grow a row nothing serves.
+   */
+  let dependencyMount: Promise<FileTreeNode | undefined> | undefined;
+  const dependencyMountRow = async (): Promise<FileTreeNode | undefined> => {
+    dependencyMount ??= (async () => {
+      try {
+        const mount = await workspace.stat(dependencyMountPath);
+        return mount.type === 'dir'
+          ? treeNode({ name: dependencyMountName, ...mount, provenance: outsideCheckoutProvenance })
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    return dependencyMount;
+  };
+
   const remember = (relativePath: string, value: FileProvenance | undefined): void => {
     if (value !== undefined) {
       provenance.set(relativePath, value);
@@ -506,7 +535,15 @@ export const createComposedViewClient = (input: {
       for (const row of rows) {
         remember(relative === '' ? row.name : `${relative}/${row.name}`, row.provenance);
       }
-      return rows.map((row) => treeNode(row));
+      const nodes = rows.map((row) => treeNode(row));
+      /* A checkout can hold a `node_modules` of its own — the registry classes it
+       * as cache for every consumer, so the view lists it and that row stands:
+       * two rows of one name would fight over one tree key. */
+      if (relative !== '' || nodes.some((node) => node.name === dependencyMountName)) {
+        return nodes;
+      }
+      const mount = await dependencyMountRow();
+      return mount === undefined ? nodes : [...nodes, mount];
     },
   };
 

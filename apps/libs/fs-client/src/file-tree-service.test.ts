@@ -57,16 +57,18 @@ const skillOverlay = (): ComposedViewOverlay => {
  * The production client: in-root reads through one composed view, everything
  * else on the authority.
  */
-const createComposedProxy = async (): Promise<ComposedViewClient> => {
+const createComposedProxy = async (workspace?: ComposedViewClient): Promise<ComposedViewClient> => {
   const provider = new MemoryProvider();
   await provider.writeFile('main.ts', 'export {};\n');
   return createComposedViewClient({
-    workspace: mock<ComposedViewClient>({
-      readDirectory: vi.fn().mockResolvedValue([]),
-      readdir: vi.fn().mockResolvedValue([]),
-      stat: vi.fn().mockResolvedValue(textStat()),
-      getDirectoryStat: vi.fn().mockResolvedValue([]),
-    }),
+    workspace:
+      workspace ??
+      mock<ComposedViewClient>({
+        readDirectory: vi.fn().mockResolvedValue([]),
+        readdir: vi.fn().mockResolvedValue([]),
+        stat: vi.fn().mockResolvedValue(textStat()),
+        getDirectoryStat: vi.fn().mockResolvedValue([]),
+      }),
     /* The rooted connection also archives a subtree (charter D2) and serves the
      * mutation pipeline's porcelain (D4); this harness reads rows. */
     view: Object.assign(
@@ -232,6 +234,78 @@ describe('FileTreeService composed-view provenance (north star W2)', () => {
       });
     } finally {
       harness.disposeChannel();
+    }
+  });
+});
+
+/**
+ * The authority half of the composed client: the dependency mount, which lives
+ * outside every checkout and so reaches no view.
+ */
+const dependencyMountAuthority = (): ComposedViewClient => {
+  const rows = new Map<string, FileTreeNode[]>([
+    ['/node_modules', [directoryNode('three')]],
+    ['/node_modules/three', [textNode('index.d.ts')]],
+  ]);
+  return mock<ComposedViewClient>({
+    readDirectory: vi.fn(async (path: string) => rows.get(path) ?? []),
+    readdir: vi.fn().mockResolvedValue([]),
+    stat: vi.fn().mockResolvedValue({ type: 'dir', size: 0, mtimeMs: 0 }),
+    getDirectoryStat: vi.fn().mockResolvedValue([]),
+  });
+};
+
+/*
+ * Finding 4: a root listing is authoritative over the root's children, so the
+ * dependency mount has to be in it or every re-list deletes the row — and with
+ * the row goes the subtree the eager listing loaded.
+ */
+describe('FileTreeService dependency mount row (close-out W3)', () => {
+  it('should keep the dependency mount and its loaded children across a root refresh', async () => {
+    vi.useFakeTimers();
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: await createComposedProxy(dependencyMountAuthority()),
+    });
+    try {
+      const root = await tree.listDirectory('');
+      expect(root.map(({ name }) => name)).toContain('node_modules');
+      await tree.listDirectory('node_modules');
+      expect(tree.getTreeSnapshot().get('node_modules')?.provenance).toMatchObject({ source: 'dependencies' });
+
+      emitFileChanged({ type: 'fileWritten', path: 'added.ts', backend: 'indexeddb' });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);
+      expect(tree.getTreeSnapshot().has('node_modules/three')).toBe(true);
+    } finally {
+      tree.dispose();
+      disposeChannel();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should keep the dependency mount and its loaded children across a backend resync', async () => {
+    const authority = dependencyMountAuthority();
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: await createComposedProxy(authority),
+    });
+    try {
+      await tree.listDirectory('');
+      await tree.listDirectory('node_modules');
+      vi.mocked(authority.readDirectory).mockClear();
+
+      emitFileChanged({ type: 'backendChanged', backend: 'indexeddb' });
+      /* The resync walks resolved directories root-first, so the mount's own arm
+       * runs only while the row survived the root's merge. */
+      await vi.waitFor(() => {
+        expect(authority.readDirectory).toHaveBeenCalledWith('/node_modules');
+      });
+
+      expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);
+      expect(tree.getTreeSnapshot().has('node_modules/three')).toBe(true);
+    } finally {
+      tree.dispose();
+      disposeChannel();
     }
   });
 });

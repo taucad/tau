@@ -29,5 +29,9 @@ export type {
   RevisionTreeMergeResult,
   TextConflict,
 } from '#algorithms/revision-merge.js';
-export { captureRevisionTree } from '#algorithms/revision-capture.js';
-export type { CaptureRevisionTreeOptions, RevisionCaptureFileSystem } from '#algorithms/revision-capture.js';
+export { captureRevisionTree, createCaptureMemo } from '#algorithms/revision-capture.js';
+export type {
+  CaptureMemo,
+  CaptureRevisionTreeOptions,
+  RevisionCaptureFileSystem,
+} from '#algorithms/revision-capture.js';

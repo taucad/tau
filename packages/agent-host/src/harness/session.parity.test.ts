@@ -681,7 +681,7 @@ describe('pi full-turn parity fixture', () => {
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"kind":"safeguard"');
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"pruning":"preserve-until-compaction"');
     expect(JSON.stringify(transport.requests[0]?.messages)).toContain('<system-reminder>');
-    expect(JSON.stringify(transport.requests[1]?.messages)).not.toContain('<system-reminder>');
+    expect(JSON.stringify(transport.requests[1]?.messages)).toContain('<system-reminder>');
     expect(compactions).toContain('tool_result_clearing');
     expect(new Set(transport.requests.map((request) => request.attemptId)).size).toBe(transport.requests.length);
     expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(transport.requests.length);

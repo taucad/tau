@@ -326,12 +326,15 @@ const lastUserText = (messages: readonly AgentMessage[]): string => {
 
 const keepContext = (
   messages: readonly AgentMessage[],
+  identities: SessionRecord['messages'],
 ): { readonly tags: string[]; readonly messages: ReadonlySet<AgentMessage> } => {
   const newestByTag = new Map<string, AgentMessage>();
   const safety = new Set<AgentMessage>();
+  let newestUser: AgentMessage | undefined;
   for (const message of messages) {
     const text = userText(message);
-    for (const tag of text.match(/<[a-z][\w:-]*(?:\s[^>]*)?>/giu) ?? []) {
+    const tags = text.match(/<[a-z][\w:-]*(?:\s[^>]*)?>/giu) ?? [];
+    for (const tag of tags) {
       if (tag.toLowerCase().includes('safety')) {
         safety.add(message);
         newestByTag.set(tag, message);
@@ -339,8 +342,19 @@ const keepContext = (
         newestByTag.set(tag, message);
       }
     }
+    if (
+      message.role === 'user' &&
+      summaryText(message) === undefined &&
+      identities.metadata(message)?.tauInternal === undefined &&
+      !tags.some((tag) => tag.toLowerCase().includes('system-reminder'))
+    ) {
+      newestUser = message;
+    }
   }
-  return { tags: [...newestByTag.keys()], messages: new Set([...safety, ...newestByTag.values()]) };
+  return {
+    tags: [...newestByTag.keys()],
+    messages: new Set([...safety, ...newestByTag.values(), ...(newestUser ? [newestUser] : [])]),
+  };
 };
 
 const preserveDuringCompaction = (message: AgentMessage, pinned: ReadonlySet<AgentMessage>): boolean =>
@@ -476,6 +490,7 @@ export const installCompaction = (
     let evictedCount = 0;
     let tokensAfter = trigger.tokens;
     let summaryKind: CompactionTrace['summary'];
+    let overBudget = false;
     const trace = (tier: CompactionTrace['tier'], cleared: number): CompactionTrace => ({
       lane,
       tier,
@@ -487,6 +502,7 @@ export const installCompaction = (
       summarizerUsage,
       ...(summarizerError === undefined ? {} : { summarizerError }),
       ...(summaryKind === undefined ? {} : { summary: summaryKind }),
+      ...(overBudget ? { overBudget: true } : {}),
       ...(discardedOverflowError === undefined ? {} : { discardedOverflowError }),
     });
     const refuse = ({
@@ -551,7 +567,7 @@ export const installCompaction = (
     }
 
     const tierTwoMessages = input;
-    const keep = keepContext(tierTwoMessages);
+    const keep = keepContext(tierTwoMessages, options.record.messages);
     if (tierTwoMessages.length <= 1) {
       refuse({
         code: 'NO_EVICTABLE_HISTORY',
@@ -575,14 +591,26 @@ export const installCompaction = (
           continue;
         }
         refuse({
-          code: 'SUMMARY_REQUIRED',
-          message: 'Pinned context leaves no history available to summarize.',
+          code: 'NO_EVICTABLE_HISTORY',
+          message: 'Context is oversized but has no safe history to evict or clear.',
           tier: 'summarization',
         });
       }
       const previousSummary = evicted.findLast((message) => summaryText(message) !== undefined);
       const previousSummaryText = previousSummary ? summaryText(previousSummary) : undefined;
       const messagesToSummarize = evicted.filter((message) => message !== previousSummary);
+      if (messagesToSummarize.length === 0) {
+        const later = laterCutoff(tierTwoMessages, cutoff);
+        if (later !== undefined) {
+          cutoff = later;
+          continue;
+        }
+        refuse({
+          code: 'NO_EVICTABLE_HISTORY',
+          message: 'Context is oversized but has no safe history to evict or clear.',
+          tier: 'summarization',
+        });
+      }
       let compactedSummary = '';
       if (!placeholder) {
         summarizerAttempts++;
@@ -658,21 +686,16 @@ export const installCompaction = (
       }
       const later = laterCutoff(tierTwoMessages, cutoff);
       if (later === undefined) {
-        const retained = tierTwoMessages.filter((message) => !evictedSet.has(message));
-        if (messageTokens(retained) > messageBudget) {
-          refuse({
-            code: 'NO_EVICTABLE_HISTORY',
-            message: 'Context is oversized but has no safe history to evict or clear.',
-            tier: 'summarization',
-          });
-        }
+        overBudget = true;
         strikes = placeholder ? 0 : strikes + 1;
-        const code = strikes >= 3 ? 'CIRCUIT_BREAKER_OPEN' : 'SUMMARY_REQUIRED';
-        const message =
-          code === 'CIRCUIT_BREAKER_OPEN'
-            ? 'Repeated compaction could not restore provider headroom; start a new thread.'
-            : 'Compaction summary could not restore provider headroom.';
-        throw new HostCompactionError(code, message, trace('summarization', 0));
+        if (strikes >= 3) {
+          throw new HostCompactionError(
+            'CIRCUIT_BREAKER_OPEN',
+            'Repeated compaction could not restore provider headroom; start a new thread.',
+            trace('summarization', 0),
+          );
+        }
+        break;
       }
       cutoff = later;
     }
@@ -729,7 +752,9 @@ export const installCompaction = (
         details,
       );
     }
-    strikes = 0;
+    if (!overBudget) {
+      strikes = 0;
+    }
     options.onSummary?.();
     const outcome: CompactionOutcome = {
       messages,

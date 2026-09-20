@@ -194,6 +194,7 @@ export type CompactionTrace = {
   readonly summarizerUsage: Usage | null;
   readonly summarizerError?: string | undefined;
   readonly summary?: 'generated' | 'placeholder' | undefined;
+  readonly overBudget?: boolean | undefined;
   readonly discardedOverflowError?: string | undefined;
 };
 

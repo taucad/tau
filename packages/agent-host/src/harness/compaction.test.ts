@@ -574,13 +574,16 @@ describe('Compaction', () => {
 
   it('should open the circuit breaker after three completed summaries cannot restore headroom', async () => {
     const messages = evictableHistory(8);
+    const appended: Array<Parameters<SessionRecord['append']>[0]> = [];
     const agent = new Agent({
       streamFn: dispatchedStream,
       initialState: { model: stubModel, messages },
     });
     const compaction = installCompaction({
       agent,
-      record: recordFor(messages),
+      record: recordFor(messages, async (event) => {
+        appended.push(event);
+      }),
       projectHistory: async () => messages,
       contextWindow: 8192,
       summarize: async () => 'summary-too-large-'.repeat(3000),
@@ -597,11 +600,18 @@ describe('Compaction', () => {
     }
 
     expect(failures.map((failure) => failure.errorMessage)).toEqual([
-      'Compaction summary could not restore provider headroom.',
-      'Compaction summary could not restore provider headroom.',
+      undefined,
+      undefined,
       'Repeated compaction could not restore provider headroom; start a new thread.',
     ]);
+    expect(appended.filter((event) => event.type === 'history.compacted')).toHaveLength(2);
+    expect(
+      appended
+        .filter((event) => event.type === 'history.compacted')
+        .every((event) => event.details?.overBudget === true),
+    ).toBe(true);
     expect(JSON.stringify(failures[2]?.diagnostics)).toContain('CIRCUIT_BREAKER_OPEN');
+    expect(JSON.stringify(failures.map((failure) => failure.diagnostics))).not.toContain('SUMMARY_REQUIRED');
   });
 
   it('should not count placeholder summaries as circuit-breaker strikes', async () => {
@@ -620,7 +630,7 @@ describe('Compaction', () => {
       contextWindow: 8192,
       summarize: async () => '',
     });
-    const failures: AssistantMessage[] = [];
+    const results: AssistantMessage[] = [];
 
     for (let attempt = 0; attempt < 3; attempt++) {
       // oxlint-disable-next-line no-await-in-loop -- Each placeholder refusal is one independent pass.
@@ -630,15 +640,11 @@ describe('Compaction', () => {
         messages: messages as Context['messages'],
       });
       // oxlint-disable-next-line no-await-in-loop -- The stream result is the observable breaker verdict.
-      failures.push(await stream.result());
+      results.push(await stream.result());
     }
 
-    expect(failures.map((failure) => failure.errorMessage)).toEqual([
-      'Compaction summary could not restore provider headroom.',
-      'Compaction summary could not restore provider headroom.',
-      'Compaction summary could not restore provider headroom.',
-    ]);
-    expect(JSON.stringify(failures.map((failure) => failure.diagnostics))).not.toContain('CIRCUIT_BREAKER_OPEN');
+    expect(results.map((result) => result.errorMessage)).toEqual([undefined, undefined, undefined]);
+    expect(JSON.stringify(results.map((result) => result.diagnostics))).not.toContain('CIRCUIT_BREAKER_OPEN');
   });
 
   it('should timestamp a summary after its evicted prefix and before a future-dated retained tail', async () => {
@@ -1100,6 +1106,60 @@ describe('Compaction', () => {
     });
   });
 
+  it('should refuse one overflow lane without resummarizing a maximal compaction', async () => {
+    const messages = evictableHistory(8);
+    let projected: AgentMessage[] = messages;
+    const summarize = vi.fn(async () => 'summary-too-large-'.repeat(3000));
+    const agent = new Agent({
+      streamFn: dispatchedStream,
+      initialState: { model: stubModel, messages },
+    });
+    const record = recordFor(messages);
+    const compaction = installCompaction({
+      agent,
+      record: {
+        ...record,
+        append: async (event) => {
+          if (event.type === 'history.compacted') {
+            const evicted = new Set(event.evictedMessageIds);
+            const summary = providerMessageToPi(event.summary, stubModel, record.messages);
+            if (!summary) {
+              throw new Error('Compaction summary did not hydrate.');
+            }
+            projected = [summary, ...projected.filter((message) => !evicted.has(record.messages.id(message)))];
+          }
+        },
+      },
+      projectHistory: async () => projected,
+      contextWindow: 8192,
+      summarize,
+    });
+    const firstPrepared = await compaction.prepareTurn();
+    expect(JSON.stringify(firstPrepared)).toContain('<summary>');
+    const attemptsAfterMaximalCompaction = summarize.mock.calls.length;
+
+    const overflow = vi.fn(() => {
+      const stream = createAssistantMessageEventStream();
+      const message: AssistantMessage = {
+        ...answeredTurn(8192, 101),
+        stopReason: 'length',
+        errorMessage: 'still too long',
+      };
+      stream.push({ type: 'start', partial: message });
+      stream.push({ type: 'done', reason: 'length', message });
+      return stream;
+    }) as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
+    const stream = await compaction.wrapStreamFn(overflow)(stubModel, {
+      messages: firstPrepared as Context['messages'],
+    });
+    const result = await stream.result();
+
+    expect(result.errorMessage).toBe('Context is oversized but has no safe history to evict or clear.');
+    expect(JSON.stringify(result.diagnostics)).toContain('NO_EVICTABLE_HISTORY');
+    expect(summarize).toHaveBeenCalledTimes(attemptsAfterMaximalCompaction);
+    expect(overflow).toHaveBeenCalledTimes(1);
+  });
+
   /*
    * A chat whose whole history is one oversized turn has no earlier turn to
    * evict, so rolling pi's cut back to the turn start leaves an empty prefix
@@ -1145,6 +1205,11 @@ describe('Compaction', () => {
         },
       );
     }
+    messages.push({
+      role: 'user',
+      content: '<system-reminder>synthetic context</system-reminder>',
+      timestamp: 99,
+    });
     const agent = new Agent({
       streamFn: () => createAssistantMessageEventStream(),
       initialState: { model: stubModel, messages },
@@ -1163,7 +1228,9 @@ describe('Compaction', () => {
 
     expect(outcomes[0]?.tier).toBe('summarization');
     expect(outcomes[0]?.evicted).toBeGreaterThan(0);
-    expect(JSON.stringify(prepared[0])).toContain('<summary>');
+    expect(prepared[0]).toBe(messages[0]);
+    expect(JSON.stringify(prepared[1])).toContain('<summary>');
+    expect(JSON.stringify(prepared)).toContain('synthetic context');
     const keptCallIds = new Set(
       prepared.flatMap((message) =>
         message.role === 'assistant'

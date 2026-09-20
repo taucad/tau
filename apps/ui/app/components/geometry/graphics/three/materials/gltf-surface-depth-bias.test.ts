@@ -11,10 +11,7 @@ type ShaderProbe = {
   fragmentShader: string;
 };
 
-const compile = (
-  material: MeshStandardMaterial,
-  fragmentShader: string = '#include <logdepthbuf_fragment>',
-): ShaderProbe => {
+const compile = (material: MeshStandardMaterial, fragmentShader = '#include <logdepthbuf_fragment>'): ShaderProbe => {
   const shader = { fragmentShader };
   material.onBeforeCompile(shader as unknown as WebGLProgramParametersWithUniforms, {} as unknown as WebGLRenderer);
   return shader;
@@ -77,7 +74,7 @@ describe('GLTF surface depth bias', () => {
     (fragmentShader) => {
       const material = new MeshStandardMaterial();
       applyGltfSurfaceDepthBias(material, 'webgl');
-      expect(() => compile(material, fragmentShader)).toThrowError(
+      expect(() => compile(material, fragmentShader)).toThrow(
         'GLTF surface depth bias requires exactly one <logdepthbuf_fragment> chunk',
       );
     },

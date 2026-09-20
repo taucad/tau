@@ -38,6 +38,7 @@ export function TypingAnimation({
 
   const [displayedText, setDisplayedText] = useState<string>('');
   const [started, setStarted] = useState(false);
+  // oxlint-disable-next-line typescript/no-restricted-types -- React callback refs receive null on detach.
   const [element, setElement] = useState<HTMLElement | null>(null);
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { FileExtension } from '@taucad/types';
+import { isRecord } from '@taucad/utils/schema';
 import { toast } from '#components/ui/sonner.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
@@ -46,7 +47,10 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
           return;
         }
         const exportFormat = route.targetFormat;
-        const options = route.exportOptions.defaults;
+        // The runtime types route defaults as `any`; narrow them at the app boundary.
+        const options: Record<string, unknown> = isRecord(route.exportOptions.defaults)
+          ? route.exportOptions.defaults
+          : {};
         const result = await exportWithRuntimeValidatedInput(kernelClient, route, { exportOptions: options });
 
         if (!result.success) {

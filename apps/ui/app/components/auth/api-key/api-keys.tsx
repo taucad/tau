@@ -17,7 +17,7 @@ export type ApiKeysProps = {
   className?: string;
 };
 
-export function ApiKeys({ className }: ApiKeysProps) {
+export function ApiKeys({ className }: ApiKeysProps): React.JSX.Element {
   const { authClient } = useAuth();
   const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin);
 

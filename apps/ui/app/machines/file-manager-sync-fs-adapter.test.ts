@@ -3,9 +3,13 @@ import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter
 
 describe('listWorkspaceDirectories', () => {
   it('returns directory names without treating sibling files as directories', async () => {
-    const fileSystem = {
+    const fileSystem: Parameters<typeof listWorkspaceDirectories>[0] = {
       readdir: vi.fn(async () => ['file.ts', 'src', 'types']),
-      stat: vi.fn(async (path: string) => ({ type: path.endsWith('.ts') ? ('file' as const) : ('dir' as const) })),
+      stat: vi.fn(
+        async (path: string): Promise<{ type: 'file' | 'dir' }> => ({
+          type: path.endsWith('.ts') ? 'file' : 'dir',
+        }),
+      ),
     };
 
     await expect(listWorkspaceDirectories(fileSystem, '')).resolves.toEqual(['src', 'types']);

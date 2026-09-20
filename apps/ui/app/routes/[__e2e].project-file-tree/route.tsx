@@ -108,6 +108,7 @@ const buildSeedFiles = (fileCount: number, binaryMib: number): Record<string, { 
 };
 
 /** A bounded, non-negative integer from one search parameter. */
+// oxlint-disable-next-line typescript/no-restricted-types -- URLSearchParams.get answers null for a missing key.
 const readCount = (value: string | null, limit: number): number => {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, limit) : 0;

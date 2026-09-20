@@ -614,6 +614,7 @@ describe('the page client of the worker revision root', () => {
      * registrant can hold the document open until the worker answers it. It
      * used to be posted and abandoned in the same microtask, which left
      * `pagehide` offering the previous push's pack — or nothing. */
+    // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.any` is typed `any` by vitest.
     expect(messages).toEqual([{ command: 'saveRevision', trigger: 'close', id: expect.any(Number) }]);
 
     messages.length = 0;
@@ -628,9 +629,10 @@ describe('the page client of the worker revision root', () => {
     messages.length = 0;
 
     let settled = false;
-    const flush = client.saveRevision('close').then(() => {
+    const flush = (async () => {
+      await client.saveRevision('close');
       settled = true;
-    });
+    })();
 
     await settle();
     expect(settled).toBe(false);

@@ -44,7 +44,7 @@ const stringifyCompactPrimitiveArrays = (value: unknown, depth = 0): string => {
   const childIndent = '  '.repeat(depth + 1);
 
   if (Array.isArray(value)) {
-    if (value.every(isJsonPrimitive)) {
+    if (value.every((item) => isJsonPrimitive(item))) {
       return `[${value.map((item) => JSON.stringify(item)).join(', ')}]`;
     }
 

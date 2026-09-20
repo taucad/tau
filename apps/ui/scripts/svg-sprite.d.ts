@@ -4,11 +4,11 @@ declare module 'svg-sprite' {
     result: { symbol: { sprite: { contents: { toString(): string }; path: string } } };
   };
 
-  export default class SVGSprite {
+  export default class SvgSprite {
     public constructor(config: {
       dest: string;
       mode: { symbol: { sprite: string } };
-      shape: object;
+      shape: Record<string, unknown>;
       svg: { xmlDeclaration: boolean };
     });
 

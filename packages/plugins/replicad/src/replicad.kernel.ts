@@ -449,7 +449,7 @@ export const replicadKernel = defineKernel({
     content: ['includeEdges', 'includeTopology'],
   },
   // D2: in-worker OpenCascade yields cooperatively, so a superseded drag render is abandoned, not killed.
-  liveEdit: true,
+  cancellation: 'cooperative',
   exportFormats: {
     stl: { optionsSchema: replicadExportSchemas.stl },
     step: { optionsSchema: replicadExportSchemas.step },

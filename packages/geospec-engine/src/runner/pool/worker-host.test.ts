@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- VM paths and module specifiers are object keys here. */
 import { describe, expect, it, vi } from 'vitest';
 import { geoSpecEngineImplementation } from '#register.js';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
@@ -228,7 +227,6 @@ describe('startGeoSpecPoolWorkerHost', () => {
         if (message.type === 'tests-listed') {
           // A non-Error throw: the host must still name it.
           // oxlint-disable-next-line typescript/only-throw-error -- a worker that throws a non-Error is exactly the case under test.
-          // eslint-disable-next-line @typescript-eslint/only-throw-error -- same.
           throw 'not an Error';
         }
         posted.push(message);

@@ -4,12 +4,27 @@ import type { Channel } from '@taucad/rpc';
 import { describe, expect, it, vi } from 'vitest';
 import { RuntimeWorkerClient } from '#framework/runtime-worker-client.js';
 import { admitParameterManifest, compileParameterManifest } from '@taucad/parameters';
+import type * as ParametersModule from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 
 type NotifyHandler = (args: unknown) => void;
+
+// Admission canonically recompiles exactly once; count that public boundary without reaching into manifest internals.
+const compileManifestSpy = vi.hoisted(() => vi.fn());
+
+vi.mock('@taucad/parameters', async (importOriginal) => {
+  const actual = await importOriginal<typeof ParametersModule>();
+  return {
+    ...actual,
+    admitParameterManifest: async (...args: Parameters<typeof actual.admitParameterManifest>) => {
+      compileManifestSpy();
+      return actual.admitParameterManifest(...args);
+    },
+  };
+});
 
 const compileManifest = async (): Promise<ParameterManifest> =>
   compileParameterManifest({
@@ -45,6 +60,7 @@ const compileManifest = async (): Promise<ParameterManifest> =>
 
 const createFixture = async () => {
   const handlers = new Map<string, NotifyHandler>();
+  const call = vi.fn(async (): Promise<unknown> => undefined);
   const channel = {
     ready: Promise.resolve(),
     hello: {
@@ -56,6 +72,7 @@ const createFixture = async () => {
         handlers.delete(name);
       };
     }),
+    call,
   } as unknown as Channel<RuntimeProtocol>;
   const transport: RuntimeTransportClient = {
     id: 'parameters-test',
@@ -80,10 +97,61 @@ const createFixture = async () => {
   const notifyParameters = (args: RuntimeProtocol['notifies']['parametersResolved']['args']): void => {
     handlers.get('parametersResolved')?.(args);
   };
-  return { client, notifyParameters };
+  return { call, client, notifyParameters };
 };
 
 describe('RuntimeWorkerClient parameter notifications', () => {
+  it('should return the held manifest for a repeated revision without recompiling', async () => {
+    const fixture = await createFixture();
+    const manifest = await compileManifest();
+    fixture.call.mockResolvedValue({ success: true, data: manifest, issues: [] });
+    compileManifestSpy.mockClear();
+
+    const first = await fixture.client.resolveParameters({ file: { path: '', filename: 'main.ts' } });
+    const second = await fixture.client.resolveParameters({ file: { path: '', filename: 'main.ts' } });
+
+    if (!first.success || !second.success) {
+      expect.fail('both admissions should succeed');
+    }
+    expect(second.data).toBe(first.data);
+    expect(compileManifestSpy).toHaveBeenCalledOnce();
+    fixture.client.terminate();
+  });
+
+  it('should ignore a tampered body under a held revision', async () => {
+    const fixture = await createFixture();
+    const manifest = await compileManifest();
+    const tampered = { ...manifest, defaults: { length: 999 } };
+    fixture.call
+      .mockResolvedValueOnce({ success: true, data: manifest, issues: [] })
+      .mockResolvedValueOnce({ success: true, data: tampered, issues: [] });
+
+    const first = await fixture.client.resolveParameters({ file: { path: '', filename: 'main.ts' } });
+    const second = await fixture.client.resolveParameters({ file: { path: '', filename: 'main.ts' } });
+
+    if (!first.success || !second.success) {
+      expect.fail('both admissions should succeed');
+    }
+    expect(second.data).toBe(first.data);
+    fixture.client.terminate();
+  });
+
+  it('should not cache a rejected admission', async () => {
+    const fixture = await createFixture();
+    const manifest = await compileManifest();
+    const tampered = { ...manifest, defaults: { length: 999 } };
+    fixture.call
+      .mockResolvedValueOnce({ success: true, data: tampered, issues: [] })
+      .mockResolvedValueOnce({ success: true, data: manifest, issues: [] });
+
+    const rejected = await fixture.client.resolveParameters({ file: { path: '', filename: 'main.ts' } });
+    const accepted = await fixture.client.resolveParameters({ file: { path: '', filename: 'main.ts' } });
+
+    expect(rejected.success).toBe(false);
+    expect(accepted).toMatchObject({ success: true, data: manifest });
+    fixture.client.terminate();
+  });
+
   it('should canonically admit valid manifests before publishing them', async () => {
     const fixture = await createFixture();
     const manifest = await compileManifest();

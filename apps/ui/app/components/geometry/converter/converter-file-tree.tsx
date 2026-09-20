@@ -1,6 +1,6 @@
 import { FileArchive, FileIcon } from 'lucide-react';
 import { getExtensionForFormat } from '#components/geometry/converter/converter-utils.js';
-import type { ConverterExportFormat } from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterExportFormat } from '@taucad/converter/runtime';
 
 type ConverterFileTreeProps = {
   readonly selectedFormats: ConverterExportFormat[];

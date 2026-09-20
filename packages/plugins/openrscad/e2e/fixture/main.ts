@@ -2,16 +2,15 @@
  * Browser fixture for the OpenRSCAD USDZ e2e suite.
  *
  * Mirrors what `apps/ui` does: a runtime client over a dedicated web worker
- * that hosts `openrscad()` and `assimp()`, driven with the same
- * `openscad.kitchen-sink` example the CLI distribution suite exports on the
- * native path. Nothing here is Node-aware — a Node-only module reachable from
+ * that hosts `openrscad()` and `assimp()`, driven with the `.scad` source the
+ * browser command hands the page before it loads, so both paths export the
+ * same bytes. Nothing here is Node-aware — a Node-only module reachable from
  * `@taucad/openrscad` fails this bundle at build time, which is the packaging
  * regression this fixture exists to catch.
  */
 
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
-import { findBuiltinExample } from '@taucad/tau-examples/builtin';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { trackEngineBackend } from '#e2e/backend-log.js';
 
@@ -29,13 +28,12 @@ export type OpenrscadBrowserReport = {
   error?: string;
 };
 
-const loadKitchenSink = async (): Promise<string> => {
-  const example = findBuiltinExample('openscad.kitchen-sink');
-  const asset = example?.assets.find(({ path }) => path === 'main.scad');
-  if (!asset) {
-    throw new Error('The openscad.kitchen-sink example has no main.scad asset.');
+const readSource = (): string => {
+  const source: unknown = Reflect.get(globalThis, '__openrscadBrowserSource');
+  if (typeof source !== 'string') {
+    throw new TypeError('The browser command did not hand the page its .scad source.');
   }
-  return new TextDecoder().decode(await asset.load());
+  return source;
 };
 
 /**
@@ -55,7 +53,7 @@ const zipFirstEntryName = (bytes: Uint8Array<ArrayBuffer>): string => {
 };
 
 const run = async (): Promise<OpenrscadBrowserReport> => {
-  const source = await loadKitchenSink();
+  const source = readSource();
   const client = createRuntimeClient(
     createWebWorkerClientOptions({
       createWorker: () => new Worker(new URL('runtime.worker.ts', import.meta.url), { type: 'module' }),
@@ -69,7 +67,7 @@ const run = async (): Promise<OpenrscadBrowserReport> => {
     if (!result.success) {
       throw new Error(`usdz export failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
     }
-    const bytes = new Uint8Array(result.data[0].bytes);
+    const bytes = new Uint8Array(result.data[0]!.bytes);
     return {
       backend: await tracker.backend(),
       logs: tracker.logs,
@@ -84,11 +82,7 @@ const run = async (): Promise<OpenrscadBrowserReport> => {
 
 const report = document.querySelector('#report');
 
-/**
- * Handshake key the Vitest Browser command reads back off the page. Named
- * rather than inlined because it lives on an index signature, and `e2e/` is in
- * no tsconfig so the lint pass types it against the default project.
- */
+/** Handshake key the Vitest Browser command reads back off the page. */
 const browserReportKey = '__openrscadBrowserReport';
 
 try {

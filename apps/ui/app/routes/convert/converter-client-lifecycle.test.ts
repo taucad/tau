@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ConverterRuntimeClient } from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterRuntimeClient } from '@taucad/converter/runtime';
 import { beginConverterOperation, createActiveConverterClient } from '#routes/convert/converter-client-lifecycle.js';
 
 describe('createActiveConverterClient', () => {

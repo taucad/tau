@@ -159,8 +159,10 @@ vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () 
 vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
+    ready: true,
     get: () => undefined,
     prepare: async () => ({ execution: harness.workspaceExecution }),
+    attachment: async () => ({ execution: harness.workspaceExecution }),
     setRevisionMode: () => undefined,
     subscribe: () => () => undefined,
     markAdmitted: async () => undefined,

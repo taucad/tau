@@ -65,6 +65,7 @@ type ParametersNumberProps = {
   readonly value: number;
   readonly defaultValue: number;
   readonly fieldProjection: ParameterFieldProjection;
+  readonly sourceUnit?: string;
   readonly edit: Readonly<{ kind: 'transient' }> | Readonly<{ kind: 'authoritative'; commit: ParameterCommit }>;
   readonly onChange: (value: number) => void;
   readonly min?: number;
@@ -94,12 +95,13 @@ const fieldBinding = (fieldProjection: ParameterFieldProjection): ParameterField
 });
 
 /** The authority value this row last showed, which a commit proves it was still editing. */
-type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding }>;
+type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding; authorityValue: number }>;
 
 export function ParametersNumber({
   value,
   defaultValue,
   fieldProjection,
+  sourceUnit,
   edit,
   onChange,
   min,
@@ -116,7 +118,8 @@ export function ParametersNumber({
   onBlur,
 }: ParametersNumberProps): React.JSX.Element {
   const binding = React.useMemo(() => fieldBinding(fieldProjection), [fieldProjection]);
-  const { displayUnit, instancePointer } = fieldProjection;
+  const { instancePointer } = fieldProjection;
+  const displayUnit = binding.representation === 'safe-integer' ? binding.nativeUnit : fieldProjection.displayUnit;
   const authorityValue = typeof value === 'number' ? value : defaultValue;
   const commit = edit.kind === 'authoritative' ? edit.commit : undefined;
 
@@ -124,24 +127,24 @@ export function ParametersNumber({
    * value the edit started from. A retained draft is seeded back on mount so collapsing a group
    * never discards an in-progress edit. */
   const [draftText, setDraftText] = React.useState(() => commit?.draft(instancePointer)?.text ?? '');
-  const [draftValue, setDraftValue] = React.useState(() => displayValue(authorityValue, binding, displayUnit));
+  const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
-  const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding }));
+  const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding, authorityValue }));
 
   const isDirty = draftText !== '';
+  const currentBase: EditBase = { value: authorityValue, binding, authorityValue };
+  const editBase = isDirty || Object.is(base.authorityValue, authorityValue) ? base : currentBase;
+  const draftValue =
+    localValue !== undefined && Object.is(localValue.authorityValue, authorityValue)
+      ? localValue.value
+      : displayValue(authorityValue, binding, displayUnit);
   /* An authority value that arrived while this row was being edited: the draft is kept, and the row
    * says the field moved underneath it rather than silently overwriting either side. */
   const hasConflict = isDirty && !Object.is(authorityValue, base.value);
-
+  const authorityRef = React.useRef(currentBase);
   React.useEffect(() => {
-    if (draftText !== '') {
-      return;
-    }
-    // oxlint-disable-next-line react/set-state-in-effect -- An authority change replaces the shown value of a clean row.
-    setDraftValue(displayValue(authorityValue, binding, displayUnit));
-    // oxlint-disable-next-line react/set-state-in-effect -- A clean row always edits from the current value.
-    setBase({ value: authorityValue, binding });
-  }, [authorityValue, binding, displayUnit, draftText]);
+    authorityRef.current = { value: authorityValue, binding, authorityValue };
+  }, [authorityValue, binding]);
 
   /* The blur handler runs inside the same event as Enter, whose state update has not landed yet, so
    * every writer of `draftText` mirrors it here; the ref is what keeps a committed draft from being
@@ -166,34 +169,29 @@ export function ParametersNumber({
     [commit, instancePointer],
   );
 
-  /* One in-flight transient commit per animation frame per field: a drag keeps the newest value and
-   * drops the frames in between, and the pointer release always sends the final one. */
-  const frameRef = React.useRef<number>(undefined);
-  const cancelFrame = (): void => {
-    if (frameRef.current !== undefined) {
-      globalThis.cancelAnimationFrame(frameRef.current);
-      frameRef.current = undefined;
-    }
-  };
-  React.useEffect(() => cancelFrame, []);
-
   const toNative = (next: number): number => {
     if (displayUnit === undefined || binding.nativeUnit === undefined || displayUnit === binding.nativeUnit) {
-      return next;
+      return binding.representation === 'safe-integer' ? Math.round(next) : next;
     }
-    return displayValue(next, { ...binding, nativeUnit: displayUnit }, binding.nativeUnit);
+    const value = displayValue(next, { ...binding, nativeUnit: displayUnit }, binding.nativeUnit);
+    return binding.representation === 'safe-integer' ? Math.round(value) : value;
   };
 
-  const send = (native: number, pressure: 'transient' | 'final'): void => {
+  const send = (
+    native: number,
+    pressure: 'transient' | 'final',
+    options: Readonly<{ base: EditBase; retainedText?: string }>,
+  ): Promise<boolean> | undefined => {
+    const { base: submittedBase, retainedText } = options;
     if (commit === undefined) {
       onChange(native);
-      return;
+      return undefined;
     }
     // The sidecar write is what re-renders the model, so an authoritative row reports no value here.
     // It does report a refusal: a transient value is superseded by design, and so is a final one a
     // newer edit displaced before it was applied, but anything else the authority refused must not
     // look entered.
-    const settle = async (): Promise<void> => {
+    const settle = async (): Promise<boolean> => {
       try {
         const outcome = await commit.commit({
           pointer: instancePointer,
@@ -201,49 +199,59 @@ export function ParametersNumber({
           pressure,
           base: {
             pointer: instancePointer,
-            value: base.value,
+            value: submittedBase.value,
             binding: {
-              representation: base.binding.representation,
-              ...(base.binding.nativeUnit === undefined ? {} : { unit: base.binding.nativeUnit }),
-              ...(base.binding.quantityKind === undefined ? {} : { quantityKind: base.binding.quantityKind }),
-              ...(base.binding.space === undefined ? {} : { space: base.binding.space }),
-              ...(base.binding.reference === undefined ? {} : { reference: base.binding.reference }),
+              representation: submittedBase.binding.representation,
+              ...(submittedBase.binding.nativeUnit === undefined ? {} : { unit: submittedBase.binding.nativeUnit }),
+              ...(submittedBase.binding.quantityKind === undefined
+                ? {}
+                : { quantityKind: submittedBase.binding.quantityKind }),
+              ...(submittedBase.binding.space === undefined ? {} : { space: submittedBase.binding.space }),
+              ...(submittedBase.binding.reference === undefined ? {} : { reference: submittedBase.binding.reference }),
             },
           },
         });
-        if (
-          pressure === 'final' &&
-          outcome !== undefined &&
-          outcome.status !== 'committed' &&
-          outcome.status !== 'cancelled-before-apply'
-        ) {
+        if (pressure === 'final' && outcome !== undefined) {
+          if (outcome.status === 'committed' || outcome.status === 'cancelled-before-apply') {
+            setLocalValue(undefined);
+            return true;
+          }
+          const authority = authorityRef.current;
+          setLocalValue(undefined);
+          setBase(authority);
+          if (retainedText !== undefined) {
+            draftRef.current = '';
+            setDraftText('');
+            commit.setDraft(instancePointer, { text: retainedText, valid: true });
+          }
           setInputDiagnostic('message' in outcome ? outcome.message : 'The parameter could not be saved.');
         }
       } catch (error) {
         setInputDiagnostic(error instanceof Error ? error.message : 'The parameter could not be saved.');
       }
+      return false;
     };
-    // async-iife: bootstrap -- an input handler cannot return the authority's settlement.
-    void settle();
+    return settle();
   };
 
   /** Enter a value from the slider or the stepper; text entry goes through {@link commitText}. */
-  const commitValue = (next: number): void => {
-    cancelFrame();
+  const commitValue = (next: number): Promise<boolean> | undefined => {
     const native = toNative(next);
     const diagnostic = validateParameterInputValue(binding, native);
     if (diagnostic !== undefined) {
-      setDraftValue(displayValue(authorityValue, binding, displayUnit));
+      setLocalValue(undefined);
       setInputDiagnostic(diagnostic.message);
-      return;
+      return undefined;
     }
     setInputDiagnostic(undefined);
     retainDraft('', true);
-    setDraftValue(next);
-    if (!Object.is(native, base.value)) {
-      send(native, 'final');
-      setBase({ value: native, binding });
+    setLocalValue({ value: displayValue(native, binding, displayUnit), authorityValue });
+    if (!Object.is(native, editBase.value)) {
+      const final = send(native, 'final', { base: editBase });
+      setBase({ value: native, binding, authorityValue });
+      return final;
     }
+    return undefined;
   };
 
   const commitText = (): void => {
@@ -269,23 +277,24 @@ export function ParametersNumber({
       setInputDiagnostic(diagnostic.message);
       return;
     }
+    const retainedText = draftRef.current;
+    const submittedBase = hasConflict ? currentBase : editBase;
     setInputDiagnostic(undefined);
     retainDraft('', true);
-    setDraftValue(displayValue(native.value.value, binding, displayUnit));
+    setLocalValue({ value: displayValue(native.value.value, binding, displayUnit), authorityValue });
     if (
-      !Object.is(native.value.value, base.value) &&
-      Math.abs(native.value.value - base.value) >
-        Number.EPSILON * Math.max(1, Math.abs(native.value.value), Math.abs(base.value)) * 8
+      !Object.is(native.value.value, submittedBase.value) &&
+      Math.abs(native.value.value - submittedBase.value) >
+        Number.EPSILON * Math.max(1, Math.abs(native.value.value), Math.abs(submittedBase.value)) * 8
     ) {
-      send(native.value.value, 'final');
-      setBase({ value: native.value.value, binding });
+      void send(native.value.value, 'final', { base: submittedBase, retainedText });
+      setBase({ value: native.value.value, binding, authorityValue });
     }
   };
 
   const revert = (): void => {
-    cancelFrame();
-    setDraftValue(displayValue(authorityValue, binding, displayUnit));
-    setBase({ value: authorityValue, binding });
+    setLocalValue(undefined);
+    setBase(currentBase);
     retainDraft('', true);
     setInputDiagnostic(undefined);
   };
@@ -303,8 +312,10 @@ export function ParametersNumber({
         ? 0
         : automaticExtent(displayDefault)
       : displayValue(max, binding, displayUnit);
-  const currentStep =
+  const projectedStep =
     step === undefined ? automaticStep(displayDefault) : Math.abs(displayStep(step, binding, displayUnit));
+  const currentStep =
+    binding.representation === 'safe-integer' ? Math.max(1, Math.round(projectedStep)) : projectedStep;
 
   const committedDisplayValue = displayValue(authorityValue, binding, displayUnit);
   // Rounding follows what the row shows, so a drag reports its own value rather than the last commit.
@@ -325,7 +336,7 @@ export function ParametersNumber({
       value={draftValue}
       formattedValue={formattedValue}
       editingValue={draftText || undefined}
-      unit={fieldProjection.adornment}
+      unit={binding.representation === 'safe-integer' ? binding.nativeUnit : fieldProjection.adornment}
       isApproximation={isApproximation}
       diagnostic={
         fieldProjection.diagnostic?.message ??
@@ -344,36 +355,41 @@ export function ParametersNumber({
       className={className}
       aria-label={ariaLabel}
       onSliderChange={(next) => {
-        setDraftValue(next);
-        if (frameRef.current !== undefined) {
+        const native = toNative(next);
+        setLocalValue({ value: displayValue(native, binding, displayUnit), authorityValue });
+        if (validateParameterInputValue(binding, native) !== undefined) {
           return;
         }
-        frameRef.current = globalThis.requestAnimationFrame(() => {
-          frameRef.current = undefined;
-          const native = toNative(next);
-          if (validateParameterInputValue(binding, native) !== undefined || Object.is(native, base.value)) {
-            return;
-          }
-          /* D2: a drag renders on the transient lane, which persists nothing. `scrub` is absent
-           * unless the kernel declared cooperative cancellation, and the row then only shows the
-           * dragged value until the release commits it. */
-          if (commit?.scrub !== undefined) {
-            commit.scrub({ pointer: instancePointer, value: native });
-          } else if (enableContinualOnChange) {
-            send(native, 'transient');
-          }
-        });
+        /* The scrub lane owns coalescing. A source-unit claim travels as the row's unit-bearing
+         * display text; every other drag value remains a native number. */
+        if (commit?.scrub !== undefined) {
+          commit.scrub({
+            pointer: instancePointer,
+            value: sourceUnit === undefined ? native : `${String(Number(next.toPrecision(12)))} ${sourceUnit}`,
+          });
+        } else if (commit === undefined && enableContinualOnChange) {
+          onChange(native);
+        }
       }}
       onSliderRelease={(next) => {
-        commit?.endScrub?.();
-        commitValue(next);
+        const final = commitValue(next);
+        if (final === undefined) {
+          void commit?.endScrub?.();
+        } else {
+          void commit?.endScrub?.(final);
+        }
       }}
       onSliderCancel={() => {
-        commit?.endScrub?.();
+        void commit?.endScrub?.();
         revert();
       }}
-      onValueChange={commitValue}
+      onValueChange={(next) => {
+        void commitValue(next);
+      }}
       onTextChange={(text) => {
+        if (draftRef.current === '' && text !== '') {
+          setBase(currentBase);
+        }
         retainDraft(
           text,
           text === '' ||

@@ -749,7 +749,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * @returns When the cut has settled.
    */
   const awaitCut = async (trigger: 'save' | 'hidden' | 'close'): Promise<void> => {
-    const checkoutId = selectRevisionStatus(actor.getSnapshot()).checkoutId;
+    const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before close.');
     }
@@ -812,6 +812,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       const pending = Promise.withResolvers<WorkerTurnPlacement>();
       admissions.set(input.runId, pending);
       const bound = globalThis.setTimeout(() => {
+        if (!admissions.has(input.runId)) {
+          return;
+        }
+        /*
+         * The root is told, not only the caller (T4-02).
+         *
+         * An admission queued behind a held turn id (V8) outlives the wait that
+         * asked for it: the root raised it when that turn retired, the turn it
+         * spawned took the checkout's lease, and nothing was left to send it
+         * `turnCompleted` — so the checkout read as held for the rest of the
+         * session and every manual save on it answered `nothingToSave`. A lease
+         * has no heartbeat by policy (§8), so this host giving up is the only
+         * liveness signal it has.
+         */
+        actor.send({ type: 'turnAbandoned', turnId: input.turnId, runId: input.runId });
         refuseAdmission(input.runId, 'it was never leased.');
       }, admissionMilliseconds);
       /* No wait for the registry: the root holds an admission that arrives

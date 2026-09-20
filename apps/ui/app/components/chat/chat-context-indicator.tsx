@@ -126,33 +126,43 @@ function formatScheduledStatus(data: ContextUsageData): string | undefined {
 
 function formatCompactionStatus(data: ContextUsageData): string | undefined {
   switch (data.lastCompactionStatus) {
-    case 'compacted':
+    case 'compacted': {
       return 'Context summarized';
-    case 'failed':
+    }
+    case 'failed': {
       return 'Compaction blocked';
-    case 'overflow_retry_succeeded':
+    }
+    case 'overflow_retry_succeeded': {
       return 'Overflow retry trimmed context';
+    }
     case 'skipped':
-    case undefined:
+    case undefined: {
       return undefined;
-    default:
+    }
+    default: {
       return undefined;
+    }
   }
 }
 
 function formatTriggerReason(reason: ContextUsageData['triggerReason']): string | undefined {
   switch (reason) {
-    case 'estimate':
+    case 'estimate': {
       return 'estimated budget';
-    case 'previous_usage':
+    }
+    case 'previous_usage': {
       return 'previous provider usage';
-    case 'overflow':
+    }
+    case 'overflow': {
       return 'provider overflow';
+    }
     case 'none':
-    case undefined:
+    case undefined: {
       return undefined;
-    default:
+    }
+    default: {
       return undefined;
+    }
   }
 }
 

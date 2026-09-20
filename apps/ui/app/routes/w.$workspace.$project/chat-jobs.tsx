@@ -328,7 +328,9 @@ const JobCard = ({
             variant='outline'
             disabled={isCancelling}
             aria-label={`Cancel ${titleForJob(job)}`}
-            onClick={() => void onCancel(snapshot.jobId)}
+            onClick={() => {
+              void onCancel(snapshot.jobId);
+            }}
           >
             <StopCircle aria-hidden className='size-3.5' />
             {isCancelling ? 'Requesting…' : 'Cancel'}
@@ -455,7 +457,9 @@ const ArtifactManifestEntry = ({
             size='sm'
             variant='outline'
             disabled={isImporting}
-            onClick={() => void importArtifact()}
+            onClick={() => {
+              void importArtifact();
+            }}
           >
             {isImporting ? 'Importing…' : pathState === 'corrupt' ? 'Repair import' : 'Import'}
           </Button>

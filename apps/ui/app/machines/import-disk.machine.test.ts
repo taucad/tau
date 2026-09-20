@@ -3,9 +3,10 @@ import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type * as FileReaderUtilities from '#utils/file-reader.utils.js';
 
 vi.mock('#utils/file-reader.utils.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#utils/file-reader.utils.js')>()),
+  ...(await importOriginal<typeof FileReaderUtilities>()),
   readFromFileList: vi.fn(async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]])),
   readFromDataTransfer: vi.fn(
     async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]]),

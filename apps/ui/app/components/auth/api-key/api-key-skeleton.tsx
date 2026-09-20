@@ -1,7 +1,7 @@
 import { Card, CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 
-export function ApiKeySkeleton() {
+export function ApiKeySkeleton(): React.JSX.Element {
   return (
     <Card className='border-0 bg-transparent shadow-none ring-0'>
       <CardContent className='flex items-center gap-3'>

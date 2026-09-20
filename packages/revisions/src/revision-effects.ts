@@ -326,10 +326,12 @@ export const describeTurnSettlement = async (
     checkoutId: settlement.checkoutId,
     ...(settlement.revisionId === undefined ? {} : { revisionId: settlement.revisionId }),
     ...(branch === undefined ? {} : { branch }),
-    changedPaths: changes.map(({ path }) => path),
+    /* Sorted here, at the one producer: the log compares a repeated settlement
+     * by value, arrays in order, so two views must spell one fact one way. */
+    changedPaths: changes.map(({ path }) => path).toSorted(),
     ...(record?.treeId === undefined ? {} : { treeId: record.treeId }),
     trigger: 'turn',
-    runIds: settlement.runIds,
+    runIds: settlement.runIds.toSorted(),
   });
 };
 

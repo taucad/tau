@@ -6,7 +6,7 @@
 
 The local implementation and regression matrix are complete. Credentialed GitHub, clean-machine packaged desktop, production R2, and Fly recovery validation remain external operator gates; they do not weaken the local contracts below.
 
-The Tau Hosted Remote's storage substrate was re-ruled on 2026-09-18 by the [git storage substrate charter](../research/git-storage-substrate-charter.md): object storage is authoritative, the Fly volume is retired, the browser repository is `.git`, and a project may have collaborators. The passages below carry that ruling. The charter's own deployment gate (a second copy, regional measurements, a staging proof and the production apply) is still open, so **Tau Cloud sync is not open to users yet**; operating the deployed system is the [revisions cloud handbook](revisions-cloud-handbook.md). Normative rules are extracted into `docs/policy` (topology OQ-N20).
+The Tau Hosted Remote's storage substrate was re-ruled on 2026-09-18 by the [git storage substrate charter](../research/git-storage-substrate-charter.md): object storage is authoritative, the Fly volume is retired, the browser repository is `.git`, and a project may have collaborators. The passages below carry that ruling. The charter's own deployment gate (a second copy, regional measurements, a staging proof and the production apply) is still open, so **Tau Cloud sync is not open to users yet**; the server-side contract is [revisions cloud architecture](revisions-cloud-handbook.md), and operating the deployed system is covered by the private operations handbook. Normative rules are extracted into `docs/policy` (topology OQ-N20).
 
 ---
 

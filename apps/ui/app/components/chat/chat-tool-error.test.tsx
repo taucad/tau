@@ -15,7 +15,7 @@ const createError = (
   errorCode: ToolExecutionError['errorCode'],
   overrides: Partial<ToolExecutionError> = {},
 ): ToolExecutionError => {
-  // oxlint-disable-next-line typescript-eslint(consistent-type-assertions) -- test factory for discriminated union
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- test factory for discriminated union
   return {
     errorCode,
     message: 'Test error message',

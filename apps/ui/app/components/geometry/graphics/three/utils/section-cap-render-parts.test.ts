@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { buildSectionCapRenderParts } from '#components/geometry/graphics/three/utils/section-cap-render-parts.js';
 import {
-  buildSectionCapRenderParts,
   sectionCapOverlapBaseHex,
   sectionCapOverlapStripeHex,
-} from '#components/geometry/graphics/three/utils/section-cap-render-parts.js';
+} from '#components/geometry/graphics/three/utils/section-cap-style.js';
 import { classifySectionCapOverlaps } from '#components/geometry/graphics/three/utils/section-cap-overlap.js';
 import { measureCapMultiPolygonArea } from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean.js';
 import type { SectionCapPolygon } from '#components/geometry/graphics/three/utils/section-cap-region.js';

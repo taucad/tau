@@ -258,7 +258,7 @@ describe('ParametersWidget boolean contract', () => {
 });
 
 describe('ParametersWidget authoritative commits', () => {
-  it('commits a boolean as one field instead of replacing the whole group', () => {
+  it('should commit a boolean as a field edit carrying its base', () => {
     const setValue = vi.fn(async () => undefined);
     const onChange = vi.fn();
     const props = widgetProps({ name: 'width', schema: { type: 'boolean' }, value: false, onChange });
@@ -269,7 +269,6 @@ describe('ParametersWidget authoritative commits', () => {
         commit: {
           target: { authority: 'test', root: '/', entry: 'main.ts' },
           group: 'default',
-          editorInstance: 'editor',
           draft: vi.fn(),
           setDraft: vi.fn(),
           subscribeDrafts: vi.fn(() => () => undefined),
@@ -282,7 +281,11 @@ describe('ParametersWidget authoritative commits', () => {
 
     fireEvent.click(screen.getByRole('switch', { name: 'Toggle for Width' }));
 
-    expect(setValue).toHaveBeenCalledWith({ pointer: '/width', value: true });
+    expect(setValue).toHaveBeenCalledWith({
+      pointer: '/width',
+      value: true,
+      base: { pointer: '/width', value: false },
+    });
     expect(onChange).not.toHaveBeenCalled();
   });
 

@@ -31,31 +31,53 @@ const startRelay = async (hostUrl: URL, authorizationToken: string): Promise<URL
       const host = new WebSocket(target, { headers: { authorization: `Bearer ${authorizationToken}` } });
       const pending: Array<{ readonly data: WebSocket.RawData; readonly binary: boolean }> = [];
       browser.on('message', (data, binary) => {
-        if (host.readyState === WebSocket.OPEN) host.send(data, { binary });
-        else pending.push({ data, binary });
+        if (host.readyState === WebSocket.OPEN) {
+          host.send(data, { binary });
+        } else {
+          pending.push({ data, binary });
+        }
       });
       host.once('open', () => {
-        for (const frame of pending.splice(0)) host.send(frame.data, { binary: frame.binary });
+        for (const frame of pending.splice(0)) {
+          host.send(frame.data, { binary: frame.binary });
+        }
       });
-      host.on('message', (data, binary) => browser.send(data, { binary }));
-      browser.on('close', (code, reason) => host.close(code, reason));
-      host.on('close', (code, reason) => browser.close(code, reason));
-      browser.on('error', () => host.terminate());
-      host.on('error', () => browser.terminate());
+      host.on('message', (data, binary) => {
+        browser.send(data, { binary });
+      });
+      browser.on('close', (code, reason) => {
+        host.close(code, reason);
+      });
+      host.on('close', (code, reason) => {
+        browser.close(code, reason);
+      });
+      browser.on('error', () => {
+        host.terminate();
+      });
+      host.on('error', () => {
+        browser.terminate();
+      });
     });
   });
-  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => {
+    httpServer.listen(0, '127.0.0.1', resolve);
+  });
   closures.push(
-    () =>
-      new Promise<void>((resolve, reject) =>
+    async () =>
+      new Promise<void>((resolve, reject) => {
         httpServer.close((error) => {
-          if (error) reject(error);
-          else resolve();
-        }),
-      ),
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      }),
   );
   const address = httpServer.address();
-  if (!address || typeof address === 'string') throw new Error('Expected a TCP relay address.');
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected a TCP relay address.');
+  }
   return new URL(`ws://127.0.0.1:${String(address.port)}/browser`);
 };
 
@@ -63,7 +85,7 @@ describe('Tau Host production-surface relay', { concurrent: false }, () => {
   it('renders byte-identical geometry through the relay with browser-owned filesystem authority', async () => {
     const authorizationToken = 'runtime-loopback-token-'.padEnd(40, 'x');
     const host = await serveHostRuntime({ runtime: webSocketRuntime, authorizationToken });
-    closures.push(() => host.close());
+    closures.push(async () => host.close());
     const relayUrl = await startRelay(host.url, authorizationToken);
     const fileSystem = fromMemoryFs({ 'main.ts': boxSource(42) });
     const remote = createRuntimeClient({
@@ -92,7 +114,7 @@ describe('Tau Host production-surface relay', { concurrent: false }, () => {
   it('rejects a loopback runtime route without the parent token', async () => {
     const authorizationToken = 'runtime-loopback-token-'.padEnd(40, 'x');
     const host = await serveHostRuntime({ runtime: webSocketRuntime, authorizationToken });
-    closures.push(() => host.close());
+    closures.push(async () => host.close());
     const rejected = new WebSocket(new URL('/runtime?session=rejected', host.url));
     const [error] = (await once(rejected, 'error')) as [Error];
 

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- VM and host paths are object keys here. */
 import { describe, expect, it, vi } from 'vitest';
 import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import {

@@ -18,24 +18,25 @@ describe('Python language contribution', () => {
       }),
     );
     Object.assign(stub.monaco.languages, {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors Monaco's own `CompletionItemKind` enum names.
       CompletionItemKind: { Class: 7, Function: 1 },
       registerCompletionItemProvider: register,
     });
     const result = pythonContribution.activate({ monaco: stub.monaco } as ActivationContext);
     expect(result.disposables).toHaveLength(1);
     expect(register).toHaveBeenCalledWith('python', expect.any(Object));
-    const provider = register.mock.calls[0]![1] as Monaco.languages.CompletionItemProvider;
+    const provider = register.mock.calls[0]![1];
     const model = {
       getLineContent: () => 'from build123d import Bo',
       getWordUntilPosition: () => ({ word: 'Bo', startColumn: 24, endColumn: 26 }),
     } as unknown as Monaco.editor.ITextModel;
-    const completionContext = {
-      triggerKind: 0,
-    } as Monaco.languages.CompletionContext;
-    const cancellationToken = {
+    const completionContext: Monaco.languages.CompletionContext = {
+      triggerKind: 0 as Monaco.languages.CompletionTriggerKind,
+    };
+    const cancellationToken: Monaco.CancellationToken = {
       isCancellationRequested: false,
       onCancellationRequested: () => ({ dispose: () => undefined }),
-    } as Monaco.CancellationToken;
+    };
     const completion = await provider.provideCompletionItems(
       model,
       { lineNumber: 1, column: 26 } as Monaco.Position,

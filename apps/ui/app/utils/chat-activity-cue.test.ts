@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSidebarState } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import { selectChatActivityCue } from '#utils/chat-activity-cue.js';
 import type { ChatActivityFacts } from '#utils/chat-activity-cue.js';
 

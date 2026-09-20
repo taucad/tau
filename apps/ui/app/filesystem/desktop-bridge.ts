@@ -47,12 +47,12 @@ type DesktopShell = {
     }): Promise<DesktopQuickLookResult>;
     close(): void;
   };
-  /** Ask main to broker a port for one concern; answered by a relayed message. */
-  requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
   readonly agentHost: {
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
   };
+  /** Ask main to broker a port for one concern; answered by a relayed message. */
+  requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
 };
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };

@@ -378,7 +378,7 @@ export const readLineCoverageEvidence = async (
       const opacity = new Float32Array(width * height);
       const linear = (channel: number): number => {
         const value = channel / 255;
-        return value <= 0.040_45 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
       };
       const luminance = (values: Uint8ClampedArray, offset: number): number =>
         linear(values[offset]!) * 0.2126 + linear(values[offset + 1]!) * 0.7152 + linear(values[offset + 2]!) * 0.0722;

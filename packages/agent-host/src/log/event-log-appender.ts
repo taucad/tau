@@ -155,7 +155,7 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
           throw appendError;
         }
         transition.commit();
-        events.push(event);
+        events.push(transition.event);
         byteLength += bytes.byteLength;
         needsSeparator = false;
         return { appended: true };

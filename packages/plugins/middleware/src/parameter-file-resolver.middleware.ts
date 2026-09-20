@@ -1,10 +1,10 @@
 import deepmerge from 'deepmerge';
 import { z } from 'zod';
-import { getActiveGroupValues, parametersDirectory } from '@taucad/runtime/types';
+import { parameterEntryPath } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime/types';
-import { assertRootedPath, isNotFoundError } from '@taucad/runtime/kernel';
+import { isNotFoundError } from '@taucad/runtime/kernel';
 import { defineMiddleware } from '@taucad/runtime/middleware';
-import { requireParameterRecord } from '@taucad/parameters';
+import { parameterRecordInputValues, requireParameterRecord } from '@taucad/parameters';
 
 const encoder = new TextEncoder();
 
@@ -27,19 +27,11 @@ const recordFrom = (content: string): ReturnType<typeof requireParameterRecord> 
   }
 };
 
-const resolveParameterFilePath = (entryPath: string, parametersDirectoryPath: string): string => {
-  const localEntryPath = assertRootedPath(entryPath);
-  const directory = assertRootedPath(parametersDirectoryPath);
-  return assertRootedPath(`${directory ? `${directory}/` : ''}${localEntryPath}.json`);
-};
-
 /**
  * Middleware that applies persisted parameter-group values during geometry creation.
  *
- * Each normalized runtime entry path maps to a runtime path beneath `parametersDir`. For example,
- * `src/box.ts` maps to `.tau/parameters/src/box.ts.json` by default. The active
- * group's values are deep-merged over the request parameters, with arrays replaced
- * rather than concatenated.
+ * Each normalized runtime entry path maps to its canonical parameter record path. The active
+ * group's values are merged below caller overrides, with arrays replaced rather than concatenated.
  *
  * The parameter file is included in dependency hashing and registered for watching.
  * Missing files leave the request unchanged. Invalid or unsupported records
@@ -53,7 +45,6 @@ export const parameterFileResolver = defineMiddleware({
   id: 'parameterFileResolver',
   name: 'ParameterFileResolver',
   optionsSchema: z.object({
-    parametersDir: z.string().default(parametersDirectory),
     /** Milliseconds. */
     watchDebounce: z.number().default(0),
   }),
@@ -61,14 +52,15 @@ export const parameterFileResolver = defineMiddleware({
   getDependencies({ entryPath }, { options }) {
     return [
       {
-        path: resolveParameterFilePath(entryPath, options.parametersDir),
+        path: parameterEntryPath(entryPath),
+        affects: ['createGeometry'],
         watchDebounce: options.watchDebounce,
       },
     ];
   },
 
   async wrapCreateGeometry(input, handler, runtime) {
-    const parametersPath = resolveParameterFilePath(input.entryPath, runtime.options.parametersDir);
+    const parametersPath = parameterEntryPath(input.entryPath);
     let content: string;
     try {
       content = await runtime.filesystem.readFile(parametersPath, 'utf8');
@@ -83,7 +75,7 @@ export const parameterFileResolver = defineMiddleware({
 
     return handler({
       ...input,
-      parameters: deepmerge(input.parameters, getActiveGroupValues(entry), {
+      parameters: deepmerge(parameterRecordInputValues(entry), input.parameters, {
         arrayMerge: (_target: unknown[], source: unknown[]) => source,
       }),
     });

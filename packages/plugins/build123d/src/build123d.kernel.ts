@@ -1,14 +1,6 @@
-import {
-  asBuffer,
-  assertRootedPath,
-  createKernelError,
-  createKernelSuccess,
-  defineKernel,
-  isNotFoundError,
-} from '@taucad/runtime/kernel';
+import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import type { ComputeAnnouncement, KernelIssue, KernelRuntime } from '@taucad/runtime/kernel';
-import { createExportFile, parametersDirectory } from '@taucad/runtime/types';
-import { requireParameterRecord, resolveProducerParameterValues } from '@taucad/parameters';
+import { createExportFile } from '@taucad/runtime/types';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
@@ -84,23 +76,6 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   ];
 };
 
-/** Decode stored values under the shared record policy, reporting a refusal as a typed kernel issue. */
-const recordFrom = (bytes: Uint8Array<ArrayBuffer>, fileName: string): ReturnType<typeof requireParameterRecord> => {
-  try {
-    return requireParameterRecord(bytes);
-  } catch (error) {
-    throw new Build123dKernelError([
-      {
-        message: error instanceof Error ? error.message : String(error),
-        code: 'INVALID_RECORD',
-        type: 'runtime',
-        severity: 'error',
-        location: { fileName, startLineNumber: 1, startColumn: 1 },
-      },
-    ]);
-  }
-};
-
 /**
  * One analyze request, spanned.
  *
@@ -140,7 +115,7 @@ export const build123dKernel = defineKernel({
   optionsSchema: build123dOptionsSchema,
   render: { optionsSchema: build123dRenderSchema },
   // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.
-  liveEdit: true,
+  cancellation: 'cooperative',
   exportFormats: {
     glb: { optionsSchema: build123dExportSchemas.glb },
     step: { optionsSchema: build123dExportSchemas.step },
@@ -198,26 +173,6 @@ export const build123dKernel = defineKernel({
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
     await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
-    let executionParameters = parameters;
-    try {
-      const parameterPath = assertRootedPath(`${parametersDirectory}/${entryPath}.json`);
-      const bytes = await runtime.filesystem.readFile(parameterPath);
-      const entry = recordFrom(bytes, parameterPath);
-      const analysis = await analyzeEntry(entryPath, runtime, context);
-      if (!analysis.declaration) {
-        throw new Error('Build123d analyzer omitted its parameter declaration.');
-      }
-      executionParameters = resolveProducerParameterValues({
-        producer: 'build123d',
-        declaration: analysis.declaration,
-        entry,
-        values: parameters,
-      });
-    } catch (error) {
-      if (!isNotFoundError(error)) {
-        throw error;
-      }
-    }
     const build = async (compute: Record<string, unknown> | undefined) => {
       const span = runtime.tracer.startSpan('build123d.build', { entryPath });
       try {
@@ -225,7 +180,7 @@ export const build123dKernel = defineKernel({
           method: 'build',
           params: {
             entryPath,
-            parameters: executionParameters,
+            parameters,
             ...(compute ? { compute } : {}),
           },
           schema: build123dBuildSchema,

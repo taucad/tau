@@ -490,15 +490,13 @@ describe('chatSessionMachine run ownership', () => {
   ) => {
     const admissions: Array<{ readonly chatId: string; readonly gesture: ChatTurnGesture }> = [];
     const settlements: ChatTurnSettlementInput[] = [];
-    const abandoned: string[] = [];
+    /* No `signal.aborted` branch here: a fixture that models abandonment is a
+     * fixture asserting itself (I8). The real `chatTurnAdmission` releases the
+     * lease it took, and `chat-host-binding.test.ts` drives that path. */
     const admit = fromSafeAsync<{ type: 'turnAdmitted'; turn: ChatTurn }, { chatId: string; gesture: ChatTurnGesture }>(
-      async ({ input, signal }) => {
+      async ({ input }) => {
         admissions.push(input);
         const turn = await (script.admit?.(input) ?? Promise.resolve(turnOf('run-1', 'user-1')));
-        if (signal.aborted) {
-          abandoned.push(turn.leaseTurnId ?? '(none)');
-          throw new Error('aborted');
-        }
         return { type: 'turnAdmitted', turn };
       },
     );
@@ -506,7 +504,7 @@ describe('chatSessionMachine run ownership', () => {
       settlements.push(input);
       await (script.settle?.(input) ?? Promise.resolve());
     });
-    return { admissions, settlements, abandoned, actors: { admitTurn: admit, settleTurn: settle } };
+    return { admissions, settlements, actors: { admitTurn: admit, settleTurn: settle } };
   };
 
   const startOwning = (actors: ReturnType<typeof turnActors>['actors']) => {
@@ -544,12 +542,14 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
-  it('should abandon only its own admission when a second gesture replaces it', async () => {
+  it('should hold only the replacing gesture\u2019s turn when a second gesture replaces an admission', async () => {
     const first = Promise.withResolvers<ChatTurn>();
     const script = turnActors({
       admit: async ({ gesture }) => (gesture.kind === 'regenerate' ? first.promise : turnOf('run-2', 'user-2')),
     });
     const actor = startOwning(script.actors);
+    const dispatched: Array<{ readonly request: unknown }> = [];
+    actor.on('startTurnRequest', (event) => dispatched.push(event));
 
     actor.send({ type: 'requestTurn', gesture: sendGesture });
     actor.send({ type: 'requestTurn', gesture: { kind: 'edit', messageId: 'user-2', text: 'Second.' } });
@@ -557,11 +557,14 @@ describe('chatSessionMachine run ownership', () => {
       expect(runState(actor)).toBe('queued.dispatched');
     });
 
+    /* The replaced admission answers late. Its turn is not this chat's: the
+     * actor that took its lease releases it, and nothing here adopts it. */
     first.resolve(turnOf('run-1', 'user-1'));
     await vi.waitFor(() => {
-      expect(script.abandoned).toEqual(['user-1']);
+      expect(dispatched).toHaveLength(1);
     });
-    expect(actor.getSnapshot().context.turn?.runId).toBe('run-2');
+    expect(actor.getSnapshot().context.turn).toEqual(turnOf('run-2', 'user-2'));
+    expect(runState(actor)).toBe('queued.dispatched');
 
     actor.stop();
   });
@@ -588,22 +591,105 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
+  /* V5, on a chat that actually owns a turn. The row this replaces sent
+   * `adoptRun` twice into a chat that never admitted anything, so it proved
+   * only that `idle` is left behind — never that discovery cannot retire a live
+   * turn, which is what V5 says. */
   it('should ignore adoptRun once this chat owns a turn', async () => {
     const script = turnActors();
     const actor = startOwning(script.actors);
 
-    actor.send({ type: 'adoptRun', runId: 'run-discovered' });
-    expect(runState(actor)).toBe('running.reconnecting');
-    expect(actor.getSnapshot().context.activeRunId).toBe('run-discovered');
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
 
     actor.send({ type: 'adoptRun', runId: 'run-other' });
-    expect(runState(actor)).toBe('running.reconnecting');
-    expect(actor.getSnapshot().context.activeRunId).toBe('run-discovered');
+
+    expect(runState(actor)).toBe('queued.dispatched');
+    expect(actor.getSnapshot().context.activeRunId).toBe('run-1');
+    expect(actor.getSnapshot().context.turn).toEqual(turnOf('run-1', 'user-1'));
 
     actor.stop();
   });
 
-  it('should record a rejected settlement as the failure it is', async () => {
+  /* T3-D10: `adoptRun` was accepted only in `idle`, so a chat whose machine had
+   * already reached a terminal state while a run of that chat was still live
+   * elsewhere showed a terminal row and let the next gesture lease a second
+   * checkout over the live run. The guard is what enforces V5, not the state. */
+  it('should adopt a discovered run from a terminal state when it holds no turn', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
+    actor.send({ type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'user-1' });
+    expect(runState(actor)).toBe('done');
+
+    actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
+
+    expect(runState(actor)).toBe('running.reconnecting');
+    expect(actor.getSnapshot().context.activeRunId).toBe('run-elsewhere');
+
+    actor.stop();
+  });
+
+  /* W10-1: discovery must not reach *into* a turn this chat is taking. The
+   * guard `hasNoOwnTurn` is true for the whole admission window — the lease is
+   * taken before `turn` exists — so an `adoptRun` sent from `#bindSessionOwner`
+   * (a rebind with a live `browserRuns` entry) stopped the admission actor and
+   * took the person's parked message with it. */
+  it('should ignore adoptRun while an admission is in flight', async () => {
+    const admitted = Promise.withResolvers<ChatTurn>();
+    const script = turnActors({ admit: async () => admitted.promise });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    expect(runState(actor)).toBe('queued.admitting');
+
+    actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
+
+    expect(runState(actor)).toBe('queued.admitting');
+    admitted.resolve(turnOf('run-1', 'user-1'));
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+    expect(actor.getSnapshot().context.turn).toEqual(turnOf('run-1', 'user-1'));
+
+    actor.stop();
+  });
+
+  /* The same guard from the other end. A reconciled settlement runs in
+   * `finishing.settling` holding no turn of its own, so `hasNoOwnTurn` is true
+   * there too — and adopting over it abandons the `settleTurn` that is the
+   * adopted run's only settlement. */
+  it('should ignore adoptRun while a reconciled run is settling', async () => {
+    const released = Promise.withResolvers<void>();
+    const script = turnActors({ settle: async () => released.promise });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-reloaded' });
+    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
+    expect(runState(actor)).toBe('finishing.settling');
+
+    actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
+
+    expect(runState(actor)).toBe('finishing.settling');
+    released.resolve();
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('done');
+    });
+    expect(script.settlements).toHaveLength(1);
+
+    actor.stop();
+  });
+
+  /* T3-D6. A rejected settlement shared `recordActorFailure` with a rejected
+   * admission, which clears `turn`, `pendingGesture` and `outcome`. There the
+   * clearing is right — the cleared gesture *is* the one that failed and
+   * nothing was leased. Here it was not: the lease was never released (that is
+   * what failed), and the actor no longer knew which run held it, so nothing
+   * could retry and the person's queued message went with it. */
+  it('should keep the turn when every settlement of it is rejected', async () => {
     const script = turnActors({
       settle: async () => {
         throw new Error('The revision root never answered.');
@@ -621,7 +707,38 @@ describe('chatSessionMachine run ownership', () => {
       expect(runState(actor)).toBe('failed');
     });
     expect(actor.getSnapshot().context.failureReason).toBe('The revision root never answered.');
-    expect(actor.getSnapshot().context.turn).toBeUndefined();
+    /* Retried once, then surfaced — with the turn retained, so a later
+     * `reconcileSettlement` can still name the run that holds the lease. */
+    expect(script.settlements).toHaveLength(2);
+    expect(actor.getSnapshot().context.turn).toEqual(turnOf('run-1', 'user-1'));
+
+    actor.stop();
+  });
+
+  it('should settle a turn whose first settlement was rejected, and admit the gesture queued behind it', async () => {
+    let attempts = 0;
+    const script = turnActors({
+      settle: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error('The revision root never answered.');
+        }
+      },
+    });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+    actor.send({ type: 'requestTurn', gesture: { kind: 'edit', messageId: 'user-1', text: 'Edited.' } });
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
+
+    await vi.waitFor(() => {
+      expect(script.admissions).toHaveLength(2);
+    });
+    expect(script.settlements.map((settlement) => settlement.runId)).toEqual(['run-1', 'run-1']);
+    expect(script.admissions[1]?.gesture).toEqual({ kind: 'edit', messageId: 'user-1', text: 'Edited.' });
 
     actor.stop();
   });
@@ -689,6 +806,120 @@ describe('chatSessionMachine run ownership', () => {
       expect(script.admissions).toHaveLength(1);
     });
     expect(script.admissions[0]?.gesture).toEqual(sendGesture);
+
+    actor.stop();
+  });
+
+  /*
+   * V1/V2 in `queued.dispatched`. The lease is held and the request is out, but
+   * the transport reports `running` only once bytes flow — so a gesture made
+   * here is over a live turn exactly as one made in `running` is. Deleting this
+   * state's own `requestTurn` handler sends the gesture to the root's, which
+   * re-enters `queued.admitting` and leases a second checkout, and no row
+   * anywhere noticed.
+   */
+  it('should hold a gesture made in queued.dispatched rather than lease a second checkout', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+    const interrupts: unknown[] = [];
+    actor.on('stopTurnRequest', (event) => interrupts.push(event));
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+
+    actor.send({ type: 'requestTurn', gesture: { kind: 'edit', messageId: 'user-1', text: 'Second.' } });
+
+    expect(runState(actor)).toBe('queued.dispatched');
+    expect(script.admissions).toHaveLength(1);
+    expect(interrupts).toHaveLength(1);
+    expect(actor.getSnapshot().context.pendingGesture).toEqual({
+      kind: 'edit',
+      messageId: 'user-1',
+      text: 'Second.',
+    });
+
+    actor.stop();
+  });
+
+  /* V1/V2 in `queued.observing`: a run this page did not admit. There is
+   * nothing to admit over it either, and the gesture waits for it to settle. */
+  it('should hold a gesture made over an admitted run this page did not start', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+    const interrupts: unknown[] = [];
+    actor.on('stopTurnRequest', (event) => interrupts.push(event));
+
+    actor.send({ type: 'runLifecycle', phase: 'admitted', runId: 'run-elsewhere' });
+    expect(runState(actor)).toBe('queued.observing');
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+
+    expect(runState(actor)).toBe('queued.observing');
+    expect(script.admissions).toEqual([]);
+    expect(interrupts).toHaveLength(1);
+    expect(actor.getSnapshot().context.pendingGesture).toEqual(sendGesture);
+
+    actor.stop();
+  });
+
+  /*
+   * V3's page half: a settlement names the run it settles. `settleTurn` reads
+   * `context.turn?.runId ?? context.activeRunId`, and the two differ whenever
+   * the transport reports a run this chat is not holding — `captureRunIdentity`
+   * moves `activeRunId`, the turn's lease does not move with it.
+   */
+  it('should settle the run its own turn leased, not the last run the transport named', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+    actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-other' });
+    expect(actor.getSnapshot().context.activeRunId).toBe('run-other');
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-other' });
+
+    await vi.waitFor(() => {
+      expect(script.settlements).toHaveLength(1);
+    });
+    expect(script.settlements[0]).toMatchObject({ runId: 'run-1', leaseTurnId: 'user-1' });
+
+    actor.stop();
+  });
+
+  /*
+   * T3-D7. `ChatTurn.runId` is `string | undefined` precisely so a `continue`
+   * can carry "no new run" — it resumes the run the host already has. Adopting
+   * that `undefined` as the chat's run identity dropped every host-attested
+   * observation (`matchesActiveRun`), so no settlement could be buffered and
+   * `settleTurn` was handed `undefined`, which the settlement returns on.
+   */
+  it('should keep the active run id when a turn mints none', async () => {
+    const script = turnActors({
+      admit: async () => ({ runId: undefined, leaseTurnId: undefined, request: { kind: 'continue' } }),
+    });
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
+    actor.send({ type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'user-1' });
+    expect(runState(actor)).toBe('done');
+
+    actor.send({ type: 'requestTurn', gesture: { kind: 'continue' } });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
+
+    expect(actor.getSnapshot().context.activeRunId).toBe('run-1');
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
+    await vi.waitFor(() => {
+      expect(script.settlements).toHaveLength(1);
+    });
+    expect(script.settlements[0]).toMatchObject({ runId: 'run-1' });
 
     actor.stop();
   });

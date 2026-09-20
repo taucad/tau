@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { server } from 'vitest/browser';
+import { server as vitestServer } from 'vitest/browser';
+import type { OpenrscadBrowserCommands } from '#e2e/browser-command.js';
+
+const server = vitestServer as typeof vitestServer & { readonly commands: OpenrscadBrowserCommands };
 
 const zipLocalFileHeader = [0x50, 0x4b, 0x03, 0x04];
 
@@ -65,8 +68,8 @@ describe('@taucad/openrscad USDZ export', () => {
      */
     expect(browser.roundtrip.triangles).toBe(native.roundtrip.triangles);
     for (let axis = 0; axis < 3; axis++) {
-      expect(browser.roundtrip.bounds.min[axis]).toBeCloseTo(native.roundtrip.bounds.min[axis], 6);
-      expect(browser.roundtrip.bounds.max[axis]).toBeCloseTo(native.roundtrip.bounds.max[axis], 6);
+      expect(browser.roundtrip.bounds.min[axis]).toBeCloseTo(native.roundtrip.bounds.min[axis]!, 6);
+      expect(browser.roundtrip.bounds.max[axis]).toBeCloseTo(native.roundtrip.bounds.max[axis]!, 6);
     }
 
     expect(result.consoleErrors).toEqual([]);

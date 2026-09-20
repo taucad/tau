@@ -204,7 +204,7 @@ describe('@taucad/camera', () => {
       view: createCameraView({
         ...createView(),
         requestedVerticalFieldOfView: 45,
-        direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+        direction: [0.6123724357, -0.6123724357, 0.5],
         viewport: { width: 768, height: 576, pixelRatio: 1 },
       }),
       bounds: volumetricBounds,
@@ -212,9 +212,9 @@ describe('@taucad/camera', () => {
     });
     const frame = resolveCameraFrame({ view: framed });
 
-    expect(frame.distance).toBeCloseTo(35.808_573_937_594_36, 10);
-    expect(framed.perspectiveZoom).toBeCloseTo(1.078_034_861_982_213_3, 10);
-    expect(framed.verticalSpan).toBeCloseTo(27.517_471_831_882_276, 10);
+    expect(frame.distance).toBeCloseTo(35.80857393759436, 10);
+    expect(framed.perspectiveZoom).toBeCloseTo(1.0780348619822133, 10);
+    expect(framed.verticalSpan).toBeCloseTo(27.517471831882276, 10);
     expect(frame.zoom).toBe(framed.perspectiveZoom);
 
     const coordinates = volumetricCorners.map((point) =>
@@ -223,8 +223,8 @@ describe('@taucad/camera', () => {
     expect(Math.max(...coordinates.flatMap(([x, y]) => [Math.abs(x), Math.abs(y)]))).toBeCloseTo(0.9, 12);
     expect(coordinates.every(([x, y]) => Math.abs(x) <= 0.9 + 1e-12 && Math.abs(y) <= 0.9 + 1e-12)).toBe(true);
     expect(projectedPoint({ point: [20, 14, 8], view: framed, distance: frame.distance })).toEqual([
-      expect.closeTo(0.733_907_379_246_009_8, 10),
-      expect.closeTo(0.195_649_892_264_690_48, 10),
+      expect.closeTo(0.7339073792460098, 10),
+      expect.closeTo(0.19564989226469048, 10),
     ]);
   });
 
@@ -234,7 +234,7 @@ describe('@taucad/camera', () => {
         ...createView(),
         requestedVerticalFieldOfView: 0,
         perspectiveZoom: 1.75,
-        direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+        direction: [0.6123724357, -0.6123724357, 0.5],
         viewport: { width: 768, height: 576, pixelRatio: 1 },
       }),
       bounds: volumetricBounds,

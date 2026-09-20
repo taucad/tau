@@ -63,6 +63,7 @@ vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
+    ready: true,
     get: () => ({
       execution: {
         hostId: 'host_integration',
@@ -71,6 +72,13 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
       },
     }),
     prepare: async () => ({
+      execution: {
+        hostId: 'host_integration',
+        workspaceId: 'workspace_integration',
+        baseRevisionId: 'rev_integration',
+      },
+    }),
+    attachment: async () => ({
       execution: {
         hostId: 'host_integration',
         workspaceId: 'workspace_integration',

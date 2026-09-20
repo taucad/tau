@@ -120,9 +120,9 @@ const expectations = {
 const rows = Object.entries(expectations) as ReadonlyArray<readonly [string, NoticeExpectation]>;
 
 const closeReasons: ReadonlyArray<readonly [ProjectSessionCloseReason, string]> = [
-  ['user', 'Its files and chats are kept. Reopen it to continue where you left off.'],
-  ['quit', 'Its files and chats are kept. Reopen it to continue where you left off.'],
-  ['budget', 'Closed to free memory for other projects. Its files and chats are kept.'],
+  ['user', 'Its files and chats are saved. Reopen it to continue where you left off.'],
+  ['quit', 'Its files and chats are saved. Reopen it to continue where you left off.'],
+  ['budget', 'Closed to free memory for other projects. Its files and chats are saved.'],
 ];
 
 const recoveryFailures: ReadonlyArray<readonly [PendingProjectRecoveryReason, string, string]> = [
@@ -195,7 +195,7 @@ describe('ProjectRouteNotice', () => {
     render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'idle' }} />);
 
     expect(
-      screen.getByText('Closed to save memory after 45 min idle. Its files and chats are kept.'),
+      screen.getByText('Closed to save memory after 45 min idle. Its files and chats are saved.'),
     ).toBeInTheDocument();
   });
 

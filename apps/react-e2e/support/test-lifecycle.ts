@@ -1,15 +1,15 @@
 import { aroundEach, inject } from 'vitest';
-import { server } from 'vitest/browser';
+import { reactServer } from './external-target.js';
 
 aroundEach(async (runTest, { annotate }) => {
   const target = inject('reactE2ETarget');
-  const session = await server.commands.reactOpenTarget(target.id);
+  const session = await reactServer.commands.reactOpenTarget(target.id);
   let failure: unknown;
   try {
     await runTest();
   } catch (error) {
     failure = error;
-    const diagnostics = await server.commands.reactCaptureTargetDiagnostics();
+    const diagnostics = await reactServer.commands.reactCaptureTargetDiagnostics();
     if (diagnostics.screenshot) {
       await annotate('React E2E target screenshot', {
         body: diagnostics.screenshot,
@@ -29,7 +29,7 @@ aroundEach(async (runTest, { annotate }) => {
   }
 
   try {
-    await server.commands.reactCloseTarget();
+    await reactServer.commands.reactCloseTarget();
   } catch (cleanupError) {
     if (failure) {
       throw new AggregateError([failure, cleanupError], 'React E2E test and cleanup both failed.');

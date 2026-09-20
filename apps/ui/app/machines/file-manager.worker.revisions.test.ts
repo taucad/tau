@@ -401,7 +401,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const alpha = await fixture.open('alpha');
     await settle(20);
     const root = await fixture.root('alpha');
-    const before = (await root.log()).length;
+    const beforeRows = await root.log();
+    const before = beforeRows.length;
 
     await project.writeFile('main.scad', 'cube(20);');
     fixture.announce('alpha', ['main.scad']);
@@ -415,7 +416,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       answer = alpha.frames.find((frame) => (frame.type === 'result' || frame.type === 'error') && frame.id === 77);
       if (answer !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- read the log at the instant the frame landed.
-        rowsWhenAnswered = (await root.log()).length;
+        const rowsAtAnswer = await root.log();
+        rowsWhenAnswered = rowsAtAnswer.length;
       }
     }
 
@@ -464,6 +466,55 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     /* The lease is retired by the completion the root held, so nothing is left
      * holding the checkout open. */
     await expect(project.readdir('.tau/runs')).resolves.toEqual([]);
+  });
+
+  /*
+   * T4-02: the admission wait is bounded, the root's queue was not.
+   *
+   * An edit behind a running turn queues on the turn id that turn holds (V8).
+   * When the caller's 30 s wait expired it refused only its own promise, so the
+   * entry stayed in the root and was raised the moment the running turn
+   * retired: a turn spawned, took the checkout's lease, and nothing was left to
+   * send it `turnCompleted`. The checkout then read as held for the rest of the
+   * session — every manual save on it answered `nothingToSave` and recorded
+   * nothing.
+   */
+  it('should abandon an admission whose wait expired, leaving the checkout free to record a save', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fixture = harness(['alpha']);
+      const project = fixture.service.createRootedFileSystem('/projects/alpha');
+      await project.writeFile('main.scad', 'cube(10);');
+      const alpha = await fixture.open('alpha');
+      const placed = await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+      expect(placed.type).toBe('result');
+
+      /* The person edits that same message while the first run is still
+       * recording, and gives up waiting before it retires. */
+      alpha.send({ command: 'admitTurn', id: 77, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+      await settle(8);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await settle(8);
+      expect(alpha.frames.find((frame) => frame.type === 'error' && frame.id === 77)).toBeDefined();
+
+      alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
+      await settle(40);
+
+      /* The abandoned run never takes a lease, so nothing holds the checkout. */
+      await expect(project.readdir('.tau/runs')).resolves.toEqual([]);
+
+      const root = await fixture.root('alpha');
+      const before = await root.log();
+      await project.writeFile('main.scad', 'cube(30);');
+      alpha.send({ command: 'saveRevision', trigger: 'save' });
+      await settle(40);
+      const after = await root.log();
+
+      expect(after.length).toBe(before.length + 1);
+      expect(after[0]?.source).toBe('user');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should register the project on Tau Cloud before it asks the remote for anything (P54, W18 DEF-1)', async () => {

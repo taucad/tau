@@ -128,7 +128,7 @@ describe('viewCommand', () => {
     captureStream(process.stdout, stdout);
 
     await runCommand(command, {
-      rawArgs: [inputPath, '--width=1024', '--height=576', '--params={"teeth":24}', '--resolution-mode=declared-only'],
+      rawArgs: [inputPath, '--width=1024', '--height=576', '--params={"teeth":24}'],
     });
 
     expect(exportFunction).toHaveBeenCalledWith('webp', {
@@ -136,10 +136,8 @@ describe('viewCommand', () => {
       parameters: { teeth: 24 },
       exportOptions: { quality: 0.8, width: 1024, height: 576 },
     });
-    expect(resolveParametersFunction).toHaveBeenCalledWith({
-      source: { path: 'model.ts' },
-      resolution: { mode: 'declared-only' },
-    });
+    // Parameters travel as the caller's overrides; the runtime resolves them at the kernel boundary.
+    expect(resolveParametersFunction).not.toHaveBeenCalled();
   });
 
   it('should report a preview above the terminal ceiling without discarding it', async () => {

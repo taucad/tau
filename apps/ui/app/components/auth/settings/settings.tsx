@@ -14,19 +14,15 @@ export type SettingsProps = {
   path?: string;
   /** @remarks `SettingsView` */
   view?: SettingsView;
-  hideNav?: boolean;
+  shouldHideNav?: boolean;
 };
 
 /**
  * Renders the settings UI and activates the appropriate settings view based on `view` or `path`.
  *
- * @param className - Additional CSS class names applied to the root container
- * @param path - Route path used to resolve which settings view to activate when `view` is not provided
- * @param view - Explicit settings view to activate (for example, `"account"` or `"security"`)
- * @param hideNav - When `true`, hides the settings navigation tabs
  * @returns A JSX element rendering the settings layout and the selected settings panel
  */
-export function Settings({ className, view, path, hideNav }: SettingsProps) {
+export function Settings({ className, view, path, shouldHideNav }: SettingsProps): React.JSX.Element {
   const { authClient, basePaths, localization, viewPaths, Link } = useAuth();
   useAuthenticate(authClient);
 
@@ -44,7 +40,7 @@ export function Settings({ className, view, path, hideNav }: SettingsProps) {
 
   return (
     <Tabs value={currentView} className={cn('w-full gap-4 md:gap-6', className)}>
-      <div className={cn(hideNav && 'hidden')}>
+      <div className={cn(shouldHideNav && 'hidden')}>
         <TabsList aria-label={localization.settings.settings}>
           <TabsTrigger value='account' asChild>
             <Link href={`${basePaths.settings}/${viewPaths.settings.account}`}>{localization.settings.account}</Link>

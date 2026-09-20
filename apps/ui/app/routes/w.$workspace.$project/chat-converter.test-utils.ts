@@ -53,9 +53,9 @@ export const createConfigurationParameterOwner = (): Readonly<{
     ) => {
       store(target.entry, values);
     },
-    draft: (key: ParameterDraftKey) => drafts.get(JSON.stringify([key.target.entry, key.editorInstance, key.pointer])),
+    draft: (key: ParameterDraftKey) => drafts.get(JSON.stringify([key.target.entry, key.group, key.pointer])),
     setDraft: (key: ParameterDraftKey, draft: ParameterDraft | undefined) => {
-      const mapKey = JSON.stringify([key.target.entry, key.editorInstance, key.pointer]);
+      const mapKey = JSON.stringify([key.target.entry, key.group, key.pointer]);
       if (draft === undefined) {
         drafts.delete(mapKey);
       } else {

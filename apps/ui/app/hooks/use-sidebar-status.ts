@@ -40,20 +40,7 @@ import type { ProjectLivenessStatus } from '#services/sessions-store.js';
 import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-
-/** One chat row's run state — the architecture's agent-state table. @public */
-export type ChatSidebarState =
-  | 'idle'
-  | 'queued'
-  | 'working'
-  | 'tool'
-  | 'approval'
-  | 'question'
-  | 'reconnecting'
-  | 'finishing'
-  | 'done'
-  | 'failed'
-  | 'stopped';
+import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 
 /**
  * Everything a chat row draws, from that chat's own machine.

@@ -157,12 +157,14 @@ describe('awaitFreshRender', () => {
 
     let settledError: unknown;
     let settled = false;
-    const promise = awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0]).catch(
-      (error: unknown) => {
+    const promise = (async () => {
+      try {
+        await awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0]);
+      } catch (error) {
         settled = true;
         settledError = error;
-      },
-    );
+      }
+    })();
 
     try {
       await vi.advanceTimersByTimeAsync(defaultRenderTimeout - 1);

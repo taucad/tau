@@ -22,7 +22,7 @@ export type ChangeAvatarProps = {
   className?: string;
 };
 
-export function ChangeAvatar({ className }: ChangeAvatarProps) {
+export function ChangeAvatar({ className }: ChangeAvatarProps): React.JSX.Element {
   const { authClient, localization, avatar } = useAuth();
   const { data: session } = useSession(authClient);
 
@@ -34,18 +34,18 @@ export function ChangeAvatar({ className }: ChangeAvatarProps) {
 
   const isPending = updatePending || isUploading || isDeleting;
 
-  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
     if (!file) {
       return;
     }
 
-    e.target.value = '';
+    event.target.value = '';
 
     setIsUploading(true);
 
     try {
-      const resized = (await avatar.resize?.(file, avatar.size, avatar.extension)) || file;
+      const resized = await avatar.resize(file, avatar.size, avatar.extension);
 
       const image = (await avatar.upload?.(resized)) ?? (await fileToBase64(resized));
 

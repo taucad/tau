@@ -105,12 +105,40 @@ const providerMetadataFromDiagnostics = (
   return zodUtility.isObject(value) ? (value as ProviderMessageMetadata) : undefined;
 };
 
-/** Recover a typed transport refusal from durable provider history. @internal */
-export const transportFailureFromProviderMessages = (
-  messages: readonly ProviderMessage[],
-): HostRunFailure | undefined => {
-  for (const message of messages.toReversed()) {
-    if (message.role !== 'assistant' || !Array.isArray(message.metadata?.diagnostics)) {
+/**
+ * Recover the typed transport refusal one run's own messages carry.
+ *
+ * A failure is a fact about the run that hit it, and a chat's history outlives
+ * every run in it: an older refusal's marker survives any turn that did not
+ * rewind it, so the newest diagnostic in the chat is not this run's. Reading it
+ * as one made an abandoned run report a previous turn's code, and the surfaces
+ * key the saved-turn card and `isResumableRunFailure` off exactly that field.
+ * The run owns a message when its own record appended or replaced it.
+ *
+ * @internal
+ * @param input - The chat's durable records, its reduced history and the run to describe.
+ * @returns The refusal that run recorded, or `undefined` when it recorded none.
+ */
+export const transportFailureOfRun = (input: {
+  readonly events: readonly AgentLogEvent[];
+  readonly messages: readonly ProviderMessage[];
+  readonly runId: string;
+}): HostRunFailure | undefined => {
+  const owned = new Set(
+    input.events.flatMap((event) => {
+      if (event.runId === input.runId) {
+        if (event.type === 'message.appended') {
+          return [event.message.id];
+        }
+        if (event.type === 'message.envelope-replaced') {
+          return [event.messageId];
+        }
+      }
+      return [];
+    }),
+  );
+  for (const message of input.messages.toReversed()) {
+    if (!owned.has(message.id) || message.role !== 'assistant' || !Array.isArray(message.metadata?.diagnostics)) {
       continue;
     }
     for (const candidate of message.metadata.diagnostics.toReversed()) {
@@ -215,6 +243,16 @@ type CreateSessionRecordOptions = {
   readonly leaderEpoch: string;
   readonly createId?: (() => string) | undefined;
   readonly now?: (() => string) | undefined;
+  /**
+   * The owner's writer, when the session is one of several on this log (I2).
+   *
+   * A host runs many writers over one `events.jsonl` — the run's session, a
+   * revision settlement, an external runner — and each one that derives the
+   * next sequence number from the tail it read itself will collide with the
+   * others on `EVENT_MUTATED`. Given a writer, the record stamps nothing and
+   * decides nothing: position and legality belong to whoever owns the log.
+   */
+  readonly append?: ((event: SessionLogEvent) => Promise<void>) | undefined;
 };
 
 /** Adapt pi's append-oriented session shape directly onto the PH19 event log. @public */
@@ -226,12 +264,17 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
   const now = options.now ?? (() => new Date().toISOString());
   let pending: Promise<void> = Promise.resolve();
 
+  const write = options.append;
   const append = async (body: SessionLogEvent): Promise<void> => {
     const prior = pending;
     const next = Promise.withResolvers<void>();
     pending = next.promise;
     await prior;
     try {
+      if (write) {
+        await write(body);
+        return;
+      }
       const event: AgentLogEvent = {
         ...body,
         version: 1,
@@ -457,10 +500,11 @@ const metadataNumber = (message: ProviderMessage, key: string, fallback = 0): nu
 
 /** Convert one pi message to the provider-native A1 log envelope. @public */
 export const piMessageToProvider = (message: AgentMessage, identities: MessageIdentities): ProviderMessage => {
-  const id =
-    message.role === 'assistant'
-      ? (liveMessageIdFromDiagnostics(message.diagnostics) ?? identities.id(message))
-      : identities.id(message);
+  const liveId = message.role === 'assistant' ? liveMessageIdFromDiagnostics(message.diagnostics) : undefined;
+  if (liveId) {
+    identities.set(message, liveId);
+  }
+  const id = liveId ?? identities.id(message);
   if (message.role === 'user') {
     return {
       id,

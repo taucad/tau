@@ -252,6 +252,102 @@ const memberOrdering = [
   },
 ];
 
+/**
+ * Nx module boundaries. The options are shared so the runtime-e2e override can add its
+ * own dynamic-dependency exceptions without restating the tag constraints.
+ */
+const moduleBoundaryOptions = {
+  allowCircularSelfDependency: true,
+  /*
+   * Libraries that are deliberately lazy-loaded in one consumer and
+   * statically imported in another: the UI keeps the runtime and the
+   * filesystem bridge out of its initial bundle, and the CLI client
+   * loads the agent host on demand, while the Node daemon, its render
+   * probe and the integration tests import the same packages directly.
+   * Entries are matched as regular expressions against the import
+   * specifier, so `(/|$)` keeps `@taucad/runtime` from also exempting
+   * `@taucad/runtime-testing`.
+   */
+  checkDynamicDependenciesExceptions: ['@taucad/runtime(/|$)', '@taucad/agent-host(/|$)', '@taucad/fs-bridge(/|$)'],
+  depConstraints: [
+    {
+      sourceTag: 'scope:api',
+      onlyDependOnLibsWithTags: ['scope:shared', 'scope:api'],
+    },
+    {
+      sourceTag: 'scope:ui',
+      onlyDependOnLibsWithTags: ['scope:shared', 'scope:ui'],
+    },
+    {
+      sourceTag: 'type:app',
+      onlyDependOnLibsWithTags: ['type:lib', 'type:app-lib', 'type:example', 'type:package', 'type:tool'],
+    },
+    {
+      /*
+       * Shared libraries may consume published packages. `tau-examples`
+       * and `chat` both do: a tool contract that describes kernel
+       * results necessarily speaks the runtime's issue vocabulary.
+       * `type:app-lib` is deliberately absent here and from every other
+       * allowlist except `type:app` and `type:e2e` — that omission is
+       * what stops a published package or shared library from consuming
+       * private application code.
+       */
+      sourceTag: 'type:lib',
+      onlyDependOnLibsWithTags: ['type:lib', 'type:package', 'type:tool'],
+    },
+    {
+      // Private application capabilities under `apps/libs/*`.
+      sourceTag: 'type:app-lib',
+      onlyDependOnLibsWithTags: ['type:app-lib', 'type:lib', 'type:package', 'type:tool'],
+    },
+    {
+      // Published packages build on other published packages, shared
+      // libraries, and dev-time tooling — never on application code.
+      sourceTag: 'type:package',
+      onlyDependOnLibsWithTags: ['type:package', 'type:lib', 'type:tool'],
+    },
+    {
+      // Dev-time-only projects: build configs, generators, gates.
+      sourceTag: 'type:tool',
+      onlyDependOnLibsWithTags: ['type:tool', 'type:lib', 'type:package', 'type:example'],
+    },
+    {
+      // Example apps depend on what they demonstrate — geospec for
+      // `.geospec.ts` suites, runtime for export scripts.
+      sourceTag: 'type:example',
+      onlyDependOnLibsWithTags: ['type:lib', 'type:example', 'type:package'],
+    },
+    {
+      // E2e/regression packages sit at the top of the graph and may
+      // consume anything they exercise: apps, libs, and examples.
+      sourceTag: 'type:e2e',
+      onlyDependOnLibsWithTags: ['type:app', 'type:lib', 'type:app-lib', 'type:example', 'type:package', 'type:tool'],
+    },
+    {
+      sourceTag: 'layer:feature',
+      onlyDependOnLibsWithTags: [
+        'layer:feature',
+        'layer:ui',
+        'layer:data-access',
+        'layer:util',
+        ...unlayeredTargetTypes,
+      ],
+    },
+    {
+      sourceTag: 'layer:ui',
+      onlyDependOnLibsWithTags: ['layer:ui', 'layer:util', ...unlayeredTargetTypes],
+    },
+    {
+      sourceTag: 'layer:data-access',
+      onlyDependOnLibsWithTags: ['layer:data-access', 'layer:util', ...unlayeredTargetTypes],
+    },
+    {
+      sourceTag: 'layer:util',
+      onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
+    },
+  ],
+};
+
 /** @type {import('eslint').Linter.Config[]} */
 const config = [
   {
@@ -283,6 +379,10 @@ const config = [
       '**/*.prompt.example-multifile/**',
       '**/*.cjs',
       '**/*.jscad.js',
+      // Same class: the design-story splash imports these JSCAD model sources with `?raw`
+      // and checks them against a baked evidence digest, so any byte change makes the splash
+      // throw. They are model data outside every tsconfig, so the project service cannot parse them.
+      'apps/ui/app/components/geometry/splash/planetary/**',
       '**/content/docs/**/props/**',
       '**/vitest.integration.config.ts',
       'experiments/**',
@@ -303,6 +403,10 @@ const config = [
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
       'packages/geospec-engine/fixtures/scripts/**',
+      // Registry-gate fixtures are inert artifact inputs the gate parses as
+      // text: their imports deliberately name packages that do not resolve,
+      // and they live in no tsconfig project.
+      'scripts/src/fixtures/**',
       // Opt-in benchmark experiments: engine-internal, unpublished, and outside
       // the package tsconfig until PE2 rebuilds what they measure.
       'packages/geospec-engine/experiments/**',
@@ -315,6 +419,10 @@ const config = [
       // opt-in benchmark reaching runtime-internal seams through a loader
       // hook; `.mts` files outside the project tsconfig.
       'apps/runtime-e2e/src/compute-baseline/harness/**',
+      // Same class: a frozen matcher-performance POC whose `#mesh/*` modules moved
+      // out in the engine extraction, so it no longer resolves; kept as the artifact
+      // docs/research/geospec-matcher-performance-poc.md cites.
+      'packages/geospec-engine/experiments/matcher-performance/**',
     ],
   },
 
@@ -342,108 +450,30 @@ const config = [
   {
     plugins: { '@nx': nxEslintPlugin },
     rules: {
+      '@nx/enforce-module-boundaries': ['error', moduleBoundaryOptions],
+    },
+  },
+
+  {
+    /*
+     * The compute-reuse baseline harness and the bundler benchmarks `await import()` the
+     * replicad, esbuild and openrscad sources by relative path — measuring that dynamic
+     * import IS the benchmark — so Nx records a lazy edge to each. Without this, every
+     * ordinary static import of those packages elsewhere in the suite is rejected. Scoped
+     * to this project so the lazy-load guarantee still holds for the applications.
+     */
+    files: ['apps/runtime-e2e/**/*.{ts,tsx,mts,cts}'],
+    plugins: { '@nx': nxEslintPlugin },
+    rules: {
       '@nx/enforce-module-boundaries': [
         'error',
         {
-          allowCircularSelfDependency: true,
-          /*
-           * Libraries that are deliberately lazy-loaded in one consumer and
-           * statically imported in another: the UI keeps the runtime and the
-           * filesystem bridge out of its initial bundle, and the CLI client
-           * loads the agent host on demand, while the Node daemon, its render
-           * probe and the integration tests import the same packages directly.
-           * Entries are matched as regular expressions against the import
-           * specifier, so `(/|$)` keeps `@taucad/runtime` from also exempting
-           * `@taucad/runtime-testing`.
-           */
+          ...moduleBoundaryOptions,
           checkDynamicDependenciesExceptions: [
-            '@taucad/runtime(/|$)',
-            '@taucad/agent-host(/|$)',
-            '@taucad/fs-bridge(/|$)',
-          ],
-          depConstraints: [
-            {
-              sourceTag: 'scope:api',
-              onlyDependOnLibsWithTags: ['scope:shared', 'scope:api'],
-            },
-            {
-              sourceTag: 'scope:ui',
-              onlyDependOnLibsWithTags: ['scope:shared', 'scope:ui'],
-            },
-            {
-              sourceTag: 'type:app',
-              onlyDependOnLibsWithTags: ['type:lib', 'type:app-lib', 'type:example', 'type:package', 'type:tool'],
-            },
-            {
-              /*
-               * Shared libraries may consume published packages. `tau-examples`
-               * and `chat` both do: a tool contract that describes kernel
-               * results necessarily speaks the runtime's issue vocabulary.
-               * `type:app-lib` is deliberately absent here and from every other
-               * allowlist except `type:app` and `type:e2e` — that omission is
-               * what stops a published package or shared library from consuming
-               * private application code.
-               */
-              sourceTag: 'type:lib',
-              onlyDependOnLibsWithTags: ['type:lib', 'type:package', 'type:tool'],
-            },
-            {
-              // Private application capabilities under `apps/libs/*`.
-              sourceTag: 'type:app-lib',
-              onlyDependOnLibsWithTags: ['type:app-lib', 'type:lib', 'type:package', 'type:tool'],
-            },
-            {
-              // Published packages build on other published packages, shared
-              // libraries, and dev-time tooling — never on application code.
-              sourceTag: 'type:package',
-              onlyDependOnLibsWithTags: ['type:package', 'type:lib', 'type:tool'],
-            },
-            {
-              // Dev-time-only projects: build configs, generators, gates.
-              sourceTag: 'type:tool',
-              onlyDependOnLibsWithTags: ['type:tool', 'type:lib', 'type:package', 'type:example'],
-            },
-            {
-              // Example apps depend on what they demonstrate — geospec for
-              // `.geospec.ts` suites, runtime for export scripts.
-              sourceTag: 'type:example',
-              onlyDependOnLibsWithTags: ['type:lib', 'type:example', 'type:package'],
-            },
-            {
-              // E2e/regression packages sit at the top of the graph and may
-              // consume anything they exercise: apps, libs, and examples.
-              sourceTag: 'type:e2e',
-              onlyDependOnLibsWithTags: [
-                'type:app',
-                'type:lib',
-                'type:app-lib',
-                'type:example',
-                'type:package',
-                'type:tool',
-              ],
-            },
-            {
-              sourceTag: 'layer:feature',
-              onlyDependOnLibsWithTags: [
-                'layer:feature',
-                'layer:ui',
-                'layer:data-access',
-                'layer:util',
-                ...unlayeredTargetTypes,
-              ],
-            },
-            {
-              sourceTag: 'layer:ui',
-              onlyDependOnLibsWithTags: ['layer:ui', 'layer:util', ...unlayeredTargetTypes],
-            },
-            {
-              sourceTag: 'layer:data-access',
-              onlyDependOnLibsWithTags: ['layer:data-access', 'layer:util', ...unlayeredTargetTypes],
-            },
-            {
-              sourceTag: 'layer:util',
-              onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
-            },
+            ...moduleBoundaryOptions.checkDynamicDependenciesExceptions,
+            '@taucad/replicad(/|$)',
+            '@taucad/esbuild(/|$)',
+            '@taucad/openrscad(/|$)',
           ],
         },
       ],

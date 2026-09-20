@@ -1,6 +1,12 @@
+/*
+ * The worker's own copy of this decision was deleted: `replayedStartOutcome`
+ * now ships from `@taucad/agent-host`, so the browser worker's start pre-check
+ * and the node launcher's answer a replayed start from one implementation.
+ * These rows stay here because the worker is the caller they guard.
+ */
 import { describe, expect, it } from 'vitest';
 import type { AgentLogEvent } from '@taucad/agent-host';
-import { replayedStartOutcome } from './agent-host-replay.js';
+import { replayedStartOutcome } from '@taucad/agent-host';
 
 /** One scripted durable record, with the log's own base fields left to {@link scriptedLog}. */
 type ScriptedRow = AgentLogEvent extends infer Event

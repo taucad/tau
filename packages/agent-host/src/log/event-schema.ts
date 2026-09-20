@@ -39,6 +39,20 @@ const usageSchema = z
     cost: usageCostSchema,
   })
   .catchall(jsonValueSchema);
+const compactionTraceSchema = z.looseObject({
+  lane: z.enum(['start_of_turn', 'between_turn', 'overflow']),
+  tier: z.enum(['tool_result_clearing', 'summarization']),
+  tokensBefore: z.number().nonnegative(),
+  tokensAfter: z.number().nonnegative(),
+  cleared: z.number().int().nonnegative(),
+  evicted: z.number().int().nonnegative(),
+  summarizerAttempts: z.number().int().nonnegative(),
+  summarizerUsage: usageSchema.nullable(),
+  summarizerError: z.string().optional(),
+  summary: z.enum(['generated', 'placeholder']).optional(),
+  overBudget: z.boolean().optional(),
+  discardedOverflowError: z.string().optional(),
+});
 const metadataSchema = z
   .object({
     api: z.string().optional(),
@@ -208,12 +222,14 @@ const knownLogEventSchema = z.union([
     type: z.literal('message.envelope-replaced'),
     messageId: nonEmptyString,
     replacement: providerMessageSchema,
+    details: compactionTraceSchema.optional(),
   }),
   z.looseObject({
     ...eventBase,
     type: z.literal('history.compacted'),
     evictedMessageIds: z.array(nonEmptyString).min(1),
     summary: providerMessageSchema,
+    details: compactionTraceSchema.optional(),
   }),
   z.looseObject({
     ...eventBase,

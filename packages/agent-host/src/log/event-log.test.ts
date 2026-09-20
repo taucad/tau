@@ -383,6 +383,33 @@ describe('event-log appender durability', () => {
     await log.close();
   });
 
+  it('parses and reduces an unknown compaction trace field from a newer writer', () => {
+    const appended = appendEvents(1)[0]!;
+    const compacted = parseLogEvent({
+      ...base(1),
+      type: 'history.compacted',
+      evictedMessageIds: [appended.message.id],
+      summary: { id: 'summary-future', role: 'user', content: 'summary' },
+      details: {
+        lane: 'start_of_turn',
+        tier: 'summarization',
+        tokensBefore: 7000,
+        tokensAfter: 1000,
+        cleared: 0,
+        evicted: 1,
+        summarizerAttempts: 1,
+        summarizerUsage: null,
+        futureTraceField: { kept: true },
+      },
+    });
+
+    if (compacted.type !== 'history.compacted') {
+      throw new Error('Expected a parsed compaction event.');
+    }
+    expect(compacted.details).toMatchObject({ futureTraceField: { kept: true } });
+    expect(reduceEventLog([appended, compacted])).toEqual([{ id: 'summary-future', role: 'user', content: 'summary' }]);
+  });
+
   it('still fails closed for a malformed record of a known type', () => {
     expect(() => parseLogEvent({ ...base(0), type: 'run.lifecycle', state: 'not-a-lifecycle-state' })).toThrow(
       expect.objectContaining({ code: 'EVENT_INVALID' }),

@@ -46,7 +46,7 @@ export type ActiveSessionProps = {
  * @param session - The session object containing id, token, userAgent, ipAddress, and createdAt
  * @returns A JSX element containing the active session row
  */
-export function ActiveSession({ activeSession }: ActiveSessionProps) {
+export function ActiveSession({ activeSession }: ActiveSessionProps): React.JSX.Element {
   const { authClient, basePaths, localization, viewPaths, navigate } = useAuth();
   const { data: session } = useSession(authClient, { refetchOnMount: false });
 
@@ -76,9 +76,7 @@ export function ActiveSession({ activeSession }: ActiveSessionProps) {
               {localization.settings.currentSession}
             </span>
           ) : (
-            activeSession.createdAt && (
-              <span className='text-xs text-muted-foreground capitalize'>{timeAgo(activeSession.createdAt)}</span>
-            )
+            <span className='text-xs text-muted-foreground capitalize'>{timeAgo(activeSession.createdAt)}</span>
           )}
         </div>
 

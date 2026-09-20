@@ -45,7 +45,6 @@ export type {
   TextFileContentMetadata,
   WorkerLog,
 } from '@taucad/types';
-export { fileParameterEntrySchema, getActiveGroupValues, parametersDirectory } from '@taucad/types';
 export {
   createExportFile,
   cadEdgeOverlayMaterialDefaults,

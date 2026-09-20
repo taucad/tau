@@ -59,4 +59,37 @@ describe('turnIntentOf', () => {
       retainedMessageIds: ['u1', 'a1'],
     });
   });
+
+  /* T3-D5: an edit is admitted seconds after the gesture — a reattach rebuilds
+   * the transcript and a stop truncates its tail. Clamping the missing index to
+   * 0 leased a checkout and minted a run id for a rewind point that does not
+   * exist, and the dispatcher then returned silently: lifecycle wedged in
+   * `invoking`, lease held forever. A turn with no rewind point is refused. */
+  it('should refuse an edit for a message the transcript no longer holds', () => {
+    expect(() => turnIntentOf(refusedSecondTurn, { kind: 'edit', messageId: 'gone' })).toThrow(
+      /no longer in this chat/u,
+    );
+  });
+
+  /* I1: a continuation is a second *attempt* at the same turn, so it leases the
+   * same message the first attempt leased. It used to be a lease-less special
+   * case in the turn host, which is why a resumed run's writes were unfenced,
+   * its completion minted no revision and nothing settled it. */
+  it('should continue the last turn over its own lease, rewinding nothing', () => {
+    expect(turnIntentOf(refusedSecondTurn, { kind: 'continue' })).toEqual({
+      trigger: 'resume',
+      leaseTurnId: 'u2',
+    });
+  });
+
+  /* W10-B. A lease-less continuation is not a lease-less special case any more
+   * — `prepare` falls back to the *run id* as the lease's turn id, so the
+   * attempt fences its writes under a turn no message has, and the settlement
+   * names a turn id the saved-turn card can never match. The error card renders
+   * over an empty transcript (`chat-history.tsx`, `groups.length === 0`) while
+   * the host record that makes *Try again* a continuation survives a reload, so
+   * this is a button a person can press. There is no turn to continue: say so. */
+  it('should refuse a continuation of a transcript with no user message', () => {
+    expect(() => turnIntentOf([], { kind: 'continue' })).toThrow(/nothing to continue/u);
+  });
 });

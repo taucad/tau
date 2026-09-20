@@ -1,4 +1,4 @@
-import type { ChatSidebarState } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 
 /**
  * What the chat history's bottom activity indicator may say.

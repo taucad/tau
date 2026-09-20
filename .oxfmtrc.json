@@ -16,7 +16,6 @@
     "**/out/**",
     "/.nx/cache",
     "/.nx/workspace-data",
-    ".cursor/plans/**",
     ".agents/skills/create-repo/templates/**",
     "/.claude/worktrees/**",
     "/tarballs/**",

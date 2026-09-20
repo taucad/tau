@@ -66,7 +66,8 @@ describe('resolveAcpAdapters', () => {
   });
 
   it('honours an adapter override only under NODE_ENV=test', () => {
-    const environment = { ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` };
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+    const environment = { NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` };
     const { agents } = resolveAcpAdapters({ resolveFrom: import.meta.url, environment });
     const codex = agents.find((agent) => agent.id === 'codex');
 
@@ -79,7 +80,8 @@ describe('resolveAcpAdapters', () => {
      * credentials, so `codex` still resolves to the pinned adapter. */
     const production = resolveAcpAdapters({
       resolveFrom: new URL('../../../cli/src/commands/serve.ts', import.meta.url).href,
-      environment: { ['NODE_ENV']: 'production', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+      environment: { NODE_ENV: 'production', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
     });
     expect(production.agents.find((agent) => agent.id === 'codex')?.modulePath).not.toBe(fakeAgentPath);
   });
@@ -125,7 +127,8 @@ const fixtureProfile = (mode?: string) => ({
   package: 'p',
   version: '1',
   configEnv: [],
-  ...(mode === undefined ? {} : { spawnEnv: { ['TAU_FAKE_AGENT_MODE']: mode } }),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+  ...(mode === undefined ? {} : { spawnEnv: { TAU_FAKE_AGENT_MODE: mode } }),
 });
 
 const fixtureAdapter = (mode?: string) => ({ ...fixtureProfile(mode), modulePath: fakeAgentPath });
@@ -183,7 +186,8 @@ describe('discoverAcpAgents', () => {
     const discovery = await discoverAcpAgents({
       resolveFrom: import.meta.url,
       pins: [fixtureProfile('silent')],
-      environment: { ...process.env, ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+      environment: { ...process.env, NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
       probeTimeout: 1500,
       modelProbeTimeout: 750,
     });
@@ -201,7 +205,8 @@ describe('externalAgentDescriptors', () => {
     const discovery = await discoverAcpAgents({
       resolveFrom: import.meta.url,
       pins: [fixtureProfile()],
-      environment: { ...process.env, ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+      environment: { ...process.env, NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
       modelProbeTimeout: 20_000,
     });
     const descriptors = externalAgentDescriptors(

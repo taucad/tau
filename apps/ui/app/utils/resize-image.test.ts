@@ -83,7 +83,7 @@ beforeEach(() => {
     }
     return document.createElementNS('http://www.w3.org/1999/xhtml', tag);
   };
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- electron's WebviewTag overload is the one mockImplementation captures; the mock only ever builds HTML elements.
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, @typescript-eslint/no-deprecated -- electron's deprecated WebviewTag overload is the one mockImplementation captures; the mock only ever builds HTML elements.
   vi.spyOn(document, 'createElement').mockImplementation(createElementMock as typeof document.createElement);
 });
 

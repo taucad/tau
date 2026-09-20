@@ -199,7 +199,7 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
    * The `builder` parameter mirrors the upstream signature so this stays a true override
    * even though the body ignores it.
    */
-  // oxlint-disable-next-line unused-vars(no-unused-vars) -- preserves override parity with NodeMaterial.setupHardwareClipping
+  // oxlint-disable-next-line no-unused-vars -- preserves override parity with NodeMaterial.setupHardwareClipping
   public override setupHardwareClipping(builder: unknown): void {
     (this as { hardwareClipping: boolean }).hardwareClipping = false;
   }

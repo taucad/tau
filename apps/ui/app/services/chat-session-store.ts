@@ -54,6 +54,7 @@ import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import type { ComposerRecordClient } from '#db/composer-record-store.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
+import { attachmentReferenceOf } from '#utils/attachment.utils.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
@@ -281,6 +282,8 @@ type InternalSession = ChatSession & {
   durableRunState: 'reattaching' | 'active' | 'terminal' | undefined;
   /** Host this session has already reattached to; see `reattachHostChat`. */
   reattachedHostId: string | undefined;
+  /** Host a reattach named while the chat was still loading; see `reattachHostChat`. */
+  pendingReattachHostId: string | undefined;
   /**
    * This load dispatched the chat's seeded first turn, so the host stream is
    * this page's own and there is nothing to reattach to; see
@@ -295,11 +298,16 @@ type InternalSession = ChatSession & {
   /** Where this chat's next turn runs, as its turn host last said. */
   placement: string | undefined;
   /**
-   * A consumed seed whose owner had not bound yet, waiting for
-   * {@link ChatSessionStore.setProjectSession}. The startup request is one-shot:
-   * dropping this gesture loses the prompt for good (V3a).
+   * A gesture whose owner had not bound yet, waiting for
+   * {@link ChatSessionStore.setProjectSession}.
+   *
+   * One slot for every gesture, not just the consumed homepage seed: the seed
+   * is one-shot and dropping it loses the prompt for good (V3a), and a person's
+   * `send` is worse — its text has already left the composer. A chat has no
+   * owner between `setProjectSession(id, undefined)` and the next registration,
+   * and after the idle policy stops its project session (I5).
    */
-  pendingSeedGesture: ChatTurnGesture | undefined;
+  pendingGesture: ChatTurnGesture | undefined;
   /** The chat machine's turn emits, re-subscribed whenever its actor changes. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
   /** What was last handed to `stateActorRef`, so nothing is sent twice. */
@@ -348,6 +356,14 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- fixed debug bridge read by browser E2E.
   __TAU_CHAT_SESSION_LIVENESS__?: () => ChatSessionLivenessSnapshot;
 };
+
+/**
+ * The text a message puts in — or took out of — the composer.
+ *
+ * The draft's own `loadMessage` keeps the first text part and nothing else, so
+ * this is the same string on the way back (I5).
+ */
+const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
 
 /** The two phases that OPEN a run; every other phase settles one. */
 const opensRun = (phase: ChatRunPhase): boolean => phase === 'admitted' || phase === 'running';
@@ -578,8 +594,11 @@ export class ChatSessionStore {
    *
    * The host's log is the authority (PH19) and the transport resolves the run
    * from it, so the trigger here is the *placement*, not a run id. Idempotent
-   * per host: the caller is the host registration effect, which re-runs
-   * whenever the per-turn agent config changes.
+   * per host, and there is no second pass: the caller is the host binding,
+   * which composes once per placement. A request that lands while the chat's
+   * row is still being read is therefore held rather than dropped — the chat's
+   * view mounts as soon as it is focused, long before its load settles, and a
+   * dropped one left the durable log unattached for the life of the page (I7).
    *
    * A chat whose seeded first turn *this load* dispatched is excluded: that
    * dispatch is already the host stream, and reattaching over it opened a
@@ -592,17 +611,21 @@ export class ChatSessionStore {
    */
   public reattachHostChat(input: { readonly chatId: string; readonly hostId: string }): void {
     const session = this.#sessions.get(input.chatId);
-    if (
-      !session ||
-      session.reattachedHostId === input.hostId ||
-      session.seededDispatch ||
-      session.status !== 'ready' ||
-      session.persistenceActorRef.getSnapshot().context.isLoadingChat
-    ) {
-      // Marked only when it actually reattaches, so a later registration pass
-      // still reattaches a chat that was loading or busy on this one.
+    if (!session || session.reattachedHostId === input.hostId || session.seededDispatch) {
       return;
     }
+    if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
+      /* Held, not dropped. @see flushPendingReattach */
+      session.pendingReattachHostId = input.hostId;
+      return;
+    }
+    session.pendingReattachHostId = undefined;
+    if (session.status !== 'ready') {
+      // A chat already running a turn is already attached to its host; this one
+      // is genuinely nothing to do, and resuming over it opens a second stream.
+      return;
+    }
+    // Marked only when it actually reattaches.
     session.reattachedHostId = input.hostId;
     queueMicrotask(() => {
       if (this.#sessions.get(input.chatId) === session) {
@@ -727,8 +750,9 @@ export class ChatSessionStore {
    * Every verb goes through here, and through nothing else: the actor owns the
    * lease, the run id and the settlement, so it is the only thing that can
    * refuse a second turn while one is live (V1, V2). A chat with no session
-   * actor yet has no owner to ask, and the gesture is dropped rather than run
-   * unowned.
+   * actor yet parks the gesture on its session; `#bindSessionOwner` flushes it
+   * when the owner arrives, because a dropped gesture is a message the person
+   * wrote and can no longer see (I5).
    *
    * @param chatId - The chat the person acted on.
    * @param gesture - What they did.
@@ -739,31 +763,202 @@ export class ChatSessionStore {
     if (!session) {
       return;
     }
+    await this.#requestTurn(session, gesture);
+  }
+
+  /**
+   * The body of {@link ChatSessionStore.requestTurn}, by session.
+   *
+   * Separate because `#bindSessionOwner` flushes a parked gesture through it
+   * while the session is still being created, before it is in `#sessions` —
+   * and a flush that skipped this path left the composer holding a message the
+   * chat had already taken (I5).
+   *
+   * @param session - The chat that acted.
+   * @param gesture - What the person did.
+   */
+  async #requestTurn(session: InternalSession, gesture: ChatTurnGesture): Promise<void> {
     /* The banner belongs to the request lifecycle, and the gesture is what
      * clears it — the dispatch is an admission away. */
     session.persistenceActorRef.send({ type: 'turnRequested' });
     const owner = session.stateActorRef;
     if (owner === undefined) {
+      /* A second gesture made while this chat is still unbound displaces the
+       * first one out of the same single slot. */
+      const parked = session.pendingGesture;
+      session.pendingGesture = gesture;
+      await this.#settleComposer(session, gesture, parked);
       return;
     }
+    /* Read before the send: the slot this gesture is about to overwrite. */
+    const displaced = owner.getSnapshot().context.pendingGesture;
     owner.send({ type: 'requestTurn', gesture });
+    if (owner.getSnapshot().context.pendingGesture !== gesture) {
+      /* The ref is stale: a stopped actor takes no event and never emits
+       * again, and its last snapshot can still read `admitting`, so the wait
+       * below would never end — the composer's editable lock is what awaits it
+       * (T3-D11, from the other side). The gesture is nobody's until this chat
+       * is given a new owner, which is what the unbound path above is for. */
+      const parked = session.pendingGesture;
+      session.pendingGesture = gesture;
+      await this.#settleComposer(session, gesture, parked);
+      return;
+    }
     /* S01: the composer stays busy until the turn is admitted or refused, so a
      * send does not look finished while its checkout is still being leased.
      * The owner says when that is; nothing here polls it. A gesture queued
      * behind a live turn never enters `admitting`, and frees the composer at
      * once. */
     const admitting = (): boolean => owner.getSnapshot().matches({ run: { queued: 'admitting' } });
-    if (!admitting()) {
+    if (admitting()) {
+      await new Promise<void>((resolve) => {
+        const settle = (): void => {
+          /* Resolved before the unsubscribe it closes over, so an observer
+           * called back during `subscribe` itself still settles this promise. */
+          resolve();
+          subscription.unsubscribe();
+        };
+        const subscription = owner.subscribe({
+          next: () => {
+            if (!admitting()) {
+              settle();
+            }
+          },
+          /* An actor stopped mid-admission never emits again, and this promise
+           * is what the composer's editable lock waits on: without this the
+           * editor stayed read-only until reload (T3-D11). */
+          complete: settle,
+          error: settle,
+        });
+      });
+    }
+    await this.#settleComposer(session, gesture, displaced);
+  }
+
+  /**
+   * Whether this chat's own turn owner is holding a turn, or taking one.
+   *
+   * The turn moved to the chat's session actor (policy §16), so the actor is
+   * the only authority on it. Readers that used to ask a proxy — the AI SDK's
+   * `submitted`/`streaming` status, which stays `ready` for the whole admission
+   * window — ask this instead.
+   *
+   * @param chatId - The chat to ask about.
+   * @returns Whether that chat's actor owns a turn right now.
+   * @public
+   */
+  public holdsTurn(chatId: string): boolean {
+    const snapshot = this.#sessions.get(chatId)?.stateActorRef?.getSnapshot();
+    return (
+      snapshot !== undefined &&
+      (snapshot.context.turn !== undefined || snapshot.matches({ run: { queued: 'admitting' } }))
+    );
+  }
+
+  /**
+   * Say what the composer holds now that this gesture has been answered (I5).
+   *
+   * One writer, one decision, at the one point where the answer is known — the
+   * clear, the restore *and* the release of the draft-stage bytes, because a
+   * release decided anywhere else can only race the restore. A `send`'s message
+   * is in the transcript only once it dispatches, so until then the composer is
+   * its only copy; clearing it at the top of `sendMessage` meant every way a
+   * gesture could fail to become a turn — an unbound owner, a displaced
+   * one-slot queue, a refused admission — deleted what the person wrote. The
+   * chat holds one gesture, so the composer holds the one send that is *not*
+   * it: the gesture it displaced (ruling E2), or this gesture back again when
+   * nothing took it.
+   *
+   * @param session - The chat whose composer this is.
+   * @param gesture - The gesture just requested.
+   * @param displaced - The gesture it replaced in the chat's one slot, if any.
+   */
+  async #settleComposer(
+    session: InternalSession,
+    gesture: ChatTurnGesture,
+    displaced: ChatTurnGesture | undefined,
+  ): Promise<void> {
+    /* Only what this gesture took out of the composer is the composer's to
+     * clear or write over. A gesture can be answered a long time after it was
+     * made — a chat with no owner parks it until one binds — and by then the
+     * person may have typed the next message into the same box. Neither the
+     * clear nor a returning message may land on that. */
+    const { draftText } = session.draftActorRef.getSnapshot().context;
+    if (gesture.kind === 'send' && draftText !== '' && draftText !== composedText(gesture.message)) {
       return;
     }
-    await new Promise<void>((resolve) => {
-      const subscription = owner.subscribe(() => {
-        if (!admitting()) {
-          subscription.unsubscribe();
-          resolve();
-        }
-      });
-    });
+    /* An `edit` and a `regenerate` rewind to a message the transcript still
+     * holds, so nothing the person wrote is lost when one is displaced. */
+    const returning = displaced?.kind === 'send' ? displaced.message : undefined;
+    if (returning !== undefined) {
+      await this.#restoreDraftMessage(session, returning);
+      return;
+    }
+    const held = session.stateActorRef?.getSnapshot().context;
+    if (
+      gesture.kind === 'send' &&
+      (held === undefined || (held.turn === undefined && held.pendingGesture === undefined))
+    ) {
+      /* Nothing took it. Either the chat has no owner yet and the gesture is
+       * parked on the session — `pendingGesture` is a field that dies with the
+       * document, so the composer is the only durable copy (I5) — or the
+       * admission refused it and the chat is holding nothing, where the banner
+       * says why and the message comes back rather than vanishing with the
+       * turn that never started. `#bindSessionOwner` flushes a parked gesture
+       * back through `#requestTurn`, so the clear below is still what ends it. */
+      await this.#restoreDraftMessage(session, gesture.message);
+      return;
+    }
+    if (gesture.kind === 'send') {
+      session.draftActorRef.send({ type: 'clearDraft' });
+    }
+    /* Nothing was handed back, so the draft-stage bytes this gesture promoted
+     * are the composer's to let go of (D11, "Send"). Never fatal to the
+     * gesture: an unreleased blob is reclaimed by the next `retainOnly`, and
+     * nothing the person sent is affected. */
+    try {
+      await this.releaseDraftAttachments(session.chatId);
+    } catch (error) {
+      console.warn('[ChatSessionStore] draft attachments could not be released', error);
+    }
+  }
+
+  /**
+   * Put one send's message back in the composer, bytes included (I5).
+   *
+   * Its attachments were promoted into the chat's own directory when the
+   * gesture was taken, and the draft-stage copies released with the draft — so
+   * restoring the message alone gave back chips whose bytes the composer can no
+   * longer read or re-send. The chat directory is where they live now, so that
+   * is where they are re-retained from.
+   *
+   * @param session - The chat whose composer this is.
+   * @param message - The user message coming back.
+   */
+  async #restoreDraftMessage(session: InternalSession, message: MyUIMessage): Promise<void> {
+    const attachments = message.parts.flatMap((part) =>
+      part.type === 'file' ? (attachmentReferenceOf(part) ?? []) : [],
+    );
+    if (attachments.length > 0) {
+      try {
+        const binding = await session.composer;
+        await Promise.allSettled(
+          attachments.map(async (attachment) => {
+            if (await binding?.record.attachments.has(attachment)) {
+              return;
+            }
+            await binding?.chatAttachments.copyTo(binding.record.attachments, attachment);
+          }),
+        );
+      } catch (error) {
+        /* The chips come back either way; the person can re-attach what the
+         * composer cannot read. Losing the text as well would be worse. */
+        console.warn('[ChatSessionStore] a returned message\u2019s attachments could not be re-retained', error);
+      }
+    }
+    /* Wholesale: this replaces the displacing send's text and attachments
+     * rather than clearing and then restoring over the top of it. */
+    session.draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft: message });
   }
 
   /**
@@ -1086,6 +1281,10 @@ export class ChatSessionStore {
       session.turnSubscriptions = [];
       return;
     }
+    /* The admission is a reference on the session (`#isAdmittingTurn`), and the
+     * moment it ends is the only moment that reference is released — a chat
+     * whose last view unmounted mid-admission is never asked about again. */
+    let admitting = this.#isAdmittingTurn(session);
     session.turnSubscriptions = [
       stateActorRef.on('startTurnRequest', ({ request }) => {
         session.persistenceActorRef.send({ type: 'startRequest', request });
@@ -1093,6 +1292,17 @@ export class ChatSessionStore {
       stateActorRef.on('stopTurnRequest', () => {
         session.persistenceActorRef.send({ type: 'preemptRequest' });
       }),
+      ...(typeof stateActorRef.subscribe === 'function'
+        ? [
+            stateActorRef.subscribe(() => {
+              const admits = this.#isAdmittingTurn(session);
+              if (admitting && !admits) {
+                this.#disposeIfUnreferenced(session);
+              }
+              admitting = admits;
+            }),
+          ]
+        : []),
     ];
   }
 
@@ -1115,14 +1325,20 @@ export class ChatSessionStore {
     if (session.placement !== undefined) {
       session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
     }
-    /* The homepage seed is consumed by the loader on the route's first render,
-     * which is before the effect that registers the project session. The
-     * gesture waited here rather than being dropped on an unbound owner, which
-     * burnt the one-shot request and lost the prompt (V3a). */
-    const seedGesture = session.pendingSeedGesture;
-    if (seedGesture !== undefined && session.stateActorRef !== undefined) {
-      session.pendingSeedGesture = undefined;
-      session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+    /* Every gesture made while this chat had no owner (I5). The homepage seed
+     * is consumed by the loader on the route's first render, before the effect
+     * that registers the project session; a person's own verb lands here
+     * whenever the project session is between registrations or the idle policy
+     * has stopped it. Dropping either loses what the person wrote — the seed's
+     * one-shot request, or a `send` whose text the composer no longer holds. */
+    const heldGesture = session.pendingGesture;
+    if (heldGesture !== undefined && session.stateActorRef !== undefined) {
+      session.pendingGesture = undefined;
+      /* Through the request path, not straight at the actor: the composer is
+       * still holding this message (I5), and `#requestTurn` is the one writer
+       * that knows when it has been taken. Floating, as the gesture's own
+       * request is: the flush outlives this bind. */
+      void this.#requestTurn(session, heldGesture);
     }
     /* A run outlives the view that started it (V5). Navigating away and back
      * gives this chat a new actor while its run is still in flight, and an
@@ -1428,7 +1644,7 @@ export class ChatSessionStore {
                    * reload (V3a). `#bindSessionOwner` flushes it instead, so the
                    * seed is never lost — only late. */
                   if (session.stateActorRef === undefined) {
-                    session.pendingSeedGesture = seedGesture;
+                    session.pendingGesture = seedGesture;
                   } else {
                     session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
                   }
@@ -1561,7 +1777,14 @@ export class ChatSessionStore {
     const chat = createChatInstance({
       chatId,
       onFinish: ({ messages, isAbort, isError, isDisconnect }) => {
-        const durableRunId = session.durableRunId ?? getBoundDurableChatRunId(chatId);
+        /* The host's run first, this page's memory second. The stream that just
+         * ended resolved the run from the chat's durable log, and after a
+         * reload that is the *only* source — `durableRunId` is whatever reload
+         * discovery retained from a workspace claim, which on a reattached chat
+         * names a different run or none at all, so a settlement keyed on it
+         * reconciled the wrong run or no run (T2-D4). `#syncRunPhase` already
+         * reads the two in this order. */
+        const durableRunId = getBoundDurableChatRunId(chatId) ?? session.durableRunId;
         if (durableRunId && !isDisconnect) {
           session.durableRunId = durableRunId;
           session.durableRunState = 'terminal';
@@ -1628,13 +1851,13 @@ export class ChatSessionStore {
             // went with the actor this session stopped.
             return;
           }
-          if (requestBody === undefined) {
-            /* A dispatch with no body used to return silently, leaving
-             * `requestLifecycle` in `invoking` forever with no banner — and,
-             * since F3, holding the session with it (F4a). End the request. */
+          /* A dispatch that cannot run ends its request. Returning silently
+           * left `requestLifecycle` in `invoking` forever with no banner — and,
+           * since F3, held the session and the turn's lease with it (F4a). */
+          const refuse = (reason: string): void => {
             persistenceActorRef.send({
               type: 'setPersistedError',
-              error: parseErrorForPersistence(new Error('No agent configuration is available for this chat.')),
+              error: parseErrorForPersistence(new Error(reason)),
             });
             persistenceActorRef.send({
               type: 'requestFinished',
@@ -1643,6 +1866,15 @@ export class ChatSessionStore {
               isError: true,
               isDisconnect: false,
             });
+          };
+          /* A continuation composes no body and needs none: `reconnectToStream`
+           * never reads one, because the host continues the run from its own
+           * durable log. Requiring one refused every *Resume* the person
+           * pressed after a run had ended — `activeRunBody` is the live run's
+           * and the settlement that ended it cleared it — so the turn was
+           * admitted and leased and then silently never dispatched (I1). */
+          if (requestBody === undefined && request.kind !== 'continue') {
+            refuse('No agent configuration is available for this chat.');
             return;
           }
           switch (request.kind) {
@@ -1659,6 +1891,12 @@ export class ChatSessionStore {
             case 'edit': {
               const messageIndex = chat.messages.findIndex((m) => m.id === request.messageId);
               if (messageIndex === -1) {
+                /* `turnIntentOf` refuses this gesture at admission, so only the
+                 * microtask between `turnAdmitted` and this dispatch can lose
+                 * the message. Kept as a refusal rather than deleted: the
+                 * alternative reads `messages[-1]` and throws inside the
+                 * microtask, which is the wedge this branch existed to avoid. */
+                refuse('That message is no longer in this chat, so it cannot be edited.');
                 return;
               }
               const originalMessage = chat.messages[messageIndex]!;
@@ -1679,7 +1917,7 @@ export class ChatSessionStore {
               if (isBrowserAgentHostPlaced(chatId)) {
                 requestBrowserAgentHostResume(chatId);
               }
-              void chat.resumeStream({ body: requestBody });
+              void chat.resumeStream(requestBody === undefined ? {} : { body: requestBody });
             }
           }
         };
@@ -1846,11 +2084,12 @@ export class ChatSessionStore {
       durableRunId: undefined,
       durableRunState: undefined,
       reattachedHostId: undefined,
+      pendingReattachHostId: undefined,
       seededDispatch: false,
       activeRunBody: undefined,
       status: chat.status,
       placement: undefined,
-      pendingSeedGesture: undefined,
+      pendingGesture: undefined,
       turnSubscriptions: [],
       dispose: () => {
         for (const subscription of session.turnSubscriptions) {
@@ -1874,6 +2113,7 @@ export class ChatSessionStore {
 
     lifecycleSubscription = persistenceActorRef.subscribe((snapshot) => {
       this.#syncChatState(session);
+      this.#flushPendingReattach(session);
       const idle = snapshot.matches({ requestLifecycle: 'idle' });
       if (!idle) {
         requestLifecycleWasActive = true;
@@ -1910,6 +2150,22 @@ export class ChatSessionStore {
    *
    * @param session - The chat whose facts moved.
    */
+  /**
+   * Apply a reattach the chat was still loading for.
+   *
+   * Driven from the persistence actor's own snapshots, which is where the
+   * condition that held the request clears. `reattachHostChat` decides again
+   * from scratch: a chat that is still loading simply holds it once more.
+   *
+   * @param session - The session whose load may have settled.
+   */
+  #flushPendingReattach(session: InternalSession): void {
+    const hostId = session.pendingReattachHostId;
+    if (hostId !== undefined) {
+      this.reattachHostChat({ chatId: session.chatId, hostId });
+    }
+  }
+
   #syncChatState(session: InternalSession): void {
     const { lastState, stateActorRef } = session;
     /* Run accounting is not gated on the chat machine: the project session has
@@ -1965,10 +2221,20 @@ export class ChatSessionStore {
     if (getHostTurnSettlement(session.chatId)?.runId === outcome.runId) {
       return;
     }
+    /* How the *run* ended, not how this document's stream ended. A reattach
+     * over an abandoned or already-terminal run closes cleanly — nothing
+     * aborted and nothing errored — so reading the SDK's flags settled a run
+     * the host had recorded `failed` as though it had completed, and the page
+     * would have asked the root to record the dead turn's writes as a
+     * revision. The stream's flags still decide for a run this document drove,
+     * where the host record is this same stream's. */
+    const host = getBrowserAgentHostRun(session.chatId);
+    const hostOutcome =
+      host?.runId === outcome.runId && (host.state === 'failed' || host.state === 'cancelled') ? host.state : undefined;
     session.stateActorRef?.send({
       type: 'reconcileSettlement',
       runId: outcome.runId,
-      outcome: outcome.isAbort ? 'cancelled' : outcome.isError ? 'failed' : 'completed',
+      outcome: hostOutcome ?? (outcome.isAbort ? 'cancelled' : outcome.isError ? 'failed' : 'completed'),
     });
   }
 
@@ -2149,11 +2415,35 @@ export class ChatSessionStore {
     });
   }
 
+  /**
+   * Whether this session's actor is taking a turn right now.
+   *
+   * An admission is a reference on the session exactly as `runHeld` is, and it
+   * is the one window `runHeld` does not cover: that flag is set by `startRun`
+   * at *dispatch*, while the lease is taken by the admission before it. So
+   * disposing here stopped the actor and then deleted the turn-service registry
+   * the abandoned admission's own release reads, and the checkout stayed leased
+   * with nothing left that could retire it (T3-D2). Every later state is
+   * already held by `runHeld`, and the wait is bounded, so this reference is
+   * released by the admission ending either way.
+   *
+   * @param session - The chat to ask about.
+   * @returns Whether its actor is in `run.queued.admitting`.
+   */
+  #isAdmittingTurn(session: InternalSession): boolean {
+    const owner = session.stateActorRef;
+    if (owner === undefined || typeof owner.getSnapshot !== 'function') {
+      return false;
+    }
+    return owner.getSnapshot().matches({ run: { queued: 'admitting' } });
+  }
+
   #disposeIfUnreferenced(session: InternalSession): void {
     if (
       session.viewRefcount > 0 ||
       session.runHeld ||
       session.durableRunId !== undefined ||
+      this.#isAdmittingTurn(session) ||
       this.#sessions.get(session.chatId) !== session
     ) {
       return;

@@ -13,7 +13,7 @@ describe('color-space utilities', () => {
     });
 
     it('decodes mid-gray (0.5 sRGB ≈ 0.2140 linear)', () => {
-      expect(srgbToLinear(0.5)).toBeCloseTo(0.214_041, 4);
+      expect(srgbToLinear(0.5)).toBeCloseTo(0.214041, 4);
     });
 
     it('uses the linear segment below the 0.04045 threshold', () => {
@@ -28,9 +28,9 @@ describe('color-space utilities', () => {
   describe('srgbTupleToLinear', () => {
     it('converts RGB channels and preserves alpha', () => {
       const result = srgbTupleToLinear([0.5, 0.5, 0.5, 0.75]);
-      expect(result[0]).toBeCloseTo(0.214_041, 4);
-      expect(result[1]).toBeCloseTo(0.214_041, 4);
-      expect(result[2]).toBeCloseTo(0.214_041, 4);
+      expect(result[0]).toBeCloseTo(0.214041, 4);
+      expect(result[1]).toBeCloseTo(0.214041, 4);
+      expect(result[2]).toBeCloseTo(0.214041, 4);
       expect(result[3]).toBe(0.75);
     });
 
@@ -52,9 +52,9 @@ describe('color-space utilities', () => {
     it('parses mid-gray #808080 to ~[0.2159, 0.2159, 0.2159, 1]', () => {
       // 128/255 = 0.50196 → linear ≈ 0.21586
       const result = srgbHexToLinearTuple('#808080');
-      expect(result[0]).toBeCloseTo(0.215_861, 4);
-      expect(result[1]).toBeCloseTo(0.215_861, 4);
-      expect(result[2]).toBeCloseTo(0.215_861, 4);
+      expect(result[0]).toBeCloseTo(0.215861, 4);
+      expect(result[1]).toBeCloseTo(0.215861, 4);
+      expect(result[2]).toBeCloseTo(0.215861, 4);
       expect(result[3]).toBe(1);
     });
 

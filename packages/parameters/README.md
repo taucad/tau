@@ -19,11 +19,17 @@ Values live in a sidecar next to the source, `.tau/parameters/<entry>.json`. It 
 ```json
 {
   "activeGroup": "default",
-  "groups": { "default": { "values": { "shellLength": 520 }, "units": { "/shellLength": "in" } } }
+  "groups": {
+    "default": {
+      "values": { "shellLength": 20 },
+      "units": { "/shellLength": "in" },
+      "sourceUnits": { "/shellLength": "in" }
+    }
+  }
 }
 ```
 
-`units` is the unit the stored number means, keyed by RFC 6901 instance pointer. Its presence is the field's `project` provenance: it overrides an inferred manifest unit, and conflicts with an explicitly declared one. `sourceUnits` records the variant a source-unit-capable producer converts back from. Both are omitted when empty.
+`units[p]` is the unit the person chose, keyed by RFC 6901 instance pointer. `sourceUnits[p]` is the marker that the stored number is in that unit and must be converted to the producer unit; it must equal `units[p]`. A pointer in `units` alone relabels the number without converting it. Both maps are omitted when empty.
 
 `serializeParameterRecord` writes canonical bytes: keys are sorted inside `values`, `units` and `sourceUnits`, group order is preserved and the file ends with a newline, so equal records have equal bytes.
 
@@ -35,13 +41,13 @@ Every reader applies one refusal policy through `requireParameterRecord`. Unread
 
 `planParameterChange` returns a rejection, a semantic no-op, or replacement bytes with one checked precondition: the sidecar's own bytes. A request whose `expected.manifestRevision` differs from the live manifest is refused with `STALE_MANIFEST`. A value edit carrying `base` commits while its own field still holds that value under an unchanged effective binding, so an edit to another field never conflicts with it. `commitParameterChange` submits one checked write, and a competing write conflicts rather than overwriting newer data.
 
-The set machine sequences these functions and publishes native events. Each `settled` event names the request it settles; a confirm or cancel naming no held command emits `command-rejected` instead. Pending commands form a queue of at most 8, and a newer value edit for the same field replaces the older one in place with a `cancelled-before-apply` settlement. A record change during planning or confirmation refreshes and re-plans rather than rejecting, and a re-read that returns the bytes this actor just wrote is adopted without re-publishing. An uncertain write re-reads the record and compares bytes: the written bytes settle as `committed`, the planned-from bytes as `WRITE_FAILED`, and anything else stays indeterminate.
+The set machine sequences these functions and publishes native events. Each `settled` event names the request it settles; a confirm or cancel naming no held command emits `command-rejected` instead. Pending commands form a queue of at most 8. A final displaces any queued value edit for its field. A transient edit never displaces a queued final and displaces only a transient. Displacement settles the replaced request as `cancelled-before-apply`. A record change during planning or confirmation refreshes and re-plans rather than rejecting, and a re-read that returns the bytes this actor just wrote is adopted without re-publishing. An uncertain write re-reads the record and compares bytes: the written bytes settle as `committed`, the planned-from bytes as `WRITE_FAILED`, and foreign valid bytes settle as indeterminate `UNKNOWN_APPLICATION` before work continues from that snapshot. Only a failed recovery read enters uncertain mode with `RECOVERY_FAILED`.
 
-Explicit declarations take precedence over versioned English inference. Native values and per-field provenance are retained. Unknown units remain unknown. Decimal data is preserved but is not presented as exact executable binary64 arithmetic.
+Explicit declarations take precedence over versioned English inference, and the manifest retains per-field provenance. Stored values remain numeric; a `sourceUnits` marker identifies a value held in the person's chosen unit for kernel-boundary conversion. Unknown units remain unknown. Decimal data is preserved but is not presented as exact executable binary64 arithmetic.
 
 ## Source-unit changes
 
-A binding admits a source-unit change only when its producer declares `sourceUnitCapability` (currently `change-source-unit:preserve-size:v1`). The record stores the chosen unit under `units` and the producer-sanctioned variant under `sourceUnits`; the producer to convert back for comes from the live manifest, never from the file. Planning returns `confirmation-required` with a plan fingerprint, and only a `confirm` with that fingerprint writes the record.
+A binding admits a source-unit change only when its producer declares `sourceUnitCapability` (currently `change-source-unit:preserve-size:v1`). The record stores the chosen unit under `units` and repeats it under `sourceUnits` as the converting-claim marker; the producer unit comes from the live manifest, never from the file. Planning returns `confirmation-required` with a plan fingerprint, and only a `confirm` with that fingerprint writes the record.
 
 A saved source unit stays valid while the same producer still advertises the same capability for that pointer. When that no longer holds, value edits are refused with `SOURCE_UNIT_REBIND_REQUIRED` until the group is reset or the unit is chosen again.
 

@@ -4,11 +4,11 @@ import { resolveCameraControlMouseButtons } from '#components/geometry/graphics/
 
 describe('resolveCameraControlMouseButtons', () => {
   it('should use zoom rather than unsupported dolly input for the orthographic endpoint', () => {
-    const orthographicOptions = {
+    const orthographicOptions: Parameters<typeof resolveCameraControlMouseButtons>[0] = {
       enablePan: true,
       enableZoom: true,
-      secondaryMouseButtonMode: 'camera-pan' as const,
-      projectionKind: 'orthographic' as const,
+      secondaryMouseButtonMode: 'camera-pan',
+      projectionKind: 'orthographic',
     };
 
     expect(resolveCameraControlMouseButtons(orthographicOptions)).toMatchObject({

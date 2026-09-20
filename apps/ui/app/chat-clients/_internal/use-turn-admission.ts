@@ -25,11 +25,14 @@ export type TurnAdmission = Readonly<{
    *
    * @param turnId - The user message this turn leases.
    * @param turnExecution - The execution this dispatch runs, when not the live one.
+   * @param runId - The run the lease belongs to, when the host already holds
+   *   it; a continuation's attempt is fenced under the run it continues (I1).
    * @returns The turn's execution target and the run id its claim carries.
    */
   admitWorkspace: (
     turnId: string | undefined,
     turnExecution?: CadAgentExecution,
+    runId?: string,
   ) => Promise<readonly [ChatExecutionTarget, string | undefined]>;
   /** Surface a dropped dispatch on the same banner the transport errors use. */
   surfaceDispatchFailure: (error: unknown) => void;
@@ -79,6 +82,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
     async (
       turnId: string | undefined,
       turnExecution: CadAgentExecution = liveExecution,
+      runId?: string,
     ): Promise<readonly [ChatExecutionTarget, string | undefined]> => {
       const daemonHostId = daemonPlacementOf(turnExecution);
       // Every host placement waits out its own probe: a turn dispatched before
@@ -166,9 +170,18 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
           settle();
         });
       }
+      /* A claim this chat still holds is reused — except by a continuation,
+       * which has to be fenced under the run the host is carrying: reusing a
+       * claim minted for a different run would leave `drop` unable to name
+       * either of them. The wait above has already established that no claim is
+       * admitted, so a claim here belongs to a turn that took no run. */
+      const retained = workspaceAuthority.get(activeChatId);
       const prepared =
-        workspaceAuthority.get(activeChatId) ??
-        (await workspaceAuthority.prepare(activeChatId, turnId === undefined ? undefined : { turnId }));
+        (runId === undefined || retained?.runId === runId ? retained : undefined) ??
+        (await workspaceAuthority.prepare(activeChatId, {
+          ...(turnId === undefined ? {} : { turnId }),
+          ...(runId === undefined ? {} : { runId }),
+        }));
       await workspaceAuthority.markAdmitted(activeChatId, turnId);
       return [prepared.execution, prepared.runId];
     },

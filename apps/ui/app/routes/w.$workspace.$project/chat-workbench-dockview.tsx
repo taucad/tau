@@ -1249,7 +1249,15 @@ export const FileEditor = memo(function ({
         setSettledHold({ service: modelService, path: filePath });
       }
     };
-    void modelService.acquireModel(filePath).then(settle, settle);
+    // async-iife: bootstrap -- an effect cannot await the model hold; `isCurrent` fences a stale settle.
+    void (async () => {
+      try {
+        await modelService.acquireModel(filePath);
+      } catch {
+        // A failed hold still settles the panel, which then renders its own error.
+      }
+      settle();
+    })();
     return () => {
       isCurrent = false;
       modelService.releaseModel(filePath);

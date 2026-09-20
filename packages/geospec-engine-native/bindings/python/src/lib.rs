@@ -87,6 +87,11 @@ impl PyEngine {
         self.cache.take();
     }
 
+    /// Owned snapshot bytes; diagnostic copies deliberately do not count themselves.
+    fn observations<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        Ok(PyBytes::new(py, &self.engine()?.observations()))
+    }
+
     fn ingest_subject<'py>(
         &mut self,
         py: Python<'py>,
@@ -94,10 +99,15 @@ impl PyEngine {
         primary: &[u8],
         resources: Vec<Vec<u8>>,
     ) -> PyResult<Bound<'py, PyBytes>> {
+        self.engine()?.observe_input_copy(primary.len());
+        for bytes in &resources {
+            self.engine()?.observe_input_copy(bytes.len());
+        }
         let result = self
             .engine_mut()?
             .ingest_subject(request, primary.to_vec(), resources)
             .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
         Ok(PyBytes::new(py, &result))
     }
 
@@ -111,6 +121,7 @@ impl PyEngine {
             .engine_mut()?
             .ingest_mesh(request, mesh)
             .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
         Ok(PyBytes::new(py, &result))
     }
 
@@ -123,6 +134,7 @@ impl PyEngine {
             .engine()?
             .subject_handle(request)
             .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
         Ok(PyBytes::new(py, &result))
     }
 
@@ -135,6 +147,7 @@ impl PyEngine {
             .engine_mut()?
             .release_subject(request)
             .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
         Ok(PyBytes::new(py, &result))
     }
 
@@ -147,6 +160,7 @@ impl PyEngine {
             .engine()?
             .process_request(request)
             .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
         Ok(PyBytes::new(py, &result))
     }
 
@@ -159,6 +173,7 @@ impl PyEngine {
             .engine()?
             .canonical_plan(request)
             .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
         Ok(PyBytes::new(py, &result))
     }
 
@@ -171,6 +186,7 @@ impl PyEngine {
             .engine()?
             .evaluate_plan(plan)
             .map_err(|error| protocol_error(py, error))?;
+        self.engine()?.observe_output_copy(result.len());
         Ok(PyBytes::new(py, &result))
     }
 

@@ -32,8 +32,167 @@ fn next_engine_owner() -> u64 {
         .expect("GeoSpec Engine owner counter exhausted")
 }
 
+/// Fixed-size cumulative observations. Never consulted by geometry or charging.
+#[derive(Default)]
+pub(crate) struct Observations {
+    counters: [std::cell::Cell<u64>; 25],
+    inexact: std::cell::Cell<bool>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum WorkCounter {
+    ChargedUnits,
+    Claims,
+    Evaluations,
+    Admissions,
+    Parses,
+    IdentityBuilds,
+    MeshRecords,
+    ReportBuilds,
+    SelectorBuilds,
+    ComponentBuilds,
+    Tessellations,
+    DerivedHits,
+    CsgAdmissions,
+    CsgBooleans,
+    CsgProperties,
+    CsgOther,
+    CsgSourceHits,
+    OverlapResidentHits,
+    OverlapDiskHits,
+    OverlapBuilds,
+    MeshBuilds,
+    InputCopies,
+    InputCopyBytes,
+    OutputCopies,
+    OutputCopyBytes,
+}
+
+impl Observations {
+    pub(crate) fn add(&self, counter: WorkCounter, amount: u64) {
+        let cell = &self.counters[counter as usize];
+        if let Some(value) = cell.get().checked_add(amount) {
+            cell.set(value);
+        } else {
+            // Observation overflow cannot change the geometric result.
+            self.inexact.set(true);
+        }
+    }
+
+    fn snapshot(&self) -> Json {
+        let values = |names: &[&str], start: usize| {
+            Json::Object(
+                names
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| {
+                        (
+                            (*name).into(),
+                            Json::String(self.counters[start + index].get().to_string()),
+                        )
+                    })
+                    .collect(),
+            )
+        };
+        Json::object([
+            ("schema", Json::string("geospec-engine-observations-v1")),
+            ("numericProfile", Json::string(NUMERIC_PROFILE)),
+            ("exact", Json::Bool(!self.inexact.get())),
+            (
+                "logical",
+                values(&["chargedUnits", "claims", "evaluations"], 0),
+            ),
+            (
+                "physical",
+                values(
+                    &[
+                        "admissions",
+                        "parses",
+                        "identityBuilds",
+                        "meshRecords",
+                        "reportBuilds",
+                        "selectorBuilds",
+                        "componentBuilds",
+                        "tessellations",
+                        "derivedHits",
+                        "csgAdmissions",
+                        "csgBooleans",
+                        "csgProperties",
+                        "csgOther",
+                        "csgSourceHits",
+                        "overlapResidentHits",
+                        "overlapDiskHits",
+                        "overlapBuilds",
+                        "meshAnalysisBuilds",
+                    ],
+                    3,
+                ),
+            ),
+            (
+                "copies",
+                Json::object([
+                    (
+                        "inputCopies",
+                        Json::String(
+                            self.counters[WorkCounter::InputCopies as usize]
+                                .get()
+                                .to_string(),
+                        ),
+                    ),
+                    (
+                        "inputBytes",
+                        Json::String(
+                            self.counters[WorkCounter::InputCopyBytes as usize]
+                                .get()
+                                .to_string(),
+                        ),
+                    ),
+                    (
+                        "outputCopies",
+                        Json::String(
+                            self.counters[WorkCounter::OutputCopies as usize]
+                                .get()
+                                .to_string(),
+                        ),
+                    ),
+                    (
+                        "outputBytes",
+                        Json::String(
+                            self.counters[WorkCounter::OutputCopyBytes as usize]
+                                .get()
+                                .to_string(),
+                        ),
+                    ),
+                ]),
+            ),
+            (
+                "scope",
+                Json::string("engine-methods; diagnostic snapshot traffic excluded"),
+            ),
+            (
+                "unavailable",
+                Json::Array(
+                    [
+                        "independentCanonicalizer",
+                        "kernelInternalIterations",
+                        "allocatorBytes",
+                        "geometryShuttleBytes",
+                        "perGenerationReuseProof",
+                        "hashPasses",
+                        "bindingRuntimeInternalCopies",
+                    ]
+                    .into_iter()
+                    .map(Json::string)
+                    .collect(),
+                ),
+            ),
+        ])
+    }
+}
+
 /// Experimental thread-confined engine with owned subjects and neutral connectors.
 pub struct Engine {
+    pub(crate) observations: Rc<Observations>,
     pub(crate) subjects: HashMap<String, Rc<Subject>>,
     pub(crate) subject_generations: HashMap<String, u64>,
     pub(crate) owner: u64,
@@ -52,6 +211,7 @@ impl Default for Engine {
     fn default() -> Self {
         let config = EngineConfig::entry();
         Self {
+            observations: Rc::default(),
             subjects: HashMap::new(),
             subject_generations: HashMap::new(),
             owner: next_engine_owner(),
@@ -77,6 +237,29 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// Owned non-mutating cumulative diagnostics, separate from canonical results.
+    pub fn observations(&self) -> Vec<u8> {
+        encode(&self.observations.snapshot()).expect("fixed observation document encodes")
+    }
+
+    /// Record an actual binding input copy; borrowed views and diagnostic traffic are excluded.
+    pub fn observe_input_copy(&self, bytes: usize) {
+        if bytes != 0 {
+            self.observations.add(WorkCounter::InputCopies, 1);
+            self.observations
+                .add(WorkCounter::InputCopyBytes, bytes as u64);
+        }
+    }
+
+    /// Record an actual owned output copy at a host boundary, excluding diagnostics.
+    pub fn observe_output_copy(&self, bytes: usize) {
+        if bytes != 0 {
+            self.observations.add(WorkCounter::OutputCopies, 1);
+            self.observations
+                .add(WorkCounter::OutputCopyBytes, bytes as u64);
+        }
+    }
+
     /// Creates an engine with no ingested subjects.
     pub fn new() -> Self {
         Self::default()
@@ -92,6 +275,7 @@ impl Engine {
             config.analysis.max_solid_entries,
         ));
         Self {
+            observations: Rc::default(),
             resident_overlaps: Rc::new(RefCell::new(
                 crate::analysis::interference::ResidentOverlaps::new(
                     config.analysis.max_mesh_bytes,
@@ -128,7 +312,9 @@ impl Engine {
     }
 
     pub(crate) fn evaluate_prepared(&self, plan: PreparedPlan) -> Result<Json, ProtocolError> {
-        let resolved = plan.resolve(&self.subjects, self.config.analysis)?;
+        let resolved = plan
+            .resolve(&self.subjects, self.config.analysis)?
+            .with_observations(Rc::clone(&self.observations));
         let mut connector = self.csg.borrow_mut();
         match connector.as_mut() {
             Some(connector) => resolved.evaluate_with_retained(
@@ -183,7 +369,9 @@ impl Engine {
         let content_hash = string_field(request, "contentHash")?;
         validate_content_hash(content_hash)
             .map_err(|error| ProtocolError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        self.observations.add(WorkCounter::Parses, 1);
         let subject = Mesh::decode(mesh)?;
+        self.observations.add(WorkCounter::IdentityBuilds, 1);
         let verified_hash = format!("{:x}", Sha256::digest(mesh));
         if content_hash != verified_hash {
             return invalid_request("Mesh contentHash does not match the exact supplied bytes.");
@@ -206,6 +394,7 @@ impl Engine {
             SubjectFormat::MeshBufferV1,
             "mm".into(),
         );
+        self.observations.add(WorkCounter::MeshRecords, 1);
         let _ = retained.mesh_record.set(Rc::new(subject.analysis_record()));
         self.admit_retained(retained)?;
         Ok(response)

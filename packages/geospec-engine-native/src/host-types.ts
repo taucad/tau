@@ -15,6 +15,8 @@ export class ProtocolError extends Error {
 
 /** Byte-only stateful engine surface shared by Node and WASM hosts. @public */
 export type HostEngine = {
+  /** Non-mutating cumulative diagnostics; absent on unqualified historical bindings. */
+  observations?: () => HostBytes;
   close(): void;
   ingestSubject(request: HostBytes, primary: HostBytes, resources: readonly HostBytes[]): HostBytes;
   ingestMesh(request: HostBytes, mesh: HostBytes): HostBytes;
@@ -93,4 +95,59 @@ export const callHost = (operation: () => HostBytes): HostBytes => {
   } catch (error) {
     throw asProtocolError(error);
   }
+};
+
+/** Actual engine-method copies owned by a host facade. Diagnostic traffic is excluded. @internal */
+export type HostCopyObservations = {
+  exact: boolean;
+  inputCopies: bigint;
+  inputBytes: bigint;
+  outputCopies: bigint;
+  outputBytes: bigint;
+};
+
+/**
+ * Observe an actual copy in fixed-width counters without affecting engine work.
+ * @internal
+ * @param copies - Engine facade counters.
+ * @param direction - Boundary direction.
+ * @param bytes - Actual nonempty copied length.
+ */
+export const observeHostCopy = (copies: HostCopyObservations, direction: 'input' | 'output', bytes: number): void => {
+  if (bytes === 0) {
+    return;
+  }
+  const countKey = direction === 'input' ? 'inputCopies' : 'outputCopies';
+  const bytesKey = direction === 'input' ? 'inputBytes' : 'outputBytes';
+  const total = copies[bytesKey] + BigInt(bytes);
+  const maximum = 18_446_744_073_709_551_615n;
+  if (copies[countKey] === maximum || total > maximum) {
+    copies.exact = false;
+    return;
+  }
+  copies[countKey] += 1n;
+  copies[bytesKey] = total;
+};
+
+/**
+ * Join actual facade copies with the owned engine snapshot without mutating either.
+ * @param bytes - Engine observation bytes, not geometry result bytes.
+ * @param copies - Actual facade copy counters.
+ * @returns Owned diagnostic bytes with exact decimal-string integers.
+ * @internal
+ */
+export const appendHostObservationCopies = (bytes: HostBytes, copies: HostCopyObservations): HostBytes => {
+  const snapshot = JSON.parse(new TextDecoder().decode(bytes)) as {
+    schema: string;
+    exact: boolean;
+    copies: Record<Exclude<keyof HostCopyObservations, 'exact'>, string>;
+  };
+  if (snapshot.schema !== 'geospec-engine-observations-v1') {
+    throw new Error('Unsupported engine observation schema.');
+  }
+  snapshot.exact = snapshot.exact && copies.exact;
+  for (const key of ['inputCopies', 'inputBytes', 'outputCopies', 'outputBytes'] as const) {
+    snapshot.copies[key] = (BigInt(snapshot.copies[key]) + copies[key]).toString();
+  }
+  return new TextEncoder().encode(JSON.stringify(snapshot));
 };

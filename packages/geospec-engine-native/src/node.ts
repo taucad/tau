@@ -1,5 +1,11 @@
 import { Engine as NativeEngine, canonicalize as nativeCanonicalize } from '#native-binding';
-import { ProtocolError as HostProtocolError, callHost, toHostBytes } from '#host-types.js';
+import {
+  ProtocolError as HostProtocolError,
+  appendHostObservationCopies,
+  observeHostCopy,
+  callHost,
+  toHostBytes,
+} from '#host-types.js';
 import type { HostBytes, HostCacheLifecycle, HostCacheOptions, HostEngine, HostSubjectLifecycle } from '#host-types.js';
 
 // oxlint-disable no-barrel-files/no-barrel-files -- The host facade exposes its shared public contracts.
@@ -17,6 +23,7 @@ const buffer = (value: unknown) => {
 /** Stateful Node N-API facade over the configured native GeoSpec engine. @public */
 export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecycle {
   #inner: NativeEngine | undefined;
+  readonly #copies = { exact: true, inputCopies: 0n, inputBytes: 0n, outputCopies: 0n, outputBytes: 0n };
 
   /** Create a resident-only engine or opt into authenticated filesystem cache storage. */
   public constructor(cacheOptions?: HostCacheOptions) {
@@ -39,7 +46,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    */
   public ingestSubject(request: HostBytes, primary: HostBytes, resources: readonly HostBytes[]): HostBytes {
     return callHost(() =>
-      toHostBytes(
+      this.output(
         this.inner().ingestSubject(
           buffer(request),
           buffer(primary),
@@ -56,7 +63,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    * @returns Exact response bytes.
    */
   public ingestMesh(request: HostBytes, mesh: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.inner().ingestMesh(buffer(request), buffer(mesh))));
+    return callHost(() => this.output(this.inner().ingestMesh(buffer(request), buffer(mesh))));
   }
 
   /**
@@ -65,7 +72,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    * @returns Exact subject-handle response bytes.
    */
   public subjectHandle(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.inner().subjectHandle(buffer(request))));
+    return callHost(() => this.output(this.inner().subjectHandle(buffer(request))));
   }
 
   /**
@@ -74,7 +81,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    * @returns Exact release response bytes.
    */
   public releaseSubject(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.inner().releaseSubject(buffer(request))));
+    return callHost(() => this.output(this.inner().releaseSubject(buffer(request))));
   }
 
   /**
@@ -83,7 +90,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    * @returns Exact response bytes.
    */
   public processRequest(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.inner().processRequest(buffer(request))));
+    return callHost(() => this.output(this.inner().processRequest(buffer(request))));
   }
 
   /**
@@ -92,7 +99,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    * @returns Exact plan bytes.
    */
   public canonicalPlan(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.inner().canonicalPlan(buffer(request))));
+    return callHost(() => this.output(this.inner().canonicalPlan(buffer(request))));
   }
 
   /**
@@ -101,7 +108,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    * @returns Exact response bytes.
    */
   public evaluatePlan(plan: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.inner().evaluatePlan(buffer(plan))));
+    return callHost(() => this.output(this.inner().evaluatePlan(buffer(plan))));
   }
 
   /**
@@ -126,6 +133,20 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
    */
   public cacheProducerIdentity(): HostBytes {
     return callHost(() => toHostBytes(this.inner().cacheProducerIdentity()));
+  }
+
+  /**
+   * Return a non-mutating cumulative snapshot; this copy does not observe itself.
+   * @returns Owned cumulative diagnostic bytes.
+   */
+  public observations(): HostBytes {
+    return appendHostObservationCopies(toHostBytes(this.inner().observations()), this.#copies);
+  }
+
+  private output(value: unknown): HostBytes {
+    const bytes = toHostBytes(value);
+    observeHostCopy(this.#copies, 'output', bytes.byteLength);
+    return bytes;
   }
 
   private inner(): NativeEngine {

@@ -1,7 +1,9 @@
 //! Ordinary claim-scoped temporary results and bounded retained source operands.
 
 use crate::budget::Budget;
+use crate::protocol::{Observations, WorkCounter};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use super::{
     csg::{
@@ -74,6 +76,7 @@ pub struct CsgScope<'a> {
     transient: Vec<SolidId>,
     retained: Option<&'a mut RetainedSolids>,
     budget: Option<&'a Budget>,
+    observations: Option<Rc<Observations>>,
     charged_sources: HashSet<(String, u32)>,
 }
 
@@ -84,6 +87,7 @@ impl<'a> CsgScope<'a> {
             transient: Vec::new(),
             retained: None,
             budget: None,
+            observations: None,
             charged_sources: HashSet::new(),
         }
     }
@@ -97,7 +101,19 @@ impl<'a> CsgScope<'a> {
             transient: Vec::new(),
             retained: Some(retained),
             budget: None,
+            observations: None,
             charged_sources: HashSet::new(),
+        }
+    }
+
+    pub(crate) fn with_observations(mut self, observations: Option<Rc<Observations>>) -> Self {
+        self.observations = observations;
+        self
+    }
+
+    fn observe(&self, counter: WorkCounter) {
+        if let Some(observations) = &self.observations {
+            observations.add(counter, 1);
         }
     }
 
@@ -152,11 +168,17 @@ impl<'a> CsgScope<'a> {
         self.charge_cached_source(identity, component, Self::mesh_cost(mesh))?;
         let key = (identity.to_owned(), component);
         let Some(cache) = self.retained.as_deref_mut() else {
+            if let Some(observations) = &self.observations {
+                observations.add(WorkCounter::CsgAdmissions, 1);
+            }
             let id = self.connector.admit(mesh, merges)?;
             self.transient.push(id);
             return Ok(id);
         };
         if let Some(result) = cache.entries.get(&key) {
+            if let Some(observations) = &self.observations {
+                observations.add(WorkCounter::CsgSourceHits, 1);
+            }
             return Ok(*result);
         }
         if cache.entries.len() as u64 >= u64::from(cache.max_entries) {
@@ -164,6 +186,9 @@ impl<'a> CsgScope<'a> {
                 kind: BackendErrorKind::Unsupported,
                 message: "Source CSG operands exceed the configured retained solid limit.".into(),
             });
+        }
+        if let Some(observations) = &self.observations {
+            observations.add(WorkCounter::CsgAdmissions, 1);
         }
         let result = self.connector.admit(mesh, merges)?;
         cache.entries.insert(key, result);
@@ -176,6 +201,9 @@ impl<'a> CsgScope<'a> {
         merges: &[[u32; 2]],
     ) -> Result<SolidId, BackendError> {
         self.charge(Self::mesh_cost(mesh))?;
+        if let Some(observations) = &self.observations {
+            observations.add(WorkCounter::CsgAdmissions, 1);
+        }
         let id = self.connector.admit(mesh, merges)?;
         self.transient.push(id);
         Ok(id)
@@ -187,6 +215,7 @@ impl<'a> CsgScope<'a> {
         operands: &[SolidId],
     ) -> Result<SolidId, BackendError> {
         self.charge(1)?;
+        self.observe(WorkCounter::CsgBooleans);
         let id = self.connector.boolean(operation, operands)?;
         self.transient.push(id);
         Ok(id)
@@ -198,6 +227,7 @@ impl<'a> CsgScope<'a> {
         affine: [f64; 12],
     ) -> Result<SolidId, BackendError> {
         self.charge(1)?;
+        self.observe(WorkCounter::CsgOther);
         let id = self.connector.transform(solid, affine)?;
         self.transient.push(id);
         Ok(id)
@@ -205,6 +235,7 @@ impl<'a> CsgScope<'a> {
 
     pub fn decompose(&mut self, solid: SolidId) -> Result<Vec<SolidId>, BackendError> {
         self.charge(1)?;
+        self.observe(WorkCounter::CsgOther);
         let ids = self.connector.decompose(solid)?;
         self.transient.extend_from_slice(&ids);
         Ok(ids)
@@ -224,16 +255,19 @@ impl<'a> CsgScope<'a> {
 
     pub fn properties(&self, solid: SolidId) -> Result<SolidProperties, BackendError> {
         self.charge(1)?;
+        self.observe(WorkCounter::CsgProperties);
         self.connector.properties(solid)
     }
 
     pub fn export(&self, solid: SolidId) -> Result<MeshExport, BackendError> {
         self.charge(1)?;
+        self.observe(WorkCounter::CsgOther);
         self.connector.export(solid)
     }
 
     pub fn slice(&self, solid: SolidId, z: f64) -> Result<Section, BackendError> {
         self.charge(1)?;
+        self.observe(WorkCounter::CsgOther);
         self.connector.slice(solid, z)
     }
 
@@ -247,6 +281,7 @@ impl<'a> CsgScope<'a> {
                 .iter()
                 .fold(1_u64, |sum, row| sum.saturating_add(row.len() as u64)),
         )?;
+        self.observe(WorkCounter::CsgOther);
         self.connector.section(contours, fill)
     }
 
@@ -257,6 +292,7 @@ impl<'a> CsgScope<'a> {
         right: &Section,
     ) -> Result<Section, BackendError> {
         self.charge(1)?;
+        self.observe(WorkCounter::CsgOther);
         self.connector.section_boolean(operation, left, right)
     }
 

@@ -1,4 +1,5 @@
 //! Binary admission and explicit entry configuration for the shared engine.
+use crate::protocol::WorkCounter;
 use std::{collections::HashSet, rc::Rc};
 
 use crate::{
@@ -230,8 +231,10 @@ impl Engine {
                 {
                     return Err(invalid("Rational plate entry requires z-up/mm, unchanged coordinates and no resources."));
                 }
+                self.observations.add(WorkCounter::Parses, 1);
                 let source = crate::certificates::plate_syntax::PlateSource::decode(primary)
                     .map_err(|error| invalid(error.to_string()))?;
+                self.observations.add(WorkCounter::IdentityBuilds, 1);
                 let identity = SubjectIdentity::rational_plate(&source).map_err(backend)?;
                 let mut retained = Subject::new(
                     identity.primary_hash().to_owned(),
@@ -252,6 +255,7 @@ impl Engine {
                     string_field(frame, "outputUnit")?,
                 )
                 .map_err(backend)?;
+                self.observations.add(WorkCounter::Parses, 1);
                 let decoded = if format == "gltf" {
                     decode_gltf(&primary, &bundle, applied.uniform_scale())
                 } else {
@@ -267,6 +271,7 @@ impl Engine {
                         "Decoded mesh exceeds configured vertex or triangle limits.",
                     ));
                 }
+                self.observations.add(WorkCounter::IdentityBuilds, 1);
                 let identity = SubjectIdentity::gltf(
                     &primary,
                     &bundle,
@@ -289,6 +294,7 @@ impl Engine {
                     string_field(frame, "outputUnit")?.into(),
                 );
                 let _ = retained.semantic_identity.set(identity);
+                self.observations.add(WorkCounter::MeshRecords, 1);
                 let _ = retained.mesh_record.set(Rc::new(decoded.record));
                 retained
             }
@@ -310,6 +316,7 @@ impl Engine {
                     .brep
                     .as_ref()
                     .ok_or_else(|| invalid("This engine composition has no BRep connector."))?;
+                self.observations.add(WorkCounter::Parses, 1);
                 let document = connector.open_step(&primary).map_err(backend)?;
                 let facts = document.admission_facts().map_err(backend)?;
                 if facts.occurrence_count as u64 > u64::from(self.config.binary.max_occurrences) {
@@ -317,6 +324,7 @@ impl Engine {
                         "STEP document exceeds the configured occurrence limit.",
                     ));
                 }
+                self.observations.add(WorkCounter::IdentityBuilds, 1);
                 let identity = SubjectIdentity::step(
                     &primary,
                     &facts.source_length_unit,
@@ -496,6 +504,8 @@ impl Engine {
     }
 
     pub(crate) fn admit_retained(&mut self, mut retained: Subject) -> Result<(), ProtocolError> {
+        retained.observations = Rc::clone(&self.observations);
+        self.observations.add(WorkCounter::Admissions, 1);
         retained.retention_limits = self.config.analysis;
         retained.binary_limits = self.config.binary.clone();
         retained.resident_overlaps = Some(self.resident_overlaps.clone());

@@ -85,6 +85,12 @@ impl Engine {
         self.cache.take();
     }
 
+    /// Non-mutating observation bytes; their transfer is excluded from copy counters.
+    #[napi]
+    pub fn observations(&self) -> Result<Buffer, &'static str> {
+        Ok(Buffer::from(self.engine()?.observations()))
+    }
+
     #[napi(js_name = "ingestSubject")]
     pub fn ingest_subject(
         &mut self,
@@ -92,6 +98,10 @@ impl Engine {
         primary: Buffer,
         resources: Vec<Buffer>,
     ) -> Result<Buffer, &'static str> {
+        self.engine()?.observe_input_copy(primary.len());
+        for bytes in &resources {
+            self.engine()?.observe_input_copy(bytes.len());
+        }
         self.engine_mut()?
             .ingest_subject(
                 request.as_ref(),

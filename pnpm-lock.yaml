@@ -4481,6 +4481,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../packages/runtime
+      '@taucad/ui':
+        specifier: workspace:*
+        version: link:../packages/ui
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
         version: 0.11.0-beta.4

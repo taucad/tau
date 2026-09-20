@@ -3,11 +3,14 @@ import { parameterSetMachine, submitParameterRequest } from '#parameter-set.mach
 import { commitParameterChange } from '#authority.js';
 import type { ParameterAuthority } from '#authority.js';
 import { contentDigest } from '@taucad/cache-core';
+import { createQuantity, convert } from '@taucad/units/quantity';
 import { expect, it } from 'vitest';
 import {
   compileParameterManifest,
+  parameterRecordInputValues,
   resolveParameterSnapshot,
   planParameterChange,
+  resolveEffectiveParameterBinding,
   resolveParameterInputValues,
   readParameterRecord,
 } from '@taucad/parameters';
@@ -63,6 +66,111 @@ const manifest = async (sourceUnit = true, revision = digest) =>
     middleware: digest,
   });
 
+const bindinglessScalarManifest = async () =>
+  compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: 'urn:test:bindingless-scalars',
+        $uses: ['JSONSchemaUnits'],
+        name: 'Parameters',
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean' },
+          label: { type: 'string' },
+          settings: { type: 'object', properties: { enabled: { type: 'boolean' } } },
+        },
+      },
+      defaults: { enabled: false, label: 'box', settings: { enabled: false } },
+    },
+    scope: {
+      kind: 'source',
+      authority: target.authority,
+      root: target.root,
+      entry: target.entry,
+    },
+    source: {
+      id: 'fixture',
+      version: '1',
+      revision: digest,
+      capability: 'json-structure',
+    },
+    dependency: digest,
+    middleware: digest,
+  });
+
+it('should commit a native-value edit on a boolean field that has no binding', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'boolean',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'default',
+        parameterId: `${admitted.source.revision}:/enabled`,
+        resource: 'urn:taucad:parameter-schema:root',
+        pointer: '/enabled',
+        value: true,
+      },
+    },
+  });
+
+  expect(plan).toMatchObject({
+    status: 'prepared',
+    proposed: { entry: { groups: { default: { values: { enabled: true } } } } },
+  });
+});
+
+it('should refuse a binding-less native-value edit whose identity names another revision', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'wrong-revision',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'default',
+        parameterId: `another-revision:/enabled`,
+        resource: 'urn:taucad:parameter-schema:root',
+        pointer: '/enabled',
+        value: true,
+      },
+    },
+  });
+
+  expect(plan).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+});
+
+it('should refuse a native-value edit that addresses an object', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'object',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'default',
+        parameterId: `${admitted.source.revision}:/settings`,
+        resource: 'urn:taucad:parameter-schema:root',
+        pointer: '/settings',
+        value: { enabled: true },
+      },
+    },
+  });
+
+  expect(plan).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+});
+
 it('plans one checked first write without creating a record during resolution', async () => {
   const admitted = await manifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
@@ -70,7 +178,6 @@ it('plans one checked first write without creating a record during resolution', 
   const before = structuredClone(current);
   const request: ParameterSetRequest = {
     requestId: 'edit:1',
-    draftGeneration: 1,
     fingerprint: 'caller-label',
     pressure: 'final',
     expected: current.identity,
@@ -100,7 +207,6 @@ it('rejects deleting the last group through the pure API', async () => {
     current,
     request: {
       requestId: 'delete',
-      draftGeneration: 0,
       fingerprint: 'delete',
       pressure: 'final',
       expected: current.identity,
@@ -117,7 +223,6 @@ it('names the missing group when a value edit addresses one that does not exist'
     current,
     request: {
       requestId: 'edit:absent',
-      draftGeneration: 0,
       fingerprint: 'absent',
       pressure: 'final',
       expected: current.identity,
@@ -139,7 +244,6 @@ it('requires explicit source-unit confirmation before one record write', async (
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const request: ParameterSetRequest = {
     requestId: 'source-unit',
-    draftGeneration: 0,
     fingerprint: 'untrusted-label',
     pressure: 'final',
     expected: current.identity,
@@ -270,6 +374,114 @@ it('converts unit-bearing text once while retaining native numeric overrides', a
   });
 });
 
+it('should render a sourceUnits field as unit-bearing text and a units-only field as its number', () => {
+  expect(
+    parameterRecordInputValues({
+      activeGroup: 'default',
+      groups: {
+        default: {
+          values: { sourceLength: 20, labelledLength: 30 },
+          units: { '/sourceLength': 'in', '/labelledLength': 'cm' },
+          sourceUnits: { '/sourceLength': 'in' },
+        },
+        inactive: { values: { sourceLength: 99 } },
+      },
+    }),
+  ).toEqual({ sourceLength: '20 in', labelledLength: 30 });
+});
+
+it('should leave a null source-unit value unchanged', () => {
+  expect(
+    parameterRecordInputValues({
+      activeGroup: 'default',
+      groups: {
+        default: {
+          values: { width: null },
+          units: { '/width': 'in' },
+          sourceUnits: { '/width': 'in' },
+        },
+      },
+    }),
+  ).toEqual({ width: null });
+});
+
+it.each([
+  { name: 'in', storedUnit: '[in_i]', storedValue: 2, nativeUnit: 'mm', nativeValue: 50.8 },
+  { name: 'ft', storedUnit: '[ft_i]', storedValue: 2, nativeUnit: 'mm', nativeValue: 609.6 },
+  { name: 'cm', storedUnit: 'cm', storedValue: 2, nativeUnit: 'mm', nativeValue: 20 },
+  { name: 'm', storedUnit: 'm', storedValue: 2, nativeUnit: 'mm', nativeValue: 2000 },
+  {
+    name: 'point space',
+    storedUnit: '[degF]',
+    storedValue: 32,
+    nativeUnit: 'Cel',
+    nativeValue: Number.EPSILON * 256,
+  },
+  { name: 'safe integer', storedUnit: 'mm', storedValue: 5, nativeUnit: 'mm', nativeValue: 5, integer: true },
+])('should convert a stored value identically as text and as a number ($name)', async (testCase) => {
+  const admitted = await compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: `urn:test:record-input:${testCase.name}`,
+        $uses: ['JSONSchemaUnits'],
+        name: 'RecordInput',
+        type: 'object',
+        properties: {
+          value: { type: testCase.integer === true ? 'integer' : 'double', ucumUnit: testCase.nativeUnit },
+        },
+      },
+      defaults: { value: testCase.nativeValue },
+      ...(testCase.name === 'point space'
+        ? {
+            bindings: {
+              '/value': {
+                quantityKind: 'http://qudt.org/vocab/quantitykind/Temperature',
+                space: 'point',
+                reference: 'urn:taucad:reference:thermodynamic-absolute-zero',
+              },
+            },
+          }
+        : {}),
+    },
+    scope: { kind: 'source', ...target },
+    source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
+    dependency: digest,
+    middleware: digest,
+  });
+  const recordInput = parameterRecordInputValues({
+    activeGroup: 'default',
+    groups: {
+      default: {
+        values: { value: testCase.storedValue },
+        units: { '/value': testCase.storedUnit },
+        sourceUnits: { '/value': testCase.storedUnit },
+      },
+    },
+  });
+  const numeric = createQuantity({
+    value: testCase.storedValue,
+    representation: testCase.integer === true ? 'safe-integer' : 'binary64',
+    unit: testCase.storedUnit,
+    space: testCase.name === 'point space' ? 'point' : 'linear',
+    ...(testCase.name === 'point space'
+      ? {
+          kind: 'http://qudt.org/vocab/quantitykind/Temperature',
+          reference: 'urn:taucad:reference:thermodynamic-absolute-zero',
+        }
+      : {}),
+  });
+  if (numeric.status !== 'success') {
+    throw new Error(JSON.stringify(numeric.diagnostic));
+  }
+  const converted = convert({ quantity: numeric.value, to: testCase.nativeUnit });
+  if (converted.status !== 'success') {
+    throw new Error(JSON.stringify(converted.diagnostic));
+  }
+
+  expect(resolveParameterInputValues(admitted, recordInput)).toEqual({ value: converted.value.value });
+});
+
 it('writes arbitrary JSON property names without traversing object prototypes', async () => {
   const admitted = compileParameterManifest({
     declaration: {
@@ -337,7 +549,6 @@ it('writes arbitrary JSON property names without traversing object prototypes', 
   });
   const operation: ParameterSetRequest = {
     requestId: 'write-prototype-keys',
-    draftGeneration: 1,
     fingerprint: 'fingerprint:write-prototype-keys',
     expected: current.identity,
     pressure: 'final',
@@ -458,7 +669,6 @@ const fieldRequest = (
   }>,
 ): ParameterSetRequest => ({
   requestId: input.requestId,
-  draftGeneration: 1,
   fingerprint: `${input.requestId}:label`,
   pressure: 'final',
   expected: input.expected,
@@ -473,7 +683,7 @@ const fieldRequest = (
   },
 });
 
-it('rebases a draft whose record revision moved only because another field changed', async () => {
+it('keeps another field change when this field still matches its captured base', async () => {
   const admitted = await twoFieldManifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
@@ -509,6 +719,19 @@ it('rebases a draft whose record revision moved only because another field chang
     throw new Error(JSON.stringify(second));
   }
   expect(second.proposed.entry.groups['default']?.values).toEqual({ width: 101, height: 15 });
+
+  const wrongBase = planParameterChange({
+    current: first.proposed,
+    request: fieldRequest(admitted, {
+      requestId: 'height:wrong-base',
+      pointer: '/height',
+      parameterId: 'height',
+      value: 15,
+      expected: current.identity,
+      base: fieldBase('/height', 13),
+    }),
+  });
+  expect(wrongBase).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
 });
 
 it('refuses a rebase when the field the draft touches changed underneath it', async () => {
@@ -592,7 +815,6 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
       'a batch',
       {
         requestId: 'batch',
-        draftGeneration: 1,
         pressure: 'final',
         expected: stale,
         base: heightBase,
@@ -614,7 +836,6 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
       'a group reset',
       {
         requestId: 'reset',
-        draftGeneration: 1,
         pressure: 'final',
         expected: stale,
         base: heightBase,
@@ -626,7 +847,7 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
     scoped.map(async ([label, request]) => [label, planParameterChange({ current: first.proposed, request })] as const),
   );
   for (const [label, plan] of plans) {
-    expect(plan.status, label).toBe('rejected');
+    expect(plan, label).toMatchObject({ status: 'rejected', code: 'INVALID_REQUEST' });
   }
 
   const inactive = planParameterChange({
@@ -651,17 +872,16 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
     },
   });
   // A base never reaches a group the record does not hold; the record itself refuses the edit.
-  expect(inactive).toMatchObject({ status: 'rejected' });
+  expect(inactive).toMatchObject({ status: 'rejected', code: 'GROUP_NOT_FOUND' });
 });
 
-it('keeps a source-unit choice across unrelated source edits and asks for rebind when its declaration changes', async () => {
+it('should refuse SOURCE_UNIT_REBIND_REQUIRED at admission for a marked claim whose producer no longer advertises the capability', async () => {
   const admitted = await manifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const plan = planParameterChange({
     current,
     request: {
       requestId: 'unit',
-      draftGeneration: 0,
       pressure: 'final',
       expected: current.identity,
       operation: {
@@ -690,7 +910,6 @@ it('keeps a source-unit choice across unrelated source edits and asks for rebind
     current: later,
     request: {
       requestId: 'value',
-      draftGeneration: 1,
       pressure: 'final',
       expected: later.identity,
       operation: {
@@ -713,7 +932,6 @@ it('keeps a source-unit choice across unrelated source edits and asks for rebind
       current: snapshot,
       request: {
         requestId: 'value:rebind',
-        draftGeneration: 1,
         pressure: 'final',
         expected: snapshot.identity,
         operation: {
@@ -727,4 +945,226 @@ it('keeps a source-unit choice across unrelated source edits and asks for rebind
       },
     }),
   ).toMatchObject({ code: 'SOURCE_UNIT_REBIND_REQUIRED' });
+});
+
+const boundedManifest = async () =>
+  compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: 'urn:test:bounded-parameters',
+        $uses: ['JSONSchemaUnits'],
+        name: 'BoundedParameters',
+        type: 'object',
+        properties: { width: { type: 'double', minimum: 10, maximum: 1000 } },
+      },
+      defaults: { width: 100 },
+      bindings: {
+        '/width': {
+          parameterId: 'width',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+          space: 'linear',
+          unit: 'mm',
+          sourceUnitCapability: 'change-source-unit:preserve-size:v1',
+          provenance: {
+            unit: {
+              origin: 'inferred',
+              producer: 'fixture',
+              sourceRevision: digest,
+              profile: 'test-v1',
+              rule: 'width-unit',
+              evidence: '/width',
+            },
+          },
+        },
+      },
+    },
+    scope: { kind: 'source', ...target },
+    source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
+    dependency: digest,
+    middleware: digest,
+  });
+
+it('should convert a claim marked in sourceUnits and only relabel a units-only claim', async () => {
+  const admitted = await boundedManifest();
+  const binding = admitted.bindings['/width']!;
+
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', binding, {
+      values: { width: 10 },
+      units: { '/width': 'cm' },
+      sourceUnits: { '/width': 'cm' },
+    }),
+  ).toMatchObject({ unit: 'cm', constraints: { minimum: 1, maximum: 100 } });
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', binding, {
+      values: { width: 10 },
+      units: { '/width': 'cm' },
+    }),
+  ).toMatchObject({ unit: 'cm', constraints: { minimum: 10, maximum: 1000 } });
+});
+
+it('should restate bounds in the chosen unit on a capability field', async () => {
+  const admitted = await boundedManifest();
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', admitted.bindings['/width']!, {
+      values: {},
+      units: { '/width': 'cm' },
+      sourceUnits: { '/width': 'cm' },
+    }).constraints,
+  ).toEqual({ minimum: 1, maximum: 100 });
+});
+
+it('should keep bounds unchanged for a relabel', async () => {
+  const admitted = await boundedManifest();
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', admitted.bindings['/width']!, {
+      values: {},
+      units: { '/width': 'cm' },
+    }).constraints,
+  ).toEqual({ minimum: 10, maximum: 1000 });
+});
+
+it('should remove the claim when the producer unit is chosen again', async () => {
+  const admitted = await boundedManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const capability = {
+    producer: admitted.source.id,
+    sourceRevision: admitted.source.revision,
+    capability: 'change-source-unit:preserve-size:v1',
+  };
+  const chooseCentimetres = planParameterChange({
+    current,
+    request: {
+      requestId: 'centimetres',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        parameterId: 'width',
+        resource: admitted.bindings['/width']!.schema.resource,
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: capability,
+      },
+    },
+  });
+  if (chooseCentimetres.status !== 'prepared') {
+    throw new Error(JSON.stringify(chooseCentimetres));
+  }
+  const chooseProducerUnit = planParameterChange({
+    current: chooseCentimetres.proposed,
+    request: {
+      requestId: 'millimetres',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        parameterId: 'width',
+        resource: admitted.bindings['/width']!.schema.resource,
+        pointer: '/width',
+        unit: 'mm',
+        producerCapability: capability,
+      },
+    },
+  });
+  if (chooseProducerUnit.status !== 'prepared') {
+    throw new Error(JSON.stringify(chooseProducerUnit));
+  }
+  expect(chooseProducerUnit.proposed.entry.groups['default']).toEqual({ values: { width: 100 } });
+});
+
+it('should keep a renamed group in its display position', async () => {
+  const admitted = await manifest();
+  let current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  for (const group of ['middle', 'last']) {
+    const created = planParameterChange({
+      current,
+      request: {
+        requestId: `create:${group}`,
+        pressure: 'final',
+        expected: current.identity,
+        operation: { kind: 'create-group', group },
+      },
+    });
+    if (created.status !== 'prepared') {
+      throw new Error(JSON.stringify(created));
+    }
+    current = created.proposed;
+  }
+  const renamed = planParameterChange({
+    current,
+    request: {
+      requestId: 'rename',
+      pressure: 'final',
+      expected: current.identity,
+      operation: { kind: 'rename-group', group: 'middle', nextGroup: 'renamed' },
+    },
+  });
+  if (renamed.status !== 'prepared') {
+    throw new Error(JSON.stringify(renamed));
+  }
+  expect(Object.keys(renamed.proposed.entry.groups)).toEqual(['default', 'renamed', 'last']);
+});
+
+const missingGroupOperations: ReadonlyArray<ParameterSetRequest['operation']> = [
+  { kind: 'select-group', group: 'missing' },
+  { kind: 'reset-group', group: 'missing' },
+  { kind: 'replace-group-values', group: 'missing', values: {} },
+  {
+    kind: 'native-value',
+    group: 'missing',
+    parameterId: 'width',
+    resource: 'urn:taucad:parameter-schema:root',
+    pointer: '/width',
+    value: 1,
+  },
+  {
+    kind: 'unit-value',
+    group: 'missing',
+    parameterId: 'width',
+    resource: 'urn:taucad:parameter-schema:root',
+    pointer: '/width',
+    inputUnit: 'cm',
+    value: '1',
+  },
+  {
+    kind: 'batch',
+    group: 'missing',
+    edits: [{ parameterId: 'width', resource: 'urn:taucad:parameter-schema:root', pointer: '/width', value: 1 }],
+  },
+  {
+    kind: 'source-unit',
+    mode: 'preserve-size',
+    group: 'missing',
+    parameterId: 'width',
+    resource: 'urn:taucad:parameter-schema:root',
+    pointer: '/width',
+    unit: 'cm',
+    producerCapability: {
+      producer: 'fixture',
+      sourceRevision: digest,
+      capability: 'change-source-unit:preserve-size:v1',
+    },
+  },
+];
+
+it.each(missingGroupOperations)('should refuse GROUP_NOT_FOUND for in-place $kind', async (operation) => {
+  const admitted = await manifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  expect(
+    planParameterChange({
+      current,
+      request: {
+        requestId: `missing:${operation.kind}`,
+        pressure: 'final',
+        expected: current.identity,
+        operation,
+      },
+    }),
+  ).toMatchObject({ status: 'rejected', code: 'GROUP_NOT_FOUND' });
 });

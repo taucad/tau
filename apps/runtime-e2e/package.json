@@ -30,6 +30,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
+    "@taucad/types": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "@types/ws": "^8.18.1",
     "geospec": "workspace:*",

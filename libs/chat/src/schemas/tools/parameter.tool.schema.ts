@@ -115,20 +115,13 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.enum(['source-unit']),
-      mode: z.enum(['preserve-size', 'reinterpret']),
+      mode: z.enum(['preserve-size']),
       group: tokenSchema,
       parameterId: tokenSchema,
       resource: tokenSchema,
       pointer: z.string(),
       unit: tokenSchema,
       producerCapability: parameterSourceUnitCapabilitySchema,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.enum(['display-preference']),
-      parameterId: tokenSchema,
-      unit: tokenSchema,
     })
     .strict(),
 ]);

@@ -236,7 +236,7 @@ describe('JscadWorker', () => {
         expect(schema).toMatchObject({
           type: 'object',
           properties: {
-            size: { type: 'integer', default: 20 },
+            size: { type: 'double', default: 20 },
           },
         });
       });
@@ -269,9 +269,9 @@ describe('JscadWorker', () => {
         expect(schema).toMatchObject({
           type: 'object',
           properties: {
-            height: { type: 'integer', default: 20 },
-            radius: { type: 'integer', default: 8 },
-            segments: { type: 'integer', default: 48 },
+            height: { type: 'double', default: 20 },
+            radius: { type: 'double', default: 8 },
+            segments: { type: 'double', default: 48 },
           },
         });
       });

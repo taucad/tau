@@ -300,11 +300,9 @@ test('rejects one of two stale browser-tab edits through the shared authority', 
     expect(primaryDiagnostic ?? secondaryDiagnostic).toMatch(
       /field changed since this edit began|checked write precondition changed|changed to \d+ elsewhere/iu,
     );
-    const losingSurface: target.TargetSurface = primaryRejected ? 'primary' : 'secondary';
     const winningSurface: target.TargetSurface = primaryRejected ? 'secondary' : 'primary';
     const winningValue = await fieldNumber(width, winningSurface);
     expect([21, 22]).toContain(winningValue);
-    await target.press(width, 'Escape', losingSurface);
     await expect.poll(async () => fieldNumber(width, 'primary')).toBe(winningValue);
     await expect.poll(async () => fieldNumber(width, 'secondary')).toBe(winningValue);
   } finally {

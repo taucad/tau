@@ -3,7 +3,7 @@ title: 'Parameter Record Policy'
 description: 'What the parameter sidecar may store, and how concurrency, echoes and rendering are decided around it.'
 status: active
 created: '2026-09-17'
-updated: '2026-09-17'
+updated: '2026-09-21'
 ---
 
 # Parameter Record Policy
@@ -18,7 +18,11 @@ The record had grown into a protocol ledger: a version, a profile, an ordering, 
 
 ### 1. Store only what a person authored
 
-The record is exactly `activeGroup` plus, per group, `values` and the optional `units` and `sourceUnits` maps keyed by RFC 6901 instance pointer. Nothing else may be stored.
+The record is exactly `activeGroup` plus a `groups` object with at least one group. Every group contains `values` and may contain `units` and `sourceUnits` maps keyed by RFC 6901 instance pointers beginning with `/`. `activeGroup` must name one of those groups. Group key order is display order. Nothing else may be stored.
+
+`units[p]` is the unit a person chose. `sourceUnits[p]` marks the stored number for conversion from that chosen unit to the producer unit, and the schema therefore requires `sourceUnits[p] === units[p]`. A pointer in `units` alone is a relabel: its stored number and numeric bounds keep their values and are not converted.
+
+Readers enforce the record bounds before accepting it: at most 1 MiB of bytes, 1,000,000 JSON characters, depth 64 and 10,000 nodes.
 
 **Why**: Anything a producer can recompute is a second copy that can be wrong; anything belonging to one exchange is gone by the time the file is read again.
 
@@ -27,7 +31,13 @@ CORRECT:
 ```json
 {
   "activeGroup": "default",
-  "groups": { "default": { "values": { "shellLength": 520 }, "units": { "/shellLength": "in" } } }
+  "groups": {
+    "default": {
+      "values": { "shellLength": 20 },
+      "units": { "/shellLength": "in" },
+      "sourceUnits": { "/shellLength": "in" }
+    }
+  }
 }
 ```
 
@@ -50,7 +60,7 @@ Units, quantity kinds, spaces, references, representations, constraints, default
 
 **Why**: A stored binding outlives the declaration it copied. A stored receipt makes the record a log that every reader must interpret.
 
-The one exception is a person's own claim: `units` says what the stored number means, and `sourceUnits` says which producer-sanctioned variant a source-unit-capable producer converts back from. Both are authored, not derived.
+The one exception is a person's own unit choice. `units[p]` records that choice. Presence of the same pointer and unit in `sourceUnits` is the converting-claim marker described by Rule 1; absence from `sourceUnits` makes the choice a relabel only. The producer unit and capability still come from the manifest and are never copied into the record.
 
 ### 3. Refuse an unreadable record through one policy, and never overwrite its bytes
 
@@ -70,28 +80,36 @@ A value edit may also carry a field-scoped `base` — the value and effective bi
 
 ### 5. Adopt an own-write echo instead of rejecting on it
 
-A watch event whose re-read returns bytes equal to the ones this actor just wrote is adopted without re-publishing. A record change arriving during planning or confirmation refreshes and re-plans; it never rejects a queued command.
+A watch event whose re-read returns bytes equal to the ones this actor just wrote is adopted without re-publishing. A record change arriving during planning or confirmation refreshes and re-plans. A checked-write conflict follows the same route for at most three total attempts; exhaustion rejects with `RECORD_CONFLICT`.
 
 **Why**: The write's own notification arrives after the command that caused it. Treating it as foreign made an edit reject itself.
 
-Only `base` decides whether the field itself moved. An uncertain write re-reads the record and compares bytes: the written bytes settle as `committed`, the planned-from bytes as `WRITE_FAILED`, and anything else stays indeterminate.
+Only `base` decides whether the field itself moved. After an uncertain write, the machine re-reads the record and compares bytes: the planned bytes settle as `committed`, the planned-from bytes as `WRITE_FAILED`, and any other valid bytes settle as indeterminate `UNKNOWN_APPLICATION` before work continues from that refreshed record. Only a failed recovery read enters uncertain mode with `RECOVERY_FAILED`; resolving the authority exits that mode.
 
-### 6. Let the watched record be the only render trigger
+### 6. Keep three explicit render lanes and one value precedence
 
-The runtime registers the sidecar as a watched dependency of every render. A checked write to it is what brings the geometry up to date; no UI path forwards the stored values to the kernel alongside it.
+The three render lanes are:
 
-**Why**: Two triggers render twice for one edit and can disagree about which values are current.
+- **Watch** for an external sidecar change from an agent, another tab, git or a hand edit.
+- **Staged commit** after this actor's checked write, carrying the exact sidecar bytes just persisted so the UI does not wait for its watch echo.
+- **Transient scrub** carrying a never-persisted preview sample. It may update displayed geometry but never the published artifact.
 
-A preview has no record. It owns its values in its own machine and sends them straight to the kernel; that is the only place values travel outside the file.
+Values reach the kernel only as sidecar bytes or as a never-persisted scrub sample. The staged commit is not a second value authority: it carries those same persisted bytes, and the later watch event is hash-equal.
+
+At render time the precedence is `defaults ← stored ← caller overrides`: the resolver merges `parameterRecordInputValues(record)` below caller overrides. After the middleware chain, the worker converts unit-bearing text and fills missing defaults once at the kernel boundary. A unit-bound numeric field accepts a number in its declared unit or text such as `"20 in"`; a record value marked by `sourceUnits` becomes that text. Unit-bearing text for a field with no unit is refused with `SEMANTICS_UNRESOLVED`.
+
+**Why**: The watch owns foreign writes, staging removes latency from an acknowledged local commit, and scrubbing gives live feedback without turning a preview into stored state. One documented precedence keeps all three lanes semantically equal.
 
 ## Summary Checklist
 
-- [ ] The written record contains only `activeGroup`, `values`, `units` and `sourceUnits`
+- [ ] The written record contains only `activeGroup`, a non-empty `groups`, and each group's `values`, `units` and `sourceUnits`
+- [ ] `activeGroup` exists, pointer keys begin with `/`, every `sourceUnits[p]` equals `units[p]`, and group order is display order
+- [ ] The reader enforces the byte, character, depth and node bounds
 - [ ] Nothing manifest-derived and no request evidence is stored
 - [ ] The reader calls `requireParameterRecord` and leaves refused bytes alone
 - [ ] The write's only precondition is the sidecar's own bytes
 - [ ] The request carries the live manifest revision, and a value edit carries its field `base`
-- [ ] The change reaches geometry through the watched sidecar, not a second path
+- [ ] Watch, staged commit and transient scrub preserve `defaults ← stored ← caller overrides`
 
 ## References
 

@@ -15,10 +15,10 @@ export {
 export { projectDraft7SchemaToParameterDeclaration } from '#json-schema-adapter.js';
 export { projectParameterField } from '#projection.js';
 export {
+  parameterRecordInputValues,
   resolveEffectiveParameterBinding,
   resolveEffectiveParameterProvenance,
   resolveParameterInputValues,
-  resolveProducerParameterValues,
   valueAtPointer,
 } from '#values.js';
 export { readParameterRecord, requireParameterRecord, sameRecordBytes, serializeParameterRecord } from '#record.js';
@@ -52,7 +52,6 @@ export type {
   ParameterSetRequest,
   ParameterSetOutcome,
   ParameterSetPlanResult,
-  ParameterSetApplyResult,
   ParameterSetRequestBase,
   ParameterSourceUnitCapability,
 } from '#types.js';

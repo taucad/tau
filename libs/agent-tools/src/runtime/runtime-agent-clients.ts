@@ -188,7 +188,6 @@ export const createRuntimeParameterAgentClient = (
         request.action === 'propose'
           ? {
               requestId: request.requestId,
-              draftGeneration: 0,
               fingerprint: JSON.stringify({
                 targetFile,
                 expected: request.expected,

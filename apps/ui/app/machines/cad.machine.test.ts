@@ -469,6 +469,21 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should re-render the committed record when a scrub returns to its start', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'scrubParameters', parameters: { height: 21 } });
+      vi.mocked(mockClient.render).mockClear();
+
+      actor.send({ type: 'restoreParameters' });
+
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        content: { includeEdges: true },
+      });
+      actor.stop();
+    });
+
     it('should forward initializeModel as a render carrying no values', async () => {
       const { actor, mockClient } = await startAndConnect();
 

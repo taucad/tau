@@ -53,6 +53,7 @@ import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
 import { admitParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 import {
   defaultTranscodeTimeout,
   renderTimeoutRecoveryGrace,
@@ -270,6 +271,7 @@ export class RuntimeWorkerClient {
   }>({ name: 'runtime-worker-client.local-timeouts' });
   private readonly disposers: Unsubscribe[] = [];
   private _capabilities: CapabilitiesManifest | undefined;
+  private heldParameterManifest: ParameterManifest | undefined;
   private terminated = false;
 
   /**
@@ -808,8 +810,14 @@ export class RuntimeWorkerClient {
     if (!result.success) {
       return result;
     }
+    const held = this.heldParameterManifest;
+    if (result.data.revision === held?.revision) {
+      return { ...result, data: held };
+    }
     try {
-      return { ...result, data: await admitParameterManifest(result.data) };
+      const admitted = await admitParameterManifest(result.data);
+      this.heldParameterManifest = admitted;
+      return { ...result, data: admitted };
     } catch (error) {
       const diagnostics = error instanceof ParameterAdmissionError ? error.diagnostics : undefined;
       return {

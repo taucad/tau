@@ -191,6 +191,9 @@ dependencies = [
  "geospec-engine-native-core",
  "geospec-engine-native-csg",
  "geospec-engine-native-occt",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

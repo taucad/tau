@@ -460,24 +460,20 @@ process.stdout.write(JSON.stringify({
     }
 
 
-def python_license_inputs():
-    """Select reviewed material bytes without the recursively referenced source kit."""
-    root = PACKAGE / 'bindings/python/licenses'
-    inventory = root / 'COMPONENTS.json'
-    material = read_json(inventory)
-    require(material['cohort'] == 'python', 'Expected reviewed Python material inventory')
-    records = []
-    for record in material['materialFiles']:
-        relative = Path(record['path'])
-        if relative.parts[0] == 'source-relink' or relative.name.startswith('SOURCE-RELINK.'):
-            continue
-        require(not relative.is_absolute() and '..' not in relative.parts, 'Invalid material path')
-        source = root / relative
-        require(source.stat().st_size == record['bytes'] and digest(source) == record['sha256'],
-                f'Reviewed Python material changed: {source}')
-        records.append(record)
-    require(records, 'Reviewed Python material inventory is empty')
-    return root, {'reviewedInventorySha256': digest(inventory), 'files': records}
+def python_license_material(output, delivery_cache):
+    """Build kit material from the locked Python closure, without a prior kit."""
+    new_directory(output)
+    external_files = copy_external_licenses('python', output, delivery_cache)
+    components, cargo_root = cargo_components('python', output)
+    external = external_components('python')
+    write_notices(output, components, external)
+    return {
+        'cohort': 'python', 'cargoRoot': cargo_root, 'cargoComponents': components,
+        'externalComponents': external, 'externalLicenseFiles': external_files,
+        'files': [{'path': path.relative_to(output).as_posix(),
+                   'sha256': digest(path), 'bytes': path.stat().st_size}
+                  for path in walk_files(output)],
+    }
 
 
 def native_producer_recipe(napi_identity):
@@ -933,7 +929,6 @@ def make_relink_material(output, delivery_cache, mixed=None):
     producer_proof = Path(selected_proof).resolve()
     require(producer_proof.is_file(), 'Missing selected producer identity-source-proof.json')
     wrapper_manifest, wrapper_lock, napi_identity = napi_wrapper_inputs()
-    license_root, license_inventory = python_license_inputs()
     new_directory(output)
     source_manifest = read_json(PACKAGE / 'native/occt/source-manifest.json')
     archive = delivery_cache / 'downloads/occt.tar.gz'
@@ -1035,18 +1030,7 @@ def make_relink_material(output, delivery_cache, mixed=None):
         f"{napi_identity['implementation']['sha256']}  node_modules/@napi-rs/cli/dist/cli.js\n"
         f"{napi_identity['packageManifestSha256']}  node_modules/@napi-rs/cli/package.json\n"
     )
-    for record in license_inventory['files']:
-        destination = output / 'materials/python' / record['path']
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        source = license_root / record['path']
-        if record['path'] == 'NOTICE.txt':
-            source = PACKAGE / 'NOTICE'
-            license_inventory['noticeReplacement'] = {
-                'reviewed': dict(record),
-                'selectedSource': 'source/packages/geospec-engine-native/NOTICE',
-            }
-            record.update(sha256=digest(source), bytes=source.stat().st_size)
-        shutil.copyfile(source, destination)
+    license_inventory = python_license_material(output / 'materials/python', delivery_cache)
     write_json(output / 'receipts/python-license-material.json', license_inventory)
     shutil.copyfile(
         PACKAGE / 'native/occt/source-manifest.json',
@@ -1135,9 +1119,9 @@ already-populated pnpm store. It does not install the incomplete source workspac
 Node invokes the real CLI entry point in that isolated environment while keeping
 the source package cwd, package.json NAPI configuration and build flags.
 
-materials/python contains only the reviewed license/notice payload selected by
-receipts/python-license-material.json, with the current source NOTICE replacing
-the historical notice as explicitly recorded there. Preparation stages those exact files in
+materials/python is generated from the locked Python Cargo closure and current
+source licenses, including NOTICE. Its dependency and byte inventory is recorded
+in receipts/python-license-material.json. Preparation stages those exact files in
 the Python source licenses directory before either wheel build. The original
 COMPONENTS inventory, its nested source receipt and the adjacent source archive
 are not recursively included in the wheel.

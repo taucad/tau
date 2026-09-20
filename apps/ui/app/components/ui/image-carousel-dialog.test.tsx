@@ -8,7 +8,7 @@ import type { ImageCarouselDialogItem } from '#components/ui/image-carousel-dial
 const attachmentDirectory = '/projects/p1/.tau/chats/c1/attachments';
 const attachmentHash = 'c'.repeat(64);
 const readFile = vi.fn(async (_path: string) => new Uint8Array([137, 80, 78, 71]));
-const fileManager = { files: { readFile } };
+const fileManager = { recordFiles: { readFile } };
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => fileManager,
 }));

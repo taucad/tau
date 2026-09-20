@@ -53,11 +53,11 @@ export const loader = async (): Promise<Response> => {
 };
 
 const ChatImageCarouselDebugRoute = (): React.JSX.Element => {
-  const { files } = useFileManager();
+  const { recordFiles } = useFileManager();
   const [images, setImages] = React.useState<readonly Attachment[]>();
 
   React.useEffect(() => {
-    const store = createAttachmentStore(files, fixtureDirectory);
+    const store = createAttachmentStore(recordFiles, fixtureDirectory);
     const storeFixtures = async (): Promise<void> => {
       setImages(
         await Promise.all(
@@ -67,7 +67,7 @@ const ChatImageCarouselDebugRoute = (): React.JSX.Element => {
     };
     // async-iife: bootstrap — the fixture renders nothing until its images are stored.
     void storeFixtures();
-  }, [files]);
+  }, [recordFiles]);
 
   return (
     <main className='flex min-h-screen items-end justify-center bg-background p-10'>

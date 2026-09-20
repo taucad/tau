@@ -55,15 +55,34 @@ export type RootedConnection = Readonly<{
 }>;
 
 /**
- * The same surface addressed absolutely, plus the release that closes every
- * connection it opened.
+ * The same surface addressed absolutely.
  *
  * @public
  */
-export type RootedContentClient = RootedFiles & {
-  /** Close every connection this client opened. Idempotent. */
+export type RootedContentClient = RootedFiles;
+
+/**
+ * Every rooted connection one session opened, keyed by the root **and** the
+ * consumer that asked for it.
+ *
+ * The consumer is half the key because it is half the capability: a
+ * `'working-copy'` connection hands back the unmasked checkout and an `'agent'`
+ * one a masked view of the same root, so a table keyed by the root alone would
+ * answer an executor with whichever handle a trusted store happened to open
+ * first.
+ *
+ * @public
+ */
+export type RootedContentOwner<Consumer extends string> = Readonly<{
+  /**
+   * The absolute-path content client one consumer reaches every root through.
+   *
+   * Stable per consumer, so a store memoised on it is not rebuilt.
+   */
+  files: (consumer: Consumer) => RootedContentClient;
+  /** Close every connection this owner opened. Idempotent. */
   dispose: () => void;
-};
+}>;
 
 /**
  * The root that owns one absolute path, and the path in that root's namespace.
@@ -88,26 +107,34 @@ export const rootedPathOf = (absolutePath: string): Readonly<{ root: string; pat
 };
 
 /**
- * One filesystem client that reaches every path through the root that owns it.
+ * The one owner of a session's rooted connections, one per `(root, consumer)`.
  *
- * @param input - How to open one root's connection; the client owns what it opens.
- * @returns A content client taking absolute paths, plus its own release.
+ * @param input - How to open one connection; the owner owns what it opens.
+ * @returns One absolute-path content client per consumer, plus the session's release.
  * @public
  *
  * @example <caption>Open trusted rooted connections through the file-manager bridge</caption>
  * ```typescript
  * import { createRootedContentClient } from '@taucad/fs-client/rooted-content-client';
  *
- * export function exampleClient(openRooted: (root: string) => RootedFiles) {
- *   return createRootedContentClient({
- *     open: async (root) => ({ files: openRooted(root), dispose: () => undefined }),
+ * export function exampleOwner(openRooted: (root: string, consumer: 'working-copy') => RootedFiles) {
+ *   const owner = createRootedContentClient({
+ *     open: async (root, consumer: 'working-copy') => ({
+ *       files: openRooted(root, consumer),
+ *       dispose: () => undefined,
+ *     }),
  *   });
+ *   return owner.files('working-copy');
  * }
  * ```
  */
-export const createRootedContentClient = (input: {
-  readonly open: (root: string) => Promise<RootedConnection>;
-}): RootedContentClient => {
+export const createRootedContentClient = <Consumer extends string>(input: {
+  readonly open: (root: string, consumer: Consumer) => Promise<RootedConnection>;
+}): RootedContentOwner<Consumer> => {
+  /**
+   * Keyed by consumer and root together: the consumer decides what the handle
+   * serves. A consumer never carries a space, so the first one splits the key.
+   */
   const connections = new Map<string, Promise<RootedConnection>>();
   /** Releases for the connections that actually opened, so `dispose` stays synchronous. */
   const releases: Array<() => void> = [];
@@ -120,9 +147,10 @@ export const createRootedContentClient = (input: {
    */
   let generation = 0;
 
-  /** One connection per root, opened once; a failed open is not remembered. */
-  const connectionFor = async (root: string): Promise<RootedConnection> => {
-    const existing = connections.get(root);
+  /** One connection per `(root, consumer)`, opened once; a failed open is not remembered. */
+  const connectionFor = async (root: string, consumer: Consumer): Promise<RootedConnection> => {
+    const key = `${consumer} ${root}`;
+    const existing = connections.get(key);
     if (existing !== undefined) {
       return existing;
     }
@@ -130,10 +158,10 @@ export const createRootedContentClient = (input: {
     const opening = (async (): Promise<RootedConnection> => {
       let connection: RootedConnection;
       try {
-        connection = await input.open(root);
+        connection = await input.open(root, consumer);
       } catch (error) {
         /* A worker that went away must not be remembered as this root's connection. */
-        connections.delete(root);
+        connections.delete(key);
         throw error;
       }
       if (opened === generation) {
@@ -145,92 +173,109 @@ export const createRootedContentClient = (input: {
       }
       return connection;
     })();
-    connections.set(root, opening);
+    connections.set(key, opening);
     return opening;
   };
 
-  /**
-   * The connection all of these paths belong to, and the rewrite into its
-   * namespace.
-   *
-   * All of them or none: a rooted connection serves one root, so an operation
-   * naming two is not one operation. The cross-root copy is `transfer` on the
-   * authority (charter D11) and nothing here is it.
-   */
-  const rooted = async (
-    absolutePaths: readonly string[],
-  ): Promise<Readonly<{ files: RootedFiles; relative: (absolutePath: string) => string }>> => {
-    const resolved = absolutePaths.map((absolutePath) => rootedPathOf(absolutePath));
-    const root = resolved[0]?.root ?? '/';
-    if (resolved.some((entry) => entry.root !== root)) {
-      throw new Error(`One rooted connection serves one root; ${absolutePaths.join(', ')} span several.`);
-    }
-    const { files } = await connectionFor(root);
-    return { files, relative: (absolutePath) => rootedPathOf(absolutePath).path };
+  /** One absolute-path client per consumer, so a store memoised on it is stable. */
+  const clients = new Map<Consumer, RootedContentClient>();
+
+  const clientFor = (consumer: Consumer): RootedContentClient => {
+    /**
+     * The connection all of these paths belong to, and the rewrite into its
+     * namespace.
+     *
+     * All of them or none: a rooted connection serves one root, so an operation
+     * naming two is not one operation. The cross-root copy is `transfer` on the
+     * authority (charter D11) and nothing here is it.
+     */
+    const rooted = async (
+      absolutePaths: readonly string[],
+    ): Promise<Readonly<{ files: RootedFiles; relative: (absolutePath: string) => string }>> => {
+      const resolved = absolutePaths.map((absolutePath) => rootedPathOf(absolutePath));
+      const root = resolved[0]?.root ?? '/';
+      if (resolved.some((entry) => entry.root !== root)) {
+        throw new Error(`One rooted connection serves one root; ${absolutePaths.join(', ')} span several.`);
+      }
+      const { files } = await connectionFor(root, consumer);
+      return { files, relative: (absolutePath) => rootedPathOf(absolutePath).path };
+    };
+
+    /* One cast, for the one overloaded member: `readFile` answers text or bytes. */
+    const readFile = (async (absolutePath: string, options?: 'utf8') => {
+      const { files, relative } = await rooted([absolutePath]);
+      return options === undefined
+        ? files.readFile(relative(absolutePath))
+        : files.readFile(relative(absolutePath), options);
+    }) as RootedFiles['readFile'];
+
+    return {
+      readFile,
+      writeFile: async (absolutePath, data) => {
+        const { files, relative } = await rooted([absolutePath]);
+        return files.writeFile(relative(absolutePath), data);
+      },
+      writeFileChecked: async (write) => {
+        const { files, relative } = await rooted([write.path, ...write.preconditions.map(({ path }) => path)]);
+        return files.writeFileChecked({
+          ...write,
+          path: relative(write.path),
+          preconditions: write.preconditions.map((precondition) => ({
+            ...precondition,
+            path: relative(precondition.path),
+          })),
+        });
+      },
+      writeFiles: async (fileMap) => {
+        const entries = Object.entries(fileMap);
+        if (entries.length === 0) {
+          return;
+        }
+        const { files, relative } = await rooted(entries.map(([absolutePath]) => absolutePath));
+        return files.writeFiles(
+          Object.fromEntries(entries.map(([absolutePath, descriptor]) => [relative(absolutePath), descriptor])),
+        );
+      },
+      mkdir: async (absolutePath, options) => {
+        const { files, relative } = await rooted([absolutePath]);
+        return files.mkdir(relative(absolutePath), options);
+      },
+      readdir: async (absolutePath) => {
+        const { files, relative } = await rooted([absolutePath]);
+        return files.readdir(relative(absolutePath));
+      },
+      stat: async (absolutePath) => {
+        const { files, relative } = await rooted([absolutePath]);
+        return files.stat(relative(absolutePath));
+      },
+      exists: async (absolutePath) => {
+        const { files, relative } = await rooted([absolutePath]);
+        return files.exists(relative(absolutePath));
+      },
+      unlink: async (absolutePath) => {
+        const { files, relative } = await rooted([absolutePath]);
+        return files.unlink(relative(absolutePath));
+      },
+      rmdir: async (absolutePath, options) => {
+        const { files, relative } = await rooted([absolutePath]);
+        return files.rmdir(relative(absolutePath), options);
+      },
+      move: async (source, target) => {
+        const { files, relative } = await rooted([source, target]);
+        return files.move(relative(source), relative(target));
+      },
+    };
   };
 
-  /* One cast, for the one overloaded member: `readFile` answers text or bytes. */
-  const readFile = (async (absolutePath: string, options?: 'utf8') => {
-    const { files, relative } = await rooted([absolutePath]);
-    return options === undefined
-      ? files.readFile(relative(absolutePath))
-      : files.readFile(relative(absolutePath), options);
-  }) as RootedFiles['readFile'];
-
   return {
-    readFile,
-    writeFile: async (absolutePath, data) => {
-      const { files, relative } = await rooted([absolutePath]);
-      return files.writeFile(relative(absolutePath), data);
-    },
-    writeFileChecked: async (write) => {
-      const { files, relative } = await rooted([write.path, ...write.preconditions.map(({ path }) => path)]);
-      return files.writeFileChecked({
-        ...write,
-        path: relative(write.path),
-        preconditions: write.preconditions.map((precondition) => ({
-          ...precondition,
-          path: relative(precondition.path),
-        })),
-      });
-    },
-    writeFiles: async (fileMap) => {
-      const entries = Object.entries(fileMap);
-      if (entries.length === 0) {
-        return;
+    files: (consumer) => {
+      const existing = clients.get(consumer);
+      if (existing !== undefined) {
+        return existing;
       }
-      const { files, relative } = await rooted(entries.map(([absolutePath]) => absolutePath));
-      return files.writeFiles(
-        Object.fromEntries(entries.map(([absolutePath, descriptor]) => [relative(absolutePath), descriptor])),
-      );
-    },
-    mkdir: async (absolutePath, options) => {
-      const { files, relative } = await rooted([absolutePath]);
-      return files.mkdir(relative(absolutePath), options);
-    },
-    readdir: async (absolutePath) => {
-      const { files, relative } = await rooted([absolutePath]);
-      return files.readdir(relative(absolutePath));
-    },
-    stat: async (absolutePath) => {
-      const { files, relative } = await rooted([absolutePath]);
-      return files.stat(relative(absolutePath));
-    },
-    exists: async (absolutePath) => {
-      const { files, relative } = await rooted([absolutePath]);
-      return files.exists(relative(absolutePath));
-    },
-    unlink: async (absolutePath) => {
-      const { files, relative } = await rooted([absolutePath]);
-      return files.unlink(relative(absolutePath));
-    },
-    rmdir: async (absolutePath, options) => {
-      const { files, relative } = await rooted([absolutePath]);
-      return files.rmdir(relative(absolutePath), options);
-    },
-    move: async (source, target) => {
-      const { files, relative } = await rooted([source, target]);
-      return files.move(relative(source), relative(target));
+      const client = clientFor(consumer);
+      clients.set(consumer, client);
+      return client;
     },
     dispose: () => {
       generation += 1;

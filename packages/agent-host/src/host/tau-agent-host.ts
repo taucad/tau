@@ -988,9 +988,10 @@ const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cance
  * its real result before the run is marked failed, so a resume continues from
  * the work that happened rather than re-applying it. Re-issuing that one call
  * is the entire recovery — no rewind of the turn, and no second charge for tool
- * work the customer already paid for. A failure that a second attempt would
- * only meet again (no evictable history, a lost leadership, a model the catalog
- * does not carry) ends the run for good and is dispatched afresh.
+ * work the customer already paid for. Compaction failures also retain the
+ * failed turn and re-enter start-of-turn compaction after their synthesized
+ * marker is rewound. Failures that cannot improve on retry, such as lost
+ * leadership or a model absent from the catalog, are dispatched afresh.
  *
  * One set, read by the host's own `resume` and by the surfaces that decide
  * whether to offer Resume at all. The non-resumable half is ruled by
@@ -1006,6 +1007,10 @@ const resumableRunFailureCodes = new Set<string>([
   // A session that expired mid-turn: signing in again is the whole recovery.
   'UNAUTHENTICATED',
   'UPSTREAM_REJECTED',
+  'SESSION_LOG_INTEGRITY',
+  'SUMMARY_REQUIRED',
+  'NO_EVICTABLE_HISTORY',
+  'CIRCUIT_BREAKER_OPEN',
 ]);
 
 /**

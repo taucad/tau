@@ -30,6 +30,7 @@
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
+import { equalBytes } from '#object-hash.js';
 
 import type { RevisionActor, RevisionProvenance } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -295,9 +296,6 @@ const unionTree = (base: ImmutableRevisionTree | undefined, local: ChatTreeEntri
   return new ImmutableRevisionTree(files.values());
 };
 
-const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
-
 const startsWithBytes = (value: Uint8Array<ArrayBuffer>, prefix: Uint8Array<ArrayBuffer>): boolean =>
   value.byteLength >= prefix.byteLength && prefix.every((byte, index) => value[index] === byte);
 
@@ -323,10 +321,10 @@ const reconcileMetadata = (
   base: Uint8Array<ArrayBuffer> | undefined,
   incoming: Uint8Array<ArrayBuffer> | undefined,
 ): Uint8Array<ArrayBuffer> | undefined => {
-  if (local === undefined || (base !== undefined && sameBytes(local, base))) {
+  if (local === undefined || (base !== undefined && equalBytes(local, base))) {
     return incoming;
   }
-  if (incoming === undefined || sameBytes(local, incoming) || (base !== undefined && sameBytes(incoming, base))) {
+  if (incoming === undefined || equalBytes(local, incoming) || (base !== undefined && equalBytes(incoming, base))) {
     return local;
   }
   throw new RevisionPortError(
@@ -341,7 +339,7 @@ const sameTree = (left: ImmutableRevisionTree, right: ImmutableRevisionTree | un
   }
   return left.entries().every((entry) => {
     const other = right.get(entry.path);
-    return other !== undefined && right.mode(entry.path) === entry.mode && sameBytes(other, entry.content);
+    return other !== undefined && right.mode(entry.path) === entry.mode && equalBytes(other, entry.content);
   });
 };
 
@@ -391,7 +389,7 @@ const writeEntries = async (
         current !== undefined && entry.path.startsWith('events/')
           ? appendUnion(current, entry.content, entry.path)
           : entry.content;
-      if (current !== undefined && sameBytes(current, content)) {
+      if (current !== undefined && equalBytes(current, content)) {
         return false;
       }
       signal?.throwIfAborted();

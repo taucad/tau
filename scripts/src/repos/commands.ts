@@ -412,42 +412,53 @@ Run without arguments for interactive TUI.
 export const run = (argv: string[]): void => {
   const { command, positional, flags } = parseArgs(argv);
   switch (command) {
-    case 'add':
+    case 'add': {
       cmdAdd(positional, flags);
       break;
+    }
     case 'remove':
-    case 'rm':
+    case 'rm': {
       cmdRemove(positional, flags);
       break;
-    case 'clone':
+    }
+    case 'clone': {
       cmdClone(positional, flags);
       break;
-    case 'sync':
+    }
+    case 'sync': {
       cmdSync(positional, flags);
       break;
-    case 'status':
+    }
+    case 'status': {
       cmdStatus(positional, flags);
       break;
-    case 'list':
+    }
+    case 'list': {
       cmdList(flags);
       break;
-    case 'exec':
+    }
+    case 'exec': {
       cmdExec(positional, flags);
       break;
-    case 'fork':
+    }
+    case 'fork': {
       cmdFork(positional, flags);
       break;
-    case 'unfork':
+    }
+    case 'unfork': {
       cmdUnfork(positional, flags);
       break;
+    }
     case 'help':
     case '--help':
-    case '-h':
+    case '-h': {
       console.log(helpText);
       break;
-    default:
+    }
+    default: {
       console.error(`Unknown command: ${command}\n`);
       console.log(helpText);
       throw new Error(`Unknown command: ${command}`);
+    }
   }
 };

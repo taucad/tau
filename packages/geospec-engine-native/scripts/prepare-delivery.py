@@ -14,6 +14,8 @@ GEOSPEC_OCCT_PRODUCER_BUILDER selects preserved builder source for existing
 prefix verification only; new prefixes always execute the current builder.
 GEOSPEC_OCCT_PRODUCER_RECIPE selects original recipe bytes for a retained prefix;
 new prefixes retain their recipe beside the receipt. Neither receipt is rewritten.
+GEOSPEC_OCCT_SUPPORT_INPUTS selects a retained mixed-inputs.json for validating
+legacy SDK support rows before excluding the unused default Emscripten cache.
 GEOSPEC_OCCT_JOBS defaults to 2; CARGO_BUILD_JOBS, EMCC_CORES and BINARYEN_CORES
 default to that bound. All four scheduling controls must be positive integers.
 GEOSPEC_GIT selects the exact Git executable, including verifier subprocesses.
@@ -70,11 +72,14 @@ def write_json(path, value):
     temporary.replace(path)
 
 
-def files(directory, skipped=()):
+def files(directory, skipped=(), excluded=None):
     require(directory.is_dir(), f'Missing input directory: {directory}')
     result = set()
     seen = set()
     for parent, directories, names in os.walk(directory, followlinks=True):
+        if Path(parent) == excluded:
+            directories[:] = []
+            continue
         physical = Path(parent).resolve()
         if physical in seen:
             directories[:] = []
@@ -91,21 +96,39 @@ def files(directory, skipped=()):
     return result
 
 
-def support_payload(roots):
+def unused_sdk_cache(env):
+    """Only the explicit external cache route can exclude the SDK default cache."""
+    unused = SDK / 'emscripten/cache'
+    for key in ['EM_CACHE', 'EM_CONFIG']:
+        value = env.get(key, '')
+        require(value and Path(value).is_absolute(), f'Explicit absolute {key} required')
+        selected = Path(value).resolve()
+        require(not selected.is_relative_to(unused.resolve()) and
+                not unused.resolve().is_relative_to(selected), f'{key} overlaps default SDK cache')
+    return unused
+
+
+def support_payload(roots, excluded=None, recorded=None):
     records = []
     selected_roots = {}
     for name, directory in sorted(roots.items()):
         root = Path(directory).resolve()
         selected_roots[name] = str(root)
+        paths = files(root, excluded=excluded) if recorded is None else {
+            path for path in recorded if path.is_relative_to(root) and
+            (excluded is None or not path.is_relative_to(excluded))
+        }
         records.extend({
             'path': f'{name}/{path.relative_to(root).as_posix()}',
-            'sha256': digest(path),
-        } for path in sorted(files(root)))
+            'sha256': digest(path) if recorded is None else recorded[path],
+        } for path in sorted(paths))
     encoded = json.dumps(records, sort_keys=True, separators=(',', ':')).encode()
     return {
         'roots': selected_roots,
         'files': len(records),
         'sha256': hashlib.sha256(encoded).hexdigest(),
+        **({'schema': 'geospec-sdk-support-v2', 'excludedDefaultCache': str(excluded)}
+           if excluded is not None else {}),
     }
 
 
@@ -296,7 +319,7 @@ def prefix_context(paths, env):
             'sdk/bin': SDK / 'bin',
             'sdk/emscripten': SDK / 'emscripten',
             'sdk/lib': SDK / 'lib',
-        }),
+        }, excluded=unused_sdk_cache(env)),
         'native': support_payload({
             'apple-sdk': sdk_path,
             'clang-resource': compiler_resource,
@@ -380,7 +403,70 @@ def create_prefix_receipt(prefix, contract):
     }
 
 
-def verify_prefix(prefix, contract, recipe_path=None):
+def migrate_sdk_support(prefix, receipt, contract, evidence_input):
+    """Validate a historical aggregate, never replace its receipt or claim a rebuild."""
+    require(evidence_input is not None, 'Legacy SDK support requires GEOSPEC_OCCT_SUPPORT_INPUTS')
+    if isinstance(evidence_input, dict):
+        require(evidence_input.get('schema') == 'geospec-sdk-support-migration-v2',
+                'Unsupported carried SDK support migration')
+        evidence = evidence_input['supportEvidence']
+        require(evidence.get('schema') == 'geospec-sdk-support-evidence-v1', 'Unsupported carried SDK support evidence')
+        reference = evidence_input['evidence']
+        require(Path(reference['path']).is_absolute() and
+                re.fullmatch(r'[0-9a-f]{64}', reference['sha256']) is not None,
+                'Invalid original SDK evidence reference')
+    else:
+        evidence_path = Path(evidence_input)
+        require(evidence_path.is_absolute(), 'SDK support evidence must be absolute')
+        require(evidence_path.resolve() != (CACHE / 'mixed-inputs.json').resolve(),
+                'Retain support evidence outside the current manifest')
+        evidence = json.loads(evidence_path.read_text())
+        require(evidence.get('schema') == 'geospec-mixed-build-inputs-v2', 'Unsupported SDK support evidence')
+        reference = {'path': str(evidence_path), 'sha256': digest(evidence_path)}
+    for key in ['EM_CACHE', 'EM_CONFIG']:
+        require(receipt['environment'].get(key) == contract['environment'].get(key) ==
+                evidence['environment'].get(key), f'SDK support evidence {key} differs')
+    excluded = unused_sdk_cache(receipt['environment'])
+    require(excluded == unused_sdk_cache(contract['environment']), 'SDK default cache differs')
+    expected = contract['supportPayload']
+    require(receipt['supportPayload'].get('roots') == expected['roots'] and
+            evidence.get('sdkPrefix') == str(SDK), 'Historical SDK support roots differ')
+    recorded = {}
+    for row in evidence['inputs']:
+        path = Path(row['path'])
+        require(path.is_absolute() and '..' not in path.parts and str(path) == row['path'] and
+                path not in recorded, 'Invalid or duplicate SDK evidence input')
+        require(re.fullmatch(r'[0-9a-f]{64}', row['sha256']) is not None, 'Invalid SDK evidence digest')
+        recorded[path] = row['sha256']
+    receipt_path = prefix / 'prefix-receipt.json'
+    require(recorded.get(receipt_path) == digest(receipt_path), 'SDK evidence prefix receipt hash differs')
+    config = Path(contract['environment']['EM_CONFIG'])
+    require(recorded.get(config) == digest(config), 'SDK evidence configuration bytes differ')
+    original = support_payload(expected['roots'], recorded=recorded)
+    require(original == receipt['supportPayload'], 'Historical SDK support aggregate differs')
+    projected = support_payload(expected['roots'], excluded, recorded)
+    require(projected == expected, 'Projected SDK support membership or bytes differ')
+    # Carry only the authenticated support rows and the two required context pins,
+    # not the unrelated historical source/tool inputs. The full original manifest
+    # digest remains provenance; the immutable prefix aggregate authenticates rows.
+    carried_paths = {path for path in recorded if any(path.is_relative_to(root) for root in expected['roots'].values())}
+    carried_paths.update([receipt_path, config])
+    carried = {
+        'schema': 'geospec-sdk-support-evidence-v1', 'sdkPrefix': evidence['sdkPrefix'],
+        'environment': {key: evidence['environment'][key] for key in ['EM_CACHE', 'EM_CONFIG']},
+        'inputs': [{'path': str(path), 'sha256': recorded[path]} for path in sorted(carried_paths)],
+    }
+    return {
+        'schema': 'geospec-sdk-support-migration-v2', 'prefixRebuilt': False,
+        'originalReceipt': {'path': str(receipt_path), 'sha256': digest(receipt_path)},
+        'evidence': reference, 'supportEvidence': carried,
+        'originalSupport': original, 'effectiveSupport': projected,
+        'excludedFiles': original['files'] - projected['files'],
+        'selectedCache': contract['environment']['EM_CACHE'],
+    }
+
+
+def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
     receipt_path = prefix / 'prefix-receipt.json'
     require(receipt_path.is_file(), f'Missing prefix receipt: {receipt_path}')
     receipt = json.loads(receipt_path.read_text())
@@ -390,12 +476,20 @@ def verify_prefix(prefix, contract, recipe_path=None):
     recorded_recipe = json.loads(recipe_path.read_text())
     require(prefix_sources(recorded_recipe, contract['kind']) == prefix_sources(RECIPE, contract['kind']),
             f'Prefix source selection changed: {prefix}')
+    migration = None
     for name, expected in contract.items():
         if name == 'recipeSha256':
             # Historical provenance is checked above. Compatibility uses every
             # effective field, including source selections absent from old receipts.
             continue
         actual = receipt.get(name)
+        if (name == 'supportPayload' and contract['kind'] == 'mixed' and
+                receipt.get('schema') == PREFIX_RECEIPT_SCHEMA and
+                isinstance(actual, dict) and 'schema' not in actual and
+                expected.get('schema') == 'geospec-sdk-support-v2'):
+            migration = migrate_sdk_support(prefix, receipt, contract,
+                                            support_inputs or os.environ.get('GEOSPEC_OCCT_SUPPORT_INPUTS'))
+            continue
         if name == 'environment':
             # Scheduling changes physical work only. Keep recorded values intact;
             # every non-scheduling environment value still requires exact equality.
@@ -434,7 +528,7 @@ def verify_prefix(prefix, contract, recipe_path=None):
         recorded[relative] = item['sha256']
     actual = {path.relative_to(install): digest(path) for path in files(install)}
     require(actual == recorded, f'Installed prefix outputs changed: {prefix}')
-    return receipt
+    return {**receipt, 'supportMigration': migration} if migration else receipt
 
 
 def prepare_prefix(kind, paths, env, context):
@@ -491,7 +585,8 @@ def source_files():
 def required_inputs(manifest):
     required = source_files()
     for directory in manifest['inputRoots']:
-        required.update(files(Path(directory)))
+        excluded = unused_sdk_cache(manifest['environment']) if Path(directory) == SDK / 'emscripten' else None
+        required.update(files(Path(directory), excluded=excluded))
     required.update(Path(p) for p in manifest['tools'].values())
     required.update(Path(p) for p in manifest['libraries'])
     required.add(Path(manifest['environment']['EM_CONFIG']))
@@ -538,6 +633,8 @@ def prepare_inputs(paths, env):
         **{name: str(paths[name]) for name in ['rustc', 'cargo', 'emcc', 'emxx', 'emar']},
         'environment': env, 'occtPrefix': str(MIXED), 'libraries': list(map(str, libraries(MIXED))),
         'prefixProducerBuilder': str(producing_builder), 'prefixRecovery': prefix_recovery,
+        'sdkSupport': context['supportPayloads']['mixed'],
+        'prefixSupportMigration': receipt.get('supportMigration'),
         'prefixProducerRecipe': str(recipe_path),
         'inputRoots': list(map(str, input_roots())), 'linkOptimization': RECIPE['linkOptimization'],
         'recipeSha256': digest(RECIPE_PATH),
@@ -587,7 +684,10 @@ def verify_manifest(path):
     recipe_path = Path(manifest['prefixProducerRecipe'])
     require(recipe_path.is_absolute(), 'Prefix recipe evidence path must be absolute')
     receipt = verify_prefix(CACHE / 'occt-mixed',
-                            prefix_contract('mixed', paths, selected_environment, context, producing_builder), recipe_path)
+                            prefix_contract('mixed', paths, selected_environment, context, producing_builder), recipe_path,
+                            manifest.get('prefixSupportMigration'))
+    require(manifest.get('sdkSupport') == context['supportPayloads']['mixed'], 'SDK support policy or bytes changed')
+    require(manifest.get('prefixSupportMigration') == receipt.get('supportMigration'), 'SDK support migration changed')
     prefix_recovery = {'mixed': receipt.get('recovery')}
     require(manifest['prefixRecovery'] == prefix_recovery, 'Prefix recovery qualifications changed')
     print(json.dumps({'verifiedInputs': len(selected), 'sourceRoot': str(ROOT), 'output': manifest['output']}))

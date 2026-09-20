@@ -76,7 +76,7 @@ describe('render frames', () => {
   };
 
   it('round-trips points, bounds, and planes', () => {
-    const point = [1_000_000.000_000_02, -1_999_999.999_999_97, 3_000_000.000_000_04] as const;
+    const point = [1_000_000.00000002, -1_999_999.99999997, 3_000_000.00000004] as const;
     const bounds = { min: point, max: [point[0] + 8e-8, point[1] + 9e-8, point[2] + 1e-7] as const };
     const plane = { pointMeters: point, normal: [0, 0, 1] as const };
     expectVectorClose(fromRenderPoint({ renderFrame, point: toRenderPoint({ renderFrame, point }) }), point);
@@ -111,8 +111,6 @@ describe('render frames', () => {
       shouldRescaleRenderFrame({ renderFrame: { ...renderFrame, metersPerRenderUnit: 1 }, visibleSpanMeters: 1e4 }),
     ).toBe(true);
     expect(shouldRebaseRenderFrame({ renderFrame, targetMeters: renderFrame.originMeters })).toBe(false);
-    expect(shouldRebaseRenderFrame({ renderFrame, targetMeters: [1_000_000.000_02, -2_000_000, 3_000_000] })).toBe(
-      true,
-    );
+    expect(shouldRebaseRenderFrame({ renderFrame, targetMeters: [1_000_000.00002, -2_000_000, 3_000_000] })).toBe(true);
   });
 });

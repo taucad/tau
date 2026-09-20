@@ -7,8 +7,100 @@
  * Exit codes: n/a (library module).
  */
 
-import { cp, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { cp, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, relative, resolve } from 'node:path';
+
+/**
+ * Stage the published native root and Darwin arm64 platform from the explicit
+ * assemble-package.sh output. Extract the tarballs, preserving their generated
+ * manifests, loader layout and licenses; never substitute workspace build files.
+ * The caller selects the qualified assembly; this does not qualify its source.
+ * @param assemblyRoot - ASSEMBLY_ROOT printed by the native assembly driver.
+ * @param modulesRoot - Fresh packaged app node_modules directory.
+ * @returns Exact root/platform dependencies for the staged app manifest.
+ */
+export const copyGeoSpecNativeAssembly = async (
+  assemblyRoot: string,
+  modulesRoot: string,
+): Promise<Readonly<Record<string, string>>> => {
+  const name = '@taucad/geospec-engine-native';
+  const platformName = `${name}-darwin-arm64`;
+  const root = resolve(modulesRoot, name);
+  const platform = resolve(modulesRoot, platformName);
+  await mkdir(dirname(root), { recursive: true });
+  await Promise.all([mkdir(root), mkdir(platform)]);
+  execFileSync('tar', ['-xzf', resolve(assemblyRoot, 'tarballs/root.tgz'), '-C', root, '--strip-components=1']);
+  execFileSync('tar', [
+    '-xzf',
+    resolve(assemblyRoot, 'tarballs/darwin-arm64.tgz'),
+    '-C',
+    platform,
+    '--strip-components=1',
+  ]);
+  const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as {
+    readonly name: string;
+    readonly version: string;
+    readonly optionalDependencies?: Readonly<Record<string, string>>;
+    readonly exports?: { readonly './node'?: { readonly node?: string } };
+    readonly imports?: { readonly '#native-binding'?: { readonly node?: string }; readonly '#wasm-binding'?: unknown };
+  };
+  const platformManifest = JSON.parse(await readFile(resolve(platform, 'package.json'), 'utf8')) as {
+    readonly name: string;
+    readonly version: string;
+    readonly main: string;
+    readonly os?: readonly string[];
+    readonly cpu?: readonly string[];
+  };
+  if (
+    manifest.name !== name ||
+    !manifest.version ||
+    platformManifest.name !== platformName ||
+    platformManifest.version !== manifest.version ||
+    manifest.optionalDependencies?.[platformName] !== manifest.version ||
+    platformManifest.os?.join(',') !== 'darwin' ||
+    platformManifest.cpu?.join(',') !== 'arm64' ||
+    manifest.exports?.['./node']?.node !== './dist/node.mjs' ||
+    manifest.imports?.['#native-binding']?.node !== './dist/native/index.js' ||
+    manifest.imports['#wasm-binding'] !== undefined
+  ) {
+    throw new Error(
+      'GeoSpec native assembly must contain matching published root/Darwin arm64 manifests and current Node loader mappings.',
+    );
+  }
+  if (basename(platformManifest.main) !== platformManifest.main || !platformManifest.main.endsWith('.node')) {
+    throw new Error('GeoSpec native platform main must name its adjacent .node addon.');
+  }
+  const licenseEntries = await readdir(resolve(root, 'licenses'), { recursive: true, withFileTypes: true });
+  const licenses = licenseEntries
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(root, resolve(entry.parentPath, entry.name)));
+  if (licenses.length === 0) {
+    throw new Error('GeoSpec native assembly has no dependency licenses.');
+  }
+  await Promise.all([
+    ...[
+      resolve(root, 'dist/node.mjs'),
+      resolve(root, 'dist/native/index.js'),
+      resolve(platform, platformManifest.main),
+    ].map(async (path) => {
+      const info = await stat(path);
+      if (!info.isFile() || info.size === 0) {
+        throw new Error(`GeoSpec native assembly is missing a nonempty file: ${path}`);
+      }
+    }),
+    ...['LICENSE', 'NOTICE', ...licenses].map(async (path) => {
+      const [rootBytes, platformBytes] = await Promise.all([
+        readFile(resolve(root, path)),
+        readFile(resolve(platform, path)),
+      ]);
+      if (rootBytes.length === 0 || !rootBytes.equals(platformBytes)) {
+        throw new Error(`GeoSpec native root/platform license closure differs at ${path}.`);
+      }
+    }),
+  ]);
+  return { [name]: manifest.version, [platformName]: platformManifest.version };
+};
 
 /**
  * Stage GeoSpec's runtime-loaded native subpath; the engine itself is bundled.

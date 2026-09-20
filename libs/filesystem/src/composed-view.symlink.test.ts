@@ -9,11 +9,13 @@
  * that knows the real path, so it answers for both.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '#backend/node/provider.js';
+import { statConcurrency } from '#concurrency.js';
 import { composeView } from '#composed-view.js';
 import type { ComposedViewConsumer } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
@@ -102,5 +104,68 @@ describe('composed view over a checkout holding symlinks', () => {
 
     await expect(provider.readFile('notes/config')).rejects.toMatchObject({ code: 'ELOOP' });
     await expect(provider.readFile('.git/config', 'utf8')).resolves.toContain('owner/private');
+  });
+});
+
+/**
+ * G0b-4, G0b-5: the probe that keeps a laundered row out of a listing answers for
+ * every row a `_resolve` refuses, and it answers from a bounded pool.
+ */
+describe('the node provider probing its symlink rows', () => {
+  const sandbox = (): string => {
+    const root = mkdtempSync(join(tmpdir(), 'tau-provider-symlink-'));
+    sandboxes.push(root);
+    return root;
+  };
+
+  /* One unresolvable link used to cost the caller the whole directory: the probe
+   * dropped a row only for `ELOOP`, so a broken link — or one pointing out of the
+   * root — stayed listed, and the `stat` every walker then runs rejected. */
+  it('should drop a link the provider cannot resolve for any reason and keep the rest of the listing', async () => {
+    const root = sandbox();
+    writeFileSync(join(root, 'main.ts'), 'export const main = 1;\n');
+    mkdirSync(join(root, 'src'));
+    symlinkSync('./gone', join(root, 'broken'));
+    symlinkSync(tmpdir(), join(root, 'outside'));
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+
+    await expect(provider.readdir('')).resolves.toEqual(['main.ts', 'src']);
+    await expect(provider.readdirWithStats('')).resolves.toEqual([
+      expect.objectContaining({ name: 'main.ts', type: 'file' }),
+      expect.objectContaining({ name: 'src', type: 'dir' }),
+    ]);
+  });
+
+  /* Budget row: a pnpm `node_modules` is thousands of link rows, and every one of
+   * them is an `lstat` walk plus a `realpath`. Unbounded, one listing put all of
+   * them in flight at once — twice, because `readdirWithStats` stats them again. */
+  it('should probe its link rows from one bounded pool', async () => {
+    const root = sandbox();
+    writeFileSync(join(root, 'main.ts'), 'export const main = 1;\n');
+    for (let row = 0; row < statConcurrency * 3; row++) {
+      symlinkSync('./main.ts', join(root, `link${row}.ts`));
+    }
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const realpath = fs.realpath.bind(fs);
+    vi.spyOn(fs, 'realpath').mockImplementation(async (target) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        return await realpath(target);
+      } finally {
+        inFlight -= 1;
+      }
+    });
+
+    try {
+      await expect(provider.readdir('')).resolves.toHaveLength(statConcurrency * 3 + 1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(statConcurrency);
   });
 });

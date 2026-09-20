@@ -22,6 +22,7 @@ import {
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { Topic } from '@taucad/events';
 import { isResumableRunFailure } from '@taucad/agent-host';
+import type { AgentHostRefusalCode } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 
 type AgentLogEvent = Parameters<Parameters<AgentHostClient['subscribe']>[0]>[1];
@@ -121,16 +122,6 @@ const finalizedTurns = new Map<string, TurnFinalizedEvent>();
  */
 const finalizedTurnLimit = 256;
 
-/**
- * How long a stream's writer stays open for the settlement of the run it
- * admitted, once the stream itself has ended.
- *
- * The settlement is produced by the chat's session actor in the same beat the
- * request lifecycle ends, so this is a failure bound and not a wait anybody
- * sees: what it prevents is one unsettled turn holding this chat's next stream
- * behind `clientSettlements` forever.
- */
-const settlementWriterGrace = 15_000;
 let finalizedTurnSnapshot: readonly TurnFinalizedEvent[] = [];
 const finalizedTurnTopic = new Topic<void>({ name: 'host-finalized-turns' });
 const hostTurnSettlementTopic = new Topic<HostTurnSettlement>({ name: 'host-turn-settlements' });
@@ -195,30 +186,63 @@ export const persistBrowserTurnSettlement = async (event: HostTurnSettlement): P
 };
 
 /**
- * Resolve when the chat's current run has ended, as the host reports it.
+ * Resolve when the run that refused this admission has ended.
  *
- * Asked only after the host has refused an admission because a run is live:
- * the snapshot answers a run that ended in the meantime, and the subscription
- * answers the one that ends next. Nothing polls, and no state of another owner
- * is read twice.
+ * Asked only after the host has refused an admission with `CHAT_RUN_LIVE`: the
+ * snapshot answers a run that ended in the meantime, and the subscription
+ * answers **that** run ending — not whatever ends next, which on a chat with
+ * two views is a different run and resolved the wait on someone else's turn.
+ *
+ * The host names the live run in its refusal, but the worker's error wire
+ * carries only a code and a message (`toWireError`), so the run id is read back
+ * from the authority that raised it instead of parsed out of prose. Bounded by
+ * the same settlement bound every other cross-owner wait takes: a run nobody is
+ * driving never ends, and an unbounded wait here left the composer on
+ * "Planning next moves…" for as long as the page stayed open.
  *
  * @param client - This chat's host client.
  * @param chatId - The chat whose live run must end.
+ * @param abortSignal - The stream's own abort, so a stopped turn stops waiting.
  */
-const liveRunEnded = async (client: AgentHostClient, chatId: string): Promise<void> => {
+const liveRunEnded = async (
+  client: AgentHostClient,
+  chatId: string,
+  abortSignal: AbortSignal | undefined,
+): Promise<void> => {
   const ended = Promise.withResolvers<void>();
+  const endedRuns = new Set<string>();
+  let liveRunId: string | undefined;
   const unsubscribe = client.subscribe((eventChatId, event) => {
-    if (eventChatId === chatId && event.type === 'run.lifecycle' && terminal(event.state)) {
+    if (eventChatId !== chatId || event.type !== 'run.lifecycle' || !terminal(event.state)) {
+      return;
+    }
+    endedRuns.add(event.runId);
+    if (event.runId === liveRunId) {
       ended.resolve();
     }
   });
+  const abort = (): void => {
+    ended.resolve();
+  };
+  abortSignal?.addEventListener('abort', abort, { once: true });
   try {
     const current = await client.attach({ chatId, cursor: 0, limit: 1 });
-    if (current.snapshot === undefined || terminal(current.snapshot.state)) {
+    const live = current.snapshot;
+    if (live === undefined || terminal(live.state)) {
       return;
     }
-    await ended.promise;
+    liveRunId = live.runId;
+    // A terminal row for it may have arrived while the attach was in flight.
+    if (endedRuns.has(live.runId) || abortSignal?.aborted === true) {
+      return;
+    }
+    await awaitSettlement(
+      ended.promise,
+      `Chat ${chatId} is still running an earlier turn (${live.runId}). Reload the page and try again.`,
+      'CHAT_RUN_LIVE',
+    );
   } finally {
+    abortSignal?.removeEventListener('abort', abort);
     unsubscribe();
   }
 };
@@ -234,6 +258,36 @@ const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): voi
 };
 
 export const getBrowserAgentHostRun = (chatId: string): BrowserAgentHostRun | undefined => browserRuns.get(chatId);
+
+/** What the host said about a chat's run the last time this tab attached to it. */
+export type BrowserAgentHostAttachment = Readonly<{
+  snapshot: HostRunSnapshot;
+  /**
+   * This attach took the chat over from a driver that is gone, and the run it
+   * found still wants the page: one the host has just recorded abandoned, or
+   * one left non-terminal. @see getBrowserAgentHostAttachment
+   */
+  takeover: boolean;
+}>;
+
+const attachedRuns = new Map<string, BrowserAgentHostAttachment>();
+
+const recordAttachedRun = (chatId: string, attachment: BrowserAgentHostAttachment): void => {
+  attachedRuns.set(chatId, attachment);
+};
+
+/**
+ * The host's own answer about this chat's run, from the last attach.
+ *
+ * `browserRuns` is what a *stream of this document* published, so it is empty
+ * on the first read after a reload and is cleared the moment a settlement
+ * retires the record — which is why resumability read from it judged *Try
+ * again* on a credit refusal non-resumable and rewound the turn instead of
+ * continuing it. This is the same fact read from the authority: the run the
+ * chat's durable log ends on, with the typed failure the host recorded for it.
+ */
+export const getBrowserAgentHostAttachment = (chatId: string): BrowserAgentHostAttachment | undefined =>
+  attachedRuns.get(chatId);
 
 /**
  * Whether this chat's turns are placed on a browser-hosted agent at all.
@@ -809,6 +863,9 @@ const createHostStream = <Message extends UIMessage>(input: {
     const replay = async (hostClient: AgentHostClient): Promise<boolean> => {
       attaching ??= [];
       const batch = await hostClient.attach({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
+      if (batch.snapshot) {
+        recordAttachedRun(input.chatId, { snapshot: batch.snapshot, takeover: batch.takeover === true });
+      }
       // The log's own snapshot names the run this chat ends on — the only source
       // for a reattach whose in-memory binding a reload dropped. The host answers
       // one for every non-empty log (and takes a non-terminal run over first).
@@ -889,6 +946,14 @@ const createHostStream = <Message extends UIMessage>(input: {
        * driving can still publish its P71 settlement after lifecycle
        * completion, so its subscription must outlive the readable stream. */
       const awaitLateSettlement = !terminal(state) || holdWriterForSettlement || driveResume;
+      /* H1 (discarded): `markRunId` re-stamps the chat's *current* workspace
+       * claim, so a reattach that resolved an older run could in principle
+       * stamp it over a live turn's claim and make that turn's release
+       * mismatch. It cannot happen: every stream of one chat serialises behind
+       * `clientSettlements`, so a reattach never runs while an admission stream
+       * holds the chat, and the run it then resolves is that admission's own.
+       * A terminal run must keep binding — reload discovery retires its claim
+       * by exactly this run id. */
       if (input.runId === undefined && runId !== undefined) {
         await bindRun(runId);
       }
@@ -923,15 +988,18 @@ const createHostStream = <Message extends UIMessage>(input: {
          * person asked for, and it is bounded by the run itself ending.
          */
         const recoverFromLiveRun = async (error: unknown): Promise<HostRunSnapshot> => {
-          if (
-            !(error instanceof AgentHostWorkerError) ||
-            error.code !== 'RUN_ADMISSION_CONFLICT' ||
-            cancelled ||
-            !/has a \w+ run/u.test(error.message)
-          ) {
+          /* The code alone, because the host now raises this one from a single
+           * builder for both the in-memory and the durable refusal. The regex
+           * that used to stand in for it (`/has a \w+ run/`) matched neither
+           * the durable wording nor a duplicate run id, and nothing wrote down
+           * which of the five conditions it meant to catch. */
+          if (!(error instanceof AgentHostWorkerError) || error.code !== 'CHAT_RUN_LIVE' || cancelled) {
             throw error;
           }
-          await liveRunEnded(client!, input.chatId);
+          await liveRunEnded(client!, input.chatId, input.abortSignal);
+          if (input.abortSignal?.aborted === true) {
+            throw error;
+          }
           return startOnce(client!);
         };
         /* The command itself is issued before this frame yields — the recovery
@@ -955,6 +1023,16 @@ const createHostStream = <Message extends UIMessage>(input: {
         } else {
           reconcileSnapshot(snapshot);
         }
+      } else if (driveResume && !refusedResumably(input.chatId) && terminal(state)) {
+        /* Resume was asked for and there is nothing to continue. The flag is
+         * one-shot and was consumed at stream creation, so the silent branch
+         * this replaces left the person having pressed Resume with the stream
+         * opening, replaying and closing — no continuation, no message. A
+         * refusal that names its recovery is the outcome. */
+        throw new AgentHostWorkerError(
+          'RESUME_UNAVAILABLE' satisfies AgentHostRefusalCode,
+          'This turn has nothing left to continue. Send it again to start a new one.',
+        );
       } else if (driveResume && refusedResumably(input.chatId)) {
         // The turn the gateway refused, continued at the call it could not
         // fund. The host owns that continuation — it reattaches the session
@@ -1008,7 +1086,10 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (holdWriterForSettlement && !lateSettlementAwaited && client !== undefined && runId !== undefined) {
         /* The completed path waited above, loudly and bounded; this is the
          * stopped and refused turn, whose settlement the page produces after
-         * the stream is gone.
+         * the stream is gone. One settlement, one bound: the quiet grace used
+         * to expire at 15 s while the loud wait ran to 30 s, so a settlement
+         * arriving between them was dropped by the writer that would have
+         * persisted it on one path and awaited on the other.
          * ponytail: a wall-clock bound, because a settlement that never comes
          * would hold the chat's next stream behind `clientSettlements`. The
          * upgrade path is the chat session actor telling the transport its turn
@@ -1016,7 +1097,7 @@ const createHostStream = <Message extends UIMessage>(input: {
         await Promise.race([
           turnSettlement.promise,
           new Promise<void>((resolve) => {
-            globalThis.setTimeout(resolve, settlementWriterGrace);
+            globalThis.setTimeout(resolve, settlementTimeout);
           }),
         ]);
         await projection;

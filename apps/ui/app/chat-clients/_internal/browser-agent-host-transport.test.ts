@@ -1100,7 +1100,13 @@ describe('BrowserPlacementChatTransport', () => {
     const transport = new BrowserPlacementChatTransport();
 
     requestBrowserAgentHostResume(chatId);
-    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+    /* The Resume flag is one-shot and is spent the moment the stream opens, so
+     * a resume nothing can honour has to say so: replaying and closing in
+     * silence left the person having pressed Resume with no continuation and no
+     * message. */
+    await expect(
+      drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader()),
+    ).rejects.toMatchObject({ code: 'RESUME_UNAVAILABLE' });
 
     expect(client.resume).not.toHaveBeenCalled();
     expect(isBrowserAgentHostRunResumable(chatId)).toBe(false);
@@ -1855,12 +1861,12 @@ describe('BrowserPlacementChatTransport', () => {
    * The page came back to a chat mid-turn: this document never attached to the
    * run the worker is still driving, and the workspace claim that reload
    * discovery reads was dropped when the previous document unloaded. The host
-   * is the only authority that knows, and it says so — `admit is refused`
-   * because the chat has a running run. Ending the turn on that banner made
-   * *navigate away mid-turn and back* a dead chat; the stream waits for the
-   * live run to end and admits once, which is what the person asked for.
+   * is the only authority that knows, and it says so with `CHAT_RUN_LIVE`.
+   * Ending the turn on that banner made *navigate away mid-turn and back* a
+   * dead chat; the stream waits for the live run to end and admits once, which
+   * is what the person asked for.
    */
-  it('waits out a live run the host refuses to admit over, then admits once', async () => {
+  it('waits out the live run the host named, then admits once', async () => {
     installBrowserGlobals();
     const chatId = 'chat-live-refusal';
     const runId = 'run-live-refusal';
@@ -1870,10 +1876,7 @@ describe('BrowserPlacementChatTransport', () => {
       start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
         refusals += 1;
         if (refusals === 1) {
-          throw new AgentHostWorkerError(
-            'RUN_ADMISSION_CONFLICT',
-            `Chat ${chatId} has a running run; admit is refused.`,
-          );
+          throw new AgentHostWorkerError('CHAT_RUN_LIVE', `Chat ${chatId} has a running run; admit the next turn.`);
         }
         listener?.(chatId, {
           version: 1,
@@ -1937,6 +1940,77 @@ describe('BrowserPlacementChatTransport', () => {
       expect(refusals).toBe(2);
     } finally {
       unregister();
+    }
+  });
+
+  /**
+   * The other half of the same refusal: after a document died with no takeover,
+   * nobody drives the run the host is refusing over, so it never ends. The wait
+   * used to have no timer and no abort — the composer sat on *Planning next
+   * moves…* for as long as the page stayed open. A bounded wait turns an
+   * invisible hang back into a failure the person can act on — and another
+   * view's run ending is not this run ending, so it must not release the wait.
+   */
+  it('surfaces a live run nobody is driving once the settlement bound expires', async () => {
+    installBrowserGlobals();
+    vi.useFakeTimers();
+    const chatId = 'chat-live-forever';
+    const runId = 'run-live-forever';
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        throw new AgentHostWorkerError('CHAT_RUN_LIVE', `Chat ${chatId} has a running run; admit the next turn.`);
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: snapshot(chatId, 'run-orphan', 'running'),
+      })),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        globalThis.setTimeout(() => {
+          next(chatId, {
+            version: 1,
+            leaderEpoch: 'leader-live-forever',
+            sequence: 4,
+            recordedAt: '2026-09-18T00:00:04.000Z',
+            runId: 'run-someone-else',
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+        }, 1000);
+        return () => undefined;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-live-forever',
+        backend: 'opfs',
+        providerBasePath: 'project-live-forever',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-live-forever',
+        messages: [{ id: 'message-live-forever', role: 'user', parts: [{ type: 'text', text: 'Second.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      const drained = drain(stream.getReader());
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await expect(drained).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+      /* Once: the unrelated run ending at 1 s is not this run ending, so it
+       * never released the wait into a second admission. */
+      expect(client.start).toHaveBeenCalledOnce();
+    } finally {
+      unregister();
+      vi.useRealTimers();
     }
   });
 

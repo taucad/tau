@@ -38,6 +38,18 @@ type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
 type AgentHostGatewayFailure = {
   readonly status: number;
   readonly message: string;
+  /**
+   * The wire error type, which is what decides the run's coded failure.
+   *
+   * Tau's own gateway refuses with one of `gatewayModelErrorCodes` here, and
+   * `gatewayErrorCode` maps anything else — an upstream provider's own
+   * `api_error`, for one — to `UNKNOWN_GATEWAY_ERROR`, which
+   * `isResumableRunFailure` rejects. So the default refusal is one the turn
+   * cannot continue from and *Try again* rewinds; a row that means to exercise
+   * a *resumable* refusal (I1: one run, two attempts) has to name a code the
+   * host can continue, exactly as the gateway would.
+   */
+  readonly type?: string;
 };
 
 /** Where a gateway request is parked, and which turn it belongs to. */
@@ -625,7 +637,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
             JSON.stringify({
               type: 'error',
               error: {
-                type: 'api_error',
+                type: agentHostGatewayFailure.type ?? 'api_error',
                 message: agentHostGatewayFailure.message,
               },
             }),

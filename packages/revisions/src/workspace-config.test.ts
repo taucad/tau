@@ -38,7 +38,15 @@ describe('generated ignore file', () => {
    * when the generated block excludes it, and excluded as far as the row
    * matches. A row that classifies by segment must be excluded wherever it
    * appears, or a nested `.git` would be hidden from every view and captured
-   * into the revision anyway. */
+   * into the revision anyway.
+   *
+   * PP5 is stated over the rows, not over every spelling of them: `classify`
+   * compares each row folded (G0b-8), so on a case-sensitive disk `Exports/x.step`
+   * is unversioned while this block — a `.gitignore`, which git matches
+   * case-sensitively there — does not name it. Widening the block with every
+   * folded spelling would put Tau's case rules into the person's own ignore file;
+   * the capture's own `exclude` (`!classify(path).versioned`) is what keeps such a
+   * path out of every tree, and that is the half PP5 exists to protect. */
   it('should exclude every unversioned row as far as it matches, and no versioned one', () => {
     for (const row of pathRegistry) {
       const anywhere = generatedIgnoreEntries.some((entry) => entry.replace(/\/$/u, '') === `**/${row.prefix}`);

@@ -200,6 +200,12 @@ describe('the tree a cut hashes', () => {
      * skill beside it still arrives, so an empty subtree cannot pass this. */
     await filesystem.writeFile('.tau/skills/cad/SKILL.md', '---\nname: cad\n---\n');
     await filesystem.writeFile('.tau/skills/cad/.git/config', '[remote "origin"]\n');
+    /* G0b-9: a case alias of a reserved path wedged this cut. `classify` called it
+     * authored and versioned, so the capture carried it — and `portable-tree`
+     * refused the whole tree at commit, with no way out but deleting the file by
+     * hand. Folded, it is the records row it resolves to on the disk that holds
+     * it, and the cut simply leaves it out. */
+    await filesystem.writeFile('Exports/x.step', 'solid alias\n');
 
     const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
       checkoutId: 'live',

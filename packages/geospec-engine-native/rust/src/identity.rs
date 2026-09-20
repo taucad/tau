@@ -302,6 +302,10 @@ impl SubjectIdentity {
         &self.descriptor
     }
 
+    pub(crate) fn descriptor_bytes(&self) -> Result<Vec<u8>, BackendError> {
+        codec::encode(&self.descriptor).map_err(|error| invalid(error.to_string()))
+    }
+
     #[cfg(test)]
     pub(crate) fn plan_subject(&self, slot: &str) -> Json {
         Json::object([

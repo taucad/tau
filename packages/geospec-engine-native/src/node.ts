@@ -1,13 +1,11 @@
 import { Engine as NativeEngine, canonicalize as nativeCanonicalize } from '#native-binding';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
 import { ProtocolError as HostProtocolError, callHost, toHostBytes } from '#host-types.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves in-package contract types.
-import type { HostBytes, HostEngine, HostSubjectLifecycle } from '#host-types.js';
+import type { HostBytes, HostCacheLifecycle, HostCacheOptions, HostEngine, HostSubjectLifecycle } from '#host-types.js';
 
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- The host facade exposes the shared protocol-error identity.
-export { ProtocolError } from '#host-types.js'; // eslint-disable-line import-x/no-extraneous-dependencies -- Package import resolves an in-package public contract.
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- The host facade exposes the shared byte contract.
-export type { HostBytes, HostEngine, HostSubjectLifecycle } from '#host-types.js'; // eslint-disable-line import-x/no-extraneous-dependencies -- Package import resolves in-package public contract types.
+// oxlint-disable no-barrel-files/no-barrel-files -- The host facade exposes its shared public contracts.
+export { ProtocolError } from '#host-types.js';
+export type { HostBytes, HostCacheLifecycle, HostCacheOptions, HostEngine, HostSubjectLifecycle } from '#host-types.js';
+// oxlint-enable no-barrel-files/no-barrel-files
 
 const buffer = (value: unknown) => {
   if (!(value instanceof Uint8Array) || !(value.buffer instanceof ArrayBuffer)) {
@@ -17,8 +15,20 @@ const buffer = (value: unknown) => {
 };
 
 /** Stateful Node N-API facade over the configured native GeoSpec engine. @public */
-export class Engine implements HostEngine, HostSubjectLifecycle {
-  readonly #inner = new NativeEngine();
+export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecycle {
+  #inner: NativeEngine | undefined;
+
+  /** Create a resident-only engine or opt into authenticated filesystem cache storage. */
+  public constructor(cacheOptions?: HostCacheOptions) {
+    this.#inner = cacheOptions === undefined ? new NativeEngine() : new NativeEngine(cacheOptions);
+  }
+
+  /** Release the retained native engine and authenticated cache. */
+  public close(): void {
+    const inner = this.#inner;
+    this.#inner = undefined;
+    inner?.close();
+  }
 
   /**
    * Transfer one subject and its ordered external resource buffers.
@@ -30,7 +40,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
   public ingestSubject(request: HostBytes, primary: HostBytes, resources: readonly HostBytes[]): HostBytes {
     return callHost(() =>
       toHostBytes(
-        this.#inner.ingestSubject(
+        this.inner().ingestSubject(
           buffer(request),
           buffer(primary),
           resources.map((resource) => buffer(resource)),
@@ -46,7 +56,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact response bytes.
    */
   public ingestMesh(request: HostBytes, mesh: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.ingestMesh(buffer(request), buffer(mesh))));
+    return callHost(() => toHostBytes(this.inner().ingestMesh(buffer(request), buffer(mesh))));
   }
 
   /**
@@ -55,7 +65,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact subject-handle response bytes.
    */
   public subjectHandle(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.subjectHandle(buffer(request))));
+    return callHost(() => toHostBytes(this.inner().subjectHandle(buffer(request))));
   }
 
   /**
@@ -64,7 +74,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact release response bytes.
    */
   public releaseSubject(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.releaseSubject(buffer(request))));
+    return callHost(() => toHostBytes(this.inner().releaseSubject(buffer(request))));
   }
 
   /**
@@ -73,7 +83,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact response bytes.
    */
   public processRequest(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.processRequest(buffer(request))));
+    return callHost(() => toHostBytes(this.inner().processRequest(buffer(request))));
   }
 
   /**
@@ -82,7 +92,7 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact plan bytes.
    */
   public canonicalPlan(request: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.canonicalPlan(buffer(request))));
+    return callHost(() => toHostBytes(this.inner().canonicalPlan(buffer(request))));
   }
 
   /**
@@ -91,7 +101,38 @@ export class Engine implements HostEngine, HostSubjectLifecycle {
    * @returns Exact response bytes.
    */
   public evaluatePlan(plan: HostBytes): HostBytes {
-    return callHost(() => toHostBytes(this.#inner.evaluatePlan(buffer(plan))));
+    return callHost(() => toHostBytes(this.inner().evaluatePlan(buffer(plan))));
+  }
+
+  /**
+   * Seal cache publication and return stable canonical diagnostics.
+   * @returns Canonical cache diagnostics bytes.
+   */
+  public flushCache(): HostBytes {
+    return callHost(() => toHostBytes(this.inner().flushCache()));
+  }
+
+  /**
+   * Evict this cache family's records while the cache remains open.
+   * @returns Whether the cache was open and eviction succeeded.
+   */
+  public clearOverlapCache(): boolean {
+    return this.inner().clearOverlapCache();
+  }
+
+  /**
+   * Return the common core/CSG/BRep build identity.
+   * @returns Canonical producer identity bytes.
+   */
+  public cacheProducerIdentity(): HostBytes {
+    return callHost(() => toHostBytes(this.inner().cacheProducerIdentity()));
+  }
+
+  private inner(): NativeEngine {
+    if (this.#inner === undefined) {
+      throw new HostProtocolError('invalid-request', 'GeoSpec Node engine is closed.');
+    }
+    return this.#inner;
   }
 }
 

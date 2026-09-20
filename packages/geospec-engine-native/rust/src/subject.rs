@@ -67,6 +67,10 @@ pub(crate) struct Subject {
     pub display_name: String,
     pub diagnostics: Vec<Diagnostic>,
     pub retention_limits: crate::backend::AnalysisRetentionLimits,
+    pub(crate) resident_overlaps:
+        Option<Rc<RefCell<crate::analysis::interference::ResidentOverlaps>>>,
+    pub(crate) overlap_cache: Option<crate::cache::SharedOverlapEvidenceCache>,
+    pub(crate) producer_identity: Option<Rc<crate::cache::ProducerIdentity>>,
     overlap_components: OnceCell<Rc<crate::analysis::interference::PreparedComponents>>,
     component_labels: OnceCell<Rc<Vec<crate::analysis::interference::ComponentIdentity>>>,
     pub mesh_record: OnceCell<Rc<MeshAnalysisRecord>>,
@@ -128,6 +132,9 @@ impl Subject {
             display_name: "step".into(),
             diagnostics: Vec::new(),
             retention_limits: crate::EngineConfig::entry().analysis,
+            resident_overlaps: None,
+            overlap_cache: None,
+            producer_identity: None,
             overlap_components: OnceCell::new(),
             component_labels: OnceCell::new(),
             mesh_record: OnceCell::new(),
@@ -146,6 +153,16 @@ impl Subject {
             selector_index: OnceCell::new(),
             tessellations: RefCell::new(Vec::new()),
         }
+    }
+
+    pub(crate) fn identity_descriptor_bytes(&self) -> Result<Vec<u8>, BackendError> {
+        self.semantic_identity
+            .get()
+            .ok_or_else(|| BackendError {
+                kind: BackendErrorKind::ComputationFailed,
+                message: "Subject identity was not established before cache lookup.".into(),
+            })?
+            .descriptor_bytes()
     }
 
     /// One immutable derived mesh per entity and exact declared numeric profile.

@@ -487,6 +487,7 @@ impl Engine {
                 })?;
         }
         self.subjects.remove(&key);
+        self.resident_overlaps.borrow_mut().prune();
         self.subject_generations.remove(&key);
         encode(&Json::object([
             ("requestId", Json::string(request_id)),
@@ -497,6 +498,11 @@ impl Engine {
     pub(crate) fn admit_retained(&mut self, mut retained: Subject) -> Result<(), ProtocolError> {
         retained.retention_limits = self.config.analysis;
         retained.binary_limits = self.config.binary.clone();
+        retained.resident_overlaps = Some(self.resident_overlaps.clone());
+        retained.overlap_cache.clone_from(&self.overlap_cache);
+        retained
+            .producer_identity
+            .clone_from(&self.producer_identity);
         let key = retained.cache_identity().map_err(backend)?;
         if self.subjects.contains_key(&key) {
             return Ok(());

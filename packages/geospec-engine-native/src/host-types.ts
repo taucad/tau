@@ -15,6 +15,7 @@ export class ProtocolError extends Error {
 
 /** Byte-only stateful engine surface shared by Node and WASM hosts. @public */
 export type HostEngine = {
+  close(): void;
   ingestSubject(request: HostBytes, primary: HostBytes, resources: readonly HostBytes[]): HostBytes;
   ingestMesh(request: HostBytes, mesh: HostBytes): HostBytes;
   processRequest(request: HostBytes): HostBytes;
@@ -26,6 +27,19 @@ export type HostEngine = {
 export type HostSubjectLifecycle = {
   subjectHandle(request: HostBytes): HostBytes;
   releaseSubject(request: HostBytes): HostBytes;
+};
+
+/** Explicit Node filesystem cache construction options. @public */
+export type HostCacheOptions = {
+  readonly root: string;
+  readonly projectRoot: string;
+};
+
+/** Optional authenticated overlap-cache lifecycle. @public */
+export type HostCacheLifecycle = {
+  flushCache(): HostBytes;
+  clearOverlapCache(): boolean;
+  cacheProducerIdentity(): HostBytes;
 };
 
 type ErrorLike = {

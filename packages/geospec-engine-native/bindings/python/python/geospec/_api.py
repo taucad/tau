@@ -33,6 +33,14 @@ class _NativeEngine(Protocol):
 
     def evaluate_plan(self, plan: bytes) -> bytes: ...
 
+    def flush_cache(self) -> bytes: ...
+
+    def clear_overlap_cache(self) -> bool: ...
+
+    def cache_producer_identity(self) -> bytes: ...
+
+    def close(self) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class GeoSpecRegex:
@@ -170,21 +178,30 @@ class GeoSpecEngine:
         self,
         *,
         work_unit_budget: int | None = None,
+        cache_root: str | None = None,
+        project_root: str | None = None,
         native_engine: _NativeEngine | None = None,
         native_module: Any | None = None,
     ) -> None:
         if native_module is None:
             native_module = importlib.import_module("geospec_engine_native")
         self._native_module = native_module
-        self._native = (
-            native_engine if native_engine is not None else native_module.Engine()
-        )
+        if (cache_root is None) != (project_root is None):
+            raise ValueError("cache_root and project_root must be supplied together")
+        if native_engine is not None:
+            native = native_engine
+        elif cache_root is None:
+            native = native_module.Engine()
+        else:
+            native = native_module.Engine(cache_root, project_root)
+        self._native: _NativeEngine | None = native
         self._next_claim = 0
         self._next_lifecycle = 0
         self._handles: list[Mapping[str, object]] = []
         self._closed = False
-        subject_handle = getattr(self._native, "subject_handle", None)
-        release_subject = getattr(self._native, "release_subject", None)
+        self._cache_flush_result: bytes | None = None
+        subject_handle = getattr(native, "subject_handle", None)
+        release_subject = getattr(native, "release_subject", None)
         if callable(subject_handle) != callable(release_subject):
             raise RuntimeError(
                 "GeoSpec native lifecycle requires subject_handle and release_subject together."
@@ -194,8 +211,12 @@ class GeoSpecEngine:
             raise RuntimeError(
                 "Installed GeoSpec native Engine does not expose subject lifecycle operations."
             )
+        if native_engine is None and not callable(getattr(native, "close", None)):
+            raise RuntimeError(
+                "Installed GeoSpec native Engine does not expose deterministic close."
+            )
         initialized = _decode_object(
-            self._native.process_request(
+            native.process_request(
                 _json_bytes(
                     {
                         "method": "initialize",
@@ -255,9 +276,46 @@ class GeoSpecEngine:
             except Exception as error:
                 if first_error is None:
                     first_error = error
+        native = self._ensure_open()
+        flush_cache = getattr(native, "flush_cache", None)
+        if callable(flush_cache):
+            try:
+                self._cache_flush_result = bytes(flush_cache())
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        native_close = getattr(native, "close", None)
+        if callable(native_close):
+            try:
+                native_close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        self._native = None
+        self._closed = True
         if first_error is not None:
             raise first_error
-        self._closed = True
+
+    def clear_overlap_cache(self) -> bool:
+        """Evict persisted overlap evidence before the engine is closed."""
+
+        native = self._ensure_open()
+        clear = getattr(native, "clear_overlap_cache", None)
+        return bool(clear()) if callable(clear) else False
+
+    @property
+    def cache_producer_identity(self) -> bytes:
+        """Common native producer identity used by persistent evidence."""
+
+        native = self._ensure_open()
+        identity = getattr(native, "cache_producer_identity", None)
+        return bytes(identity()) if callable(identity) else b""
+
+    @property
+    def cache_flush_result(self) -> bytes | None:
+        """Stable cache diagnostics returned when this engine closed."""
+
+        return self._cache_flush_result
 
     def __enter__(self) -> GeoSpecEngine:
         if self._closed:
@@ -273,9 +331,10 @@ class GeoSpecEngine:
         except Exception:
             pass
 
-    def _ensure_open(self) -> None:
-        if self._closed:
+    def _ensure_open(self) -> _NativeEngine:
+        if self._closed or self._native is None:
             raise RuntimeError("GeoSpec engine is closed.")
+        return self._native
 
     def ingest_mesh(
         self,
@@ -283,13 +342,13 @@ class GeoSpecEngine:
         *,
         slot: str = "subject",
     ) -> GeoSpecSubject:
-        self._ensure_open()
+        native = self._ensure_open()
         import hashlib
 
         mesh = _required_bytes(mesh, "mesh")
         digest = hashlib.sha256(mesh).hexdigest()
         response = _decode_object(
-            self._native.ingest_mesh(
+            native.ingest_mesh(
                 _json_bytes(
                     {
                         "method": "ingestSubject",
@@ -326,7 +385,7 @@ class GeoSpecEngine:
         options and derives the applied scale from the source/output units.
         """
 
-        self._ensure_open()
+        native = self._ensure_open()
         primary = _required_bytes(primary, "primary")
         if ingest_options is not None and not isinstance(ingest_options, Mapping):
             raise TypeError("ingest_options must be a mapping.")
@@ -343,7 +402,7 @@ class GeoSpecEngine:
             metadata.append({"name": name, "byteLength": len(binary)})
             binary_resources.append(binary)
         response = _decode_object(
-            self._native.ingest_subject(
+            native.ingest_subject(
                 _json_bytes(
                     {
                         "method": "ingestSubject",
@@ -396,7 +455,7 @@ class GeoSpecEngine:
             return None
         self._next_lifecycle += 1
         response = _decode_object(
-            self._native.subject_handle(
+            self._ensure_open().subject_handle(
                 _json_bytes(
                     {
                         "method": "subjectHandle",
@@ -424,7 +483,7 @@ class GeoSpecEngine:
             self._handles.remove(handle)
             return
         self._next_lifecycle += 1
-        self._native.release_subject(
+        self._ensure_open().release_subject(
             _json_bytes(
                 {
                     "method": "releaseSubject",
@@ -503,7 +562,7 @@ class GeoSpecEngine:
         claim_id: str | None,
         polarity: str,
     ) -> GeoSpecAssertionReport:
-        self._ensure_open()
+        native = self._ensure_open()
         if subject.engine is not self:
             raise ValueError("GeoSpec subject belongs to a different engine.")
         if capability not in self.capabilities:
@@ -529,7 +588,7 @@ class GeoSpecEngine:
             "canonicalProfile": self.canonical_profile,
             "plan": {"subjects": [subject.plan_entry()], "claims": [claim]},
         }
-        canonical_plan = bytes(self._native.canonical_plan(_json_bytes(request)))
+        canonical_plan = bytes(native.canonical_plan(_json_bytes(request)))
         parsed_plan = _decode_object(canonical_plan, "canonical plan")
         plan = _required_object(parsed_plan, "plan", "canonical plan")
         claims = plan.get("claims")
@@ -544,7 +603,7 @@ class GeoSpecEngine:
         canonical_claim = bytes(
             self._native_module.canonicalize(_json_bytes(claims[0]))
         )
-        canonical_result = bytes(self._native.evaluate_plan(canonical_plan))
+        canonical_result = bytes(native.evaluate_plan(canonical_plan))
         parsed_result = _decode_object(canonical_result, "canonical result")
         results = parsed_result.get("results")
         if (

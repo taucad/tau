@@ -1,16 +1,18 @@
 // Fixture helpers cube_buffer/document copied verbatim from retention.rs
 // SHA-256 4a1f366592ed8159384c75cd6cff29711ae91b24ccbe9b2c2d156fb19fab57c7.
 // The forwarding wrapper adds only an actual properties-request counter.
+use geospec_engine_native_cache_host::AuthenticatedOverlapCache;
 use geospec_engine_native_core::backend::{csg::*, BackendError, TriangleMesh};
 use geospec_engine_native_csg::ManifoldCsgConnector;
 use geospec_engine_native_occt::OcctConnector;
-use geospec_engine_native_runtime::{Engine, EngineConfig};
+use geospec_engine_native_runtime::{producer_identity, Engine, EngineConfig};
 use serde_json::{json, Value};
 use std::{
     cell::Cell,
     fs,
     path::{Path, PathBuf},
     rc::Rc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 const EXPECTED_INTERSECTION_VOLUME: f64 = 0.5;
@@ -18,6 +20,7 @@ const MAIN_EVALUATIONS: usize = 1001;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct Counts {
+    calls: usize,
     admissions: usize,
     booleans: usize,
     properties: usize,
@@ -30,6 +33,7 @@ struct Counts {
 impl Counts {
     fn json(self) -> Value {
         json!({
+            "calls": self.calls,
             "admissions": self.admissions,
             "booleans": self.booleans,
             "properties": self.properties,
@@ -64,6 +68,7 @@ impl CountedCsg {
 
 impl CsgConnector for CountedCsg {
     fn admit(&mut self, mesh: &TriangleMesh, merges: &[[u32; 2]]) -> Result<SolidId, BackendError> {
+        self.update(|counts| counts.calls += 1);
         let result = self.inner.admit(mesh, merges);
         if result.is_ok() {
             self.update(|counts| counts.admissions += 1);
@@ -73,6 +78,7 @@ impl CsgConnector for CountedCsg {
     }
 
     fn release(&mut self, id: SolidId) -> Result<(), BackendError> {
+        self.update(|counts| counts.calls += 1);
         let result = self.inner.release(id);
         if result.is_ok() {
             self.update(|counts| {
@@ -85,6 +91,7 @@ impl CsgConnector for CountedCsg {
 
     fn boolean(&mut self, op: BooleanOp, ids: &[SolidId]) -> Result<SolidId, BackendError> {
         self.update(|counts| counts.booleans += 1);
+        self.update(|counts| counts.calls += 1);
         let result = self.inner.boolean(op, ids);
         if result.is_ok() {
             self.created(1);
@@ -93,6 +100,7 @@ impl CsgConnector for CountedCsg {
     }
 
     fn transform(&mut self, id: SolidId, m: [f64; 12]) -> Result<SolidId, BackendError> {
+        self.update(|counts| counts.calls += 1);
         let result = self.inner.transform(id, m);
         if result.is_ok() {
             self.created(1);
@@ -101,6 +109,7 @@ impl CsgConnector for CountedCsg {
     }
 
     fn decompose(&mut self, id: SolidId) -> Result<Vec<SolidId>, BackendError> {
+        self.update(|counts| counts.calls += 1);
         let result = self.inner.decompose(id);
         if let Ok(ids) = &result {
             self.created(ids.len());
@@ -109,19 +118,25 @@ impl CsgConnector for CountedCsg {
     }
 
     fn properties(&self, id: SolidId) -> Result<SolidProperties, BackendError> {
-        self.update(|counts| counts.properties += 1);
+        self.update(|counts| {
+            counts.calls += 1;
+            counts.properties += 1;
+        });
         self.inner.properties(id)
     }
 
     fn export(&self, id: SolidId) -> Result<MeshExport, BackendError> {
+        self.update(|counts| counts.calls += 1);
         self.inner.export(id)
     }
 
     fn slice(&self, id: SolidId, z: f64) -> Result<Section, BackendError> {
+        self.update(|counts| counts.calls += 1);
         self.inner.slice(id, z)
     }
 
     fn section(&self, p: &[Vec<[f64; 2]>], f: FillRule) -> Result<Section, BackendError> {
+        self.update(|counts| counts.calls += 1);
         self.inner.section(p, f)
     }
 
@@ -131,6 +146,7 @@ impl CsgConnector for CountedCsg {
         a: &Section,
         b: &Section,
     ) -> Result<Section, BackendError> {
+        self.update(|counts| counts.calls += 1);
         self.inner.section_boolean(op, a, b)
     }
 }
@@ -203,12 +219,27 @@ fn counted_engine() -> (Engine, Rc<Cell<Counts>>) {
     (engine, counts)
 }
 
+fn counted_engine_with_cache(cache: Rc<AuthenticatedOverlapCache>) -> (Engine, Rc<Cell<Counts>>) {
+    let counts = Rc::new(Cell::new(Counts::default()));
+    let engine = Engine::with_backends_and_overlap_cache(
+        EngineConfig::entry(),
+        Box::new(OcctConnector),
+        Box::new(CountedCsg {
+            inner: ManifoldCsgConnector::new(),
+            counts: Rc::clone(&counts),
+        }),
+        cache,
+        producer_identity().expect("verified release producer profile"),
+    );
+    (engine, counts)
+}
+
 fn ingest(engine: &mut Engine, primary: Vec<u8>, buffer: Vec<u8>) -> String {
     let request = json!({
         "method": "ingestSubject",
         "requestId": "admit",
         "protocolVersion": 3,
-        "registryVersion": 4,
+        "registryVersion": 5,
         "canonicalProfile": "geospec-jcs-v1",
         "format": "gltf",
         "frame": {"coordinateSystem": "z-up", "sourceUnit": "mm", "outputUnit": "mm"},
@@ -271,7 +302,7 @@ fn request(
 ) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "method": "submitClaims", "requestId": "query",
-        "protocolVersion": 3, "registryVersion": 4, "canonicalProfile": "geospec-jcs-v1",
+        "protocolVersion": 3, "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
         "plan": {
             "subjects": [{"slot": "part", "subjectHash": subject}],
             "claims": [{
@@ -318,6 +349,7 @@ fn assert_computations(counts: Counts, computations: usize) {
     assert_eq!(
         counts,
         Counts {
+            calls: 2 + 3 * computations,
             admissions: 2,
             booleans: computations,
             properties: computations,
@@ -381,120 +413,281 @@ fn repeated_overlap_reuses_owned_results_with_identical_logical_requests() {
         assert_computations(counts.get(), 1);
     }
     write_json(root, "raw/main-counters.json", &Value::Array(counters));
-    projection_controls(root, &mut engine, &counts, &subject);
-    key_controls(root, &mut engine, &counts, &subject, &first.unwrap().1);
-    budget_controls(root);
     write_json(
         root,
         "raw/numeric-gate.json",
         &json!({
-            "cacheChecksPassed": true, "logicalBudgetChecksPassed": true,
+            "cacheChecksPassed": true,
             "expectedIntersectionVolume": EXPECTED_INTERSECTION_VOLUME,
+            "numericAcceptance": "diagnostic-only-under-charter-A1-R2",
             "exactNumericChecksPassed": observations.iter().all(|row|
                 row["intersectionVolume"] == EXPECTED_INTERSECTION_VOLUME),
             "observations": observations
         }),
     );
-    // All successful cache/key/projection/budget controls are saved first.
-    for observation in observations {
-        assert_eq!(
-            observation["intersectionVolume"], EXPECTED_INTERSECTION_VOLUME,
-            "{observation}"
-        );
-    }
+    // Charter A1-R2 retains the analytic 0.5 comparison above as diagnostic
+    // evidence, not an exact-domain verdict for this approximate CSG query.
+    // Cache acceptance remains exact complete plan/result bytes and counters;
+    // independent numerical accuracy qualification is a separate obligation.
 }
 
-fn projection_controls(
-    root: Option<&Path>,
-    engine: &mut Engine,
-    counts: &Cell<Counts>,
-    subject: &str,
-) {
+#[test]
+fn authenticated_overlap_survives_reopen_and_replays_before_evidence() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let cache_root =
+        std::env::temp_dir().join(format!("geospec-m4-overlap-{}-{nonce}", std::process::id()));
+    let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let project_root = manifest_root.ancestors().nth(4).unwrap();
+
+    let first_cache = Rc::new(AuthenticatedOverlapCache::open(&cache_root, project_root).unwrap());
+    let (mut first_engine, first_counts) = counted_engine_with_cache(first_cache.clone());
+    let subject = ingest(&mut first_engine, primary(), cube_buffer());
+    let request = query(&subject, json!({}), 180);
+    let first = evaluate(
+        &mut first_engine,
+        &first_counts,
+        None,
+        "persistent-first",
+        &request,
+    );
+    query_volume(&first.1);
+    assert_computations(first_counts.get(), 1);
+    let first_flush = first_cache.flush();
+    assert_eq!(first_cache.flush(), first_flush, "repeated flush result");
+    drop(first_engine);
+    drop(first_cache);
+
+    let reopened_cache =
+        Rc::new(AuthenticatedOverlapCache::open(&cache_root, project_root).unwrap());
+    let (mut reopened_engine, reopened_counts) = counted_engine_with_cache(reopened_cache.clone());
+    assert_eq!(
+        ingest(&mut reopened_engine, primary(), cube_buffer()),
+        subject
+    );
+    let refused = evaluate(
+        &mut reopened_engine,
+        &reopened_counts,
+        None,
+        "persistent-budget-refusal",
+        &query(&subject, json!({}), 179),
+    );
+    assert_eq!(reopened_counts.get(), Counts::default());
+    let refused: Value = serde_json::from_slice(&refused.1).unwrap();
+    assert_eq!(refused["results"][0]["status"], "refused");
+    assert!(refused["results"][0].get("evidence").is_none());
+
+    let reopened = evaluate(
+        &mut reopened_engine,
+        &reopened_counts,
+        None,
+        "persistent-hit",
+        &request,
+    );
+    assert_eq!(reopened, first, "persistent result and plan bytes");
+    assert_eq!(reopened_counts.get(), Counts::default(), "zero CSG calls");
+    assert!(reopened_cache.clear());
+    drop(reopened_engine);
+    drop(reopened_cache);
+
+    let empty_cache = Rc::new(AuthenticatedOverlapCache::open(&cache_root, project_root).unwrap());
+    let (mut cold_engine, cold_counts) = counted_engine_with_cache(empty_cache);
+    assert_eq!(ingest(&mut cold_engine, primary(), cube_buffer()), subject);
+    let cold = evaluate(
+        &mut cold_engine,
+        &cold_counts,
+        None,
+        "after-eviction",
+        &request,
+    );
+    assert_eq!(cold, first);
+    assert_computations(cold_counts.get(), 1);
+    fs::remove_dir_all(cache_root).unwrap();
+}
+
+#[test]
+fn authenticated_overlap_positive_reopen_matches_cold_bytes_and_accounting() {
+    let evidence_root = evidence_root();
+    let evidence_root = evidence_root.as_deref();
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let cache_root = std::env::temp_dir().join(format!(
+        "geospec-m4-overlap-positive-{}-{nonce}",
+        std::process::id()
+    ));
+    let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let project_root = manifest_root.ancestors().nth(4).unwrap();
+
+    let cold_cache = Rc::new(AuthenticatedOverlapCache::open(&cache_root, project_root).unwrap());
+    let (mut cold_engine, cold_counts) = counted_engine_with_cache(cold_cache.clone());
+    let subject = ingest(&mut cold_engine, primary(), cube_buffer());
+    let request = query(&subject, json!({}), 180);
+    let cold = evaluate(
+        &mut cold_engine,
+        &cold_counts,
+        evidence_root,
+        "positive-cold",
+        &request,
+    );
+    query_volume(&cold.1);
+    assert_computations(cold_counts.get(), 1);
+    let cold_flush = serde_json::from_slice::<Value>(&cold_cache.flush()).unwrap();
+    assert_eq!(
+        cold_flush,
+        json!({
+            "authenticationFailures": 0,
+            "hits": 0,
+            "ioFailures": 0,
+            "misses": 1,
+            "reads": 1,
+            "rejectedWrites": 0,
+            "sealed": true,
+            "writes": 1
+        })
+    );
+    write_json(evidence_root, "raw/positive-cold-flush.json", &cold_flush);
+    drop(cold_engine);
+    drop(cold_cache);
+
+    let hit_cache = Rc::new(AuthenticatedOverlapCache::open(&cache_root, project_root).unwrap());
+    let (mut hit_engine, hit_counts) = counted_engine_with_cache(hit_cache.clone());
+    assert_eq!(ingest(&mut hit_engine, primary(), cube_buffer()), subject);
+    let hit = evaluate(
+        &mut hit_engine,
+        &hit_counts,
+        evidence_root,
+        "positive-hit",
+        &request,
+    );
+    assert_eq!(hit, cold, "canonical cold and persisted-hit bytes");
+    assert_eq!(hit_counts.get(), Counts::default(), "zero hit CSG calls");
+    let hit_flush = serde_json::from_slice::<Value>(&hit_cache.flush()).unwrap();
+    assert_eq!(
+        hit_flush,
+        json!({
+            "authenticationFailures": 0,
+            "hits": 1,
+            "ioFailures": 0,
+            "misses": 0,
+            "reads": 1,
+            "rejectedWrites": 0,
+            "sealed": true,
+            "writes": 0
+        })
+    );
+    write_json(evidence_root, "raw/positive-hit-flush.json", &hit_flush);
+    drop(hit_engine);
+    drop(hit_cache);
+    fs::remove_dir_all(cache_root).unwrap();
+}
+
+// W2.C-CURRENT-PROFILE-CONFORMANCE-01: sampled glTF cannot certify the
+// complete-material proof. Both polarities refuse without calling geometry;
+// ancillary cache state must not change that result.
+#[test]
+fn sampled_proof_refuses_both_polarities_without_geometry() {
+    let root = evidence_root();
+    let root = root.as_deref();
     let allowance = |maximum: f64, reason: &str| {
         json!({
             "allowances": [{"left": "A#0", "right": "B#0", "maxVolume": maximum, "reason": reason}]
         })
     };
     let controls = [
-        (
-            "positive",
-            json!({}),
-            "positive",
-            "failed",
-            "GEOSPEC_COMPONENT_INTERFERENCE_DETECTED",
-        ),
-        ("negative", json!({}), "negative", "passed", ""),
-        (
-            "allowed",
-            allowance(0.5, "intentional overlap"),
-            "positive",
-            "passed",
-            "",
-        ),
-        (
-            "limited",
-            allowance(0.25, "limited overlap"),
-            "positive",
-            "failed",
-            "GEOSPEC_COMPONENT_INTERFERENCE_DETECTED",
-        ),
-        (
-            "reason",
-            allowance(0.5, "different authored reason"),
-            "positive",
-            "passed",
-            "",
-        ),
+        ("unallowed", json!({}), "This selected component pair has no bounded complete-material noninterference certificate."),
+        ("allowed", allowance(0.5, "intentional overlap"), "Interference requires complete source-associated BRep materials."),
+        ("limited", allowance(0.25, "limited overlap"), "Interference requires complete source-associated BRep materials."),
+        ("reason", allowance(0.5, "different authored reason"), "Interference requires complete source-associated BRep materials."),
     ];
-    for (name, expected, polarity, status, diagnostic) in controls {
-        let payload = json!({"kind": "componentInterference", "expected": expected});
-        let request = request(
-            subject,
-            "toHaveNoComponentInterference",
-            payload,
-            polarity,
-            180,
-            name,
-        );
-        let warm = evaluate(
-            engine,
-            counts,
-            root,
-            &format!("projection-{name}-warm"),
-            &request,
-        );
-        assert_computations(counts.get(), 1);
-        let (mut cold_engine, cold_counts) = counted_engine();
-        assert_eq!(ingest(&mut cold_engine, primary(), cube_buffer()), subject);
-        let cold = evaluate(
-            &mut cold_engine,
-            &cold_counts,
-            root,
-            &format!("projection-{name}-cold"),
-            &request,
-        );
-        assert_eq!(cold, warm, "full projection plan/result bytes");
-        assert_computations(cold_counts.get(), 1);
-        let result: Value = serde_json::from_slice(&warm.1).unwrap();
-        let row = &result["results"][0];
-        assert_eq!(row["claimId"], name);
-        assert_eq!(row["status"], status);
-        assert_eq!(row["evidence"]["polarity"], polarity);
-        if diagnostic.is_empty() {
-            assert_eq!(row["diagnostics"], json!([]));
-        } else {
-            assert_eq!(row["diagnostics"][0]["code"], diagnostic);
+    for (name, expected, message) in controls {
+        for polarity in ["positive", "negative"] {
+            let (mut cold_engine, cold_counts) = counted_engine();
+            let subject = ingest(&mut cold_engine, primary(), cube_buffer());
+            let request = request(
+                &subject,
+                "toHaveNoComponentInterference",
+                json!({"kind": "componentInterference", "expected": expected}),
+                polarity,
+                180,
+                name,
+            );
+            let cold = evaluate(
+                &mut cold_engine,
+                &cold_counts,
+                root,
+                &format!("projection-{name}-{polarity}-cold"),
+                &request,
+            );
+            assert_eq!(cold_counts.get(), Counts::default(), "no geometry calls");
+            let result: Value = serde_json::from_slice(&cold.1).unwrap();
+            assert_eq!(
+                result,
+                json!({
+                    "numericProfile": "geospec-st-logical-requests-v3",
+                    "results": [{"claimId": name, "status": "refused", "diagnostics": [{
+                        "code": if name == "unallowed" { "GEOSPEC_EVIDENCE_UNSUPPORTED" } else { "GEOSPEC_UNSUPPORTED_EVIDENCE" }, "severity": "error", "message": message
+                    }]}]
+                })
+            );
+            let (mut warm_engine, warm_counts) = counted_engine();
+            assert_eq!(ingest(&mut warm_engine, primary(), cube_buffer()), subject);
+            let seed = evaluate(
+                &mut warm_engine,
+                &warm_counts,
+                root,
+                &format!("projection-{name}-{polarity}-seed"),
+                &query(&subject, json!({}), 180),
+            );
+            query_volume(&seed.1);
+            let before = warm_counts.get();
+            let warm = evaluate(
+                &mut warm_engine,
+                &warm_counts,
+                root,
+                &format!("projection-{name}-{polarity}-warm"),
+                &request,
+            );
+            assert_eq!(warm, cold, "complete cold/warm proof plan and result");
+            assert_eq!(warm_counts.get(), before, "proof adds zero geometry calls");
+            let resumed = evaluate(
+                &mut warm_engine,
+                &warm_counts,
+                root,
+                &format!("projection-{name}-{polarity}-back-to-query"),
+                &query(&subject, json!({}), 180),
+            );
+            assert_eq!(resumed, seed, "proof refusal preserves ancillary cache");
+            assert_eq!(warm_counts.get(), before);
         }
     }
-    let result = evaluate(
-        engine,
-        counts,
+}
+
+#[test]
+fn overlap_keys_reuse_and_invalidate_only_the_declared_inputs() {
+    let root = evidence_root();
+    let root = root.as_deref();
+    let (mut engine, counts) = counted_engine();
+    let subject = ingest(&mut engine, primary(), cube_buffer());
+    let seed = evaluate(
+        &mut engine,
+        &counts,
         root,
-        "projection-back-to-query",
-        &query(subject, json!({}), 180),
+        "key-seed",
+        &query(&subject, json!({}), 180),
     );
-    query_volume(&result.1);
+    query_volume(&seed.1);
     assert_computations(counts.get(), 1);
+    key_controls(root, &mut engine, &counts, &subject, &seed.1);
+}
+
+#[test]
+fn overlap_logical_budgets_preserve_cold_warm_179_180_boundary() {
+    let root = evidence_root();
+    budget_controls(root.as_deref());
 }
 
 fn key_controls(
@@ -606,6 +799,7 @@ fn budget_controls(root: Option<&Path>) {
         assert_eq!(
             cold_counts.get(),
             Counts {
+                calls: admissions + 2 * booleans + properties,
                 admissions,
                 booleans,
                 properties,

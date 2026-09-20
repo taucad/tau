@@ -15,9 +15,9 @@ use crate::codec::{decode, encode, Json};
 use crate::mesh::Mesh;
 use crate::{ErrorKind, ProtocolError};
 
-const PROTOCOL_VERSION: f64 = 3.0;
-const REGISTRY_VERSION: f64 = 5.0;
-const CANONICAL_PROFILE: &str = "geospec-jcs-v1";
+pub(crate) const PROTOCOL_VERSION: f64 = 3.0;
+pub(crate) const REGISTRY_VERSION: f64 = 5.0;
+pub(crate) const CANONICAL_PROFILE: &str = "geospec-jcs-v1";
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
 use crate::registry::CAPABILITIES;
@@ -43,6 +43,9 @@ pub struct Engine {
     pub(crate) brep: Option<Box<dyn BrepConnector>>,
     pub(crate) csg: RefCell<Option<Box<dyn CsgConnector>>>,
     pub(crate) retained_solids: RefCell<crate::backend::csg_scope::RetainedSolids>,
+    pub(crate) resident_overlaps: Rc<RefCell<crate::analysis::interference::ResidentOverlaps>>,
+    pub(crate) overlap_cache: Option<crate::cache::SharedOverlapEvidenceCache>,
+    pub(crate) producer_identity: Option<Rc<crate::cache::ProducerIdentity>>,
 }
 
 impl Default for Engine {
@@ -53,6 +56,11 @@ impl Default for Engine {
             subject_generations: HashMap::new(),
             owner: next_engine_owner(),
             next_generation: 0,
+            resident_overlaps: Rc::new(RefCell::new(
+                crate::analysis::interference::ResidentOverlaps::new(
+                    config.analysis.max_mesh_bytes,
+                ),
+            )),
             plate_retention: Rc::new(crate::certificates::engine::Retention::new(
                 config.analysis.max_mesh_bytes,
             )),
@@ -61,6 +69,8 @@ impl Default for Engine {
             retained_solids: RefCell::new(crate::backend::csg_scope::RetainedSolids::new(
                 config.analysis.max_solid_entries,
             )),
+            overlap_cache: None,
+            producer_identity: None,
             config,
         }
     }
@@ -82,6 +92,11 @@ impl Engine {
             config.analysis.max_solid_entries,
         ));
         Self {
+            resident_overlaps: Rc::new(RefCell::new(
+                crate::analysis::interference::ResidentOverlaps::new(
+                    config.analysis.max_mesh_bytes,
+                ),
+            )),
             plate_retention: Rc::new(crate::certificates::engine::Retention::new(
                 config.analysis.max_mesh_bytes,
             )),
@@ -93,7 +108,23 @@ impl Engine {
             subject_generations: HashMap::new(),
             owner: next_engine_owner(),
             next_generation: 0,
+            overlap_cache: None,
+            producer_identity: None,
         }
+    }
+
+    /// Composes the native engine with one optional host-owned overlap cache.
+    pub fn with_backends_and_overlap_cache(
+        config: EngineConfig,
+        brep: Box<dyn BrepConnector>,
+        csg: Box<dyn CsgConnector>,
+        cache: crate::cache::SharedOverlapEvidenceCache,
+        producer_identity: crate::cache::ProducerIdentity,
+    ) -> Self {
+        let mut engine = Self::with_backends(config, brep, csg);
+        engine.overlap_cache = Some(cache);
+        engine.producer_identity = Some(Rc::new(producer_identity));
+        engine
     }
 
     pub(crate) fn evaluate_prepared(&self, plan: PreparedPlan) -> Result<Json, ProtocolError> {

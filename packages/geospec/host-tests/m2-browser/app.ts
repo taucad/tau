@@ -364,12 +364,15 @@ const runWarmup = async (
       diagnostics: [...report.diagnostics],
       status: report.status,
     };
-    // A conclusive negative assertion can fail while its setup computation succeeds.
+    // Queries return failed reports normally; failed matchers throw their structured report.
     result.succeeded =
       report.status === setup.expectedStatus &&
       firstResult(result.report.canonicalResultUtf8).status === setup.expectedStatus &&
       ((setup.expectedStatus === 'passed' && result.error === null) ||
-        (setup.expectedStatus === 'failed' && result.error?.assertionError === true));
+        (setup.expectedStatus === 'failed' &&
+          (queryCapabilities.has(setup.invocation.capability as GeoSpecQueryCapability)
+            ? setup.invocation.polarity === 'positive' && result.error === null
+            : result.error?.assertionError === true)));
   } catch (error) {
     result.error = errorRecord(error);
   }
@@ -395,7 +398,10 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
         row.protocolControl !== undefined ||
         !(
           (row.expected.status === 'passed' && row.expected.error === null) ||
-          (row.expected.status === 'failed' && row.expected.error?.name === 'GeoSpecAssertionError')
+          (row.expected.status === 'failed' &&
+            (queryCapabilities.has(row.invocation.capability as GeoSpecQueryCapability)
+              ? row.invocation.polarity === 'positive' && row.expected.error === null
+              : row.expected.error?.name === 'GeoSpecAssertionError'))
         ) ||
         !/^[\da-f]{64}$/.test(row.subjectHash) ||
         !row.expected.bytes?.canonicalClaimUtf8 ||

@@ -335,7 +335,12 @@ const assertCanonicalReportRow = (row: M2BrowserRow): void => {
       row.expected.error?.message === null) &&
     (!(
       (row.expected.status === 'passed' && row.expected.error === null) ||
-      (row.expected.status === 'failed' && row.expected.error?.name === 'GeoSpecAssertionError')
+      (row.expected.status === 'failed' &&
+        (['analyzeMesh', 'analyzeBrep', 'inspectGeometry', 'analyzeMeshOverlap', 'queryPmi'].includes(
+          row.invocation.capability,
+        )
+          ? row.invocation.polarity === 'positive' && row.expected.error === null
+          : row.expected.error?.name === 'GeoSpecAssertionError'))
     ) ||
       !/^[\da-f]{64}$/.test(row.subjectHash))
   ) {

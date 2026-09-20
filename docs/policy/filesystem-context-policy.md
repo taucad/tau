@@ -3,13 +3,14 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-09-13'
+updated: '2026-09-20'
 related:
   - docs/policy/context-engineering-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/research/client-host-topology-and-filesystem-authority.md
   - docs/research/transcript-search-architecture.md
   - docs/research/harness-cache-hygiene-audit.md
+  - docs/research/chat-compaction-safety-blueprint.md
 ---
 
 # Filesystem Context Policy
@@ -59,24 +60,22 @@ Do not add static skill or memory content to the system prompt. Let the middlewa
 
 ### 5. Context Compaction Pipeline
 
-Compaction fires when estimated token count exceeds 85% of the model's context window:
+`packages/agent-host/src/harness/compaction.ts` owns compaction for Tau-hosted sessions. It runs before the first model call of a prompt or resume, between agent turns, and once more if the provider still reports a context overflow. The escalation order is tool-result clearing, then summarizing compaction, per `docs/policy/context-engineering-policy.md`.
 
-1. **Truncate tool args** in old messages (lightweight, no API call)
-2. **Proactive compaction** via native Morph Compact (evict + compact older messages)
-3. **Emergency re-compaction** on `ContextOverflowError` (calibrates estimation multiplier)
+Invariants:
 
-When compaction fires:
+- **Decide over the durable log, never the live array.** Every lane compacts a fresh projection of the session log (the same hydration a reload performs) and then replaces the agent's in-memory history with the result. Do not resolve durable ids from in-memory message objects: the model-call middleware clones messages, so object identity is not message identity. Request-shaped copies (trimmed tool results, rewritten assistant text) never enter durable-facing state.
+- **Compaction wraps the model call outermost**, so an overflow retry re-enters every request-shaping middleware.
+- **One compaction pass per model call.** No ephemeral per-call lane or memo beside the durable lanes.
+- **The log is append-only and a refused compaction leaves it byte-identical.** Run every check before the first append. A pass writes either tool-result clearings or one `history.compacted`, never both, and never a clearing for a row it evicts.
+- **A cut always evicts when more than one message exists.** Tool results are never cut points, retained tool results keep their calls, whole turn clusters are evicted together, and the retained tail is checked against the budget the trigger computed (window − reserve − measured overhead). Both tiers must land at least the keep-recent budget below the trigger threshold, so the next message does not compact again; a summary that falls short escalates the cut in the same pass.
+- **Accept tool-result clearing only when it restores that headroom.** Each clearing invalidates the cached prefix; otherwise go straight to a summary and persist no clearings.
+- **Degrade, do not refuse.** A summarizer that fails, aborts, returns nothing or cannot fit its input yields a placeholder summary that names the evicted range and points at the project files, and the attempt records why. The run's own abort still stops the run. Tau never sends the same unreduced history again, and never partially reconstructs a native provider turn without its provider-required signatures and ids.
+- **Pinned content survives verbatim**: every `<safety>` block is preserved; for the other `keepContextTags` tags the newest instance is preserved and older instances are evictable, so reminders cannot accumulate into an unevictable history.
+- **A compaction failure is a resumable turn failure, not a dead chat.** Compaction codes are resumable, Resume keeps the turn's work, and every attempt records its lane, tier, token counts, eviction count and any discarded overflow response in the existing log events.
+- **The circuit breaker counts only completed summaries that remain over budget.**
 
-- Evicted messages are rendered into a provider-neutral compaction transcript and **appended** (not overwritten) to the unified transcript file
-- A `role: "compaction"` marker event is appended to the transcript
-- A `data-context-compaction` SSE event is emitted to the UI
-- The model call proceeds only after Morph returns a valid compacted `output`, the transcript commit succeeds, and the in-memory graph is rewritten to compacted history plus recent complete turns
-
-All compaction writes use `append`, never `write` (overwrite). Overwrite semantics lose prior transcript data.
-
-Required compaction is fail-closed. Once Tau determines that the provider-visible request must be compacted, Morph transport errors, Morph HTTP errors, invalid Morph response shape, empty compacted output, transcript commit failure, state rewrite failure, or any Tau-authored compaction pipeline invariant failure MUST throw a typed pre-provider error such as `CONTEXT_COMPACTION_FAILED`. Tau MUST NOT continue with the same unreduced history, a tail-only request, or a partial `AIMessage` reconstruction as an implicit fallback.
-
-The compaction transcript renderer is provider-neutral. It preserves user-visible text, tool-call boundaries, tool-result boundaries, file references, and test outcomes, but excludes opaque provider signatures and raw provider reasoning by default. A compacted seed may replace whole old turn clusters; middleware must not partially reconstruct a native provider turn without all provider-required signatures, IDs, and replay metadata.
+Tests for this pipeline drive `createAgentSession` through the real middleware chain; they do not hand-populate `MessageIdentities` (`compaction.safety.test.ts`). Evidence: `docs/research/chat-compaction-safety-blueprint.md`.
 
 ### 6. Middleware Ordering
 

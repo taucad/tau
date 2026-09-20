@@ -261,6 +261,14 @@ describe('KernelWorker lifecycle', () => {
     }
   }
 
+  const storedUnitBearingWidth = defineMiddleware({
+    id: 'storedUnitBearingWidth',
+    name: 'StoredUnitBearingWidth',
+    async wrapCreateGeometry(input, handler) {
+      return handler({ ...input, parameters: { width: '20 in', ...input.parameters } });
+    },
+  });
+
   it('should convert unit-bearing text at the kernel boundary', async () => {
     const worker = new ParameterBoundaryWorker({ middleware: [], onLog: noopLog });
 
@@ -272,6 +280,51 @@ describe('KernelWorker lifecycle', () => {
     expect(result.success).toBe(true);
     expect(worker.receivedParameters?.['width']).toBeCloseTo(508);
     expect(worker.receivedParameters?.['height']).toBe(5);
+  });
+
+  it('should convert stored unit-bearing text and fill defaults on a direct createGeometry', async () => {
+    const worker = new ParameterBoundaryWorker({ middleware: [storedUnitBearingWidth()], onLog: noopLog });
+
+    const result = await worker.createGeometry({ file: createGeometryFile('main.ts'), parameters: {} });
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameters?.['width']).toBeCloseTo(508);
+    expect(worker.receivedParameters?.['height']).toBe(5);
+  });
+
+  it('should rematerialize an export with the converted default-filled parameters', async () => {
+    class ExportParameterBoundaryWorker extends ParameterBoundaryWorker {
+      public readonly receivedParameterHistory: Array<Readonly<Record<string, unknown>>> = [];
+
+      public constructor(options: MockKernelWorkerOptions) {
+        super(options);
+        this.kernelCreateOptionsZodSchemaMap.set('mock-kernel', z.object({ tessellation: z.number() }));
+      }
+
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        this.receivedParameterHistory.push(input.parameters);
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+    const worker = new ExportParameterBoundaryWorker({
+      middleware: [storedUnitBearingWidth()],
+      onLog: noopLog,
+      renderZodSchema: z.object({ tessellation: z.number().default(0.1) }),
+      exportZodSchemas: { gltf: z.object({ tessellation: z.number().default(0.01) }) },
+    });
+
+    await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+    const result = await worker.runExportGeometry('gltf');
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameterHistory).toHaveLength(2);
+    for (const parameters of worker.receivedParameterHistory) {
+      expect(parameters['width']).toBeCloseTo(508);
+      expect(parameters['height']).toBe(5);
+    }
   });
 
   it('should report SEMANTICS_UNRESOLVED for unit-bearing text on a field with no unit', async () => {
@@ -288,6 +341,32 @@ describe('KernelWorker lifecycle', () => {
     }
     expect(result.issues[0]?.code).toBe('SEMANTICS_UNRESOLVED');
     expect(result.issues[0]?.message).toMatch(/\/height.*20 in.*number|unit declaration/iu);
+  });
+
+  it('should pass a string that a mixed numeric-or-string field accepts', async () => {
+    class MixedParameterWorker extends ParameterBoundaryWorker {
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+        return createParameterDeclaration(
+          {},
+          {
+            properties: {
+              stock: {
+                oneOf: [{ type: 'number' }, { type: 'string', enum: ['3mm-plate'] }],
+              },
+            },
+          },
+        );
+      }
+    }
+    const worker = new MixedParameterWorker({ middleware: [], onLog: noopLog });
+
+    const result = await worker.evaluateModel({
+      file: createGeometryFile('main.ts'),
+      parameters: { stock: '3mm-plate' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameters?.['stock']).toBe('3mm-plate');
   });
 
   it('should stop direct, interactive, and export renders when parameter discovery fails', async () => {

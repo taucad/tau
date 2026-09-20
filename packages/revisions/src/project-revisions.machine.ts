@@ -198,6 +198,14 @@ export type ProjectRevisionsMachineContext = Readonly<{
    */
   pendingAdmissions: ReadonlyArray<Readonly<{ turnId: string; chatId: string; runId: string; checkoutId?: string }>>;
   /**
+   * A *New branch* waiting for the selected checkout to record its files.
+   *
+   * A project with no revision yet has nothing to branch from, and the checkout
+   * is the sole minter (F2) — so the root asks it to cut and holds the branch
+   * name here until that cut answers.
+   */
+  pendingBranch: string | undefined;
+  /**
    * Whether the registry has answered at all — announced, or failed.
    *
    * Not `checkouts.length > 0`: a registry that *failed* has no records and
@@ -536,6 +544,21 @@ export const projectRevisionsMachine = setup({
         }
       }
     }),
+    /* The cut a held *New branch* asked for has answered. With nothing minted
+     * the branch still has no base, and the registry's own refusal says so. */
+    settlePendingBranch: enqueueActions(
+      ({ context, enqueue }, params: Readonly<{ checkoutId: string; turnId: string | undefined; from: string }>) => {
+        if (
+          context.pendingBranch === undefined ||
+          params.turnId !== undefined ||
+          params.checkoutId !== context.selectedCheckoutId
+        ) {
+          return;
+        }
+        enqueue.sendTo('checkouts', { type: 'addCheckout', branch: context.pendingBranch, from: params.from });
+        enqueue.assign({ pendingBranch: undefined });
+      },
+    ),
     /*
      * One `resolution` child per conflicted branch head (S33, A38).
      *
@@ -597,6 +620,7 @@ export const projectRevisionsMachine = setup({
     resolutionRefs: {},
     chatCheckouts: {},
     pendingAdmissions: [],
+    pendingBranch: undefined,
     registrySettled: false,
   }),
   invoke: [
@@ -892,6 +916,10 @@ export const projectRevisionsMachine = setup({
         },
         revisionMinted: {
           actions: [
+            {
+              type: 'settlePendingBranch',
+              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: event.revisionId }),
+            },
             enqueueActions(({ context, enqueue, event }) => {
               const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
               if (ref !== undefined) {
@@ -912,6 +940,10 @@ export const projectRevisionsMachine = setup({
          * quitting on a `close` flush waits for. */
         nothingToSave: {
           actions: [
+            {
+              type: 'settlePendingBranch',
+              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: '' }),
+            },
             enqueueActions(({ context, enqueue, event }) => {
               const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
               if (ref !== undefined) {
@@ -923,6 +955,10 @@ export const projectRevisionsMachine = setup({
         },
         cutFailed: {
           actions: [
+            {
+              type: 'settlePendingBranch',
+              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: '' }),
+            },
             enqueueActions(({ context, enqueue, event }) => {
               const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
               if (ref !== undefined) {
@@ -934,6 +970,10 @@ export const projectRevisionsMachine = setup({
         },
         casLost: {
           actions: [
+            {
+              type: 'settlePendingBranch',
+              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: '' }),
+            },
             enqueueActions(({ context, enqueue, event }) => {
               const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
               if (ref !== undefined) {
@@ -1185,14 +1225,23 @@ export const projectRevisionsMachine = setup({
            that, so it fills it here rather than making every caller — the
            picker, the region, `branch.machine` — carry a revision id. */
         addCheckout: {
-          actions: sendTo('checkouts', ({ context, event }) => {
+          actions: enqueueActions(({ context, enqueue, event }) => {
             if (event.from !== '') {
-              return event;
+              enqueue.sendTo('checkouts', event);
+              return;
             }
             const selected = context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
             const head =
               context.checkoutStatus[context.selectedCheckoutId ?? '']?.headRevisionId ?? selected?.headRevisionId;
-            return head === undefined ? event : { ...event, from: head };
+            if (head !== undefined || selected === undefined) {
+              enqueue.sendTo('checkouts', head === undefined ? event : { ...event, from: head });
+              return;
+            }
+            /* No revision yet: a fresh project, which is exactly where the
+               composer's *New branch* is the only way out. Record the files as
+               they stand, then branch from that (`settlePendingBranch`). */
+            enqueue.assign({ pendingBranch: event.branch });
+            enqueue.raise({ type: 'cut', trigger: 'switch', checkoutId: selected.id, leaseIds: [] });
           }),
         },
         removeCheckout: { actions: sendTo('checkouts', ({ event }) => event) },

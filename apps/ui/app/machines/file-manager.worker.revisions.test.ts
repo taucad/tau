@@ -275,6 +275,29 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await project.exists(`.tau/checkouts/alpha/${created?.checkoutId ?? ''}/main.scad`)).toBe(true);
   });
 
+  /* The composer's *New branch* is the only always-reachable way out of a fresh
+   * project (W7 review R1), and a fresh project has no revision: the branch has
+   * to start from the files as they stand, not be refused for lacking a base. */
+  it('should give a branch its own checkout on a project that has no revision yet', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+
+    alpha.send({ command: 'createBranch', name: 'isolated-run' });
+    const root = await fixture.root('alpha');
+    for (let attempt = 0; attempt < 40 && root.status().branches.length < 2; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the registry's own answer.
+      await alpha.settle();
+    }
+
+    expect(alpha.frames.filter((frame) => frame.type === 'error')).toEqual([]);
+    const created = root.status().branches.find((row) => row.name === 'isolated-run');
+    expect(created?.checkoutId).toBeDefined();
+    const checkout = fixture.service.createRootedFileSystem(created?.checkoutRoot ?? '');
+    expect(await checkout.readFile('main.scad', 'utf8')).toBe('cube(10);');
+  });
+
   it('should adopt a daemon revision into the worker projection', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');

@@ -223,7 +223,7 @@ Every runtime error class exposes a stable `code` getter and a realm-safe guard 
 
 `client.connect()` runs the transport handshake and takes **no arguments** — filesystem and signalling concerns are closed over by the transport supplied at construction. Call it explicitly to surface connection failures before the first command; `render` and `export` open the transport as needed. Teardown is `client.terminate(){:ts}`.
 
-The transport carries the scenario. Inline `source.files`, one-shot or live, use `inProcessTransport({ runtime, fileSystem: fromMemoryFs() }){:ts}` ([Quick Start](../getting-started/quick-start)); an on-disk Node project swaps in `fromNodeFs(path){:ts}` ([Set Up the Filesystem](../guides/filesystem-setup)); a browser editor passes `fromFileSystemBridge(() => openFileSystemBridge(fsWorker, { root: '/projects/widget' })){:ts}` to `createWebWorkerClientOptions` ([Embedding in a Host](../guides/embedding-in-a-host)).
+The transport carries the scenario. Inline `source.files`, one-shot or live, use `inProcessTransport({ runtime, fileSystem: fromMemoryFs() }){:ts}` ([Quick Start](../getting-started/quick-start)); an on-disk Node project swaps in `fromNodeFs(path){:ts}` ([Set Up the Filesystem](../guides/filesystem-setup)); a browser editor passes `fromFileSystemBridge(() => openFileSystemBridge(fsWorker, { root: '/projects/widget', consumer: 'working-copy' })){:ts}` to `createWebWorkerClientOptions` ([Embedding in a Host](../guides/embedding-in-a-host)).
 
 ## Usage
 

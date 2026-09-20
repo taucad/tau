@@ -21,8 +21,12 @@ const harness = {
   holdsTurn: false,
   finalize: vi.fn(),
   discard: vi.fn(),
+  prepare: vi.fn(),
+  /** The claim this page holds for the run being settled, if any (E3). */
+  reclaim: vi.fn(),
   retireClaim: vi.fn(),
   reclaimAll: vi.fn(),
+  persistBrowserTurnSettlement: vi.fn(),
   releaseDurableRun: vi.fn(),
   retainDurableRun: vi.fn(),
   reconcileDurableUserMessage: vi.fn(),
@@ -73,7 +77,9 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useChatWorkspaceAuthority: () => ({
     reclaimAll: harness.reclaimAll,
+    reclaim: harness.reclaim,
     retireClaim: harness.retireClaim,
+    prepare: harness.prepare,
     finalize: harness.finalize,
     discard: harness.discard,
   }),
@@ -83,7 +89,11 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getBrowserAgentHostRun: () => harness.browserRun,
   getHostFinalizedTurns: () => harness.finalizedTurns,
-  clearBrowserAgentHostRun: (chatId: string): void => {
+  persistBrowserTurnSettlement: async (event: unknown): Promise<boolean> => {
+    harness.persistBrowserTurnSettlement(event);
+    return true;
+  },
+  retireBrowserAgentHostRun: (chatId: string): void => {
     harness.clearBrowserAgentHostRun(chatId);
   },
 }));
@@ -104,9 +114,12 @@ describe('ProjectChatRunSettlement', () => {
       turnId: 'turn_1',
     };
     harness.reclaimAll.mockResolvedValue([]);
+    /* This page admitted the turn it is settling, so it holds its claim. */
+    harness.reclaim.mockResolvedValue(workspace);
     harness.finalizedTurns = [];
     harness.finalize.mockResolvedValue(undefined);
     harness.discard.mockResolvedValue(undefined);
+    harness.prepare.mockResolvedValue(workspace);
     harness.retireClaim.mockResolvedValue(undefined);
   });
 
@@ -218,6 +231,75 @@ describe('ProjectChatRunSettlement', () => {
       expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
+  });
+
+  /**
+   * E3 / T1 rows 3–5. The run completed and the page died inside the
+   * settlement window, so the lease that fenced the agent's writes was retired
+   * by the root's epoch sweep and the writes sit in the checkout attributed to
+   * nobody. Finalising on return re-leases the turn: the root refuses to lease
+   * a dirty tree and mints it first as a `turn` revision carrying this turn's
+   * id, so the work lands on the turn instead of being swept into whoever
+   * saves next.
+   */
+  it('re-leases and finalises a completed run whose page died before it settled', async () => {
+    harness.reclaim.mockResolvedValue(undefined);
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn();
+
+    await waitFor(() => {
+      expect(harness.prepare).toHaveBeenCalledWith('chat_1', { turnId: 'turn_1', runId: 'run_1' });
+    });
+    expect(harness.finalize).toHaveBeenCalledWith('chat_1', 'run_1');
+    expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  /**
+   * I1/I7. An abandoned run has no lease here, so `discard` retires nothing
+   * and the revision root emits no settlement of its own — and a run with no
+   * settlement is one every later open reconciles all over again. Its outcome
+   * is recorded where every other host settlement lives: the chat's log.
+   */
+  it('records a durable turn.failed for an adopted run nothing here leased', async () => {
+    harness.reclaim.mockResolvedValue(undefined);
+    harness.browserRun = {
+      runId: 'run_1',
+      state: 'failed',
+      eventCount: 4,
+      turnId: 'turn_1',
+      failure: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
+    };
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn('failed');
+
+    await waitFor(() => {
+      expect(harness.persistBrowserTurnSettlement).toHaveBeenCalledWith({
+        type: 'turn.failed',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        turnId: 'turn_1',
+        checkoutId: undefined,
+        reason: 'The host executing this run is gone.',
+      });
+    });
+    expect(harness.finalize).not.toHaveBeenCalled();
+  });
+
+  /* A turn this page admitted settles through its own lease; the root emits
+   * that settlement, so writing a second one here would be a duplicate. */
+  it('leaves a turn it leased itself to the revision root', async () => {
+    harness.browserRun = { runId: 'run_1', state: 'failed', eventCount: 2, turnId: 'turn_1' };
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn('failed');
+
+    await waitFor(() => {
+      expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
+    });
+    expect(harness.persistBrowserTurnSettlement).not.toHaveBeenCalled();
+    expect(harness.prepare).not.toHaveBeenCalled();
   });
 
   it('does not reattach a new local lease before its send starts', async () => {

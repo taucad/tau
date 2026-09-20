@@ -1498,6 +1498,66 @@ describe('ChatSessionStore', () => {
     });
 
     /**
+     * T2-D4 / I7. After a reload the run this page settles is the one the
+     * *host's* log named — the stream resolved it from there — and not whatever
+     * run id reload discovery retained from a workspace claim this document
+     * never wrote. Keying the reconciliation on page memory settled a run the
+     * host does not hold, or none at all.
+     */
+    it('should settle the run the host named, not the one page memory retained', async () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_host_named');
+      const settlements = publishSettlementRecorder('chat_host_named');
+      store.acquire('chat_host_named');
+      // Reload discovery retained a *stale* claim's run; the reattach then
+      // resolved the run the chat's log actually ends on.
+      store.retainDurableRun({ chatId: 'chat_host_named', runId: 'run_stale_claim', state: 'active' });
+      bindDurableChatRun('chat_host_named', 'run_from_host_log');
+
+      harness.created.find((entry) => entry.id === 'chat_host_named')!.finish();
+
+      await vi.waitFor(() => {
+        expect(settlements).toEqual([
+          { chatId: 'chat_host_named', runId: 'run_from_host_log', leaseTurnId: undefined, outcome: 'completed' },
+        ]);
+      });
+    });
+
+    /**
+     * I4/I7. A takeover records an abandoned run as `failed` and never drives
+     * it, so the reattach that found it closes cleanly — nothing aborted and
+     * nothing errored. Reading the SDK's own flags then settled that run as
+     * *completed*, which asks the revision root to record a dead turn's writes
+     * as its revision. How the run ended is the host's fact.
+     */
+    it('should settle an abandoned run as failed, not as the clean stream it replayed', async () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_abandoned');
+      const settlements = publishSettlementRecorder('chat_abandoned');
+      const abandoned = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
+        runId: 'run_abandoned',
+        state: 'failed',
+        eventCount: 4,
+        failure: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
+      });
+
+      try {
+        store.acquire('chat_abandoned');
+        bindDurableChatRun('chat_abandoned', 'run_abandoned');
+
+        harness.created.find((entry) => entry.id === 'chat_abandoned')!.finish();
+
+        await vi.waitFor(() => {
+          expect(settlements).toEqual([
+            { chatId: 'chat_abandoned', runId: 'run_abandoned', leaseTurnId: undefined, outcome: 'failed' },
+          ]);
+        });
+      } finally {
+        abandoned.mockRestore();
+      }
+    });
+
+    /**
      * V5: a run outlives the view that started it. Navigating away and back
      * gives the chat a *new* session actor while its run is still in flight;
      * an actor that starts `idle` there admits a second turn over a live one,

@@ -23,6 +23,8 @@ import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { captureFilesToDataUrls } from '#services/headless-capture.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
+import { armChatTurnHold, releaseChatTurnHold } from '#chat-clients/_internal/chat-host-binding.js';
+import type { ChatTurnHold } from '#chat-clients/_internal/chat-host-binding.js';
 
 type SectionPlane = Readonly<{ point: readonly [number, number, number]; normal: readonly [number, number, number] }>;
 
@@ -31,6 +33,14 @@ type DebugProbeGlobals = {
   __tauGeoSpecReady?: () => boolean;
   __tauCaptureImages?: (input: CaptureImagesRpcInput) => Promise<CaptureImagesRpcResult>;
   __tauCaptureSectionPlanePair?: () => Promise<{ onePlane: string; twoPlanes: string }>;
+  /**
+   * Park the chat's next admission or settlement, so a row can make a gesture,
+   * a reload or a stop land inside `run.queued.admitting` or `run.finishing.*`.
+   * @see armChatTurnHold
+   */
+  __tauHoldChatTurn?: (hold: ChatTurnHold) => void;
+  /** Let a parked admission or settlement carry on. @see releaseChatTurnHold */
+  __tauReleaseChatTurn?: (hold: ChatTurnHold) => void;
 };
 
 const probeGlobals = globalThis as DebugProbeGlobals;
@@ -133,12 +143,22 @@ export function DebugProbes(): ReactNode {
         twoPlanes: await render([first, { point: [0, 0, 0], normal: [0, 1, 0] }]),
       };
     };
+    probeGlobals.__tauHoldChatTurn = armChatTurnHold;
+    probeGlobals.__tauReleaseChatTurn = releaseChatTurnHold;
     return () => {
       void geoSpecClient?.close();
       delete probeGlobals.__tauRunGeoSpec;
       delete probeGlobals.__tauGeoSpecReady;
       delete probeGlobals.__tauCaptureImages;
       delete probeGlobals.__tauCaptureSectionPlanePair;
+      /* Nothing else can release these: a hold left armed by a chat switch or
+       * a route unmount would park the next turn with no probe left to let it
+       * go. A row that wants one across a reload arms it again on the new
+       * document, where this module's state starts empty anyway. */
+      releaseChatTurnHold('admission');
+      releaseChatTurnHold('settlement');
+      delete probeGlobals.__tauHoldChatTurn;
+      delete probeGlobals.__tauReleaseChatTurn;
     };
   }, []);
 

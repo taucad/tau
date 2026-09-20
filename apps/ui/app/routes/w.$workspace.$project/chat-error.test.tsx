@@ -259,6 +259,28 @@ describe('ChatError', () => {
     expect(continueChat).toHaveBeenCalledTimes(1);
   });
 
+  /* T2-D11. A resume the host cannot honour is not a failure: the turn is
+   * whole and nothing was spent. Left to the generic block it read as one —
+   * a red banner with a collapsible stack trace over a message that says
+   * there is nothing to continue. */
+  it('should say a resume has nothing left to continue rather than report a failure', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'This turn has nothing left to continue. Send it again to start a new one.',
+      code: 'RESUME_UNAVAILABLE',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Nothing left to continue')).toBeInTheDocument();
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
     const quota: ChatErrorPayload = {
       category: errorCategory.rateLimit,

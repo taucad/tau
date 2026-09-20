@@ -65,7 +65,22 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
    * lease before this resolves — a turn that cannot be placed is refused rather
    * than run unrecorded (I-EDIT).
    */
-  prepare: (chatId: string, options?: { readonly turnId?: string }) => Promise<PreparedChatWorkspace>;
+  prepare: (
+    chatId: string,
+    options?: {
+      readonly turnId?: string;
+      /**
+       * The run this lease belongs to, when the host already holds it.
+       *
+       * A continuation is a second attempt at the run the host is still
+       * carrying (I1), so its lease must be keyed by that run and not by a
+       * fresh one — `drop` refuses a release that does not name the claim's
+       * current run, and a claim minted under a new id could never be retired
+       * by the settlement of the run it actually fenced.
+       */
+      readonly runId?: string;
+    },
+  ) => Promise<PreparedChatWorkspace>;
   /**
    * Say this chat exists to resolve one conflicted revision (S33, AC14).
    *
@@ -605,9 +620,26 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   );
 
   const prepare = useCallback(
-    async (chatId: string, options?: { readonly turnId?: string }): Promise<PreparedChatWorkspace> => {
+    async (
+      chatId: string,
+      options?: { readonly turnId?: string; readonly runId?: string },
+    ): Promise<PreparedChatWorkspace> => {
       const current = state.turns.get(chatId);
       if (current) {
+        /* The claim this chat holds *is* the turn's, so reusing it is right —
+         * unless the caller named a run and this claim is not it. Handing back
+         * a claim keyed by a different run would fence the continuation's
+         * writes under the wrong id, and its settlement would then name a run
+         * `drop` is not holding. Refused rather than mis-keyed: the admission
+         * routes this to the chat's banner. */
+        if (options?.runId !== undefined && current.prepared.runId !== options.runId) {
+          throw Object.assign(
+            new Error(
+              `Chat ${chatId} is still holding a workspace for run ${current.prepared.runId ?? '(none)'}, so run ${options.runId} cannot continue over it.`,
+            ),
+            { code: 'CHAT_CLAIM_RUN_MISMATCH' },
+          );
+        }
         return current.prepared;
       }
       const inFlight = state.pending.get(chatId);
@@ -621,8 +653,9 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         await ensureProviderCapabilities(state.binding);
         /* The lease key is also the host request id. Mint it before admission
          * so the revision settlement and chat lifecycle can only name the same
-         * run. */
-        const runId = generatePrefixedId(idPrefix.run);
+         * run — unless the caller is continuing a run the host already holds,
+         * whose id this lease has to carry instead. */
+        const runId = options?.runId ?? generatePrefixedId(idPrefix.run);
         const leaseTurnId = options?.turnId ?? runId;
         state.placing.set(chatId, { leaseTurnId, runId });
         const conflict = state.conflicts.get(chatId);

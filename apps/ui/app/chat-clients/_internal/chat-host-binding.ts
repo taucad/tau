@@ -183,6 +183,8 @@ export const clearChatTurnServices = (chatId: string): void => {
 export const resetChatTurnServices = (): void => {
   admissionsByChat.clear();
   settlementsByChat.clear();
+  releaseChatTurnHold('admission');
+  releaseChatTurnHold('settlement');
 };
 
 /**
@@ -245,6 +247,55 @@ const awaitTurnService = async <T>(
   });
 };
 
+/** The two points an e2e row can park a chat's turn at. @public */
+export type ChatTurnHold = 'admission' | 'settlement';
+
+const holds = new Map<ChatTurnHold, PromiseWithResolvers<void>>();
+
+/**
+ * Park this chat's next admission or settlement until it is released.
+ *
+ * `TAU_DEBUG` only, and armed only through the debug probes, because the two
+ * states a browser row most needs to observe — `run.queued.admitting` and
+ * `run.finishing.*` — are the two it cannot hold open from the outside: the
+ * admission window is microseconds long and the settlement runs after the
+ * stream the row is watching has already closed. Holding them is the only way
+ * a row can make a gesture, a reload or a stop land *inside* them.
+ *
+ * Global rather than per chat: a row drives one chat.
+ *
+ * The gate is the caller, not a flag read here: `DebugProbes` is the only
+ * thing in the app that arms a hold, and `ChatInterfaceSessionGate` mounts it
+ * only under `ENV.TAU_DEBUG`. Nothing arms one in a production bundle, so the
+ * wait below is a map lookup that finds nothing.
+ *
+ * @param hold - Which point to park at.
+ * @public
+ */
+export const armChatTurnHold = (hold: ChatTurnHold): void => {
+  if (holds.has(hold)) {
+    return;
+  }
+  holds.set(hold, Promise.withResolvers<void>());
+};
+
+/**
+ * Let a parked admission or settlement carry on.
+ *
+ * @param hold - The point to release; releasing one that was never armed is a
+ *   no-op, so a row's cleanup never has to ask.
+ * @public
+ */
+export const releaseChatTurnHold = (hold: ChatTurnHold): void => {
+  holds.get(hold)?.resolve();
+  holds.delete(hold);
+};
+
+/** Wait out a debug hold; nothing armed is one map lookup. */
+const awaitChatTurnHold = async (hold: ChatTurnHold): Promise<void> => {
+  await holds.get(hold)?.promise;
+};
+
 /**
  * The chat's admission, as `chatSessionMachine.run.queued` invokes it.
  *
@@ -262,6 +313,7 @@ export const chatTurnAdmission = fromSafeAsync<
   if (admit === undefined) {
     throw new Error('This chat is not ready to run a turn yet.');
   }
+  await awaitChatTurnHold('admission');
   const turn = await admit(input.gesture);
   if (signal.aborted) {
     /* Under a bound of its own, not this actor's signal: that signal is already
@@ -293,5 +345,6 @@ export const chatTurnAdmission = fromSafeAsync<
  */
 export const chatTurnSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input, signal }) => {
   const settle = await awaitTurnService(settlementsByChat, input.chatId, signal);
+  await awaitChatTurnHold('settlement');
   await settle?.(input);
 });

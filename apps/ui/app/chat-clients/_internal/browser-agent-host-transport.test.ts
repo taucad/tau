@@ -8,15 +8,15 @@ import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
-  clearBrowserAgentHostRun,
+  retireBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
-  isBrowserAgentHostRunResumable,
   persistBrowserTurnSettlement,
   recordHostTurnSettlement,
   registerAgentHost,
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
+  resumableBrowserAgentHostRunId,
   resolveBrowserAgentHostInterrupt,
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
@@ -296,7 +296,7 @@ describe('BrowserPlacementChatTransport', () => {
 
     /* What project settlement does the moment it finalizes the turn. The
      * stream is still subscribed, waiting out this run's settlement. */
-    clearBrowserAgentHostRun(chatId);
+    retireBrowserAgentHostRun(chatId, runId);
     listener?.(chatId, {
       version: 1,
       leaderEpoch: 'leader-cleared',
@@ -1054,7 +1054,7 @@ describe('BrowserPlacementChatTransport', () => {
     });
     // The store's `continue` dispatch answers the Resume the credits card
     // offers, and reads the same answer before choosing its verb.
-    expect(isBrowserAgentHostRunResumable(chatId)).toBe(true);
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
     requestBrowserAgentHostResume(chatId);
     await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
 
@@ -1065,6 +1065,88 @@ describe('BrowserPlacementChatTransport', () => {
     await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
 
     expect(client.resume).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  /*
+   * T3-D8. A settlement retires this page's record of the run — it is the
+   * page's live bookkeeping and the turn is over — but resumability is a fact
+   * about the *host's* run, and it survives that. Reading it from the retired
+   * record made every *Try again* after a credit refusal a full re-admission:
+   * a new lease, a new run id and a rewind, which pays a second time for the
+   * tool work the customer already paid for.
+   */
+  it('keeps a credit-refused run resumable after settlement retires the page record', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refused-settled';
+    const runId = 'run-refused-settled';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-refused-settled',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+      /* The admission is answered as soon as the run is admitted — long before
+       * the model call the gateway refuses — so the failure reaches a live turn
+       * on the run's own terminal row and never in a snapshot. */
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          ...base,
+          sequence: 1,
+          type: 'run.lifecycle',
+          state: 'failed',
+          detail: {
+            message: 'Insufficient Tau credit for this model request.',
+            code: 'INSUFFICIENT_CREDIT',
+            status: 402,
+          },
+        } satisfies AgentLogEvent);
+        return { chatId, runId, turnId: 'user-refused-settled', state: 'running', messages: [] } as const;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refused-settled',
+        backend: 'opfs',
+        providerBasePath: 'project-refused-settled',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [{ id: 'user-refused-settled', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+      abortSignal: undefined,
+      body: {
+        admission: { version: 1, idempotencyKey: runId },
+        browserHost: { trigger: 'submit', agent: { kind: 'acp', id: 'codex' } },
+      },
+    });
+    await drain(stream.getReader());
+
+    expect(getBrowserAgentHostRun(chatId)).toMatchObject({
+      runId,
+      state: 'failed',
+      failure: { code: 'INSUFFICIENT_CREDIT' },
+    });
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
+
+    // The turn settled: the page's own record of the run is retired with it.
+    retireBrowserAgentHostRun(chatId, runId);
+
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
     unregister();
   });
 
@@ -1109,7 +1191,7 @@ describe('BrowserPlacementChatTransport', () => {
     ).rejects.toMatchObject({ code: 'RESUME_UNAVAILABLE' });
 
     expect(client.resume).not.toHaveBeenCalled();
-    expect(isBrowserAgentHostRunResumable(chatId)).toBe(false);
+    expect(resumableBrowserAgentHostRunId(chatId)).toBeUndefined();
     unregister();
   });
 
@@ -2001,10 +2083,12 @@ describe('BrowserPlacementChatTransport', () => {
         abortSignal: undefined,
         body: browserBody({ runId, trigger: 'submit' }),
       });
-      const drained = drain(stream.getReader());
+      /* Observed before the clock moves: the bound rejects inside the advance,
+       * and a rejection nothing is watching yet is reported as unhandled. */
+      const refusal = expect(drain(stream.getReader())).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
       await vi.advanceTimersByTimeAsync(31_000);
 
-      await expect(drained).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+      await refusal;
       /* Once: the unrelated run ending at 1 s is not this run ending, so it
        * never released the wait into a second admission. */
       expect(client.start).toHaveBeenCalledOnce();
@@ -2601,7 +2685,7 @@ describe('BrowserPlacementChatTransport attachments', () => {
     } finally {
       consoleError.mockRestore();
       unregister();
-      clearBrowserAgentHostRun(chatId);
+      retireBrowserAgentHostRun(chatId, runId);
     }
   });
 });

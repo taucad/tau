@@ -40,6 +40,17 @@ describe('private documentation symlinks', () => {
     expect(privateDocumentationIssues(root)).toEqual([]);
   });
 
+  it('should accept an instruction link to a private directory whose checkout is absent', () => {
+    const root = fixture();
+    mkdirSync(resolve(root, 'docs'), { recursive: true });
+    for (const name of ['handbooks', 'incidents', 'reference', 'research']) {
+      symlinkSync(`../repos/tau-brain/${name}`, resolve(root, `docs/${name}`));
+    }
+    write(root, 'AGENTS.md', '# Agents\n\n[handbooks](docs/handbooks) and [a page](docs/incidents/index.md)\n');
+    stage(root);
+    expect(validateAgentConfig(root).issues.filter((issue) => issue.includes('broken local link'))).toEqual([]);
+  });
+
   it('should reject a real directory that publishes private documentation', () => {
     const root = fixture();
     write(root, 'docs/handbooks/cloud/index.md', '# Cloud\n');

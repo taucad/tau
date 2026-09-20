@@ -1,6 +1,7 @@
-"""Execute exact verdict/campaign functions only; never import the installed pytest module."""
+"""Execute exact harness AST with inert dependencies; never import product modules."""
 import ast
 import copy
+from hashlib import sha256
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,13 +9,14 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().with_name('test_installed.py')
-NAMES = {'run_installed_campaign', '_compare_verdict', 'test_should_exercise_complete_selected_corpus_through_installed_pytest'}
+NAMES = {'run_installed_campaign', '_compare_verdict', 'test_should_exercise_complete_selected_corpus_through_installed_pytest',
+         '_RecordingNativeEngine', 'run_installed_row', '_byte_record', '_binary_record', '_error_record'}
 tree = ast.parse(SOURCE.read_text())
-selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in NAMES]
+selected = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in NAMES]
 assert {node.name for node in selected} == NAMES
 # Future annotations prevent loading product types. Bodies below are the exact source AST.
 module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), *selected], type_ignores=[])
-namespace = {'json': json, 'Path': Path}
+namespace = {'json': json, 'Path': Path, 'sha256': sha256}
 exec(compile(ast.fix_missing_locations(module), str(SOURCE), 'exec'), namespace)
 compare = namespace['_compare_verdict']
 
@@ -29,10 +31,87 @@ def outcome(status='passed'):
         'canonicalPlan': {'utf8': '{"plan":{"claims":[{"claimId":"ordinary-box-volume"}]}}'},
         'canonicalResult': {'utf8': json.dumps({'results': [{'claimId': ROW['claimId'], 'status': status}]})}},
         'error': None if status == 'passed' else {'assertionError': True, 'structuredGeoSpec': {'claimId': ROW['claimId'], 'status': status}},
-        'stages': {'cleanup': {'status': 'released'}}}
+        'stages': {'cleanup': {'status': 'released', 'error': None, 'close': 'GeoSpecEngine.close',
+                               'nativeClose': [{'operation': 'close', 'succeeded': True}]}}}
 
 
 class VerdictTests(unittest.TestCase):
+    def test_native_close_requires_successful_forwarding_not_a_facade_label(self):
+        for closes in [[], [{'succeeded': False}], [{'succeeded': True, 'error': {'message': 'close failed'}}]]:
+            captured = outcome()
+            captured['stages']['cleanup']['nativeClose'] = closes
+            self.assertIn('native-close', compare(ROW, captured)['hardFailures'])
+
+    def test_row_cleanup_forwards_release_flush_close_and_preserves_first_error(self):
+        for release_error, close_error in [(False, False), (True, False), (True, True), (False, True)]:
+            with self.subTest(release_error=release_error, close_error=close_error):
+                events = []
+                inert = dict(namespace)
+                exec(compile(ast.fix_missing_locations(module), str(SOURCE), 'exec'), inert)
+
+                class InertNative:
+                    def release_subject(self, request):
+                        events.append('release')
+                        if release_error:
+                            raise ValueError('inert subject release error')
+                        return b'{"result":{"released":true}}'
+
+                    def flush_cache(self):
+                        events.append('flush')
+                        return b'{"persisted":false}'
+
+                    def close(self):
+                        events.append('native-close')
+                        if close_error:
+                            raise RuntimeError('inert native close error')
+
+                class InertFacade:
+                    def __init__(self, *, native_engine, **options):
+                        self.recorder = native_engine
+
+                    def ingest_subject(self, primary, **options):
+                        return SimpleNamespace(identity_field='subjectHash', identity='inert-subject',
+                                               close=lambda: self.recorder.release_subject(b'{}'))
+
+                    def close(self):
+                        self.recorder.flush_cache()
+                        self.recorder.close()
+
+                inert.update({
+                    'GeoSpecEngine': InertFacade,
+                    'GeoSpecAssertionError': type('InertAssertionError', (Exception,), {}),
+                    '_read_fixture': lambda fixture: b'inert',
+                    '_evaluate_row': lambda recorder, subject, row: (outcome()['report'], None),
+                    '_report_record': lambda report: report,
+                })
+                row = {**ROW, 'workUnitBudget': 1, 'identityField': 'subjectHash',
+                       'expectedIdentity': 'inert-subject', 'subjectSlot': 'part', 'authoring': {},
+                       'subject': {'primary': {}, 'resources': []},
+                       'admission': {'format': 'step', 'ingestOptions': {},
+                                     'frame': {'coordinateSystem': 'z-up', 'sourceUnit': 'auto', 'outputUnit': 'mm'}}}
+                captured = inert['run_installed_row'](SimpleNamespace(Engine=InertNative), row, 'inert')
+                self.assertEqual(['release', 'flush', 'native-close'], events)
+                cleanup = captured['stages']['cleanup']
+                self.assertEqual(1, len(cleanup['nativeClose']))
+                self.assertEqual(not close_error, cleanup['nativeClose'][0]['succeeded'])
+                self.assertEqual('{"persisted":false}', cleanup['cacheFlush'][0]['output']['utf8'])
+                self.assertEqual(None if close_error else 'GeoSpecEngine.close', cleanup['close'])
+                self.assertEqual(outcome()['report'], captured['report'])
+                if release_error or close_error:
+                    self.assertEqual('cleanup-error', cleanup['status'])
+                    self.assertEqual('ValueError' if release_error else 'RuntimeError', cleanup['error']['name'])
+                    self.assertEqual('inert subject release error' if release_error else 'inert native close error',
+                                     cleanup['error']['message'])
+                    self.assertIn('cleanup', inert['_compare_verdict'](row, captured)['hardFailures'])
+                else:
+                    self.assertEqual('released', cleanup['status'])
+                    self.assertIsNone(cleanup['error'])
+                    self.assertEqual([], inert['_compare_verdict'](row, captured)['hardFailures'])
+                if close_error:
+                    self.assertEqual('RuntimeError', cleanup['nativeClose'][0]['error']['name'])
+                    self.assertEqual('inert native close error', cleanup['nativeClose'][0]['error']['message'])
+                    self.assertIn('native-close', inert['_compare_verdict'](row, captured)['hardFailures'])
+
     def test_wrong_verdict_and_missing_report_fail_without_result_golden(self):
         self.assertIn('expected-status', compare(ROW, outcome('failed'))['hardFailures'])
         missing = outcome()

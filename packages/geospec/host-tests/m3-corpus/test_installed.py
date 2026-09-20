@@ -131,6 +131,19 @@ class _RecordingNativeEngine:
             "evaluatePlan", plan, lambda: self.native.evaluate_plan(plan)
         )
 
+    def flush_cache(self) -> bytes:
+        return self._forward("flushCache", b"", self.native.flush_cache)
+
+    def close(self) -> None:
+        record: dict[str, object] = {"operation": "close", "succeeded": False}
+        self.calls.append(record)
+        try:
+            self.native.close()
+        except BaseException as error:
+            record["error"] = _error_record(error)
+            raise
+        record["succeeded"] = True
+
 
 def _read_fixture(fixture: dict[str, object]) -> bytes:
     value = Path(str(fixture["path"])).read_bytes()
@@ -313,17 +326,25 @@ def run_installed_row(native_module: Any, row: dict[str, object], route: str) ->
         route_state = f"{route_state}-error"
     finally:
         cleanup_error = None
+        engine_close_succeeded = False
         try:
             if subject is not None:
                 subject.close()
-            if engine is not None:
-                engine.close()
         except BaseException as error:
             cleanup_error = _error_record(error)
+        try:
+            if engine is not None:
+                engine.close()
+                engine_close_succeeded = True
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = _error_record(error)
     initialize = [call for call in recorder.calls if call["operation"] == "processRequest"]
     admissions = [call for call in recorder.calls if call["operation"] == "ingestSubject"]
     handles = [call for call in recorder.calls if call["operation"] == "subjectHandle"]
     releases = [call for call in recorder.calls if call["operation"] == "releaseSubject"]
+    closes = [call for call in recorder.calls if call["operation"] == "close"]
+    flushes = [call for call in recorder.calls if call["operation"] == "flushCache"]
     cleanup_status = "cleanup-error"
     if cleanup_error is None:
         cleanup_status = (
@@ -362,7 +383,9 @@ def run_installed_row(native_module: Any, row: dict[str, object], route: str) ->
             "cleanup": {
                 "status": cleanup_status,
                 "calls": releases,
-                "close": "GeoSpecEngine.close",
+                "close": "GeoSpecEngine.close" if engine_close_succeeded else None,
+                "nativeClose": closes,
+                "cacheFlush": flushes,
                 "error": cleanup_error,
             },
         },
@@ -422,8 +445,17 @@ def _compare_verdict(row: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
             )
             if not structured:
                 hard_failures.append("unstructured-assertion-error")
-    if outcome.get("stages", {}).get("cleanup", {}).get("status") != "released":
+    cleanup = outcome.get("stages", {}).get("cleanup", {})
+    if cleanup.get("status") != "released" or cleanup.get("error") is not None:
         hard_failures.append("cleanup")
+    closes = cleanup.get("nativeClose", [])
+    if (
+        cleanup.get("close") != "GeoSpecEngine.close"
+        or len(closes) != 1
+        or closes[0].get("succeeded") is not True
+        or closes[0].get("error") is not None
+    ):
+        hard_failures.append("native-close")
     return {
         "expectedStatus": status if known else None,
         "statusEqual": status_equal,

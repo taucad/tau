@@ -10,6 +10,10 @@ Optional env: GEOSPEC_DELIVERY_CACHE, GEOSPEC_DELIVERY_RUST_PREFIX,
 GEOSPEC_DELIVERY_EMSDK_PREFIX (existing tools are read-only), GEOSPEC_OCCT_JOBS.
 GEOSPEC_OCCT_PRODUCER_BUILDER selects preserved builder source for existing
 prefix verification only; new prefixes always execute the current builder.
+GEOSPEC_OCCT_PRODUCER_RECIPE selects original recipe bytes for a retained prefix;
+new prefixes retain their recipe beside the receipt. Neither receipt is rewritten.
+GEOSPEC_OCCT_JOBS defaults to 2; CARGO_BUILD_JOBS, EMCC_CORES and BINARYEN_CORES
+default to that bound. All four scheduling controls must be positive integers.
 GEOSPEC_GIT selects the exact Git executable, including verifier subprocesses.
 All default paths derive from this checkout, with no Brain/spike dependency.
 Exit: 0 success; 1 unavailable/not-ready/invalid; 2 argument error.
@@ -39,6 +43,7 @@ MIXED = CACHE / 'occt-mixed/install'
 PACKAGE_SKIP = {'target', 'node_modules', '.git', '__pycache__', 'out-tsc'}
 PREFIX_RECEIPT_SCHEMA = 'geospec-occt-prefix-receipt-v2'
 PREFIX_CACHE_OUTPUTS = ('build/CMakeCache.txt', 'static-toolkit-closure.txt')
+SCHEDULING_VARIABLES = ('GEOSPEC_OCCT_JOBS', 'CARGO_BUILD_JOBS', 'EMCC_CORES', 'BINARYEN_CORES')
 
 
 def digest(path):
@@ -221,7 +226,16 @@ def prepare_tools():
     print(json.dumps(metadata, indent=2))
 
 
+def scheduling_environment():
+    jobs = os.environ.get('GEOSPEC_OCCT_JOBS', '2')
+    selected = {name: os.environ.get(name, jobs) for name in SCHEDULING_VARIABLES}
+    for name, value in selected.items():
+        require(re.fullmatch(r'[1-9][0-9]*', value) is not None, f'{name} must be a positive integer')
+    return selected
+
+
 def environment(paths, write_config=True):
+    scheduling = scheduling_environment()
     config = CACHE / 'emscripten.config'
     text = '\n'.join(f'{key} = {str(value)!r}' for key, value in {
         'LLVM_ROOT': SDK / 'bin', 'BINARYEN_ROOT': SDK, 'EMSCRIPTEN_ROOT': SDK / 'emscripten',
@@ -238,6 +252,7 @@ def environment(paths, write_config=True):
         'EM_CONFIG': str(config), 'EM_CACHE': str(CACHE / 'em-cache'),
         'PYTHONDONTWRITEBYTECODE': '1',
         'GEOSPEC_GIT': str(paths['git']),
+        **scheduling,
     }
 
 
@@ -295,6 +310,20 @@ def producer_builder():
     return Path(os.environ.get('GEOSPEC_OCCT_PRODUCER_BUILDER', PACKAGE / 'native/occt/build-occt.sh')).resolve()
 
 
+def producer_recipe(prefix):
+    retained = prefix / 'selected-delivery.json'
+    return Path(os.environ.get('GEOSPEC_OCCT_PRODUCER_RECIPE',
+                               retained if retained.is_file() else RECIPE_PATH)).resolve()
+
+
+def prefix_sources(recipe, kind):
+    # Header archives affect the mixed prefix through its explicit CMake paths.
+    # Other effective recipe selections are already materialized in the contract.
+    return {'occt': recipe['occt']['sha256'],
+            'headers': {name: item['sha256'] for name, item in recipe['headers'].items()}
+            if kind == 'mixed' else {}}
+
+
 def prefix_contract(kind, paths, env, context, producing_builder=None):
     options = [f'-DCMAKE_C_COMPILER={context["compiler"]["clang"]}',
                f'-DCMAKE_CXX_COMPILER={context["compiler"]["clang++"]}',
@@ -347,12 +376,34 @@ def create_prefix_receipt(prefix, contract):
     }
 
 
-def verify_prefix(prefix, contract):
+def verify_prefix(prefix, contract, recipe_path=None):
     receipt_path = prefix / 'prefix-receipt.json'
     require(receipt_path.is_file(), f'Missing prefix receipt: {receipt_path}')
     receipt = json.loads(receipt_path.read_text())
+    recipe_path = recipe_path or producer_recipe(prefix)
+    require(recipe_path.is_file() and digest(recipe_path) == receipt.get('recipeSha256'),
+            f'Original prefix recipe bytes required: {recipe_path}')
+    recorded_recipe = json.loads(recipe_path.read_text())
+    require(prefix_sources(recorded_recipe, contract['kind']) == prefix_sources(RECIPE, contract['kind']),
+            f'Prefix source selection changed: {prefix}')
     for name, expected in contract.items():
-        require(receipt.get(name) == expected, f'Prefix receipt {name} changed: {prefix}')
+        if name == 'recipeSha256':
+            # Historical provenance is checked above. Compatibility uses every
+            # effective field, including source selections absent from old receipts.
+            continue
+        actual = receipt.get(name)
+        if name == 'environment':
+            # Scheduling changes physical work only. Keep recorded values intact;
+            # every non-scheduling environment value still requires exact equality.
+            for environment_values in [actual, expected]:
+                require(isinstance(environment_values, dict), f'Missing prefix environment: {prefix}')
+                for variable in SCHEDULING_VARIABLES:
+                    if variable in environment_values:
+                        require(re.fullmatch(r'[1-9][0-9]*', environment_values[variable]) is not None,
+                                f'{variable} must be a positive integer')
+            actual = {key: value for key, value in actual.items() if key not in SCHEDULING_VARIABLES}
+            expected = {key: value for key, value in expected.items() if key not in SCHEDULING_VARIABLES}
+        require(actual == expected, f'Prefix receipt {name} changed: {prefix}')
     cache_outputs = receipt.get('cacheOutputs')
     require(isinstance(cache_outputs, dict) and set(cache_outputs) == set(PREFIX_CACHE_OUTPUTS),
             f'Prefix receipt cache outputs changed: {prefix}')
@@ -395,15 +446,16 @@ def prepare_prefix(kind, paths, env, context):
     build_env = {
         **contract['environment'],
         'GEOSPEC_OCCT_CACHE': str(attempt),
-        'GEOSPEC_OCCT_JOBS': os.environ.get('GEOSPEC_OCCT_JOBS', '2'),
+        **scheduling_environment(),
     }
     print('+ ' + ' '.join(contract['command']), file=sys.stderr, flush=True)
     subprocess.run(contract['command'], cwd=ROOT, env=build_env, check=True)
+    shutil.copyfile(RECIPE_PATH, attempt / 'selected-delivery.json')
     write_json(attempt / 'prefix-receipt.json', create_prefix_receipt(attempt, contract))
-    verify_prefix(attempt, contract)
+    verify_prefix(attempt, contract, attempt / 'selected-delivery.json')
     require(not destination.exists(), f'Prefix destination appeared during build: {destination}')
     attempt.rename(destination)
-    verify_prefix(destination, contract)
+    verify_prefix(destination, contract, destination / 'selected-delivery.json')
     print(f'✓ Promoted verified OCCT {kind} prefix: {destination}')
 
 
@@ -435,8 +487,8 @@ def required_inputs(manifest):
     required.update(Path(p) for p in manifest['libraries'])
     required.add(Path(manifest['environment']['EM_CONFIG']))
     required.add(Path(manifest['prefixProducerBuilder']))
-    for kind in ['native', 'mixed']:
-        required.add(CACHE / f'occt-{kind}/prefix-receipt.json')
+    required.add(CACHE / 'occt-mixed/prefix-receipt.json')
+    required.add(Path(manifest['prefixProducerRecipe']))
     required.add(CACHE / 'tool-metadata.json')
     for name in ['config', 'config.toml']:
         configuration = CACHE / 'cargo' / name
@@ -454,10 +506,10 @@ def prepare_inputs(paths, env):
     prepare_sources()
     context = prefix_context(paths, env)
     producing_builder = producer_builder()
-    prefix_recovery = {}
-    for kind in ['native', 'mixed']:
-        receipt = verify_prefix(CACHE / f'occt-{kind}', prefix_contract(kind, paths, env, context, producing_builder))
-        prefix_recovery[kind] = receipt.get('recovery')
+    recipe_path = producer_recipe(CACHE / 'occt-mixed')
+    receipt = verify_prefix(CACHE / 'occt-mixed',
+                            prefix_contract('mixed', paths, env, context, producing_builder), recipe_path)
+    prefix_recovery = {'mixed': receipt.get('recovery')}
     # The standalone runtime build script also reads its own locked graph for
     # producer identity, independently of the consuming Emscripten binding.
     for relative in ['bindings/emscripten/Cargo.toml', 'native/runtime/Cargo.toml']:
@@ -477,6 +529,7 @@ def prepare_inputs(paths, env):
         **{name: str(paths[name]) for name in ['rustc', 'cargo', 'emcc', 'emxx', 'emar']},
         'environment': env, 'occtPrefix': str(MIXED), 'libraries': list(map(str, libraries(MIXED))),
         'prefixProducerBuilder': str(producing_builder), 'prefixRecovery': prefix_recovery,
+        'prefixProducerRecipe': str(recipe_path),
         'inputRoots': list(map(str, input_roots())), 'linkOptimization': RECIPE['linkOptimization'],
         'recipeSha256': digest(RECIPE_PATH),
         'sourceRevision': run([paths['git'], '-C', ROOT, 'rev-parse', 'HEAD'], env, timeout=30).strip(),
@@ -487,7 +540,7 @@ def prepare_inputs(paths, env):
     write_json(path, manifest)
     verify_manifest(path)
     print(f'GEOSPEC_MIXED_INPUTS={path}')
-    print(f'GEOSPEC_OCCT_PREFIX={CACHE}/occt-native/install')
+    print(f'GEOSPEC_OCCT_PREFIX={MIXED}')
 
 
 def verify_manifest(path):
@@ -522,10 +575,11 @@ def verify_manifest(path):
     producing_builder = Path(manifest['prefixProducerBuilder'])
     require(producing_builder.is_absolute(), 'Prefix producer evidence path must be absolute')
     context = prefix_context(paths, selected_environment)
-    prefix_recovery = {}
-    for kind in ['native', 'mixed']:
-        receipt = verify_prefix(CACHE / f'occt-{kind}', prefix_contract(kind, paths, selected_environment, context, producing_builder))
-        prefix_recovery[kind] = receipt.get('recovery')
+    recipe_path = Path(manifest['prefixProducerRecipe'])
+    require(recipe_path.is_absolute(), 'Prefix recipe evidence path must be absolute')
+    receipt = verify_prefix(CACHE / 'occt-mixed',
+                            prefix_contract('mixed', paths, selected_environment, context, producing_builder), recipe_path)
+    prefix_recovery = {'mixed': receipt.get('recovery')}
     require(manifest['prefixRecovery'] == prefix_recovery, 'Prefix recovery qualifications changed')
     print(json.dumps({'verifiedInputs': len(selected), 'sourceRoot': str(ROOT), 'output': manifest['output']}))
 
@@ -539,12 +593,12 @@ def main():
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Selected recipe is Darwin ARM64 only')
     if args.stage == 'check':
         required = [SOURCE / 'CMakeLists.txt', RUST / 'bin/rustc', SDK / 'emscripten/emcc',
-                    CACHE / 'occt-native/install/lib/libTKDESTEP.a', MIXED / 'lib/libTKDESTEP.a', CACHE / 'mixed-inputs.json']
+                    MIXED / 'lib/libTKDESTEP.a', CACHE / 'mixed-inputs.json']
         missing = [str(p) for p in required if not p.is_file()]
         if not missing:
             verify_manifest(CACHE / 'mixed-inputs.json')
         tools_missing = not (RUST / 'bin/rustc').is_file() or not (SDK / 'emscripten/emcc').is_file()
-        prefixes_missing = not (CACHE / 'occt-native/install/lib/libTKDESTEP.a').is_file() or not (MIXED / 'lib/libTKDESTEP.a').is_file()
+        prefixes_missing = not (MIXED / 'lib/libTKDESTEP.a').is_file()
         remaining = RECIPE['diskGiB']['mixedBuildReserve'] + (RECIPE['diskGiB']['sources'] if not SOURCE.is_dir() else 0)
         remaining += RECIPE['diskGiB']['tools'] if tools_missing else 0
         remaining += RECIPE['diskGiB']['prefixes'] if prefixes_missing else 0

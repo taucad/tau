@@ -909,6 +909,17 @@ cp "$GEOSPEC_RELINK_ROOT/receipts/mixed-sdk-package-lock.json" "$GEOSPEC_MIXED_S
 def copy_mixed_material(output, mixed):
     c = mixed['closure']
     receipts = output / 'receipts'
+    # Older closures selected the then-current recipe implicitly. It is usable
+    # only if its bytes still join both that closure and the original receipt.
+    prefix_recipe = Path(c.get('prefixProducerRecipe', PACKAGE / 'scripts/selected-delivery.json'))
+    recipe_bytes = prefix_recipe.read_bytes()
+    recipe_sha = hashlib.sha256(recipe_bytes).hexdigest()
+    recipe_pin = next((row['sha256'] for row in c['inputs'] if row['path'] == str(prefix_recipe)), None)
+    require(recipe_sha == recipe_pin, 'Mixed prefix recipe differs from its input pin')
+    require(recipe_sha == read_json(mixed['prefixReceipt'])['recipeSha256'],
+            'Mixed prefix recipe differs from its producer receipt')
+    recipe_relative = 'receipts/mixed-prefix-selected-delivery.json'
+    (output / recipe_relative).write_bytes(recipe_bytes)
     for name, path in mixed['paths'].items():
         shutil.copyfile(path, receipts / f'mixed-{name}.json')
     shutil.copyfile(mixed['prefixReceipt'], receipts / 'mixed-prefix-receipt.json')
@@ -926,7 +937,9 @@ def copy_mixed_material(output, mixed):
         require(digest(archive) == item['sha256'], f'Mixed source archive changed: {archive}')
         shutil.copyfile(archive, output / f'archives/{name}.tar.gz')
     return {'path': 'receipts/mixed-producer-recipe.json',
-            'sha256': digest(receipts / 'mixed-producer-recipe.json'), **mixed['attribution']}
+            'sha256': digest(receipts / 'mixed-producer-recipe.json'), **mixed['attribution'],
+            'prefixProducerRecipe': {'path': recipe_relative, 'sha256': recipe_sha,
+                                     'prefixReceiptSha256': digest(mixed['prefixReceipt'])}}
 
 
 def copy_prefix_builder(output, prefix_receipt, builder, role):

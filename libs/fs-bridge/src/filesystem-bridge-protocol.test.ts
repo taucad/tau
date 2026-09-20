@@ -25,6 +25,14 @@ describe('void call results', () => {
   });
 });
 
+/* A literal, so a bump is a deliberate edit to this line and not a silent one:
+ * every other assertion in the suite now reads the constant (G0-11). */
+describe('filesystem bridge protocol version', () => {
+  it('should be 2', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(2);
+  });
+});
+
 describe('@taucad/fs-bridge barrel', () => {
   it('exports createFileSystemBridgeHello', () => {
     expect(barrel.createFileSystemBridgeHello).toBe(createFileSystemBridgeHello);

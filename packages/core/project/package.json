@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./revision-id": "./src/revision-id.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -43,6 +44,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./revision-id": {
+        "types": "./dist/revision-id.d.mts",
+        "import": "./dist/revision-id.mjs",
+        "default": "./dist/revision-id.mjs"
       },
       "./package.json": "./package.json"
     },

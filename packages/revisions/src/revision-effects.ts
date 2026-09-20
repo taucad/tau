@@ -26,14 +26,16 @@
 import type { FileMode, RootedFileSystem } from '@taucad/filesystem';
 import { classify } from '@taucad/filesystem/path-registry';
 import { randomUuid } from '@taucad/utils/id';
+import { walk } from '@taucad/filesystem/content-ops';
 import {
   captureRevisionTree,
+  createCaptureMemo,
   ImmutableRevisionTree,
   mergeRevisionTrees,
   renderConflictMarkers,
   revisionId,
 } from '#algorithms/index.js';
-import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
+import type { CaptureMemo, RevisionId, RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import type { RevisionConflictTerms } from '#revision-conflict.js';
 import { integrationOf, mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
@@ -831,6 +833,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const plans = createHandles<{ checkoutId: string; revisionId: string; tree: ImmutableRevisionTree }>('plan');
   const fences = new Map<string, Promise<void>>();
   const activeOperations = new Set<Promise<unknown>>();
+  /**
+   * What each open checkout's captures may reuse instead of reading (EQ7).
+   *
+   * One memo per checkout, because `(path, size, mtimeMs)` only identifies bytes
+   * within one tree; it is dropped when the checkout is, and with this closure.
+   */
+  const captureMemos = new Map<string, CaptureMemo>();
+  const memoOf = (checkoutId: string): CaptureMemo => {
+    const memo = captureMemos.get(checkoutId) ?? createCaptureMemo();
+    captureMemos.set(checkoutId, memo);
+    return memo;
+  };
+  /** Checkouts this process has already swept the litter of an interrupted apply from. */
+  const swept = new Set<string>();
 
   const fromAuthorityPromise = <Output, Input>(
     effect: Parameters<typeof fromPromise<Output, Input>>[0],
@@ -998,14 +1014,77 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const headOf = async (place: Checkout): Promise<string | undefined> =>
     place.baseRevisionId ?? (place.branch === undefined ? undefined : await port.readRef(place.branch));
 
+  /*
+   * `.<name>.0.<uuid>.tmp` — the sibling `applyTree` stages and backs up
+   * through. The minter and the matcher sit together, and a pin mints a name
+   * and matches it, so the sweep below cannot drift from what an interrupted
+   * apply actually left behind (W8f).
+   */
+  const temporarySibling = (path: string): string => {
+    const separator = path.lastIndexOf('/');
+    const directory = separator === -1 ? '' : path.slice(0, separator + 1);
+    const name = path.slice(separator + 1);
+    return `${directory}.${name}.0.${randomUuid()}.tmp`;
+  };
+  const temporarySiblingPattern = /^\..+\.0\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.tmp$/u;
+
+  /**
+   * Remove the staged and backup siblings a killed apply left behind.
+   *
+   * They are ordinary authored paths to the registry, so the first capture after
+   * a process died inside `applyTree` would record them as the person's own
+   * files. Once per checkout per process, before that first capture (W8f).
+   *
+   * @param place - The checkout being opened.
+   * @param live - Its tree.
+   */
+  const sweepTemporarySiblings = async (place: Checkout, live: RevisionFileSystem): Promise<void> => {
+    if (swept.has(place.id)) {
+      return;
+    }
+    swept.add(place.id);
+    try {
+      for await (const entry of walk(live, '', { admits: (path) => classify(path).versioned })) {
+        if (entry.kind === 'file' && temporarySiblingPattern.test(entry.relativePath.split('/').at(-1) ?? '')) {
+          // oxlint-disable-next-line no-await-in-loop -- litter is removed as the walk reaches it, not held in a list.
+          await unlinkIfPresent(live, entry.relativePath);
+        }
+      }
+    } catch (error) {
+      /* A listing is a snapshot: an entry can be gone before the sweep reaches
+       * it. Litter nobody removed is swept at the next open, so a vanished
+       * directory is not a project that cannot be opened. */
+      if (
+        (error as NodeJS.ErrnoException).code !== 'ENOENT' &&
+        (error as { name?: unknown }).name !== 'NotFoundError'
+      ) {
+        throw error;
+      }
+    }
+  };
+
+  /** Remove one path, tolerating one that is already gone. */
+  const unlinkIfPresent = async (live: RevisionFileSystem, path: string): Promise<void> => {
+    await live.unlink(path).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    });
+  };
+
   /** Capture one already-open checkout filesystem. */
   const captureFileSystem = async (
     rooted: RevisionFileSystem,
     basis: ImmutableRevisionTree | undefined,
+    memo: CaptureMemo,
   ): Promise<ImmutableRevisionTree> => {
+    /* The reading comes first, so a file whose timestamp the stats then report
+     * as this recent is racily clean and is read rather than trusted (EQ7). */
+    const observedAt = now();
     const tree = await captureRevisionTree(rooted, {
       exclude: (path) => !classify(path).versioned,
       inheritedMode: (path) => basis?.mode(path),
+      ...memo.unchanged(await rooted.statTree?.('', { admits: (path) => classify(path).versioned }), observedAt),
     });
     const collisions = caseCollisions(tree);
     if (collisions.length > 0) {
@@ -1019,16 +1098,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
-    useFileSystem(place, async (rooted) =>
-      captureFileSystem(
+    useFileSystem(place, async (rooted) => {
+      await sweepTemporarySiblings(place, rooted);
+      return captureFileSystem(
         rooted,
         modeBasis ??
           (await (async () => {
             const head = await headOf(place);
             return head === undefined ? undefined : port.readTree(revisionId(head));
           })()),
-      ),
-    );
+        memoOf(place.id),
+      );
+    });
 
   /* The tree object id of one revision, as the store recorded it. */
   const treeIdOf = async (revision: string | undefined): Promise<string | undefined> => {
@@ -1039,8 +1120,30 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return record?.treeId;
   };
 
-  const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-    left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
+  /*
+   * Four bytes a step through a `DataView`, which needs no alignment of its own,
+   * rather than a JavaScript callback per byte: this runs once per changed file
+   * in an apply and once per path in a recovery, over whole CAD models.
+   */
+  const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean => {
+    if (left.byteLength !== right.byteLength) {
+      return false;
+    }
+    const leftWords = new DataView(left.buffer, left.byteOffset, left.byteLength);
+    const rightWords = new DataView(right.buffer, right.byteOffset, right.byteLength);
+    const wordEnd = left.byteLength - (left.byteLength % 4);
+    for (let offset = 0; offset < wordEnd; offset += 4) {
+      if (leftWords.getUint32(offset) !== rightWords.getUint32(offset)) {
+        return false;
+      }
+    }
+    for (let offset = wordEnd; offset < left.byteLength; offset += 1) {
+      if (left[offset] !== right[offset]) {
+        return false;
+      }
+    }
+    return true;
+  };
 
   const equalEntry = (
     left: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }> | undefined,
@@ -1065,11 +1168,39 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
-  const temporarySibling = (path: string): string => {
-    const separator = path.lastIndexOf('/');
-    const directory = separator === -1 ? '' : path.slice(0, separator + 1);
-    const name = path.slice(separator + 1);
-    return `${directory}.${name}.0.${randomUuid()}.tmp`;
+  /**
+   * Stage every file's bytes before the first swap.
+   *
+   * The one step of the protocol with no order of its own, so it is one batch
+   * where the surface has one; the rename / verify / swap chain that follows is
+   * ordered and stays sequential (W8d).
+   *
+   * @param live - The checkout's tree.
+   * @param files - Each changed file's bytes and the sibling they stage at.
+   */
+  const stageFiles = async (
+    live: RevisionFileSystem,
+    files: ReadonlyArray<Readonly<{ staged: string; entry: RevisionTreeEntry }>>,
+  ): Promise<void> => {
+    if (files.length === 0) {
+      return;
+    }
+    if (live.writeFiles === undefined) {
+      /* Every write settles before the first failure is raised, exactly as the
+       * batch does: a write still in flight would land after the cleanup that
+       * removes what this call staged. */
+      const staged = await Promise.allSettled(
+        files.map(async ({ staged: path, entry }) => live.writeFile(path, entry.content)),
+      );
+      const refused = staged.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (refused !== undefined) {
+        throw refused.reason instanceof Error
+          ? refused.reason
+          : new Error('Staging the bytes of this change failed.', { cause: refused.reason });
+      }
+      return;
+    }
+    await live.writeFiles(Object.fromEntries(files.map(({ staged, entry }) => [staged, { content: entry.content }])));
   };
 
   /**
@@ -1125,66 +1256,72 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           // oxlint-disable-next-line no-await-in-loop -- the revision retains the removed bytes; the temporary copy is no longer needed.
           await live.unlink(backup);
         }
-        for (const [path, entry] of changedFiles) {
-          signal?.throwIfAborted();
-          const current = liveFiles.get(path);
-          const staged = temporarySibling(path);
-          const backup = current === undefined ? undefined : temporarySibling(path);
-          try {
-            // oxlint-disable-next-line no-await-in-loop -- stage bytes before touching the admitted path.
-            await live.writeFile(staged, entry.content);
-            if (live.setFileMode !== undefined) {
-              // oxlint-disable-next-line no-await-in-loop -- mode belongs to the staged file.
-              await live.setFileMode(staged, entry.mode);
-            }
-            if (backup !== undefined) {
-              // oxlint-disable-next-line no-await-in-loop -- moving first lets us verify the exact bytes being replaced.
-              await live.rename(path, backup);
-              // oxlint-disable-next-line no-await-in-loop -- the moved bytes are the replacement precondition.
-              const moved = await entryOf(live, backup);
-              if (!equalEntry(moved, current)) {
-                // oxlint-disable-next-line no-await-in-loop -- recovery belongs to this ordered mutation.
-                if (!(await live.exists(path))) {
-                  // oxlint-disable-next-line no-await-in-loop -- put the concurrent winner back before refusing.
-                  await live.rename(backup, path);
+        const stagedFiles = changedFiles.map(([path, entry]) => ({ path, entry, staged: temporarySibling(path) }));
+        signal?.throwIfAborted();
+        await stageFiles(live, stagedFiles);
+        try {
+          for (const { path, entry, staged } of stagedFiles) {
+            signal?.throwIfAborted();
+            const current = liveFiles.get(path);
+            const backup = current === undefined ? undefined : temporarySibling(path);
+            let published = false;
+            try {
+              if (live.setFileMode !== undefined) {
+                // oxlint-disable-next-line no-await-in-loop -- mode belongs to the staged file.
+                await live.setFileMode(staged, entry.mode);
+              }
+              if (backup !== undefined) {
+                // oxlint-disable-next-line no-await-in-loop -- moving first lets us verify the exact bytes being replaced.
+                await live.rename(path, backup);
+                // oxlint-disable-next-line no-await-in-loop -- the moved bytes are the replacement precondition.
+                const moved = await entryOf(live, backup);
+                if (!equalEntry(moved, current)) {
+                  // oxlint-disable-next-line no-await-in-loop -- recovery belongs to this ordered mutation.
+                  if (!(await live.exists(path))) {
+                    // oxlint-disable-next-line no-await-in-loop -- put the concurrent winner back before refusing.
+                    await live.rename(backup, path);
+                  }
+                  throw new RevisionPortError(
+                    'CHECKOUT_CONFLICT',
+                    `${path} changed while these files were being updated.`,
+                  );
                 }
+                // oxlint-disable-next-line no-await-in-loop -- this is the new-file compare step.
+              } else if (await live.exists(path)) {
+                throw new RevisionPortError(
+                  'CHECKOUT_CONFLICT',
+                  `${path} was created while these files were being updated.`,
+                );
+              }
+              // oxlint-disable-next-line no-await-in-loop -- the target must still be absent immediately before publication.
+              if (await live.exists(path)) {
                 throw new RevisionPortError(
                   'CHECKOUT_CONFLICT',
                   `${path} changed while these files were being updated.`,
                 );
               }
-              // oxlint-disable-next-line no-await-in-loop -- this is the new-file compare step.
-            } else if (await live.exists(path)) {
-              throw new RevisionPortError(
-                'CHECKOUT_CONFLICT',
-                `${path} was created while these files were being updated.`,
-              );
-            }
-            // oxlint-disable-next-line no-await-in-loop -- the target must still be absent immediately before publication.
-            if (await live.exists(path)) {
-              throw new RevisionPortError('CHECKOUT_CONFLICT', `${path} changed while these files were being updated.`);
-            }
-            // oxlint-disable-next-line no-await-in-loop -- one atomic rename publishes the already-written file.
-            await live.rename(staged, path);
-            if (backup !== undefined) {
-              // oxlint-disable-next-line no-await-in-loop -- the recorded revision retains the prior bytes.
-              await live.unlink(backup);
-            }
-          } finally {
-            // oxlint-disable-next-line no-await-in-loop -- failed staging must not leak provider bookkeeping.
-            await live.unlink(staged).catch((error: unknown) => {
-              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-                throw error;
+              // oxlint-disable-next-line no-await-in-loop -- one atomic rename publishes the already-written file.
+              await live.rename(staged, path);
+              published = true;
+            } finally {
+              if (backup !== undefined) {
+                /* The bytes this replacement moved aside go back unless the swap
+                 * that replaces them completed, or something else already took
+                 * the path — so an apply that stops mid-file leaves the file it
+                 * was replacing rather than a hole where neither version is. */
+                // oxlint-disable-next-line no-await-in-loop -- the backup belongs to this ordered mutation.
+                const replaced = published || (await live.exists(path));
+                // oxlint-disable-next-line no-await-in-loop -- either the revision retains the prior bytes or the checkout must.
+                await (replaced ? unlinkIfPresent(live, backup) : live.rename(backup, path));
               }
-            });
-            if (backup !== undefined) {
-              // oxlint-disable-next-line no-await-in-loop -- a completed replacement already removed this path.
-              await live.unlink(backup).catch((error: unknown) => {
-                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-                  throw error;
-                }
-              });
             }
+          }
+        } finally {
+          /* Bytes staged and never published are this call's litter, swept
+           * before the verification re-reads the tree they would appear in. */
+          for (const { staged } of stagedFiles) {
+            // oxlint-disable-next-line no-await-in-loop -- one ordered sweep of what this call staged.
+            await unlinkIfPresent(live, staged);
           }
         }
         signal?.throwIfAborted();
@@ -1241,28 +1378,44 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     );
   };
 
-  /** Apply bytes and their graph update as one checkout-owned recoverable operation. */
+  /**
+   * Apply bytes and their graph update as one checkout-owned recoverable operation.
+   *
+   * @param place - The checkout being written.
+   * @param target - The tree it must carry.
+   * @param materialization - Cancellation, the caller's own capture, and the
+   *   validation and graph update that bracket the write.
+   * @returns The paths written and whatever `publish` answered.
+   */
   const materializeTree = async <Result = void>(
     place: Checkout,
     target: ImmutableRevisionTree,
     materialization: Readonly<{
       signal?: AbortSignal;
+      /**
+       * The checkout's tree as the caller captured it, under the checkout fence
+       * the caller is holding for this call.
+       *
+       * A caller that computes `target` *from* the live tree hands over the
+       * capture it computed it from rather than paying a second walk for the
+       * same bytes (CI4) — and, holding the fence across both, closes the window
+       * a `validate` would otherwise have to refuse.
+       */
+      before?: ImmutableRevisionTree;
       validate?: (before: ImmutableRevisionTree) => Promise<void>;
       publish?: () => Promise<Result>;
     }> = {},
-  ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> =>
-    withCheckoutFence(place.id, async () => {
-      const before = await capture(place);
+  ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
+    const materialize = async (
+      before: ImmutableRevisionTree,
+    ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
       await materialization.validate?.(before);
       try {
+        /* `applyTree` verifies the paths it wrote by re-reading them (C3); that
+         * re-read is the settlement's second and last walk, so nothing here
+         * captures the tree again to compare it a second time. */
         const paths = await applyTree(place, target, { from: before, signal: materialization.signal });
         materialization.signal?.throwIfAborted();
-        const applied = await capture(place, target);
-        const appliedFiles = new Map(applied.entries().map((entry) => [entry.path, entry]));
-        const targetFiles = new Map(target.entries().map((entry) => [entry.path, entry]));
-        if (paths.some((path) => !equalEntry(appliedFiles.get(path), targetFiles.get(path)))) {
-          throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while the revision was being applied.');
-        }
         return { paths, result: await materialization.publish?.() };
       } catch (error) {
         try {
@@ -1283,7 +1436,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         throw error;
       }
-    });
+    };
+    return materialization.before === undefined
+      ? withCheckoutFence(place.id, async () => materialize(await capture(place)))
+      : materialize(materialization.before);
+  };
 
   /**
    * Where this device records what the remote has not acknowledged.
@@ -2283,25 +2440,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           input.baseRevisionId === undefined
             ? new ImmutableRevisionTree([])
             : ((await port.readTree(revisionId(input.baseRevisionId))) ?? new ImmutableRevisionTree([]));
-        const live = await capture(place);
-        /* A file where the other side has a directory used to throw out of here
-         * (W3a re-review); it is a typed `file-directory` conflict now, so a
-         * conflicted turn is one return rather than an exception (W10). */
-        const merged = mergeRevisionTrees(base, live, agent);
-        if (merged.status === 'conflicted') {
-          return { status: 'conflicted' };
-        }
-        await materializeTree(place, merged.tree, {
-          validate: async (current) => {
-            if (
-              revisionTreeId(await recordedTree(current), await formatOf()) !==
-              revisionTreeId(await recordedTree(live), await formatOf())
-            ) {
-              throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while the turn was settling.');
-            }
-          },
+        /* One walk of the live tree for the whole settlement (CI4): the merge's
+         * third side and the apply's `from` are the same capture, taken inside
+         * the fence that the apply will run under — so there is no window left
+         * between them for a second mint to change what was merged. */
+        return withCheckoutFence(place.id, async () => {
+          const live = await capture(place);
+          /* A file where the other side has a directory used to throw out of here
+           * (W3a re-review); it is a typed `file-directory` conflict now, so a
+           * conflicted turn is one return rather than an exception (W10). */
+          const merged = mergeRevisionTrees(base, live, agent);
+          if (merged.status === 'conflicted') {
+            return { status: 'conflicted' };
+          }
+          await materializeTree(place, merged.tree, { before: live });
+          return { status: 'recorded' };
         });
-        return { status: 'recorded' };
       }),
 
       /*
@@ -2410,6 +2564,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           );
         }
         await port.removeCheckout(input.id);
+        /* The bytes a closed checkout's captures could reuse describe a tree
+         * this process can no longer reach (EQ7). */
+        captureMemos.delete(input.id);
+        swept.delete(input.id);
       }),
 
       /* F13: a lease from a superseded epoch belongs to a process that no longer

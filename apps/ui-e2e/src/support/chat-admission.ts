@@ -225,6 +225,13 @@ export const editFirstMessage = async (suffix: string): Promise<void> => {
   await target.press(editComposer, 'Enter');
 };
 
+/*
+ * The error card's one continuing action. A refusal the host can resume reads
+ * *Resume* (the paused-turn card); one it cannot reads *Try again*. Both press
+ * the same gesture, and which it is belongs to the row's assertions, not here.
+ */
+const continueAction = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
+
 /**
  * Refuse the next provider call, send `text`, and wait for the error card.
  *
@@ -234,7 +241,7 @@ export const editFirstMessage = async (suffix: string): Promise<void> => {
 export const sendRefused = async (text: string): Promise<void> => {
   await target.setAgentHostGatewayFailure({ status: 400, message: 'Refused once.' });
   await sendDraft(text);
-  await target.expectVisible(selectors.getByRole('button', { name: 'Try again' }), 120_000);
+  await target.expectVisible(continueAction, 120_000);
   await target.setAgentHostGatewayFailure();
 };
 
@@ -244,7 +251,7 @@ export const sendRefused = async (text: string): Promise<void> => {
  * @returns Nothing.
  */
 export const tryAgain = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: 'Try again' }));
+  await target.click(continueAction);
 };
 
 /**

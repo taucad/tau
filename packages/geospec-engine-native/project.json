@@ -844,6 +844,24 @@
         "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path \"${GEOSPEC_RUST_TEST_MANIFEST:?Supply the frozen core manifest}\" --locked --offline --lib --target-dir \"${GEOSPEC_RUST_TEST_TARGET_DIR:?Supply the exclusive target directory}\" -- \"${GEOSPEC_RUST_TEST_FILTER:?Supply the semantic test filter}\" --nocapture --test-threads=1",
         "forwardAllArgs": false
       }
+    },
+    "check-coverage-gate": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "python3 -B packages/geospec-engine-native/quality/test_gate.py",
+        "forwardAllArgs": false
+      }
+    },
+    "coverage-critical": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "python3 -B packages/geospec-engine-native/quality/gate.py --inventory-sha256 \"$GEOSPEC_COVERAGE_INVENTORY_SHA256\" --receipts out/reports/coverage/packages/geospec-engine-native/receipts.json",
+        "forwardAllArgs": false
+      }
     }
   }
 }

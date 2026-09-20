@@ -145,6 +145,9 @@ jobs:
           pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart
           pnpm nx affected -t test --exclude tag:scope:api
 
+      - name: Check affected critical coverage gates
+        run: pnpm nx affected -t check-coverage-gate
+
       - name: Check workspace root hygiene
         if: always()
         run: pnpm nx run scripts:validate-workspace-root

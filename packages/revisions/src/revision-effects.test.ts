@@ -195,6 +195,11 @@ describe('the tree a cut hashes', () => {
      * never tracks a nested `.git`; capturing one as ordinary files put its
      * `config` — credentials included — into every revision. */
     await filesystem.writeFile('vendor/lib/.git/config', '[remote "origin"]\n');
+    /* G0-3: `classify` answered with the first matching row, so a store under an
+     * authored `.tau` control was that row's — authored and *versioned*. The
+     * skill beside it still arrives, so an empty subtree cannot pass this. */
+    await filesystem.writeFile('.tau/skills/cad/SKILL.md', '---\nname: cad\n---\n');
+    await filesystem.writeFile('.tau/skills/cad/.git/config', '[remote "origin"]\n');
 
     const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
       checkoutId: 'live',
@@ -215,7 +220,7 @@ describe('the tree a cut hashes', () => {
         ?.entries()
         .map(({ path }) => path)
         .toSorted(),
-    ).toEqual(['.gitattributes', '.gitignore', 'main.ts']);
+    ).toEqual(['.gitattributes', '.gitignore', '.tau/skills/cad/SKILL.md', 'main.ts']);
   }, 30_000);
 
   it('refuses a capture whose paths differ only by case', async () => {

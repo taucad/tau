@@ -28,10 +28,19 @@ const unversioned = pathRegistry.filter((row) => !row.versioned);
  * `.tau/binding.json` would leave a nested one versioned and disagree with
  * `classify` (PP5).
  *
+ * A control-plane directory row is spelled without the trailing `/` that every
+ * other directory row carries. A trailing slash restricts the pattern to
+ * directories, and the row also covers the one-line `.git` a worktree or
+ * submodule leaves behind — unversioned by `classify`, so a directory-only
+ * pattern breaks PP5 for exactly the shape the row exists to catch. The cache
+ * keeps its slash: a file named `node_modules` is not the cache.
+ *
  * @public
  */
 export const generatedIgnoreEntries: readonly string[] = Object.freeze(
-  unversioned.map((row) => `${row.anchored ? '/' : '**/'}${row.prefix}${row.directory ? '/' : ''}`),
+  unversioned.map(
+    (row) => `${row.anchored ? '/' : '**/'}${row.prefix}${row.directory && row.class !== 'control-plane' ? '/' : ''}`,
+  ),
 );
 
 /** Project-relative path of the generated ignore file. @public */

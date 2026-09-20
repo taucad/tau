@@ -100,6 +100,48 @@ export const reservedTauPathClassification: PathClassification = Object.freeze({
  * @public
  */
 export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
+  /* Control plane: hidden from every composed view, refused before provider
+   * I/O. A revision hash never covers its own store — its own or a vendored
+   * dependency's, a submodule's, a second project's (EQ1, CI1), which is why
+   * every row here matches a segment and none of them is anchored in the ignore
+   * file: `versioned` and the generated block have to agree at every depth
+   * (PP5).
+   *
+   * They lead the table because {@link classify} takes the *first* match: behind
+   * the rows below, a store vendored into `node_modules` was the cache's and one
+   * under `.tau/skills` was authored — and therefore versioned, captured into
+   * every revision (G0-3). */
+  {
+    prefix: '.tau/binding.json',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: false,
+  },
+  {
+    prefix: '.jj',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
+  {
+    prefix: '.git',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
+
   /* Generated from the registry itself on every host, so versioning them would
    * put tooling output into revisions. `.gitignore` and `.gitattributes` are
    * deliberately absent: git needs them in the tree, so they take the authored
@@ -271,43 +313,6 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'segment',
     directory: true,
   },
-
-  /* Control plane: hidden from every composed view, refused before provider
-   * I/O. A revision hash never covers its own store — its own or a vendored
-   * dependency's, a submodule's, a second project's (EQ1, CI1), which is why
-   * every row here matches a segment and none of them is anchored in the ignore
-   * file: `versioned` and the generated block have to agree at every depth
-   * (PP5). */
-  {
-    prefix: '.tau/binding.json',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: false,
-    match: 'segment',
-    directory: false,
-  },
-  {
-    prefix: '.jj',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: false,
-    match: 'segment',
-    directory: true,
-  },
-  {
-    prefix: '.git',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: false,
-    match: 'segment',
-    directory: true,
-  },
 ] satisfies readonly PathRegistryRow[]);
 
 /**
@@ -346,6 +351,55 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
 );
 
 /**
+ * The control-plane rows alone, in registry order.
+ *
+ * They lead the registry, so an index here is that row's index there — which is
+ * what lets the folded re-test below share {@link rowClassifications}.
+ */
+const controlPlane: readonly PathRegistryRow[] = Object.freeze(
+  pathRegistry.filter((row) => row.class === 'control-plane'),
+);
+
+/**
+ * Spellings whose fold can differ from the path as written.
+ *
+ * Cheap enough to run on every classified path: a lowercase path with no
+ * trailing dot or space on any segment already *is* its fold, and only the paths
+ * this admits pay for one below.
+ */
+const mayFold = /[A-Z]|[. ](?:\/|$)/u;
+
+/**
+ * The control-plane row a filesystem's own folding of this path lands on, if any.
+ *
+ * Every filesystem a `NodeFsProvider` runs on folds case, and Win32 folds
+ * trailing dots and spaces too, so `vendor/.Git/config` and `vendor/.git./HEAD`
+ * open the real store while a byte comparison calls them the user's content
+ * (G0-1, G0-5). Only the control plane folds — a user's `Exports` directory is
+ * theirs — and it folds on every host, because a genuinely separate `.GIT`
+ * directory on a case-sensitive disk being hidden is the fail-closed answer and
+ * asking the provider would make the mask depend on where the project sits.
+ *
+ * The same defence `portable-tree.ts` applies to a revision tree, spelled the
+ * same way. Normalization is in it for that reason rather than because it can
+ * change the answer: all three prefixes are ASCII, which normalization never
+ * rewrites.
+ *
+ * @param relative - Path relative to the project root, leading `/` already dropped.
+ * @returns The row's index, or `-1`.
+ */
+const foldedControlPlaneIndex = (relative: string): number => {
+  if (!mayFold.test(relative)) {
+    return -1;
+  }
+  const folded = relative
+    .normalize('NFC')
+    .toLowerCase()
+    .replaceAll(/[. ]+(?=\/|$)/gu, '');
+  return controlPlane.findIndex((row) => covers(row, folded));
+};
+
+/**
  * Classify one project-relative path.
  *
  * @param projectRelativePath - Path relative to the project root; a leading `/` is tolerated.
@@ -363,8 +417,11 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
 export const classify = (projectRelativePath: string): PathClassification => {
   const relative = projectRelativePath.replace(/^\/+/u, '');
   const index = pathRegistry.findIndex((row) => covers(row, relative));
+  /* The control plane answers first, and for a spelling the filesystem folds
+   * onto one it answers instead of the row that matched (G0-1, G0-3, G0-5). */
+  const folded = index !== -1 && index < controlPlane.length ? -1 : foldedControlPlaneIndex(relative);
   return (
-    rowClassifications[index] ??
+    rowClassifications[folded === -1 ? index : folded] ??
     (relative.startsWith('.tau/') ? reservedTauPathClassification : unlistedPathClassification)
   );
 };

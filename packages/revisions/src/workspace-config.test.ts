@@ -35,15 +35,33 @@ describe('generated ignore file', () => {
   });
 
   /* PP5: `versioned` agrees with the ignore file — a path is unversioned exactly
-   * when the generated block excludes it. Both halves are asserted, because the
-   * pattern's anchoring is what makes them agree: a row that classifies by
-   * segment must be excluded wherever it appears, or a nested `.git` would be
-   * hidden from every view and captured into the revision anyway. */
-  it('should exclude every unversioned row, anchored exactly where the row matches', () => {
-    for (const row of pathRegistry.filter((entry) => !entry.versioned)) {
-      expect(row.anchored, row.prefix).toBe(row.match === 'root');
-      expect(generatedIgnoreEntries).toContain(`${row.anchored ? '/' : '**/'}${row.prefix}${row.directory ? '/' : ''}`);
+   * when the generated block excludes it, and excluded as far as the row
+   * matches. A row that classifies by segment must be excluded wherever it
+   * appears, or a nested `.git` would be hidden from every view and captured
+   * into the revision anyway. */
+  it('should exclude every unversioned row as far as it matches, and no versioned one', () => {
+    for (const row of pathRegistry) {
+      const anywhere = generatedIgnoreEntries.some((entry) => entry.replace(/\/$/u, '') === `**/${row.prefix}`);
+      const atRoot = generatedIgnoreEntries.some((entry) => entry.replace(/\/$/u, '') === `/${row.prefix}`);
+
+      expect({ prefix: row.prefix, anywhere, atRoot }).toStrictEqual({
+        prefix: row.prefix,
+        anywhere: !row.versioned && row.match === 'segment',
+        atRoot: !row.versioned && row.match === 'root',
+      });
     }
+  });
+
+  /* G0-8: a trailing `/` restricts a gitignore pattern to directories, and a
+   * control-plane row also covers the one-line `.git` a worktree or submodule
+   * leaves behind — a path `classify` calls unversioned, which a directory-only
+   * pattern would not exclude. `node_modules` keeps its slash: a file of that
+   * name is not the cache. */
+  it('should exclude a control-plane pointer file as well as its directory', () => {
+    expect(generatedIgnoreEntries).toContain('**/.git');
+    expect(generatedIgnoreEntries).toContain('**/.jj');
+    expect(generatedIgnoreEntries).not.toContain('**/.git/');
+    expect(generatedIgnoreEntries).toContain('**/node_modules/');
   });
 
   /* The whole block, literally: it is the one artifact a person reads in their
@@ -52,6 +70,9 @@ describe('generated ignore file', () => {
   it('should write the generated block exactly as the registry orders it', () => {
     expect(generatedIgnoreContent(undefined)).toBe(
       `# BEGIN Tau generated — derived content is never versioned
+**/.tau/binding.json
+**/.jj
+**/.git
 /.tau/types/
 /.tau/tsconfig.generated.json
 /.tau/lockfile.json
@@ -64,9 +85,6 @@ describe('generated ignore file', () => {
 /thumbnail.webp
 /.tau/cache/
 **/node_modules/
-**/.tau/binding.json
-**/.jj/
-**/.git/
 # END Tau generated
 `,
     );

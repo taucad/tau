@@ -8,14 +8,14 @@
  * `turn.failed` was written under the new run id before the host admitted it.
  *
  * Each row asserts three things, because any one of them alone passed while the
- * chat was broken: the provider was asked once per turn, the console carries no
- * admission refusal, and every run in the chat's durable log is admitted before
- * exactly one settlement of the kind the gesture earned.
+ * chat was broken: the provider was asked once per *attempt*, the console
+ * carries no admission refusal, and every run in the chat's durable log is
+ * admitted before the settlements its attempts earned.
  *
- * *Try again* on an error card is the fifth admission route (`continueChat` →
- * a bodyless `continue`), and the rows below drive it: it is the one verb that
- * derives its own rewind point, and it derived the wrong one for every turn
- * after the first.
+ * *Try again* on an error card is the fifth admission route, and the rows below
+ * drive it. It is no longer a rewind: a run the host can still continue is
+ * continued under its own run id (`chat-turn-host.tsx:313-334`), so a refused
+ * turn retried is one run with two attempts, not two runs.
  *
  * Every read and gesture comes from `#support/chat-admission.js`. The sweep that
  * used to live in `zz-gesture-sweep.spec.ts` kept its own diverging copy of them
@@ -27,7 +27,9 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { composerSelector, pdfModelName, selectModel, sendDraft } from '#support/chat-attachments.js';
+import { settlementTypes } from '#support/chat-admission-log.js';
 import {
+  chatLog,
   completeFirstTurn,
   editFirstMessage,
   expectLogInvariant,
@@ -52,11 +54,66 @@ const twoTurnScript = [reply('Reply one.'), reply('Reply two.')];
  * length read that followed it could not see a call already in flight — the row
  * passed while the product asked three times (T5 M1/M4/M11). A per-turn ask
  * count names *which* turn was charged twice, which is the fact the contract is
- * about.
+ * about: one ask per attempt, and a turn with two attempts is asked twice.
  */
-const expectOneAskPerTurn = async (turns: readonly string[]): Promise<void> => {
-  expect(await gatewayAsksByTurn()).toEqual(turns.map((turn) => ({ turn, asks: 1 })));
+const expectAsksByTurn = async (asks: ReadonlyArray<readonly [string, number]>): Promise<void> => {
+  expect(await gatewayAsksByTurn()).toEqual(asks.map(([turn, count]) => ({ turn, asks: count })));
 };
+
+/*
+ * `expectLogInvariant` cannot speak for a *reopened* run. Its fold treats a
+ * second `failed` row, or any non-reopening lifecycle row after a settlement,
+ * as illegal — and that is exactly what a second attempt of one run writes
+ * (`chat-admission-log.ts` `shapeOf`: `duplicateLifecycle`, `afterSettlement`).
+ * Rows that resume a run therefore assert its settlements and its run count
+ * directly. See the cross-lane request in W8b's report.
+ */
+
+/** Every settlement one chat's log holds, oldest first, attempts included. */
+const settlementsOf = async (chatId: string): Promise<readonly string[]> => {
+  const records = await chatLog(chatId);
+  return records.filter((record) => settlementTypes.has(record.type)).map((record) => record.type);
+};
+
+/** How many distinct runs one chat's log holds. */
+const runCountOf = async (chatId: string): Promise<number> => {
+  const records = await chatLog(chatId);
+  return new Set(records.map((record) => record.runId)).size;
+};
+
+/** How many rewinds one chat's log records; a continuation records none. */
+const rewindCountOf = async (chatId: string): Promise<number> => {
+  const records = await chatLog(chatId);
+  return records.filter((record) => record.type === 'history.rewound').length;
+};
+
+/**
+ * Send from the composer with Enter.
+ *
+ * `sendDraft` clicks the composer's send button, and that button *is* the stop
+ * button while the chat's AI SDK status is `submitted` or `streaming`
+ * (`chat-textarea-submit-button.tsx:78-82`). `handleSubmit` is not gated on the
+ * status (`chat-textarea-types.ts:426-434`), so Enter is how a person makes a
+ * gesture over a turn that is already live.
+ *
+ * @param text - The message to send.
+ * @returns Nothing.
+ */
+const sendWhileLive = async (text: string): Promise<void> => {
+  const composer = selectors.getByCss(composerSelector).first();
+  await target.type(composer, text);
+  await target.press(composer, 'Enter');
+};
+
+/**
+ * The card's continuation button.
+ *
+ * One locator for both spellings, because the label states the behaviour the
+ * gesture will get: `Resume` when the host can continue the run,
+ * `Try again` when it cannot (`chat-error-paused-turn.tsx:84-93`). Both call
+ * `continueChat()`.
+ */
+const continueAction = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
 
 test('sends a second plain message after a completed turn', async () => {
   const [chatId] = await openChat(twoTurnScript);
@@ -65,7 +122,10 @@ test('sends a second plain message after a completed turn', async () => {
   await sendDraft('Second plain message.');
 
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
-  await expectOneAskPerTurn(['First plain message.', 'Second plain message.']);
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['Second plain message.', 1],
+  ]);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
 });
@@ -116,7 +176,10 @@ test('sends a second message after reloading a completed chat', async () => {
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   /* Run 1 is terminal before the reload, so nothing may re-ask it: a second ask
    * of turn 1 is the reload double charge this file exists to exclude. */
-  await expectOneAskPerTurn(['First plain message.', 'Second plain message.']);
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['Second plain message.', 1],
+  ]);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
 });
@@ -144,7 +207,7 @@ test('sends a third message after two completed turns', async () => {
  * each failed before the waves that own it landed.
  */
 
-test('edits a turn after retrying a refused one', async () => {
+test('edits a turn after resuming a refused one', async () => {
   const [chatId] = await openChat([reply('Reply one.'), reply('Reply two.')]);
   await sendRefused('First plain message.');
 
@@ -158,10 +221,12 @@ test('edits a turn after retrying a refused one', async () => {
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
-  await expectLogInvariant(chatId!, {
-    runs: 3,
-    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
-  });
+  /* Two runs, three attempts: the refused turn's continuation keeps its run,
+   * and only the edit mints a new one. */
+  await expect
+    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
+    .toEqual(['turn.failed', 'turn.finalized', 'turn.finalized']);
+  expect(await runCountOf(chatId!)).toBe(2);
 });
 
 test('edits twice in a row after a completed turn', async () => {
@@ -186,7 +251,7 @@ test('edits twice in a row after a completed turn', async () => {
   });
 });
 
-test('retries a refused turn that follows a completed one', async () => {
+test('resumes a refused turn that follows a completed one', async () => {
   const [chatId] = await openChat([reply('Reply one.'), reply('Reply two.')]);
   await completeFirstTurn();
   await sendRefused('Second plain message.');
@@ -195,26 +260,31 @@ test('retries a refused turn that follows a completed one', async () => {
 
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
-  /* The rewind point of a *Try again* is the last **user** message. Deriving it
-   * from the last assistant message retained the prefix before turn 1 and sent
-   * turn 2's text, which the host refused as an invalid history prefix (F2). */
+  /* A continuation carries the turn it is continuing, so the last user message
+   * on the wire is still turn 2's. Deriving a rewind point from the last
+   * *assistant* message retained the prefix before turn 1 and sent turn 2's
+   * text, which the host refused as an invalid history prefix (F2). */
   const texts = await gatewayUserTexts();
   expect(texts.at(-1)).toContain('Second plain message.');
   await expectNoAdmissionRefusal();
-  await expectLogInvariant(chatId!, {
-    runs: 3,
-    settlements: ['turn.finalized', 'turn.failed', 'turn.finalized'],
-  });
+  await expect
+    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
+    .toEqual(['turn.finalized', 'turn.failed', 'turn.finalized']);
+  expect(await runCountOf(chatId!)).toBe(2);
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['Second plain message.', 2],
+  ]);
 });
 
-test('retries a refused turn twice', async () => {
+test('resumes a refused turn twice', async () => {
   const [chatId] = await openChat([reply('Reply one.')]);
   await sendRefused('First plain message.');
 
   await target.setAgentHostGatewayFailure({ status: 400, message: 'Refused twice.' });
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
-  await target.expectVisible(selectors.getByRole('button', { name: 'Try again' }), 120_000);
+  await target.expectVisible(continueAction, 120_000);
   await target.setAgentHostGatewayFailure();
 
   await tryAgain();
@@ -225,10 +295,12 @@ test('retries a refused turn twice', async () => {
    * is written with it — the log invariant is only meaningful once it has. */
   await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
   await expectNoAdmissionRefusal();
-  await expectLogInvariant(chatId!, {
-    runs: 3,
-    settlements: ['turn.failed', 'turn.failed', 'turn.finalized'],
-  });
+  /* One run, three attempts, three settlements. The retry verb used to rewind
+   * and mint a fresh run id, which paid for the refused prefix again (W7). */
+  await expect
+    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
+    .toEqual(['turn.failed', 'turn.failed', 'turn.finalized']);
+  expect(await runCountOf(chatId!)).toBe(1);
 });
 
 test('edits a turn before its revision is saved', async () => {
@@ -247,7 +319,7 @@ test('edits a turn before its revision is saved', async () => {
   await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
 });
 
-test('retries, edits, then sends a new message', async () => {
+test('resumes, edits, then sends a new message', async () => {
   const [chatId] = await openChat([reply('Reply one.'), reply('Reply two.'), reply('Reply three.')]);
   await sendRefused('First plain message.');
 
@@ -265,10 +337,10 @@ test('retries, edits, then sends a new message', async () => {
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(4);
   await target.expectVisible(selectors.getByText('Reply three.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
-  await expectLogInvariant(chatId!, {
-    runs: 4,
-    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized', 'turn.finalized'],
-  });
+  await expect
+    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
+    .toEqual(['turn.failed', 'turn.finalized', 'turn.finalized', 'turn.finalized']);
+  expect(await runCountOf(chatId!)).toBe(3);
 });
 
 test('alternates turns between two chats of one project', async () => {
@@ -290,13 +362,139 @@ test('alternates turns between two chats of one project', async () => {
   /* One ask per turn across both chats: a chat switch that re-dispatched the
    * chat it left would charge the same turn twice, and a cumulative count
    * cannot see it. */
-  await expectOneAskPerTurn(['First plain message.', 'Second chat message.', 'Back in the first chat.']);
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['Second chat message.', 1],
+    ['Back in the first chat.', 1],
+  ]);
   await expectLogInvariant(chatIds[0]!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
   await expectLogInvariant(chatIds[1]!, { runs: 1, settlements: ['turn.finalized'] });
 });
 
+test('queues a gesture made while a turn is dispatched', async () => {
+  const [chatId] = await openChat(twoTurnScript);
+  /* The turn is parked at the request's *entry* — dispatched, not one byte
+   * answered — which is the only way to press a gesture while the chat sits in
+   * `run.queued.dispatched`. That child handler records the gesture and
+   * interrupts the live turn (`chat-session.machine.ts:518-520`); nothing there
+   * takes a second lease, and no row anywhere held that state before (V1(b)). */
+  await target.holdNextAgentHostGatewayRequest();
+  await sendDraft('First plain message.');
+  await target.waitForAgentHostGatewayGate({ kind: 'request', turn: 'First plain message.' });
+  expect(await gatewayPendingCount()).toBe(1);
+
+  await sendWhileLive('Second plain message.');
+
+  /* No second provider call while the first is held: a cumulative total cannot
+   * say this, because the first turn's own call already satisfies it. */
+  expect(await gatewayPendingCount()).toBe(1);
+  await target.releaseAgentHostGatewayRequest('First plain message.');
+
+  await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['Second plain message.', 1],
+  ]);
+  await expectNoAdmissionRefusal();
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+});
+
+test('hands a send displaced from the one-slot queue back to the composer', async () => {
+  const [chatId] = await openChat(twoTurnScript);
+  await target.holdNextAgentHostGatewayRequest();
+  await sendDraft('First plain message.');
+  await target.waitForAgentHostGatewayGate({ kind: 'request', turn: 'First plain message.' });
+
+  /* A chat holds one gesture. The second of these two takes the slot, and the
+   * first must come back to the composer rather than vanish: its text was
+   * never in the transcript, so the composer was its only copy (I5, ruling E2 —
+   * `chat-session-store.ts` `#settleComposer` / `#restoreDraftMessage`). */
+  await sendWhileLive('Second plain message.');
+  /* The gesture that was taken clears the composer; typing the next one before
+   * that lands would append to it rather than replace it. */
+  await target.expectText(selectors.getByCss(composerSelector).first(), '', 30_000);
+  await sendWhileLive('Third plain message.');
+
+  await target.expectContainingText(selectors.getByCss(composerSelector).first(), 'Second plain message.', 30_000);
+  await target.releaseAgentHostGatewayRequest('First plain message.');
+
+  await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
+  /* The displaced send never reached the provider — it is in the composer, not
+   * on the wire, and it was never charged for. */
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['Third plain message.', 1],
+  ]);
+  await expectNoAdmissionRefusal();
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+});
+
+test('reaches no provider while a turn is admitting', async () => {
+  const [chatId] = await openChat([reply('Reply one.')]);
+  /* The admission window takes the checkout lease, and it takes it *before* the
+   * turn is dispatched — so a hold here parks the turn in `run.queued.admitting`
+   * with nothing spent (`chat-host-binding.ts` `chatTurnAdmission`: the hold is
+   * awaited after the turn service is published and before `admit`). Nothing
+   * outside the page can hold that state open, which is why the seam exists. */
+  await target.holdChatTurn('admission');
+  await sendDraft('First plain message.');
+
+  await target.delay(3000);
+  expect(await gatewayRequestCount()).toBe(0);
+
+  await target.releaseChatTurn('admission');
+
+  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await expectAsksByTurn([['First plain message.', 1]]);
+  await expectNoAdmissionRefusal();
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+});
+
+test('edits a turn queued behind a live one', async () => {
+  const [chatId] = await openChat(twoTurnScript);
+  await target.holdNextAgentHostGatewayRequest();
+  await sendDraft('First plain message.');
+  await target.waitForAgentHostGatewayGate({ kind: 'request', turn: 'First plain message.' });
+
+  /* An edit derives its rewind point when it is *admitted*, from the transcript
+   * as it is then — and the live turn's interruption truncates that transcript
+   * in between. Clamping a missing target to index 0 leased a checkout for a
+   * rewind point that does not exist (T3-D5); refusing it is the contract. */
+  await editFirstMessage(' Edited.');
+  await target.releaseAgentHostGatewayRequest('First plain message.');
+
+  await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['First plain message. Edited.', 1],
+  ]);
+  await expectNoAdmissionRefusal();
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+});
+
+test('resumes a refused turn under its own run, rewinding nothing', async () => {
+  const [chatId] = await openChat([reply('Reply one.')]);
+  await sendRefused('First plain message.');
+
+  await tryAgain();
+
+  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  /* One run, two attempts. *Try again* entered as a `regenerate` before W7: it
+   * rewound, minted a fresh run id and paid for the refused prefix again, and
+   * the host's record for the old id was orphaned so `drop` could not match it. */
+  expect(await runCountOf(chatId!)).toBe(1);
+  expect(await rewindCountOf(chatId!)).toBe(0);
+  await expect.poll(async () => settlementsOf(chatId!), { timeout: 60_000 }).toEqual(['turn.failed', 'turn.finalized']);
+  /* Two attempts, two asks. The refused call never reached a reply, so the
+   * continuation asks the provider again for the same turn — the charge the
+   * person consented to by pressing the card's own verb. */
+  await expectAsksByTurn([['First plain message.', 2]]);
+  await expectNoAdmissionRefusal();
+});
+
 test('sends again after reloading while a turn is queued', async () => {
-  await openChat(twoTurnScript);
+  const [chatId] = await openChat(twoTurnScript);
   /* The turn is parked at the request's *entry* — dispatched, not one byte
    * answered — which is the only way to reload a turn that is still in
    * `queued.dispatched`. The stream gate parks after the text block is written,
@@ -310,20 +508,29 @@ test('sends again after reloading while a turn is queued', async () => {
   await target.reload();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await target.releaseAgentHostGatewayRequest('First plain message.');
-  await selectModel(pdfModelName);
 
+  /* I4: the document that placed the run is gone, so the new document's attach
+   * *records* it — one `turn.failed` carrying `RUN_ABANDONED` — and never
+   * drives it. The turn keeps its single ask; the reload spends nothing. */
+  await expect.poll(async () => settlementsOf(chatId!), { timeout: 120_000 }).toEqual(['turn.failed']);
+  await expectAsksByTurn([['First plain message.', 1]]);
+
+  await selectModel(pdfModelName);
   await sendDraft('Second plain message.');
 
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
-  // W8b: what the reloaded turn 1 owes — whether it is re-asked, what it
-  // settles, and whether the next send may be refused meanwhile — is the
-  // Resume/discovery lane's contract (blueprint E1, D1, D4). Assert the ask
-  // counts, the settlement kinds and `expectNoAdmissionRefusal` here once it
-  // lands. Until then this row holds only what is certain: a chat reloaded out
-  // of `queued.dispatched` still runs its next turn.
+  await expectAsksByTurn([
+    ['First plain message.', 1],
+    ['Second plain message.', 1],
+  ]);
+  expect(await runCountOf(chatId!)).toBe(2);
+  await expect.poll(async () => settlementsOf(chatId!), { timeout: 60_000 }).toEqual(['turn.failed', 'turn.finalized']);
+  /* `RUN_ABANDONED` is the record the takeover just wrote, so the page reports
+   * it; every other refusal in the union is still a failure here. */
+  await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });
 
-test('sends again after navigating away mid-turn and back', async () => {
+test('resumes the turn a navigation abandoned, then sends another', async () => {
   const [chatId] = await openChat([reply('Reply one.', { gated: true }), reply('Reply two.')]);
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
@@ -334,17 +541,36 @@ test('sends again after navigating away mid-turn and back', async () => {
   await target.navigate(`${projectUrl.pathname}${projectUrl.search}`);
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await target.releaseAgentHostGatewayFixture();
-  await selectModel(pdfModelName);
 
+  /* Ruling E1: the run the departed document left behind is recorded, not
+   * resumed. The takeover used to resume it on the next gesture's attach — a
+   * full-price re-ask of a turn the person had already paid for, with the reply
+   * they watched erased and no settlement written at all (Finding 1). */
+  await expect.poll(async () => settlementsOf(chatId!), { timeout: 120_000 }).toEqual(['turn.failed']);
+  await expectAsksByTurn([['First plain message.', 1]]);
+
+  /* The person's own gesture is what spends: the saved turn's card continues
+   * the same run rather than rewinding it. A partial stream is never durable,
+   * so the continuation asks for that turn a second time and the script replays
+   * its own entry. */
+  await target.expectVisible(continueAction, 60_000);
+  await target.click(continueAction);
+  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' });
+  await target.releaseAgentHostGatewayFixture('First plain message.');
+  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+
+  await selectModel(pdfModelName);
   await sendDraft('Second plain message.');
 
-  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-  // W8b: this row's contract is the one the Resume/discovery lane is
-  // redefining — today's takeover re-asks turn 1, so the texts are
-  // `[First, First, Second]` and the count below is the wrong assertion
-  // (blueprint Q5 defect 1, E1). Left as it stands until that lane lands.
-  expect(await gatewayUserTexts()).toHaveLength(2);
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
-  await expectNoAdmissionRefusal();
-  await expectLogInvariant(chatId!, 2);
+  await expectAsksByTurn([
+    ['First plain message.', 2],
+    ['Second plain message.', 1],
+  ]);
+  expect(await runCountOf(chatId!)).toBe(2);
+  await expect
+    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
+    .toEqual(['turn.failed', 'turn.finalized', 'turn.finalized']);
+  await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });

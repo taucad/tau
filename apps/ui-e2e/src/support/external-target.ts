@@ -479,6 +479,48 @@ export const waitForAgentHostGatewayGate = (
 ): Promise<TargetGatewayGate> => server.commands.uiWaitForAgentHostGatewayGate(match, timeoutMilliseconds);
 /** Every `/v1/chat/...` path the page asked the (absent) API for since the fixture was installed. */
 export const readAgentHostApiRequests = (): Promise<string[]> => server.commands.uiReadAgentHostApiRequests();
+
+/** The two points a row can park a chat's turn at; see {@link holdChatTurn}. */
+export type ChatTurnHold = 'admission' | 'settlement';
+
+/**
+ * Park this chat's next admission or settlement.
+ *
+ * The gateway fixture cannot hold either: `run.queued.admitting` is over before
+ * a provider call exists, and `run.finishing.settling` runs after the stream
+ * the row is watching has closed. The page's own `TAU_DEBUG` probe holds them
+ * (`apps/ui/app/chat-clients/debug-probes.tsx`, mounted by `focused-chat-gate.tsx`
+ * only under `ENV.TAU_DEBUG`, which `global-setup.ts` sets for this suite).
+ *
+ * Waits for the probe rather than racing the focused chat's mount. Arming twice
+ * is a no-op, and the probe releases both holds when it unmounts.
+ *
+ * @param hold - Which point to park at.
+ * @returns Nothing.
+ */
+export const holdChatTurn = async (hold: ChatTurnHold): Promise<void> => {
+  await expect
+    .poll(
+      async () => evaluate(() => typeof (globalThis as Record<string, unknown>)['__tauHoldChatTurn'] === 'function'),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  await evaluate((which: ChatTurnHold) => {
+    (globalThis as unknown as { __tauHoldChatTurn: (value: ChatTurnHold) => void }).__tauHoldChatTurn(which);
+  }, hold);
+};
+
+/**
+ * Let a parked admission or settlement carry on; releasing an unarmed hold is a no-op.
+ *
+ * @param hold - The point to release.
+ * @returns Nothing.
+ */
+export const releaseChatTurn = async (hold: ChatTurnHold): Promise<void> => {
+  await evaluate((which: ChatTurnHold) => {
+    (globalThis as unknown as { __tauReleaseChatTurn?: (value: ChatTurnHold) => void }).__tauReleaseChatTurn?.(which);
+  }, hold);
+};
 /** Arms (or disarms, with no argument) a coded provider refusal on the gateway fixture. */
 export const setAgentHostGatewayFailure = (failure?: {
   readonly status: number;

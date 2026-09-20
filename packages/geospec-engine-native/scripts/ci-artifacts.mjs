@@ -4,6 +4,9 @@
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
  * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
+ * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
+ * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
+ * apply only to that prefix's verification. Mixed selectors remain independent.
  * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json
  * Exit: 0 complete and matching; 1 missing, changed or failed prerequisite.
  */
@@ -255,6 +258,13 @@ export const prepareArtifacts = (root) => {
   const source = sourceIdentity(root);
   const { GEOSPEC_DELIVERY_CACHE: deliveryCache } = process.env;
   const cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery');
+  const reusePrefixes = process.env.GEOSPEC_NATIVE_DELIVERY_CACHE !== undefined;
+  const nativeCache = resolve(root, process.env.GEOSPEC_NATIVE_DELIVERY_CACHE ?? cache);
+  const nativeBuilder = resolve(
+    root,
+    (reusePrefixes ? process.env.GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER : process.env.GEOSPEC_OCCT_PRODUCER_BUILDER) ??
+      `${packagePath}/native/occt/build-occt.sh`,
+  );
   mkdirSync(cache, { recursive: true });
   const nativeTarget = mkdtempSync(join(cache, 'ci-node-target-'));
   const environment = {
@@ -263,7 +273,7 @@ export const prepareArtifacts = (root) => {
     pnpm_config_verify_deps_before_run: 'warn',
     GEOSPEC_DELIVERY_CACHE: cache,
     GEOSPEC_NODE_MANIFEST: 'bindings/node/Cargo.toml',
-    GEOSPEC_OCCT_PREFIX: join(cache, 'occt-native/install'),
+    GEOSPEC_OCCT_PREFIX: join(nativeCache, 'occt-native/install'),
     GEOSPEC_MIXED_INPUTS: resolve(root, mixedInputsPath),
     GEOSPEC_MIXED_COMMANDS: resolve(root, mixedCommandsPath),
     GEOSPEC_MIXED_RECEIPT: resolve(root, receiptPath),
@@ -271,8 +281,8 @@ export const prepareArtifacts = (root) => {
   };
   const inputsPath = join(cache, 'mixed-inputs.json');
   mkdirSync(resolve(root, transportPath), { recursive: true });
-  /** @type {(target: string) => string} */
-  const run = (target) => {
+  /** @type {(target: string, preparationEnvironment?: Record<string, string | undefined>) => string} */
+  const run = (target, preparationEnvironment = {}) => {
     const argv = ['pnpm', 'nx', 'run', `geospec-engine-native:${target}`];
     const capture = target === 'build-node' || target === 'assemble-package';
     const overrides =
@@ -289,6 +299,7 @@ export const prepareArtifacts = (root) => {
         ...environment,
         GEOSPEC_MIXED_INPUTS: target === 'assemble-package' ? environment.GEOSPEC_MIXED_INPUTS : inputsPath,
         ...overrides,
+        ...preparationEnvironment,
       },
     });
     if (capture) {
@@ -315,10 +326,7 @@ export const prepareArtifacts = (root) => {
               GEOSPEC_NODE_MANIFEST: environment.GEOSPEC_NODE_MANIFEST,
               RUSTC_LOG: overrides.RUSTC_LOG,
             },
-            prefixBuilder: resolve(
-              root,
-              process.env.GEOSPEC_OCCT_PRODUCER_BUILDER ?? `${packagePath}/native/occt/build-occt.sh`,
-            ),
+            prefixBuilder: nativeBuilder,
             ownedTarget: /** @type {{'build-node': unknown}} */ (project.targets)['build-node'],
             logs: ['build-node.stdout', 'build-node.stderr'].map((name) =>
               fileRecord(root, `${transportPath}/${name}`),
@@ -331,15 +339,21 @@ export const prepareArtifacts = (root) => {
     }
     return result.stdout || '';
   };
-  for (const target of [
-    'prepare-delivery:sources',
-    'prepare-delivery:tools',
-    'prepare-delivery:prefixes',
-    'build-node',
-    'prepare-delivery:inputs',
-  ]) {
-    run(target);
+  run('prepare-delivery:sources');
+  run('prepare-delivery:tools');
+  if (reusePrefixes) {
+    run('prepare-delivery:reuse-native', {
+      GEOSPEC_DELIVERY_CACHE: nativeCache,
+      GEOSPEC_OCCT_PRODUCER_BUILDER: nativeBuilder,
+      GEOSPEC_OCCT_PRODUCER_RECIPE: process.env.GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE,
+      GIT_CEILING_DIRECTORIES: process.env.GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES,
+    });
+    run('prepare-delivery:reuse-mixed');
+  } else {
+    run('prepare-delivery:prefixes');
   }
+  run('build-node');
+  run('prepare-delivery:inputs');
   const inputsBytes = readFileSync(inputsPath);
   const { cache: mixedCache } = readJson(inputsPath);
   assert.ok(typeof mixedCache === 'string', 'Prepared inputs lack mixed cache path.');

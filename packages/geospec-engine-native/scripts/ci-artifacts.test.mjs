@@ -8,7 +8,8 @@ import process from 'node:process';
 // oxlint-disable-next-line no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export.
 import { prepareArtifacts, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
 
-await test('complete transport relocates, rejects missing/stale bytes, and never loads a product', (context) => {
+/** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
+const checkTransport = (context, reusePrefixes) => {
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
   mkdirSync(scratch, { recursive: true });
   const temporary = mkdtempSync(join(scratch, 'transport-'));
@@ -54,7 +55,14 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   );
   /** @type {string[]} */
   const targets = [];
+  const mixedCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery');
+  const nativeCache = reusePrefixes ? join(producer, 'retained-native-cache') : mixedCache;
+  const nativeBuilder = join(
+    producer,
+    reusePrefixes ? 'native-producing-builder.sh' : `${packagePath}/native/occt/build-occt.sh`,
+  );
   let failNode = false;
+  let failPrefix = false;
   let changeSource = false;
   let omitReceipt = false;
   let omitCommands = false;
@@ -64,7 +72,7 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {cwd: string, env: {CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string}}) => {status: number}} */ (
+    /** @type {(executable: string, args: string[], options: {cwd: string, env: {CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
       executable,
       args,
       options,
@@ -92,10 +100,12 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
         /** @type {unknown} */
         const invocationData = JSON.parse(readFileSync(args[3], 'utf8'));
         const invocation =
-          /** @type {{exitCode: number, environment: {CARGO_TARGET_DIR: string}, addon: {sha256: string}}} */ (
+          /** @type {{exitCode: number, environment: {CARGO_TARGET_DIR: string, GEOSPEC_OCCT_PREFIX: string}, prefixBuilder: string, addon: {sha256: string}}} */ (
             invocationData
           );
         assert.equal(invocation.exitCode, 0);
+        assert.equal(invocation.prefixBuilder, nativeBuilder);
+        assert.equal(invocation.environment.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
         assert.ok(invocation.environment.CARGO_TARGET_DIR.includes('/ci-node-target-'));
         assert.equal(
           invocation.addon.sha256,
@@ -111,6 +121,27 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
       assert.ok(command);
       const target = command.replace('geospec-engine-native:', '');
       targets.push(target);
+      assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
+      if (target === 'prepare-delivery:reuse-native') {
+        assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, nativeCache);
+        assert.equal(options.env.GEOSPEC_OCCT_PRODUCER_BUILDER, nativeBuilder);
+        assert.equal(options.env.GEOSPEC_OCCT_PRODUCER_RECIPE, join(producer, 'native-producing-recipe.json'));
+        assert.equal(options.env.GIT_CEILING_DIRECTORIES, nativeCache);
+        if (failPrefix) {
+          return { status: 1 };
+        }
+      } else {
+        assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, mixedCache);
+        assert.equal(
+          options.env.GEOSPEC_OCCT_PRODUCER_BUILDER,
+          reusePrefixes ? join(producer, 'mixed-producing-builder.sh') : undefined,
+        );
+        assert.equal(
+          options.env.GEOSPEC_OCCT_PRODUCER_RECIPE,
+          reusePrefixes ? join(producer, 'mixed-producing-recipe.json') : undefined,
+        );
+        assert.equal(options.env.GIT_CEILING_DIRECTORIES, undefined);
+      }
       if (target === 'assemble-package') {
         // Nx owns the target's build dependency. The real input inventory must already verify.
         verifyArtifacts(producer);
@@ -126,10 +157,7 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
       }
       if (target === 'build-node') {
         assert.equal(options.env.GEOSPEC_NODE_MANIFEST, 'bindings/node/Cargo.toml');
-        assert.equal(
-          options.env.GEOSPEC_OCCT_PREFIX,
-          join(producer, 'node_modules/.cache/geospec-engine-native/delivery/occt-native/install'),
-        );
+        assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
         if (failNode) {
           return { status: 1 };
         }
@@ -225,6 +253,13 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   process.env = {
     ...process.env,
     GEOSPEC_DELIVERY_CACHE: undefined,
+    GEOSPEC_NATIVE_DELIVERY_CACHE: reusePrefixes ? nativeCache : undefined,
+    GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER: reusePrefixes ? nativeBuilder : undefined,
+    GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE: reusePrefixes ? join(producer, 'native-producing-recipe.json') : undefined,
+    GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES: reusePrefixes ? nativeCache : undefined,
+    GEOSPEC_OCCT_PRODUCER_BUILDER: reusePrefixes ? join(producer, 'mixed-producing-builder.sh') : undefined,
+    GEOSPEC_OCCT_PRODUCER_RECIPE: reusePrefixes ? join(producer, 'mixed-producing-recipe.json') : undefined,
+    GIT_CEILING_DIRECTORIES: undefined,
     CARGO_HOME: join(producer, 'assembly-cargo-home'),
   };
   context.after(() => {
@@ -235,7 +270,9 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   assert.deepEqual(targets, [
     'prepare-delivery:sources',
     'prepare-delivery:tools',
-    'prepare-delivery:prefixes',
+    ...(reusePrefixes
+      ? ['prepare-delivery:reuse-native', 'prepare-delivery:reuse-mixed']
+      : ['prepare-delivery:prefixes']),
     'build-node',
     'prepare-delivery:inputs',
     'build-wasm',
@@ -254,7 +291,7 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   rmSync(join(consumer, 'node_modules'), { recursive: true });
   assert.deepEqual(verifyArtifacts(consumer), inventory);
   assert.deepEqual(verifyDelivery(consumer), inventory);
-  assert.equal(targets.length, 7, 'verification must not invoke a producer');
+  assert.equal(targets.length, reusePrefixes ? 8 : 7, 'verification must not invoke a producer');
   assert.equal(observations, 1, 'verification must not observe a native module');
   assert.equal(pythonFetches, 1, 'verification must not fetch Cargo material');
   for (const name of ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz']) {
@@ -350,4 +387,22 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   changeSource = true;
   assert.throws(() => prepareArtifacts(producer), /sources changed during production/);
   assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);
+  if (reusePrefixes) {
+    changeSource = false;
+    failPrefix = true;
+    targets.length = 0;
+    assert.throws(() => prepareArtifacts(producer), /prepare-delivery:reuse-native failed/);
+    assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);
+    assert.ok(!targets.includes('build-node'));
+    assert.ok(!targets.includes('build-wasm'));
+    assert.ok(!targets.includes('assemble-package'));
+  }
+};
+
+await test('default cold preparation transports complete artifacts without loading a product', (context) => {
+  checkTransport(context, false);
+});
+
+await test('independent retained prefixes transport complete artifacts without loading a product', (context) => {
+  checkTransport(context, true);
 });

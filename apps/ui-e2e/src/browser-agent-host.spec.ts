@@ -397,7 +397,14 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
 
   await target.releaseAgentHostGatewayFixture();
   await target.expectVisible(selectors.getByText('The model is ready.', { exact: true }), 120_000);
-  await target.expectVisible(selectors.getByRole('button', { name: 'Read files' }), 60_000);
+  const activityTrigger = selectors.getByRole('button', { name: 'Read files' });
+  await target.expectVisible(activityTrigger, 60_000);
+  /* A thought beside a tool call is a row of that call's activity group
+   * (`groupAssistantParts`, `f09daf114`), and a settled group collapses and
+   * unmounts its rows: the thought is reachable only through `Read files`. */
+  await target.expectCount(reasoningBody, 0);
+  await target.click(activityTrigger);
+  await target.expectVisible(selectors.getByText(/Read public\/models\/honeycomb\.js/u), 30_000);
   /* A settled thought behind a message that has content stays collapsed. */
   await target.expectCount(reasoningBody, 0);
 
@@ -411,7 +418,6 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
   await target.expectVisible(reasoningBody, 30_000);
 
   await target.setViewport({ width: 430, height: 820 });
-  const activityTrigger = selectors.getByRole('button', { name: 'Read files' });
   const alignment = await target.evaluateLocator(activityTrigger, (element) => {
     const icon = element.querySelector('svg');
     const label = element.querySelector('span');
@@ -428,12 +434,11 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
   expect(alignment?.usesExactToken).toBe(true);
   expect(alignment?.centerDelta).toBeLessThanOrEqual(1);
 
+  /* The narrow viewport mounts the mobile chat tree (`chat-interface.tsx`), so both disclosures start over. */
   await target.click(activityTrigger);
   await target.expectVisible(selectors.getByText(/Read public\/models\/honeycomb\.js/u), 30_000);
-  if (!(await target.isVisible(reasoningBody))) {
-    await target.click(thoughtTrigger);
-    await target.expectVisible(reasoningBody, 30_000);
-  }
+  await target.click(thoughtTrigger);
+  await target.expectVisible(reasoningBody, 30_000);
   await target.screenshot(selectors.getByCss('body'), 'agent-activity-exact-light-narrow.png');
   await target.emulateColorScheme('dark');
   await target.screenshot(selectors.getByCss('body'), 'agent-activity-exact-dark-narrow.png');
@@ -441,11 +446,10 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
   await target.reload();
   await ensureChatOpen();
   await target.expectVisible(selectors.getByText('The model is ready.', { exact: true }), 60_000);
-  await target.expectVisible(
-    selectors.getByRole('button', { name: /^Thought (?:briefly|for \d+ seconds?)$/u }),
-    60_000,
-  );
-  await target.expectVisible(selectors.getByRole('button', { name: 'Read files' }), 60_000);
+  /* The reloaded transcript is the durable log's: its thought is still there, inside its group. */
+  await target.expectVisible(activityTrigger, 60_000);
+  await target.click(activityTrigger);
+  await target.expectVisible(thoughtTrigger, 60_000);
 });
 
 streamingFadeTest('fades live reasoning and prose chunks without retaining wrappers', async () => {

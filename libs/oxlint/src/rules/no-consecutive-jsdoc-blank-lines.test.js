@@ -46,6 +46,25 @@ function foo(x) {}
 `,
         },
         {
+          name: 'empty JSDoc block is left to no-blank-blocks',
+          code: `
+class Foo {
+  /**
+   */
+  read() {}
+}
+`,
+        },
+        {
+          name: 'one blank line before the closer',
+          code: `
+/**
+ *
+ */
+function foo() {}
+`,
+        },
+        {
           name: 'regular block comment is ignored',
           code: `
 /*

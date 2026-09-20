@@ -44,9 +44,10 @@ function checkConsecutiveBlanks(context, comment) {
   let lineOffset = 0;
   let previousWasBlank = false;
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const lineString = String(line);
-    const isBlank = BLANK_LINE_REGEX.test(lineString);
+    // The first line carries the `/**` opener and the last the indent before `*/`; neither is a blank content line.
+    const isBlank = index > 0 && index < lines.length - 1 && BLANK_LINE_REGEX.test(lineString);
 
     if (isBlank && previousWasBlank) {
       const absStart = commentStart + 2 + lineOffset;

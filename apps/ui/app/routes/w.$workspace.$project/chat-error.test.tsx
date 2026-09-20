@@ -281,6 +281,28 @@ describe('ChatError', () => {
     expect(continueChat).toHaveBeenCalledTimes(1);
   });
 
+  /* E1. A run whose document died is recorded abandoned, not failed by
+   * anything the person did: the turn is saved and Resume continues it. Left
+   * to the category it read as a generic error offering *Try again*. */
+  it('should present an abandoned run as a paused turn that resumes', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The host executing this run is gone. Resume the turn to continue it.',
+      code: 'RUN_ABANDONED',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
     const quota: ChatErrorPayload = {
       category: errorCategory.rateLimit,

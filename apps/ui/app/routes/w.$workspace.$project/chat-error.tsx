@@ -30,8 +30,12 @@ import { externalAgentStopCodes, externalAgentStopSchema, isResumableRunFailure 
  * the host would resume from is complete. The category cannot tell them apart:
  * the masked in-stream failure arrives on an HTTP 200, which reads as
  * `generic`, and a 502 reads as `server`.
+ *
+ * `RUN_ABANDONED` is the host's record of a run whose document died: nothing
+ * the person did failed, and the host resumes it from what it had saved.
  */
 const pausedTurnCodes = new Set([
+  'RUN_ABANDONED',
   'NETWORK_ERROR',
   'PROVIDER_UNAVAILABLE',
   'MALFORMED_RESPONSE',

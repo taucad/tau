@@ -51,7 +51,8 @@
     },
     "./native/opencascade/single/wasm": "./native/opencascade/dist/geospec_opencascade_single.wasm",
     "./native/opencascade/single/wasm-url": "./src/native/opencascade-wasm.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./node-filesystem": "./src/runner/node/node-vm-filesystem.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -82,7 +83,12 @@
         "import": "./dist/native/opencascade-wasm.mjs",
         "default": "./dist/native/opencascade-wasm.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./node-filesystem": {
+        "types": "./dist/runner/node/node-vm-filesystem.d.mts",
+        "import": "./dist/runner/node/node-vm-filesystem.mjs",
+        "default": "./dist/runner/node/node-vm-filesystem.mjs"
+      }
     },
     "imports": {}
   },

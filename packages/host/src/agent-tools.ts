@@ -196,6 +196,57 @@ export const createHostGeoSpecRunner = async (
   });
 };
 
+/**
+ * Create an opt-in native runner for one tool call using the host's existing runtime.
+ * The runtime is borrowed; closing this runner releases its subjects and engine only.
+ *
+ * @param workspaceRoot - Absolute project root the runner executes against.
+ * @param runtime - Existing project runtime used to export authored models.
+ * @returns The ordinary GeoSpec runner contract, owning its native engine.
+ * @public
+ */
+export const createHostNativeGeoSpecRunner = async (
+  workspaceRoot: string,
+  runtime: HostGeoSpecRuntimeClient,
+): Promise<GeoSpecRunner> => {
+  const [nativeEngineModule, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
+    import('@taucad/geospec-engine-native/node'),
+    import('geospec/runner/native'),
+    import('@taucad/geospec-engine/node-filesystem'),
+  ]);
+  const filesystem = createNodeVmFileSystem(workspaceRoot);
+  const engine = new nativeEngineModule.Engine();
+  try {
+    const runner = createNativeGeoSpecRunner({
+      filesystem,
+      nativeAssertions: { engine, canonicalize: nativeEngineModule.canonicalize },
+      model: {
+        projectPath: workspaceRoot,
+        runtime,
+        readSource: async (source) => {
+          if (typeof source !== 'string') {
+            throw new TypeError('Native GeoSpec file sources must be project paths.');
+          }
+          return filesystem.readFile(assertRootedPath(source));
+        },
+      },
+    });
+    return {
+      ...runner,
+      async close() {
+        try {
+          await runner.close();
+        } finally {
+          engine.close();
+        }
+      },
+    };
+  } catch (error) {
+    engine.close();
+    throw error;
+  }
+};
+
 /** Options for {@link createHostToolRegistry}. @public */
 export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
@@ -230,6 +281,13 @@ export type HostToolRegistryOptions = {
    * from an installation that has the engine.
    */
   readonly geospecRunner?: ((workspaceRoot: string) => Promise<GeoSpecRunner>) | false | undefined;
+  /**
+   * Authoring API of `geospecRunner`, advertised before the first model turn.
+   * Defaults to legacy, matching the built-in runner. A custom native runner
+   * must explicitly pair with `native`; arbitrary factories cannot be inspected
+   * to infer their backend. The caller owns this pairing.
+   */
+  readonly geospecAuthoringMode?: 'legacy' | 'native' | undefined;
   /**
    * Where each admitted run works, by run id — the map `createProjectRevisions`
    * publishes (V19).
@@ -430,6 +488,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),
+      geospecAuthoringMode: options.geospecAuthoringMode,
       ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
       skillResolver,
       testingEnabled: geospec !== undefined,

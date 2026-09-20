@@ -3546,6 +3546,9 @@ importers:
       '@taucad/geospec-engine':
         specifier: workspace:*
         version: link:../geospec-engine
+      '@taucad/geospec-engine-native':
+        specifier: workspace:*
+        version: link:../geospec-engine-native
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../revisions

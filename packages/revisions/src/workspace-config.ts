@@ -13,9 +13,38 @@
  * land on a Node host and in the browser provider.
  */
 
-import { pathRegistry } from '@taucad/filesystem/path-registry';
+import { pathRegistry, tauPathPolicy } from '@taucad/filesystem/path-registry';
+import type { PathClassification, PathPolicy } from '@taucad/filesystem';
 
-const unversioned = pathRegistry.filter((row) => !row.versioned);
+/**
+ * The row fields a generated ignore pattern is derived from (PP5).
+ *
+ * Structural, so this module names the classification vocabulary and not the
+ * registry's own row type: what a pattern needs to know is where the row
+ * matches and whether its bytes are versioned.
+ *
+ * @public
+ */
+export type IgnoreRegistryRow = PathClassification &
+  Readonly<{ prefix: string; anchored: boolean; directory: boolean }>;
+
+/**
+ * Tau's own layout: the classifier revisions default to, and the rows the
+ * generated ignore block that must agree with it is derived from (EQ6, PP5).
+ *
+ * **The one place `@taucad/filesystem/path-registry` is imported** in this
+ * package's non-test source (`import-boundary.test.ts` pins it, mirroring L1's
+ * own rule). The classifier and the rows travel as one value because PP5 is a
+ * property of the *pair*: every unversioned row must be excluded by the ignore
+ * block, so a project that answers with another policy has to supply that
+ * policy's rows in the same breath, and the type makes it do so.
+ *
+ * @public
+ */
+export const tauRevisionPolicy: Readonly<{ policy: PathPolicy; rows: readonly IgnoreRegistryRow[] }> = Object.freeze({
+  policy: tauPathPolicy,
+  rows: pathRegistry,
+});
 
 /**
  * Paths never carried by a revision, as ignore patterns. The `.tau` families and
@@ -35,13 +64,17 @@ const unversioned = pathRegistry.filter((row) => !row.versioned);
  * pattern breaks PP5 for exactly the shape the row exists to catch. The cache
  * keeps its slash: a file named `node_modules` is not the cache.
  *
+ * @param rows - The layout's registry rows; every unversioned one is excluded
+ *   (PP5), so these must be the rows of the policy this project classifies with.
+ * @returns One ignore pattern per unversioned row, in registry order.
  * @public
  */
-export const generatedIgnoreEntries: readonly string[] = Object.freeze(
-  unversioned.map(
-    (row) => `${row.anchored ? '/' : '**/'}${row.prefix}${row.directory && row.class !== 'control-plane' ? '/' : ''}`,
-  ),
-);
+export const generatedIgnoreEntries = (rows: readonly IgnoreRegistryRow[]): readonly string[] =>
+  rows
+    .filter((row) => !row.versioned)
+    .map(
+      (row) => `${row.anchored ? '/' : '**/'}${row.prefix}${row.directory && row.class !== 'control-plane' ? '/' : ''}`,
+    );
 
 /** Project-relative path of the generated ignore file. @public */
 export const generatedIgnorePath = '.gitignore';
@@ -76,11 +109,17 @@ const withGeneratedBlock = (existing: string | undefined, markerStart: string, l
  *
  * @param existing - Current ignore file content, or `undefined` when absent.
  * @param additional - Extra project-specific lines to include in the block.
+ * @param rows - The layout's rows, defaulting to Tau's own. A project that
+ *   classifies with another policy passes that policy's rows, or the block and
+ *   the capture disagree (PP5).
  * @returns The full file content to write.
  * @public
  */
-export const generatedIgnoreContent = (existing: string | undefined, additional: readonly string[] = []): string =>
-  withGeneratedBlock(existing, ignoreMarker, [...generatedIgnoreEntries, ...additional]);
+export const generatedIgnoreContent = (
+  existing: string | undefined,
+  additional: readonly string[] = [],
+  rows: readonly IgnoreRegistryRow[] = tauRevisionPolicy.rows,
+): string => withGeneratedBlock(existing, ignoreMarker, [...generatedIgnoreEntries(rows), ...additional]);
 
 /**
  * The file families whose bytes are large objects wherever they appear (A24).

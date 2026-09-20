@@ -23,8 +23,7 @@
  * authority epoch on the next open (F13, R15).
  */
 
-import type { RootedFileSystem } from '@taucad/filesystem';
-import { classify } from '@taucad/filesystem/path-registry';
+import type { PathPolicy, RootedFileSystem } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { walk } from '@taucad/filesystem/content-ops';
 import {
@@ -122,6 +121,7 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  tauRevisionPolicy,
 } from '#workspace-config.js';
 import type {
   SyncActors,
@@ -404,6 +404,20 @@ export type RevisionActorsOptions = Readonly<{
    */
   actor?: (input: Readonly<{ runId: string | undefined; trigger: CheckoutCutTrigger }>) => RevisionActor | undefined;
   /**
+   * The classifier this project's layout answers with (EQ6, D6).
+   *
+   * Injected for the same reason the composed view's is: the mask is the
+   * mechanism and the layout is data. Defaults to Tau's own, which is the one
+   * place in this package that reads the registry — every site below asks this
+   * value, so a project opened under another layout cannot have Tau's rows
+   * quietly applied to its files.
+   *
+   * A non-default policy must also hand its rows to
+   * `generatedIgnoreContent`, or the generated ignore block and the capture
+   * disagree (PP5); `tauRevisionPolicy` keeps the pair together.
+   */
+  policy?: PathPolicy;
+  /**
    * Called when a turn's placement settles, before its lease is written.
    *
    * Both outcomes: a host has to root the turn's agent where the placement put
@@ -604,6 +618,7 @@ export { revisionTreeId } from '#git-tree-id.js';
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's port; splitting it would thread the same six values through every half.
 export const createRevisionActors = (options: RevisionActorsOptions): RevisionActors => {
   const { port, filesystem, projectId, authorityEpoch } = options;
+  const policy = options.policy ?? tauRevisionPolicy.policy;
   const useFileSystem: UseCheckoutFileSystem =
     options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
   const actorId = options.actorId ?? 'tau-host';
@@ -844,7 +859,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     swept.add(place.id);
     try {
-      for await (const entry of walk(live, '', { admits: (path) => classify(path).versioned })) {
+      for await (const entry of walk(live, '', { admits: (path) => policy.classify(path).versioned })) {
         if (entry.kind === 'file' && temporarySiblingPattern.test(entry.relativePath.split('/').at(-1) ?? '')) {
           // oxlint-disable-next-line no-await-in-loop -- litter is removed as the walk reaches it, not held in a list.
           await unlinkIfPresent(live, entry.relativePath);
@@ -882,9 +897,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      * as this recent is racily clean and is read rather than trusted (EQ7). */
     const observedAt = now();
     const tree = await captureRevisionTree(rooted, {
-      exclude: (path) => !classify(path).versioned,
+      exclude: (path) => !policy.classify(path).versioned,
       inheritedMode: (path) => basis?.mode(path),
-      ...memo.unchanged(await rooted.statTree?.('', { admits: (path) => classify(path).versioned }), observedAt),
+      ...memo.unchanged(await rooted.statTree?.('', { admits: (path) => policy.classify(path).versioned }), observedAt),
     });
     const collisions = caseCollisions(tree);
     if (collisions.length > 0) {
@@ -924,6 +939,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     useFileSystem,
     capture,
     onApplyingTree: options.onApplyingTree,
+    policy,
     withCheckoutFence,
     recordedTree,
     formatOf,
@@ -1062,7 +1078,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const collisions = caseCollisions(tree);
     const invalid = tree
       .entries()
-      .find((entry) => !isSyncedEvidencePath(entry.path) || classify(entry.path).class !== 'records');
+      .find((entry) => !isSyncedEvidencePath(entry.path) || policy.classify(entry.path).class !== 'records');
     if (invalid !== undefined || collisions.length > 0) {
       throw new RevisionPortError(
         'UNSUPPORTED_OPERATION',
@@ -2940,6 +2956,19 @@ export const createProjectRevisionsActor = (
   );
   return { actor, settled: actors.settled };
 };
+
+/**
+ * How long an admission waits for its turn to take its lease.
+ *
+ * The same bound the turn machine gives its own cut (`turnCutSettlementMilliseconds`),
+ * spelled here rather than imported because it is the *host's* patience: a turn
+ * whose base mint never settles must refuse the run rather than hold the client
+ * open for the life of the process. Both compositions read this one value
+ * (W10.5) — they had a copy each, and a bound kept in two places is a bound.
+ *
+ * @public
+ */
+export const admissionMilliseconds = 30_000;
 
 /**
  * How long a host waits for the scheduler before it lets a project go.

@@ -2,7 +2,9 @@
 import { createActor, setup, waitFor } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import { jscad } from '@taucad/jscad';
 import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
@@ -40,7 +42,7 @@ const fixtureRuntime = defineRuntime({
 
 type FileManagerProbeContext = {
   contentService: Record<string, unknown>;
-  openFileSystemBridge: (root: string) => FileSystemBridgeConnection;
+  openFileSystemBridge: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
 };
 
 const fileManagerProbe = setup({
@@ -91,7 +93,14 @@ const createFixture = async (partSource: string) => {
   vi.stubGlobal('self', workerScope);
   const exposedFileSystem = exposeFileSystem(fileService, {
     changeEventBus: eventBus,
-    handlerForRoot: (root, context) => fileService.createRootedFileSystem(root, context),
+    /* The worker's own switch (W2): the kernel names `'agent'`, so this fixture
+     * renders through the masked view it really reads, not the checkout. */
+    handlerForRoot: (root, context, consumer) => {
+      const filesystem = fileService.createRootedFileSystem(root, context);
+      return consumer === 'working-copy'
+        ? filesystem
+        : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
+    },
   });
   const bridgeWorker = {
     postMessage(message: unknown): void {
@@ -101,12 +110,11 @@ const createFixture = async (partSource: string) => {
   const fileManagerRef = createActor(fileManagerProbe, {
     input: {
       contentService: fileService as unknown as Record<string, unknown>,
-      openFileSystemBridge: (root) =>
+      openFileSystemBridge: (root, consumer) =>
         openFileSystemBridge(bridgeWorker as Worker, {
           messageType: filesystemBridgeConnectMessageType,
           root,
-          /* The kernel runs the checkout itself, never a consumer's view (G6). */
-          consumer: 'working-copy',
+          consumer,
         }),
     },
   }).start();

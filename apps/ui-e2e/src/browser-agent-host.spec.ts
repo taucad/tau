@@ -10,6 +10,7 @@ import {
 } from '#support/project-storage-state.js';
 import type { StoredProjectConfig } from '#support/project-storage-state.js';
 import { settlementTypes } from '#support/chat-admission-log.js';
+import { continueAction } from '#support/chat-admission.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 
 type TestBackend = 'indexeddb' | 'opfs' | 'webaccess';
@@ -802,18 +803,6 @@ describe('durable log reattach after a reload', () => {
     expect(apiRequests.filter((path) => /^\/v1\/chat\/(?!projects\/)[^/]+\/runs\//u.test(path))).toEqual([]);
   };
 
-  /**
-   * The card's continuation button.
-   *
-   * `RUN_ABANDONED` names no card of its own — it is not in `pausedTurnCodes`
-   * and `gatewayCodeCategories` gives it no category, so the failure reaches
-   * `chat-error.tsx`'s generic branch, whose action reads *Try again*. A code
-   * that does name a card (`INVALID_REQUEST`) renders *Resume* instead
-   * (`chat-error-paused-turn.tsx:84-93`). Both call `continueChat()`, so one
-   * locator covers the gesture either way.
-   */
-  const continueAction = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
-
   test('records a reloaded run as abandoned and finalises it when the person continues', async () => {
     await prepareBrowserHost('home');
     // The run is durably admitted and parked at the gateway gate; reloading here
@@ -830,8 +819,9 @@ describe('durable log reattach after a reload', () => {
     expect(await readGatewayRequestCount()).toBe(1);
     await assertNoApiRunCalls();
 
-    // The person's gesture is what spends. It continues the same run: no rewind
-    // and no new run id (`chat-turn-host.tsx:313-334`).
+    /* The person's gesture is what spends. It continues the same run: no rewind
+     * and no new run id (`chat-turn-host.tsx`). `RUN_ABANDONED` is a paused-turn
+     * code, so the card is the saved-turn one and its action reads *Resume*. */
     await target.expectVisible(continueAction, 60_000);
     await target.click(continueAction);
     /* The continuation replays this turn's own script entry, which is gated —

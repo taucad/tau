@@ -513,9 +513,73 @@ size_t shape_count(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) {
   return count;
 }
 
+bool collect_validation_solids(const TopoDS_Shape& shape,
+                               std::vector<TopoDS_Shape>& solids) {
+  if (shape.IsNull()) return false;
+  if (shape.ShapeType() == TopAbs_SOLID) {
+    solids.push_back(shape);
+    return true;
+  }
+  if (shape.ShapeType() != TopAbs_COMPOUND) return false;
+  TopoDS_Iterator child(shape, true, true);
+  if (!child.More()) return false;
+  for (; child.More(); child.Next()) {
+    if (!collect_validation_solids(child.Value(), solids)) return false;
+  }
+  return true;
+}
+
+bool disjoint_validation_solids(const std::vector<TopoDS_Shape>& solids) {
+  // IsSame includes the accumulated location but ignores orientation. Sharing
+  // within one complete solid is normal; sharing across solids needs fallback.
+  NCollection_IndexedDataMap<TopoDS_Shape, size_t, TopTools_ShapeMapHasher> owners;
+  for (size_t owner = 0; owner < solids.size(); ++owner) {
+    std::vector<TopoDS_Shape> pending{solids[owner]};
+    while (!pending.empty()) {
+      const TopoDS_Shape current = pending.back();
+      pending.pop_back();
+      if (current.IsNull()) return false;
+      const int index = owners.FindIndex(current);
+      if (index != 0) {
+        if (owners.FindFromIndex(index) != owner) return false;
+        continue;
+      }
+      owners.Add(current, owner);
+      for (TopoDS_Iterator child(current, true, true); child.More(); child.Next()) {
+        pending.push_back(child.Value());
+      }
+    }
+  }
+  return !solids.empty();
+}
+
+bool shape_is_valid(const TopoDS_Shape& shape) {
+  if (shape.IsNull() || shape.ShapeType() != TopAbs_COMPOUND) {
+    return BRepCheck_Analyzer(shape).IsValid();
+  }
+  std::vector<TopoDS_Shape> solids;
+  if (collect_validation_solids(shape, solids) && solids.size() > 1 &&
+      disjoint_validation_solids(solids)) {
+    // The identity map is already destroyed. Analyze each exact located and
+    // oriented solid, with the same geometric/ST/non-exact settings as before.
+    bool valid = true;
+    for (const TopoDS_Shape& solid : solids) {
+      const bool leaf_valid = BRepCheck_Analyzer(solid, true, false, false).IsValid();
+      if (!leaf_valid) {
+        valid = false;
+        break;
+      }
+    }
+    if (valid) return true;
+  }
+  // Each leaf analyzer has been destroyed before whole-shape fallback.
+  // Exceptions propagate to the existing operation guard, never to success.
+  return BRepCheck_Analyzer(shape).IsValid();
+}
+
 geospec_occt_shape_facts shape_facts(const TopoDS_Shape& shape) {
   geospec_occt_shape_facts result{};
-  result.valid = BRepCheck_Analyzer(shape).IsValid() ? 1 : 0;
+  result.valid = shape_is_valid(shape) ? 1 : 0;
   result.bounds = bounds(shape);
 
   GProp_GProps volume;

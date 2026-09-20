@@ -3,6 +3,18 @@ import { parseLogEvent } from '#log/event-schema.js';
 import { createEventSequence } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 
+const parsedEvents = new WeakMap<AgentLogEvent, AgentLogEvent>();
+
+const reducerEvent = (candidate: AgentLogEvent): AgentLogEvent => {
+  const cached = parsedEvents.get(candidate);
+  if (cached) {
+    return cached;
+  }
+  const parsed = parseLogEvent(candidate);
+  parsedEvents.set(candidate, parsed);
+  return parsed;
+};
+
 const failHistory = (message: string): never => {
   throw new EventLogError('HISTORY_INVALID', message);
 };
@@ -54,7 +66,7 @@ export const createEventLogReducer = (): {
   let messages: ProviderMessage[] = [];
 
   const prepare = (candidate: AgentLogEvent): EventLogTransition => {
-    const event = parseLogEvent(candidate);
+    const event = reducerEvent(candidate);
     const sequenceCheck = sequence.check(event);
     if (sequenceCheck.duplicate) {
       return { duplicate: true };

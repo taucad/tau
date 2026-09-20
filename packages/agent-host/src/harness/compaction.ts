@@ -78,6 +78,7 @@ type CreateCompactionOptions = {
   readonly models?: Models | undefined;
   readonly onCompaction?: ((outcome: CompactionOutcome) => void) | undefined;
   readonly onSummary?: (() => void) | undefined;
+  readonly settleDiscardedToolCalls?: (() => Promise<void>) | undefined;
   readonly now?: (() => number) | undefined;
 };
 
@@ -117,23 +118,28 @@ const failureStream = (model: Model<Api>, error: HostCompactionError, timestamp:
 
 const clearOldToolResults = (
   messages: readonly AgentMessage[],
+  forced: ReadonlySet<AgentMessage>,
 ): {
   readonly messages: AgentMessage[];
   readonly cleared: readonly ClearedToolResult[];
 } => {
   const candidates = messages.flatMap((message, index) =>
     message.role === 'toolResult' &&
-    compactableTools.has(message.toolName) &&
-    message.content.every((block) => block.type !== 'image') &&
     !(
       message.content.length === 1 &&
       message.content[0]?.type === 'text' &&
       message.content[0].text === clearedToolResultContent
-    )
-      ? [{ index, message }]
+    ) &&
+    (forced.has(message) ||
+      (compactableTools.has(message.toolName) && message.content.every((block) => block.type !== 'image')))
+      ? [{ index, message, forced: forced.has(message) }]
       : [],
   );
-  const selected = candidates.slice(0, Math.max(0, candidates.length - recentToolResultsToKeep));
+  const ordinary = candidates.filter((candidate) => !candidate.forced);
+  const selected = [
+    ...ordinary.slice(0, Math.max(0, ordinary.length - recentToolResultsToKeep)),
+    ...candidates.filter((candidate) => candidate.forced),
+  ];
   if (selected.length === 0) {
     return { messages: [...messages], cleared: [] };
   }
@@ -144,15 +150,7 @@ const clearOldToolResults = (
     if (!original) {
       return message;
     }
-    const replacement: typeof original = {
-      ...original,
-      content: [{ type: 'text', text: clearedToolResultContent }],
-      details: {
-        content: clearedToolResultContent,
-        isError: original.isError,
-        substituted: false,
-      },
-    };
+    const replacement = clearedToolResult(original);
     cleared.push({ original, replacement });
     return replacement;
   });
@@ -167,6 +165,16 @@ const compactionSettings = (contextWindow: number): CompactionSettings => ({
 
 const messageTokens = (messages: readonly AgentMessage[]): number =>
   messages.reduce((total, message) => total + estimateTokens(message), 0);
+
+const clearedToolResult = (message: Extract<AgentMessage, { role: 'toolResult' }>): typeof message => ({
+  ...message,
+  content: [{ type: 'text', text: clearedToolResultContent }],
+  details: {
+    content: clearedToolResultContent,
+    isError: message.isError,
+    substituted: false,
+  },
+});
 
 const combineUsage = (left: CompactionTrace['summarizerUsage'], right: Usage): Usage => ({
   input: (left?.input ?? 0) + right.input,
@@ -258,7 +266,7 @@ const laterCutoff = (messages: readonly AgentMessage[], after: number): number |
       return index;
     }
   }
-  return undefined;
+  return after < messages.length && messages.at(-1)?.role !== 'user' ? messages.length : undefined;
 };
 
 const tokenBudgetCutoff = (messages: readonly AgentMessage[], keepRecentTokens: number): number => {
@@ -318,15 +326,19 @@ const keepContext = (
   messages: readonly AgentMessage[],
 ): { readonly tags: string[]; readonly messages: ReadonlySet<AgentMessage> } => {
   const newestByTag = new Map<string, AgentMessage>();
+  const safety = new Set<AgentMessage>();
   for (const message of messages) {
     const text = userText(message);
     for (const tag of text.match(/<[a-z][\w:-]*(?:\s[^>]*)?>/giu) ?? []) {
-      if (tag.toLowerCase().includes('safety') || tag.toLowerCase().includes('system-reminder')) {
+      if (tag.toLowerCase().includes('safety')) {
+        safety.add(message);
+        newestByTag.set(tag, message);
+      } else if (tag.toLowerCase().includes('system-reminder')) {
         newestByTag.set(tag, message);
       }
     }
   }
-  return { tags: [...newestByTag.keys()], messages: new Set(newestByTag.values()) };
+  return { tags: [...newestByTag.keys()], messages: new Set([...safety, ...newestByTag.values()]) };
 };
 
 const preserveDuringCompaction = (message: AgentMessage, pinned: ReadonlySet<AgentMessage>): boolean =>
@@ -458,6 +470,7 @@ export const installCompaction = (
     const fixedOverhead = Math.max(0, trigger.tokens - messageTokens(input));
     let summarizerAttempts = 0;
     let summarizerUsage: CompactionTrace['summarizerUsage'] = null;
+    let summarizerError: string | undefined;
     let evictedCount = 0;
     let tokensAfter = trigger.tokens;
     let summaryKind: CompactionTrace['summary'];
@@ -470,6 +483,7 @@ export const installCompaction = (
       evicted: evictedCount,
       summarizerAttempts,
       summarizerUsage,
+      ...(summarizerError === undefined ? {} : { summarizerError }),
       ...(summaryKind === undefined ? {} : { summary: summaryKind }),
       ...(discardedOverflowError === undefined ? {} : { discardedOverflowError }),
     });
@@ -491,8 +505,25 @@ export const installCompaction = (
     if (!force && !oversized) {
       return { messages: [...input], cleared: 0, evicted: 0 };
     }
-    const messageBudget = Math.max(32, options.contextWindow - settings.reserveTokens - fixedOverhead);
-    const tierOne = clearOldToolResults(input);
+    const messageBudget = Math.max(
+      32,
+      options.contextWindow - settings.reserveTokens - settings.keepRecentTokens - fixedOverhead,
+    );
+    const emergencyClearings = new Set<AgentMessage>();
+    const initialCutoff = tokenBudgetCutoff(input, messageBudget);
+    let retainedTailTokens = messageTokens(input.slice(initialCutoff));
+    for (const message of input
+      .slice(initialCutoff)
+      .toSorted((left, right) => estimateTokens(right) - estimateTokens(left))) {
+      if (retainedTailTokens <= messageBudget) {
+        break;
+      }
+      if (message.role === 'toolResult') {
+        emergencyClearings.add(message);
+        retainedTailTokens -= estimateTokens(message) - estimateTokens(clearedToolResult(message));
+      }
+    }
+    const tierOne = clearOldToolResults(input, emergencyClearings);
     const tierOneTokens = fixedOverhead + messageTokens(tierOne.messages);
     if (
       tierOne.cleared.length > 0 &&
@@ -597,6 +628,8 @@ export const installCompaction = (
                 if (result.value.usage) {
                   summarizerUsage = combineUsage(summarizerUsage, result.value.usage);
                 }
+              } else {
+                summarizerError = result.error instanceof Error ? result.error.message : String(result.error);
               }
             }
           }
@@ -604,15 +637,23 @@ export const installCompaction = (
           if (signal?.aborted) {
             throw error;
           }
+          summarizerError = error instanceof Error ? error.message : String(error);
+        }
+        if (signal?.aborted) {
+          throw new DOMException('Compaction aborted', 'AbortError');
         }
         placeholder = compactedSummary === '';
       }
       summaryKind = placeholder ? 'placeholder' : 'generated';
       compactedSummary = placeholder ? placeholderSummary(evicted) : compactedSummary;
+      let latestInputTimestamp = 0;
+      for (const message of tierTwoMessages) {
+        latestInputTimestamp = Math.max(latestInputTimestamp, message.timestamp);
+      }
       summary = {
         role: 'user',
         content: [{ type: 'text', text: `<summary>\n${compactedSummary}\n</summary>` }],
-        timestamp: now(),
+        timestamp: Math.max(now(), latestInputTimestamp + 1),
       };
       const evictedSet = new Set(evicted);
       const firstIndex = tierTwoMessages.findIndex((message) => evictedSet.has(message));
@@ -624,6 +665,14 @@ export const installCompaction = (
       }
       const later = laterCutoff(tierTwoMessages, cutoff);
       if (later === undefined) {
+        const retained = tierTwoMessages.filter((message) => !evictedSet.has(message));
+        if (messageTokens(retained) > messageBudget) {
+          refuse({
+            code: 'NO_EVICTABLE_HISTORY',
+            message: 'Context is oversized but has no safe history to evict or clear.',
+            tier: 'summarization',
+          });
+        }
         strikes++;
         const code = strikes >= 3 ? 'CIRCUIT_BREAKER_OPEN' : 'SUMMARY_REQUIRED';
         const message =
@@ -732,7 +781,7 @@ export const installCompaction = (
   };
 
   const prepareTurn = async (signal?: AbortSignal): Promise<AgentMessage[]> => {
-    let { messages } = agent.state;
+    let messages = [...agent.state.messages];
     try {
       messages = await options.projectHistory();
       agent.state.messages = messages;
@@ -760,7 +809,7 @@ export const installCompaction = (
       messages: agent.state.messages,
       tools: agent.state.tools,
     };
-    let { messages: projected } = agent.state;
+    let projected = [...agent.state.messages];
     try {
       projected = await options.projectHistory();
       agent.state.messages = projected;
@@ -790,6 +839,7 @@ export const installCompaction = (
       const discardedOverflowError = message.errorMessage;
       let { messages: projected } = options.agent.state;
       try {
+        await options.settleDiscardedToolCalls?.();
         projected = await options.projectHistory();
         const emergency = await compact({
           input: projected,
@@ -799,6 +849,9 @@ export const installCompaction = (
           discardedOverflowError,
         });
         options.agent.state.messages = emergency.messages;
+        // Pi already applied convertToLlm/transformContext before this wrapper.
+        // The durable projection is hydrated AgentMessage history, so only the
+        // inner request-shaping middleware must run again for the bounded retry.
         return await base(
           model,
           { ...context, messages: emergency.messages as typeof context.messages },

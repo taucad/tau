@@ -835,6 +835,7 @@ export class MutationPipeline {
     return this._crossTabCoordinator.withLocks(lockPaths, async () =>
       this._resourceQueue.queueForMany(lockPaths, async () => {
         let mutationBegan = false;
+        let incompleteCrossProviderDirectoryCopy = false;
         try {
           await this.refreshMutationProviders([sourceResolution, targetResolution]);
           this._assertNoDescendantMounts(source, 'move');
@@ -851,12 +852,14 @@ export class MutationPipeline {
           if (sourceResolution.provider === targetResolution.provider) {
             await sourceResolution.provider.rename(sourceResolution.path, targetResolution.path);
           } else if (sourceStat.type === 'dir') {
+            incompleteCrossProviderDirectoryCopy = true;
             await this._copyDirectoryAcrossProviders(
               sourceResolution.provider,
               sourceResolution.path,
               targetResolution.provider,
               targetResolution.path,
             );
+            incompleteCrossProviderDirectoryCopy = false;
             await this.removeRecursive(sourceResolution.provider, sourceResolution.path);
           } else {
             const data = await sourceResolution.provider.readFile(sourceResolution.path);
@@ -903,6 +906,9 @@ export class MutationPipeline {
 
           return resultingStat;
         } catch (error) {
+          if (incompleteCrossProviderDirectoryCopy && (await targetResolution.provider.exists(targetResolution.path))) {
+            await this.removeRecursive(targetResolution.provider, targetResolution.path);
+          }
           if (mutationBegan) {
             const operations = [
               { path: source, resolution: sourceResolution },

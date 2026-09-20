@@ -743,7 +743,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
     }
     if (failure !== undefined) {
-      if (replaced && (failure as NodeJS.ErrnoException).code !== 'CHECKED_WRITE_POTENTIALLY_APPLIED') {
+      if (
+        replaced &&
+        !['CHECKED_WRITE_POTENTIALLY_APPLIED', 'WRITE_VERIFICATION_FAILED'].includes(
+          (failure as NodeJS.ErrnoException).code ?? '',
+        )
+      ) {
         throw Object.assign(new Error('Checked write may have been applied.', { cause: failure }), {
           code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
         });
@@ -810,10 +815,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         throw error;
       }
       throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
-        applicationState:
-          (error as NodeJS.ErrnoException | undefined)?.code === 'CHECKED_WRITE_POTENTIALLY_APPLIED'
-            ? 'potentially-applied'
-            : 'known-not-applied',
+        applicationState: ['CHECKED_WRITE_POTENTIALLY_APPLIED', 'WRITE_VERIFICATION_FAILED'].includes(
+          (error as NodeJS.ErrnoException | undefined)?.code ?? '',
+        )
+          ? 'potentially-applied'
+          : 'known-not-applied',
       });
     }
   };

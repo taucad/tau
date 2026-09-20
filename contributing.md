@@ -104,4 +104,4 @@ Here are some specific rules to be aware of, and why they are important:
 
 ### Production releases
 
-Production UI deploys ship from Netlify on pushes to the **`production`** git branch after maintainers merge the bot-managed trail PR; the Fly **`tau-api`** app deploys via [`.github/workflows/prod-deploy-on-merge.yml`](.github/workflows/prod-deploy-on-merge.yml). Operational checklist: **[docs/architecture/production-gitops-runbook.md](docs/architecture/production-gitops-runbook.md)**. Do **not** push directly to **`production`** or manually rewrite **`release/main-to-production`**.
+Production UI deploys ship from Netlify on pushes to the **`production`** git branch after maintainers merge the bot-managed trail PR; the Fly **`tau-api`** app deploys via [`.github/workflows/prod-deploy-on-merge.yml`](.github/workflows/prod-deploy-on-merge.yml). Do **not** push directly to **`production`** or manually rewrite **`release/main-to-production`**.

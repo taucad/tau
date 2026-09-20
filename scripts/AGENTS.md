@@ -6,7 +6,7 @@ Use Node built-ins or already-declared dependencies, explicit input validation a
 
 ## Validation owners
 
-- `pnpm docs:validate` runs `scripts:validate-frontmatter` for policy/research documents.
+- `pnpm docs:validate` runs `scripts:validate-frontmatter` for policy, research, handbook and incident documents.
 - `pnpm nx run scripts:validate-agent-config` checks authored boundaries, imports, budgets, skill routing and retired producers without model calls.
 - `pnpm nx run scripts:validate-agent-lanes` checks live-job refusal and byte attribution in the optional lane helper.
 - `pnpm nx run scripts:validate-tsgo-runtime-references` checks the runtime TypeScript project boundary.

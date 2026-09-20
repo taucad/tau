@@ -14,7 +14,7 @@ Use `create-charter` to establish an unresolved program architecture, `create-re
 1. Read the governing document, selected IDs, applicable rulings and current execution state. “Implement the blueprint as specified” selects its defined implementation scope; non-goals and deferred items remain excluded. If IDs are ambiguous, resolve the specific ambiguity before dependent work while progressing independent authorized items.
 2. Record the document revision/content fingerprint, the user's authorization, selected outcome/IDs and acceptance evidence. Preserve the governing document. Never rewrite a ruling or edit a user-curated plan to make implementation fit; use its authorized native todo state and an explicit queue mapping.
 3. Resolve prerequisites. Schedule those already authorized and necessary for the selected outcome. A prerequisite that changes the outcome, governing invariant or authority needs a specific decision, not silent expansion into the whole charter. Preserve existing completed evidence and identify only affected work when a ruling changes.
-4. Inspect the checkout, dirty paths, surviving jobs, source owners and available tools before dispatch. Use existing native task/subagent tools; `codex-lanes` is an optional transport when its companion is available. Do not start duplicate jobs merely because a prior worker is quiet.
+4. Inspect the checkout, dirty paths, surviving jobs, source owners and available tools before dispatch. Use existing native task/subagent tools; `codex-lanes` is an optional transport when its companion is available. Snapshot tracked and untracked bytes; status alone misses edits to dirty files. Do not start duplicate jobs merely because a prior worker is quiet.
 
 ## One coordinator, one durable queue
 
@@ -67,3 +67,5 @@ Context, quota and interruption are continuation events. Persist usable evidence
 Resolve empirical facts and reversible details consistent with intent autonomously. Ask only about an unresolved objective/invariant, a material trade-off between valid outcomes, unavailable evidence that changes the authorized result, or missing authority. Supply the recommendation, resolved evidence, affected task IDs and independent work that can continue. Do not re-ask for authorization already present.
 
 Close out only the selected scope after semantic acceptance and relevant review. Record changed paths, observed checks, unresolved limitations and the next-ready set. Validate research/artifact links, check the separate Tau Brain Git boundary, and distinguish local saving, commit and backup. Do not silently commit, push, publish, schedule a future run or implement the unselected remainder.
+
+An owed item that must happen before production launch (a staging or production apply, a live check, a counsel or supplier gate) is added to the go-live checklist through `create-handbook`, not left only in a closeout note or memory.

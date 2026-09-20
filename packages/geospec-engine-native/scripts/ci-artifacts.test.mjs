@@ -34,6 +34,7 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   put(join(producer, bindingPath), 'fixture source\n');
   put(join(producer, packagePath, 'scripts/ci-artifacts.mjs'), 'fixture inventory script');
   put(join(producer, packagePath, 'rust/target/untracked-output'), 'not source');
+  put(join(producer, 'mixed-cache/attempt-0/commands.json'), 'old attempt must not be selected');
   let revision = 'a'.repeat(40);
   context.mock.method(
     childProcess,
@@ -53,6 +54,7 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   let failNode = false;
   let changeSource = false;
   let omitReceipt = false;
+  let omitCommands = false;
   let attempt = 0;
   context.mock.method(
     childProcess,
@@ -85,7 +87,24 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
       }
       if (target === 'prepare-delivery:inputs') {
         assert.ok(typeof options.env.GEOSPEC_MIXED_INPUTS === 'string');
-        put(options.env.GEOSPEC_MIXED_INPUTS, JSON.stringify({ cache: join(producer, 'mixed-cache') }));
+        put(
+          options.env.GEOSPEC_MIXED_INPUTS,
+          JSON.stringify(
+            {
+              schema: 'geospec-mixed-build-inputs-v2',
+              sourceRoot: producer,
+              sourceRevision: revision,
+              cache: join(producer, 'mixed-cache'),
+              output: join(producer, mixedPath),
+              rustc: '/inert-tools/rustc',
+              cargo: '/inert-tools/cargo',
+              emxx: '/inert-tools/em++',
+              linkOptimization: 'O3',
+            },
+            null,
+            2,
+          ) + '\n',
+        );
       }
       if (target === 'build-wasm' && !omitReceipt) {
         assert.ok(typeof options.env.GEOSPEC_MIXED_INPUTS === 'string');
@@ -101,11 +120,46 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
           JSON.stringify({
             sourceRoot: producer,
             sourceRevision: revision,
+            output: join(producer, mixedPath),
             manifestSha256: digest(readFileSync(options.env.GEOSPEC_MIXED_INPUTS)),
             bindingSha256: digest(readFileSync(join(producer, bindingPath))),
             artifacts,
           }),
         );
+        if (!omitCommands) {
+          put(
+            join(producer, `mixed-cache/attempt-${attempt}/commands.json`),
+            JSON.stringify(
+              [
+                { executable: '/inert-tools/rustc', args: ['-vV'], status: 0 },
+                { executable: '/inert-tools/em++', args: ['--version'], status: 0 },
+                {
+                  executable: '/inert-tools/cargo',
+                  args: [
+                    'build',
+                    '--manifest-path',
+                    join(producer, packagePath, 'bindings/emscripten/Cargo.toml'),
+                    '--locked',
+                    '--offline',
+                    '--release',
+                    '--target',
+                    'wasm32-unknown-emscripten',
+                    '--target-dir',
+                    join(producer, 'mixed-cache/target'),
+                  ],
+                  status: 0,
+                },
+                {
+                  executable: '/inert-tools/em++',
+                  args: ['-O3', '-o', join(producer, mixedPath, 'geospec_engine_native.mjs')],
+                  status: 0,
+                },
+              ],
+              null,
+              2,
+            ) + '\n',
+          );
+        }
         if (changeSource) {
           put(join(producer, bindingPath), 'changed during build');
         }
@@ -130,8 +184,16 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
     'build-wasm',
   ]);
   assert.equal(inventory.artifacts.length, 5);
+  for (const [name, original] of [
+    ['mixed-inputs.json', 'node_modules/.cache/geospec-engine-native/delivery/mixed-inputs.json'],
+    ['mixed-commands.json', 'mixed-cache/attempt-1/commands.json'],
+  ]) {
+    assert.deepEqual(readFileSync(join(producer, transportPath, name)), readFileSync(join(producer, original)));
+  }
   assert.ok(!inventory.source.files.some((file) => file.path.includes('/target/')));
   cpSync(producer, consumer, { recursive: true });
+  rmSync(join(consumer, 'mixed-cache'), { recursive: true });
+  rmSync(join(consumer, 'node_modules'), { recursive: true });
   assert.deepEqual(verifyArtifacts(consumer), inventory);
   assert.equal(targets.length, 6, 'verification must not invoke a producer');
   for (const file of inventory.artifacts) {
@@ -159,11 +221,52 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   assert.throws(() => verifyArtifacts(consumer), /source revision\/inputs differ/);
   revision = 'a'.repeat(40);
   const inventoryFile = join(consumer, transportPath, 'inventory.json');
+  for (const name of ['mixed-inputs.json', 'mixed-commands.json']) {
+    const path = join(consumer, transportPath, name);
+    const bytes = readFileSync(path);
+    rmSync(path);
+    assert.throws(() => verifyArtifacts(consumer), /Missing artifact\/input/);
+    put(path, '{}');
+    assert.throws(() => verifyArtifacts(consumer), /changed during transport/);
+    put(path, bytes);
+  }
+  // Even an updated transport hash must still join the selected manifest and command tools to the receipt.
+  for (const [key, name, replacement, message] of [
+    ['mixedInputs', 'mixed-inputs.json', '{}', /receipt\/input-manifest hash differs/],
+    ['mixedCommands', 'mixed-commands.json', '[]', /Incomplete mixed commands/],
+    [
+      'mixedCommands',
+      'mixed-commands.json',
+      readFileSync(join(consumer, transportPath, 'mixed-commands.json'), 'utf8').replace(
+        '/inert-tools/cargo',
+        '/other/cargo',
+      ),
+      /command\/tool selection differs/,
+    ],
+  ]) {
+    const path = join(consumer, transportPath, name);
+    const bytes = readFileSync(path);
+    put(path, replacement);
+    put(
+      inventoryFile,
+      JSON.stringify({
+        ...inventory,
+        [key]: {
+          path: `${transportPath}/${name}`,
+          bytes: Buffer.byteLength(replacement),
+          sha256: digest(replacement),
+        },
+      }),
+    );
+    assert.throws(() => verifyArtifacts(consumer), message);
+    put(path, bytes);
+    put(inventoryFile, JSON.stringify(inventory));
+  }
   put(inventoryFile, JSON.stringify({ ...inventory, artifacts: inventory.artifacts.slice(1) }));
   assert.throws(() => verifyArtifacts(consumer), /membership\/bytes\/hashes differ/);
   put(inventoryFile, JSON.stringify(inventory));
   put(join(consumer, transportPath, 'mixed-build-receipt.json'), '{}');
-  assert.throws(() => verifyArtifacts(consumer), /receipt changed during transport/);
+  assert.throws(() => verifyArtifacts(consumer), /mixedReceipt changed during transport/);
   failNode = true;
   assert.throws(() => prepareArtifacts(producer), /build-node failed/);
   assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);
@@ -172,6 +275,10 @@ await test('complete transport relocates, rejects missing/stale bytes, and never
   assert.throws(() => prepareArtifacts(producer), /exactly one new mixed build attempt/);
   assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);
   omitReceipt = false;
+  omitCommands = true;
+  assert.throws(() => prepareArtifacts(producer), /ENOENT.*commands.json/);
+  assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);
+  omitCommands = false;
   changeSource = true;
   assert.throws(() => prepareArtifacts(producer), /sources changed during production/);
   assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);

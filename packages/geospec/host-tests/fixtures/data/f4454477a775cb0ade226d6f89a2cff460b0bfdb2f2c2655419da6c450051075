@@ -1,0 +1,554 @@
+[
+  {
+    "id": "f1-ingest-target",
+    "subjectId": "target",
+    "request": {
+      "value": {
+        "method": "ingestSubject",
+        "requestId": "f1-ingest-target",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "rational-plate",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "mm",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 272,
+        "resources": []
+      },
+      "canonicalUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":272,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"f1-ingest-target\",\"resources\":[]}",
+      "sha256": "d37681573f401bc946a44115f66fc0bb72d3926a562e972a59f400acb7294c71",
+      "byteLength": 289
+    },
+    "primary": {
+      "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subjects/target.json",
+      "utf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]}]}",
+      "sha256": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
+      "byteLength": 272
+    },
+    "resourceBuffers": [],
+    "response": {
+      "value": {
+        "requestId": "f1-ingest-target",
+        "result": {
+          "subject": {
+            "subjectHash": "3419006b2f24e82260808012e5692df6f5e2fceadc5f41a11c44aa0a87fbf736",
+            "format": "rational-plate",
+            "descriptor": {
+              "schema": "geospec-subject-v1",
+              "format": "rational-plate",
+              "primary": {
+                "sha256": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
+                "byteLength": 272
+              },
+              "resources": [],
+              "frame": {
+                "coordinateSystem": "z-up",
+                "sourceUnit": "mm",
+                "outputUnit": "mm",
+                "uniformScale": 1
+              },
+              "ingestOptions": {},
+              "ingestProfile": "geospec-rational-orthogonal-plate-v1",
+              "backendProfile": "portable-rational-plate-v1"
+            }
+          }
+        }
+      },
+      "canonicalUtf8": "{\"requestId\":\"f1-ingest-target\",\"result\":{\"subject\":{\"descriptor\":{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"},\"format\":\"rational-plate\",\"subjectHash\":\"3419006b2f24e82260808012e5692df6f5e2fceadc5f41a11c44aa0a87fbf736\"}}}",
+      "sha256": "99eee0b25f675d63fae9ade0d6c5de42fbc5600061eaed7219034ae8bd847fba",
+      "byteLength": 562
+    },
+    "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+    "subjectHash": "3419006b2f24e82260808012e5692df6f5e2fceadc5f41a11c44aa0a87fbf736",
+    "sourceJoins": [
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "sha256": "9218563737f557c76bf3bab775f13bb30e22171ae17fd90092db89ff5b79e78e",
+        "jsonPointer": "/0"
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "sha256": "10fe85f2ea4360c3576043636c53e73d91eef469c601a07eff036650b11c8bde",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "sha256": "9b58487b9d5f98806f415a1e77156172d9c96ab0e901e3cb682cfc5df037b373",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "sha256": "ad3611603e356732d8570519debb9295a322655935921bba755be2e5b0ed44d2",
+        "jsonPointer": ""
+      }
+    ]
+  },
+  {
+    "id": "f1-ingest-mirrored-holes",
+    "subjectId": "mirrored-holes",
+    "request": {
+      "value": {
+        "method": "ingestSubject",
+        "requestId": "f1-ingest-mirrored-holes",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "rational-plate",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "mm",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 272,
+        "resources": []
+      },
+      "canonicalUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":272,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"f1-ingest-mirrored-holes\",\"resources\":[]}",
+      "sha256": "e51f9100369198f56accdd243b285e2ee3bd28d32da83bc0812b6a64d8d8265b",
+      "byteLength": 297
+    },
+    "primary": {
+      "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subjects/mirrored-holes.json",
+      "utf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"17/2\",\"2/1\"],\"min\":[\"3/2\",\"15/2\",\"0/1\"]},{\"max\":[\"17/2\",\"5/2\",\"2/1\"],\"min\":[\"15/2\",\"3/2\",\"0/1\"]}]}",
+      "sha256": "9c52077b0e6f734e346ed8b02a1c7b64e4208453d68c1f603b7ad91756464256",
+      "byteLength": 272
+    },
+    "resourceBuffers": [],
+    "response": {
+      "value": {
+        "requestId": "f1-ingest-mirrored-holes",
+        "result": {
+          "subject": {
+            "subjectHash": "79c04c8385062a9536f2a2065a13a06addc657cdfc646a754e175ed45d4bcd79",
+            "format": "rational-plate",
+            "descriptor": {
+              "schema": "geospec-subject-v1",
+              "format": "rational-plate",
+              "primary": {
+                "sha256": "9c52077b0e6f734e346ed8b02a1c7b64e4208453d68c1f603b7ad91756464256",
+                "byteLength": 272
+              },
+              "resources": [],
+              "frame": {
+                "coordinateSystem": "z-up",
+                "sourceUnit": "mm",
+                "outputUnit": "mm",
+                "uniformScale": 1
+              },
+              "ingestOptions": {},
+              "ingestProfile": "geospec-rational-orthogonal-plate-v1",
+              "backendProfile": "portable-rational-plate-v1"
+            }
+          }
+        }
+      },
+      "canonicalUtf8": "{\"requestId\":\"f1-ingest-mirrored-holes\",\"result\":{\"subject\":{\"descriptor\":{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"9c52077b0e6f734e346ed8b02a1c7b64e4208453d68c1f603b7ad91756464256\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"},\"format\":\"rational-plate\",\"subjectHash\":\"79c04c8385062a9536f2a2065a13a06addc657cdfc646a754e175ed45d4bcd79\"}}}",
+      "sha256": "3ff93cff987fe767138b9f4ac378d0c51bbb673c0637aeb16c1135203e8740b8",
+      "byteLength": 570
+    },
+    "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":272,\"sha256\":\"9c52077b0e6f734e346ed8b02a1c7b64e4208453d68c1f603b7ad91756464256\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+    "subjectHash": "79c04c8385062a9536f2a2065a13a06addc657cdfc646a754e175ed45d4bcd79",
+    "sourceJoins": [
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "sha256": "9218563737f557c76bf3bab775f13bb30e22171ae17fd90092db89ff5b79e78e",
+        "jsonPointer": "/1"
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "sha256": "10fe85f2ea4360c3576043636c53e73d91eef469c601a07eff036650b11c8bde",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "sha256": "9b58487b9d5f98806f415a1e77156172d9c96ab0e901e3cb682cfc5df037b373",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "sha256": "ad3611603e356732d8570519debb9295a322655935921bba755be2e5b0ed44d2",
+        "jsonPointer": ""
+      }
+    ]
+  },
+  {
+    "id": "f1-ingest-wider-outer-box",
+    "subjectId": "wider-outer-box",
+    "request": {
+      "value": {
+        "method": "ingestSubject",
+        "requestId": "f1-ingest-wider-outer-box",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "rational-plate",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "mm",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 274,
+        "resources": []
+      },
+      "canonicalUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":274,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"f1-ingest-wider-outer-box\",\"resources\":[]}",
+      "sha256": "ef14a328ec1098c7e62ee4241a541c60ff3aa1a70cb6c5ac7683f4fbe37b4b88",
+      "byteLength": 298
+    },
+    "primary": {
+      "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subjects/wider-outer-box.json",
+      "utf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"11/1\",\"100/11\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]}]}",
+      "sha256": "53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d",
+      "byteLength": 274
+    },
+    "resourceBuffers": [],
+    "response": {
+      "value": {
+        "requestId": "f1-ingest-wider-outer-box",
+        "result": {
+          "subject": {
+            "subjectHash": "47e9e04dbb8937a6543f8a0e4de8bc862f70fff163c9a7f7ecec796ef8dd8d51",
+            "format": "rational-plate",
+            "descriptor": {
+              "schema": "geospec-subject-v1",
+              "format": "rational-plate",
+              "primary": {
+                "sha256": "53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d",
+                "byteLength": 274
+              },
+              "resources": [],
+              "frame": {
+                "coordinateSystem": "z-up",
+                "sourceUnit": "mm",
+                "outputUnit": "mm",
+                "uniformScale": 1
+              },
+              "ingestOptions": {},
+              "ingestProfile": "geospec-rational-orthogonal-plate-v1",
+              "backendProfile": "portable-rational-plate-v1"
+            }
+          }
+        }
+      },
+      "canonicalUtf8": "{\"requestId\":\"f1-ingest-wider-outer-box\",\"result\":{\"subject\":{\"descriptor\":{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":274,\"sha256\":\"53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"},\"format\":\"rational-plate\",\"subjectHash\":\"47e9e04dbb8937a6543f8a0e4de8bc862f70fff163c9a7f7ecec796ef8dd8d51\"}}}",
+      "sha256": "7717ff9ae92f9fde9a3964c1f4fc16a9b11c4ef1c403519eec69958763901ab4",
+      "byteLength": 571
+    },
+    "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":274,\"sha256\":\"53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+    "subjectHash": "47e9e04dbb8937a6543f8a0e4de8bc862f70fff163c9a7f7ecec796ef8dd8d51",
+    "sourceJoins": [
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "sha256": "9218563737f557c76bf3bab775f13bb30e22171ae17fd90092db89ff5b79e78e",
+        "jsonPointer": "/2"
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "sha256": "10fe85f2ea4360c3576043636c53e73d91eef469c601a07eff036650b11c8bde",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "sha256": "9b58487b9d5f98806f415a1e77156172d9c96ab0e901e3cb682cfc5df037b373",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "sha256": "ad3611603e356732d8570519debb9295a322655935921bba755be2e5b0ed44d2",
+        "jsonPointer": ""
+      }
+    ]
+  },
+  {
+    "id": "f1-ingest-extra-central-window",
+    "subjectId": "extra-central-window",
+    "request": {
+      "value": {
+        "method": "ingestSubject",
+        "requestId": "f1-ingest-extra-central-window",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "rational-plate",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "mm",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 328,
+        "resources": []
+      },
+      "canonicalUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":328,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"f1-ingest-extra-central-window\",\"resources\":[]}",
+      "sha256": "834553da7b5d9d9d366a96f1341dc108bae3a1fb6bd38b4fe949a7a4dcb7c9a0",
+      "byteLength": 303
+    },
+    "primary": {
+      "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subjects/extra-central-window.json",
+      "utf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]},{\"max\":[\"11/2\",\"11/2\",\"2/1\"],\"min\":[\"9/2\",\"9/2\",\"0/1\"]}]}",
+      "sha256": "d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c",
+      "byteLength": 328
+    },
+    "resourceBuffers": [],
+    "response": {
+      "value": {
+        "requestId": "f1-ingest-extra-central-window",
+        "result": {
+          "subject": {
+            "subjectHash": "f6cc18dcec382969d401864d6765f65b66246ed84aedce9d1df237408e8ef400",
+            "format": "rational-plate",
+            "descriptor": {
+              "schema": "geospec-subject-v1",
+              "format": "rational-plate",
+              "primary": {
+                "sha256": "d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c",
+                "byteLength": 328
+              },
+              "resources": [],
+              "frame": {
+                "coordinateSystem": "z-up",
+                "sourceUnit": "mm",
+                "outputUnit": "mm",
+                "uniformScale": 1
+              },
+              "ingestOptions": {},
+              "ingestProfile": "geospec-rational-orthogonal-plate-v1",
+              "backendProfile": "portable-rational-plate-v1"
+            }
+          }
+        }
+      },
+      "canonicalUtf8": "{\"requestId\":\"f1-ingest-extra-central-window\",\"result\":{\"subject\":{\"descriptor\":{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":328,\"sha256\":\"d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"},\"format\":\"rational-plate\",\"subjectHash\":\"f6cc18dcec382969d401864d6765f65b66246ed84aedce9d1df237408e8ef400\"}}}",
+      "sha256": "18d6d685ce0329cc812040d299b756838e7b110c2f46db99cb201f6d95f933f4",
+      "byteLength": 576
+    },
+    "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":328,\"sha256\":\"d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+    "subjectHash": "f6cc18dcec382969d401864d6765f65b66246ed84aedce9d1df237408e8ef400",
+    "sourceJoins": [
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "sha256": "9218563737f557c76bf3bab775f13bb30e22171ae17fd90092db89ff5b79e78e",
+        "jsonPointer": "/3"
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "sha256": "10fe85f2ea4360c3576043636c53e73d91eef469c601a07eff036650b11c8bde",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "sha256": "9b58487b9d5f98806f415a1e77156172d9c96ab0e901e3cb682cfc5df037b373",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "sha256": "ad3611603e356732d8570519debb9295a322655935921bba755be2e5b0ed44d2",
+        "jsonPointer": ""
+      }
+    ]
+  },
+  {
+    "id": "f1-ingest-moved-A",
+    "subjectId": "moved-A",
+    "request": {
+      "value": {
+        "method": "ingestSubject",
+        "requestId": "f1-ingest-moved-A",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "rational-plate",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "mm",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 274,
+        "resources": []
+      },
+      "canonicalUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":274,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"f1-ingest-moved-A\",\"resources\":[]}",
+      "sha256": "067bd3546802de9e52169ca3b4ef66a2e696398713da3eeb248dbbd92ded9e68",
+      "byteLength": 290
+    },
+    "primary": {
+      "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subjects/moved-A.json",
+      "utf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"17/2\",\"2/1\"],\"min\":[\"3/2\",\"15/2\",\"0/1\"]},{\"max\":[\"17/2\",\"17/2\",\"2/1\"],\"min\":[\"15/2\",\"15/2\",\"0/1\"]}]}",
+      "sha256": "2d563a9054aa0fd031921c2684e7ecc0b61e4d3ce0e95b65d4bd3f1e9d141ee3",
+      "byteLength": 274
+    },
+    "resourceBuffers": [],
+    "response": {
+      "value": {
+        "requestId": "f1-ingest-moved-A",
+        "result": {
+          "subject": {
+            "subjectHash": "1369546e1f595350dde3f6123c61a55db83142aa84a9cf2b4e4b33b0dfef4299",
+            "format": "rational-plate",
+            "descriptor": {
+              "schema": "geospec-subject-v1",
+              "format": "rational-plate",
+              "primary": {
+                "sha256": "2d563a9054aa0fd031921c2684e7ecc0b61e4d3ce0e95b65d4bd3f1e9d141ee3",
+                "byteLength": 274
+              },
+              "resources": [],
+              "frame": {
+                "coordinateSystem": "z-up",
+                "sourceUnit": "mm",
+                "outputUnit": "mm",
+                "uniformScale": 1
+              },
+              "ingestOptions": {},
+              "ingestProfile": "geospec-rational-orthogonal-plate-v1",
+              "backendProfile": "portable-rational-plate-v1"
+            }
+          }
+        }
+      },
+      "canonicalUtf8": "{\"requestId\":\"f1-ingest-moved-A\",\"result\":{\"subject\":{\"descriptor\":{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":274,\"sha256\":\"2d563a9054aa0fd031921c2684e7ecc0b61e4d3ce0e95b65d4bd3f1e9d141ee3\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"},\"format\":\"rational-plate\",\"subjectHash\":\"1369546e1f595350dde3f6123c61a55db83142aa84a9cf2b4e4b33b0dfef4299\"}}}",
+      "sha256": "bee180c44bca8270cfc5954b3363f19e484284ebb037eb62664875a71f07f916",
+      "byteLength": 563
+    },
+    "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":274,\"sha256\":\"2d563a9054aa0fd031921c2684e7ecc0b61e4d3ce0e95b65d4bd3f1e9d141ee3\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+    "subjectHash": "1369546e1f595350dde3f6123c61a55db83142aa84a9cf2b4e4b33b0dfef4299",
+    "sourceJoins": [
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "sha256": "9218563737f557c76bf3bab775f13bb30e22171ae17fd90092db89ff5b79e78e",
+        "jsonPointer": "/4"
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "sha256": "10fe85f2ea4360c3576043636c53e73d91eef469c601a07eff036650b11c8bde",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "sha256": "9b58487b9d5f98806f415a1e77156172d9c96ab0e901e3cb682cfc5df037b373",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "sha256": "ad3611603e356732d8570519debb9295a322655935921bba755be2e5b0ed44d2",
+        "jsonPointer": ""
+      }
+    ]
+  },
+  {
+    "id": "f1-ingest-moved-B",
+    "subjectId": "moved-B",
+    "request": {
+      "value": {
+        "method": "ingestSubject",
+        "requestId": "f1-ingest-moved-B",
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "format": "rational-plate",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "mm",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 270,
+        "resources": []
+      },
+      "canonicalUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":270,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"f1-ingest-moved-B\",\"resources\":[]}",
+      "sha256": "1460c8469d665cc7766b415952f82ee9a05a182e9c9da7467a0f2075f7d6614c",
+      "byteLength": 290
+    },
+    "primary": {
+      "originalPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subjects/moved-B.json",
+      "utf8": "{\"frame\":\"artifact-xyz\",\"plate\":{\"max\":[\"10/1\",\"10/1\",\"2/1\"],\"min\":[\"0/1\",\"0/1\",\"0/1\"]},\"schema\":\"geospec.rational-orthogonal-plate/v1\",\"unit\":\"mm\",\"windows\":[{\"max\":[\"5/2\",\"5/2\",\"2/1\"],\"min\":[\"3/2\",\"3/2\",\"0/1\"]},{\"max\":[\"17/2\",\"5/2\",\"2/1\"],\"min\":[\"15/2\",\"3/2\",\"0/1\"]}]}",
+      "sha256": "bb5e8b4360348939c607b528a7861f7d514e119a0846652bf536afa59e852897",
+      "byteLength": 270
+    },
+    "resourceBuffers": [],
+    "response": {
+      "value": {
+        "requestId": "f1-ingest-moved-B",
+        "result": {
+          "subject": {
+            "subjectHash": "4925b40196db09fd63d551fe3328fb0365b4cfdd56ae026923ffc7198975e1e6",
+            "format": "rational-plate",
+            "descriptor": {
+              "schema": "geospec-subject-v1",
+              "format": "rational-plate",
+              "primary": {
+                "sha256": "bb5e8b4360348939c607b528a7861f7d514e119a0846652bf536afa59e852897",
+                "byteLength": 270
+              },
+              "resources": [],
+              "frame": {
+                "coordinateSystem": "z-up",
+                "sourceUnit": "mm",
+                "outputUnit": "mm",
+                "uniformScale": 1
+              },
+              "ingestOptions": {},
+              "ingestProfile": "geospec-rational-orthogonal-plate-v1",
+              "backendProfile": "portable-rational-plate-v1"
+            }
+          }
+        }
+      },
+      "canonicalUtf8": "{\"requestId\":\"f1-ingest-moved-B\",\"result\":{\"subject\":{\"descriptor\":{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":270,\"sha256\":\"bb5e8b4360348939c607b528a7861f7d514e119a0846652bf536afa59e852897\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"},\"format\":\"rational-plate\",\"subjectHash\":\"4925b40196db09fd63d551fe3328fb0365b4cfdd56ae026923ffc7198975e1e6\"}}}",
+      "sha256": "39e58005cfbe3dc4fb2afb790f6139de82b10b9cab9e393fae665e8daecc70ef",
+      "byteLength": 563
+    },
+    "descriptorUtf8": "{\"backendProfile\":\"portable-rational-plate-v1\",\"format\":\"rational-plate\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"mm\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-rational-orthogonal-plate-v1\",\"primary\":{\"byteLength\":270,\"sha256\":\"bb5e8b4360348939c607b528a7861f7d514e119a0846652bf536afa59e852897\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+    "subjectHash": "4925b40196db09fd63d551fe3328fb0365b4cfdd56ae026923ffc7198975e1e6",
+    "sourceJoins": [
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/subject-identities.json",
+        "sha256": "9218563737f557c76bf3bab775f13bb30e22171ae17fd90092db89ff5b79e78e",
+        "jsonPointer": "/5"
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-wire-contract-b65/metadata-transfer-proposal.json",
+        "sha256": "10fe85f2ea4360c3576043636c53e73d91eef469c601a07eff036650b11c8bde",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-ingest-options-layer-b60-ruling.json",
+        "sha256": "9b58487b9d5f98806f415a1e77156172d9c96ab0e901e3cb682cfc5df037b373",
+        "jsonPointer": ""
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "readPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/f1-core-integration-b67/oracle-authority/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/f1-wire-metadata-b65-ruling.json",
+        "sha256": "ad3611603e356732d8570519debb9295a322655935921bba755be2e5b0ed44d2",
+        "jsonPointer": ""
+      }
+    ]
+  }
+]

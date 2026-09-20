@@ -9,6 +9,7 @@ import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/ass
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { loadM3CorpusProfileV3 } from './profile-v3.mjs';
 import { requireEvaluationEnvelope } from './corpus.mjs';
+import { fixturePath, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
 assert.ok(backend === 'native' || backend === 'mixed');
@@ -283,10 +284,9 @@ export const loadInstalledCampaign = () => {
 };
 
 const continuousPath = (name) =>
-  resolve(
+  fixturePath(
+    `docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/continuous-public-a1/${name}`,
     requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'),
-    'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/continuous-public-a1',
-    name,
   );
 
 const readBoundJson = (path, expectedSha256) => {
@@ -297,7 +297,7 @@ const readBoundJson = (path, expectedSha256) => {
 
 const continuousRow = (source) => {
   const workspaceRoot = requiredEnvironment('GEOSPEC_WORKSPACE_ROOT');
-  const primary = readFileSync(resolve(workspaceRoot, source.subject.path));
+  const primary = readFixture(source.subject.path, workspaceRoot);
   assert.equal(primary.byteLength, source.subject.byteLength);
   assert.equal(sha256(primary), source.subject.sha256);
   return {

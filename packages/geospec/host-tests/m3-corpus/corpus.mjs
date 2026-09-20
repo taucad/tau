@@ -1,8 +1,8 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- The input is hash-verified frozen JSON without a runtime schema package. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+// oxlint-disable-next-line no-restricted-imports -- The standalone data harness reads its local fixture closure without workspace aliases.
+import { fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
 
 const RUN = 'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation';
 const B35 = `${RUN}/lead/matcher-full-entry/current-approved-b35-inputs.json`;
@@ -49,7 +49,7 @@ function sha256(bytes) {
 }
 
 function readAuthority(workspaceRoot, path) {
-  const bytes = readFileSync(resolve(workspaceRoot, path));
+  const bytes = readFixture(path, workspaceRoot);
   assert.equal(sha256(bytes), AUTHORITIES[path], `authority hash changed: ${path}`);
   return JSON.parse(bytes);
 }
@@ -62,7 +62,7 @@ function verifyDeclaredSources(workspaceRoot, sources) {
     }
     seen.add(source.path);
     assert.equal(
-      sha256(readFileSync(resolve(workspaceRoot, source.path))),
+      sha256(readFixture(source.path, workspaceRoot)),
       source.sha256,
       `declared source hash changed: ${source.path}`,
     );
@@ -77,7 +77,7 @@ function loadBytes(workspaceRoot, spec, cache) {
   if (spec.utf8 === undefined) {
     bytes =
       spec.hex === undefined
-        ? readFileSync(resolve(workspaceRoot, spec.path ?? spec.originalPath))
+        ? readFixture(spec.path ?? spec.originalPath, workspaceRoot)
         : Buffer.from(spec.hex, 'hex');
   } else {
     bytes = Buffer.from(spec.utf8);
@@ -247,7 +247,7 @@ export function fingerprintM3Corpus(corpus) {
   );
 }
 
-export function loadM3Corpus(workspaceRoot) {
+export function loadM3Corpus(workspaceRoot = fixtureWorkspaceRoot) {
   const b35 = readAuthority(workspaceRoot, B35);
   const b55 = readAuthority(workspaceRoot, B55);
   const m3 = readAuthority(workspaceRoot, M3);
@@ -255,14 +255,14 @@ export function loadM3Corpus(workspaceRoot) {
   const histories = HISTORICAL.map((path) => [path, readAuthority(workspaceRoot, path)]);
   const f1Results = readAuthority(workspaceRoot, F1_RESULTS);
   const f1Admissions = readAuthority(workspaceRoot, F1_ADMISSIONS);
-  const principal = JSON.parse(readFileSync(resolve(workspaceRoot, PRINCIPAL_M3)));
+  const principal = JSON.parse(readFixture(PRINCIPAL_M3, workspaceRoot));
   const early = readAuthority(workspaceRoot, EARLY);
   readAuthority(workspaceRoot, `${SHARED_V3}/definition-records.json`);
   readAuthority(workspaceRoot, `${SHARED_V3}/definition-source-bindings.json`);
   readAuthority(workspaceRoot, `${SHARED_V3}/definition-canonical.json`);
   const definitionReceipt = readAuthority(workspaceRoot, `${SHARED_V3}/definition-encoding-receipt.json`);
   assert.equal(
-    sha256(readFileSync(resolve(workspaceRoot, ACCEPTANCE))),
+    sha256(readFixture(ACCEPTANCE, workspaceRoot)),
     AUTHORITIES[ACCEPTANCE],
     `authority hash changed: ${ACCEPTANCE}`,
   );

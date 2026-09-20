@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { loadM3Corpus } from './corpus.mjs';
 
 void test('should assemble the frozen M3 corpus without crossing acceptance tracks', () => {
-  const corpus = loadM3Corpus(process.cwd());
+  const corpus = loadM3Corpus();
   assert.equal(corpus.rows.length, 334);
   assert.equal(corpus.preservedCohorts.early320.records, 320);
   assert.equal(corpus.preservedCohorts.selector87, 87);

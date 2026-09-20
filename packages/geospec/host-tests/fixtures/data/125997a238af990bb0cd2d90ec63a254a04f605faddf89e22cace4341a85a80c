@@ -1,0 +1,374 @@
+{
+  "schemaVersion": 1,
+  "taskId": "MATCHER-ORACLE-PROOF-REFUSALS-A2",
+  "sourceRevision": "abda45d29347115685b226bffe26bbb3678a27e0",
+  "candidateInputsUsed": false,
+  "candidateComparisonAuthorized": false,
+  "semantics": {
+    "evidence": "W2.C-EVIDENCE-02",
+    "controls": "W2.C-CONTROL-02",
+    "void": "W5-VOID-CONTINUOUS-01",
+    "containment": "W3-CONTAINMENT-SET-01",
+    "stepReporting": "W3-STEP-REPORT-PROFILE-01 (REPORT01)",
+    "refusalPrecedence": "Complete request syntax, claim preparation, and selector resolution precede these noninvertible refusals; malformed and negative ancillary controls retain CONTROL02/QUERY01 precedence."
+  },
+  "selectorResolution": {
+    "void": {
+      "materialOccurrence": "guide",
+      "independentlyObservedSelectors": [
+        {
+          "selector": "guide.bore",
+          "entityId": "interface:guide.bore",
+          "occurrencePath": "guide"
+        },
+        {
+          "selector": "valve.stem",
+          "entityId": "interface:valve.stem",
+          "occurrencePath": "valve"
+        }
+      ],
+      "basis": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-successor-oracle/reference-observations.json"
+    },
+    "containment": {
+      "selections": [
+        {
+          "selector": {
+            "kind": "occurrence",
+            "name": "subject"
+          },
+          "matches": [
+            {
+              "kind": "occurrence",
+              "name": "subject",
+              "bounds": {
+                "min": [
+                  0,
+                  0,
+                  0
+                ],
+                "max": [
+                  10,
+                  10,
+                  10
+                ]
+              },
+              "center": [
+                5,
+                5,
+                5
+              ],
+              "source": "step"
+            }
+          ]
+        },
+        {
+          "selector": {
+            "kind": "occurrence",
+            "name": "target"
+          },
+          "matches": [
+            {
+              "kind": "occurrence",
+              "name": "target",
+              "bounds": {
+                "min": [
+                  0,
+                  0,
+                  0
+                ],
+                "max": [
+                  10,
+                  10,
+                  10
+                ]
+              },
+              "center": [
+                5,
+                5,
+                5
+              ],
+              "source": "step"
+            }
+          ]
+        }
+      ],
+      "basis": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/containment-reference-a1/stdout.log"
+    }
+  },
+  "legacyContainmentReceipt": {
+    "id": "containment-reference-a1/containment-countermodel",
+    "profile": "frozen TypeScript/WASM protocol v2 reference",
+    "status": "passed",
+    "diagnostics": [],
+    "primarySha256": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6",
+    "independentSetContainment": false,
+    "independentOutsideWitness": [
+      2.5,
+      2.5,
+      2.5
+    ],
+    "ingestRequestJson": "{\"contentHash\":\"sha256:e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"sourceUnit\":\"mm\",\"targetUnit\":\"mm\"},\"options\":{},\"provenance\":null,\"requestId\":\"containment-reference-ingest\"}",
+    "claimsJson": "[{\"capability\":\"inspectGeometry\",\"claimId\":\"inspect-countermodel\",\"payload\":{\"selectors\":[{\"kind\":\"occurrence\",\"name\":\"subject\"},{\"kind\":\"occurrence\",\"name\":\"target\"}]},\"subjectIds\":[\"sha256:e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6:154391118-538479151-3958962937-215616864:1\"],\"workUnitBudget\":8000000},{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"containment-countermodel\",\"payload\":{\"arguments\":[{\"relationships\":[{\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"}}]}],\"expected\":{\"relationships\":[{\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"}}]},\"kind\":\"spatialRelationships\"},\"subjectIds\":[\"sha256:e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6:154391118-538479151-3958962937-215616864:1\"],\"workUnitBudget\":8000000}]",
+    "submitResultJson": "{\"requestId\":\"containment-reference-evaluate\",\"results\":[{\"claimId\":\"inspect-countermodel\",\"diagnostics\":[],\"evidence\":{\"diagnostics\":[],\"selections\":[{\"matches\":[{\"bounds\":{\"max\":[10,10,10],\"min\":[0,0,0]},\"center\":[5,5,5],\"kind\":\"occurrence\",\"name\":\"subject\",\"source\":\"step\"}],\"selector\":{\"kind\":\"occurrence\",\"name\":\"subject\"}},{\"matches\":[{\"bounds\":{\"max\":[10,10,10],\"min\":[0,0,0]},\"center\":[5,5,5],\"kind\":\"occurrence\",\"name\":\"target\",\"source\":\"step\"}],\"selector\":{\"kind\":\"occurrence\",\"name\":\"target\"}}]},\"provenance\":{\"engine\":\"@taucad/geospec-engine\",\"protocolVersion\":2,\"version\":\"0.1.0-beta.1\"},\"status\":\"passed\"},{\"claimId\":\"containment-countermodel\",\"diagnostics\":[],\"provenance\":{\"engine\":\"@taucad/geospec-engine\",\"protocolVersion\":2,\"version\":\"0.1.0-beta.1\"},\"status\":\"passed\"}]}",
+    "stdoutUtf8": "{\"primarySha256\":\"e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6\",\"results\":[{\"claimId\":\"inspect-countermodel\",\"status\":\"passed\",\"diagnostics\":[],\"evidence\":{\"selections\":[{\"selector\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"matches\":[{\"kind\":\"occurrence\",\"name\":\"subject\",\"bounds\":{\"min\":[0,0,0],\"max\":[10,10,10]},\"center\":[5,5,5],\"source\":\"step\"}]},{\"selector\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"matches\":[{\"kind\":\"occurrence\",\"name\":\"target\",\"bounds\":{\"min\":[0,0,0],\"max\":[10,10,10]},\"center\":[5,5,5],\"source\":\"step\"}]}],\"diagnostics\":[]}},{\"claimId\":\"containment-countermodel\",\"status\":\"passed\",\"diagnostics\":[]}]}\n",
+    "resultPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/containment-reference-a1/result.json",
+    "resultSha256": "535f63cb83cf4157a93a830a5c3aa4dc2dc91af7652062f4cd4dc572e4253e20",
+    "disposition": "preserved false-positive observation; it is not a successor containment oracle"
+  },
+  "rows": [
+    {
+      "id": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/positive",
+      "family": "voidContinuity",
+      "capability": "toHaveVoidContinuity",
+      "sourceCaseIds": [
+        "family/toHaveVoidContinuity",
+        "W5-VOID-CONTINUOUS-01"
+      ],
+      "subject": {
+        "primary": {
+          "path": "packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/model.step",
+          "bytes": 29381,
+          "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+        },
+        "resources": [],
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "millimetre",
+          "uniformScale": 1
+        },
+        "appliedUnit": "mm",
+        "options": {},
+        "semanticDescriptorUtf8": "{\"backendProfile\":\"occt-8.1.0-dev1-3d097a-report-v2\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"millimetre\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-step-xde-report-v2\",\"primary\":{\"byteLength\":29381,\"sha256\":\"55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+        "subjectHash": "a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4",
+        "inputFrame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "auto"
+        },
+        "subjectContentHash": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940",
+        "ingestTransport": {
+          "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"auto\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":29381,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"ingest:containment.valve-stem-guide-positive\",\"resources\":[]}",
+          "primaryBuffer": {
+            "path": "packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/model.step",
+            "byteLength": 29381,
+            "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+          },
+          "resourceBuffers": []
+        }
+      },
+      "polarity": "positive",
+      "expectedAdmission": "accepted-after-complete-syntax-and-selector-resolution",
+      "expectedOperationDisposition": "refused",
+      "byteStatus": "independently-authored-expected-refusal-no-target-certification",
+      "applicability": {
+        "semanticProfile": "geospec-st-v1",
+        "subjectReportProfile": "report-v2",
+        "numericCertification": "none-refusal-contract-only",
+        "budgetProfile": "pending-LOGICAL-BUDGET02"
+      },
+      "authoredRequestJson": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:positive\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"oracle-proof-refusals-a2:voidContinuity:positive\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:positive\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousMinimumQualified\":false,\"matcher\":\"toHaveVoidContinuity\",\"profile\":\"geospec-void-sampled-sections-v1\"},\"message\":\"The void profile samples cross-sections; a continuous minimum cross-section is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified continuous section proof for the declared geometry representation.\"}],\"status\":\"refused\"}]}",
+      "protocolErrorUtf8": null,
+      "contractStatus": "reviewable-amendment-expected-bytes"
+    },
+    {
+      "id": "amendment/W5-VOID-CONTINUOUS-01/minCrossSection/negative",
+      "family": "voidContinuity",
+      "capability": "toHaveVoidContinuity",
+      "sourceCaseIds": [
+        "family/toHaveVoidContinuity",
+        "W5-VOID-CONTINUOUS-01"
+      ],
+      "subject": {
+        "primary": {
+          "path": "packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/model.step",
+          "bytes": 29381,
+          "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+        },
+        "resources": [],
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "millimetre",
+          "uniformScale": 1
+        },
+        "appliedUnit": "mm",
+        "options": {},
+        "semanticDescriptorUtf8": "{\"backendProfile\":\"occt-8.1.0-dev1-3d097a-report-v2\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"millimetre\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-step-xde-report-v2\",\"primary\":{\"byteLength\":29381,\"sha256\":\"55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+        "subjectHash": "a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4",
+        "inputFrame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "auto"
+        },
+        "subjectContentHash": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940",
+        "ingestTransport": {
+          "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"auto\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":29381,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"ingest:containment.valve-stem-guide-positive\",\"resources\":[]}",
+          "primaryBuffer": {
+            "path": "packages/geospec-engine/fixtures/containment/valve-stem-guide-positive/model.step",
+            "byteLength": 29381,
+            "sha256": "55192ed0a48e39b6d8f6315c5529a1fb88cc71902e416a6a00549f516a940940"
+          },
+          "resourceBuffers": []
+        }
+      },
+      "polarity": "negative",
+      "expectedAdmission": "accepted-after-complete-syntax-and-selector-resolution",
+      "expectedOperationDisposition": "refused",
+      "byteStatus": "independently-authored-expected-refusal-no-target-certification",
+      "applicability": {
+        "semanticProfile": "geospec-st-v1",
+        "subjectReportProfile": "report-v2",
+        "numericCertification": "none-refusal-contract-only",
+        "budgetProfile": "pending-LOGICAL-BUDGET02"
+      },
+      "authoredRequestJson": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:negative\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"oracle-proof-refusals-a2:voidContinuity:negative\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveVoidContinuity\",\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:negative\",\"payload\":{\"expected\":{\"material\":[\"guide\"],\"minCrossSection\":1,\"path\":[[0,0,3],[0,0,42]]},\"kind\":\"voidContinuity\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"a9bbd5dd23964bdb39791cb841e0bd541290a187c4050e987db5ddd42d424df4\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W5-VOID-CONTINUOUS-01:minCrossSection:negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousMinimumQualified\":false,\"matcher\":\"toHaveVoidContinuity\",\"profile\":\"geospec-void-sampled-sections-v1\"},\"message\":\"The void profile samples cross-sections; a continuous minimum cross-section is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified continuous section proof for the declared geometry representation.\"}],\"status\":\"refused\"}]}",
+      "protocolErrorUtf8": null,
+      "contractStatus": "reviewable-amendment-expected-bytes"
+    },
+    {
+      "id": "amendment/W3-CONTAINMENT-SET-01/ap242-cavity-countermodel/positive",
+      "family": "spatialRelationships",
+      "capability": "toHaveSpatialRelationships",
+      "sourceCaseIds": [
+        "containment-reference-a1/containment-countermodel",
+        "W3-CONTAINMENT-SET-01"
+      ],
+      "relationshipKind": "containment",
+      "subject": {
+        "primary": {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/containment-reproduction-a1/ap242-attempt2/subject-and-cavity-target.step",
+          "bytes": 44254,
+          "sha256": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6"
+        },
+        "resources": [],
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "millimetre",
+          "uniformScale": 1
+        },
+        "appliedUnit": "mm",
+        "options": {},
+        "semanticDescriptorUtf8": "{\"backendProfile\":\"occt-8.1.0-dev1-3d097a-report-v2\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"millimetre\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-step-xde-report-v2\",\"primary\":{\"byteLength\":44254,\"sha256\":\"e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+        "subjectHash": "71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1",
+        "inputFrame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "auto"
+        },
+        "subjectContentHash": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6",
+        "ingestTransport": {
+          "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"auto\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":44254,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"ingest:containment.ap242-cavity-countermodel\",\"resources\":[]}",
+          "primaryBuffer": {
+            "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/containment-reproduction-a1/ap242-attempt2/subject-and-cavity-target.step",
+            "byteLength": 44254,
+            "sha256": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6"
+          },
+          "resourceBuffers": []
+        }
+      },
+      "polarity": "positive",
+      "expectedAdmission": "accepted-after-complete-syntax-and-selector-resolution",
+      "expectedOperationDisposition": "refused",
+      "byteStatus": "independently-authored-expected-refusal-no-target-certification",
+      "applicability": {
+        "semanticProfile": "geospec-st-v1",
+        "subjectReportProfile": "report-v2",
+        "numericCertification": "none-refusal-contract-only",
+        "budgetProfile": "pending-LOGICAL-BUDGET02"
+      },
+      "authoredRequestJson": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:positive\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"oracle-proof-refusals-a2:spatialRelationships:positive\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:positive\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousContainmentQualified\":false,\"kind\":\"containment\",\"matcher\":\"toHaveSpatialRelationships\",\"profile\":\"geospec-containment-sampled-v1\"},\"message\":\"The containment profile has only finite point samples; continuous solid containment is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified regular-solid containment query; sampled points do not prove that the complete subject is contained.\"}],\"status\":\"refused\"}]}",
+      "protocolErrorUtf8": null,
+      "contractStatus": "reviewable-amendment-expected-bytes"
+    },
+    {
+      "id": "amendment/W3-CONTAINMENT-SET-01/ap242-cavity-countermodel/negative",
+      "family": "spatialRelationships",
+      "capability": "toHaveSpatialRelationships",
+      "sourceCaseIds": [
+        "containment-reference-a1/containment-countermodel",
+        "W3-CONTAINMENT-SET-01"
+      ],
+      "relationshipKind": "containment",
+      "subject": {
+        "primary": {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/containment-reproduction-a1/ap242-attempt2/subject-and-cavity-target.step",
+          "bytes": 44254,
+          "sha256": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6"
+        },
+        "resources": [],
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "millimetre",
+          "uniformScale": 1
+        },
+        "appliedUnit": "mm",
+        "options": {},
+        "semanticDescriptorUtf8": "{\"backendProfile\":\"occt-8.1.0-dev1-3d097a-report-v2\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"millimetre\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-step-xde-report-v2\",\"primary\":{\"byteLength\":44254,\"sha256\":\"e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+        "subjectHash": "71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1",
+        "inputFrame": {
+          "coordinateSystem": "z-up",
+          "outputUnit": "mm",
+          "sourceUnit": "auto"
+        },
+        "subjectContentHash": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6",
+        "ingestTransport": {
+          "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"auto\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":44254,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"ingest:containment.ap242-cavity-countermodel\",\"resources\":[]}",
+          "primaryBuffer": {
+            "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/containment-reproduction-a1/ap242-attempt2/subject-and-cavity-target.step",
+            "byteLength": 44254,
+            "sha256": "e2443e12043eb48b36bbe8daa182f26d38c3af1abce46357b193b05db58308b6"
+          },
+          "resourceBuffers": []
+        }
+      },
+      "polarity": "negative",
+      "expectedAdmission": "accepted-after-complete-syntax-and-selector-resolution",
+      "expectedOperationDisposition": "refused",
+      "byteStatus": "independently-authored-expected-refusal-no-target-certification",
+      "applicability": {
+        "semanticProfile": "geospec-st-v1",
+        "subjectReportProfile": "report-v2",
+        "numericCertification": "none-refusal-contract-only",
+        "budgetProfile": "pending-LOGICAL-BUDGET02"
+      },
+      "authoredRequestJson": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:negative\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"oracle-proof-refusals-a2:spatialRelationships:negative\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-v1\",\"plan\":{\"claims\":[{\"capability\":\"toHaveSpatialRelationships\",\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:negative\",\"payload\":{\"expected\":{\"relationships\":[{\"angularToleranceDegrees\":0.5,\"kind\":\"containment\",\"subject\":{\"kind\":\"occurrence\",\"name\":\"subject\"},\"target\":{\"kind\":\"occurrence\",\"name\":\"target\"},\"tolerance\":0.02}]},\"kind\":\"spatialRelationships\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"71112ed75ce355faa9fcf259e04d61d8e65a61b714f74ef3c6e9501b533865c1\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"results\":[{\"claimId\":\"W3-CONTAINMENT-SET-01:ap242-cavity-countermodel:negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_EVIDENCE_UNSUPPORTED\",\"details\":{\"continuousContainmentQualified\":false,\"kind\":\"containment\",\"matcher\":\"toHaveSpatialRelationships\",\"profile\":\"geospec-containment-sampled-v1\"},\"message\":\"The containment profile has only finite point samples; continuous solid containment is not qualified.\",\"severity\":\"error\",\"suggestion\":\"Use a qualified regular-solid containment query; sampled points do not prove that the complete subject is contained.\"}],\"status\":\"refused\"}]}",
+      "protocolErrorUtf8": null,
+      "contractStatus": "reviewable-amendment-expected-bytes"
+    }
+  ],
+  "pendingQualification": {
+    "void": [
+      "Implement and qualify a selected continuous section-proof domain for every nonzero requested path segment.",
+      "Prove section topology and component membership over open event intervals and certify signed-area minima, one-sided event limits, and endpoints with exact or interval-certified arithmetic.",
+      "Refuse ambiguous degeneracies and unqualified component tracking.",
+      "Qualify any constant-section shortcut through a connector-certified analytic extrusion with complete trim coverage and representation identity.",
+      "Keep nominal BRep qualification behind a separate neutral certified section-bound operation; tessellation cannot substitute for the nominal BRep.",
+      "Produce full measured proof records and witnesses for non-threshold void rows before final family completion."
+    ],
+    "containment": [
+      "Implement and qualify BrepSubject::containment(subjects, target) with owned backend-neutral ContainmentFacts.",
+      "Admit only validated regular closed 3D solid operands and a successful valid pinned-OCCT BRepAlgoAPI_Cut result per subject-target.",
+      "Decide residue from actual result solid topology, retaining per-subject residual topology and volume plus available residual location and bounds; no rounded volume, samples, or missing residue may imply contained.",
+      "Qualify inside, boundary-touching, protruding, missed-cavity, and single-target-versus-split-target controls in both polarities.",
+      "Materialize corrected expected bytes for all 20 final general-containment rows without changing their preserved legacy rows.",
+      "Verify selected Node, WASM, JavaScript, Vitest, Python, and pytest target bytes after the query is qualified."
+    ],
+    "distinctSemantics": "Bore containment remains radial-fit-with-positive-engagement with axialEnclosureRequired=false. Already-qualified exact analytic relationship operations are not refused by this amendment.",
+    "budget": "The LOGICAL-BUDGET02 profile envelope remains under review; the retained per-claim request budget is transport data, not budget-profile certification."
+  }
+}

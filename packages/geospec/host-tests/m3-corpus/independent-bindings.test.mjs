@@ -1,11 +1,11 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, no-restricted-imports -- This harness-only check reads existing hash-bound independent authority JSON. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { bindIndependentPublicCase, requireEvaluationEnvelope } from './corpus.mjs';
+import { readFixture } from '../fixtures/read-fixture.mjs';
 
-const bytes = readFileSync(
+const bytes = readFixture(
   'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/f2-independent-wire/revisions/binding-a8/complete-wire.json',
 );
 assert.equal(

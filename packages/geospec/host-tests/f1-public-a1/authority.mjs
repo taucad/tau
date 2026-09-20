@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+// oxlint-disable-next-line no-restricted-imports -- The standalone authority harness shares the local immutable fixture closure.
+import { readFixture } from '../fixtures/read-fixture.mjs';
 
 /** @typedef {import('@taucad/runtime/types').JSONValue} JSONValue */
 /** @typedef {import('@taucad/geospec/assertion-client').GeoSpecCanonicalClaimReport} GeoSpecCanonicalClaimReport */
@@ -23,6 +25,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const resultsHash = 'd961d9e25b36fbc2baa8812e114b0fd37ee5c6f92453474dbac1022b86df1aab';
 const admissionsHash = 'f4454477a775cb0ade226d6f89a2cff460b0bfdb2f2c2655419da6c450051075';
+const authorityRoot =
+  'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/revisions/metadata-a2';
 const priorNumericProfile = '"numericProfile":"geospec-st-logical-requests-v2"';
 const currentNumericProfile = '"numericProfile":"geospec-st-logical-requests-v3"';
 const priorRegistryVersion = '"registryVersion":4';
@@ -90,17 +94,22 @@ const promoteAdmissionAuthority = (admission) => ({
   },
 });
 
-/** @type {(environmentName: string, expectedHash: string) => unknown} */
-const readVerifiedJson = (environmentName, expectedHash) => {
-  const bytes = readFileSync(requiredEnvironment(environmentName));
+/** @type {(environmentName: string, expectedHash: string, originalPath: string) => unknown} */
+const readVerifiedJson = (environmentName, expectedHash, originalPath) => {
+  const selectedPath = process.env[environmentName];
+  const bytes = selectedPath ? readFileSync(selectedPath) : readFixture(originalPath);
   assert.equal(sha256(bytes), expectedHash);
   return /** @type {unknown} */ (JSON.parse(bytes.toString('utf8')));
 };
 
 /** @type {() => { admissions: Map<string, Admission>, rows: AuthorityRow[] }} */
 export const loadAuthority = () => {
-  const rowsValue = readVerifiedJson('GEOSPEC_F1_RESULTS', resultsHash);
-  const admissionsValue = readVerifiedJson('GEOSPEC_F1_ADMISSIONS', admissionsHash);
+  const rowsValue = readVerifiedJson('GEOSPEC_F1_RESULTS', resultsHash, `${authorityRoot}/fullwire-results.json`);
+  const admissionsValue = readVerifiedJson(
+    'GEOSPEC_F1_ADMISSIONS',
+    admissionsHash,
+    `${authorityRoot}/binary-admissions.json`,
+  );
   assert.ok(Array.isArray(rowsValue));
   assert.ok(Array.isArray(admissionsValue));
   const rows = /** @type {AuthorityRow[]} */ (rowsValue).map((row) => promoteRowAuthority(row));

@@ -1,0 +1,424 @@
+{
+  "at": "2026-09-09T04:32:08.423220+00:00",
+  "kind": "Next-chunk coverage inventory, not new semantic authority or qualification",
+  "sources": [
+    {
+      "path": "packages/geospec-engine-native/rust/src/registry.rs",
+      "sha256": "18a4756b2fda7db55a89aeaec7f8546ceb5608b02f96481ffbfb634511a6e21a"
+    },
+    {
+      "path": "packages/geospec-engine-native/rust/src/matchers/relationships.rs",
+      "sha256": "30d9389f47db683ac06846788ad650926a9175a0b14d8c38e039130750425ebc"
+    },
+    {
+      "path": "packages/geospec-engine-native/rust/src/matchers/proofs.rs",
+      "sha256": "edf70e0d17d2c947f527da2a3976e576cb993f9ad63c1d80e3150811be8d4473"
+    },
+    {
+      "path": "packages/geospec-engine-native/rust/src/ancillary/inspection.rs",
+      "sha256": "762e1762a6da5bc4e112d44d062345cdad4569ba6ac17496b99a5f536c63d21a"
+    },
+    {
+      "path": "packages/geospec-engine-native/rust/src/certificates/plate_contract.rs",
+      "sha256": "b835c02faee794b4554430a85ab5c96d21c537890b3173e19504d2a1509b2d6c"
+    },
+    {
+      "path": "docs/research/geospec-native-engine-charter.md",
+      "sha256": "017df4b2712f49e71dfbee7a3e89b565f8ad40275a6456f9182d32be74e086ef"
+    }
+  ],
+  "originalMatchers": 24,
+  "relationshipKinds": [
+    "contact",
+    "clearance",
+    "coaxial",
+    "concentric",
+    "coplanar",
+    "parallel",
+    "perpendicular",
+    "angle",
+    "containment",
+    "insertion",
+    "interference"
+  ],
+  "ancillaryOperations": 4,
+  "capabilities": [
+    {
+      "capability": "toHaveBoundingBox",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveConnectedComponents",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toBeWatertight",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveNoComponentInterference",
+      "category": "original-matcher",
+      "m2ObservedCases": [
+        {
+          "id": "m1/half-cube/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "m1/half-cube/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        },
+        {
+          "id": "paired-glb/m1/half-cube/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "paired-glb/m1/half-cube/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveAssemblyOccurrences",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveSpatialRelationships",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveMeshIntegrity",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveNoDiagnostics",
+      "category": "original-matcher",
+      "m2ObservedCases": [
+        {
+          "id": "family/toHaveNoDiagnostics/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "family/toHaveNoDiagnostics/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveSurfaceArea",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveVolume",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveMass",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveCenterOfMass",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toBeValidBrep",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveTopologyCounts",
+      "category": "original-matcher",
+      "m2ObservedCases": [
+        {
+          "id": "family/toHaveTopologyCounts/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "family/toHaveTopologyCounts/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveStepUnits",
+      "category": "original-matcher",
+      "m2ObservedCases": [
+        {
+          "id": "family/toHaveStepUnits/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "family/toHaveStepUnits/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveProductStructure",
+      "category": "original-matcher",
+      "m2ObservedCases": [
+        {
+          "id": "family/toHaveProductStructure/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "family/toHaveProductStructure/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHavePlanarFace",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveCylindricalFace",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveCircularHole",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveCircularHolePattern",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveChamferFeature",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveFilletFeature",
+      "category": "original-matcher",
+      "m2ObservedCases": [
+        {
+          "id": "facet/missing/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "facet/missing/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        },
+        {
+          "id": "paired-glb/facet/missing/positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "paired-glb/facet/missing/negative",
+          "polarity": "negative",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveMinimumWallThickness",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toHaveVoidContinuity",
+      "category": "original-matcher",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "analyzeBrep",
+      "category": "ancillary",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "analyzeMesh",
+      "category": "ancillary",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "inspectGeometry",
+      "category": "ancillary",
+      "m2ObservedCases": [],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "analyzeMeshOverlap",
+      "category": "ancillary",
+      "m2ObservedCases": [
+        {
+          "id": "m1/half-cube/query",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "paired-glb/m1/half-cube/query",
+          "polarity": "positive",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    },
+    {
+      "capability": "toSatisfyRationalPlate",
+      "category": "F1",
+      "m2ObservedCases": [
+        {
+          "id": "f1-target-positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-target-negative",
+          "polarity": "negative",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-mirrored-holes-positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-mirrored-holes-negative",
+          "polarity": "negative",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-wider-outer-box-positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-wider-outer-box-negative",
+          "polarity": "negative",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-extra-central-window-positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-extra-central-window-negative",
+          "polarity": "negative",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-moved-A-positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-moved-A-negative",
+          "polarity": "negative",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-moved-B-positive",
+          "polarity": "positive",
+          "passedConformance": true
+        },
+        {
+          "id": "f1-moved-B-negative",
+          "polarity": "negative",
+          "passedConformance": true
+        }
+      ],
+      "fullSelectedFamilyStatus": "open; reconcile independent full corpus and supported-domain obligations before promotion",
+      "registryPresent": true
+    }
+  ],
+  "F2": {
+    "selectedFamily": "geospec.pmi.parallel-plane-distance/v1",
+    "registryPresent": false,
+    "status": "Typed PMI/association + independently specified conformance implementation remains required; AP242 Edition4 exchange evidence separately."
+  },
+  "tracks": [
+    "reference compatibility",
+    "independent mathematical soundness/accuracy",
+    "same-profile target canonical equality"
+  ],
+  "doNotReopen": [
+    "M1 paired GLB half-cube original/native equality",
+    "B82 four direct Manifold controls",
+    "B77 finite norm controls",
+    "M2 30-case installed/browser target cells"
+  ]
+}

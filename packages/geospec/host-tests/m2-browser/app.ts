@@ -18,13 +18,17 @@ type Asset = {
   url: string;
 };
 
-type ExpectedBytes = {
+type CanonicalBytes = {
   canonicalClaimUtf8: string;
   canonicalPlanUtf8: string;
   canonicalResultUtf8: string;
 };
 
-type IndependentBytes = { canonicalPlanUtf8: string; canonicalResultUtf8?: string };
+type ExpectedBytes = Omit<CanonicalBytes, 'canonicalResultUtf8'> & { canonicalResultUtf8: string | null };
+
+type IndependentBytes = { canonicalPlanUtf8: string; canonicalResultUtf8?: string | null };
+
+type ExpectedComparison = Record<keyof CanonicalBytes, boolean | null>;
 
 type IndependentComparison = Record<keyof IndependentBytes, boolean | null>;
 
@@ -42,7 +46,7 @@ type BrowserRow = {
   authoredRequestUtf8: string;
   cohort: string;
   expected: {
-    admissionUtf8: string;
+    admissionUtf8: string | null;
     bytes?: ExpectedBytes;
     error: null | { message: string; name: string };
     independent: null | IndependentBytes;
@@ -75,8 +79,8 @@ type ByteRecord = {
 
 type ByteComparison = {
   actual: ByteRecord;
-  equal: boolean;
-  expected: ByteRecord;
+  equal: boolean | null;
+  expected: ByteRecord | null;
 };
 
 type ErrorRecord = {
@@ -105,14 +109,15 @@ type CellResult = {
   };
   cohort: string;
   comparison?: {
-    directFrozen: Record<keyof ExpectedBytes, boolean>;
+    directFrozen: ExpectedComparison;
     errorClass: boolean;
     independent: null | IndependentComparison;
     publicDirect: Record<keyof ExpectedBytes, boolean>;
-    publicFrozen: Record<keyof ExpectedBytes, boolean>;
+    publicFrozen: ExpectedComparison;
+    unavailableFields: string[];
     status: boolean;
   };
-  direct?: ExpectedBytes & { diagnostics: unknown[]; status: string };
+  direct?: CanonicalBytes & { diagnostics: unknown[]; status: string };
   id: string;
   passed: boolean;
   protocolControl?: {
@@ -123,7 +128,12 @@ type CellResult = {
       reason: 'GeoSpec query API exposes ancillary capabilities with positive polarity only.';
     };
   };
-  public?: ExpectedBytes & { calls: RecorderCall[]; diagnostics: unknown[]; error: ErrorRecord | null; status: string };
+  public?: CanonicalBytes & {
+    calls: RecorderCall[];
+    diagnostics: unknown[];
+    error: ErrorRecord | null;
+    status: string;
+  };
   runtimeFailure?: ErrorRecord & { phase: string };
   warmup?: { direct?: WarmupResult; public?: WarmupResult };
 };
@@ -132,7 +142,7 @@ type WarmupResult = {
   calls: RecorderCall[];
   error: ErrorRecord | null;
   invocation: Invocation;
-  report?: ExpectedBytes & { diagnostics: unknown[]; status: string };
+  report?: CanonicalBytes & { diagnostics: unknown[]; status: string };
   succeeded: boolean;
 };
 
@@ -163,7 +173,13 @@ const byteRecord = async (bytes: ByteArray): Promise<ByteRecord> => ({
   utf8: decoder.decode(bytes),
 });
 
-const compareBytes = async (actual: ByteArray, expectedUtf8: string): Promise<ByteComparison> => {
+const compareBytes = async (
+  actual: ByteArray,
+  expectedUtf8: BrowserRow['expected']['admissionUtf8'],
+): Promise<ByteComparison> => {
+  if (expectedUtf8 === null) {
+    return { actual: await byteRecord(actual), equal: null, expected: null };
+  }
   const expected = encoder.encode(expectedUtf8);
   return {
     actual: await byteRecord(actual),
@@ -278,7 +294,7 @@ const invokePublic = async (
   return (await Reflect.apply(method, chain, invocation.arguments)) as GeoSpecCanonicalClaimReport;
 };
 
-const exactMap = (actual: ExpectedBytes, expected: ExpectedBytes): Record<keyof ExpectedBytes, boolean> => ({
+const exactMap = (actual: CanonicalBytes, expected: CanonicalBytes): Record<keyof ExpectedBytes, boolean> => ({
   canonicalClaimUtf8: actual.canonicalClaimUtf8 === expected.canonicalClaimUtf8,
   canonicalPlanUtf8: actual.canonicalPlanUtf8 === expected.canonicalPlanUtf8,
   canonicalResultUtf8: actual.canonicalResultUtf8 === expected.canonicalResultUtf8,
@@ -287,11 +303,26 @@ const exactMap = (actual: ExpectedBytes, expected: ExpectedBytes): Record<keyof 
 const allExact = (comparison: Record<keyof ExpectedBytes, boolean>): boolean =>
   byteKeys.every((key) => comparison[key]);
 
-const independentMap = (actual: ExpectedBytes, expected: IndependentBytes): IndependentComparison => ({
+const independentMap = (actual: CanonicalBytes, expected: IndependentBytes): IndependentComparison => ({
   canonicalPlanUtf8: actual.canonicalPlanUtf8 === expected.canonicalPlanUtf8,
   canonicalResultUtf8:
-    expected.canonicalResultUtf8 === undefined ? null : actual.canonicalResultUtf8 === expected.canonicalResultUtf8,
+    expected.canonicalResultUtf8 === undefined || expected.canonicalResultUtf8 === null
+      ? null
+      : actual.canonicalResultUtf8 === expected.canonicalResultUtf8,
 });
+
+// Null records absent authority; direct/public parity still compares every actual byte.
+const expectedMap = (actual: CanonicalBytes, expected: ExpectedBytes): ExpectedComparison => ({
+  canonicalClaimUtf8: actual.canonicalClaimUtf8 === expected.canonicalClaimUtf8,
+  canonicalPlanUtf8: actual.canonicalPlanUtf8 === expected.canonicalPlanUtf8,
+  canonicalResultUtf8:
+    expected.canonicalResultUtf8 === null ? null : actual.canonicalResultUtf8 === expected.canonicalResultUtf8,
+});
+
+const allExpected = (comparison: ExpectedComparison): boolean =>
+  comparison.canonicalClaimUtf8 === true &&
+  comparison.canonicalPlanUtf8 === true &&
+  (comparison.canonicalResultUtf8 === true || comparison.canonicalResultUtf8 === null);
 
 const allIndependent = (comparison: IndependentComparison): boolean =>
   comparison.canonicalPlanUtf8 === true && comparison.canonicalResultUtf8 !== false;
@@ -345,13 +376,32 @@ const runWarmup = async (
   return result;
 };
 
-const runCell = async (row: BrowserRow): Promise<CellResult> => {
+const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResult> => {
   const { registryVersion } = jsonRecord(JSON.parse(row.ingest.requestUtf8) as unknown, 'ingest request');
   const cell: CellResult = { cohort: row.cohort, id: row.id, passed: false };
   let engine: Engine | undefined;
   let handle: unknown;
-  let phase = 'engine-construction';
+  let phase = 'expected-authority';
   try {
+    const unavailableFields = [
+      ...(row.expected.admissionUtf8 === null ? ['admissionUtf8'] : []),
+      ...(row.expected.bytes?.canonicalResultUtf8 === null ? ['canonicalResultUtf8'] : []),
+      ...(row.expected.independent?.canonicalResultUtf8 === null ? ['independent.canonicalResultUtf8'] : []),
+    ];
+    if (
+      unavailableFields.length > 0 &&
+      (!supplemental ||
+        row.protocolControl !== undefined ||
+        row.expected.status !== 'passed' ||
+        row.expected.error !== null ||
+        !/^[\da-f]{64}$/.test(row.subjectHash) ||
+        !row.expected.bytes?.canonicalClaimUtf8 ||
+        !row.expected.bytes.canonicalPlanUtf8 ||
+        !row.expected.independent?.canonicalPlanUtf8)
+    ) {
+      throw new Error(`M2 unavailable authority requires a supplemental independently passed row: ${row.id}.`);
+    }
+    phase = 'engine-construction';
     engine = new Engine();
     phase = 'binary-fetch';
     const [primary, ...resources] = await Promise.all([
@@ -428,7 +478,7 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
           reason: 'GeoSpec query API exposes ancillary capabilities with positive polarity only.',
         },
       };
-      cell.passed = cell.admission.equal && matched;
+      cell.passed = cell.admission.equal === true && matched;
       return cell;
     }
     const expectedBytes = row.expected.bytes;
@@ -437,7 +487,7 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
     }
     phase = 'direct';
     const canonicalPlanBytes = Uint8Array.from(engine.canonicalPlan(encoder.encode(row.authoredRequestUtf8)));
-    const directBytes: ExpectedBytes = {
+    const directBytes: CanonicalBytes = {
       canonicalClaimUtf8: decoder.decode(canonicalClaim(decoder.decode(canonicalPlanBytes))),
       canonicalPlanUtf8: decoder.decode(canonicalPlanBytes),
       canonicalResultUtf8: decoder.decode(engine.evaluatePlan(canonicalPlanBytes)),
@@ -476,7 +526,7 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
     if (publicReport === undefined) {
       throw new Error(`M2 public assertion returned no report for ${row.id}.`);
     }
-    const publicBytes: ExpectedBytes = {
+    const publicBytes: CanonicalBytes = {
       canonicalClaimUtf8: decoder.decode(publicReport.canonicalClaim),
       canonicalPlanUtf8: decoder.decode(publicReport.canonicalPlan),
       canonicalResultUtf8: decoder.decode(publicReport.canonicalResult),
@@ -488,8 +538,8 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
       error: publicError,
       status: publicReport.status,
     };
-    const directFrozen = exactMap(directBytes, expectedBytes);
-    const publicFrozen = exactMap(publicBytes, expectedBytes);
+    const directFrozen = expectedMap(directBytes, expectedBytes);
+    const publicFrozen = expectedMap(publicBytes, expectedBytes);
     const publicDirect = exactMap(publicBytes, directBytes);
     const independent =
       row.expected.independent === null ? null : independentMap(directBytes, row.expected.independent);
@@ -503,12 +553,17 @@ const runCell = async (row: BrowserRow): Promise<CellResult> => {
       independent,
       publicDirect,
       publicFrozen,
-      status: directResult.status === row.expected.status && publicReport.status === row.expected.status,
+      unavailableFields,
+      status:
+        directResult.status === row.expected.status &&
+        publicReport.status === row.expected.status &&
+        firstResult(publicBytes.canonicalResultUtf8).status === row.expected.status,
     };
     cell.passed =
-      cell.admission.equal &&
-      allExact(directFrozen) &&
-      allExact(publicFrozen) &&
+      (cell.admission.equal === true || (supplemental && row.expected.admissionUtf8 === null)) &&
+      byteKeys.every((key) => directBytes[key].length > 0 && publicBytes[key].length > 0) &&
+      allExpected(directFrozen) &&
+      allExpected(publicFrozen) &&
       allExact(publicDirect) &&
       (independent === null || allIndependent(independent)) &&
       cell.comparison.status &&
@@ -604,7 +659,7 @@ const run = async () => {
   const rows: CellResult[] = [];
   for (const row of metadata.rows) {
     // oxlint-disable-next-line no-await-in-loop -- The ST engine corpus is evaluated and cleaned up one cell at a time.
-    rows.push(await runCell(row));
+    rows.push(await runCell(row, metadata.expectedRowCount !== undefined));
   }
   const wasmUrl = performance
     .getEntriesByType('resource')

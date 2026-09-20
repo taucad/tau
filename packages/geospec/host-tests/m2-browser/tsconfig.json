@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.lib.json",
   "compilerOptions": {
+    "allowJs": true,
     "composite": false,
     "declaration": false,
     "declarationMap": false,
@@ -10,7 +11,7 @@
       "@taucad/geospec-engine-native": ["../../../geospec-engine-native/src/index.ts"]
     }
   },
-  "files": ["app.ts"],
+  "files": ["app.ts", "verdict-host.mjs"],
   "include": [],
   "references": []
 }

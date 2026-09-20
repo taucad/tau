@@ -1,4 +1,4 @@
-"""Installed CPython pytest routes for the shared M3 corpus."""
+"""Installed CPython standalone and pytest routes for the shared M3 corpus."""
 
 from __future__ import annotations
 
@@ -435,21 +435,16 @@ def _compare_verdict(row: dict[str, Any], outcome: dict[str, Any]) -> dict[str, 
     }
 
 
-def test_should_exercise_complete_selected_corpus_through_installed_pytest(
-    geospec_engine: GeoSpecEngine,
-    pytestconfig: pytest.Config,
-) -> None:
-    assert isinstance(geospec_engine, GeoSpecEngine)
-    assert pytestconfig.pluginmanager.hasplugin("geospec.pytest_plugin") or (
-        pytestconfig.pluginmanager.hasplugin("geospec")
-    )
+def run_installed_campaign(route: str | None = None) -> dict[str, object]:
+    """Run the declared installed map through the public Python API and save raw captures."""
+    if route is None:
+        route = f"python{sys.version_info.major}.{sys.version_info.minor}-standalone"
     native_module = importlib.import_module("geospec_engine_native")
     campaign = json.loads(
         Path(_required_environment("GEOSPEC_INSTALLED_MAP")).read_text(
             encoding="utf-8"
         )
     )
-    route = f"python{sys.version_info.major}.{sys.version_info.minor}-pytest"
     output: dict[str, object] = {
         "schemaVersion": 1,
         "taskId": campaign["taskId"],
@@ -463,7 +458,9 @@ def test_should_exercise_complete_selected_corpus_through_installed_pytest(
             outcome = run_installed_row(native_module, row, route)
             output["rows"].append(outcome)
             outcome["comparison"] = _compare_verdict(row, outcome)
-        assert len(output["rows"]) == len(campaign["rows"])
+        assert [outcome["id"] for outcome in output["rows"]] == [
+            row["id"] for row in campaign["rows"]
+        ]
         failures = [
             f"{outcome['id']}: {failure}"
             for outcome in output["rows"]
@@ -475,3 +472,19 @@ def test_should_exercise_complete_selected_corpus_through_installed_pytest(
             json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+    return output
+
+
+def test_should_exercise_complete_selected_corpus_through_installed_pytest(
+    geospec_engine: GeoSpecEngine,
+    pytestconfig: pytest.Config,
+) -> None:
+    assert isinstance(geospec_engine, GeoSpecEngine)
+    assert pytestconfig.pluginmanager.hasplugin("geospec.pytest_plugin") or (
+        pytestconfig.pluginmanager.hasplugin("geospec")
+    )
+    run_installed_campaign(f"python{sys.version_info.major}.{sys.version_info.minor}-pytest")
+
+
+if __name__ == "__main__":
+    run_installed_campaign()

@@ -33,6 +33,7 @@
       "cache": false,
       "options": {
         "commands": [
+          "node --test packages/geospec/host-tests/m2-browser/verdict-host.mjs",
           "node --test packages/geospec/host-tests/m3-corpus/verdict-host.mjs",
           "python3 -B packages/geospec/host-tests/m3-corpus/verdict_host_check.py"
         ],

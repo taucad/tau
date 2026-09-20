@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().with_name('test_installed.py')
-NAMES = {'_compare_verdict', 'test_should_exercise_complete_selected_corpus_through_installed_pytest'}
+NAMES = {'run_installed_campaign', '_compare_verdict', 'test_should_exercise_complete_selected_corpus_through_installed_pytest'}
 tree = ast.parse(SOURCE.read_text())
 selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in NAMES]
 assert {node.name for node in selected} == NAMES
@@ -96,15 +96,18 @@ class VerdictTests(unittest.TestCase):
             })
             config = SimpleNamespace(pluginmanager=SimpleNamespace(hasplugin=lambda name: True))
             run_test = namespace['test_should_exercise_complete_selected_corpus_through_installed_pytest']
-            for status in ['failed', 'passed']:
+            for route, status in [('pytest', 'failed'), ('pytest', 'passed'), ('standalone', 'failed'), ('standalone', 'passed')]:
                 namespace['run_installed_row'] = lambda native, row, route: {**outcome(status), 'id': row['id'], 'route': route}
+                invoke = (lambda: run_test(InertEngine(), config)) if route == 'pytest' else namespace['run_installed_campaign']
                 if status == 'failed':
                     with self.assertRaisesRegex(AssertionError, 'expected-status'):
-                        run_test(InertEngine(), config)
+                        invoke()
                 else:
-                    run_test(InertEngine(), config)
+                    invoke()
                 saved = json.loads(output_path.read_text())
-                self.assertEqual(len(rows), len(saved['rows']))
+                self.assertEqual([row['id'] for row in rows], [record['id'] for record in saved['rows']])
+                self.assertEqual(f'python3.14-{route}', saved['route'])
+                self.assertEqual({'scope': 'inert-host-only'}, saved['provenance'])
                 for record in saved['rows']:
                     self.assertEqual(outcome(status)['report'], record['report'])
                     self.assertEqual(outcome(status)['error'], record['error'])

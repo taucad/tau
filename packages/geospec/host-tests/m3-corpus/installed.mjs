@@ -446,7 +446,6 @@ const releaseCase = (nativeEngine, row, handle) => {
   if (!handle) {
     return {
       status: 'not-acquired',
-      close: 'not-exported-by-node-engine',
     };
   }
   const input = Buffer.from(
@@ -463,7 +462,6 @@ const releaseCase = (nativeEngine, row, handle) => {
   return {
     status: call.output ? 'released' : 'release-error',
     call: call.record,
-    close: 'not-exported-by-node-engine',
   };
 };
 
@@ -628,15 +626,17 @@ const vitestEvaluation = async (nativeEngine, row, subject, hostExpect) => {
 
 // oxlint-disable-next-line max-params -- Cleanup attaches the one case's engine/row/handle record to its outcome.
 const attachCleanup = (outcome, nativeEngine, row, handle) => {
+  if (!nativeEngine) {
+    outcome.stages.cleanup = { status: 'not-acquired', close: 'not-created' };
+    return outcome;
+  }
   outcome.stages.cleanup = releaseCase(nativeEngine, row, handle);
-  if (backend === 'mixed') {
-    try {
-      nativeEngine.close();
-      outcome.stages.cleanup.close = 'closed';
-    } catch (error) {
-      outcome.stages.cleanup.close = 'close-error';
-      outcome.stages.cleanup.closeError = errorRecord(error);
-    }
+  try {
+    nativeEngine.close();
+    outcome.stages.cleanup.close = 'closed';
+  } catch (error) {
+    outcome.stages.cleanup.close = 'close-error';
+    outcome.stages.cleanup.closeError = errorRecord(error);
   }
   return outcome;
 };
@@ -729,7 +729,7 @@ export const runInstalledRow = async (row, route, hostExpect) => {
     };
     return outcome;
   } finally {
-    if (outcome && nativeEngine) {
+    if (outcome) {
       attachCleanup(outcome, nativeEngine, row, admission?.handle);
     }
   }
@@ -977,7 +977,8 @@ const compareRecord = (row, outcome) => {
       }
     }
   }
-  if (outcome.stages?.cleanup?.status !== 'released') {
+  const cleanup = outcome.stages?.cleanup;
+  if (cleanup?.status !== 'released' || (outcome.route?.startsWith('javascript-') && cleanup.close !== 'closed')) {
     hardFailures.push('cleanup');
   }
   return {

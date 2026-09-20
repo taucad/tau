@@ -85,7 +85,7 @@ const diagnosticsFixtures: readonly SectionCapDiagnosticsFixture[] = [
       rotationRadians: [0, 0, 0],
       pivot: [0, 0, 0],
     },
-    overlapTranslations: [-0.000_25, 0, 0.000_25],
+    overlapTranslations: [-0.00025, 0, 0.00025],
     noOverlapTranslations: [0.014, 0.0145, 0.015],
   },
   {

@@ -3,7 +3,7 @@
   "compilerOptions": {
     "rewriteRelativeImportExtensions": true,
     "outDir": "./out-tsc/spec",
-    "types": ["node", "vitest", "vitest/browser"],
+    "types": ["node", "vitest", "vitest/browser", "@vitest/browser-playwright"],
     "paths": {
       "#*": ["./src/*"]
     }

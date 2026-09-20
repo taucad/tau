@@ -25,6 +25,7 @@ import { join } from 'node:path';
 
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
+import { replayedStartOutcome } from '#host/replayed-start.js';
 import { createNodeAttachmentReader, createNodeEventLog } from '#node.js';
 import { createPortableId } from '#harness/session-record.js';
 import type {
@@ -272,11 +273,15 @@ export type NodeAgentLauncher = {
    * is the launcher's own appender, memoized per chat, so the record takes the
    * next sequence rather than opening a second writer on one `events.jsonl`.
    *
+   * Written through the host's own serialized appender rather than a second
+   * writer over the same file: two writers each deriving the next sequence
+   * number from the tail they read collide on `EVENT_MUTATED`, and a settlement
+   * landing while a run streams then kills that run (I2).
+   *
    * @param chatId - Chat whose log takes the record.
    * @param event - The record, without its log position.
-   * @returns The record as it was written.
    */
-  append(chatId: string, event: HostAuthoredLogEvent): Promise<AgentLogEvent>;
+  append(chatId: string, event: HostAuthoredLogEvent): Promise<void>;
   /** Durable event stream for every chat this launcher owns. */
   events(signal: AbortSignal): AsyncIterable<AgentChannelEvent>;
   /** Ephemeral model-delta stream for every chat this launcher owns. */
@@ -528,32 +533,27 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
         takeover: false,
       };
     }
-    let snapshot = await host.snapshot(command.chatId);
-    /* A run left non-terminal by a daemon restart is recovered here — the one
-     * place every reconnecting client passes through. A run this process is
-     * already executing needs no recovery: `resume` would be refused as an
-     * admission conflict, and an external run is tracked separately. */
+    /* Non-throwing: a chat whose log holds no run still has the transcript the
+     * client reconnected for, and refusing here made it unopenable (T4-08). */
+    let snapshot = await host.describeRun(command.chatId);
+    /* A run left non-terminal by a daemon restart is recorded here — the one
+     * place every reconnecting client passes through. Recorded, not resumed:
+     * `resume` re-asks the provider for a turn nobody requested (I4). A run
+     * this process is already executing is not abandoned at all, which
+     * `markAbandoned` decides from the host's own memory. */
     let takeover = false;
-    if (!isTerminal(snapshot.state) && !(await host.waitForAdmission(command.chatId))) {
-      try {
-        await acknowledge({ chatId: command.chatId, completion: host.resume(command.chatId) });
-        takeover = true;
-      } catch (error) {
-        /* A run that cannot be recovered must not make `attach` fail: the
-         * client still needs the transcript it reconnected for. */
-        if (!(error instanceof Error) || (error as { code?: string }).code !== 'RUN_ADMISSION_CONFLICT') {
-          throw error;
-        }
-      }
-      snapshot = await host.snapshot(command.chatId);
+    if (snapshot && !isTerminal(snapshot.state) && !(await host.waitForAdmission(command.chatId))) {
+      const marked = await host.markAbandoned(command.chatId);
+      takeover = marked?.runId === snapshot.runId && isTerminal(marked.state);
+      snapshot = marked ?? snapshot;
     }
     return {
       type: 'attach',
       chatId: command.chatId,
       batch: await host.readEvents(readWindow(command)),
       leadership: { role: 'leader', generation: generationFor(command.chatId) },
-      snapshot,
-      takeover: takeover && !isTerminal(snapshot.state),
+      ...(snapshot ? { snapshot } : {}),
+      takeover,
     };
   };
 
@@ -589,6 +589,35 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
               : {}),
           },
         };
+        /* V9: the run id is the idempotency key. A client that re-sends its
+         * `start` over a reconnected socket is answered with the run it already
+         * has — admitting it again would refuse the id as taken and lose the
+         * turn. The browser worker reads the same function. */
+        const log = await openEventLog(command.chatId);
+        switch (replayedStartOutcome({ events: await log.read(), runId: command.runId })) {
+          case 'settled': {
+            return { type: 'result', operation: 'start', snapshot: await host.snapshot(command.chatId) };
+          }
+          case 'resume': {
+            /* A run this process is still executing needs no continuation at
+             * all: answer the re-send with the run it already has. */
+            const live = await host.waitForAdmission(command.chatId, command.runId);
+            return {
+              type: 'result',
+              operation: 'start',
+              snapshot:
+                live ??
+                (await acknowledge({
+                  chatId: command.chatId,
+                  runId: command.runId,
+                  completion: host.resume(command.chatId),
+                })),
+            };
+          }
+          case 'admit': {
+            break;
+          }
+        }
         const completion = host.admit(
           command.trigger === 'submit'
             ? { ...base, trigger: 'submit' }
@@ -656,22 +685,9 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     host,
     execute,
     append: async (chatId, event) => {
-      const log = await openEventLog(chatId);
-      /* The same rule the host's own appender follows: continue this leader's
-       * run of sequences, and start a fresh one when the log's tail belongs to
-       * a leader that is gone. */
-      const leaderEpoch = generationFor(chatId);
-      const recorded = await log.read();
-      const tail = recorded.at(-1);
-      const stamped: AgentLogEvent = {
-        ...event,
-        version: 1,
-        leaderEpoch,
-        sequence: tail?.leaderEpoch === leaderEpoch ? tail.sequence + 1 : 0,
-        recordedAt: new Date().toISOString(),
-      };
-      await log.append(stamped);
-      return stamped;
+      generationFor(chatId);
+      const { runId, ...body } = event;
+      await host.recordSettlement({ chatId, runId, event: body });
     },
     events: (signal) => durable.subscribe(signal),
     liveEvents: (signal) => live.subscribe(signal),

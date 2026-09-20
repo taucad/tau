@@ -215,6 +215,16 @@ type CreateSessionRecordOptions = {
   readonly leaderEpoch: string;
   readonly createId?: (() => string) | undefined;
   readonly now?: (() => string) | undefined;
+  /**
+   * The owner's writer, when the session is one of several on this log (I2).
+   *
+   * A host runs many writers over one `events.jsonl` — the run's session, a
+   * revision settlement, an external runner — and each one that derives the
+   * next sequence number from the tail it read itself will collide with the
+   * others on `EVENT_MUTATED`. Given a writer, the record stamps nothing and
+   * decides nothing: position and legality belong to whoever owns the log.
+   */
+  readonly append?: ((event: SessionLogEvent) => Promise<void>) | undefined;
 };
 
 /** Adapt pi's append-oriented session shape directly onto the PH19 event log. @public */
@@ -226,12 +236,17 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
   const now = options.now ?? (() => new Date().toISOString());
   let pending: Promise<void> = Promise.resolve();
 
+  const write = options.append;
   const append = async (body: SessionLogEvent): Promise<void> => {
     const prior = pending;
     const next = Promise.withResolvers<void>();
     pending = next.promise;
     await prior;
     try {
+      if (write) {
+        await write(body);
+        return;
+      }
       const event: AgentLogEvent = {
         ...body,
         version: 1,

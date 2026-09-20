@@ -64,7 +64,7 @@ import {
   toolInputToProvider,
   transportFailureFromProviderMessages,
 } from '#harness/session-record.js';
-import type { AttachmentReader, MessageIdentities, SessionRecord } from '#harness/session-record.js';
+import type { AttachmentReader, MessageIdentities, SessionLogEvent, SessionRecord } from '#harness/session-record.js';
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
 import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
@@ -847,6 +847,13 @@ export type CreateAgentSessionOptions = {
   readonly snapshot?: JsonValue | undefined;
   readonly contextMessages?: readonly UserProviderMessage[] | undefined;
   readonly eventLog: DurableEventLog;
+  /**
+   * The owner's durable writer, when this session shares its log (I2).
+   *
+   * Absent, the session stamps its own positions off `eventLog`'s tail, which
+   * is correct only while it is the log's one writer.
+   */
+  readonly appendEvent?: ((event: SessionLogEvent) => Promise<void>) | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
   readonly substituteToolResult?: ToolResultSubstituter | undefined;
@@ -959,6 +966,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     leaderEpoch: options.leaderEpoch,
     createId,
     now: () => now().toISOString(),
+    ...(options.appendEvent ? { append: options.appendEvent } : {}),
   });
   /*
    * D15: durable rows name attachments; a model reads bytes. Each user message

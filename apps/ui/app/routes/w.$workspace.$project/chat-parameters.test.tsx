@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ActorRefFrom } from 'xstate';
 import type { FileParameterEntry } from '@taucad/types';
@@ -72,6 +72,7 @@ const mockSwitchParameterGroup = vi.fn();
 const mockProjectSend = vi.fn();
 const mockEditorSend = vi.fn();
 const mockPaneSetExpanded = vi.fn();
+let mockScrubFinal = Promise.resolve(true);
 let mockParameterEntries = new Map<string, FileParameterEntry>();
 const mockResolveParameterEntry = vi.fn();
 const mockEmptyParameterEntries = new Map<string, FileParameterEntry>();
@@ -254,7 +255,13 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
     filterTerm?: string;
     onParametersChange: (params: Record<string, unknown>) => void;
     units: { length: { displaySymbol: string } };
-    parameterEdit?: { kind: 'authoritative'; commit: { scrub?: (field: { pointer: string; value: string }) => void } };
+    parameterEdit?: {
+      kind: 'authoritative';
+      commit: {
+        scrub?: (field: { pointer: string; value: string }) => void;
+        endScrub?: (final?: Promise<boolean>) => Promise<void>;
+      };
+    };
   }) => (
     <div
       data-testid='parameters-component'
@@ -279,6 +286,24 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
         onClick={() => parameterEdit?.commit.scrub?.({ pointer: '/width', value: '21 in' })}
       >
         Scrub
+      </button>
+      <button
+        type='button'
+        data-testid='release-scrub'
+        onClick={() => {
+          void parameterEdit?.commit.endScrub?.(mockScrubFinal);
+        }}
+      >
+        Release scrub
+      </button>
+      <button
+        type='button'
+        data-testid='cancel-scrub'
+        onClick={() => {
+          void parameterEdit?.commit.endScrub?.();
+        }}
+      >
+        Cancel scrub
       </button>
     </div>
   ),
@@ -440,6 +465,7 @@ describe('ChatParameters', () => {
     mockSetGeometryUnitParameters.mockClear();
     mockSwitchParameterGroup.mockClear();
     mockPaneSetExpanded.mockClear();
+    mockScrubFinal = Promise.resolve(true);
     mockParameterState = 'ready';
     mockParameterActorSend.mockClear();
     vi.mocked(mockCadRef.send).mockClear();
@@ -604,6 +630,57 @@ describe('ChatParameters', () => {
       parameters: { width: '21 in' },
     });
     requestFrame.mockRestore();
+  });
+
+  it('should not restore the old record when a cancelled second gesture ends while the first final is committing', async () => {
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    try {
+      const final = Promise.withResolvers<boolean>();
+      mockScrubFinal = final.promise;
+      mockGeometryUnits.set('main.ts', mockCadRef);
+
+      render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      fireEvent.click(screen.getByTestId('release-scrub'));
+      fireEvent.click(screen.getByTestId('cancel-scrub'));
+
+      expect(mockCadRef.send).not.toHaveBeenCalledWith({ type: 'restoreParameters' });
+      await act(async () => {
+        final.resolve(true);
+        await final.promise;
+      });
+      expect(mockCadRef.send).not.toHaveBeenCalledWith({ type: 'restoreParameters' });
+    } finally {
+      requestFrame.mockRestore();
+    }
+  });
+
+  it('should restore the committed record when the scrub final is refused', async () => {
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    try {
+      const final = Promise.withResolvers<boolean>();
+      mockScrubFinal = final.promise;
+      mockGeometryUnits.set('main.ts', mockCadRef);
+
+      render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      fireEvent.click(screen.getByTestId('release-scrub'));
+      expect(mockCadRef.send).not.toHaveBeenCalledWith({ type: 'restoreParameters' });
+
+      await act(async () => {
+        final.resolve(false);
+        await final.promise;
+      });
+      expect(mockCadRef.send).toHaveBeenCalledWith({ type: 'restoreParameters' });
+    } finally {
+      requestFrame.mockRestore();
+    }
   });
 
   it('shows empty message when no geometry units', async () => {

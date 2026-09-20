@@ -85,13 +85,22 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Parameter operation failed.';
 
-/** Exact persisted bytes used to suppress a duplicate staged render. */
-export const parameterRecordFingerprint = (bytes: Uint8Array<ArrayBuffer> | undefined): string | undefined =>
-  bytes === undefined ? undefined : new TextDecoder().decode(bytes);
-
 /** Settlements that prove this actor wrote the bytes now held in its snapshot. */
 export const shouldDispatchParameterSettlement = (outcome: ParameterSetOutcome | undefined): boolean =>
   outcome?.status === 'committed' && (outcome.write === 'applied' || outcome.write === 'reconciled');
+
+export const parameterStageForSettlement = ({
+  entryPath,
+  outcome,
+  bytes,
+}: Readonly<{
+  entryPath: string;
+  outcome: ParameterSetOutcome | undefined;
+  bytes: Uint8Array<ArrayBuffer> | undefined;
+}>): Record<string, Uint8Array<ArrayBuffer>> | undefined =>
+  shouldDispatchParameterSettlement(outcome) && bytes !== undefined
+    ? { [parameterEntryPath(entryPath)]: bytes }
+    : undefined;
 
 type FocusedChatWorker = Pick<ChatStorage, 'getChatsForResource' | 'createNavigationRepairChat'>;
 
@@ -425,39 +434,9 @@ export function ProjectProvider({
     (state) => state.context.mainEntryPath,
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
-  const appliedParameterValues = useRef(new Map<string, string>());
   /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path
    * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
   const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
-
-  /* The kernel learns a committed value from the set actor's own notification, which runs in the
-   * same synchronous turn as the checked write — ahead of React's render of this provider. */
-  const dispatchParameters = useCallback(
-    (entryPath: string, mode: 'dispatch' | 'seed' = 'dispatch'): void => {
-      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
-      const current = parameterService.snapshot(entryPath);
-      if (cadRef === undefined || current === undefined) {
-        return;
-      }
-      const fingerprint = parameterRecordFingerprint(current.bytes ?? undefined);
-      const appliedFingerprint = appliedParameterValues.current.get(entryPath);
-      if (
-        mode === 'dispatch' &&
-        fingerprint !== undefined &&
-        appliedFingerprint !== fingerprint &&
-        current.bytes !== null
-      ) {
-        /* Only the bytes the authority just persisted travel: the runtime resolves the values from
-         * them and observes that revision itself, so the sidecar's own watch event has nothing left
-         * to re-render, and this machine keeps no second copy of the stored values. */
-        cadRef.send({ type: 'commitParameters', stage: { [parameterEntryPath(entryPath)]: current.bytes } });
-      }
-      if (fingerprint !== undefined) {
-        appliedParameterValues.current.set(entryPath, fingerprint);
-      }
-    },
-    [actorRef, parameterService],
-  );
 
   const observeParameters = useCallback(
     (entryPath: string): void => {
@@ -468,8 +447,17 @@ export function ProjectProvider({
       }
       existing?.unsubscribe();
       const subscription = actor.on('settled', ({ outcome }) => {
-        if (shouldDispatchParameterSettlement(outcome)) {
-          dispatchParameters(entryPath);
+        const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
+        const current = parameterService.snapshot(entryPath);
+        if (cadRef === undefined || current === undefined) {
+          return;
+        }
+        const stage = parameterStageForSettlement({ entryPath, outcome, bytes: current.bytes ?? undefined });
+        if (stage !== undefined) {
+          /* Only the bytes the authority just persisted travel: the runtime resolves the values from
+           * them and observes that revision itself, so the sidecar's own watch event has nothing left
+           * to re-render, and this machine keeps no second copy of the stored values. */
+          cadRef.send({ type: 'commitParameters', stage });
         }
       });
       parameterObservers.current.set(entryPath, {
@@ -478,12 +466,8 @@ export function ProjectProvider({
           subscription.unsubscribe();
         },
       });
-      /* The first observation only records what the record holds: `parameterFileResolver` reads the
-       * same file on every render, so the unit's opening render already carries these values and
-       * dispatching them here would render the model a second time for no change. */
-      dispatchParameters(entryPath, 'seed');
     },
-    [dispatchParameters, parameterService],
+    [actorRef, parameterService],
   );
 
   useEffect(() => {
@@ -499,7 +483,6 @@ export function ProjectProvider({
       if (!geometryUnits.has(entryPath)) {
         unsubscribe();
         observers.delete(entryPath);
-        appliedParameterValues.current.delete(entryPath);
       }
     }
     return () => {

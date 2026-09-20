@@ -532,11 +532,19 @@ function useScrubDispatch(cadRef: ActorRefFrom<typeof cadMachine>): Pick<Paramet
     );
   });
 
-  const pending = useRef<Record<string, unknown> | undefined>(undefined);
+  const pending = useRef<Readonly<{ generation: number; parameters: Record<string, unknown> }> | undefined>(undefined);
   const frame = useRef<number | undefined>(undefined);
-  const sent = useRef(false);
+  const latestGeneration = useRef(0);
+  const activeGeneration = useRef<Readonly<{ generation: number; sent: boolean }> | undefined>(undefined);
 
   const lane = useMemo(() => {
+    const clearPending = (): void => {
+      pending.current = undefined;
+      if (frame.current !== undefined) {
+        cancelAnimationFrame(frame.current);
+        frame.current = undefined;
+      }
+    };
     function pump(): void {
       frame.current = undefined;
       if (pending.current === undefined) {
@@ -548,31 +556,46 @@ function useScrubDispatch(cadRef: ActorRefFrom<typeof cadMachine>): Pick<Paramet
       }
       const next = pending.current;
       pending.current = undefined;
-      cadRef.send({ type: 'scrubParameters', parameters: next });
-      sent.current = true;
+      cadRef.send({ type: 'scrubParameters', parameters: next.parameters });
+      if (activeGeneration.current?.generation === next.generation) {
+        activeGeneration.current = { ...activeGeneration.current, sent: true };
+      }
     }
     return {
       scrub(field: Readonly<{ pointer: string; value: JSONValue }>): void {
-        pending.current = withPointerValue({}, field.pointer, field.value);
+        activeGeneration.current ??= { generation: ++latestGeneration.current, sent: false };
+        pending.current = {
+          generation: activeGeneration.current.generation,
+          parameters: withPointerValue({}, field.pointer, field.value),
+        };
         frame.current ??= requestAnimationFrame(pump);
       },
-      stop(restore: boolean): void {
-        pending.current = undefined;
-        if (frame.current !== undefined) {
-          cancelAnimationFrame(frame.current);
-          frame.current = undefined;
+      async stop(final?: Promise<boolean>): Promise<void> {
+        const completed = activeGeneration.current;
+        activeGeneration.current = undefined;
+        clearPending();
+        if (completed?.sent !== true) {
+          return;
         }
-        if (restore && sent.current) {
+        if (final === undefined) {
           cadRef.send({ type: 'restoreParameters' });
-          sent.current = false;
+          return;
         }
+        const committed = await final;
+        if (!committed && latestGeneration.current === completed.generation) {
+          cadRef.send({ type: 'restoreParameters' });
+        }
+      },
+      dispose(): void {
+        activeGeneration.current = undefined;
+        clearPending();
       },
     };
   }, [cadRef]);
 
   useEffect(() => {
     return () => {
-      lane.stop(false);
+      lane.dispose();
     };
   }, [lane]);
 

@@ -5,7 +5,7 @@ import type { ProjectManifest } from '@taucad/types';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import {
   createProjectManifestChangeObserver,
-  parameterRecordFingerprint,
+  parameterStageForSettlement,
   resolveScopedProjectManifest,
   shouldDispatchParameterSettlement,
 } from '#hooks/use-project.js';
@@ -130,7 +130,16 @@ describe('parameter record dispatch', () => {
       }),
     );
 
-    expect(parameterRecordFingerprint(millimetres)).not.toBe(parameterRecordFingerprint(inches));
+    const outcome = {
+      status: 'committed',
+      requestId: 'own-write',
+      revision: { manifestRevision: 'manifest' },
+      write: 'applied',
+    } as const;
+
+    expect(parameterStageForSettlement({ entryPath: 'main.ts', outcome, bytes: millimetres })).not.toEqual(
+      parameterStageForSettlement({ entryPath: 'main.ts', outcome, bytes: inches }),
+    );
   });
 
   it('should not dispatch for a foreign record change', () => {
@@ -151,5 +160,21 @@ describe('parameter record dispatch', () => {
         write: 'applied',
       }),
     ).toBe(true);
+  });
+
+  it('should stage an own write that restores bytes seen before a foreign change', () => {
+    const bytesA = new TextEncoder().encode('{"value":"A"}');
+    const bytesB = new TextEncoder().encode('{"value":"B"}');
+    const ownWrite = {
+      status: 'committed',
+      requestId: 'own-write',
+      revision: { manifestRevision: 'manifest' },
+      write: 'applied',
+    } as const;
+
+    expect(parameterStageForSettlement({ entryPath: 'main.ts', outcome: undefined, bytes: bytesB })).toBeUndefined();
+    expect(parameterStageForSettlement({ entryPath: 'main.ts', outcome: ownWrite, bytes: bytesA })).toEqual({
+      '.tau/parameters/main.ts.json': bytesA,
+    });
   });
 });

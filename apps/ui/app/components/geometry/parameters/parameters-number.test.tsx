@@ -1033,7 +1033,7 @@ describe('ParametersNumber', () => {
       fireSliderPointerEvent(sliderInput, 'pointerup', { clientX: 0 });
 
       expect(parameterCommit.calls).toHaveLength(0);
-      expect(endScrub).toHaveBeenCalledWith(true);
+      expect(endScrub).toHaveBeenCalledWith();
     });
 
     it('should send one final after a scrub and nothing after it', () => {
@@ -1062,7 +1062,8 @@ describe('ParametersNumber', () => {
       expect(scrub).toHaveBeenCalledOnce();
       expect(parameterCommit.calls).toHaveLength(1);
       expect(parameterCommit.calls[0]).toMatchObject({ pressure: 'final', value: 15 });
-      expect(endScrub).toHaveBeenCalledWith(false);
+      expect(endScrub).toHaveBeenCalledOnce();
+      expect(endScrub.mock.calls[0]![0]).toBeInstanceOf(Promise);
     });
 
     it('should commit a fractional drag on a field whose default is 0', () => {

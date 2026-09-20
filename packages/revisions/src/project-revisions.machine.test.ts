@@ -1181,10 +1181,33 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* A fresh project has files and no revision. *New branch* there used to reach
+   * the registry with no base, which the port refuses as unborn — so the
+   * composer's picker made no checkout and the turn leased the project itself. */
+  it('records the files first when a branch is made on a project that has no revision yet', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    await flush();
+
+    /* The checkout is the sole minter (F2), so the root asks it and waits. */
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
+    await flush();
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'isolated-run', from: 'rev-1' },
+    ]);
+
+    harness.actor.stop();
+  });
+
   it('tells the branch child when the registry refuses its delegated verb', async () => {
     const harness = start();
 
-    await readyRegistry(harness);
+    /* A head to branch from: with none, the root records the files first. */
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
     harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2' } });
     await flush();
     harness.promises.settle('addCheckout', { error: new Error('That branch already has a checkout.') });

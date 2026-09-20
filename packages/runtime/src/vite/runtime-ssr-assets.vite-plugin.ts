@@ -101,6 +101,20 @@ const findPackageAssetMatches = (matches: readonly UrlMatch[], importer: string)
 };
 
 /**
+ * A node or jsdom Vitest run never fetches a served URL, so the rewrite is
+ * skipped there. Vitest's browser mode *is* served by Vite and needs the same
+ * `/@fs/` rewrite a dev server gets. `test` is read structurally because
+ * `vite`'s own `ResolvedConfig` does not declare it.
+ *
+ * @param config - The resolved Vite config, possibly carrying Vitest's options.
+ * @returns Whether this config belongs to a headless (unserved) test run.
+ */
+const isUnservedTestRun = (config: {
+  readonly mode: string;
+  readonly test?: { readonly browser?: { readonly enabled?: boolean } };
+}): boolean => config.mode === 'test' && config.test?.browser?.enabled !== true;
+
+/**
  * Emit literal assets reached through the consumer's runtime plugin graph.
  * Vite intentionally leaves generic `new URL(literal, import.meta.url)`
  * expressions untouched in SSR builds and does not resolve package subpaths in
@@ -132,7 +146,7 @@ export const runtimeAssetsPlugin = (): Plugin => {
       isServe = config.command === 'serve';
       isServerEnvironment = consumer === 'server' || Boolean(config.build.ssr);
       isSsrBuild = Boolean(config.build.ssr) && consumer !== 'client';
-      isTest = config.mode === 'test';
+      isTest = isUnservedTestRun(config);
     },
     buildStart() {
       emittedAssets.set(this.environment, new Map());

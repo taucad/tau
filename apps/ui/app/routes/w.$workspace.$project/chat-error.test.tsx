@@ -11,13 +11,16 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as ChatErrorPayload } from '@taucad/types';
+import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode } from '#utils/error.utils.js';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
+const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
 
 let mockRetryAttempt = 0;
 
@@ -40,6 +43,15 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatRetrySnapshot: () => ({ retryAttempt: mockRetryAttempt, retryMaxAttempts: 5 }),
   useChatSelector: vi.fn(),
 }));
+
+vi.mock('@taucad/agent-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentHostModule>();
+  return {
+    ...actual,
+    isResumableRunFailure: (failure: ChatErrorPayload) =>
+      resumableFailureOverrides.has(failure.code ?? '') || actual.isResumableRunFailure(failure),
+  };
+});
 
 /* The card's "Switch Model" action mounts the composer's own picker, which
  * reads the chat-scoped model resolver; this suite renders the banner alone. */
@@ -84,6 +96,7 @@ const persisted = (error: ChatErrorPayload): void => {
 describe('ChatError', () => {
   beforeEach(() => {
     mockRetryAttempt = 0;
+    resumableFailureOverrides.clear();
     vi.clearAllMocks();
   });
 
@@ -189,36 +202,84 @@ describe('ChatError', () => {
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Switch model', 'Resume']);
   });
 
-  it('should offer only a new chat when compaction cannot make room', async () => {
-    const user = userEvent.setup();
-    persisted({
-      category: errorCategory.generic,
-      title: 'Error',
-      message: "This chat's first message is too large to continue. Start a new chat and attach less.",
+  it.each([
+    {
+      code: 'SESSION_LOG_INTEGRITY',
+      title: 'Tau paused this turn',
+      copy: 'This chat hit a problem while Tau was tidying its history.',
+      actions: ['Resume', 'Try again'],
+    },
+    {
+      code: 'SUMMARY_REQUIRED',
+      title: 'Tau paused this turn',
+      copy: 'This chat hit a problem while Tau was tidying its history.',
+      actions: ['Resume', 'Try again'],
+    },
+    {
       code: 'NO_EVICTABLE_HISTORY',
-    });
+      title: 'This chat is too long to continue',
+      copy: 'Tau could not make room for the next step.',
+      actions: ['Resume', 'Try again', 'New chat'],
+    },
+    {
+      code: 'CIRCUIT_BREAKER_OPEN',
+      title: 'This chat is too long to continue',
+      copy: 'Tau could not make room for the next step.',
+      actions: ['Resume', 'Try again', 'New chat'],
+    },
+  ])(
+    'should offer Resume before Try again for resumable compaction failure $code',
+    async ({ code, title, copy, actions }) => {
+      const user = userEvent.setup();
+      const rawMessage = `Internal host sentence for ${code}`;
+      resumableFailureOverrides.add(code);
+      persisted({
+        category: errorCategory.generic,
+        title: 'Error',
+        message: rawMessage,
+        code,
+      });
 
-    render(<ChatErrorBanner />);
+      render(<ChatErrorBanner />);
 
-    expect(screen.getByText('This chat is too long to continue')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
+      expect(screen.getByText(title)).toBeInTheDocument();
+      expect(screen.getByText(copy)).toBeInTheDocument();
+      expect(screen.queryByText(rawMessage)).not.toBeInTheDocument();
+      expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(actions);
 
-    await user.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(openNewChat).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole('button', { name: 'Resume' }));
+      expect(continueChat).toHaveBeenCalledTimes(1);
+      expect(regenerate).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(regenerate).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('should not offer Try again when a too-long run cannot resume', () => {
+    render(<ChatErrorTooLong resumable={false} />);
+
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
   });
 
-  it('should offer the same notice when compaction has given up retrying', () => {
+  it('should keep the host compaction sentence reachable in Details', async () => {
+    const user = userEvent.setup();
+    const hostSentence = 'Model invocation attempt-overflow has no durable result; it will not be sent again.';
+    resumableFailureOverrides.add('SUMMARY_REQUIRED');
     persisted({
       category: errorCategory.generic,
       title: 'Error',
-      message: 'Compaction is disabled for this chat after repeated failures.',
-      code: 'CIRCUIT_BREAKER_OPEN',
+      message: 'This chat hit a problem while Tau was tidying its history.',
+      code: 'SUMMARY_REQUIRED',
+      raw: hostSentence,
     });
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('This chat is too long to continue')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByTestId('code-viewer')).toHaveTextContent(hostSentence);
   });
 
   /* Ruling Q6: taking leadership back is a protocol, not an error action. */
@@ -257,6 +318,50 @@ describe('ChatError', () => {
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
+  /* T2-D11. A resume the host cannot honour is not a failure: the turn is
+   * whole and nothing was spent. Left to the generic block it read as one —
+   * a red banner with a collapsible stack trace over a message that says
+   * there is nothing to continue. */
+  it('should say a resume has nothing left to continue rather than report a failure', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'This turn has nothing left to continue. Send it again to start a new one.',
+      code: 'RESUME_UNAVAILABLE',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Nothing left to continue')).toBeInTheDocument();
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
+  /* E1. A run whose document died is recorded abandoned, not failed by
+   * anything the person did: the turn is saved and Resume continues it. Left
+   * to the category it read as a generic error offering *Try again*. */
+  it('should present an abandoned run as a paused turn that resumes', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The host executing this run is gone. Resume the turn to continue it.',
+      code: 'RUN_ABANDONED',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
   });
 
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {

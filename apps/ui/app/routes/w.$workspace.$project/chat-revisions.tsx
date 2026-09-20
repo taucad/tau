@@ -434,8 +434,11 @@ export function RevisionsPanelBody(): React.JSX.Element {
               const { open } = event.currentTarget;
               setOpenAutosaves((current) => {
                 const next = new Set(current);
-                if (open) next.add(groupId);
-                else next.delete(groupId);
+                if (open) {
+                  next.add(groupId);
+                } else {
+                  next.delete(groupId);
+                }
                 return next;
               });
             }}
@@ -569,7 +572,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
 
         {/* A29/D26: *Sync* appears once a remote does. The region is W11b/W13's;
             the pane only composes it. */}
-        {isSyncOpen && status !== undefined ? (
+        {isSyncOpen ? (
           <RevisionSyncRegion
             remote={status.remote}
             sync={status.sync}

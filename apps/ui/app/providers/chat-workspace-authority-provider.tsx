@@ -65,7 +65,36 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
    * lease before this resolves — a turn that cannot be placed is refused rather
    * than run unrecorded (I-EDIT).
    */
-  prepare: (chatId: string, options?: { readonly turnId?: string }) => Promise<PreparedChatWorkspace>;
+  prepare: (
+    chatId: string,
+    options?: {
+      readonly turnId?: string;
+      /**
+       * The run this lease belongs to, when the host already holds it.
+       *
+       * A continuation is a second attempt at the run the host is still
+       * carrying (I1), so its lease must be keyed by that run and not by a
+       * fresh one — `drop` refuses a release that does not name the claim's
+       * current run, and a claim minted under a new id could never be retired
+       * by the settlement of the run it actually fenced.
+       */
+      readonly runId?: string;
+    },
+  ) => Promise<PreparedChatWorkspace>;
+  /**
+   * This chat's workspace for an attach that drives nothing: no lease, no run.
+   *
+   * Open-time discovery (I7) has to build a host client before it knows what
+   * the log holds, and building it through {@link prepare} made every chat
+   * open `admitTurn` a run id the host had never admitted — the abandoned
+   * run's settlement then named *that* id and the durable log refused it
+   * (*"was never admitted in chat …"*), so the recorded `RUN_ABANDONED` never
+   * became a `turn.failed`. A claim this chat already holds is reused; nothing
+   * is minted, because minting belongs to the admission.
+   *
+   * `undefined` when no checkout can be named: there is no turn to attach to.
+   */
+  attachment: (chatId: string) => Promise<PreparedChatWorkspace | undefined>;
   /**
    * Say this chat exists to resolve one conflicted revision (S33, AC14).
    *
@@ -102,6 +131,18 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
   subscribe: (listener: () => void) => () => void;
   /** Point the workbench at the checkout this chat's turns land on (D10). */
   followChat: (chatId: string) => void;
+  /**
+   * Whether this project's revision root is connected, so a turn can be placed.
+   *
+   * `prepare` throws *"This project has no revision root"* until the file
+   * manager's worker exists, and the authority's identity changes the moment it
+   * does — so a consumer that only registers once must read this and register
+   * again. The open-time reattach did not: it composed before the worker was
+   * up, its `createClient` threw inside the resume the AI SDK swallows into
+   * `onError`, and the chat's durable log was never attached — so an abandoned
+   * run was never recorded and never settled (I4, I7).
+   */
+  ready: boolean;
 }>;
 
 const ChatWorkspaceAuthorityContext = createContext<ChatWorkspaceAuthorityContextValue | undefined>(undefined);
@@ -569,20 +610,32 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
    * released the fresh admission, and the root answered that with a
    * `turn.failed` recorded under a run the host had not admitted yet. A
    * settlement names one run; if that is not the run this chat currently holds,
-   * the claim is somebody else's and the settlement is over.
+   * the claim is somebody else's and this release must not take it.
+   *
+   * It must not answer as though it had, either. Refusing with a `console.warn`
+   * told the settlement its lease was retired when it was still held, so no
+   * owner ever retried it and every later turn of that chat waited out the
+   * admission bound and died on *"still holding a workspace"* (T3-amp). The
+   * refusal is thrown, so the turn's settlement fails visibly and its owner can
+   * retry; only discovery, which reads the claim and then retires it, tolerates
+   * the rollover.
    */
   const drop = useCallback(
     (chatId: string, command: 'turnCompleted' | 'turnAbandoned', runId: string | undefined): void => {
       const current = state.turns.get(chatId) ?? state.placing.get(chatId);
       if (current === undefined) {
+        /* Nothing is held: a daemon-placed turn leases nothing here, and a
+         * claim already retired cannot be retired twice. */
         return;
       }
       const currentRunId = 'prepared' in current ? current.prepared.runId : current.runId;
       if (currentRunId !== runId) {
-        console.warn(
-          `[chatWorkspaceAuthority] ${command} for run ${runId ?? '(none)'} does not name chat ${chatId}'s current run ${currentRunId ?? '(none)'}; the lease is left held.`,
+        throw Object.assign(
+          new Error(
+            `${command} for run ${runId ?? '(none)'} does not name chat ${chatId}'s current run ${currentRunId ?? '(none)'}.`,
+          ),
+          { code: 'CHAT_CLAIM_RUN_MISMATCH' },
         );
-        return;
       }
       state.turns.delete(chatId);
       state.placing.delete(chatId);
@@ -593,9 +646,26 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   );
 
   const prepare = useCallback(
-    async (chatId: string, options?: { readonly turnId?: string }): Promise<PreparedChatWorkspace> => {
+    async (
+      chatId: string,
+      options?: { readonly turnId?: string; readonly runId?: string },
+    ): Promise<PreparedChatWorkspace> => {
       const current = state.turns.get(chatId);
       if (current) {
+        /* The claim this chat holds *is* the turn's, so reusing it is right —
+         * unless the caller named a run and this claim is not it. Handing back
+         * a claim keyed by a different run would fence the continuation's
+         * writes under the wrong id, and its settlement would then name a run
+         * `drop` is not holding. Refused rather than mis-keyed: the admission
+         * routes this to the chat's banner. */
+        if (options?.runId !== undefined && current.prepared.runId !== options.runId) {
+          throw Object.assign(
+            new Error(
+              `Chat ${chatId} is still holding a workspace for run ${current.prepared.runId ?? '(none)'}, so run ${options.runId} cannot continue over it.`,
+            ),
+            { code: 'CHAT_CLAIM_RUN_MISMATCH' },
+          );
+        }
         return current.prepared;
       }
       const inFlight = state.pending.get(chatId);
@@ -609,8 +679,9 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         await ensureProviderCapabilities(state.binding);
         /* The lease key is also the host request id. Mint it before admission
          * so the revision settlement and chat lifecycle can only name the same
-         * run. */
-        const runId = generatePrefixedId(idPrefix.run);
+         * run — unless the caller is continuing a run the host already holds,
+         * whose id this lease has to carry instead. */
+        const runId = options?.runId ?? generatePrefixedId(idPrefix.run);
         const leaseTurnId = options?.turnId ?? runId;
         state.placing.set(chatId, { leaseTurnId, runId });
         const conflict = state.conflicts.get(chatId);
@@ -670,6 +741,48 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
     [getChat, notify, projectId, revisions, state],
   );
 
+  const attachment = useCallback(
+    async (chatId: string): Promise<PreparedChatWorkspace | undefined> => {
+      const current = state.turns.get(chatId);
+      if (current) {
+        return current.prepared;
+      }
+      /* Mirrors `prepare`'s own reuse: the claim is recorded only once
+       * `admitTurn` answers, so an attach composed while the placement is still
+       * in flight would fall through to the chain below and hand the turn's own
+       * worker a checkout that is not the turn's. */
+      /* Mirrors `prepare`'s own reuse: the claim is recorded only once
+       * `admitTurn` answers, so an attach composed while the placement is still
+       * in flight would fall through to the chain below and hand the turn's own
+       * worker a checkout that is not the turn's. */
+      const inFlight = state.pending.get(chatId);
+      if (inFlight) {
+        return inFlight;
+      }
+      const chat = await getChat(chatId);
+      /* The checkout this chat's turns land on, in the order `prepare` itself
+       * resolves it — minus the `admitTurn` that would lease it. The root's own
+       * checkout is the last resort: a chat with no turn yet has no checkout of
+       * its own, and a project with no checkout at all has no log to attach to. */
+      const checkoutId = state.conflicts.get(chatId)?.checkoutId ?? chat?.checkoutId ?? revisions?.status()?.checkoutId;
+      if (checkoutId === undefined) {
+        return undefined;
+      }
+      await ensureProviderCapabilities(state.binding);
+      const preparedFileSystems = await createPreparedWorkspaceFileSystems(state.rootedFileSystem);
+      return Object.freeze({
+        chatId,
+        projectId,
+        execution: Object.freeze({ hostId: state.hostId, workspaceId: checkoutId }),
+        ...preparedFileSystems,
+        admitted: false,
+        reclaimed: false,
+        cancelled: false,
+      });
+    },
+    [getChat, projectId, revisions, state],
+  );
+
   const update = useCallback(
     (
       chatId: string,
@@ -713,6 +826,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   const value = useMemo<ChatWorkspaceAuthorityContextValue>(
     () => ({
       prepare,
+      attachment,
       bindConflict: (chatId, conflict) => {
         state.conflicts.set(chatId, conflict);
       },
@@ -742,15 +856,24 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         drop(chatId, 'turnAbandoned', runId);
       },
       retireClaim: async (chatId, runId) => {
-        drop(chatId, 'turnAbandoned', runId);
+        try {
+          drop(chatId, 'turnAbandoned', runId);
+        } catch (error) {
+          /* Discovery reads `reclaimAll` and then retires, so the claim can
+           * roll over in between — and a claim that rolled over is a live turn
+           * this retirement must not touch. Nothing is leaked by leaving it:
+           * the turn that holds it settles it. */
+          console.warn('[chatWorkspaceAuthority] a claim rolled over before discovery could retire it', error);
+        }
       },
       subscribe: (listener) => {
         state.listeners.add(listener);
         return () => state.listeners.delete(listener);
       },
       followChat: (chatId) => revisions?.send({ command: 'followChat', chatId }),
+      ready: revisions !== undefined,
     }),
-    [drop, prepare, revisions, state, update],
+    [attachment, drop, prepare, revisions, state, update],
   );
   return <ChatWorkspaceAuthorityContext.Provider value={value}>{children}</ChatWorkspaceAuthorityContext.Provider>;
 }

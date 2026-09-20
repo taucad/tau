@@ -103,7 +103,7 @@ export const controlsListenerMachine = setup({
       ({ context }) => context.graphicsActorRef,
       ({ event }) => {
         assertEvent(event, 'controlsInteractionEnd');
-        return { type: 'controlsInteractionEnd' as const };
+        return { type: 'controlsInteractionEnd' };
       },
     ),
   },

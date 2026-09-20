@@ -13,7 +13,7 @@
  *   are tools, not package surface: nothing about them changes when a package
  *   is added.
  * - Deployment workflows (`deploy.yml`, `review.yml`, …) are topology, not
- *   package surface, and are out of scope — see {@link WORKFLOW_PATHS}.
+ *   package surface, and are out of scope — see {@link workflowPaths}.
  *
  * Every target a workflow names must exist on at least one project, because a
  * misspelt `-t` runs nothing and exits 0.
@@ -31,7 +31,7 @@ import { projects, workspace } from '@taucad/nx';
 import type { Workspace } from '@taucad/nx';
 
 /** The workflows that drive the package surface. */
-export const WORKFLOW_PATHS = ['.github/workflows/ci.yml', '.github/workflows/publish.yml'] as const;
+export const workflowPaths = ['.github/workflows/ci.yml', '.github/workflows/publish.yml'] as const;
 
 export type WorkflowFile = { readonly path: string; readonly text: string };
 
@@ -39,13 +39,13 @@ export type WorkflowFile = { readonly path: string; readonly text: string };
 export type NxInvocation = { readonly file: string; readonly job: string; readonly args: readonly string[] };
 
 /** Flags whose values are project names. */
-const PROJECT_FLAGS = new Set(['-p', '--projects', '--exclude']);
+const projectFlags = new Set(['-p', '--projects', '--exclude']);
 
 /** Flags whose values are target names. */
-const TARGET_FLAGS = new Set(['-t', '--targets', '--target', '--with-target']);
+const targetFlags = new Set(['-t', '--targets', '--target', '--with-target']);
 
 /** Subcommands, so `nx <target> <project>` is not read out of `nx show projects`. */
-const SUBCOMMANDS = new Set([
+const subcommands = new Set([
   'run',
   'run-many',
   'affected',
@@ -127,8 +127,8 @@ export const validateWorkflows = (
   const violations: string[] = [];
 
   for (const { file, job, args } of invocations) {
-    const named = flagValues(args, PROJECT_FLAGS);
-    const referenced = flagValues(args, TARGET_FLAGS);
+    const named = flagValues(args, projectFlags);
+    const referenced = flagValues(args, targetFlags);
     const [command, second] = [args.slice(0, 1).join(''), args.slice(1, 2).join('')];
 
     if (command === 'run') {
@@ -139,7 +139,7 @@ export const validateWorkflows = (
       if (!tools.has(project)) {
         named.push(project);
       }
-    } else if (command !== '' && !command.startsWith('-') && !SUBCOMMANDS.has(command)) {
+    } else if (command !== '' && !command.startsWith('-') && !subcommands.has(command)) {
       // `nx <target> <project>`, e.g. `nx test api`.
       referenced.push(command);
       named.push(...(second.startsWith('-') ? [] : [second]));
@@ -165,7 +165,7 @@ export const validateWorkflows = (
 
 /** The in-scope workflows, read from the repository root. */
 export const readWorkflows = (): WorkflowFile[] =>
-  WORKFLOW_PATHS.map((path) => ({
+  workflowPaths.map((path) => ({
     path,
     text: readFileSync(resolve(import.meta.dirname, '../..', path), 'utf8'),
   }));

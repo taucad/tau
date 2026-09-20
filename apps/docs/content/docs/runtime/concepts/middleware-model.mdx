@@ -50,6 +50,24 @@ For `[A, B, C]` with A outermost: A pre, B pre, C pre, kernel; then C post, B po
 
 Each hook has typed input and output mirroring its kernel operation. A middleware implements any subset; unimplemented hooks pass straight through to the next layer that implements them.
 
+### Parameters at the create boundary
+
+A render, export, or evaluation request's `parameters` are caller overrides. A unit-bound numeric field accepts either a number in the unit declared by the kernel or unit-bearing text such as `"20 in"`. Middleware may place stored values below those overrides, but it does not convert units or fill kernel defaults. The runtime converts unit-bearing text and fills defaults once, after the create middleware chain and immediately before calling the kernel.
+
+The resulting precedence is: kernel defaults, then stored values, then caller overrides.
+
+### Middleware dependencies
+
+`getDependencies` declares extra watched paths independently of wrap hooks. Every declaration includes the operations it invalidates:
+
+```typescript
+getDependencies({ entryPath }) {
+  return [{ path: `${entryPath}.metadata.json`, affects: ['createGeometry'] }];
+}
+```
+
+Valid operations are `getParameters`, `createGeometry`, `meshGeometry`, and `exportGeometry`. The runtime hashes and watches a declaration only for the listed operations; it never infers dependency scope from the middleware's wrap hooks.
+
 ### KernelMiddlewareRuntime
 
 Every hook receives a `KernelMiddlewareRuntime` as its third argument:
@@ -78,6 +96,7 @@ Express and Koa use `(req, res, next)`. The runtime model differs in two ways:
 
 - **Middleware and kernel:** middleware never calls the kernel directly. `handler(input)` eventually reaches it; the kernel is unaware of middleware.
 - **Ordering:** registration order determines wrapping order -- first registered is outermost. Put caches early (outer) so they wrap the expensive inner computation.
+- **Parameter values:** create middleware receives caller overrides plus values composed by outer middleware. Defaults are absent until the kernel boundary.
 
 ## Implications
 

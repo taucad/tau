@@ -25,7 +25,11 @@ import { createSerialGeoSpecRunner } from '#runner/serial.js';
  * @public
  */
 export const createNodeGeoSpecCliHost = (options?: { reportStream?: (text: string) => void }): GeoSpecCliHost => {
-  const reportStream = options?.reportStream ?? ((text: string): void => void process.stdout.write(text));
+  const reportStream =
+    options?.reportStream ??
+    ((text: string): void => {
+      process.stdout.write(text);
+    });
   return {
     cwd: () => process.cwd(),
     write: (line) => {

@@ -10,10 +10,14 @@ const utilityBody = (utility: string): string => {
   const rest = tokenStyles.slice(start);
   let depth = 0;
   for (const [index, character] of [...rest].entries()) {
-    if (character === '{') depth += 1;
+    if (character === '{') {
+      depth += 1;
+    }
     if (character === '}') {
       depth -= 1;
-      if (depth === 0) return rest.slice(0, index + 1);
+      if (depth === 0) {
+        return rest.slice(0, index + 1);
+      }
     }
   }
   throw new Error(`${utility} is unterminated`);

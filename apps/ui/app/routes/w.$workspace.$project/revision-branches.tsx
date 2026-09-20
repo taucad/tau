@@ -67,7 +67,9 @@ export function NewBranchForm({
             setDraft(undefined);
           }}
           onEditingChange={(editing) => {
-            if (!editing) setDraft(undefined);
+            if (!editing) {
+              setDraft(undefined);
+            }
           }}
         />
       )}
@@ -247,11 +249,11 @@ function ConflictCard({
           );
         })}
       </ul>
-      {!conflict.ready ? (
+      {conflict.ready ? null : (
         <p className='text-xs text-muted-foreground'>
           {`${String(conflict.paths.filter((path) => path.side === undefined).length)} file${conflict.paths.filter((path) => path.side === undefined).length === 1 ? '' : 's'} still need a choice before the merge can finish.`}
         </p>
-      ) : null}
+      )}
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Button
           size='xs'
@@ -446,7 +448,9 @@ export function RevisionBranches({
                     setRenaming(undefined);
                   }}
                   onEditingChange={(editing) => {
-                    if (!editing) setRenaming(undefined);
+                    if (!editing) {
+                      setRenaming(undefined);
+                    }
                   }}
                   renderDisplay={(name) => <span className='truncate text-sm font-medium'>{name}</span>}
                 />

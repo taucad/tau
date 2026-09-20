@@ -17,10 +17,16 @@ const harness = {
   status: 'ready' as 'ready' | 'submitted' | 'streaming' | 'error',
   durableRunId: undefined as string | undefined,
   durableRunState: 'terminal' as 'active' | 'terminal' | 'reattaching' | undefined,
+  /** What the chat's own turn owner says it is holding (T3-D9). */
+  holdsTurn: false,
   finalize: vi.fn(),
   discard: vi.fn(),
+  prepare: vi.fn(),
+  /** The claim this page holds for the run being settled, if any (E3). */
+  reclaim: vi.fn(),
   retireClaim: vi.fn(),
   reclaimAll: vi.fn(),
+  persistBrowserTurnSettlement: vi.fn(),
   releaseDurableRun: vi.fn(),
   retainDurableRun: vi.fn(),
   reconcileDurableUserMessage: vi.fn(),
@@ -60,6 +66,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
     getStatus: () => harness.status,
     getDurableRunState: () => harness.durableRunState,
     getDurableRunId: () => harness.durableRunId,
+    holdsTurn: () => harness.holdsTurn,
     get: () => session,
     releaseDurableRun: harness.releaseDurableRun,
     retainDurableRun: harness.retainDurableRun,
@@ -70,7 +77,9 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useChatWorkspaceAuthority: () => ({
     reclaimAll: harness.reclaimAll,
+    reclaim: harness.reclaim,
     retireClaim: harness.retireClaim,
+    prepare: harness.prepare,
     finalize: harness.finalize,
     discard: harness.discard,
   }),
@@ -80,7 +89,11 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getBrowserAgentHostRun: () => harness.browserRun,
   getHostFinalizedTurns: () => harness.finalizedTurns,
-  clearBrowserAgentHostRun: (chatId: string): void => {
+  persistBrowserTurnSettlement: async (event: unknown): Promise<boolean> => {
+    harness.persistBrowserTurnSettlement(event);
+    return true;
+  },
+  retireBrowserAgentHostRun: (chatId: string): void => {
     harness.clearBrowserAgentHostRun(chatId);
   },
 }));
@@ -91,6 +104,7 @@ describe('ProjectChatRunSettlement', () => {
   beforeEach(() => {
     harness.workspace = workspace;
     harness.status = 'ready';
+    harness.holdsTurn = false;
     harness.durableRunId = 'run_1';
     harness.durableRunState = 'terminal';
     harness.browserRun = {
@@ -100,9 +114,12 @@ describe('ProjectChatRunSettlement', () => {
       turnId: 'turn_1',
     };
     harness.reclaimAll.mockResolvedValue([]);
+    /* This page admitted the turn it is settling, so it holds its claim. */
+    harness.reclaim.mockResolvedValue(workspace);
     harness.finalizedTurns = [];
     harness.finalize.mockResolvedValue(undefined);
     harness.discard.mockResolvedValue(undefined);
+    harness.prepare.mockResolvedValue(workspace);
     harness.retireClaim.mockResolvedValue(undefined);
   });
 
@@ -216,6 +233,113 @@ describe('ProjectChatRunSettlement', () => {
     expect(harness.finalize).not.toHaveBeenCalled();
   });
 
+  /**
+   * E3 / T1 rows 3–5. The run completed and the page died inside the
+   * settlement window, so the lease that fenced the agent's writes was retired
+   * by the root's epoch sweep and the writes sit in the checkout attributed to
+   * nobody. Finalising on return re-leases the turn: the root refuses to lease
+   * a dirty tree and mints it first as a `turn` revision carrying this turn's
+   * id, so the work lands on the turn instead of being swept into whoever
+   * saves next.
+   */
+  it('re-leases and finalises a completed run whose page died before it settled', async () => {
+    harness.reclaim.mockResolvedValue(undefined);
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn();
+
+    await waitFor(() => {
+      expect(harness.prepare).toHaveBeenCalledWith('chat_1', { turnId: 'turn_1', runId: 'run_1' });
+    });
+    expect(harness.finalize).toHaveBeenCalledWith('chat_1', 'run_1');
+    expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  /**
+   * I1/I7. An abandoned run has no lease here, so `discard` retires nothing
+   * and the revision root emits no settlement of its own — and a run with no
+   * settlement is one every later open reconciles all over again. Its outcome
+   * is recorded where every other host settlement lives: the chat's log.
+   */
+  it('records a durable turn.failed for an adopted run nothing here leased', async () => {
+    harness.reclaim.mockResolvedValue(undefined);
+    harness.browserRun = {
+      runId: 'run_1',
+      state: 'failed',
+      eventCount: 4,
+      turnId: 'turn_1',
+      failure: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
+    };
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn('failed');
+
+    await waitFor(() => {
+      expect(harness.persistBrowserTurnSettlement).toHaveBeenCalledWith({
+        type: 'turn.failed',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        turnId: 'turn_1',
+        checkoutId: undefined,
+        reason: 'The host executing this run is gone.',
+      });
+    });
+    expect(harness.finalize).not.toHaveBeenCalled();
+  });
+
+  /**
+   * W10-2. The chat's claim has rolled on to a newer run — a second view, a
+   * `prepare` that landed while this run was finishing — so this run holds no
+   * lease here at all. `prepare`, `finalize` and `discard` all refuse a claim
+   * they are not holding (`CHAT_CLAIM_RUN_MISMATCH`, the refusal T3-amp added
+   * so a settlement learns its lease was *not* retired), and calling one
+   * anyway threw away the durable settlement, the hold release and the run
+   * record with it — then the one retry repeated the same deterministic throw.
+   */
+  it('settles a run the chat no longer holds a claim for without touching the newer claim', async () => {
+    const mismatch = Object.assign(new Error('run_1 does not name chat_1’s current run run_2.'), {
+      code: 'CHAT_CLAIM_RUN_MISMATCH',
+    });
+    harness.reclaim.mockResolvedValue({ ...workspace, runId: 'run_2' });
+    harness.prepare.mockRejectedValue(mismatch);
+    harness.finalize.mockRejectedValue(mismatch);
+    harness.discard.mockRejectedValue(mismatch);
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn();
+
+    await waitFor(() => {
+      expect(harness.persistBrowserTurnSettlement).toHaveBeenCalledWith({
+        type: 'turn.failed',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        turnId: 'turn_1',
+        checkoutId: undefined,
+        reason: 'The turn ended before it recorded a revision.',
+      });
+    });
+    expect(harness.prepare).not.toHaveBeenCalled();
+    expect(harness.finalize).not.toHaveBeenCalled();
+    expect(harness.discard).not.toHaveBeenCalled();
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+    expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
+  });
+
+  /* A turn this page admitted settles through its own lease; the root emits
+   * that settlement, so writing a second one here would be a duplicate. */
+  it('leaves a turn it leased itself to the revision root', async () => {
+    harness.browserRun = { runId: 'run_1', state: 'failed', eventCount: 2, turnId: 'turn_1' };
+
+    render(<ProjectChatRunSettlement />);
+    await settleTurn('failed');
+
+    await waitFor(() => {
+      expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
+    });
+    expect(harness.persistBrowserTurnSettlement).not.toHaveBeenCalled();
+    expect(harness.prepare).not.toHaveBeenCalled();
+  });
+
   it('does not reattach a new local lease before its send starts', async () => {
     harness.durableRunId = undefined;
     harness.durableRunState = undefined;
@@ -265,6 +389,32 @@ describe('ProjectChatRunSettlement', () => {
     });
     expect(harness.retireClaim).not.toHaveBeenCalled();
     expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  /**
+   * T3-D9. `isRetirableClaim` asked the AI SDK's status, which is `ready` for
+   * the whole admission window — the dispatch is deferred by a microtask and no
+   * bytes have flowed. So between `turnAdmitted` and the request actually
+   * starting, a claim naming the *new* run was retirable while a stale
+   * `browserRuns` entry named an older one, and discovery released the lease
+   * under the live turn. §16 moved the turn to the chat's actor; the predicate
+   * asks that owner.
+   */
+  it('should not retire a claim whose chat owner is holding the turn', async () => {
+    harness.status = 'ready';
+    harness.holdsTurn = true;
+    harness.durableRunId = undefined;
+    harness.durableRunState = undefined;
+    harness.workspace = { ...workspace, runId: 'run_2' };
+    harness.browserRun = { runId: 'run_1', state: 'completed', eventCount: 3, turnId: 'turn_1' };
+    harness.reclaimAll.mockResolvedValue([{ ...workspace, runId: 'run_2' }]);
+
+    render(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.retainDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_2', state: 'active' });
+    });
+    expect(harness.retireClaim).not.toHaveBeenCalled();
   });
 
   it('should run discovery once per mount, not when the authority changes identity', async () => {

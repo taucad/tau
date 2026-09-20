@@ -85,7 +85,9 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
           className='px-2 text-muted-foreground'
           aria-label={`Follow chat, which is working on ${chatBranch}`}
           onClick={() => {
-            if (chatCheckoutId !== undefined) commands.pinTo(chatCheckoutId);
+            if (chatCheckoutId !== undefined) {
+              commands.pinTo(chatCheckoutId);
+            }
           }}
         >
           Follow chat

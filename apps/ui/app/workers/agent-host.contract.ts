@@ -464,6 +464,34 @@ export const agentHostWorkerCommandSchema = z.union(
   commandSchemas.map((schema) => schema.extend(broadcastEnvelope)) as unknown as typeof commandSchemas,
 );
 
+/** Deliberately not strict: the frame around this envelope is the unreadable part. */
+const commandReturnAddressSchema = z.object({
+  type: z.literal('command'),
+  senderId: nonEmptyString,
+  command: z.object({ requestId: nonEmptyString }),
+});
+
+/**
+ * Read who to answer from a broadcast `command` frame this build cannot parse.
+ *
+ * A follower's forwarding wait is bounded by the leader's heartbeat alone, so a
+ * live leader that drops a command in silence leaves that request pending for
+ * the life of the tab — no response, no timeout, no banner. Every command a
+ * leader receives is therefore answered, and a frame that fails the strict
+ * broadcast schema is answered through this envelope. When the sender or the
+ * request id is itself unreadable there is nobody to answer, and the leader's
+ * console record is all that survives.
+ *
+ * @param value - The raw broadcast frame.
+ * @returns The tab and request to refuse, or `undefined` when neither survives.
+ */
+export const readCommandReturnAddress = (
+  value: unknown,
+): { readonly senderId: string; readonly requestId: string } | undefined => {
+  const parsed = commandReturnAddressSchema.safeParse(value).data;
+  return parsed && { senderId: parsed.senderId, requestId: parsed.command.requestId };
+};
+
 const capabilityChecksSchema = z.strictObject({
   worker: z.boolean(),
   webLocks: z.boolean(),

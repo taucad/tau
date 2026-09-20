@@ -20,7 +20,7 @@ const hole = ({
 
 describe('revolved chamfer derivation', () => {
   it('should read a bevelled cone as a chamfer named by its axis', () => {
-    expect(deriveRevolvedChamfers([[cone([0, 0, 1], [-13, -13, 3], [13, 13, 6.000_000_2])]])).toStrictEqual([
+    expect(deriveRevolvedChamfers([[cone([0, 0, 1], [-13, -13, 3], [13, 13, 6.0000002])]])).toStrictEqual([
       { distance: 3, selection: 'revolved chamfer (axis z)' },
     ]);
     expect(deriveRevolvedChamfers([[cone([0, 1, 0], [-13, 3, -13], [13, 6, 13])]])[0]?.selection).toBe(

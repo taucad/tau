@@ -83,7 +83,7 @@ const files = {
 
 it('exposes parameters and geometry', async () => {
   const parameters = await getTestParameters({ runtime, files, mainFile: 'main.ts' });
-  expect(parameters.defaultParameters).toEqual({ width: 10 });
+  expect(parameters.defaults).toEqual({ width: 10 });
 
   const result = await createTestGeometry({ runtime, files, mainFile: 'main.ts', parameters: { width: 25 } });
   assertSuccess(result);

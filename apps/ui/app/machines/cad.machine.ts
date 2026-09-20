@@ -86,10 +86,11 @@ type FileSystemBindingChangedEvent = {
 };
 
 type CadEvent =
-  | { type: 'initializeModel'; entryPath: string }
+  | { type: 'initializeModel'; entryPath: string; parameters?: Record<string, unknown> }
   | { type: 'setEntryPath'; entryPath: string }
   | { type: 'commitParameters'; stage: Record<string, Uint8Array<ArrayBuffer>> }
   | { type: 'scrubParameters'; parameters: Record<string, unknown> }
+  | { type: 'restoreParameters' }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
   | { type: 'geometryFailed'; issues: KernelIssue[] }
@@ -158,10 +159,11 @@ type RenderModelInput = {
   isLatestRequest: () => boolean;
 };
 
-/** What one render carries for parameters: committed sidecar bytes (D1) or a drag sample (D2). */
+/** What one render carries for parameters: initial preview values, committed sidecar bytes, or a drag sample. */
 type ParameterRender =
   | Readonly<{ kind: 'commit'; stage: Record<string, Uint8Array<ArrayBuffer>> }>
-  | Readonly<{ kind: 'scrub'; parameters: Record<string, unknown> }>;
+  | Readonly<{ kind: 'scrub'; parameters: Record<string, unknown> }>
+  | Readonly<{ kind: 'initial'; parameters: Record<string, unknown> }>;
 
 const fallbackCadFailureIssues: readonly KernelIssue[] = Object.freeze([
   Object.freeze({
@@ -362,6 +364,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     source: { path: input.entryPath },
     content: { includeEdges: true },
     ...(input.parameterRender?.kind === 'commit' ? { stage: input.parameterRender.stage } : {}),
+    ...(input.parameterRender?.kind === 'initial' ? { parameters: input.parameterRender.parameters } : {}),
     ...(input.parameterRender?.kind === 'scrub'
       ? { parameters: input.parameterRender.parameters, transient: true }
       : {}),
@@ -518,6 +521,10 @@ export const cadMachine = setup({
       },
       latestGeometryOutcome: () => undefined,
     }),
+    clearParameterRender: assign({
+      parameterRender: () => undefined,
+      latestGeometryOutcome: () => undefined,
+    }),
     setGeometry: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       const currentEntryPath = context.entryPath;
@@ -583,7 +590,7 @@ export const cadMachine = setup({
         codeIssues: [],
         latestGeometryOutcome: undefined,
         parameterManifest: undefined,
-        parameterRender: undefined,
+        parameterRender: event.parameters === undefined ? undefined : { kind: 'initial', parameters: event.parameters },
       });
     }),
     storeKernelConnection: enqueueActions(({ enqueue, context, event }) => {
@@ -665,6 +672,10 @@ export const cadMachine = setup({
   }),
   exit: ['destroyKernel'],
   on: {
+    restoreParameters: {
+      target: '.rendering.submitting',
+      actions: ['bumpRequestedRenderId', 'clearParameterRender', 'notifyExportAvailability'],
+    },
     filesystemBindingChanged: {
       target: '.connecting',
       reenter: true,

@@ -15,7 +15,7 @@ describe('jsonSchemaFromJson', () => {
       properties: {
         age: {
           default: 30,
-          type: 'integer',
+          type: 'number',
         },
         name: {
           default: 'John Doe',
@@ -118,11 +118,11 @@ describe('jsonSchemaFromJson', () => {
         },
         postDiameter: {
           default: 5,
-          type: 'integer',
+          type: 'number',
         },
         postHeight: {
           default: 7,
-          type: 'integer',
+          type: 'number',
         },
         postHole: {
           default: 2.8,
@@ -134,11 +134,11 @@ describe('jsonSchemaFromJson', () => {
         },
         ventCols: {
           default: 12,
-          type: 'integer',
+          type: 'number',
         },
         ventRows: {
           default: 3,
-          type: 'integer',
+          type: 'number',
         },
         ventDiameter: {
           default: 2.5,
@@ -146,11 +146,11 @@ describe('jsonSchemaFromJson', () => {
         },
         ventMargin: {
           default: 5,
-          type: 'integer',
+          type: 'number',
         },
         ventPitch: {
           default: 5,
-          type: 'integer',
+          type: 'number',
         },
       },
       required: [
@@ -184,7 +184,7 @@ describe('jsonSchemaFromJson', () => {
         numbers: {
           items: {
             default: 1,
-            type: 'integer',
+            type: 'number',
           },
           type: 'array',
         },
@@ -220,7 +220,7 @@ describe('jsonSchemaFromJson', () => {
             properties: {
               id: {
                 default: 1,
-                type: 'integer',
+                type: 'number',
               },
               name: {
                 default: 'Item 1',
@@ -254,7 +254,7 @@ describe('jsonSchemaFromJson', () => {
         },
         value: {
           default: 1,
-          type: 'integer',
+          type: 'number',
         },
       },
       required: ['emptyArray', 'value'],
@@ -279,7 +279,7 @@ describe('jsonSchemaFromJson', () => {
           items: {
             items: {
               default: 1,
-              type: 'integer',
+              type: 'number',
             },
             type: 'array',
           },
@@ -305,7 +305,7 @@ describe('jsonSchemaFromJson', () => {
       properties: {
         negative: {
           default: -5,
-          type: 'integer',
+          type: 'number',
         },
         negativeFloat: {
           default: -3.14,
@@ -313,7 +313,7 @@ describe('jsonSchemaFromJson', () => {
         },
         zero: {
           default: 0,
-          type: 'integer',
+          type: 'number',
         },
       },
       required: ['negative', 'negativeFloat', 'zero'],
@@ -373,7 +373,7 @@ describe('jsonSchemaFromJson', () => {
                   properties: {
                     value: {
                       default: 42,
-                      type: 'integer',
+                      type: 'number',
                     },
                   },
                   required: ['value'],
@@ -414,20 +414,20 @@ describe('jsonSchemaFromJson', () => {
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Test case
         PascalCase: {
           default: 4,
-          type: 'integer',
+          type: 'number',
         },
         camelCase: {
           default: 1,
-          type: 'integer',
+          type: 'number',
         },
         'kebab-case': {
           default: 3,
-          type: 'integer',
+          type: 'number',
         },
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Test case
         snake_case: {
           default: 2,
-          type: 'integer',
+          type: 'number',
         },
       },
       required: ['PascalCase', 'camelCase', 'kebab-case', 'snake_case'],
@@ -487,11 +487,11 @@ describe('jsonSchemaFromJson', () => {
         },
         integer: {
           default: 42,
-          type: 'integer',
+          type: 'number',
         },
         negative: {
           default: -10,
-          type: 'integer',
+          type: 'number',
         },
         string: {
           default: 'text',
@@ -524,7 +524,7 @@ describe('jsonSchemaFromJson', () => {
             properties: {
               id: {
                 default: 1,
-                type: 'integer',
+                type: 'number',
               },
             },
             required: ['id'],
@@ -536,7 +536,7 @@ describe('jsonSchemaFromJson', () => {
           properties: {
             count: {
               default: 2,
-              type: 'integer',
+              type: 'number',
             },
             tags: {
               items: {

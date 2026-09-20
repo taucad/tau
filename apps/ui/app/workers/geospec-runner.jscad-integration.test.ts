@@ -58,7 +58,7 @@ const normalizePath = (path: string): string => {
 const dirname = (path: string): string => {
   const normalized = normalizePath(path);
   const index = normalized.lastIndexOf('/');
-  if (index < 0) {
+  if (index === -1) {
     return '';
   }
   return normalized.slice(0, index);

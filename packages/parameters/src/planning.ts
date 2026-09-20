@@ -21,7 +21,7 @@ export type ParameterChange =
 
 const sameBaseBinding = (base: NonNullable<ParameterSetRequest['base']>, current: ParameterSnapshot): boolean => {
   if (base.binding === undefined) {
-    return false;
+    return true;
   }
   const native = resolveParameterBinding(current.manifest, base.pointer);
   if (native === undefined) {

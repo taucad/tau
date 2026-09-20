@@ -93,7 +93,7 @@ const startServe = async (options: {
     ],
     {
       cwd: repoRoot,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase
+      /* eslint-disable @typescript-eslint/naming-convention -- child-process environment variable names. */
       env: {
         ...process.env,
         TAU_CONFIG_DIR: options.configDirectory,
@@ -102,6 +102,7 @@ const startServe = async (options: {
          * silences the line naming the port this test connects to. */
         CONSOLA_LEVEL: '4',
       },
+      /* eslint-enable @typescript-eslint/naming-convention -- environment literal ends here. */
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

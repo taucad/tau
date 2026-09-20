@@ -576,27 +576,22 @@ export function useChatActions(chatId?: string): ChatActions {
       return session;
     };
 
-    // The draft no longer references what a send promoted; its draft-stage copies go.
-    const releaseDraftAttachments = async (): Promise<void> => {
-      try {
-        await store.releaseDraftAttachments(resolvedChatId);
-      } catch (error) {
-        // An unreleased blob is reclaimed by the next `retainOnly`; nothing the person sent is affected.
-        console.warn('[useChatActions] draft attachments could not be released', error);
-      }
-    };
-
     return {
       ...draftActions,
       async sendMessage(message: SendMessageInput, options) {
-        draftActorRef.send({ type: 'clearDraft' });
-        void releaseDraftAttachments();
         if (!requireSession('sendMessage')) {
           return;
         }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
         const outgoingMessage = message as MyUIMessage;
         void store.touchChatRecency(resolvedChatId, outgoingMessage.metadata?.createdAt ?? Date.now());
+        /* I5: the composer is this message's only copy until the dispatch
+         * appends it to the transcript, so `requestTurn` owns when it is
+         * cleared — and when the draft-stage bytes behind it are released. It
+         * is the only caller that knows whether the gesture was taken, queued,
+         * parked, displaced or refused. Clearing here first meant each of those
+         * last three deleted what the person wrote; releasing here afterwards
+         * deleted the files of the very message it had just handed back. */
         await store.requestTurn(resolvedChatId, {
           kind: 'send',
           message: outgoingMessage,
@@ -640,7 +635,6 @@ export function useChatActions(chatId?: string): ChatActions {
 
       editMessage(messageId: string, content: string, options?) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
-        void releaseDraftAttachments();
         const session = requireSession('editMessage');
         if (!session) {
           return;

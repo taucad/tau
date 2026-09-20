@@ -493,6 +493,83 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     expect(fake.stop).not.toHaveBeenCalled();
   });
 
+  /*
+   * I5, ruling E2. `sendMessage` cleared the draft and released its promoted
+   * attachments *before* handing the gesture over, so every way the gesture
+   * could fail to become a transcript row — no session actor, a displaced
+   * one-slot queue, a refused admission — destroyed what the person wrote. The
+   * composer is that message's only copy until the dispatch appends it, so it
+   * keeps it until the turn's owner has taken the gesture.
+   */
+  it('should keep the composer draft until the turn owner has taken the gesture', async () => {
+    const held = Promise.withResolvers<ChatTurn>();
+    const { result } = renderHook(
+      () => ({ actions: useChatActions(), context: useChatContext(), store: useChatSessionStore() }),
+      { wrapper: createWrapper(defaultTestChatId) },
+    );
+    act(() => {
+      stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId, async () => held.promise);
+    });
+    const draftText = (): string => result.current.context.draftActorRef.getSnapshot().context.draftText;
+
+    act(() => {
+      result.current.actions.setDraftText('still mine');
+    });
+    expect(draftText()).toBe('still mine');
+
+    const message = makeUserMessage('msg_draft_hold', 'still mine');
+    act(() => {
+      void result.current.actions.sendMessage(message);
+    });
+
+    // The admission has not answered: the gesture is not durable anywhere else.
+    expect(draftText()).toBe('still mine');
+
+    await act(async () => {
+      held.resolve({
+        runId: 'run_draft_hold',
+        leaseTurnId: undefined,
+        request: { kind: 'send', message, body: defaultAgentBody },
+      });
+      await held.promise;
+    });
+
+    await waitFor(() => {
+      expect(draftText()).toBe('');
+    });
+  });
+
+  /*
+   * Ruling E2: a second gesture over a live turn replaces the one in the chat's
+   * single slot — and the displaced `send` goes back to the composer, because
+   * its message was never appended to the transcript and the composer no longer
+   * holds it.
+   */
+  it('should hand a displaced send back to the composer', async () => {
+    const { result } = renderProvider();
+    const first = makeUserMessage('msg_displacing_1', 'first message');
+    const second = makeUserMessage('msg_displacing_2', 'second message');
+    const third = makeUserMessage('msg_displacing_3', 'third message');
+    const fake = getFake(defaultTestChatId);
+
+    act(() => {
+      void result.current.actions.sendMessage(first);
+    });
+    await waitFor(() => {
+      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    // Queued behind the live turn, then displaced by a third gesture.
+    await act(async () => {
+      await result.current.actions.sendMessage(second);
+    });
+    await act(async () => {
+      await result.current.actions.sendMessage(third);
+    });
+
+    expect(result.current.context.draftActorRef.getSnapshot().context.draftText).toBe('second message');
+  });
+
   it('routes a `regenerate` request through to chat.regenerate', async () => {
     const { result } = renderProvider();
 

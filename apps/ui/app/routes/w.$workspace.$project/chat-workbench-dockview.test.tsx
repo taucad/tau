@@ -439,7 +439,11 @@ describe('FileEditor routing', () => {
   /* A rename moves the bound model to the new path; the pane stays mounted. */
   it('should keep the editor ready for a path whose model is already bound', () => {
     mockHasSyncedModel.mockImplementation((path) => path === 'main.ts');
-    mockAcquireModel.mockReturnValueOnce(new Promise(() => undefined));
+    mockAcquireModel.mockReturnValueOnce(
+      new Promise(() => {
+        /* A hold that never settles: the panel must stay on its loading state. */
+      }),
+    );
     mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('x') });
 
     render(<FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} />);

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- VM paths are object keys here. */
 import { describe, expect, it, vi } from 'vitest';
 import type { GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 import {

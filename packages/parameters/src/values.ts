@@ -9,7 +9,7 @@ import type { FileParameterEntry, JSONValue, ParameterGroup } from '@taucad/type
 import { parseInput } from '@taucad/units/input';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { admitParameterValues, resolveParameterBinding, resolveParameterBindingPointer } from '#manifest.js';
-import type { ParameterBinding, ParameterDeclaration, ParameterManifest, ParameterProvenance } from '#manifest.js';
+import type { ParameterBinding, ParameterManifest, ParameterProvenance } from '#manifest.js';
 
 const failure = (code: string, message: string, applicationState?: string): Error =>
   Object.assign(new Error(message), { code, applicationState });
@@ -216,6 +216,27 @@ const setPointer = (
   return output;
 };
 
+/**
+ * Return the active record group as request input. A source-unit value carries its stored unit as
+ * text so later composition cannot separate the number from the unit it is expressed in.
+ *
+ * @param record - Validated stored parameter record.
+ * @returns A pure copy of the active values suitable for parameter input resolution.
+ * @public
+ */
+export const parameterRecordInputValues = (record: FileParameterEntry): Readonly<Record<string, JSONValue>> => {
+  const group = record.groups[record.activeGroup]!;
+  let values = structuredClone(group.values);
+  for (const pointer of Object.keys(group.sourceUnits ?? {})) {
+    const value = valueAtPointer(values, pointer);
+    const unit = group.units?.[pointer];
+    if (typeof value === 'number' && unit !== undefined) {
+      values = setPointer(values, pointer, `${JSON.stringify(value)} ${unit}`);
+    }
+  }
+  return values;
+};
+
 const admittedBinding = (
   manifest: ParameterManifest,
   input: Readonly<{ parameterId: string; resource: string; pointer: string }>,
@@ -229,6 +250,133 @@ const admittedBinding = (
     throw failure('STALE_MANIFEST', 'The operation does not match an admitted manifest binding.');
   }
   return binding;
+};
+
+const rootParameterSchemaResource = 'urn:taucad:parameter-schema:root';
+const nonScalarSchemaTypes = new Set([
+  'array',
+  'object',
+  'int8',
+  'uint8',
+  'int16',
+  'uint16',
+  'int32',
+  'uint32',
+  'int64',
+  'uint64',
+  'int128',
+  'uint128',
+  'integer',
+  'float',
+  'float8',
+  'double',
+  'number',
+  'decimal',
+]);
+
+const schemaValueAtPointer = (value: unknown, pointer: string): unknown => {
+  if (pointer === '') {
+    return value;
+  }
+  const parts = pointerParts(pointer);
+  if (parts === undefined) {
+    return undefined;
+  }
+  let current = value;
+  for (const part of parts) {
+    if (Array.isArray(current)) {
+      if (!/^(?:0|[1-9]\d*)$/u.test(part) || Number(part) >= current.length) {
+        return undefined;
+      }
+      current = current[Number(part)];
+    } else if (typeof current === 'object' && current !== null && Object.hasOwn(current, part)) {
+      current = Reflect.get(current, part);
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+};
+
+const schemaTypesAtPointer = (manifest: ParameterManifest, pointer: string): readonly string[] => {
+  const parts = pointerParts(pointer);
+  if (parts === undefined) {
+    return [];
+  }
+  const visited = new Set<string>();
+  const visit = (node: unknown, resource: string, remaining: readonly string[]): string[] => {
+    if (typeof node !== 'object' || node === null || Array.isArray(node)) {
+      return [];
+    }
+    const record = node as Record<string, unknown>;
+    const followReference = (reference: string): string[] => {
+      const hash = reference.indexOf('#');
+      const targetResource = reference.startsWith('#') ? resource : hash === -1 ? reference : reference.slice(0, hash);
+      const targetPointer = reference.startsWith('#')
+        ? reference.slice(1)
+        : hash === -1
+          ? ''
+          : reference.slice(hash + 1);
+      const key = `${targetResource}#${targetPointer}\0${remaining.join('/')}`;
+      if (visited.has(key)) {
+        return [];
+      }
+      visited.add(key);
+      const targetSchema =
+        targetResource === rootParameterSchemaResource ? manifest.schema : manifest.resources[targetResource];
+      return visit(schemaValueAtPointer(targetSchema, targetPointer), targetResource, remaining);
+    };
+    if (typeof record['$ref'] === 'string') {
+      return followReference(record['$ref']);
+    }
+
+    const types = Array.isArray(record['type']) ? record['type'] : [record['type']];
+    const output = types.flatMap((type) => {
+      const reference = schemaValueAtPointer(type, '/$ref');
+      return typeof reference === 'string' ? followReference(reference) : [];
+    });
+    for (const keyword of ['allOf', 'anyOf', 'oneOf']) {
+      const branches = record[keyword];
+      if (Array.isArray(branches)) {
+        output.push(...branches.flatMap((branch) => visit(branch, resource, remaining)));
+      }
+    }
+    if (remaining.length === 0) {
+      output.push(...types.filter((type): type is string => typeof type === 'string'));
+      return output;
+    }
+    const head = remaining[0]!;
+    const tail = remaining.slice(1);
+    const { properties, items } = record;
+    if (typeof properties === 'object' && properties !== null && !Array.isArray(properties) && head in properties) {
+      output.push(...visit(Reflect.get(properties, head), resource, tail));
+    }
+    if (/^(?:0|[1-9]\d*)$/u.test(head)) {
+      output.push(...visit(Array.isArray(items) ? items[Number(head)] : items, resource, tail));
+    }
+    return output;
+  };
+  return visit(manifest.schema, rootParameterSchemaResource, parts);
+};
+
+const admittedNativeBinding = (
+  manifest: ParameterManifest,
+  input: Readonly<{ parameterId: string; resource: string; pointer: string }>,
+): ParameterBinding | undefined => {
+  const binding = resolveParameterBinding(manifest, input.pointer);
+  if (binding !== undefined) {
+    return admittedBinding(manifest, input);
+  }
+  const types = schemaTypesAtPointer(manifest, input.pointer);
+  if (
+    input.parameterId !== `${manifest.source.revision}:${input.pointer}` ||
+    input.resource !== rootParameterSchemaResource ||
+    !types.some((type) => type !== 'null') ||
+    types.some((type) => nonScalarSchemaTypes.has(type))
+  ) {
+    throw failure('STALE_MANIFEST', 'The operation does not match an admitted manifest binding.');
+  }
+  return undefined;
 };
 
 /**
@@ -254,7 +402,7 @@ export const resolveEffectiveParameterBinding = (
     // Bounds authored in the producer's unit are restated in the chosen one. With no prior unit
     // there is nothing to convert from, so they stay as the producer wrote them.
     constraints:
-      binding.unit === undefined
+      binding.unit === undefined || group?.sourceUnits?.[pointer] === undefined
         ? binding.constraints
         : convertedConstraints(binding, binding.constraints, binding.unit, unit),
   };
@@ -455,60 +603,6 @@ export const resolveParameterInputValues = (
   return resolved;
 };
 
-/**
- * Convert a checked source-unit record back to one producer's authored execution units. The unit
- * to convert back to comes from the producer's live declaration, never from the record. @public
- */
-export const resolveProducerParameterValues = (
-  input: Readonly<{
-    producer: string;
-    declaration: ParameterDeclaration;
-    entry: FileParameterEntry;
-    values: Readonly<Record<string, unknown>>;
-  }>,
-): Readonly<Record<string, JSONValue>> => {
-  const group = input.entry.groups[input.entry.activeGroup];
-  if (group === undefined) {
-    throw failure('INVALID_RECORD', 'The active parameter group is missing.');
-  }
-  let resolved = structuredClone(input.values) as Record<string, JSONValue>;
-  for (const pointer of Object.keys(group.sourceUnits ?? {})) {
-    const declared = input.declaration.bindings?.[pointer];
-    const chosen = group.units?.[pointer];
-    // The producer must still advertise the capability, still declare a unit to convert back to,
-    // and the record must still name the unit the value was authored in.
-    if (declared?.sourceUnitCapability === undefined || declared.unit === undefined || chosen === undefined) {
-      throw sourceUnitRebindRequired();
-    }
-    const value = valueAtPointer(resolved, pointer);
-    if (value === undefined) {
-      continue;
-    }
-    resolved = setPointer(
-      resolved,
-      pointer,
-      nativeUnitValue(
-        {
-          parameter: { value: pointer, stability: 'revision-scoped' },
-          schema: { resource: input.producer, pointer },
-          // Source-unit changes are admitted only for finite linear binary64 fields.
-          representation: 'binary64',
-          optional: false,
-          nullable: false,
-          unit: declared.unit,
-          ...(declared.quantityKind === undefined ? {} : { quantityKind: declared.quantityKind }),
-          ...(declared.space === undefined ? {} : { space: declared.space }),
-          ...(declared.reference === undefined ? {} : { reference: declared.reference }),
-          constraints: {},
-        },
-        value,
-        chosen,
-      ),
-    );
-  }
-  return resolved;
-};
-
 /** Drop a claim map once it holds nothing, so an untouched group stays at its minimal shape. */
 const withoutEmptyClaims = (group: ParameterGroup): ParameterGroup => ({
   values: group.values,
@@ -541,13 +635,6 @@ export const planParameterRecord = (
     const { operation } = input.request;
     let changed = true;
     switch (operation.kind) {
-      case 'display-preference': {
-        return {
-          status: 'rejected',
-          code: 'DISPLAY_ONLY_ACTION',
-          message: 'Display preferences are not persisted.',
-        };
-      }
       case 'create-group': {
         if (Object.hasOwn(entry.groups, operation.group)) {
           throw failure('GROUP_ALREADY_EXISTS', `Parameter group "${operation.group}" already exists.`);
@@ -569,8 +656,11 @@ export const planParameterRecord = (
       case 'rename-group': {
         changed = operation.group !== operation.nextGroup;
         if (changed) {
-          entry.groups[operation.nextGroup] = entry.groups[operation.group]!;
-          Reflect.deleteProperty(entry.groups, operation.group);
+          entry.groups = Object.fromEntries(
+            Object.entries(entry.groups).map(([name, group]) =>
+              name === operation.group ? [operation.nextGroup, group] : [name, group],
+            ),
+          );
           entry.activeGroup = entry.activeGroup === operation.group ? operation.nextGroup : entry.activeGroup;
         }
         break;
@@ -590,16 +680,28 @@ export const planParameterRecord = (
         entry.groups[operation.group] = next;
         break;
       }
-      case 'native-value':
+      case 'native-value': {
+        const binding = admittedNativeBinding(manifest, operation);
+        const group = entry.groups[operation.group]!;
+        const value =
+          binding === undefined
+            ? operation.value
+            : nativeUnitValue(
+                resolveEffectiveParameterBinding(manifest, operation.pointer, binding, group),
+                operation.value,
+              );
+        const values = setPointer(group.values, operation.pointer, value);
+        const next = withoutEmptyClaims({ ...group, values });
+        admitGroupValues(manifest, next, values);
+        changed = !sameValues(values, group.values);
+        entry.groups[operation.group] = next;
+        break;
+      }
       case 'unit-value': {
         const binding = admittedBinding(manifest, operation);
         const group = entry.groups[operation.group]!;
         const effective = resolveEffectiveParameterBinding(manifest, operation.pointer, binding, group);
-        const value = nativeUnitValue(
-          effective,
-          operation.value,
-          operation.kind === 'unit-value' ? operation.inputUnit : undefined,
-        );
+        const value = nativeUnitValue(effective, operation.value, operation.inputUnit);
         const values = setPointer(group.values, operation.pointer, value);
         const next = withoutEmptyClaims({ ...group, values });
         admitGroupValues(manifest, next, values);
@@ -627,7 +729,6 @@ export const planParameterRecord = (
           throw failure('REPRESENTATION_UNSUPPORTED', 'Source-unit changes require finite linear binary64 semantics.');
         }
         if (
-          operation.mode !== 'preserve-size' ||
           binding.sourceUnitCapability !== 'change-source-unit:preserve-size:v1' ||
           operation.producerCapability.capability !== binding.sourceUnitCapability ||
           operation.producerCapability.producer !== manifest.source.id ||
@@ -655,11 +756,13 @@ export const planParameterRecord = (
           operation.pointer,
           nativeUnitValue({ ...binding, unit: operation.unit }, current, fromUnit),
         );
-        const next = withoutEmptyClaims({
-          values,
-          units: { ...group.units, [operation.pointer]: operation.unit },
-          sourceUnits: { ...group.sourceUnits, [operation.pointer]: operation.unit },
-        });
+        const units = { ...group.units, [operation.pointer]: operation.unit };
+        const sourceUnits = { ...group.sourceUnits, [operation.pointer]: operation.unit };
+        if (operation.unit === binding.unit) {
+          Reflect.deleteProperty(units, operation.pointer);
+          Reflect.deleteProperty(sourceUnits, operation.pointer);
+        }
+        const next = withoutEmptyClaims({ values, units, sourceUnits });
         admitGroupValues(manifest, next, values);
         entry.groups[operation.group] = next;
         return {

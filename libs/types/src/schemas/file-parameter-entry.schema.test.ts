@@ -163,6 +163,25 @@ describe('fileParameterEntrySchema', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('should refuse a record whose sourceUnits entry differs from its units entry', () => {
+    const result = fileParameterEntrySchema.safeParse({
+      activeGroup: 'default',
+      groups: {
+        default: {
+          values: { width: 10 },
+          units: { '/width': 'in' },
+          sourceUnits: { '/width': 'cm' },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error('Expected the mismatched source unit to be refused');
+    }
+    expect(result.error.issues[0]?.path).toEqual(['groups', 'default', 'sourceUnits', '/width']);
+  });
 });
 
 describe('getActiveGroupValues', () => {

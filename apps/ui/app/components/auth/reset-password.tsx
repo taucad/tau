@@ -25,7 +25,7 @@ export type ResetPasswordProps = {
  *
  * @returns The password reset form UI ready to be mounted in the app layout.
  */
-export function ResetPassword({ className }: ResetPasswordProps) {
+export function ResetPassword({ className }: ResetPasswordProps): React.JSX.Element {
   const { authClient, basePaths, emailAndPassword, localization, viewPaths, navigate, Link } = useAuth();
 
   const { mutate: resetPassword, isPending } = useResetPassword(authClient, {
@@ -53,8 +53,8 @@ export function ResetPassword({ className }: ResetPasswordProps) {
     }
   }, [basePaths.auth, localization.auth.invalidResetPasswordToken, viewPaths.auth.signIn, navigate]);
 
-  function handleSubmit(e: SyntheticEvent<HTMLFormElement>) {
-    e.preventDefault();
+  function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
 
     const searchParams = new URLSearchParams(globalThis.location.search);
     const token = searchParams.get('token')!;
@@ -65,11 +65,11 @@ export function ResetPassword({ className }: ResetPasswordProps) {
       return;
     }
 
-    const formData = new FormData(e.currentTarget);
+    const formData = new FormData(event.currentTarget);
     const password = formData.get('password') as string;
     const confirmPassword = formData.get('confirmPassword') as string;
 
-    if (emailAndPassword?.confirmPassword && password !== confirmPassword) {
+    if (emailAndPassword.confirmPassword && password !== confirmPassword) {
       toast.error(localization.auth.passwordsDoNotMatch);
       return;
     }
@@ -97,8 +97,8 @@ export function ResetPassword({ className }: ResetPasswordProps) {
                   autoComplete='new-password'
                   placeholder={localization.auth.newPasswordPlaceholder}
                   required
-                  minLength={emailAndPassword?.minPasswordLength}
-                  maxLength={emailAndPassword?.maxPasswordLength}
+                  minLength={emailAndPassword.minPasswordLength}
+                  maxLength={emailAndPassword.maxPasswordLength}
                   disabled={isPending}
                   onChange={() => {
                     setFieldErrors((previous) => ({
@@ -106,12 +106,12 @@ export function ResetPassword({ className }: ResetPasswordProps) {
                       password: undefined,
                     }));
                   }}
-                  onInvalid={(e) => {
-                    e.preventDefault();
+                  onInvalid={(event) => {
+                    event.preventDefault();
 
                     setFieldErrors((previous) => ({
                       ...previous,
-                      password: (e.target as HTMLInputElement).validationMessage,
+                      password: (event.target as HTMLInputElement).validationMessage,
                     }));
                   }}
                   aria-invalid={Boolean(fieldErrors.password)}
@@ -133,7 +133,7 @@ export function ResetPassword({ className }: ResetPasswordProps) {
               <FieldError>{fieldErrors.password}</FieldError>
             </Field>
 
-            {emailAndPassword?.confirmPassword && (
+            {emailAndPassword.confirmPassword && (
               <Field data-invalid={Boolean(fieldErrors.confirmPassword)}>
                 <Label htmlFor='confirmPassword'>{localization.auth.confirmPassword}</Label>
 
@@ -145,8 +145,8 @@ export function ResetPassword({ className }: ResetPasswordProps) {
                     autoComplete='new-password'
                     placeholder={localization.auth.confirmPasswordPlaceholder}
                     required
-                    minLength={emailAndPassword?.minPasswordLength}
-                    maxLength={emailAndPassword?.maxPasswordLength}
+                    minLength={emailAndPassword.minPasswordLength}
+                    maxLength={emailAndPassword.maxPasswordLength}
                     disabled={isPending}
                     onChange={() => {
                       setFieldErrors((previous) => ({
@@ -154,12 +154,12 @@ export function ResetPassword({ className }: ResetPasswordProps) {
                         confirmPassword: undefined,
                       }));
                     }}
-                    onInvalid={(e) => {
-                      e.preventDefault();
+                    onInvalid={(event) => {
+                      event.preventDefault();
 
                       setFieldErrors((previous) => ({
                         ...previous,
-                        confirmPassword: (e.target as HTMLInputElement).validationMessage,
+                        confirmPassword: (event.target as HTMLInputElement).validationMessage,
                       }));
                     }}
                     aria-invalid={Boolean(fieldErrors.confirmPassword)}

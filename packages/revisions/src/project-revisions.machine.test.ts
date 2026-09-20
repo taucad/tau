@@ -67,6 +67,9 @@ import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js
  *     dropped rather than thrown
  * 28  `conflictResolved` is re-emitted and the registry is asked to read again
  * 29  `turnRequested` is re-emitted for whatever starts a chat turn (W10)
+ * 30  a turn-ending verb that names a run reaches the queue as well as the ref,
+ *     and a run id another turn already holds is refused whatever turn id
+ *     carries it (T4-02, T4-hyp1)
  * --  `checkoutChanged` re-heads the checkout; the checkouts' own statuses feed
  *     the `RevisionStatus` projection; serializable snapshot; one machine value
  */
@@ -377,6 +380,81 @@ describe('projectRevisionsMachine', () => {
     expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
     expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
       turnId: 'turn-1',
+      chatId: 'chat-1',
+      runId: 'run-1',
+      code: 'TURN_ALREADY_LEASED',
+    });
+
+    harness.actor.stop();
+  });
+
+  /*
+   * T4-02: a queued admission outlives the wait that asked for it.
+   *
+   * Every host bounds its admission wait (30 s) while the queue has neither a
+   * bound nor a removal verb, so an entry whose caller had already given up was
+   * still raised when the turn ahead of it retired. The turn that spawned took
+   * the checkout's lease with nothing left to send it `turnCompleted`: the
+   * checkout read as held for the rest of the session, every manual save on it
+   * answered `nothingToSave`, and every later edit of that message queued
+   * behind it. A lease has no heartbeat by policy (§8), so the caller giving
+   * up is its only liveness signal — the verb that host already sends has to
+   * reach the queue as well as the ref.
+   */
+  it('should drop a queued admission whose caller abandoned its run before the holding turn retired', async () => {
+    const harness = start();
+
+    registerCheckouts(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([
+      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' },
+    ]);
+
+    /* The caller's wait expired. It names the run it gave up on, which is not
+     * the run the same turn id is still held by (V8). */
+    harness.actor.send({ type: 'turnAbandoned', turnId: 'turn-1', runId: 'run-2' });
+
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    /* The other run of that turn id is still recording. */
+    expect(harness.actor.getSnapshot().context.turnRefs['turn-1']?.getSnapshot().context.outcome).toBeUndefined();
+
+    harness.actor.send({
+      type: 'turnReleased',
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-1',
+      outcome: 'released',
+    });
+    await flush();
+
+    /* Nothing is raised for the abandoned run, so no turn takes a lease that
+     * nothing will ever retire. */
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
+
+    harness.actor.stop();
+  });
+
+  /*
+   * T4-hyp1: the V9 guard read the run id of the turn id it was handed, so the
+   * same run arriving under a *different* turn id passed `turnIsNew` and
+   * spawned a second turn. A run id is the lease's own key
+   * (`.tau/runs/<runId>.json`), so that is two turns writing one lease file and
+   * each retiring the other's.
+   */
+  it('should refuse a turn whose run id another turn already holds', async () => {
+    const harness = start();
+
+    registerCheckouts(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-2', chatId: 'chat-1', runId: 'run-1' });
+
+    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
+      turnId: 'turn-2',
       chatId: 'chat-1',
       runId: 'run-1',
       code: 'TURN_ALREADY_LEASED',

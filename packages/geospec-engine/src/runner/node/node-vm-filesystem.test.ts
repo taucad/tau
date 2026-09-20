@@ -19,9 +19,7 @@ describe('resolveUnderRoot', () => {
 
   it('should refuse non-canonical and escaping paths', () => {
     for (const path of ['/src/main.ts', './main.ts', '../secrets', 'a/../../secrets']) {
-      expect(() => resolveUnderRoot('/project', path)).toThrowError(
-        expect.objectContaining({ name: 'VirtualPathError' }),
-      );
+      expect(() => resolveUnderRoot('/project', path)).toThrow(expect.objectContaining({ name: 'VirtualPathError' }));
     }
   });
 });

@@ -59,9 +59,11 @@ export type RevisionSyncRegionProps = {
   readonly onDisconnect: () => void;
   readonly onCancel: () => void;
   readonly onSync: () => void;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncChats`.
   readonly syncChats: boolean;
   readonly onSyncChatsChange: (enabled: boolean) => void;
   /** EQ7/D16: generated evidence is opt-in, per project, beside *Sync chats*. */
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the persisted project manifest field `syncLargeExports`.
   readonly syncLargeExports: boolean;
   readonly onSyncLargeExportsChange: (enabled: boolean) => void;
   /**
@@ -71,7 +73,9 @@ export type RevisionSyncRegionProps = {
    * is presentational and a plan is a session fact, not a projection fact. The
    * default is "entitled", which is what a self-host build always answers.
    */
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the `useCommercialFeatures()` entitlement field.
   readonly canSyncFiles?: boolean;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors the `useCommercialFeatures()` entitlement field.
   readonly canConnectGitHub?: boolean;
   /** Take a free account to the plan surface; the pane supplies the route. */
   readonly onUpgrade?: () => void;
@@ -180,10 +184,12 @@ const connectingCopy = (remote: RemoteFacet): string =>
       : 'Connecting…';
 
 const gitRemoteLabel = (url: string | undefined, github = false): string => {
-  if (url === undefined) return github ? 'GitHub repository' : 'Git remote';
+  if (url === undefined) {
+    return github ? 'GitHub repository' : 'Git remote';
+  }
   try {
     const parsed = new URL(url);
-    const path = parsed.pathname.replace(/^\/+|\/+$/gu, '').replace(/\.git$/u, '');
+    const path = parsed.pathname.replaceAll(/^\/+|\/+$/gu, '').replace(/\.git$/u, '');
     return github && path !== '' ? path : parsed.host;
   } catch {
     return github ? 'GitHub repository' : 'Git remote';
@@ -412,6 +418,7 @@ export function RevisionSyncRegion({
    * that fell out of `connected` rendering three radios and no verb at all —
    * no Connect, no Cancel, no summary — with focus on `<body>`. */
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- C9: the draft mirrors the external connection phase, which no render-time derivation sees.
     setChangingBackup(remote.phase !== 'connected');
     if (remote.phase === 'connected') {
       setChoice(undefined);
@@ -423,8 +430,7 @@ export function RevisionSyncRegion({
     pendingConnection?.kind === 'tau'
       ? 'Tau Cloud'
       : pendingConnection?.kind === 'github'
-        ? (pendingConnection.selection.repository.fullName ??
-          gitRemoteLabel(pendingConnection.selection.repository.cloneUrl, true))
+        ? pendingConnection.selection.repository.fullName
         : pendingConnection?.kind === 'git'
           ? gitRemoteLabel(pendingConnection.url)
           : undefined;
@@ -492,12 +498,16 @@ export function RevisionSyncRegion({
   };
 
   const applyRemote = async (): Promise<void> => {
-    if (choice === 'git') return;
+    if (choice === 'git') {
+      return;
+    }
     if (choice === 'none' && remote.kind !== 'none') {
       setConfirmingDisconnect(true);
       return;
     }
-    if (choice === 'none') return;
+    if (choice === 'none') {
+      return;
+    }
     await requestConnection({ kind: 'tau' });
   };
 
@@ -717,7 +727,7 @@ export function RevisionSyncRegion({
       {remote.phase === 'connected' && !changingBackup && remote.url !== undefined && remote.kind === 'git' ? (
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <details className='min-w-0 flex-1'>
-            <summary className='cursor-pointer text-xs text-muted-foreground'>Connection details</summary>
+            <summary className='text-xs text-muted-foreground'>Connection details</summary>
             {remote.provider === 'github' ? (
               <span className='block text-xs font-medium'>GitHub repository</span>
             ) : undefined}
@@ -729,13 +739,11 @@ export function RevisionSyncRegion({
           {confirmingDisconnect ? undefined : (
             <span className='flex shrink-0 items-center gap-1'>
               {remote.provider === 'github' ? (
-                <>
-                  <Button asChild variant='ghost' size='sm'>
-                    <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
-                      Open GitHub
-                    </a>
-                  </Button>
-                </>
+                <Button asChild variant='ghost' size='sm'>
+                  <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
+                    Open GitHub
+                  </a>
+                </Button>
               ) : undefined}
             </span>
           )}

@@ -112,14 +112,7 @@ pnpm nx launch api
 
 The `/v1/agents` module pairs outbound `tau serve` daemons and relays opaque WebSocket frames for `/runtime` and `/fs`. Device identity and credential hashes are durable in Postgres; pairing codes, sessions, and one-use route grants use Redis TTLs. Raw device credentials are returned only once.
 
-Route pairing is currently process-local. Before enabling remote compute in an environment:
-
-```bash
-fly scale count 1 -a tau-api-staging
-fly scale count 1 -a tau-api
-```
-
-Keep `WEB_CONCURRENCY=1`, verify exactly one Machine is allocated, and re-run that check after any scaling or regional change. Startup rejects any other worker count. A second API process or region requires moving the relay pair map to a connection-owning service such as a dedicated relay or Durable Object; Redis session records alone do not make live sockets horizontally routable.
+Route pairing is currently process-local. A second API process or region requires moving the relay pair map to a connection-owning service such as a dedicated relay or Durable Object; Redis session records alone do not make live sockets horizontally routable. Enabling remote compute in a deployed environment is operational: see Tau's private operations handbook at `docs/handbooks/cloud/` (`operate/scaling.md`, `system/services/api.md`).
 
 Operational checks:
 

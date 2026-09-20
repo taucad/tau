@@ -251,6 +251,67 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     expect(prepared.execution).not.toHaveProperty('mode');
   });
 
+  /* I7. Open-time discovery has to build a host client before it knows what the
+     chat's log holds. Building it through `prepare` placed a turn at every chat
+     open, and the run id that placement minted is one the host never admitted:
+     the abandoned run's settlement named it and the durable log refused it
+     (*"was never admitted in chat …"*), so `RUN_ABANDONED` never became a
+     `turn.failed` and the saved-turn card had nothing behind it. */
+  it('should compose an attach from the chat checkout without placing a turn', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const attached = await act(async () => result.current.attachment('chat_1'));
+
+    expect(revisionRoot.admitted).toEqual([]);
+    expect(attached?.runId).toBeUndefined();
+    expect(attached?.execution).toEqual({
+      hostId: expect.any(String) as unknown as string,
+      workspaceId: 'checkout-durable',
+    });
+    expect(result.current.get('chat_1')).toBeUndefined();
+  });
+
+  it('should hand an attach the claim its chat already holds', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const prepared = await act(async () => result.current.prepare('chat_1', { turnId: 'turn_1' }));
+    const attached = await act(async () => result.current.attachment('chat_1'));
+
+    expect(attached).toBe(prepared);
+    expect(revisionRoot.admitted).toHaveLength(1);
+  });
+
+  /* The claim is recorded only once `admitTurn` answers, so an attach composed
+     while the placement is still in flight fell through to the fallback chain
+     and handed the turn's own worker a `workspaceId` that is not the turn's —
+     the wrong leadership scope, and the wrong parameter authority. `prepare`
+     already reuses its in-flight operation; so does this. */
+  it('should hand an attach the placement its chat is still taking', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const hold = Promise.withResolvers<void>();
+    revisionRoot.hold = hold;
+    const [prepared, attached] = await act(async () => {
+      const placing = result.current.prepare('chat_inflight', { turnId: 'turn_inflight' });
+      await waitFor(() => {
+        expect(revisionRoot.admitted).toHaveLength(1);
+      });
+      const attaching = result.current.attachment('chat_inflight');
+      hold.resolve();
+      revisionRoot.hold = undefined;
+      return Promise.all([placing, attaching]);
+    });
+
+    expect(attached).toBe(prepared);
+    expect(revisionRoot.admitted).toHaveLength(1);
+  });
+
   /* AC14's second clause: *Ask chat to resolve* is only a real control if the
      turn it seeds can see the conflict. The page binds it to the chat before
      the first turn is placed, and it rides the placement — the turn lands on
@@ -341,11 +402,68 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     await act(async () => result.current.discard('chat_roll', first.runId));
     const second = await act(async () => result.current.prepare('chat_roll', { turnId: 'turn_roll_2' }));
     /* The first run's settlement, decided while the second turn is already
-     * placed. It may not reach the second turn's lease. */
-    await act(async () => result.current.finalize('chat_roll', first.runId));
+     * placed. It may not reach the second turn's lease — and it may not answer
+     * its caller as though the lease were released either: refusing with a
+     * `console.warn` left the settlement believing it had retired a lease that
+     * was still held, so nothing ever retried and every later turn of the chat
+     * died on the stale claim (T3-amp). */
+    await expect(act(async () => result.current.finalize('chat_roll', first.runId))).rejects.toThrow(
+      /does not name chat/u,
+    );
 
     expect(revisionRoot.commands).toEqual([{ command: 'turnAbandoned', turnId: 'turn_roll_1' }]);
     expect(result.current.get('chat_roll')).toMatchObject({ runId: second.runId });
+  });
+
+  /*
+   * I1: a continuation is a second attempt at the run the host already holds,
+   * so it names that run when it takes its lease. Reusing a claim keyed by a
+   * *different* run would fence its writes under the wrong id and make its
+   * settlement name a run `drop` is not holding — so the claim is either that
+   * run's, or the continuation is refused.
+   */
+  it('should lease a continuation under the run it names, and refuse another turn’s claim', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const held = await act(async () => result.current.prepare('chat_continue', { turnId: 'turn_continue' }));
+
+    // The same run continued: the claim it already holds is the one it wants.
+    await expect(
+      act(async () => result.current.prepare('chat_continue', { turnId: 'turn_continue', runId: held.runId })),
+    ).resolves.toMatchObject({ runId: held.runId });
+
+    await expect(
+      act(async () => result.current.prepare('chat_continue', { turnId: 'turn_continue', runId: 'run_somebody_else' })),
+    ).rejects.toMatchObject({ code: 'CHAT_CLAIM_RUN_MISMATCH' });
+
+    // A fresh lease carries the run the caller named rather than minting one.
+    await act(async () => result.current.discard('chat_continue', held.runId));
+    const continued = await act(async () =>
+      result.current.prepare('chat_continue', { turnId: 'turn_continue', runId: 'run_host_holds' }),
+    );
+
+    expect(continued.runId).toBe('run_host_holds');
+    expect(revisionRoot.admitted.at(-1)).toMatchObject({ turnId: 'turn_continue', runId: 'run_host_holds' });
+  });
+
+  /* Discovery is the one caller that may name a run the claim is not: it reads
+   * `reclaimAll` and then retires, and the claim can roll over in between. It
+   * tolerates the refusal; a settlement does not. */
+  it('should let discovery retire a claim that rolled over without failing', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const first = await act(async () => result.current.prepare('chat_retire', { turnId: 'turn_retire_1' }));
+    await act(async () => result.current.discard('chat_retire', first.runId));
+    const second = await act(async () => result.current.prepare('chat_retire', { turnId: 'turn_retire_2' }));
+
+    await act(async () => result.current.retireClaim('chat_retire', first.runId));
+
+    expect(revisionRoot.commands).toEqual([{ command: 'turnAbandoned', turnId: 'turn_retire_1' }]);
+    expect(result.current.get('chat_retire')).toMatchObject({ runId: second.runId });
   });
 
   it('should keep its context value identity-stable across a chats refetch', async () => {

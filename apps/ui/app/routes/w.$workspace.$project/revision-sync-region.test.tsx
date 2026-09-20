@@ -40,6 +40,7 @@ vi.mock('#components/github/github-repository-picker.js', () => ({
           connection: { id: '00000000-0000-4000-8000-000000000001' },
           repository: {
             id: 99,
+            fullName: 'o/r',
             cloneUrl: 'https://github.com/o/r.git',
             access: 'write',
           },

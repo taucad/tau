@@ -102,20 +102,16 @@ export const findRoot = (startDirectory = process.cwd()): string => {
   }
 
   let directory = resolve(startDirectory);
-  while (true) {
-    if (isTauRoot(directory)) {
-      return directory;
-    }
-
+  while (!isTauRoot(directory)) {
     const parent = dirname(directory);
     if (parent === directory) {
-      break;
+      throw new Error('Could not find the Tau workspace root. Run inside Tau or set TAU_ROOT.');
     }
 
     directory = parent;
   }
 
-  throw new Error('Could not find the Tau workspace root. Run inside Tau or set TAU_ROOT.');
+  return directory;
 };
 
 const resolveRoot = (root?: string): string => {
@@ -256,6 +252,7 @@ const parseCatalog = (content: string, catalog: CatalogName, filePath: string): 
 
   return {
     version: shared.version,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- `repos_dir` keeps the repos.yaml wire spelling.
     repos_dir: reposDirectory,
     owner: requireString(raw['owner'], 'public catalog.owner'),
     groups: shared.groups,
@@ -281,7 +278,7 @@ const readCatalog = (root: string, catalog: CatalogName): PublicCatalog | Privat
   return parseCatalog(readFileSync(filePath, 'utf8'), catalog, filePath);
 };
 
-const assertSafeRepoPath = (root: string, manifest: Manifest, name: string, repo: RepoConfig): string => {
+const assertSafeRepoPath = ({ root, manifest, name, repo }: RepoContext): string => {
   const cloneRoot = resolve(root, manifest.repos_dir);
   const configuredPath = repo.path ?? name;
   if (isAbsolute(configuredPath)) {
@@ -300,10 +297,10 @@ const assertSafeRepoPath = (root: string, manifest: Manifest, name: string, repo
 const buildState = (root: string, catalogs: CatalogState['catalogs']): CatalogState => {
   const publicCatalog = catalogs.public;
   const privateCatalog = catalogs.private;
-  if (publicCatalog.repos['tau-brain'] || privateCatalog?.repos['tau-brain']) {
+  if (publicCatalog.repos['tau-brain'] ?? privateCatalog?.repos['tau-brain']) {
     throw new Error('Repo "tau-brain" is forbidden in both catalogs; Tau Brain cannot manage itself.');
   }
-  if (publicCatalog.groups['brain'] || privateCatalog?.groups['brain']) {
+  if (publicCatalog.groups['brain'] ?? privateCatalog?.groups['brain']) {
     throw new Error('Group "brain" is forbidden in both catalogs.');
   }
 
@@ -323,6 +320,7 @@ const buildState = (root: string, catalogs: CatalogState['catalogs']): CatalogSt
 
   const manifest: Manifest = {
     version: publicCatalog.version,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- `repos_dir` keeps the repos.yaml wire spelling.
     repos_dir: publicCatalog.repos_dir,
     owner: publicCatalog.owner,
     groups: { ...publicCatalog.groups, ...privateCatalog?.groups },
@@ -356,7 +354,7 @@ const buildState = (root: string, catalogs: CatalogState['catalogs']): CatalogSt
 
   const paths = new Map<string, string>();
   for (const [name, repo] of Object.entries(manifest.repos)) {
-    const path = assertSafeRepoPath(root, manifest, name, repo);
+    const path = assertSafeRepoPath({ root, manifest, name, repo });
     const existing = paths.get(path);
     if (existing) {
       throw new Error(`Repos "${existing}" and "${name}" resolve to the same clone path: ${path}.`);
@@ -445,12 +443,12 @@ export const resolveRepos = (
   options: { filter?: RepoFilter; catalog?: CatalogSelection } = {},
 ): ResolvedRepo[] => {
   const { manifest, repoCatalogs, groupCatalogs } = state;
-  const filter = options.filter;
+  const { filter } = options;
   const selection = options.catalog ?? 'all';
   const entries = Object.entries(manifest.repos).map(([name, repo]): ResolvedRepo => [name, repo, repoCatalogs[name]!]);
 
   if (!filter || filter.all) {
-    return entries.filter(([, , owner]) => includesCatalog(owner, selection));
+    return entries.filter(([name, repo, owner]) => includesCatalog(owner, selection));
   }
   if (filter.name) {
     const repo = manifest.repos[filter.name];
@@ -476,7 +474,7 @@ export const resolveRepos = (
       .map((name): ResolvedRepo => [name, manifest.repos[name]!, repoCatalogs[name]!]);
   }
 
-  return entries.filter(([, , owner]) => includesCatalog(owner, selection));
+  return entries.filter(([name, repo, owner]) => includesCatalog(owner, selection));
 };
 
 export const resolveGroups = (state: CatalogState, selection: CatalogSelection = 'all'): ResolvedGroup[] =>
@@ -614,7 +612,7 @@ export const removeRepo = (state: CatalogState, name: string): CatalogState => {
   }
 
   return mutateCatalog(state, owner, (catalog) => {
-    delete catalog.repos[name];
+    catalog.repos = Object.fromEntries(Object.entries(catalog.repos).filter(([repoName]) => repoName !== name));
     for (const group of Object.values(catalog.groups)) {
       group.repos = group.repos.filter((repoName) => repoName !== name);
     }

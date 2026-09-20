@@ -25,7 +25,7 @@ export type PackedSectionCapGeometryBuffers = Readonly<{
   stripeColors: Float32Array;
   patternStrengths: Float32Array;
   stripeAxes: Float32Array;
-  regionKinds: Uint8Array;
+  regionKinds: Uint8Array<ArrayBuffer>;
   indices: Uint32Array;
 }>;
 
@@ -36,7 +36,7 @@ export type SectionCapPackedGeometryArena = {
   stripeColors: Float32Array;
   patternStrengths: Float32Array;
   stripeAxes: Float32Array;
-  regionKinds: Uint8Array;
+  regionKinds: Uint8Array<ArrayBuffer>;
   indices: Uint32Array;
 };
 
@@ -88,7 +88,7 @@ const ensureIndexCapacity = (current: Uint32Array, requiredLength: number): Uint
   return new Uint32Array(nextLength);
 };
 
-const ensureUint8Capacity = (current: Uint8Array, requiredLength: number): Uint8Array => {
+const ensureUint8Capacity = (current: Uint8Array<ArrayBuffer>, requiredLength: number): Uint8Array<ArrayBuffer> => {
   if (current.length >= requiredLength) {
     return current;
   }

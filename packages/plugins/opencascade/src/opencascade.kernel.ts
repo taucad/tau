@@ -30,11 +30,8 @@ import {
   finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
 import type { KernelRuntime, RuntimeLogger } from '@taucad/runtime/kernel';
-import { detectMultiThreadSupport } from '@taucad/occt-core';
-
-import { opencascadeOptionsSchema, opencascadeRenderSchema, opencascadeExportSchemas } from '#opencascade.schemas.js';
-
 import {
+  detectMultiThreadSupport,
   initOcct,
   activateOccParallelism,
   formatOcRuntimeError,
@@ -44,6 +41,9 @@ import {
   wrapOcForExceptions,
   wrapOcWithTracing,
 } from '@taucad/occt-core';
+
+import { opencascadeOptionsSchema, opencascadeRenderSchema, opencascadeExportSchemas } from '#opencascade.schemas.js';
+
 import type { OcctModuleFactory, OcTracingSummary } from '@taucad/occt-core';
 
 import { createIncrementalMesh, meshShapesToGltf, parseHexColor } from '#opencascade-mesh.js';

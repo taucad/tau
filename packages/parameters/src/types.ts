@@ -77,15 +77,14 @@ export type ParameterSetOperation =
   | Readonly<{ kind: 'rename-group'; group: string; nextGroup: string }>
   | Readonly<{
       kind: 'source-unit';
-      mode: 'preserve-size' | 'reinterpret';
+      mode: 'preserve-size';
       group: string;
       parameterId: string;
       resource: string;
       pointer: string;
       unit: string;
       producerCapability: ParameterSourceUnitCapability;
-    }>
-  | Readonly<{ kind: 'display-preference'; parameterId: string; unit: string }>;
+    }>;
 
 /**
  * Field-scoped freshness evidence for one draft: the value and effective binding the editor was
@@ -107,7 +106,6 @@ export type ParameterSetRequestBase = Readonly<{
 /** Correlated request accepted by the parameter-set owner. @public */
 export type ParameterSetRequest = Readonly<{
   requestId: string;
-  draftGeneration: number;
   /** Caller correlation label; it never reaches the record. */
   fingerprint?: string;
   /** The manifest this request was built from; the planner refuses it once the live one differs. */
@@ -131,19 +129,6 @@ export type ParameterSetPlanResult =
       producerCapability: ParameterSourceUnitCapability;
     }>
   | Readonly<{ status: 'rejected'; code: string; message: string }>;
-
-/** Result returned by the named checked-apply effect. @public */
-export type ParameterSetApplyResult =
-  | Readonly<{
-      status: 'applied' | 'unchanged';
-      current: ParameterSetAuthoritySnapshot;
-    }>
-  | Readonly<{
-      status: 'conflict';
-      code: 'STALE_MANIFEST';
-      current: ParameterSetAuthoritySnapshot;
-      conflicts: readonly string[];
-    }>;
 
 /** Stable public settlement vocabulary for every submitted request. @public */
 export type ParameterSetOutcome =

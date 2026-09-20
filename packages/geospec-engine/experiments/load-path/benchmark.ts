@@ -9,7 +9,7 @@ import {
 
 const valueAfter = (args: readonly string[], name: string): string | undefined => {
   const index = args.indexOf(name);
-  return index !== -1 ? args[index + 1] : undefined;
+  return index === -1 ? undefined : args[index + 1];
 };
 
 const hasFlag = (args: readonly string[], name: string): boolean => args.includes(name);

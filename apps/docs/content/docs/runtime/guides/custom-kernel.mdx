@@ -19,7 +19,13 @@ Integrate a new CAD engine by implementing the kernel lifecycle with `defineKern
 `defineKernel` takes a single config object. Provide `id`, `extensions`, `initialize`, `getDependencies`, `getParameters`, `createGeometry`, and `exportGeometry`; `cleanup` is optional. Return successes with `createKernelSuccess`, failures with `createKernelError`, and geometry through `finalizeRenderOutput`:
 
 ```typescript
-import { createKernelSuccess, createKernelError, defineKernel, finalizeRenderOutput } from '@taucad/runtime/kernel';
+import {
+  createKernelSuccess,
+  createKernelError,
+  createKernelParameterDeclaration,
+  defineKernel,
+  finalizeRenderOutput,
+} from '@taucad/runtime/kernel';
 import type { GeometryResponse } from '@taucad/runtime/types';
 import { z } from 'zod';
 
@@ -47,14 +53,17 @@ export const myKernel = defineKernel({
   },
 
   async getParameters(input, runtime, _context) {
-    return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: {
-        type: 'object',
-        properties: {},
-        additionalProperties: false,
-      },
-    });
+    return createKernelSuccess(
+      createKernelParameterDeclaration(
+        {},
+        {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+        { id: 'urn:taucad:my-kernel:parameters', name: 'MyKernelParameters' },
+      ),
+    );
   },
 
   async createGeometry({ entryPath }, { filesystem }, _context) {
@@ -145,7 +154,7 @@ export async function getDependencies(
 
 ### 4. Extract parameters for parametric models
 
-`getParameters` returns `{ defaultParameters, jsonSchema }` via `createKernelSuccess`; hosts generate parameter UI from the JSON Schema. Parse your format's parameter declarations however the engine defines them — the Replicad and JSCAD kernel sources show complete implementations.
+`getParameters` returns a parameter declaration built by `createKernelParameterDeclaration(defaults, schema, identity)` and wrapped in `createKernelSuccess`; hosts generate parameter UI from the JSON Schema. Parse your format's parameter declarations however the engine defines them — the Replicad and JSCAD kernel sources show complete implementations.
 
 ## Variations
 

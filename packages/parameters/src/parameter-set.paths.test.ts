@@ -9,6 +9,7 @@ import { parameterSetMachine, submitParameterRequest } from '#parameter-set.mach
 import type { ParameterSetEmission, ParameterSetLoadInput } from '#parameter-set.machine.js';
 import { parameterSetHarness } from '#parameter-set.test-helper.js';
 import { resolveParameterSnapshot } from '#snapshot.js';
+import { planParameterChange } from '#planning.js';
 import type { ParameterChange } from '#planning.js';
 import type { ParameterSnapshot } from '#snapshot.js';
 import type { ParameterSetOutcome, ParameterSetRequest, ParameterSetTarget } from '#types.js';
@@ -52,7 +53,6 @@ const sourceUnitSnapshot = async (resolution?: ParameterResolutionOptions): Prom
 
 const sourceUnitRequest = (current: ParameterSnapshot, requestId = 'unit'): ParameterSetRequest => ({
   requestId,
-  draftGeneration: 0,
   pressure: 'final',
   expected: current.identity,
   operation: {
@@ -73,10 +73,24 @@ const sourceUnitRequest = (current: ParameterSnapshot, requestId = 'unit'): Para
 
 const groupRequest = (current: ParameterSnapshot, requestId: string): ParameterSetRequest => ({
   requestId,
-  draftGeneration: 0,
   pressure: 'final',
   expected: current.identity,
   operation: { kind: 'create-group', group: requestId },
+});
+
+const valueRequest = (current: ParameterSnapshot, requestId: string, value: number): ParameterSetRequest => ({
+  requestId,
+  pressure: 'final',
+  expected: current.identity,
+  base: { pointer: '/width', value: 100 },
+  operation: {
+    kind: 'native-value',
+    group: 'default',
+    parameterId: 'width',
+    resource: current.manifest.bindings['/width']!.schema.resource,
+    pointer: '/width',
+    value,
+  },
 });
 
 type Fixture = Readonly<{
@@ -106,7 +120,13 @@ const start = async (
         commitParameterSet: fromPromise(async ({ input }) => {
           writes += 1;
           return options.commit === undefined
-            ? { status: 'applied', content: new TextEncoder().encode(String(input.write.data)) }
+            ? {
+                status: 'applied',
+                content:
+                  typeof input.write.data === 'string'
+                    ? new TextEncoder().encode(input.write.data)
+                    : Uint8Array.from(input.write.data),
+              }
             : options.commit(writes);
         }),
         ...(options.plan === undefined ? {} : { planParameterSet: fromPromise(options.plan) }),
@@ -206,17 +226,41 @@ it('reports a planner failure as an invalid operation', async () => {
   fixture.actor.stop();
 });
 
-it('rejects a conflicted commit as stale, carries the current identity, and refreshes once', async () => {
+it('should re-plan a conflicted write and commit when the field did not move', async () => {
+  const fixture = await start({
+    commit: async (write) =>
+      write === 1 ? { status: 'conflict', conflicts: [] } : { status: 'applied', content: new Uint8Array() },
+    load: async (load, current) => {
+      if (load === 1) {
+        return structuredClone(current);
+      }
+      const foreign = planParameterChange({ current, request: groupRequest(current, 'foreign') });
+      if (foreign.status !== 'prepared') {
+        throw new Error(JSON.stringify(foreign));
+      }
+      return foreign.proposed;
+    },
+  });
+  await expect(
+    submitParameterRequest(fixture.actor, valueRequest(fixture.current, 'raced', 101)),
+  ).resolves.toMatchObject({
+    status: 'committed',
+  });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups).toMatchObject({
+    default: { values: { width: 101 } },
+    foreign: { values: {} },
+  });
+  expect(fixture.counts()).toEqual({ loads: 2, writes: 2 });
+  fixture.actor.stop();
+});
+
+it('should settle RECORD_CONFLICT after three conflicts', async () => {
   const fixture = await start({ commit: async () => ({ status: 'conflict', conflicts: [] }) });
   await expect(submitParameterRequest(fixture.actor, groupRequest(fixture.current, 'raced'))).resolves.toMatchObject({
     status: 'rejected',
-    code: 'STALE_MANIFEST',
+    code: 'RECORD_CONFLICT',
   });
-  expect(fixture.emitted.find((event) => event.type === 'settled')).toMatchObject({
-    current: fixture.current.identity,
-  });
-  await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'ready' }));
-  expect(fixture.counts()).toEqual({ loads: 2, writes: 1 });
+  expect(fixture.counts()).toEqual({ loads: 3, writes: 3 });
   fixture.actor.stop();
 });
 
@@ -255,6 +299,58 @@ it('holds an unprovable write as indeterminate when recovery cannot read, then r
   fixture.actor.send({ type: 'watch.changed' });
   await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'ready' }));
   expect(fixture.emitted.filter((event) => event.type === 'settled')).toHaveLength(1);
+  fixture.actor.stop();
+});
+
+it('should resolve an uncertain write before accepting edits again', async () => {
+  const fixture = await start({
+    commit: async () => {
+      throw new Error('Reply lost');
+    },
+    load: async (load, current) => {
+      if (load === 2) {
+        throw new Error('Replica unavailable');
+      }
+      return structuredClone(current);
+    },
+  });
+  await expect(submitParameterRequest(fixture.actor, groupRequest(fixture.current, 'lost'))).resolves.toMatchObject({
+    status: 'indeterminate',
+    code: 'RECOVERY_FAILED',
+  });
+  expect(fixture.actor.getSnapshot().matches({ open: 'uncertain' })).toBe(true);
+
+  fixture.actor.send({ type: 'resolve' });
+
+  await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'ready' }));
+  expect(fixture.actor.getSnapshot().context.diagnostic).toBeUndefined();
+  fixture.actor.stop();
+});
+
+it('should refuse close while a write outcome remains uncertain', async () => {
+  const fixture = await start({
+    commit: async () => {
+      throw new Error('Reply lost');
+    },
+    load: async (load, current) => {
+      if (load === 2) {
+        throw new Error('Replica unavailable');
+      }
+      return structuredClone(current);
+    },
+  });
+  await expect(submitParameterRequest(fixture.actor, groupRequest(fixture.current, 'lost'))).resolves.toMatchObject({
+    status: 'indeterminate',
+    code: 'RECOVERY_FAILED',
+  });
+
+  fixture.actor.send({ type: 'close' });
+
+  expect(fixture.actor.getSnapshot().matches({ open: 'uncertain' })).toBe(true);
+  expect(fixture.actor.getSnapshot().context.diagnostic).toEqual({
+    code: 'WRITE_UNCERTAIN',
+    message: 'The previous write outcome remains uncertain.',
+  });
   fixture.actor.stop();
 });
 
@@ -322,13 +418,15 @@ it('rejects the settlement promise when the actor stops during a write', async (
   gate.resolve({ status: 'applied', content: new Uint8Array() });
 });
 
-it('refreshes bytes on a same-mode read from ready and publishes nothing for an unchanged record', async () => {
+it('should keep the same current object for an own-write echo', async () => {
   const fixture = await start();
   const loaded = fixture.emitted.filter((event) => event.type === 'loaded').length;
+  const { current } = fixture.actor.getSnapshot().context;
   fixture.actor.send({ type: 'resolve' });
   expect(fixture.actor.getSnapshot().matches({ open: 'refreshing' })).toBe(true);
   await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'ready' }));
   expect(fixture.counts().loads).toBe(2);
+  expect(fixture.actor.getSnapshot().context.current).toBe(current);
   expect(fixture.emitted.filter((event) => event.type === 'loaded')).toHaveLength(loaded);
   fixture.actor.stop();
 });

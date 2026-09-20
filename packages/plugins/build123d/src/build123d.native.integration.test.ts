@@ -449,7 +449,8 @@ describe('Build123d native kernel', () => {
           },
           entry: 'main.py',
         },
-        parameters: { width: 5, angle: 15 },
+        // A caller's number is in the producer's declared unit; a value in another unit is unit-bearing text.
+        parameters: { width: '5 cm', angle: 15 },
       });
       expect(baseline.superseded).toBe(false);
       expect(converted.superseded).toBe(false);

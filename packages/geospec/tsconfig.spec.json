@@ -32,6 +32,7 @@
     "src/**/*.js",
     "src/**/*.jsx",
     "host-tests/m3-corpus/*.mjs",
+    "host-tests/fixtures/*.mjs",
     "host-tests/s7-m3/*.ts",
     "host-tests/s7-installed-m3/*.mjs"
   ]

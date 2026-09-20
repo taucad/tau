@@ -1,0 +1,1456 @@
+{
+  "milestone": "M3 A1",
+  "status": "in-progress; no milestone acceptance",
+  "owner": "Principal Astra",
+  "acceptanceTrackClarification": {
+    "at": "2026-09-09T04:41:33.703924+00:00",
+    "authority": "Charter A1-R1/R2 and core blueprint Numerical contract under A1; applies approved policy, no new tolerance or scope amendment.",
+    "observedRisk": "M3 corpus brief requires independently complete canonical expected strings. Read as a universal exact measured-scalar requirement, this would recreate the rejected analytic .5 migration blocker.",
+    "disposition": "Keep legacy/independent complete strings and mismatches immutable. Approximate scalar correctness uses independently predeclared domain, accuracy and threshold semantics. After correctness evidence is accepted, demonstrated profile canonical bytes can be frozen as empirical cross-host goldens, clearly distinct from mathematical authority. Exact-domain predicates, canonical claims/plans and other semantic fields retain precise independent requirements. No candidate-fitted accuracy, host rounding, hidden unsupported result or fixture replacement.",
+    "leadSubmission": "01a08478-4ab5-7803-ad2a-468d0c6b0161"
+  },
+  "ordinaryFixtureAuthority": {
+    "authority": "A1 milestone delegation and current M3 handoff",
+    "disposition": "Lead may author and independently qualify necessary ordinary rotation/shared-definition fixtures within M3 without per-command Principal permission. Historical B57/B68 preparation wording does not reintroduce such permission. Immutable earlier fixtures and held R8/S10 exclusions remain.",
+    "leadSubmission": "01a08476-38e6-7f52-98c7-90cec917bb9f"
+  },
+  "continuousPrerequisiteReview": {
+    "sources": [
+      "lead/matcher-full-entry/continuous-brep-choice-b57-r2.md",
+      "lead/matcher-full-entry/selected-continuous-b68/contract.md",
+      "execution/selected-domain-b84-principal-review.json",
+      "execution/continuous-display-source-review/finding.json"
+    ],
+    "disposition": "Reuse accepted bounded selected-occurrence and conditional math evidence. Remaining continuous denotation, work/accounting and exact-verdict/display contract requires one concrete semantic review before activation. Bounded nominal models are not arbitrary exact STEP or universal manufacturing proofs."
+  },
+  "continuousContractDecision": {
+    "id": "W3-W5-CONTINUOUS-NOMINAL-01",
+    "at": "2026-09-09T04:53:23.238190+00:00",
+    "decision": "Adopted for implementation with the binding corrections below; no runtime, target or full-family acceptance.",
+    "authority": "User full W0\u2013W12/A1 goal and Appendix A Principal semantic decision rights; completes the bounded B57 proposal without dropping remaining selected cases.",
+    "proposal": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/continuous-contract/proposal.md",
+    "proposalSha256": "3354b773fe5f60098f95ff01c02364fd4fe67fb6e1eaf44255def110a924ba0f",
+    "verifiedProposalSourceAndSnapshotHashes": 18,
+    "adopted": [
+      "Connector-certified actual located complete Cartesian boxes and associations; nominal ideal typed-support denotation, not exact-real STEP inference.",
+      "Closed-target total centerline occupancy for insertion; open region complement of the complete selected closed-box union for void. Positive-area face connectivity; complete serial nested rectangular section/event proof for minimum area.",
+      "Exact dyadic integer comparisons precede finite checked pinned num-rational display; exact rational witnesses remain authoritative when displays coincide.",
+      "numericProfile geospec-st-logical-requests-v3 binds changed semantics/charges; canonicalProfile geospec-jcs-v1 and registryVersion4 remain. Preserve historical v2 artifacts and reject undeclared profile substitution.",
+      "Adopt stated domain caps, logical precharge schedule, 8192-bit checked arithmetic ceiling, 16 selected records plus one replaceable successful topology cell; continuous owned payload32MiB also charged under configured shared derived limit (entry256MiB). Pending outputs and working allocations remain bounded; payload is not a process RSS claim."
+    ],
+    "bindingCorrections": [
+      {
+        "id": "VOID-WAYPOINT-FAILURE",
+        "finding": "Proposal language requiring all waypoints to be fluid could incorrectly refuse a provable material-interior counterexample. Original void-topology.ts:491 and current analysis/voids/mod.rs:235 make that a geometric mismatch.",
+        "requirement": "After supported complete material/region admission, a waypoint strictly inside a material cell yields positive=false with existing mismatch meaning and authored point witness, before connectivity/isolation/area success. Arrangement-plane or otherwise unqualified point cases may retain the declared noninvertible refusal. An isolation probe outside the fluid domain remains refusal against vacuous isolation, as existing source specifies. Preserve source diagnostic precedence for supported rows. A wholly filled region retains its separately declared historical refusal unless explicitly amended."
+      },
+      {
+        "id": "F1-PROFILE-REBIND",
+        "finding": "plate_verifier.rs:376 currently hardcodes geospec-st-logical-requests-v2; changing only the engine constant to v3 would invalidate F1 plans.",
+        "requirement": "Implement v3 coherently across protocol/plans, profile-bound subject/cache identities, F1 checker/producer metadata and actual host packages. A changed checker/source closure receives its actual new definition digest and independently authored metadata/expected bindings before acceptance. Keep old receipts paired with their original verifier artifacts; do not mutate old archives or describe old v2 target evidence as current v3 qualification. No new F1 mathematical theorem is required merely for this version binding; reuse unchanged independent geometry evidence, verify affected binding and installed paths."
+      }
+    ],
+    "independentBoundReview": {
+      "maxCells": 35937,
+      "maxExactAdjacencies": 104544,
+      "maxSectionRequests": 2261853,
+      "exactStatedScheduleMaximumExcludingExistingR": 5313249,
+      "conservativeUsingAAtMost3C": 5316516,
+      "lessThanSixMillion": true,
+      "arithmetic": "Finite binary64 magnitude<2^1024 and E<=1075 give scaled magnitude<2^2099; stated conservative sums/products/35937-term totals stay below6319bits.8192bits dominates this restricted same-scale polynomial arithmetic, not arbitrary slopes/elimination or unbounded cross-products."
+    },
+    "additionalSourceEvidence": [
+      {
+        "path": "packages/geospec-engine/src/proofs/void-topology.ts",
+        "sha256": "b1b883fa0c9c548eb32553055d84be66a63b28b64fa3c8948bcc08e6b6074f67",
+        "sameAsHead": true
+      },
+      {
+        "path": "packages/geospec-engine-native/rust/src/analysis/voids/mod.rs",
+        "sha256": "818671be31675da10fe097db203aa5c8f7500128a02a67daf70d507d4305070c",
+        "sameAsHead": true
+      },
+      {
+        "path": "packages/geospec-engine-native/rust/src/certificates/plate_verifier.rs",
+        "sha256": "432d65d0b2e33b330f751a615fb8702c98fb83b1f04d7c86fe4cb1ff27b82283",
+        "sameAsHead": true
+      },
+      {
+        "path": "packages/geospec-engine-native/rust/src/protocol.rs",
+        "sha256": "5e90498de8713c93ffd52558b049043bc828aa6466da4d5bf698b0865e5a0bce",
+        "sameAsHead": true
+      },
+      {
+        "path": "packages/geospec-engine-native/rust/src/runtime.rs",
+        "sha256": "2f145c8aa9f554033b708aa480ab9f6f0f2125e94bd75907dc154a04fec6ec33",
+        "sameAsHead": true
+      }
+    ],
+    "sourceHead": "5b2385327d36edeca373bf711eb5c652bedd9d85",
+    "remaining": "Actual implementation, independent new-domain fixtures/witnesses, chosen budget/cold-warm/selector/normal-tie-subnormal controls and installed public target parity remain. All original out-of-domain required cases stay in the M3 coverage denominator. R8-held security/fault/cancellation/fuzz/sanitizers, M4 and M5 obligations unchanged.",
+    "validation": {
+      "docsValidateExit": 1,
+      "log": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/principal-m3-before/docs-validation.log",
+      "result": "Same seven unrelated PicoVoxel missing-reference errors and five stale-document warnings; no selected GeoSpec frontmatter/link error. New artifact links and JSON readback checked separately.",
+      "leadSubmission": "01a08483-c520-7881-94ae-ae5cc43dfd31"
+    }
+  },
+  "s7SettlementReview": {
+    "at": "2026-09-09T05:04:03.732115+00:00",
+    "status": "Focused source finding sent to Lead; runtime regression for unawaited chains not yet observed by Principal. No S7 acceptance.",
+    "sourceSnapshot": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/principal-m3-s7-source-review/adapter-before-chain-review.ts",
+    "sourceSha256": "47eee16000efeb9d33958a50970f226f796a102ff2224cbcf06d13c73bef24ee",
+    "upstreamHelper": {
+      "path": "node_modules/.pnpm/@vitest+expect@4.1.11/node_modules/@vitest/expect/dist/index.js",
+      "sha256": "b177ca97952f1d65d3d2691edbc31ab1af56ac36b3cf08d7f56ad0ca69f07a45",
+      "symbol": "recordAsyncExpect, exported by @vitest/expect4.1.11; removes tracked native promise on settlement, with existing soft/error/warning handling."
+    },
+    "observedExistingProbe": "Worker pre-fix JSON has all3 passed including forgotten-red; post-fix JSON correctly has that originating test failed and2controls passed. Fixture uses a deterministic fake engine, not installed native qualification.",
+    "finding": "Custom TestTrackedPromise.consume() removes its task entry on .then/.catch/.finally before settlement. An unawaited chain therefore drops unfinished submitted work from this tracker. Reuse the existing helper where viable and qualify handled rejection plus forgotten-chain behavior; do not add a second lifecycle system.",
+    "leadSubmission": "01a0848c-afd2-7a51-acc8-4952de2f5517",
+    "rawReports": [
+      "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7/pre-fix.json",
+      "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7/post-fix-settlement.json"
+    ],
+    "timingFollowThrough": "Also qualify ignored fast-settling red while owning test continues an unrelated await; upstream helper removes on settlement and cannot be assumed to guarantee originating-test status for that timing.",
+    "followThrough": {
+      "at": "2026-09-09T05:22:49.692009+00:00",
+      "status": "Targeted settlement findings addressed in observed fake-engine runtime probes; final source binding and installed-native S7 remain Lead integration work.",
+      "records": [
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7/source-runner-matrix-r3.json",
+          "sha256": "3c51f9ce8889b430e2e85752fbe4823f95559980feb04e19f6b64b16e707bf50"
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7/post-fix-chains.json",
+          "sha256": "13dfbfd8a57a2706612bde1cb23127ad64502cec48b2504a5333231320a7c55d"
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7/unit-final.json",
+          "sha256": "9ff722bedfbe8cacd2c50253b8d0f9faa68333909a409654197e717213008535"
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7/source-passing-cases.json",
+          "sha256": "28d19a9c20fdf0484e9bbe438d492a616e46e93706ba8e6fcc39226ce43e463c"
+        },
+        {
+          "path": "packages/geospec/src/vitest/adapter.ts",
+          "sha256": "8c1fcb37bf83e833007080268d86fe99a9149015cfd0fb307242cb4188834e57"
+        },
+        {
+          "path": "packages/geospec/host-tests/s7-m3/settlement.fixture.ts",
+          "sha256": "86e11bc10ce650a88b614ac809f274ab0a0133070c09ce1139553f9672701972"
+        },
+        {
+          "path": "packages/geospec/host-tests/s7-m3/fixture-support.ts",
+          "sha256": "77e8b5d73892ec4b66207b7af160647a00a5fd5afcd027c928601f0ecfcfd0ad"
+        }
+      ],
+      "observations": {
+        "matrix": "18 cases: 11 passed, 7 intentionally failed at originating tests; raw aggregate success=false correctly preserved.",
+        "resolvedFindings": [
+          "Ignored then/finally chains remain tracked; throwing then/catch chains fail.",
+          "Fast ignored red remains attributed while originating test awaits unrelated timer.",
+          "Handled refusal/expected rejection, one not inversion, retry and following control pass."
+        ],
+        "unit": "11/11 passed in unit-final.json.",
+        "source": "Current tracker replaces a consumed wrapper with its chained promise instead of dropping tracking. Retains until task onFinished; upstream settlement-removal helper alone does not cover early ignored rejection contract.",
+        "scope": "Actual Vitest with fake engine. These outputs do not prove installed native/mixed/Python geometry parity, all terminal families, or whole S7 completion."
+      },
+      "namespaceReview": "Read actual FACE-ADDRESS-SEPARATION-01 ruling and current worker brief: public Explorer index separated from private query and certificate addresses. No additional prohibition on a separately declared proof association namespace was found; no new ruling or rework issued from speculative conflict.",
+      "next": "Lead finishes coherent source/check binding and actual installed S7 path; Principal reviews completed milestone bundle without duplicating owner tests."
+    },
+    "sourceBundleReview": {
+      "at": "2026-09-09T05:33:43.886138+00:00",
+      "status": "Source-ready S7 ordinary bundle accepted for Lead integration; installed and full S7 acceptance pending.",
+      "manifest": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7/final-manifest.json",
+      "manifestSha256": "46b04032912edc050e2f9e6e0b78b997b2ebb8cb0b5fa1f5d9d458035c7a7d12",
+      "hashChecks": 16,
+      "rawMatrix": {
+        "total": 20,
+        "passed": 13,
+        "intentionalOriginatingFailures": 7,
+        "aggregateSuccess": false
+      },
+      "focusedUnit": {
+        "passed": 12,
+        "failed": 0
+      },
+      "isolationRecords": [
+        {
+          "engineId": "isolation-a",
+          "pid": 24135,
+          "poolId": "1"
+        },
+        {
+          "engineId": "isolation-b",
+          "pid": 24136,
+          "poolId": "2"
+        }
+      ],
+      "review": "Read final report and tracker source; final seven source hashes, two preserved before copies, seven raw evidence hashes all verified. Expected-red raw exit/failure state retained. No installed engine run or whole-source security claim.",
+      "next": "Lead registers host fixtures, checks owned registration and runs existing installed-native acceptance on changed adapter; no extra worker probe round required."
+    },
+    "installedA2Acceptance": {
+      "disposition": "accepted bounded real-engine ordinary S7 matrix; not full W7/M3/target/security qualification",
+      "leadReview": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/s7-installed-review.json",
+      "leadReviewSha256": "90273a20c6563111f55c299f50ca8b7891c0f00d4849262b54df15f98178aee6",
+      "revision": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/s7-installed/check-revisions/a6-installed-a2",
+      "verifiedArtifactHashes": 94,
+      "verifiedLiveSourceSnapshotPairs": 5,
+      "processExitCounts": {
+        "0": 8,
+        "1": 9
+      },
+      "testObservations": 18,
+      "nativeEvaluations": 19,
+      "byteRecordsVerified": 364,
+      "successfulSubjectReleases": 36,
+      "findings": [
+        "Actual installed Node native engine through GeoSpec Vitest exports, immutable GLB and STEP admission; source owner traced in five frozen harness files.",
+        "Nine deliberate exit1 processes fail the originating selected test; eight exit0 processes pass. Forgotten red/then/finally/throwing chains, handled refusal, rejected subject and retry exercised. Retry contains red then green native results; rejected subject never calls native evaluate.",
+        "Missing BRep refusal remains refused in both polarities. Promise-received STEP relationship works. All evaluations precede healthy cleanup; separate isolation processes have distinct PIDs.",
+        "Raw source locations and prior attempt failures retained; physical a6 carries historical attempt-label a5 without evidence renaming. session-close is harness completion after public subject release, not an Engine.close/destructor claim."
+      ],
+      "remaining": "Complete corpus cross-language and certified targets, full API behavior, cache/cancellation/fault/security gates and final integration."
+    }
+  },
+  "sharedV3SourceReview": {
+    "at": "2026-09-09T05:07:33.298511+00:00",
+    "status": "Source/definition provenance verified; no runtime or milestone acceptance.",
+    "receipt": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/shared-v3/receipt.json",
+    "verifiedSnapshotAndPhysicalHashes": 148,
+    "definitionRecordCount": 45,
+    "definitionSha256": "831b4425151e11660c9e07f86babfecfd3adaaaf273991a623ce7ae9e0ad59b3",
+    "independentCanonicalEncodingEqual": true,
+    "changedDefinitionOwner": "rust/src/certificates/plate_verifier.rs numericProfile literal only",
+    "sourceDiffReview": "Engine and standalone checker bind v3; generated digest updated. Ingest descriptors remain unchanged; internal analysis cache keys include execution profile. Selected-domain cache has16 successful Rc cells and per-transfer capacity checks. Frozen58file check excludes the active unregistered continuous module;9warnings retained.",
+    "integrationFollowThrough": [
+      "Aggregate all simultaneously live uncached selected-domain transfers with retained cells and pending outputs; per-return accounting alone does not bound a later claim holding multiple uncached domains.",
+      "Complete selected face/edge association counts/ranges must hold before a box can be consumed as proof; upper-length guards alone do not establish them.",
+      "Actual profile/definition metadata joins, standalone verifier and installed public v3 campaigns remain required."
+    ],
+    "lifecycleCorrectionA2": {
+      "disposition": "root-cause source correction and bounded healthy lifecycle test accepted; installed full corpus rerun is still required",
+      "sourceManifestSha256": "31df550640fe591481f9f58b42060472178e8a2a8eb386e9547d5677d073bcc9",
+      "verifiedCopiedRows": 451,
+      "changedFromInstalledA1": [
+        "packages/geospec-engine-native/rust/src/prepared/plan.rs",
+        "packages/geospec-engine-native/rust/src/protocol.rs",
+        "packages/geospec-engine-native/rust/src/runtime.rs",
+        "packages/geospec-engine-native/rust/src/subject.rs"
+      ],
+      "independentFindings": [
+        "Admission already prefixed internal subject keys with NUMERIC_PROFILE, while runtime subject_handle/release and PreparedPlan used unprefixed namespaces. This explains successful admissions followed by uniform subjectHandle failures.",
+        "One subject_cache_key helper now constructs keys for admission, both lifecycle lookup/release paths and prepared-plan bindings, retaining semantic-subject versus raw-mesh namespaces. Public hashes/envelopes are unaffected.",
+        "Fourth change updates a preexisting internal test setup to use retained.cache_identity; the executed healthy subject release test body is unchanged.",
+        "A2 frozen451source closure changes exactly4files from A1 and excludes ongoing F2 source. Current helper differs from frozen code only by preserved formatting."
+      ],
+      "check": {
+        "result": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lifecycle-profile-a2/check-result.json",
+        "verifiedLogDiffBinaryManifestHashes": 4,
+        "observed": "1 existing ordinary healthy lifecycle test passed/Nx success;9 compilerwarnings remain."
+      },
+      "remaining": "Installed JS/Vitest/pytest complete current-profile corpus, F1/continuous results and deferred mandatory fault/lifetime/security qualification."
+    }
+  },
+  "f2EntryReview": {
+    "at": "2026-09-09T05:09:44.441030+00:00",
+    "report": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/f2/report.md",
+    "reportSha256": "99e61873199126fb3ebd955fe36bb5fd2d1f64fde042c532ae1a20323355a317",
+    "status": "Evidence-only prerequisite inventory inspected; no F2 source/runtime acceptance.",
+    "findings": [
+      "Current PmiFacts flattens first/second label roles and omits typed dimension values and exact plane/placement evidence. Typed numerical inventory and occurrence/public-face association are useful prerequisite implementation.",
+      "Suggested subject-bound family resource is insufficient if its verifier only checks primary/construction/mapping hashes. Self-consistent identity is not proof that rational coefficients denote the associated STEP faces.",
+      "F2 exact predicate requires a concrete independently checkable lift/admission derivation from actual represented geometry: a bounded verified source subset or sound construction/replay relation, rather than asserting provenance from a hash. Trusted attestation alone is a distinct assurance grade, not a substitute for the selected exact domain."
+    ],
+    "next": "Lead resolves smallest concrete exact-lift route and independently authored ordinary fixture/binding contract while retaining separate numerical PMI inventory work. No universal STEP/GD&T framework or held tamper/forgery execution authorized.",
+    "leadSubmission": "01a08491-d019-7c90-9c05-596e5bec88ca",
+    "directSourceDisposition": {
+      "at": "2026-09-09T05:15:03.197674+00:00",
+      "contract": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/f2-exact-lift/contract.md",
+      "sha256": "b2a49288c5cc3a1a4c705cad6cfa3f028496a62aafe41fcb183d60b29761d822",
+      "decision": "Bounded direct STEP source derivation addresses the hash-only premise gap in principle and fits adopted F2. Lead may continue concrete source-wire/transfer binding and implementation; no extra per-serialization permission gate.",
+      "requirements": "Exact original decimal/entity graph facts; admitted planar trim and units; complete occurrence route and actual transfer/public identity association; distinct source occurrences retained even under coincident floating placements; independent arithmetic bounds and ordinary fixtures. No all-STEP or runtime certification."
+    },
+    "sourceLiftA2BoundReview": {
+      "at": "2026-09-09T05:51:45.112906+00:00",
+      "status": "Source-lift graph route remains adopted; rational bound derivation needs focused correction before certifying the full admitted numeric range.",
+      "report": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/f2/revisions/source-lift-a2/report.md",
+      "reportSha256": "e597edbfa6e102aa18f703c0a71eb9ff3e0b3b716e6996e0e8828f5e09ad3dc6",
+      "counterexamples": [
+        {
+          "inputs": [
+            "1e308",
+            "1e-308"
+          ],
+          "operation": "exact addition",
+          "reducedNumeratorBits": 2047,
+          "reducedDenominatorBits": 1024
+        },
+        {
+          "inputs": [
+            "64 nines followed by e308",
+            "0. followed by 62 zeros, then 1e-308 (64 mantissa digits total)"
+          ],
+          "operation": "exact addition",
+          "reducedNumeratorBits": 2469,
+          "reducedDenominatorBits": 1233
+        }
+      ],
+      "finding": "The claimed coordinate numerator ceiling1236+10+ceil(log2(65))=1253 omits rescaling a large integer to the common decimal denominator. Even 1e308+1e-308 has a 2047-bit reduced numerator. Therefore downstream 3728/7456/9930 intermediate estimates do not follow as written.",
+      "requiredCorrection": "Bound scaled numerators and actual pre/post-normalization intermediates for the chosen algorithm. Cross-cancelled comparisons may still make10240 sufficient; either prove that concrete algorithm or derive a conservative checked ceiling. Do not shrink admitted decimals or waive exact checks to fit an unproved guard.",
+      "scope": "Exact Fraction arithmetic only, no native/parser/fault execution. This does not block ordinary supported fixture/import engineering.",
+      "next": "Lead owns focused correction with existing F2 engineer and implementation; no new research program or user ruling needed.",
+      "correctedEntry": {
+        "at": "2026-09-09T05:58:22.406294+00:00",
+        "status": "Corrected arithmetic/source entry accepted for guarded implementation; no F2 runtime or exact-domain certification yet.",
+        "report": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/f2/revisions/source-lift-a2/report.md",
+        "reportSha256": "f65c5476df2a581b67daf7834d6455b810a59ab3f3d0b86c13ac17a1a479f66d",
+        "beforeSha256": "e597edbfa6e102aa18f703c0a71eb9ff3e0b3b716e6996e0e8828f5e09ad3dc6",
+        "sourceHashesVerified": 38,
+        "sources": [
+          {
+            "path": "packages/geospec-engine/fixtures/selector/second-producer-transformed/model.step",
+            "sha256": "3514902985482242076f17e72aefc2ffb5ae4101bb4b4705d5aaa872b0f4c0c0"
+          },
+          {
+            "path": "packages/geospec-engine/fixtures/selector/second-producer-transformed/manifest.json",
+            "sha256": "a1110faa8447b2fa591107981557b9f7a475bcdc37b3fe56c632c33e14562c64"
+          },
+          {
+            "path": "packages/geospec-engine/fixtures/interop/nist-pmi/nist_ctc_01_asme1_ap242-e1.stp",
+            "sha256": "85a5752da05f53c456ca3a9e038c90358e1d5a3141d1f0d6e5f0970f2356e821"
+          },
+          {
+            "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/nist-pmi-bspline.step",
+            "sha256": "59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521"
+          },
+          {
+            "path": "packages/geospec-engine-native/rust/Cargo.lock",
+            "sha256": "08e2b144b9b89bb3637ef2f81bd92b935ac2ac726a9a303d33ce27d6bf76f0c9"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWDimensionalLocation.cxx",
+            "sha256": "1099adb1f5d31d197cae616f8bba951afc04712d3afa7115a538c8e495897d2f"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWDimensionalCharacteristicRepresentation.cxx",
+            "sha256": "691fa62be1aea0766fabdf85533bc82ad6437e47c548391b349d8746ff49a5ae"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWShapeDimensionRepresentation.cxx",
+            "sha256": "cfcb8174a9facdb7a8cbf21ff1aa363fadb13aac55e9664886342fbc1a128f3f"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWReprItemAndLengthMeasureWithUnit.cxx",
+            "sha256": "723b7113b28fa7afd6e82fe11466c7bf698000ff9e27765414d374a305e51d12"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepBasic/RWStepBasic_RWSiUnitAndLengthUnit.cxx",
+            "sha256": "c1b74e60a71c7a8478a5d5b2450252bb3082475ceab491c213b266a36de358f7"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWProductDefinitionShape.cxx",
+            "sha256": "e5edde6276a537f147ac833509a915923276bf3fab6d2cfb6843f2c1ce2ddd27"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/StepRepr/StepRepr_CharacterizedDefinition.cxx",
+            "sha256": "fd7f1b7b4a87aa79967fe7ad249b7b1b91c68bc324264e9f9bc240f4aa5bbbb9"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWShapeAspect.cxx",
+            "sha256": "da7876d5a665a5dca7169b7ccfb8ecd93e9bedaf30f25ac94f4a489c1e88867b"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWGeometricItemSpecificUsage.cxx",
+            "sha256": "8ee1e55622868ea4c77f381a1cd7f065e573f80f63e525661255dbf701733e3a"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWAssemblyComponentUsage.cxx",
+            "sha256": "ebbf4d9d4b3370b7388116966bda45548f6372b966958b3c8eeda94d95321281"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWContextDependentShapeRepresentation.cxx",
+            "sha256": "9c4e59f5469b79c58114951e06b578baeaa628cc45181af9183c2a9c91fa6fd2"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWRepresentationRelationshipWithTransformation.cxx",
+            "sha256": "729b174073fa4b1f535bacdd3fd3edc895fd7d23c4224c15435a55362c60b3bf"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWItemDefinedTransformation.cxx",
+            "sha256": "b6c27b54c5b8cbebdb85cdec50dc3bd9352d000d74f38c79a74543bdf3d544b8"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWAdvancedFace.cxx",
+            "sha256": "cd5fb88f1de56eac22addbf4a7bca62b90c69a995b5319065f84bcfad23556ca"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWFaceOuterBound.cxx",
+            "sha256": "e3f1c30cb7a56ccf184b501e2604ddb5801d8893fbdf420fd3a8c04c78f19ac9"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWEdgeLoop.cxx",
+            "sha256": "7b232dd60c32c539a93ccd185711e169063375618a1bb8e27d8269b53cea415c"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWOrientedEdge.cxx",
+            "sha256": "3e73ccffd221456e96fef7524a86faf9f1ba82ee9c070aae7d48265ca9b19e1a"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWEdgeCurve.cxx",
+            "sha256": "bbc84b6408e9ea05ec5b73560e25a4456172f780987e2765dad52e95694f154c"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepGeom/RWStepGeom_RWPlane.cxx",
+            "sha256": "0cca6b43d84ac0803d360180df3d190625dd016dae095e58d07d5e0e5e8a7fc8"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepGeom/RWStepGeom_RWAxis2Placement3d.cxx",
+            "sha256": "bc061b767359e5d082adf8c3da134a5478549bbe6e910630377ffc0ac577c0da"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepGeom/RWStepGeom_RWCartesianPoint.cxx",
+            "sha256": "8a7624043c8d86c08c6c4f1d01eb7e9340399786a716f7f7f6c95ab4e8d935f8"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepGeom/RWStepGeom_RWDirection.cxx",
+            "sha256": "6b9f71fd7957bff5a6c9275950218e3dd278bee7568e1f0bbd5acfd451d2a369"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepGeom/RWStepGeom_RWLine.cxx",
+            "sha256": "72b5c247b767471eb677d2d65467a10dd6d19b088c1494d5b18bcf96ad7c249e"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/RWStepGeom/RWStepGeom_RWVector.cxx",
+            "sha256": "77f37bc6a4a4bef99f1aa36ad2e88b322f3c2032931433288adf7ced605a0286"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/StepData/StepData_StepModel.hxx",
+            "sha256": "80eda87a083a2d97cdf4870a847233c407e4d705613c02d9c05ee782d4c26db3"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/StepData/StepData_StepModel.cxx",
+            "sha256": "71d9d48cb33d2b267375cf03e4fef7d081447f900e546a4a67a538f88aa99808"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/StepData/StepData_StepReaderTool.cxx",
+            "sha256": "5c0299c7787f5d1bf85a78d9df978538db3e43d5d447098428077141519137c8"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKXSBase/TransferBRep/TransferBRep.cxx",
+            "sha256": "a58204ae4a2c4ae43e527e72597172cbfda406f152fa993393aa442536861181"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx",
+            "sha256": "79f8bf12436c79ce51798da5f2c8303eea213745099135b4c21875fed687eaf3"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx",
+            "sha256": "a40c94e01a5f00ec0ebebaeb4dbbbc8bf21ad6f1bc1b7edf336dd5c36e4737db"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx",
+            "sha256": "71ca22ea347c61342293bf3ff05c645c90e3d3276c5fe28a1c1ed2a3c0a66465"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/DataExchange/TKXSBase/XSControl/XSControl_TransferReader.cxx",
+            "sha256": "9a43e8e43bb0efab3c21e5f4f8c49df31fb83882491469a6eeadf51407c5063d"
+          },
+          {
+            "path": "node_modules/.cache/geospec-engine-native/occt/source-verification-ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3/src/ModelingData/TKBRep/TopoDS/TopoDS_Shape.hxx",
+            "sha256": "9535f666d49437f72151a484daf9f60d065ac59d0dc765866211427e94085f65"
+          }
+        ],
+        "bounds": {
+          "token": 1236,
+          "millimeterToken": 1246,
+          "locatedCoordinate": 2489,
+          "coordinateDifference": 2490,
+          "integerNormal": 2472,
+          "dotProduct": 4964,
+          "largestWithSubtraction": 12401,
+          "guard": 12416
+        },
+        "basis": "Mixed-scale located coordinates use common decimal denominators and65signed terms, differences130; primitive-normal dot/square/interval comparison includes pre-reduction products. Reviewed rational expression bounds and independently calculated constants. Preserved original erroneous draft and counterexamples.",
+        "implementationPremises": [
+          "Normalize every source length to exact mm once before signed-permutation placement composition.",
+          "Keep admitted decimal denominators powers of2/5 and reduced after operations; count transient multiplication/addition bounds before allocation.",
+          "Implement explicit guarded arithmetic corresponding to the expression graph; unchecked arbitrary BigRational chains are not established by this proof.",
+          "Keep original source/occurrence identity and typed ambiguity refusal; actual AP242 import and forward transfer injectivity still need engineering tests."
+        ],
+        "next": "Lead reserves core checker/adapter/fixture implementation; no more conceptual proof rounds needed unless concrete implementation changes premises."
+      }
+    },
+    "blueprintIntegration": {
+      "at": "2026-09-09T06:12:35.434602+00:00",
+      "documents": {
+        "geospec-native-core-protocol-blueprint.md": {
+          "sha256": "971812aedb3a0adcd1644768c721505f1314303b850ebd221641997be9b8d1a5",
+          "reviewedLinks": [
+            "artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/f2/revisions/source-lift-a2/report.md",
+            "artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/f2/revisions/source-lift-a2/evidence/math-correction.md",
+            "artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/principal-m3-review-a1.json",
+            "artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/principal-m3-review-a1.json"
+          ]
+        },
+        "geospec-native-occt-backend-blueprint.md": {
+          "sha256": "d71c39e68a088624cc3efff04652637801365bc0ab3e30fa4a58453a4f8cd708",
+          "reviewedLinks": [
+            "artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/f2/revisions/source-lift-a2/report.md#source-identity-to-private-face-address"
+          ]
+        }
+      },
+      "scope": "Recovered successful prior edits: exact original STEP source admission, forward entity/occurrence/face association and corrected12416bit guard. No new denotation, activation or qualification.",
+      "validation": {
+        "command": "pnpm docs:validate",
+        "exitCode": 1,
+        "log": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/principal-m3-before/docs-validation-f2-source-lift.log",
+        "result": "7 unrelated missing PicoVoxel reference errors and5warnings across1448files; no selected GeoSpec document error."
+      }
+    },
+    "composedRuntimeA3Review": {
+      "disposition": "bounded actual composed-runtime behavior reviewed; no independent fullwire or installed-language F2 acceptance",
+      "receipt": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/f2-integration-a1/runtime-a3/receipt.json",
+      "receiptSha256": "7444c0b6e6902228265c1dde763ac3861976c637211bd4450074630950d6f424",
+      "verifiedReceiptArtifacts": 7,
+      "verifiedCopiedSourceRows": 377,
+      "cases": [
+        "distinct-occurrences",
+        "same-occurrence",
+        "outside-band",
+        "nonparallel",
+        "ordinary-box-no-pmi"
+      ],
+      "coldWarmClaimResults": 20,
+      "lowBudgetRefusals": 5,
+      "healthyReleases": 5,
+      "findings": [
+        "Read actual configured runtime test and all15savedrecords:5sources,20both-polarity cold/warm claim outcomes, exact result/submit consistency and coldwarm triples.",
+        "Positive/negative band controls and same/distinct-occurrence faces carry exact squared distance100 and correct subject/plan bindings; source0.95..1.05cm versus0.99cm upperlimit.",
+        "Nonparallel control changes parent AXIS2_PLACEMENT_3D axis#627 for entireinstance, retaining orthogonal reference#628; this is an admitted signed-permutation rotation, not a corrupted individual plane. Actual reason is selected planes not parallel. Missing-PMI box refuses both polarities.",
+        "Test/source checks are bounded behavior evidence. Full source checker/ABI/security assurance, independent complete claims/witness expectations and real installed host path remain selected."
+      ],
+      "remaining": "F1/F2 final source-definition bindings, independent fullwire oracle and installed JS/Vitest/pytest/currentWASM qualification."
+    },
+    "integratedA5CanonicalParityReview": {
+      "independentAuthoritySha256": "0dc84a4b24d380d76bd4edcb72435f8ef4d8d77d732c5a38248a48084a87f3ad",
+      "rawRoutes": [
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a5/f2-run-a1/javascript-standalone.json",
+          "sha256": "a39f5845191df29d4fd472aa7b367ce0fe97757b860ebc846ea25d8a8def5bbb",
+          "rows": 15,
+          "canonicalFields": 45
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a5/f2-run-a1/javascript-vitest.json",
+          "sha256": "0c1fa9d1598de20465037646a2b5c0d11c1a431ca91b244f4a5ce684959ce926",
+          "rows": 15,
+          "canonicalFields": 45
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a5/f2-run-a1/python313.json",
+          "sha256": "4b97259a1fe6b2f06dfe3661c5a83ef8d8fafbb52162d7c15c89831a3cc94eaa",
+          "rows": 15,
+          "canonicalFields": 45
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a5/f2-run-a1/python314.json",
+          "sha256": "d19fc287db9112e8be288cc92c537784a29726d4e6efdbf0eb9bf89fca3376d5",
+          "rows": 15,
+          "canonicalFields": 45
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a5/f2-mixed-run-a1/javascript-standalone.json",
+          "sha256": "83036f2e65d3560d6b054389e8696c29244d7622f7a838d6c73016061cf1d1c4",
+          "rows": 15,
+          "canonicalFields": 45
+        },
+        {
+          "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a5/f2-mixed-run-a1/javascript-vitest.json",
+          "sha256": "797f7d978facb5d6b44d7f019aa045f79f23c9accd130dc1134053f8d0471cb0",
+          "rows": 15,
+          "canonicalFields": 45
+        }
+      ],
+      "browsers": [
+        {
+          "browser": "chromium",
+          "version": "149.0.7827.55",
+          "rows": 15,
+          "canonicalFields": 45,
+          "releases": 15
+        },
+        {
+          "browser": "firefox",
+          "version": "151.0",
+          "rows": 15,
+          "canonicalFields": 45,
+          "releases": 15
+        },
+        {
+          "browser": "webkit",
+          "version": "26.5",
+          "rows": 15,
+          "canonicalFields": 45,
+          "releases": 15
+        }
+      ],
+      "browserRawSha256": "66d0970ce5d2f5a8843b072f52c78b1a3e20eef739a58cce5c92688b2158b568",
+      "totalObservations": 135,
+      "totalCanonicalFieldsCompared": 405,
+      "artifactManifestRecords": 152,
+      "artifactIssues": [],
+      "reviewerCheckCorrection": "Initial read-only check compared batch result to single result; corrected to independent evaluation envelope. No evidence or product changes.",
+      "status": "accepted-bounded-A5-F2-canonical-parity",
+      "scope": "15 independently specified F2 public cases, full claim/plan/evaluation bytes across six installed native/mixed-Node routes plus Chromium/Firefox/WebKit. Reuses prior exact-source mathematical and association review.",
+      "limitations": [
+        "No A6 binary acceptance; verifier source binding changes require the already assigned independent rebind.",
+        "No full M3 acceptance, general mixed corpus, F1 browser acceptance, numerical guarantee ledger closure, or performance/release qualification.",
+        "Three public unsupported-domain cases are positive polarity; do not treat the 15-case set as exhaustive refusal/security coverage.",
+        "First browser harness failure remains preserved; this review compares the successful A2 raw result directly to independent authority."
+      ]
+    }
+  },
+  "corpusEntryReview": {
+    "at": "2026-09-09T05:25:33.592484+00:00",
+    "status": "Source-ready adapter reviewed; no runtime/full-family acceptance.",
+    "sourceReadyPath": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/corpus/source-ready.json",
+    "sourceReadySha256": "9846592e827b263469697c173275ab644233b6103c0eb3d9a007f1445501dbcd",
+    "verifiedFiles": [
+      {
+        "path": "packages/geospec/host-tests/m3-corpus/corpus.mjs",
+        "sha256": "965f36209bbea64e26880d7927315172bc686d73a623be89559924236224b76f"
+      },
+      {
+        "path": "packages/geospec/host-tests/m3-corpus/corpus.test.mjs",
+        "sha256": "f31b432e26c3c8a03fdfa9836bc03d7cd7e151ce2051722768b23eb1f7627ef1"
+      }
+    ],
+    "independentJoin": {
+      "b35WithB55Successors": 322,
+      "f1": 12,
+      "total": 334
+    },
+    "review": [
+      "Read complete adapter and focused check; hash-verified retained authority inputs remain separate from empirical profile observations.",
+      "Prospective F1v3 plan and checker binding is explicitly metadata-only; old v2 rows stay intact.",
+      "M2 observed cells cover a bounded historical profile; new v3 still needs installed qualification.",
+      "F2 zero rows and continuous-v3 independent controls are explicit open gaps.",
+      "Host adapter currently reads Brain evidence; public installation/runtime must remain Brain-independent, and final CI corpus delivery remains M5 integration work."
+    ],
+    "next": "Lead owns source registration, appropriate cross-host campaign and remaining F2/continuous fixtures; reuse this join rather than recreating corpus tooling.",
+    "v3OverlaySourceReview": {
+      "disposition": "source reviewed for current-profile installed integration; actual target/correctness acceptance remains open",
+      "manifest": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/corpus-v3/final-manifest.json",
+      "manifestSha256": "c41fa2c5d122fbc93ee6b93b0e295f2c8fa238f6d9839e85ee18d1dbbd5fae42",
+      "verifiedSourceHashes": 6,
+      "findings": [
+        "Only three exact known numericProfile envelope fields are changed by a single validated token replacement; no floating value or authored claim is changed.",
+        "322 prior rows and12 prospective F1 rows preserved;4 protocol-error paths retained as errors. Ten changed insertion/void-domain results explicitly withheld rather than copied into v3.",
+        "Profile overlay does not independently establish accuracy or empirical current-profile equality. Existing three acceptance tracks retained; later numerical contracts and actual target results are still necessary."
+      ],
+      "checkEvidence": "Worker checks.txt records one passing source check and focused lint/format; this is summarized evidence, not a raw runner transcript. Principal source review does not claim independent rerun."
+    },
+    "interruptedPythonAdmissionDiagnosis": {
+      "disposition": "source-backed public Python API gap and separate harness bug; full four-route parity not accepted",
+      "artifacts": {
+        "attempt-4/javascript-standalone.json": "624d199a299a4f15a11abbeba59ced0465b0388b8d41339c168507a95f30e1b2",
+        "attempt-4/javascript-vitest-normalized.json": "31ac6c81a8c5151ca456ba9e84c8782b87b1d55a9916d29482df55a9033ab31a",
+        "attempt-5/python313-pytest.json": "33ced1e8a6113d1d024ac06dd4429262869d573be7e95b8421e9becf19a8a9e1",
+        "attempt-5/python314-pytest.json": "762c765999546c3fc7f94e29425e27ce35154c93d7ee31732d886800ff282c9b"
+      },
+      "routeStates": {
+        "javascript-standalone": {
+          "evaluated": 334
+        },
+        "javascript-vitest": {
+          "evaluated": 334
+        },
+        "python3.13-pytest": {
+          "evaluated": 195,
+          "admission-error": 139
+        },
+        "python3.14-pytest": {
+          "evaluated": 195,
+          "admission-error": 139
+        }
+      },
+      "admissionErrors": {
+        "javascript-standalone": {},
+        "javascript-vitest": {},
+        "python3.13-pytest": {
+          "AssertionError": 126,
+          "UnicodeDecodeError": 13
+        },
+        "python3.14-pytest": {
+          "AssertionError": 126,
+          "UnicodeDecodeError": 13
+        }
+      },
+      "rootCause": [
+        "Public GeoSpecEngine.ingest_subject has no ingest_options parameter and hardcodes empty ingestOptions. All126 Python313 identity assertions differ from matching JS requests only in ingestOptions (excluding requestId); expected identities must stay unchanged.",
+        "Harness _RecordingNativeEngine.ingest_subject feeds primary/resources into a canonical JSON byte recorder that unconditionally decodesUTF8, causing13binary-input UnicodeDecodeErrors before native call. Binary buffer hashes/lengths must remain separate."
+      ],
+      "sourceHashes": {
+        "packages/geospec-engine-native/bindings/python/python/geospec/_api.py": "393a972fa4939452ea5c7b554460cd88fc4f0bb40344cbcd61955eb735f03e53",
+        "packages/geospec/host-tests/m3-corpus/test_installed.py": "b8dfbc7b30bb0a2ab2c7abd92f50f8a1a3d7700450bcb9c0f9804f61f8558385"
+      },
+      "optionsExample": [
+        {
+          "rowId": "family/toHaveConnectedComponents/positive",
+          "original": {
+            "name": "clearance.aabb-gap-false-positive"
+          },
+          "python": {}
+        }
+      ],
+      "commonReports": 191,
+      "commonCanonicalFieldsChecked": 2292,
+      "commonCrossRouteMismatches": [],
+      "limitations": [
+        "Common-row comparison is diagnostic of the surviving subset, not full corpus coverage or numerical correctness. Vitest uses recorded Node26; standalone usesNode24.",
+        "No new engine run. Lead owns current worker recovery and publicAPI/harness implementation/rebuild checks.",
+        "Principal initially misstated ingest_options as existing in transport; corrected immediately after source read. First observation comparer used wrong JS admission container; corrected before evidence write."
+      ]
+    },
+    "pythonAdmissionA3Review": {
+      "disposition": "public API source correction, transport tests and installed artifact binding reviewed; actual same-subject corpus qualification pending",
+      "handoff": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/python-admission-a3/handoff.json",
+      "handoffSha256": "4a4bf9ad63a7cbbabaf231723fabed746d3ae04bebd51f2d0a445b1279ac5c6c",
+      "handoffFileHashesVerified": 10,
+      "installedArtifactHashesVerified": 18,
+      "sourceClosureRows": 451,
+      "exactDeltaFromA2": [
+        "packages/geospec-engine-native/bindings/python/python/geospec/_api.py",
+        "packages/geospec-engine-native/bindings/python/tests/test_matchers.py"
+      ],
+      "findings": [
+        "Optional ingest_options preserves default emptyobject; supplied Mapping uses existing recursive literal serializer for string keys/finite safe numbers and native core format-specific name validation. No changed subject identity arithmetic or expected hashes.",
+        "Existing binary-order transport control now checks omitted/default and named options in both CPython313/314, two passing parameterizations each. Transport test is not native geometry proof.",
+        "Core request.frame accepts coordinateSystem/sourceUnit/outputUnit only; uniformScale is derived descriptor metadata and correctly not added to Python request API.",
+        "Wheel rebuild source closure contains only facade+test changes from frozen A2; native artifacts have their own hashes, not a claim that rebuilt binaries are byte-identical."
+      ],
+      "remaining": "Same original authored options through installed pytest complete corpus, new continuous supplement, full certified targets and mandatory validation."
+    },
+    "installedA3ParityAndContinuousAcceptance": {
+      "disposition": "accepted bounded current334 corpus same-profile four-route canonical equality and selected18continuous witnesses/12coldwarmbudget cases; M3 incomplete",
+      "leadReview": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/installed-a3-byte-witness-review.json",
+      "leadReviewSha256": "0234dde2d930afce7b2c1ee7919a11f3c555e4075df0c0c68b8332fc9bd32b1f",
+      "verifiedRawArtifactHashes": 14,
+      "groups": {
+        "corpus": {
+          "rowsPerRoute": 334,
+          "routes": 4,
+          "completePerRoute": 330,
+          "protocolErrorRowIds": [
+            "ancillary/analyzeMesh/negative",
+            "ancillary/analyzeBrep/negative",
+            "ancillary/inspectGeometry/negative",
+            "ancillary/analyzeMeshOverlap/negative"
+          ],
+          "canonicalFieldsVerified": 3960
+        },
+        "continuous": {
+          "rowsPerRoute": 18,
+          "routes": 4,
+          "completePerRoute": 18,
+          "protocolErrorRowIds": [],
+          "canonicalFieldsVerified": 216
+        },
+        "budgets": {
+          "rowsPerRoute": 12,
+          "routes": 4,
+          "completePerRoute": 12,
+          "protocolErrorRowIds": [],
+          "canonicalFieldsVerified": 144
+        }
+      },
+      "witnesses": [
+        {
+          "id": "insertion-depth3-band3-positive",
+          "status": "passed",
+          "exactInsertionCopies": 1
+        },
+        {
+          "id": "insertion-depth3-band3-negative",
+          "status": "failed",
+          "exactInsertionCopies": 1
+        },
+        {
+          "id": "insertion-depth3-band4to6-positive",
+          "status": "failed",
+          "exactInsertionCopies": 3
+        },
+        {
+          "id": "insertion-depth3-band4to6-negative",
+          "status": "passed",
+          "exactInsertionCopies": 1
+        },
+        {
+          "id": "wide-channel-min4-positive",
+          "status": "passed",
+          "completeGridCopies": 2,
+          "sectionCopies": 2
+        },
+        {
+          "id": "wide-channel-min4-negative",
+          "status": "failed",
+          "completeGridCopies": 2,
+          "sectionCopies": 2
+        },
+        {
+          "id": "wide-channel-min5-positive",
+          "status": "failed",
+          "completeGridCopies": 2,
+          "sectionCopies": 2
+        },
+        {
+          "id": "wide-channel-min5-negative",
+          "status": "passed",
+          "completeGridCopies": 2,
+          "sectionCopies": 2
+        },
+        {
+          "id": "narrow-channel-min1-positive",
+          "status": "failed",
+          "completeGridCopies": 2,
+          "sectionCopies": 2
+        },
+        {
+          "id": "narrow-channel-min1-negative",
+          "status": "passed",
+          "completeGridCopies": 2,
+          "sectionCopies": 2
+        },
+        {
+          "id": "narrow-channel-connectivity-positive",
+          "status": "passed",
+          "completeGridCopies": 2,
+          "sectionCopies": 0
+        },
+        {
+          "id": "narrow-channel-connectivity-negative",
+          "status": "failed",
+          "completeGridCopies": 2,
+          "sectionCopies": 0
+        },
+        {
+          "id": "wide-channel-waypoint-in-material",
+          "status": "failed",
+          "completeGridCopies": 2,
+          "sectionCopies": 0
+        },
+        {
+          "id": "wide-channel-waypoint-in-material-negative",
+          "status": "passed",
+          "completeGridCopies": 2,
+          "sectionCopies": 0
+        },
+        {
+          "id": "wide-channel-isolation-in-material",
+          "status": "refused",
+          "completeGridCopies": 1,
+          "sectionCopies": 0
+        },
+        {
+          "id": "wide-channel-isolation-in-material-negative",
+          "status": "refused",
+          "completeGridCopies": 1,
+          "sectionCopies": 0
+        },
+        {
+          "id": "wide-channel-off-center-section",
+          "status": "refused",
+          "completeGridCopies": 1,
+          "sectionCopies": 0
+        },
+        {
+          "id": "wide-channel-off-center-section-negative",
+          "status": "refused",
+          "completeGridCopies": 1,
+          "sectionCopies": 0
+        }
+      ],
+      "checkerSha256": "30a400294c13698119137bdfbc266e4e81b2adb5e8784838eaafb9ff3a3557ba",
+      "findings": [
+        "Independent saved-data comparison uses full claim/plan/result UTF8, not hash-only equality or host-side tolerance.330complete corpus reports across4routes;4ancillary protocol errors remain explicit.",
+        "Python public-ingestion options fix restores original subject identities; repeated builds use independently hashed A3wheels with unchanged frozen A2Rust closure. StandaloneNode24/VitestNode26/Python313314 exercised, not full Node\u00d7framework matrix or mixed/browser qualification.",
+        "Read complete witness checker and source association/index contracts: corrections solely map one-based private face/edge addresses and x-fast cell indices. Independent exact coordinates/material union/component equivalence and rational depth/section expectations unchanged; original comparator failures retained.",
+        "Budget16/118/1256 and adjacent underspend controls preserve cold/warm canonical outcomes, explicit refusal and unitsUsed. Complete selected channels demonstrate positive/negative/material-point and noninvertibleunsupported outcomes.",
+        "26documentaryUTF8 resource values were lossy in oldJSobservations; those strings are not original binary authority. Lead separately verified64 saved buffer identities. No canonical claim/result lossy decoding or result change is accepted."
+      ],
+      "remaining": [
+        "Approximate corpus accuracy and legitimate legacy result corrections, all selected geometry domains/F2, full canonical API/target matrix and currentmixedWASM.",
+        "FullW6 cache/security/cancellation/lifetime gates, C1\u2013C3, trusted evaluation, finalperformance/CI/integration andUI/desktopE2E."
+      ]
+    },
+    "brepProjectionSoundnessReview": {
+      "disposition": "concur with retaining existing native required-evidence refusal; no new semantic waiver",
+      "evidence": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/evidence-projection/lead-integration-a2/disposition.md",
+      "sha256": "66d66ae12221cbd245c07d4e869e79d927398ce779babc2ef1408fc0810dc295",
+      "findings": [
+        "Reviewed preserved before/after: proposed removal of six required-evidence presence checks and absent free-bound/small-edge defaults changes predicate meaning, not just projection.",
+        "Restored refusal when requested maximum tolerance, free-bound count, small-edge census, same-parameter, closed-shell or closed-wire state is unmeasured. Both polarity semantics stay core-owned.",
+        "Legacy behavior remains comparison evidence; it cannot authorize passing unmeasured native facts. analyzeMesh projection and final shared metadata require separate source/behavior checks."
+      ]
+    }
+  },
+  "continuousSectionSourceReview": {
+    "at": "2026-09-09T05:29:08.731669+00:00",
+    "status": "One bounded admitted-domain finding for Lead integration; no runtime acceptance.",
+    "source": "packages/geospec-engine-native/rust/src/analysis/continuous/topology.rs",
+    "sourceSha256": "59fb49c3a44ee1a7087d2b910e829404ed4d91dbbffb78f2ac3d4d3d9d608f7d",
+    "contract": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/continuous-contract/proposal.md",
+    "contractSha256": "3354b773fe5f60098f95ff01c02364fd4fe67fb6e1eaf44255def110a924ba0f",
+    "finding": "Proposal minCrossSection requires entire component serial centered rectangular sections on the common transverse line. section_evidence checks line cell containment, complete rectangles, adjacency and nesting, but does not compare each rectangle transverse midpoint to the authored line. Off-center lines or shifted nested rectangles can therefore be admitted beyond the frozen centered domain.",
+    "disposition": "Honor current domain with exact midpoint equality before promotion. A wider provably sound line-containing domain may be separately justified later; no need to broaden this settled contract while integrating. This is an admission-contract mismatch, not evidence that the area arithmetic is false.",
+    "positiveReview": "Source scans full component sections, rejects nonrectangular/bypass and nonnested changes, includes event apertures and both one-sided limits, and compares exact rational area before display. A2 eight-selector pass is historical copied source; zero-based incidence correction awaits current-source verification.",
+    "next": "Lead integrates precise domain check/ordinary countercontrol through existing engineer ownership and one final source-bound validation; preserve existing probes.",
+    "sourceFollowThrough": {
+      "at": "2026-09-09T05:36:02.611002+00:00",
+      "observation": "section_evidence now compares both exact rational rectangle midpoints with the common transverse waypoint line for every full component rectangle. Existing bypass test includes shifted nested rectangle negative control. Admitted-domain source finding resolved; final A3 execution still pending.",
+      "sources": [
+        {
+          "path": "packages/geospec-engine-native/rust/src/analysis/continuous/topology.rs",
+          "sha256": "7a9d403c4b42cdd47005d12ee1da5ad7d3c00442c63d69e38ca10429bb889d03"
+        },
+        {
+          "path": "packages/geospec-engine-native/rust/src/analysis/continuous/tests.rs",
+          "sha256": "ee53d7c4e69b78120f65896328b95c217a0339bcf30d4690696c58d3799e5460"
+        }
+      ]
+    }
+  },
+  "faceAddressIngestReview": {
+    "at": "2026-09-09T05:31:32.606501+00:00",
+    "status": "Source review; two new quadratic population scans identified for routine Lead repair, no runtime acceptance.",
+    "source": "packages/geospec-engine-native/native/occt/bridge/geospec_occt_bridge.cpp",
+    "sha256": "ff77c33b3a185a8570af59ee258a1cfb0b050fc10f054762d92307a5a1221d46",
+    "finding": "Both occurrence and whole import iterate public Explorer faces and call exact_face_index, which scans every private face. Existing faces IndexedMap is still in scope and already maps private unique topology.",
+    "repair": "Use existing FindIndex and verify mapped face IsEqual to retain orientation/location and unsupported behavior. Keep public duplicates/semantic ambiguity handling separate. No added cache required.",
+    "positiveReview": "Read located/public identity seam, private query counts, report-copy mapping, Rust repr(C) query_index addition and updated LocatedFace entities. Whole/private certificate namespace remains separate.",
+    "leadSubmission": "01a084a6-177b-7781-aec7-0fbfec80da9f",
+    "remaining": "Actual frozen C/Rust ABI compile, private/public runtime joins, full corpus and broad performance campaign.",
+    "sourceFollowThrough": {
+      "at": "2026-09-09T05:36:02.609632+00:00",
+      "observation": "Both new public population loops now call exact_mapped_face_index with their existing IndexedMap. Helper uses FindIndex then IsEqual on stored private face, returning zero on orientation/location mismatch. Quadratic population finding is resolved in source; actual ABI/geometry/broad campaign still pending.",
+      "sources": [
+        {
+          "path": "packages/geospec-engine-native/native/occt/bridge/geospec_occt_bridge.cpp",
+          "sha256": "be59e0b6d353f79ac5e109415f1a50f5e33a7d9cd7868fea9b500e4e1a8e7edf"
+        }
+      ]
+    },
+    "classifierExpectationReview": {
+      "at": "2026-09-09T05:48:56.648569+00:00",
+      "status": "New face-address test expectation correction justified by unchanged pre-existing classifier contract; actual A3 rerun remains pending.",
+      "source": "packages/geospec-engine-native/native/occt/rust/tests/query_matchers.rs",
+      "sha256": "5fa6e9e20f36a0148e161f8a605999998705eab7e3a6af884fb5af492690e30f",
+      "basis": "HEAD-identical query_matchers.rs lines75\u201377 require In for a face center and Out off-surface; lines152\u2013154 require On for trimmed-boundary edge endpoint. BrepSubject documents located trimmed-face classification, bridge projects then calls 2D FaceClassifier.",
+      "disposition": "Changing the newly authored face-address center assertion from On to In corrects a test authoring error. It does not alter old fixtures, tolerance, geometry output or public semantics. A2 failure remains preserved.",
+      "result": "A2 compiled all three ordinary tests, two passed and named-face failed only the incorrect final In/On assertion. No broad/public target acceptance."
+    }
+  },
+  "continuousA3CheckReview": {
+    "at": "2026-09-09T05:41:06.123101+00:00",
+    "status": "Eight internal continuous-module controls verified on A3 current source. Accepted bounded module evidence, not M3/public-family completion.",
+    "sourceManifest": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/continuous-check-a3/source-manifest.json",
+    "sourceManifestSha256": "bbe54fbd1b4c80c5cc5465ba9f67127d29a5bca7bba820c79b5b38e2daf1817f",
+    "snapshotAndLiveHashesVerified": 140,
+    "log": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous/check-a3.log",
+    "logSha256": "fe07c081a2af784faf4b988f5f39ff67ea75e1a5317d07fb7d6dd8231a4008b7",
+    "binary": "node_modules/.cache/geospec-engine-native/m3-continuous-a1/a3/geospec_engine_native_core-test",
+    "binarySha256": "59d0b6f2248c1fb377ae6150d19067945c6e15e709a5e11b8469aa89da91daf0",
+    "tests": [
+      "insertion_exact_depth_and_authored_band",
+      "insertion_zero_tangent_and_closed_boundary_line",
+      "insertion_exact_comparison_precedes_tie_and_subnormal_display",
+      "void_constant_channel_has_exact_area_four_and_checked_units",
+      "void_narrow_waist_finds_exact_quarter_area",
+      "void_preserves_point_connectivity_and_isolation_precedence",
+      "void_disconnected_path_is_geometric_false",
+      "void_section_rejects_a_bypass_component"
+    ],
+    "result": "Eight exact test-name rows ok; eight 1passed/0failed summaries; Nx target success. No duplicate test execution by Principal.",
+    "reviewCorrection": "First local review assertion searched an abbreviated summary without ignored/measured columns; failed before writing acceptance. Read exact raw log and corrected review parser; engine outcome unchanged.",
+    "targetJoin": "Current test-continuous-m3 target equals preserved pre-face-target project object; unrelated added face target does not stale these tests.",
+    "limits": [
+      "Internal neutral certificates; actual OCCT selected-domain admission and public wrappers remain to qualify.",
+      "Installed full-corpus JS/Vitest/pytest and all seven targets remain M3/M5 work.",
+      "Original non-box/grouped/inferred/oblique/occurrence-waypoint cases remain selected.",
+      "Held security gates not executed."
+    ]
+  },
+  "ordinaryIterationAuthority": {
+    "at": "2026-09-09T05:42:21.161588+00:00",
+    "status": "Enforcement of existing orchestrate-program delegation; no scope or security-gate amendment.",
+    "observed": "FACE A1 ordinary test compilation failed on nonexistent CylinderAxialExtent.face and temporary PathBuf ancestor borrow; engineer was collecting failure hashes without fixing owned source under one-run brief.",
+    "raw": [
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/face-address-check-a1/stdout.log",
+        "sha256": "7e9cd59b638efb72f732feee44eba1e357b1cdf60a8dc493673281dd4d58a4ba"
+      },
+      {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/face-address-check-a1/stderr.log",
+        "sha256": "013a17c6fda7664f1f90843f300a25b8d3e98a93a8548d4b2218d65670d9e504"
+      }
+    ],
+    "instruction": "Lead gives same engineer standing bounded owned-source edit/check retry authority with fresh snapshots in its reserved path. Preserve old A1 and exclusive shared build/install scheduling. No new Principal per-command approval/goal for routine compiler repairs. Held R8 execution remains excluded.",
+    "leadSubmission": "01a084af-fd5d-7760-9219-728b1f52c784"
+  },
+  "faceAddressA3Review": {
+    "at": "2026-09-09T05:53:33.149646+00:00",
+    "status": "Bounded native OCCT face-address adapter evidence accepted; full public-family/target qualification remains.",
+    "result": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/face-address/check-revisions/a3/result.json",
+    "resultSha256": "7ce0481385d9500ed157049555448c53087c0cee77f4609eaacc6bab0cb4a6dc",
+    "baseAndA3SourceHashesVerified": 192,
+    "liveDrift": [],
+    "checks": "Both streams, overlay/base manifests and preserved binary hashes verified; raw3tests passed/Nxsuccess.",
+    "sourceReview": "Source private/public map and copy-history review complete in prior faceAddressIngestReview; new test corrections confined to authoring defects, old fixtures unchanged.",
+    "observations": {
+      "faceRows": 27,
+      "certificateRows": 2,
+      "cylinder": "public0/private1",
+      "namedCubeBFace": "public3/private4 with authored label",
+      "retainedCertificateMaps": "Both occurrences retain private6faces/12edges and report-copy identity assertions pass."
+    },
+    "limits": [
+      "These fixtures do not establish general duplicate traversal or coincident occurrence association acceptance.",
+      "No installed JS/Vitest/pytest, mixed/browser full corpus or final performance qualification follows from this adapter target.",
+      "Prefix5834-file verification is worker evidence reused from pinned build; Principal did not duplicate the full prefix scan.",
+      "Held security gates not exercised."
+    ]
+  },
+  "continuousFixtureEntryReview": {
+    "at": "2026-09-09T06:12:35.428825+00:00",
+    "disposition": "accepted independent authored fixtures and nominal mathematical expectations for public integration; not candidate geometry or installed-target qualification",
+    "evidence": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures",
+    "verified": {
+      "exportFixtureHashesAndLengths": 3,
+      "intentAndGeneratorHashes": true,
+      "readerSourceAndBinaryHashes": true,
+      "observedOccurrences": 14,
+      "orderedNamesLabelsBoundsUnitsAndIdentityTranslations": true,
+      "fixtureSha256": {
+        "channel-narrow.step": "b61d8f199498d38d792a668747c4e9269ad36917dd47e687d532f46b6c94b65d",
+        "channel-wide.step": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "insertion-boxes.step": "f8d44e55f2b013d3cee7b8c47eabe2432d87140d767c7e3750f921434d1b1eee"
+      },
+      "artifactSha256": {
+        "intent.json": "28ae4ce068c3166e44af16a0ebbc35b9d78added745a0465dd0e1b1dacd27d20",
+        "math-proof.json": "a992a8d1016749decc598d00560bae17718af90ffbc9c008a58738a2635ffe09",
+        "observed-import.json": "2940c74f6a9e4a22b90576277184db7fdac9409ea03b555ce651faa5733d2192",
+        "verify-intent.mjs": "ef9270e95e11794083cffa8cbe0c444d393b047e9ff76b209c8f5ae1c888b63d",
+        "public-request-proposals-v2.json": "a490f04ab5b872fd463846a5268db908ba6601e8c321b0a861c8102307e72a3f"
+      }
+    },
+    "semanticReview": [
+      "Generator constructs the 14 declared boxes with standard AP242 writer, assembly labels and millimetres; no fitted decimal output. Reader transfers those actual bytes through XDE and records nominal bounds plus untouched floating volume differences.",
+      "Exact declared geometry gives insertion [2,5] on centerline [0,10], hence length3. Wide open complement is (0,4)x(1,3)x(1,3), section area4. Four additional waist boxes leave centered (7/4,9/4)^2 over x=[3/2,5/2], hence area1/4 and positive-area connectivity.",
+      "Independent quarter-grid integer verifier checks cell material union and face adjacency plus slab/event areas for these authored fixtures. It is a bounded fixture verifier, not a general geometry correctness oracle.",
+      "Material waypoint is geometric false; isolation there is unsupported against vacuity; off-center section path is outside the declared centered-section domain. Both polarities of positive/negative geometric thresholds are preserved.",
+      "Public request v2 is a schema-only composition overlay: original STEP and math unchanged, sourceUnit auto, scalar minCrossSection, leaf occurrence paths, typed insertion selectors. Lead remains owner of complete canonical strings and actual public binding."
+    ],
+    "preservedFailures": [
+      "Combined initial reader required bit-exact approximate volume and failed; replacement reader records deltas. Maximum observed absolute volume delta is7.105427357601002e-15; no expected geometry/tolerance/fixture modification.",
+      "Original public proposals use incorrect authoring shapes; v2 separately corrects wire-only fields and preserves original proposal."
+    ],
+    "remaining": [
+      "Actual public selected-domain admission, complete witness/verdict checks, cold/warm cache logical budgets and installed host equality.",
+      "All broader selected nonbox/grouped/axis/region/occurrence-waypoint capabilities and full M3 remain open."
+    ]
+  },
+  "accuracyContractReview": {
+    "disposition": "source-only corrected inventory; broader approximate acceptance still pending independent evidence",
+    "report": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/accuracy-contracts/report.md",
+    "reportSha256": "5807f095585cdb3aad6cd264382567e64d3ba1d77e642b506fbfa36d0c92061d",
+    "ready": 67,
+    "withheld": 267,
+    "interpretation": "Existing A1 core numerical contract permits explicitly nominal observational scalars with independently validated operation-specific accuracy policy; no formal imported OCCT enclosure is demanded for every scalar. Sound conservative enclosure/refusal still required for guarantee-bearing predicates. Withheld source-only proof status does not create a new267-row formal-proof requirement. No arbitrary epsilon, authored-tolerance substitution, numerical fitting or hidden nominal-to-exact promotion.",
+    "nominalCalibrationA3": {
+      "disposition": "accepted bounded nominal calibration comparison; no guaranteed enclosure or general operation qualification",
+      "comparison": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/accuracy-contracts/revisions/nominal-comparison-a3/comparison.json",
+      "comparisonSha256": "ebe3a35bf96034b9c9ff816bd74de9c7efeb2a9962c0b08fa30ceda6154afa59",
+      "frozenPolicySha256": "3e37268f5f5136bc5530a362eef3462f9be43651b0ec4387537a5d7977340d5c",
+      "actualInputSha256": "624d199a299a4f15a11abbeba59ced0465b0388b8d41339c168507a95f30e1b2",
+      "associatedRows": 32,
+      "outcomes": {
+        "calibrated": 29,
+        "no-measurement-ancillary-negative": 3
+      },
+      "scalarFieldsIndependentlyMatchedToCanonicalPathsAndRecomputed": 249,
+      "scope": [
+        "Reviewed source generator/manifest:70x70x30 housing, radius25.04bore, radius25shaft,2.5degreecenteredXtilt. Aggregate analytic mass/area and centeredCOM formulas match assembly sum; bounding envelope uses ideal tiltedshaft support.",
+        "Operation-specific limits frozen before reading candidate:STEPuncertainty propagation, reporting/mesh deflection and f32quantization scales. These are engineering calibration acceptance limits, not proved arbitrary OCCT computation enclosures or manufacturing uncertainty certificates.",
+        "249field comparisons cover29associated rows, with3negativeancillary no-measurement protocol errors. Repeated fields/claims on the same source assembly are not independent broadfixture coverage. Eight existing exacttriangle rows remain their prior authority.",
+        "Claim statuses, zero design tolerances, original diagnostics and legacy differences remain unchanged. The source-v2 operation metadata and actual-v3 profile are separately recorded. Geometry predicates cannot inherit proof strength from these nominal measurements."
+      ],
+      "remaining": "Remaining nominal fixtures/operations, independent guarantee-bearing decisions, final profile/target conformance and fullM3 acceptance."
+    },
+    "nominalFeatureA6Review": {
+      "summarySha256": "353bcb7bbf74f5a252ba8811063876a51b929d8b7addec62a56e6ec2a9840289",
+      "featureMetadataObservations": 36,
+      "nativeFullTripleEqualObservations": 24,
+      "priorCalibratedFullDocumentsUnchangedExceptMetadata": 24,
+      "mixedDifferentRowIds": [
+        "family/toHaveCylindricalFace/negative",
+        "family/toHaveCylindricalFace/positive",
+        "family/toHavePlanarFace/negative",
+        "family/toHavePlanarFace/positive"
+      ],
+      "f2CurrentBindingObservations": 12,
+      "f2IndependentAuthoritySha256": "0686904b2071a314640378efcd4b6e34ec3d23bade1a7b81f84ec8036a33881f",
+      "f2DefinitionSha256": "d43cbb23732ef349ebdbfc457895420df4b0e768a2cdb8a7b620925704124557",
+      "artifactManifestCount": 152,
+      "artifactIssues": [],
+      "rawFiles": [
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/feature-run-a1/javascript-standalone.json",
+          "sha256": "e9e676acbdebd5ecb92b7b750e6f6c2b32b86cf54eebb8d3805b973b0bd87938"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/feature-run-a1/javascript-vitest.json",
+          "sha256": "014ee1ba8c222149a215334147a8fd566fcb28842190cc373948bc10aec841ab"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/feature-run-a1/python313.json",
+          "sha256": "60ac53e70359c9ff6d2df2e5062e8444f5e6458b4d1dc095edd5827e5c5e55e6"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/feature-run-a1/python314.json",
+          "sha256": "f2bd0b9af2624b84e46dab86c2def0cc2a19c6f9ac8c4ea342c79f1f43bf1ce8"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/feature-mixed-run-a1/javascript-standalone.json",
+          "sha256": "a4dd2dd36af0f41751a520747d07cc297d68f4667c2a533bf396d696f2816f51"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/feature-mixed-run-a1/javascript-vitest.json",
+          "sha256": "2a377f3c3038b81d2357570f47ab6bc9aefa7d0b505ffb6f6ed40300fda72b64"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/f2-binding-run-a1/javascript-standalone.json",
+          "sha256": "7a6157110ab206fa2b2dd7ad71bf4116500be4107cfbd2e6a8c3a925c1bb4c6e"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/f2-binding-run-a1/javascript-vitest.json",
+          "sha256": "c5b32a96aaf57ff9d8d38af280ed1aa0d3674a61ce15304fd9a53ebeaed9012c"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/f2-binding-run-a1/python313.json",
+          "sha256": "3c6162804e2672567db5def07beb5ce6d2ad5486dc81b63bc4e9b54ceea0f6c7"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/f2-binding-run-a1/python314.json",
+          "sha256": "ba3779bb1b0217571b6ae33b2813a796d2bbffe9b2ee99eb5645d8b23a41e871"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/f2-binding-mixed-run-a1/javascript-standalone.json",
+          "sha256": "f475beaca810ae2a0f0e7dc48cc6c33b621436bd2819f208057ac83d3f7f618e"
+        },
+        {
+          "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a6/f2-binding-mixed-run-a1/javascript-vitest.json",
+          "sha256": "58507ce37f6c7d1a8e59c12a84f34ef4cb3071292d063159623e3822fdebdb72"
+        }
+      ],
+      "status": "accepted-bounded-A6-nominal-contract-and-F2-binding",
+      "sourceReview": {
+        "verifiedFrozenSourceRecords": 484,
+        "changedPaths": 5,
+        "findings": "Read all five A5\u2192A6 diffs and existing planar/cylinder/hole predicates including componentwise point_holds. Production changes add scoped measurementContract, preserve matchCount/predicates/diagnostics, and refresh transitive F2 digest; README states nominal semantics and unqualified hole topology. Focused tests cover one-ULP equality, authored tolerance, strict/inclusive area and dominant-axis classification."
+      },
+      "acceptance": "Accept nominal metadata implementation and four native routes for six existing feature rows; calibration reuse is limited to unchanged prior qualified scalar fields. Accept independently rebound F2 two controls across six installed routes with prior A5 geometry evidence retained. No general target parity or full-family proof acceptance.",
+      "remaining": [
+        "Four feature rows still differ between native and mixed target result bytes.",
+        "Hole membership/through-blind topology and remaining guarantee domains remain selected/open.",
+        "378 face-local triangulation differences remain open; first arithmetic cause still being traced.",
+        "A6 browsers not exercised by this binding check; reuse A5 only for unchanged qualified behavior, not blanket current artifact certification.",
+        "Mandatory quality/security, full target/corpus coverage, Q7, M4/M5 and integration remain open. O0 mixed WASM 29,313,781 bytes is not size promotion."
+      ]
+    }
+  },
+  "recoveryCurrent": {
+    "lead": "01a07ec8-6253-7971-9848-e5625d78e023",
+    "observation": "Native handle not_found; app thread interrupted/notLoaded. Resumed same app thread; verified active turn01a084f5-39e9-7781-bf8e-f57af6e718d6. No new goal/replacement/queue ownership transfer. Lead owns worker/job recovery.",
+    "previousTurn": "progress: root cache-key correction independently reviewed and saved; current turn has evidence acceptance and verified task recovery."
+  },
+  "circularBoreTopologyRuling": {
+    "id": "M3-CIRCULAR-BORE-TOPOLOGY-A1",
+    "status": "approved-for-implementation-not-behavior-acceptance",
+    "authority": "Principal application of approved A1 named corrections and separation of nominal/kernel-model/exact assurances.",
+    "proposal": "lead/m3-geometry-a1/hole-topology-a1/contract.md",
+    "proposalSha256": "b3ec8928ad6564dd6b3e66cd018b9a7f159711ffbba2e9428fe28fbfdd4815f2",
+    "sourceReview": "Verified eight frozen source hashes; inspected actual derive_features. Reversed cylindrical face admission and whole-document AABB +/-0.1 through inference are confirmed. Unrelated-component counterexample establishes a semantic defect without requiring analytic last-bit equality.",
+    "decision": "Adopt local owning-solid straight constant-radius bore denotation and geospec-circular-bore-topology-v1 kernel-model assurance. Two qualified planar mouths mean through; one mouth and a qualified planar disk bottom mean blind; two disks/sealed cavity are nonmembers. Keep nominal metric profile and values unchanged. Assembly-level obstruction remains a distinct relation.",
+    "conditions": [
+      "Complete located/oriented face-to-owning-solid and rim/adjacent-face incidence must be established. Supported split/trim representations are either qualified or explicitly unqualified, not silently erased.",
+      "Unobstructed interior is determined by successful, non-null, valid, completely inventoried ST Common with no residual solids. Failed/missing/invalid/ambiguous output refuses. No volume epsilon, sampled substitute or guarantee beyond declared kernel-model premises.",
+      "A qualified match establishes existential truth, including ordinary failure of its negation. If relevant membership remains unknown and no qualified match decides the claim, neither polarity may turn absence into success. Pattern counts and analyzeBrep completeness must preserve relevant unknowns.",
+      "Existing tolerance-bearing band/kernel premises must be identified in public evidence/contract. No new tolerance fit, snapping, host-side logic, exact-real/F2 label or weakening of continuous/relationship guarantees.",
+      "Approve proposed coarse neutral query, bounded owned inventory and pre-cache logical schedule as implementation entry. 4096 candidates/1MiB are explicit tested limits, not proof of kernel runtime/RSS bounds; account capacities, reject rather than truncate, and preserve cold/warm budget semantics. Routine layout and check choices remain Lead-owned.",
+      "Freeze independent ordinary AP242 controls and successor expected corrections; preserve all legacy fixtures/results and named discrepancies. Initial restricted domain does not close countersunk/multiband/conical/interrupted or other selected scope. No held security/fault test authorization is added."
+    ],
+    "acceptance": "Actual imported topology/canonical controls through native query and installed JS/Vitest/pytest plus required mixed cells; owning-solid invariance under unrelated components/placement/occurrence sharing, positive/negative and incomplete-inventory behavior. Reuse existing harnesses. Broader topology, target parity and M3 completion remain open."
+  },
+  "occtContractionOffRuling": {
+    "id": "M3-OCCT-CONTRACTION-OFF-A1",
+    "status": "approved-isolated-build-experiment-not-profile-promotion",
+    "evidenceReport": "lead/m3-geometry-a1/lanes/report-triangulation-target/revisions/arithmetic-a2/report.md",
+    "evidenceReportSha256": "224a606290aedc14e304388a1373e3b4b17ac7fdc98b055bc619f1f1fc9d571e",
+    "finding": "Observed first property-path divergence at BRepGProp_Gauss boundary lm+lr*point. Same binary64 inputs, native fmadd versus WASM mul/add. Principal independently reproduced fused 0x3fe30f951a5e05f7 and split 0x3fe30f951a5e05f0 with Fraction exact product/sum and correctly rounded binary64 conversion.",
+    "scopeLimit": "This supports first property integration divergence; it does not establish that contraction explains all centroid or Watson triangulation differences. Neither value is an accuracy defect merely for differing.",
+    "decision": "Authorize isolated explicit -ffp-contract=off native TKTopAlgo rebuild at the same source pin, optimization and remaining settings, relink into separately identified candidate artifacts and compare with unchanged frozen selected WASM/input. This substantial dependency build is within the authorized native parity program. It is an experiment, not release promotion.",
+    "constraints": [
+      "Preserve original archives, binaries, fixtures and accepted evidence; use new cache/build identity with exact flags, toolchain and linked closure. Verify effective code generation at the observed expression and rule out stale objects or original archives.",
+      "Evaluate the existing matched property/mesh control first. If differences remain, localize them before extending to TKMesh or another library. Source-backed affected-closure expansion is authorized; blanket unrelated rebuilds or deterministic emulation projects are not.",
+      "Retain strict numeric semantics: no fast-math, reassociation, SIMD/MT/GPU activation, witness removal, post-hoc rounding, tolerance fitting or shared-WASM fallback. Contraction-off is not a universal determinism theorem.",
+      "Track candidate output differences against prior native and selected WASM separately. Preserve independent scalar calibration and geometric verdict controls; do not overwrite expected results to obtain parity. Claim profile membership only after demonstrated conformance, with explicit version/identity disposition if canonical semantics change.",
+      "On qualification, propagate the explicit arithmetic policy through affected native and WASM build definitions, and bind actual rebuilt dependencies/compiler options into provenance and F2 closure before installed claims. Unchanged WASM may serve as the current experiment control but is not certified by flag inference.",
+      "Collect comparable diagnostic timing/build cost for the affected workload. Final Q7 remains unchanged; a slower local primitive may be acceptable but cannot silently reduce the performance objective.",
+      "Continue independent hole/guarantee work; ordinary build/check iteration and source-backed next steps remain Lead-owned. Escalate material architecture or profile changes, not routine commands."
+    ],
+    "experimentReturnDisposition": {
+      "status": "experiment-closed-no-candidate-promotion",
+      "basis": "Read full contraction-off-a1 report and three-track residual table. Rebuilt155 TKTopAlgo units change4native scalars but leave5property/1724face-record differences; source-backed ElCLib/ElSLib and Delaun expansions have unchanged candidate observation bytes. This disproves sufficiency of tested policy/closure, not FMA first-stage diagnosis or every possible arithmetic cause.",
+      "decision": "Retain immutable experiments/capture gaps/failures; do not promote candidate archives or perform broader rebuilds without a newly localized cause. Keep unresolved target equality explicit while dependency-ready selected implementation continues. No rounding/profile partition/shared-WASM fallback authorized.",
+      "remaining": "Original cross-target property/triangulation reproducibility remains unresolved; numerical accuracy is separately qualified, not disproven merely by last-bit inequality."
+    }
+  },
+  "circularBoreNativeQueryA1Review": {
+    "summarySha256": "cebc3119bf2b12982e52f276fef4f04b3f78e1f4ec4709e118c184297705af29",
+    "sourceVerified": 121,
+    "evidenceFilesVerified": 129,
+    "aggregation": {
+      "qualified": 6,
+      "sealed": 1,
+      "obstructed": 1,
+      "unqualified": 2
+    },
+    "cells": [
+      {
+        "fixture": "01-through.step",
+        "qualified": 1,
+        "sealed": 0,
+        "obstructed": 0,
+        "unqualified": 0
+      },
+      {
+        "fixture": "02-blind.step",
+        "qualified": 1,
+        "sealed": 0,
+        "obstructed": 0,
+        "unqualified": 0
+      },
+      {
+        "fixture": "03-sealed-cavity.step",
+        "qualified": 0,
+        "sealed": 1,
+        "obstructed": 0,
+        "unqualified": 0
+      },
+      {
+        "fixture": "04-edge-notch.step",
+        "qualified": 0,
+        "sealed": 0,
+        "obstructed": 0,
+        "unqualified": 2
+      },
+      {
+        "fixture": "05-unrelated-assembly.step",
+        "qualified": 1,
+        "sealed": 0,
+        "obstructed": 0,
+        "unqualified": 0
+      },
+      {
+        "fixture": "06-rigid-transformed.step",
+        "qualified": 1,
+        "sealed": 0,
+        "obstructed": 0,
+        "unqualified": 0
+      },
+      {
+        "fixture": "07-shared-instance.step",
+        "qualified": 2,
+        "sealed": 0,
+        "obstructed": 0,
+        "unqualified": 0
+      },
+      {
+        "fixture": "08-obstructed-through.step",
+        "qualified": 0,
+        "sealed": 0,
+        "obstructed": 1,
+        "unqualified": 0
+      }
+    ],
+    "status": "accepted-bounded-eight-native-query-controls",
+    "sourceReview": "Read frozen C++ band/end/owner/Common code and exact actual-query test. Same seam/opposite uses, two distinct rims, complete wire traversal and opposite face incidence, located unique owner, regular-solid validity, planar mouth/disk topology, non-destructive ST Common and valid non-null residual solid count checks are present. Public/private joins and distinct owning solids are checked by the test. Missing/failed/invalid Boolean output returns error.",
+    "evidenceReview": "All121 snapshot and129 evidence hashes verified, eight raw debug records present in stderr exactly, stdout reports one passing eight-case test and Nx success. No test rerun.",
+    "limits": [
+      "This accepts declared native kernel-model query controls only, not exact-real/F2 proof or all supported CAD representations.",
+      "Six qualified bore instances span five positive fixture cells; eight fixtures are not eight qualified bores.",
+      "No installed JS/Vitest/pytest, mixed/browser, complete API negative/pattern/inventory, cache/budget/fault or full M3 acceptance.",
+      "Independent fixture intent is preserved; direct unit-label correction remains separate metadata evidence, not a reexport."
+    ]
+  },
+  "circularBoreInstalledA7Review": {
+    "summarySha256": "e4628b5bd38643622f6cea2998881736c479b28aade8aa2696652d54462a340d",
+    "boreObservations": 252,
+    "topologyObservations": 228,
+    "preQueryBudgetRefusals": 24,
+    "nativeStatusCounts": {
+      "passed": 84,
+      "failed": 52,
+      "refused": 32
+    },
+    "mixedDifferentIds": [
+      "bore/blind/analysis/positive",
+      "bore/obstructed-through/analysis/positive",
+      "bore/rigid-transformed/analysis/positive",
+      "bore/sealed-cavity/analysis/positive",
+      "bore/shared-instance/analysis/positive",
+      "bore/through/analysis/positive",
+      "bore/unrelated-assembly/analysis/positive"
+    ],
+    "f2BindingObservations": 12,
+    "browserObservations": 120,
+    "browserNativeFailures": 21,
+    "browserMixedCanonicalFields": 720,
+    "frozenSourceHashesVerified": 493,
+    "artifactHashesVerified": 152,
+    "rawBoreFiles": [
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a7/bore-run-a1/javascript-standalone.json",
+        "sha256": "b3cb77c472dd2094a50dcefdaaaae966614552b5bb410996d883d544f8de63b0"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a7/bore-run-a1/javascript-vitest.json",
+        "sha256": "c6b18e73f6738b522b1a5a66c9189b8a7c84407ff64b9b30b895b5cb8a4ec943"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a7/bore-run-a1/python313.json",
+        "sha256": "ab061aef797c4cf3be6abcfe33591eccefe9e1b8f3457fe3c15ad4f82fb674dd"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a7/bore-run-a1/python314.json",
+        "sha256": "c7fec6daf7af5dadd5d53e477c65f1c2581c0d6814437454497fd91a46756aa0"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a7/bore-mixed-run-a1/javascript-standalone.json",
+        "sha256": "389a25362b66df7227fe7b73b3949a7dba2c7b5aedf9ab6b7a462c0f3d998f55"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a7/bore-mixed-run-a1/javascript-vitest.json",
+        "sha256": "2701f20c20f4bfb61fd73578e28473aab1a71afc0f03ec14fe9a056cbadfef4d"
+      }
+    ],
+    "reviewerCorrection": "Initial read-only check expected topology after a pre-query budget refusal; corrected to require the independent timeout code and debit. Product/evidence unchanged.",
+    "status": "accepted-bounded-A7-installed-bore-topology-and-F2-binding",
+    "sourceReview": "Read A6\u2192A7 core matcher/subject and safe OCCT Rust adapter diffs, reusing reviewed native bridge/query controls. Old AABB/reversal hole inference removed. Qualified existential membership, noninvertible partial inventory, conservative incomplete pattern refusal, ancillary partial warning, success-only subject inventory, pre-cache debit and RAII transfer cleanup are present.",
+    "additionalVerified": "Eight corrected Python warm setup observations succeed and preserve original tested public canonical triples; retained five rows across four native routes have equal triples. The original through:false claim remains byte-identical and fails on the observed two-mouth local bore. Read all three harness overlays: missing independent full measured results stay null, empirical native equality is still checked; browser exit1 is preserved.",
+    "acceptance": "Accept scoped new straight-bore topology behavior and exact native public-route parity for42rows, including24 budget refusals over6routes. Mixed/browser topology behavior and internally exact mixed bytes accepted as observed; seven native/mixed analyzeBrep result differences and21 browser strict failures are not accepted as equality. F2 current two-polarity binding is exact across6installed+3browser routes, reusing prior domain/math evidence.",
+    "limitations": [
+      "No independent exact full measured-result golden for new bore corpus; topology expectations and nominal scalar qualification are separate.",
+      "Not complete arbitrary circular holes, complete pattern denotation, remaining selected matcher coverage, target certification or full M3 acceptance.",
+      "Whole-core strict Clippy/mandatory safety/security, Q7, size and M4/M5/integration remain pending.",
+      "Warm setup uses labelled direct core byte API; tested assertions use installed Python public API. No Python per-claim budget API is inferred."
+    ]
+  },
+  "nominalBoxClearanceRuling": {
+    "id": "M3-NOMINAL-BOX-CLEARANCE-A1",
+    "status": "approved-for-implementation-not-behavior-acceptance",
+    "proposal": "lead/m3-geometry-a1/clearance-domain-a1/contract.md",
+    "proposalSha256": "1bc2a601be17e13e8c75ace2290b16c037606ef6b3491b802ac2c31bd849eb32",
+    "sourceReview": "Verified six snapshots. Read DomainBox certificate/association/corner/frame validation, guarded exact arithmetic and current prove_clearance. Existing report AABB is not the admitted shape; this branch must use actual complete selected-domain certificates.",
+    "decision": "Adopt geospec-nominal-box-clearance-v1 for exactly one actual occurrence per endpoint. It decides minimum Euclidean distance between the closed complete nominal boxes defined by their qualified binary64 support coordinates as exact dyadic rationals. It is not a source-exact STEP, arbitrary BRep or manufacturing-clearance theorem.",
+    "mathematicalBasis": "The squared Euclidean objective is a sum of three independent coordinate objectives over a Cartesian product. Each axis attains its minimum at the nearest endpoints when disjoint, or a common overlap coordinate otherwise. Therefore the proposed p/q realize a global minimum D. Intersecting/contained/touching boxes have D=0. Signed effective bounds require L<=0 automatic lower success and U<0 automatic upper failure before squaring; other comparisons preserve inclusive semantics.",
+    "arithmeticReview": "The proposal's conservative common dyadic denominator 2^1074 bounds coordinate/threshold differences by2100 numerator bits; squares by4200/2149 numerator/denominator bits and the three-term reduced sum by4202 numerator bits. Standard product/sum/cross-comparison intermediates fit its6352 estimate below8192 for this fixed expression tree. Implementation must use pre/post guards, including comparison, not treat the estimate as permission for arbitrary unguarded rational operations.",
+    "conditions": [
+      "Deterministic complete located box admission and association/frame evidence are mandatory. Domain failure/uncertainty cannot fall back to unqualified extrema and label it this exact predicate. Existing other routes remain separately unqualified where not demonstrated.",
+      "Preserve authored inputs/thresholds/tolerances and original evidence. The named correction changes the decision algorithm/witness/budget only with independently prepared successor records, actual source/definition identity, and observed conformance.",
+      "Keep diagnostic pinned hypot conversion separate from exact decisions; no displayed scalar or rounded point may feed threshold truth. Unavailable/nonfinite display refuses as proposed and is an explicit representability limitation.",
+      "Approve existing N distinct domain debits plus1 pair debit before corresponding cached/arithmetic work, after report debit; identical cold/warm logical schedule. Add no persistent operation cache. 256KiB owned ceiling must cover actual transient capacities and lower aggregate/result limits; it is not an OCCT RSS/runtime proof.",
+      "Reuse unchanged four analytic public controls only if actual domain certificates admit them. Freeze touching/overlap/containment/diagonal/repeated-occurrence/boundary/omitted-limit controls independently. Unsupported actual fixtures remain recorded, not replaced.",
+      "No contact/fit/multipair/face-selector denotation change. Other66extrema cases and all selected relationship coverage remain open. Routine source/layout/build/check decisions remain Lead-owned; R8/security and deferred acceleration unchanged."
+    ]
+  },
+  "edgeTreatmentTopologyRuling": {
+    "id": "M3-EDGE-TREATMENT-TOPOLOGY-A1",
+    "status": "approved-for-implementation-with-scoped-conditions",
+    "proposal": "lead/m3-geometry-a1/lanes/chamfer-fillet-topology-entry-a1/contract-proposal.json",
+    "proposalSha256": "e5237f2b8385082e54a973f4523235a940da10c1076ec013a27a804fb49a7e6b",
+    "reportSha256": "b8ac6834a4697efdac382bb48d0344cf851cbdd64f9f7c120c380f134003c4b6",
+    "authority": "Principal under approved A1 named geometric corrections; original engine remains immutable.",
+    "decision": "Adopt geospec-owning-solid-edge-treatment-v1 as geometric transition membership in the actual located regular solid, not recovered authoring history or design intent. Initial families: planar equal-distance straight bevel, full-u plane/cylinder 45-degree conical bevel, non-full cylindrical constant-radius blend between planar supports, full-u quarter-torus plane/cylinder constant-radius blend. Public distance/radius/tolerance/selection inputs remain unchanged.",
+    "conditions": [
+      "Reuse complete occurrence/owning-solid/public/private incidence and trim verification. Surface type, direction/reversal, document bounds, radius-vs-document-size, first-eight occurrence scanning, sampling or rounded-value deduplication do not establish membership.",
+      "Fillet tangency requires consistently oriented material-side continuity along actual rails, not only coincidence of unoriented tangent planes. Verify admitted angular/trim branch and all end/seam uses; tangent rails alone must not silently admit another wrap or support wedge. All classes need resolved nondegenerate support intersections and complete incidence.",
+      "Topology-tolerance residual tests define declared nominal kernel-model qualification only. Freeze dimensionally explicit residuals, participating entity tolerances and rail scales before candidate acceptance; record these premises. Reject degenerate/ill-conditioned or classification-ambiguous cases. A multiplied direction residual is not a universal angular-error proof, and model tolerance is not an authored fit tolerance or a formal enclosure.",
+      "After membership, extend existing M3-FEATURE-METRIC nominal comparison metadata to chamfer/fillet. Preserve supplied thresholds/tolerances; no implicit recognition epsilon, snapping, round3, metric averaging/fitting or exact-real/F2 label. Conical common distance is the declared axial representative h under nominal equality qualification, not a claim h/dr are exact identical reals.",
+      "Each matcher has qualified/nonmember/unqualified dispositions. One matching qualified member decides existential truth; otherwise relevant unknown membership or incomplete enumeration refuses in both polarities. Unqualified means outstanding coverage, not completed absence. Analysis and both native matchers share one authoritative inventory.",
+      "Approve bounded neutral inventory/RAII transfer and success-only retention using existing bore patterns. Charge proposed1+scoped face count+edge-use count after report charge before cache, with counts already admitted under charged report work; no uncharged topology scan. Check all owned capacities/labels and aggregate/result limits, refuse rather than truncate. This does not bound kernel transient RSS/runtime.",
+      "Reject proposal source steps6/7 wherever they modify packages/geospec-engine or immutable reference evidence. Implement only additive native/current consumer paths; original engine, original ledger/helper and reference fixtures/results stay unchanged. Necessary adapter projection must not cause legacy consumers to reinterpret frozen original output.",
+      "Selection means a uniquely transferred source-owned label/path, not generated axis/class/ordinal prose. Remove generated revolved-chamfer axis labels as selection identities in the successor; class descriptions may remain distinct diagnostics. Preserve original requests verbatim and record the named compatibility difference. If label extraction is complete and no matching label exists, selector mismatch may fail; unavailable/ambiguous required label association refuses. Neither outcome proves geometric absence.",
+      "Freeze ordinary independent AP242 membership/nonmembership/unknown controls for four families, rotations/unrelated components/later occurrences/repeated equal metrics and source labels before candidate acceptance. Source/math counterexamples establish defects in heuristics, not actual kernel qualification. Existing selected examples remain conditional until their exported topology is observed."
+    ],
+    "scope": "Restricted implementation entry only; variable-radius/spline/spherical/multisupport/other selected domains remain open. No new public matcher or generic recognizer framework. Clearance proceeds independently; routine source/ABI/fixtures/check choices remain Lead-owned. R8 and deferred acceleration unchanged."
+  },
+  "nominalBoxClearanceInstalledA8Review": {
+    "clearanceObservations": 264,
+    "statusesAllSixRoutes": {
+      "refused": 192,
+      "passed": 36,
+      "failed": 36
+    },
+    "exactDecisionObservations": 72,
+    "budgetRefusals": 48,
+    "outsideDomainRefusals": 144,
+    "warmSetupReports": 48,
+    "f2BindingObservations": 12,
+    "browserObservations": 114,
+    "browserCanonicalFields": 684,
+    "sourceHashesVerified": 498,
+    "artifactHashesVerified": 182,
+    "rawClearanceFiles": [
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a8/clearance-run-a2/javascript-standalone.json",
+        "sha256": "b7cb922a1d602321850aa9abf550222ec840a9085c080afd676b9e919a5c219c"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a8/clearance-run-a2/javascript-vitest.json",
+        "sha256": "931fd473b6cbff81c58d24df6240be47df10c0fd471fe8cb4c3adde03b1d99e5"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a8/clearance-run-a2/python313.json",
+        "sha256": "e5deb96b9ed4039308ed0541fa43c32d3e400662efc062ba0e1abc91251ad6c4"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a8/clearance-run-a2/python314.json",
+        "sha256": "e849e7210efec67a3e8a28b327d259359b3014eee38fbffe435a78138a66fc2e"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a8/clearance-mixed-run-a1/javascript-standalone.json",
+        "sha256": "c42f302c8ac13d4798d6e70a6027fdca3dde7c9f62356d09d9441263da597a6c"
+      },
+      {
+        "path": "/Users/rifont/git/tau-geospec-native/docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lead-integration-a8/clearance-mixed-run-a1/javascript-vitest.json",
+        "sha256": "a29aa9c1544522204ea755633dc938c1c09dece2cb17bb901bd7b7d811eadb2f"
+      }
+    ],
+    "f2AuthoritySha256": "799a1149f42a74b16a502d1ecf814a5fb83502b57f0897d5f16ee4a695d859d5",
+    "status": "accepted-bounded-A8-installed-nominal-box-clearance-and-F2-binding",
+    "sourceReview": "Read full clearance arithmetic and A7\u2192A8 relationship/proof-accounting diffs. Complete DomainBox admission, guarded rational squared-distance/threshold comparisons including negative bound cases, deterministic closest points, finite diagnostic-only display, domain/pair charge before arithmetic/cache, no new result cache, and explicit outside-domain refusal are present. Shared JSON ownership helper is reused.",
+    "independentReview": "Compared full raw canonical triples for44cases across6installed routes. Recomputed72 actual exact-domain decisions with Python Fraction from certificate extents, checked closest points lie in their solids and attain the minimum, verified effective authored bounds and both-polarity statuses. Checked48 pre-pair timeout debits and144 outside-domain refusals. Browser114cells/684direct+public fields match native with actual WASM6d11aecc... captures. Verified498snapshot/182artifact hashes. Independent current F2 evaluation-envelope binding checked12installed+6browser observations.",
+    "reviewCorrection": "Initial read-only reviewer expected a single witness occurrence; failed results duplicate identical witnesses in diagnostic evidence. Corrected check requires all occurrences equal and verifies the same exact calculation; no source/input/evidence edit.",
+    "limits": [
+      "Acceptance covers certified nominal boxes and explicit refusals, not complete clearance capability. 24originalgeneral-BRep/face rows remain selected open work.",
+      "Original28expectedfullstrings immutable; new successor evidence/decisions do not silently rewrite legacy.",
+      "F2 originaldrivers still exit1 from result-row/evaluation-envelope input mismatch; postcapture byte evidence accepted without claiming fresh green driver or geometry rerun.",
+      "Prior A7 ancillary native/mixed numerical differences remain open; this passing browser cohort does not certify the whole profile.",
+      "General domains, full original corpus, strict quality/security/R8,Q7,size,M4/M5 and integration remain unfinished."
+    ]
+  }
+}

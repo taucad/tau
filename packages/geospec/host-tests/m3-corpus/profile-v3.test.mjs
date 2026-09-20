@@ -8,7 +8,7 @@ const NEW_PROFILE = 'geospec-st-logical-requests-v3';
 const PROFILE_FIELD = '"numericProfile"';
 
 void test('should overlay only prospective v3 profile metadata', () => {
-  const profile = loadM3CorpusProfileV3(process.cwd());
+  const profile = loadM3CorpusProfileV3();
   assert.equal(profile.rows.length, 322);
   assert.equal(profile.f1.rows.length, 12);
   assert.equal(profile.f1.verifierSourceHash, '831b4425151e11660c9e07f86babfecfd3adaaaf273991a623ce7ae9e0ad59b3');

@@ -1,0 +1,20 @@
+{
+  "status": "accepted-independent-expected-subset-and-plan-controls",
+  "freezeSha256": "10b3cafd3061c64b5c6c24dc3ec07fe778a0240b363176190ac4894918ee5c35",
+  "verifiedArtifactAndInputHashes": 27,
+  "sourceJoinedRows": 304,
+  "unchangedRows": 302,
+  "bboxSuccessors": [
+    "family/toHaveBoundingBox/positive",
+    "family/toHaveBoundingBox/negative"
+  ],
+  "exactWholeDocumentBBoxReconstruction": 6,
+  "exactWholePlanControls": 118,
+  "pairChecks": 46,
+  "patternDiagnosticUnitControls": 5,
+  "limitations": [
+    "Planar and circular-hole full failure diagnostic oracle gaps retained.",
+    "No runtime/geometry execution, no target certification or full corpus acceptance.",
+    "Only two named bbox successor rows amend existing expected bytes; control plans are canonical-only expectations."
+  ]
+}

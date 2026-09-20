@@ -23,7 +23,7 @@ import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
-import { createTauAgentHost } from '@taucad/agent-host';
+import { createTauAgentHost, replayedStartOutcome } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
   AgentLogEvent,
@@ -66,11 +66,10 @@ import {
   acquireChatLeaderLease,
   agentHostAuthorityName,
   agentHostProtocolVersion,
+  awaitWhileLeaderLives,
   createFollowerRecoveryMonitor,
-  recoverAttachedRun,
 } from '#workers/agent-host-leader.js';
 import type { AgentHostLockRequest, ChatLeaderLease } from '#workers/agent-host-leader.js';
-import { replayedStartOutcome } from '#workers/agent-host-replay.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
@@ -286,7 +285,7 @@ const wholeLogLimit = Number.MAX_SAFE_INTEGER;
 const channels = new Map<string, BroadcastChannel>();
 const leadership = new Map<string, LeadershipState>();
 const leadershipAttempts = new Map<string, Promise<boolean>>();
-const takeoverAttempts = new Map<string, Promise<HostRunSnapshot>>();
+const takeoverAttempts = new Map<string, Promise<HostRunSnapshot | undefined>>();
 const forwarded = new Map<string, ReturnType<typeof Promise.withResolvers<ForwardedResponse>>>();
 const leaderGenerations = new Map<string, string>();
 const followerCursors = new Map<string, number>();
@@ -423,6 +422,11 @@ const responseBelongsToChat = (response: ForwardedResponse, chatId: string): boo
 const validatedBroadcast = (value: unknown, active: WorkerSession, chatId: string): LeaderBroadcast | undefined => {
   const parsed = leaderBroadcastSchema.safeParse(value);
   if (!parsed.success) {
+    /* This channel is keyed on `agentHostProtocolVersion`, so a frame that
+     * reaches here was posted by a peer claiming *this* protocol and failing
+     * its schema — a real defect, not a deploy skew. Dropping it in silence
+     * burned the forwarding wait instead, and the page saw a bare timeout. */
+    console.error('[agentHost] dropped a leader frame this protocol cannot read', chatId, parsed.error.issues);
     return undefined;
   }
   const message = parsed.data as LeaderBroadcast;
@@ -630,15 +634,18 @@ const trackTask = (operation: () => Promise<void>, onError: (error: unknown) => 
 
 const acknowledgeRun = async (
   active: WorkerSession,
-  chatId: string,
+  run: { readonly chatId: string; readonly runId?: string | undefined },
   completion: Promise<unknown>,
 ): Promise<HostRunSnapshot> => {
+  const { chatId, runId } = run;
   /* A refused admission is an answer, not a race to lose: `waitForAdmission`
    * asks the *chat* what is running, so a command the host refused — because
    * the chat's previous run has not ended — used to be answered with that
    * previous run's snapshot, and the caller reported a run-id mismatch while
-   * the real reason was swallowed with the rejected promise. */
-  const admitted = await Promise.race([active.host.waitForAdmission(chatId), completion.then(() => undefined)]);
+   * the real reason was swallowed with the rejected promise. The run id makes
+   * the answer this command's own: two admissions racing on one chat can no
+   * longer be answered with each other's snapshot. */
+  const admitted = await Promise.race([active.host.waitForAdmission(chatId, runId), completion.then(() => undefined)]);
   if (!admitted) {
     await completion;
     return active.host.snapshot(chatId);
@@ -647,7 +654,12 @@ const acknowledgeRun = async (
     async () => {
       await completion;
     },
-    () => undefined,
+    /* The caller was answered at admission and the run's own failure row is
+     * durable, so there is nobody left to reject to — but a run that died after
+     * its admission is a fact this worker must not discard in silence. */
+    (error) => {
+      console.error('[agentHost] run failed after it was admitted', chatId, runId, error);
+    },
   );
   return admitted;
 };
@@ -683,25 +695,35 @@ const executeCommand = async (
     let snapshot: HostRunSnapshot | undefined;
     if (firstBatch.endCursor > 0) {
       if (takeover) {
+        /* I4: a takeover *records* what it found, it never drives it. Resuming
+         * here re-asked the provider for a turn the person had already paid
+         * for, on a run no page owned — no lease, no revision, no settlement —
+         * and it fired on the next gesture's attach, not on any decision. The
+         * host decides what the record is: an abandoned run fails with
+         * `RUN_ABANDONED` so the saved-turn card can offer Resume, a paused run
+         * is left paused for the interrupt this batch republishes, and a run
+         * this host is still driving is left alone. */
         const current = takeoverAttempts.get(command.chatId);
-        const attempt =
-          current ??
-          recoverAttachedRun({
-            snapshot: async () => active.host.snapshot(command.chatId),
-            resume: async () => acknowledgeRun(active, command.chatId, active.host.resume(command.chatId)),
-          });
+        const attempt = current ?? active.host.markAbandoned(command.chatId);
         takeoverAttempts.set(command.chatId, attempt);
         try {
-          await attempt;
+          snapshot = await attempt;
+        } catch (error) {
+          /* A run that cannot be recorded must not make the chat unopenable:
+           * the client still needs the transcript it attached for. The
+           * leadership check below turns a lost lease into its own refusal. */
+          console.error('[agentHost] could not record an abandoned run', command.chatId, error);
+          snapshot = await active.host.describeRun(command.chatId);
         } finally {
           if (takeoverAttempts.get(command.chatId) === attempt) {
             takeoverAttempts.delete(command.chatId);
           }
         }
         batch = await active.host.readEvents(command);
-        snapshot = await active.host.snapshot(command.chatId);
       } else {
-        snapshot = await active.host.snapshot(command.chatId);
+        /* Non-throwing: `snapshot`'s `NO_RUN_ADMITTED` escaping here made a chat
+         * whose log holds records but no run impossible to open at all. */
+        snapshot = await active.host.describeRun(command.chatId);
       }
     }
     const state = leadership.get(command.chatId);
@@ -717,15 +739,19 @@ const executeCommand = async (
       batch,
       leadership: { role: 'leader', generation: state.lease.generation },
       ...(snapshot ? { snapshot } : {}),
+      /* This attach took the chat over from a dead driver *and* the run it
+       * found still wants the attaching page: one it has just recorded as
+       * abandoned, or one left non-terminal (paused on a person, or still
+       * driven by this host). The page rebuilds from the log either way. */
       takeover:
         takeover &&
         snapshot !== undefined &&
-        snapshot.state !== 'completed' &&
-        snapshot.state !== 'failed' &&
-        snapshot.state !== 'cancelled',
+        (snapshot.failure?.code === 'RUN_ABANDONED' ||
+          (snapshot.state !== 'completed' && snapshot.state !== 'failed' && snapshot.state !== 'cancelled')),
     };
   }
   if (command.type === 'start') {
+    let outcome: ReturnType<typeof replayedStartOutcome> = 'admit';
     try {
       /* The whole log, because the fact that decides this is a record anywhere
        * in it — the run's committed turn — not the state of its tail.
@@ -738,20 +764,35 @@ const executeCommand = async (
        * the log's size, and the upgrade path is the host's own run ledger
        * (`runLedgerOf`) exposed as a cached read. */
       const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
-      const outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
-      if (outcome !== 'admit') {
-        if (outcome === 'resume') {
-          await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId));
-        }
-        return {
-          type: 'result',
-          requestId: command.requestId,
-          operation: command.type,
-          snapshot: await active.host.snapshot(command.chatId),
-        };
-      }
+      outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
     } catch {
-      // The command was not durably admitted; replay it below.
+      // The log could not be read, so nothing proves this command was already
+      // admitted; replay it below. Only this read is forgiven — a resume or a
+      // snapshot that fails is reported as itself, not as an admission conflict.
+      outcome = 'admit';
+    }
+    if (outcome !== 'admit') {
+      if (outcome === 'resume') {
+        /* A duplicate `start` for a run this worker is *still executing* has
+         * nothing to resume: the host would refuse the reservation as a live
+         * chat, and the duplicate — a re-broadcast forward, a double-fired
+         * effect — would surface as a failed turn beside a turn that is running
+         * fine. Answer it with the admission it already has. */
+        const running = await active.host.waitForAdmission(command.chatId, command.runId);
+        if (!running) {
+          await acknowledgeRun(
+            active,
+            { chatId: command.chatId, runId: command.runId },
+            active.host.resume(command.chatId),
+          );
+        }
+      }
+      return {
+        type: 'result',
+        requestId: command.requestId,
+        operation: command.type,
+        snapshot: await active.host.snapshot(command.chatId),
+      };
     }
   }
   switch (command.type) {
@@ -800,7 +841,7 @@ const executeCommand = async (
         type: 'result',
         requestId: command.requestId,
         operation: command.type,
-        snapshot: await acknowledgeRun(active, command.chatId, completion),
+        snapshot: await acknowledgeRun(active, { chatId: command.chatId, runId: command.runId }, completion),
       };
     }
     case 'resume': {
@@ -808,7 +849,9 @@ const executeCommand = async (
         type: 'result',
         requestId: command.requestId,
         operation: command.type,
-        snapshot: await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId)),
+        /* A `resume` command names no run: the host continues whatever the
+         * chat's ledger ends on, so the chat is the key this one waits by. */
+        snapshot: await acknowledgeRun(active, { chatId: command.chatId }, active.host.resume(command.chatId)),
       };
     }
     case 'record-settlement': {
@@ -1168,10 +1211,14 @@ const waitForForwardedResponse = async (
     targetGeneration: leaderGenerations.get(command.chatId),
     command,
   } satisfies LeaderBroadcast);
-  const deadline = new Promise<undefined>((resolve) => {
-    globalThis.setTimeout(resolve, 2000);
+  /* Liveness, not a work bound: a `start` is answered at admission time, which
+   * includes preparing the turn, so a constant deadline re-broadcast a command
+   * the leader was still working on — and the leader then executed it twice. */
+  const response = await awaitWhileLeaderLives({
+    response: pending.promise,
+    lastSeenAt: () => followerMonitors.get(command.chatId)?.lastSeenAt(),
+    heartbeatTimeout: followerHeartbeatTimeout,
   });
-  const response = await Promise.race([pending.promise, deadline]);
   if (forwarded.get(command.requestId) === pending) {
     forwarded.delete(command.requestId);
   }
@@ -1684,11 +1731,8 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
   session = active;
 };
 
-const close = async (): Promise<void> => {
-  if (closing) {
-    return;
-  }
-  closing = true;
+const releaseSession = async (): Promise<void> => {
+  takeoverAttempts.clear();
   for (const monitor of followerMonitors.values()) {
     monitor.stop();
   }
@@ -1756,14 +1800,27 @@ const close = async (): Promise<void> => {
     tailInFlight.clear();
     leaderGenerations.clear();
   }
-  /* The flag guards a *re-entrant* close, not the worker's whole lifetime.
-   * Leaving it latched made `close` permanently a no-op, so the next
-   * `initialize` kept the released session and refused the new one with
-   * SESSION_CONFLICT — invisible in a real worker, which terminates after
-   * closing, and fatal to anything that reuses the module. */
-  closing = false;
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Browser agent host could not release every session resource.');
+  }
+};
+
+const close = async (): Promise<void> => {
+  if (closing) {
+    return;
+  }
+  closing = true;
+  try {
+    await releaseSession();
+  } finally {
+    /* The flag guards a *re-entrant* close, not the worker's whole lifetime.
+     * Leaving it latched made `close` permanently a no-op, so the next
+     * `initialize` kept the released session and refused the new one with
+     * SESSION_CONFLICT — invisible in a real worker, which terminates after
+     * closing, and fatal to anything that reuses the module. A throw from the
+     * disposal below used to re-latch exactly that wedge, so it is cleared
+     * here rather than on the happy path. */
+    closing = false;
   }
 };
 

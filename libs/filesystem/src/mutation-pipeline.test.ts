@@ -935,6 +935,44 @@ describe('WorkspaceFileService', () => {
     });
   });
 
+  describe('porcelain batch contention', () => {
+    it('should serialize a subtree move behind an overlapping copy batch', async () => {
+      await service.writeFile('/source/a.txt', 'a');
+      await service.writeFile('/source/nested/b.txt', 'b');
+      const mkdir = rootProvider.mkdir.bind(rootProvider);
+      let releaseCopy: (() => void) | undefined;
+      let markCopyPaused!: () => void;
+      const copyPaused = new Promise<void>((resolve) => {
+        markCopyPaused = resolve;
+      });
+      vi.spyOn(rootProvider, 'mkdir').mockImplementation(async (path, options) => {
+        if (path === 'destination') {
+          await new Promise<void>((resolve) => {
+            releaseCopy = resolve;
+            markCopyPaused();
+          });
+        }
+        await mkdir(path, options);
+      });
+      const copy = service.createRootedFileSystem('/').copyTree!('source', 'destination');
+      await copyPaused;
+      let moveSettled = false;
+      const move = (async () => {
+        await service.move('/destination', '/moved');
+        moveSettled = true;
+      })();
+
+      await Promise.resolve();
+      expect(moveSettled).toBe(false);
+      releaseCopy?.();
+      await Promise.all([copy, move]);
+
+      await expect(service.readFile('/moved/a.txt', 'utf8')).resolves.toBe('a');
+      await expect(service.readFile('/moved/nested/b.txt', 'utf8')).resolves.toBe('b');
+      await expect(service.exists('/destination')).resolves.toBe(false);
+    });
+  });
+
   describe('provider write error propagation', () => {
     it('should propagate provider errors during nested writes', async () => {
       rootProvider.writeFile = async () => {

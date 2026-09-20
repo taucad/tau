@@ -440,6 +440,21 @@ describe('WorkspaceFileService', () => {
   // ---------------------------------------------------------------------------
 
   describe('readDirectory', () => {
+    it('should list 10,000 provider rows through the authority without per-entry stats', async () => {
+      const rows = 10_000;
+      await Promise.all(
+        Array.from({ length: rows }, async (_, index) => rootProvider.writeFile(`wide/file-${index}.txt`, 'row')),
+      );
+      const readdirWithStats = vi.spyOn(rootProvider, 'readdirWithStats');
+      const stat = vi.spyOn(rootProvider, 'stat');
+
+      const entries = await service.readDirectory('/wide');
+
+      expect(entries).toHaveLength(rows);
+      expect(readdirWithStats).toHaveBeenCalledOnce();
+      expect(stat).not.toHaveBeenCalled();
+    });
+
     it('should return sorted tree nodes (folders first)', async () => {
       await service.mkdir('/tree/sub', { recursive: true });
       await service.writeFile('/tree/file.txt', 'x');
@@ -776,12 +791,10 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
   });
 
   it('should support batch writeFiles', async () => {
-    /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed object */
     await service.writeFiles({
       '/batch/a.txt': { content: encoder.encode('a') },
       '/batch/b.txt': { content: encoder.encode('b') },
     });
-    /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after path-keyed object */
     expect(await service.readFile('/batch/a.txt', 'utf8')).toBe('a');
     expect(await service.readFile('/batch/b.txt', 'utf8')).toBe('b');
   });

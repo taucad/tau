@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as fc from 'fast-check';
 import { classify, pathRegistry, reservedTauPathClassification, unlistedPathClassification } from '#path-registry.js';
 import type { PathRegistryRow } from '#path-registry.js';
 
@@ -13,7 +14,65 @@ const controlPlane = Object.freeze({
   watch: 'none',
 } as const);
 
+const safeSegment = fc
+  .array(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._- é́'), {
+    minLength: 1,
+    maxLength: 12,
+  })
+  .map((characters) => characters.join(''))
+  .filter((segment) => segment !== '.' && segment !== '..');
+const canonicalRelativePath = fc.array(safeSegment, { maxLength: 6 }).map((segments) => segments.join('/'));
+
 describe('path registry', () => {
+  it('should classify every generated canonical relative path completely', () => {
+    fc.assert(
+      fc.property(canonicalRelativePath, (path) => {
+        const answer = classify(path);
+
+        expect(['authored', 'records', 'cache', 'control-plane']).toContain(answer.class);
+        expect(typeof answer.versioned).toBe('boolean');
+        expect(['read-write', 'read-only', 'hidden']).toContain(answer.agentAccess);
+        expect(['ui', 'kernel', 'none']).toContain(answer.watch);
+      }),
+    );
+  });
+
+  it('should inherit hidden classification through every generated descendant', () => {
+    const hiddenRows = pathRegistry.filter((row) => row.agentAccess === 'hidden');
+    fc.assert(
+      fc.property(fc.constantFrom(...hiddenRows), canonicalRelativePath, (row, descendant) => {
+        const member = memberOf(row);
+        const path = descendant === '' ? member : `${member}/${descendant}`;
+
+        expect(classify(member).agentAccess).toBe('hidden');
+        expect(classify(path).agentAccess).toBe('hidden');
+      }),
+    );
+  });
+
+  it('should fold generated control-plane spellings at any depth', () => {
+    const rows = pathRegistry.filter((row) => row.class === 'control-plane');
+    fc.assert(
+      fc.property(
+        fc.record({
+          row: fc.constantFrom(...rows),
+          depth: fc.array(safeSegment, { maxLength: 4 }),
+          uppercase: fc.boolean(),
+          trailing: fc.constantFrom('', '.', ' ', '. '),
+          stream: fc.constantFrom('', ':$DATA', '::$INDEX_ALLOCATION'),
+          decomposed: fc.boolean(),
+        }),
+        ({ row, depth, uppercase, trailing, stream, decomposed }) => {
+          const foldedPrefix = (uppercase ? row.prefix.toUpperCase() : row.prefix) + trailing + stream;
+          const ancestor = decomposed ? ['Café', ...depth] : ['Café', ...depth];
+          const path = [...ancestor, foldedPrefix, ...(row.directory ? ['leaf'] : [])].join('/');
+
+          expect(classify(path)).toStrictEqual(controlPlane);
+        },
+      ),
+    );
+  });
+
   it.each(pathRegistry.map((row) => [row.prefix, row] as const))('classifies everything under %s', (_prefix, row) => {
     const { class: storageClass, versioned, agentAccess, watch } = classify(memberOf(row));
 

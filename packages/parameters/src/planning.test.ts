@@ -66,6 +66,111 @@ const manifest = async (sourceUnit = true, revision = digest) =>
     middleware: digest,
   });
 
+const bindinglessScalarManifest = async () =>
+  compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: 'urn:test:bindingless-scalars',
+        $uses: ['JSONSchemaUnits'],
+        name: 'Parameters',
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean' },
+          label: { type: 'string' },
+          settings: { type: 'object', properties: { enabled: { type: 'boolean' } } },
+        },
+      },
+      defaults: { enabled: false, label: 'box', settings: { enabled: false } },
+    },
+    scope: {
+      kind: 'source',
+      authority: target.authority,
+      root: target.root,
+      entry: target.entry,
+    },
+    source: {
+      id: 'fixture',
+      version: '1',
+      revision: digest,
+      capability: 'json-structure',
+    },
+    dependency: digest,
+    middleware: digest,
+  });
+
+it('should commit a native-value edit on a boolean field that has no binding', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'boolean',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'default',
+        parameterId: `${admitted.source.revision}:/enabled`,
+        resource: 'urn:taucad:parameter-schema:root',
+        pointer: '/enabled',
+        value: true,
+      },
+    },
+  });
+
+  expect(plan).toMatchObject({
+    status: 'prepared',
+    proposed: { entry: { groups: { default: { values: { enabled: true } } } } },
+  });
+});
+
+it('should refuse a binding-less native-value edit whose identity names another revision', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'wrong-revision',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'default',
+        parameterId: `another-revision:/enabled`,
+        resource: 'urn:taucad:parameter-schema:root',
+        pointer: '/enabled',
+        value: true,
+      },
+    },
+  });
+
+  expect(plan).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+});
+
+it('should refuse a native-value edit that addresses an object', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'object',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'default',
+        parameterId: `${admitted.source.revision}:/settings`,
+        resource: 'urn:taucad:parameter-schema:root',
+        pointer: '/settings',
+        value: { enabled: true },
+      },
+    },
+  });
+
+  expect(plan).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+});
+
 it('plans one checked first write without creating a record during resolution', async () => {
   const admitted = await manifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
@@ -563,7 +668,7 @@ const fieldRequest = (
   },
 });
 
-it('rebases a draft whose record revision moved only because another field changed', async () => {
+it('keeps another field change when this field still matches its captured base', async () => {
   const admitted = await twoFieldManifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
@@ -599,6 +704,19 @@ it('rebases a draft whose record revision moved only because another field chang
     throw new Error(JSON.stringify(second));
   }
   expect(second.proposed.entry.groups['default']?.values).toEqual({ width: 101, height: 15 });
+
+  const wrongBase = planParameterChange({
+    current: first.proposed,
+    request: fieldRequest(admitted, {
+      requestId: 'height:wrong-base',
+      pointer: '/height',
+      parameterId: 'height',
+      value: 15,
+      expected: current.identity,
+      base: fieldBase('/height', 13),
+    }),
+  });
+  expect(wrongBase).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
 });
 
 it('refuses a rebase when the field the draft touches changed underneath it', async () => {
@@ -714,7 +832,7 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
     scoped.map(async ([label, request]) => [label, planParameterChange({ current: first.proposed, request })] as const),
   );
   for (const [label, plan] of plans) {
-    expect(plan.status, label).toBe('rejected');
+    expect(plan, label).toMatchObject({ status: 'rejected', code: 'INVALID_REQUEST' });
   }
 
   const inactive = planParameterChange({
@@ -739,7 +857,7 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
     },
   });
   // A base never reaches a group the record does not hold; the record itself refuses the edit.
-  expect(inactive).toMatchObject({ status: 'rejected' });
+  expect(inactive).toMatchObject({ status: 'rejected', code: 'GROUP_NOT_FOUND' });
 });
 
 it('should refuse SOURCE_UNIT_REBIND_REQUIRED at admission for a marked claim whose producer no longer advertises the capability', async () => {

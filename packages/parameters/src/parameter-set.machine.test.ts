@@ -81,6 +81,33 @@ it('settles a failed write that left the record untouched as a known refusal', a
   actor.stop();
 });
 
+it('should reconcile a lost reply when the intended write landed', async () => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  let visible = fixture.snapshot;
+  const actor = createActor(
+    parameterSetMachine.provide({
+      actors: {
+        loadParameterSet: fromPromise(async () => structuredClone(visible)),
+        commitParameterSet: fromPromise(async ({ input }): Promise<CheckedFileWriteResult> => {
+          visible = structuredClone(input.proposed);
+          throw new Error('Reply lost after the write landed');
+        }),
+      },
+    }),
+    { input: { target: fixture.snapshot.target } },
+  ).start();
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+
+  await expect(submitParameterRequest(actor, groupRequest('landed', fixture))).resolves.toMatchObject({
+    status: 'committed',
+    requestId: 'landed',
+    write: 'reconciled',
+  });
+  expect(actor.getSnapshot().context.current?.entry.groups).toHaveProperty('landed');
+  actor.stop();
+});
+
 it('should accept a command after a readback that found foreign bytes', async () => {
   const fixture = await parameterSetHarness();
   fixture.actor.stop();

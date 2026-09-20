@@ -252,6 +252,133 @@ const admittedBinding = (
   return binding;
 };
 
+const rootParameterSchemaResource = 'urn:taucad:parameter-schema:root';
+const nonScalarSchemaTypes = new Set([
+  'array',
+  'object',
+  'int8',
+  'uint8',
+  'int16',
+  'uint16',
+  'int32',
+  'uint32',
+  'int64',
+  'uint64',
+  'int128',
+  'uint128',
+  'integer',
+  'float',
+  'float8',
+  'double',
+  'number',
+  'decimal',
+]);
+
+const schemaValueAtPointer = (value: unknown, pointer: string): unknown => {
+  if (pointer === '') {
+    return value;
+  }
+  const parts = pointerParts(pointer);
+  if (parts === undefined) {
+    return undefined;
+  }
+  let current = value;
+  for (const part of parts) {
+    if (Array.isArray(current)) {
+      if (!/^(?:0|[1-9]\d*)$/u.test(part) || Number(part) >= current.length) {
+        return undefined;
+      }
+      current = current[Number(part)];
+    } else if (typeof current === 'object' && current !== null && Object.hasOwn(current, part)) {
+      current = Reflect.get(current, part);
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+};
+
+const schemaTypesAtPointer = (manifest: ParameterManifest, pointer: string): readonly string[] => {
+  const parts = pointerParts(pointer);
+  if (parts === undefined) {
+    return [];
+  }
+  const visited = new Set<string>();
+  const visit = (node: unknown, resource: string, remaining: readonly string[]): string[] => {
+    if (typeof node !== 'object' || node === null || Array.isArray(node)) {
+      return [];
+    }
+    const record = node as Record<string, unknown>;
+    const followReference = (reference: string): string[] => {
+      const hash = reference.indexOf('#');
+      const targetResource = reference.startsWith('#') ? resource : hash === -1 ? reference : reference.slice(0, hash);
+      const targetPointer = reference.startsWith('#')
+        ? reference.slice(1)
+        : hash === -1
+          ? ''
+          : reference.slice(hash + 1);
+      const key = `${targetResource}#${targetPointer}\0${remaining.join('/')}`;
+      if (visited.has(key)) {
+        return [];
+      }
+      visited.add(key);
+      const targetSchema =
+        targetResource === rootParameterSchemaResource ? manifest.schema : manifest.resources[targetResource];
+      return visit(schemaValueAtPointer(targetSchema, targetPointer), targetResource, remaining);
+    };
+    if (typeof record['$ref'] === 'string') {
+      return followReference(record['$ref']);
+    }
+
+    const types = Array.isArray(record['type']) ? record['type'] : [record['type']];
+    const output = types.flatMap((type) => {
+      const reference = schemaValueAtPointer(type, '/$ref');
+      return typeof reference === 'string' ? followReference(reference) : [];
+    });
+    for (const keyword of ['allOf', 'anyOf', 'oneOf']) {
+      const branches = record[keyword];
+      if (Array.isArray(branches)) {
+        output.push(...branches.flatMap((branch) => visit(branch, resource, remaining)));
+      }
+    }
+    if (remaining.length === 0) {
+      output.push(...types.filter((type): type is string => typeof type === 'string'));
+      return output;
+    }
+    const head = remaining[0]!;
+    const tail = remaining.slice(1);
+    const { properties, items } = record;
+    if (typeof properties === 'object' && properties !== null && !Array.isArray(properties) && head in properties) {
+      output.push(...visit(Reflect.get(properties, head), resource, tail));
+    }
+    if (/^(?:0|[1-9]\d*)$/u.test(head)) {
+      output.push(...visit(Array.isArray(items) ? items[Number(head)] : items, resource, tail));
+    }
+    return output;
+  };
+  return visit(manifest.schema, rootParameterSchemaResource, parts);
+};
+
+const admittedNativeBinding = (
+  manifest: ParameterManifest,
+  input: Readonly<{ parameterId: string; resource: string; pointer: string }>,
+): ParameterBinding | undefined => {
+  const binding = resolveParameterBinding(manifest, input.pointer);
+  if (binding !== undefined) {
+    return admittedBinding(manifest, input);
+  }
+  const types = schemaTypesAtPointer(manifest, input.pointer);
+  if (
+    input.parameterId !== `${manifest.source.revision}:${input.pointer}` ||
+    input.resource !== rootParameterSchemaResource ||
+    !types.some((type) => type !== 'null') ||
+    types.some((type) => nonScalarSchemaTypes.has(type))
+  ) {
+    throw failure('STALE_MANIFEST', 'The operation does not match an admitted manifest binding.');
+  }
+  return undefined;
+};
+
 /**
  * Resolve the effective binding for one field: the admitted manifest binding, refined by the unit
  * the person chose for it. Constraints follow the unit, so a bound authored in the manifest's unit
@@ -553,16 +680,28 @@ export const planParameterRecord = (
         entry.groups[operation.group] = next;
         break;
       }
-      case 'native-value':
+      case 'native-value': {
+        const binding = admittedNativeBinding(manifest, operation);
+        const group = entry.groups[operation.group]!;
+        const value =
+          binding === undefined
+            ? operation.value
+            : nativeUnitValue(
+                resolveEffectiveParameterBinding(manifest, operation.pointer, binding, group),
+                operation.value,
+              );
+        const values = setPointer(group.values, operation.pointer, value);
+        const next = withoutEmptyClaims({ ...group, values });
+        admitGroupValues(manifest, next, values);
+        changed = !sameValues(values, group.values);
+        entry.groups[operation.group] = next;
+        break;
+      }
       case 'unit-value': {
         const binding = admittedBinding(manifest, operation);
         const group = entry.groups[operation.group]!;
         const effective = resolveEffectiveParameterBinding(manifest, operation.pointer, binding, group);
-        const value = nativeUnitValue(
-          effective,
-          operation.value,
-          operation.kind === 'unit-value' ? operation.inputUnit : undefined,
-        );
+        const value = nativeUnitValue(effective, operation.value, operation.inputUnit);
         const values = setPointer(group.values, operation.pointer, value);
         const next = withoutEmptyClaims({ ...group, values });
         admitGroupValues(manifest, next, values);

@@ -120,7 +120,13 @@ const start = async (
         commitParameterSet: fromPromise(async ({ input }) => {
           writes += 1;
           return options.commit === undefined
-            ? { status: 'applied', content: new TextEncoder().encode(String(input.write.data)) }
+            ? {
+                status: 'applied',
+                content:
+                  typeof input.write.data === 'string'
+                    ? new TextEncoder().encode(input.write.data)
+                    : Uint8Array.from(input.write.data),
+              }
             : options.commit(writes);
         }),
         ...(options.plan === undefined ? {} : { planParameterSet: fromPromise(options.plan) }),
@@ -293,6 +299,58 @@ it('holds an unprovable write as indeterminate when recovery cannot read, then r
   fixture.actor.send({ type: 'watch.changed' });
   await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'ready' }));
   expect(fixture.emitted.filter((event) => event.type === 'settled')).toHaveLength(1);
+  fixture.actor.stop();
+});
+
+it('should resolve an uncertain write before accepting edits again', async () => {
+  const fixture = await start({
+    commit: async () => {
+      throw new Error('Reply lost');
+    },
+    load: async (load, current) => {
+      if (load === 2) {
+        throw new Error('Replica unavailable');
+      }
+      return structuredClone(current);
+    },
+  });
+  await expect(submitParameterRequest(fixture.actor, groupRequest(fixture.current, 'lost'))).resolves.toMatchObject({
+    status: 'indeterminate',
+    code: 'RECOVERY_FAILED',
+  });
+  expect(fixture.actor.getSnapshot().matches({ open: 'uncertain' })).toBe(true);
+
+  fixture.actor.send({ type: 'resolve' });
+
+  await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'ready' }));
+  expect(fixture.actor.getSnapshot().context.diagnostic).toBeUndefined();
+  fixture.actor.stop();
+});
+
+it('should refuse close while a write outcome remains uncertain', async () => {
+  const fixture = await start({
+    commit: async () => {
+      throw new Error('Reply lost');
+    },
+    load: async (load, current) => {
+      if (load === 2) {
+        throw new Error('Replica unavailable');
+      }
+      return structuredClone(current);
+    },
+  });
+  await expect(submitParameterRequest(fixture.actor, groupRequest(fixture.current, 'lost'))).resolves.toMatchObject({
+    status: 'indeterminate',
+    code: 'RECOVERY_FAILED',
+  });
+
+  fixture.actor.send({ type: 'close' });
+
+  expect(fixture.actor.getSnapshot().matches({ open: 'uncertain' })).toBe(true);
+  expect(fixture.actor.getSnapshot().context.diagnostic).toEqual({
+    code: 'WRITE_UNCERTAIN',
+    message: 'The previous write outcome remains uncertain.',
+  });
   fixture.actor.stop();
 });
 

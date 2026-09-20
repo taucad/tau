@@ -904,6 +904,14 @@ describe('branch revision mode', () => {
     await target.click(selectors.getByText('New branch', { exact: true }));
     await target.fill(selectors.getByLabelText('Name for the new branch'), 'isolated-run');
     await target.click(selectors.getByRole('button', { name: 'Create' }));
+    /* The chip names the branch of the chat's own `checkoutId`, which the picker
+       writes only once the branch exists. A send before it reads so leases the
+       project itself — and a fresh project records its files first, so the
+       branch is not instant. */
+    await target.expectVisible(
+      selectors.getByCss('[data-slot="chat-branch-picker"][aria-label^="Work in isolated-run."]'),
+      60_000,
+    );
     await submitAndWaitForPartial();
 
     await expect
@@ -912,6 +920,26 @@ describe('branch revision mode', () => {
 
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
-    assertPublication(await waitForPublishedTree('home'));
+
+    /* Isolated is two facts, not one: the work is in the branch's own files and
+       the branch's own revision, and the project's files never saw it. The log
+       stays with the project — a chat is not a branch's. */
+    let tree: Readonly<Record<string, string>> = {};
+    await expect
+      .poll(
+        async () => {
+          tree = await readActiveProjectTree('home');
+          return settledTurns(tree).length;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(1);
+    assertPublication(tree);
+    expect(settledTurns(tree)[0]).toMatchObject({ branch: 'isolated-run' });
+    expect(tree['/browser-host-proof.txt']).toBeUndefined();
+    const proofs = Object.entries(await readActiveCheckoutTree('home')).filter(([path]) =>
+      path.endsWith('/browser-host-proof.txt'),
+    );
+    expect(proofs.map(([, content]) => content)).toEqual(['created by the browser agent host\n']);
   });
 });

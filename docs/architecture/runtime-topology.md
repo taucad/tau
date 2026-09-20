@@ -472,6 +472,7 @@ const client = createRuntimeClient({
     fileSystem: fromFileSystemBridge(() =>
       openFileSystemBridge(fileManagerWorker, {
         root: '/projects/xxx',
+        consumer: 'agent',
       }),
     ),
   }),

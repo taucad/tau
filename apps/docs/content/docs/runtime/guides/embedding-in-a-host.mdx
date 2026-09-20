@@ -33,7 +33,7 @@ const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url))
 const clientOptions = createWebWorkerClientOptions({
   createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
   fileSystem: fromFileSystemBridge(() =>
-    openFileSystemBridge(fileManagerWorker, { root: '/projects/widget', consumer: 'working-copy' }),
+    openFileSystemBridge(fileManagerWorker, { root: '/projects/widget', consumer: 'agent' }),
   ),
 });
 const client = createRuntimeClient(clientOptions);

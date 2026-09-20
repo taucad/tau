@@ -144,8 +144,8 @@ const del = (value: Disposable): void => {
 };
 
 const delAll = (values: readonly Disposable[]): void => {
-  for (let i = values.length - 1; i >= 0; i--) {
-    del(values[i]);
+  for (let index = values.length - 1; index >= 0; index--) {
+    del(values[index]);
   }
 };
 
@@ -220,13 +220,13 @@ const configureBoolean = (algo: BRepAlgoAPI_BooleanOperation): void => {
 const booleanOp = (
   Algorithm: BooleanAlgorithmConstructor,
   label: string,
-  args: readonly [TopoDS_Shape, ...TopoDS_Shape[]],
+  arguments_: readonly [TopoDS_Shape, ...TopoDS_Shape[]],
   tools: readonly TopoDS_Shape[],
 ): TopoDS_Shape => {
   if (tools.length === 0) {
-    return args[0];
+    return arguments_[0];
   }
-  const argList = shapeList(args);
+  const argList = shapeList(arguments_);
   const toolList = shapeList(tools);
   const algo = new Algorithm();
   const progress = new Message_ProgressRange();
@@ -352,9 +352,9 @@ const regularPrismZ = (
 ): TopoDS_Shape => {
   const wireMaker = new BRepBuilderAPI_MakeWire();
   const edges: TopoDS_Edge[] = [];
-  for (let i = 0; i < sides; i++) {
-    const a0 = (2 * Math.PI * i) / sides + Math.PI / sides;
-    const a1 = (2 * Math.PI * ((i + 1) % sides)) / sides + Math.PI / sides;
+  for (let index = 0; index < sides; index++) {
+    const a0 = (2 * Math.PI * index) / sides + Math.PI / sides;
+    const a1 = (2 * Math.PI * ((index + 1) % sides)) / sides + Math.PI / sides;
     const e = edge(
       [radius * Math.cos(a0), radius * Math.sin(a0), z],
       [radius * Math.cos(a1), radius * Math.sin(a1), z],
@@ -382,10 +382,10 @@ const stations = (p: Params): CrankStations => {
   const pinStart: number[] = [];
   const pinCenter: number[] = [];
   const webStart: number[] = [];
-  for (let i = 0; i < 5; i++) {
+  for (let index = 0; index < 5; index++) {
     mainStart.push(x);
     x += p.mainJournalLen;
-    if (i < 4) {
+    if (index < 4) {
       webStart.push(x);
       x += p.webThickness;
       pinStart.push(x);
@@ -416,12 +416,12 @@ const web = (p: Params, xStart: number, phaseDeg: number): TopoDS_Shape => {
   const pinZ = p.crankThrow * z;
   const cwY = -p.counterweightOffset * y;
   const cwZ = -p.counterweightOffset * z;
-  const beamLen = p.crankThrow + p.webHubPinDia / 2;
+  const beamLength = p.crankThrow + p.webHubPinDia / 2;
   const beamW = p.webHubPinDia * 0.55;
   const beam = rotate(
     box(
       [xStart, -beamW / 2, -beamW / 2],
-      [xStart + p.webThickness, beamLen, beamW / 2],
+      [xStart + p.webThickness, beamLength, beamW / 2],
     ),
     phaseDeg,
     [0, 0, 0],
@@ -450,32 +450,34 @@ const crankshaft = (p: Params): TopoDS_Shape => {
   const solids: TopoDS_Shape[] = [
     cylinder(p.snoutDia / 2, p.snoutLen, [st.snoutStart, 0, 0], [1, 0, 0]),
   ];
-  for (let i = 0; i < 5; i++) {
+  for (let index = 0; index < 5; index++) {
     solids.push(
       cylinder(
         p.mainJournalDia / 2,
         p.mainJournalLen,
-        [arrayValue(st.mainStart, i, 'mainStart'), 0, 0],
+        [arrayValue(st.mainStart, index, 'mainStart'), 0, 0],
         [1, 0, 0],
       ),
     );
   }
-  for (let i = 0; i < 4; i++) {
-    const phase = phaseAt(i);
-    solids.push(web(p, arrayValue(st.webStart, 2 * i, 'webStart'), phase));
+  for (let index = 0; index < 4; index++) {
+    const phase = phaseAt(index);
+    solids.push(web(p, arrayValue(st.webStart, 2 * index, 'webStart'), phase));
     solids.push(
       cylinder(
         p.crankpinDia / 2,
         p.crankpinLen,
         [
-          arrayValue(st.pinStart, i, 'pinStart'),
+          arrayValue(st.pinStart, index, 'pinStart'),
           p.crankThrow * cosd(phase),
           p.crankThrow * sind(phase),
         ],
         [1, 0, 0],
       ),
     );
-    solids.push(web(p, arrayValue(st.webStart, 2 * i + 1, 'webStart'), phase));
+    solids.push(
+      web(p, arrayValue(st.webStart, 2 * index + 1, 'webStart'), phase),
+    );
   }
   solids.push(
     cylinder(p.flangeDia / 2, p.flangeThk, [st.flangeStart, 0, 0], [1, 0, 0]),
@@ -483,20 +485,28 @@ const crankshaft = (p: Params): TopoDS_Shape => {
   let shape = fuseAll(solids);
 
   const cuts: TopoDS_Shape[] = [];
-  for (let i = 0; i < 4; i++) {
-    const phase = phaseAt(i);
+  for (let index = 0; index < 4; index++) {
+    const phase = phaseAt(index);
     const pin: Vec3 = [
-      arrayValue(st.pinCenter, i, 'pinCenter'),
+      arrayValue(st.pinCenter, index, 'pinCenter'),
       p.crankThrow * cosd(phase),
       p.crankThrow * sind(phase),
     ];
-    const main: Vec3 = [arrayValue(st.mainCenter, i + 1, 'mainCenter'), 0, 0];
+    const main: Vec3 = [
+      arrayValue(st.mainCenter, index + 1, 'mainCenter'),
+      0,
+      0,
+    ];
     const dx = main[0] - pin[0];
     const dy = main[1] - pin[1];
     const dz = main[2] - pin[2];
-    const len = Math.hypot(dx, dy, dz);
+    const length = Math.hypot(dx, dy, dz);
     cuts.push(
-      cylinder(p.oilGalleryDia / 2, len, pin, [dx / len, dy / len, dz / len]),
+      cylinder(p.oilGalleryDia / 2, length, pin, [
+        dx / length,
+        dy / length,
+        dz / length,
+      ]),
     );
   }
   cuts.push(
@@ -525,7 +535,7 @@ const engineBlock = (p: Params): TopoDS_Shape => {
   const st = stations(p);
   const xFront = -10;
   const xRear = st.totalLen + 10;
-  const blockLen = xRear - xFront;
+  const blockLength = xRear - xFront;
   const caseW = 200;
   const caseTop = 30;
   const caseBot = -110;
@@ -537,8 +547,8 @@ const engineBlock = (p: Params): TopoDS_Shape => {
     const ny = cosd(bank.deckAngle);
     const nz = sind(bank.deckAngle);
     let slab = box(
-      [-blockLen / 2, -75, -p.deckHeight / 2],
-      [blockLen / 2, 75, p.deckHeight / 2],
+      [-blockLength / 2, -75, -p.deckHeight / 2],
+      [blockLength / 2, 75, p.deckHeight / 2],
     );
     slab = rotate(slab, bank.deckAngle - 90, [0, 0, 0], [1, 0, 0]);
     slab = translate(slab, [
@@ -572,7 +582,7 @@ const engineBlock = (p: Params): TopoDS_Shape => {
   cuts.push(
     cylinder(
       p.mainJournalDia / 2 + 1,
-      blockLen + 20,
+      blockLength + 20,
       [xFront - 10, 0, 0],
       [1, 0, 0],
     ),
@@ -581,7 +591,7 @@ const engineBlock = (p: Params): TopoDS_Shape => {
     common(
       cylinder(
         p.counterweightDia / 2 + 4,
-        blockLen + 20,
+        blockLength + 20,
         [xFront - 10, 0, 0],
         [1, 0, 0],
       ),
@@ -679,14 +689,14 @@ const conrod = (p: Params): TopoDS_Shape => {
 
 const cylinderHead = (p: Params): TopoDS_Shape => {
   const st = stations(p);
-  const len = st.totalLen - p.snoutLen - p.flangeThk + 40;
+  const length = st.totalLen - p.snoutLen - p.flangeThk + 40;
   const width = 150;
   const thk = p.headThk;
   const x0 = arrayValue(st.mainStart, 0, 'mainStart');
   const solids: TopoDS_Shape[] = [
-    box([x0 - 10, -width / 2, 0], [x0 - 10 + len, width / 2, thk]),
-    box([x0 - 10, -58, thk], [x0 - 10 + len, -22, thk + 28]),
-    box([x0 - 10, 22, thk], [x0 - 10 + len, 58, thk + 28]),
+    box([x0 - 10, -width / 2, 0], [x0 - 10 + length, width / 2, thk]),
+    box([x0 - 10, -58, thk], [x0 - 10 + length, -22, thk + 28]),
+    box([x0 - 10, 22, thk], [x0 - 10 + length, 58, thk + 28]),
   ];
   const cuts: TopoDS_Shape[] = [];
   for (let i = 0; i < 4; i++) {
@@ -698,25 +708,28 @@ const cylinderHead = (p: Params): TopoDS_Shape => {
     cuts.push(cylinder(15, 6, [x, 22, -1], [0, 0, 1]));
   }
   cuts.push(
-    box([x0 - 4, -width / 2 + 8, -0.1], [x0 - 10 + len - 6, width / 2 - 8, 10]),
+    box(
+      [x0 - 4, -width / 2 + 8, -0.1],
+      [x0 - 10 + length - 6, width / 2 - 8, 10],
+    ),
   );
   return cutAll(fuseAll(solids), cuts);
 };
 
 const valveCover = (p: Params): TopoDS_Shape => {
   const st = stations(p);
-  const len = st.totalLen - p.snoutLen - p.flangeThk + 30;
+  const length = st.totalLen - p.snoutLen - p.flangeThk + 30;
   const width = 110;
   const h = p.valveCoverHeight;
   const x0 = arrayValue(st.mainStart, 0, 'mainStart') - 5;
   const wall = 4;
   const solids: TopoDS_Shape[] = [
-    box([x0, -width / 2, 0], [x0 + len, width / 2, h]),
-    box([x0 - 6, -width / 2 - 6, 0], [x0 + len + 6, width / 2 + 6, 6]),
+    box([x0, -width / 2, 0], [x0 + length, width / 2, h]),
+    box([x0 - 6, -width / 2 - 6, 0], [x0 + length + 6, width / 2 + 6, 6]),
     cylinder(16, 18, [x0 + 30, 0, h], [0, 0, 1]),
   ];
   for (let i = 0; i < 4; i++) {
-    const x = x0 + (len * (i + 0.5)) / 4;
+    const x = x0 + (length * (i + 0.5)) / 4;
     solids.push(
       box(
         [x - 3, -width / 2 + wall, h - wall],
@@ -727,11 +740,11 @@ const valveCover = (p: Params): TopoDS_Shape => {
   const cuts: TopoDS_Shape[] = [
     box(
       [x0 + wall, -width / 2 + wall, -1],
-      [x0 + len - wall, width / 2 - wall, h - wall],
+      [x0 + length - wall, width / 2 - wall, h - wall],
     ),
     box(
       [x0 + wall, -width / 2 + wall, -1],
-      [x0 + len - wall, width / 2 - wall, 6.1],
+      [x0 + length - wall, width / 2 - wall, 6.1],
     ),
     cylinder(11, 22, [x0 + 30, 0, h - 2], [0, 0, 1]),
   ];
@@ -742,23 +755,23 @@ const tube = (a: Vec3, b: Vec3, radius: number): TopoDS_Shape => {
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
   const dz = b[2] - a[2];
-  const len = Math.hypot(dx, dy, dz);
-  return cylinder(radius, len, a, [dx / len, dy / len, dz / len]);
+  const length = Math.hypot(dx, dy, dz);
+  return cylinder(radius, length, a, [dx / length, dy / length, dz / length]);
 };
 
 const intake = (p: Params): TopoDS_Shape => {
   const st = stations(p);
   const plenumR = p.plenumDia / 2;
   const x0 = arrayValue(st.mainStart, 0, 'mainStart');
-  const len = st.totalLen - p.snoutLen - p.flangeThk;
+  const length = st.totalLen - p.snoutLen - p.flangeThk;
   const plenumZ = p.deckHeight * sind(45) + 40;
   const solids: TopoDS_Shape[] = [
-    cylinder(plenumR, len, [x0, 0, plenumZ], [1, 0, 0]),
+    cylinder(plenumR, length, [x0, 0, plenumZ], [1, 0, 0]),
     cylinder(p.throttleDia / 2, 40, [x0 - 40, 0, plenumZ], [1, 0, 0]),
   ];
   for (const side of [-1, 1]) {
-    for (let i = 0; i < 4; i++) {
-      const x = arrayValue(st.pinCenter, i, 'pinCenter') - 7;
+    for (let index = 0; index < 4; index++) {
+      const x = arrayValue(st.pinCenter, index, 'pinCenter') - 7;
       const portY = side * (p.deckHeight * cosd(45) * 0.35 + 25);
       const portZ = plenumZ - 60;
       solids.push(
@@ -825,11 +838,11 @@ const flywheel = (p: Params): TopoDS_Shape => {
     ringX(r, r - 12, 12, [0, 0, 0]),
   ]);
   const cuts: TopoDS_Shape[] = [];
-  for (let i = 0; i < p.ringGearTeeth; i++) {
+  for (let index = 0; index < p.ringGearTeeth; index++) {
     cuts.push(
       rotate(
         box([-1, -1.6, r - 3.5], [13, 1.6, r + 1]),
-        (360 / p.ringGearTeeth) * i,
+        (360 / p.ringGearTeeth) * index,
         [0, 0, 0],
         [1, 0, 0],
       ),
@@ -915,12 +928,12 @@ export default function main(
   for (const bank of BANKS) {
     const ny = cosd(bank.deckAngle);
     const nz = sind(bank.deckAngle);
-    for (let i = 0; i < 4; i++) {
+    for (let index = 0; index < 4; index++) {
       const x =
-        arrayValue(st.pinCenter, i, 'pinCenter') +
+        arrayValue(st.pinCenter, index, 'pinCenter') +
         (bank.side === 'R' ? 15 : 0) -
         7;
-      const phase = phaseAt(i);
+      const phase = phaseAt(index);
       const crankY = p.crankThrow * cosd(phase);
       const crankZ = p.crankThrow * sind(phase);
       const a = crankY;

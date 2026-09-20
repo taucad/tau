@@ -343,6 +343,18 @@ export const captureRevisionTree = async (
  */
 const timestampGranularityMilliseconds = 2000;
 
+/**
+ * How many bytes of one checkout a memo may keep resident, by default.
+ *
+ * Deliberately far below the capture's own 1 GiB payload bound: capture bytes
+ * used to be transient, and every byte held here is held for as long as the
+ * checkout is open, in a worker that also holds the kernel's own memory. Sixty
+ * four mebibytes covers the many-small-files tree the memo exists for — a
+ * project's sources, parameters and chats — and declines the single large mesh
+ * whose re-read costs one stream and whose residency costs the tab.
+ */
+const defaultMemoRetainedBytes = 64 * 1024 * 1024;
+
 /** Bytes one checkout's captures may reuse instead of reading. @public */
 export type CaptureMemo = Readonly<{
   /**
@@ -370,26 +382,50 @@ export type CaptureMemo = Readonly<{
  * a same-size same-timestamp rewrite is read and seen (C3). And a capture whose
  * bytes did not match the size its stat claimed memoises nothing for that path.
  *
- * ponytail: one tree's bytes, held until the tree shrinks below them — the map
- * is pruned to the paths each capture's stats name, so it is bounded by the
- * capture's own `maximumTotalBytes` rather than by a budget of its own. Give it
- * a byte ceiling if a project ever opens more checkouts than a tab can hold.
+ * **What it retains is a second copy.** `ImmutableRevisionTree` copies every byte
+ * run it is given and every one it hands back, so a memoised file is resident
+ * twice while a tree built from it is alive — the memo's own copy and the tree's.
+ * That is why the ceiling is {@link defaultMemoRetainedBytes} and not the
+ * capture's payload bound.
  *
+ * ponytail: a byte budget with per-file admission, in capture order, and no
+ * eviction — a file that does not fit is simply not held and pays its read next
+ * time, so a tree larger than the budget keeps the first files that fit rather
+ * than the most useful ones. Upgrade path, in order: hold the blob **id** rather
+ * than the bytes, which needs `ImmutableRevisionTree` to carry a lazily loaded
+ * entry (it is a synchronous copy-on-read value today, read by thirteen modules
+ * and three port adapters) — and only if that proves impossible, an LRU here.
+ *
+ * @param options - Byte ceiling for what this memo keeps resident.
  * @returns A memo to hand the captures of one checkout, dropped with it.
  * @public
  */
-export const createCaptureMemo = (): CaptureMemo => {
+export const createCaptureMemo = (options?: Readonly<{ maximumRetainedBytes?: number }>): CaptureMemo => {
+  const budget = assertCaptureLimit(
+    options?.maximumRetainedBytes ?? defaultMemoRetainedBytes,
+    'maximumRetainedBytes',
+    Number.MAX_SAFE_INTEGER,
+  );
   const held = new Map<string, Readonly<{ size: number; mtimeMs: number; content: Uint8Array<ArrayBuffer> }>>();
+  let retainedBytes = 0;
+  const drop = (path: string): void => {
+    const entry = held.get(path);
+    if (entry !== undefined) {
+      retainedBytes -= entry.content.byteLength;
+      held.delete(path);
+    }
+  };
   return {
     unchanged: (stats, observedAt) => {
       if (stats === undefined) {
         held.clear();
+        retainedBytes = 0;
         return {};
       }
       const byPath = new Map(stats.map((entry) => [entry.path, entry]));
       for (const path of held.keys()) {
         if (!byPath.has(path)) {
-          held.delete(path);
+          drop(path);
         }
       }
       return {
@@ -402,14 +438,16 @@ export const createCaptureMemo = (): CaptureMemo => {
         },
         onRead: (path, content) => {
           const stat = byPath.get(path);
+          drop(path);
           if (
             stat === undefined ||
             stat.size !== content.byteLength ||
-            observedAt - stat.mtimeMs <= timestampGranularityMilliseconds
+            observedAt - stat.mtimeMs <= timestampGranularityMilliseconds ||
+            retainedBytes + content.byteLength > budget
           ) {
-            held.delete(path);
             return;
           }
+          retainedBytes += content.byteLength;
           held.set(path, { size: stat.size, mtimeMs: stat.mtimeMs, content });
         },
       };

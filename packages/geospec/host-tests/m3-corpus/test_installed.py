@@ -369,6 +369,72 @@ def run_installed_row(native_module: Any, row: dict[str, object], route: str) ->
     }
 
 
+def _compare_verdict(row: dict[str, Any], outcome: dict[str, Any]) -> dict[str, Any]:
+    """Gate declared verdicts without deriving an oracle from captured geometry."""
+    expected = row["expected"]
+    report = outcome.get("report")
+    failure = outcome.get("error")
+    protocol = expected.get("protocolError")
+    status = expected.get("status")
+    if status == "full" and expected.get("canonicalResultUtf8"):
+        status = next(
+            (
+                result.get("status")
+                for result in json.loads(expected["canonicalResultUtf8"])["results"]
+                if result.get("claimId") == row["claimId"]
+            ),
+            None,
+        )
+    known = status in {
+        "passed", "failed", "unsupported", "refused", "invalid", "cancelled", "engine-error"
+    }
+    status_equal = (
+        report is not None and report.get("status") == status
+        if known and not protocol else None
+    )
+    hard_failures = []
+    if protocol:
+        if not (
+            failure
+            and failure.get("protocolError") is True
+            and failure.get("code") == protocol["code"]
+            and failure.get("message") == protocol["message"]
+            and report is None
+        ):
+            hard_failures.append("canonical-plan-protocol-error")
+    else:
+        if not known:
+            hard_failures.append("expected-status-authority")
+        elif not status_equal:
+            hard_failures.append("expected-status")
+        if not report or not all(
+            report.get(field, {}).get("utf8")
+            for field in ("canonicalClaim", "canonicalPlan", "canonicalResult")
+        ):
+            hard_failures.append("missing-report")
+        if failure and (not row["matcher"] or (report or {}).get("status") == "passed"):
+            hard_failures.append("unexpected-error")
+        if row["matcher"] and report and report.get("status") != "passed":
+            structured = bool(failure) and (
+                failure.get("assertionError") is True
+                or (failure.get("structuredGeoSpec") or {}).get("claimId")
+                == report.get("claimId")
+            )
+            if not structured:
+                hard_failures.append("unstructured-assertion-error")
+    if outcome.get("stages", {}).get("cleanup", {}).get("status") != "released":
+        hard_failures.append("cleanup")
+    return {
+        "expectedStatus": status if known else None,
+        "statusEqual": status_equal,
+        "statusAuthority": (
+            "independent-protocol-error" if protocol
+            else "independent-verdict" if known else "withheld"
+        ),
+        "hardFailures": hard_failures,
+    }
+
+
 def test_should_exercise_complete_selected_corpus_through_installed_pytest(
     geospec_engine: GeoSpecEngine,
     pytestconfig: pytest.Config,
@@ -394,8 +460,16 @@ def test_should_exercise_complete_selected_corpus_through_installed_pytest(
     }
     try:
         for row in campaign["rows"]:
-            output["rows"].append(run_installed_row(native_module, row, route))
+            outcome = run_installed_row(native_module, row, route)
+            output["rows"].append(outcome)
+            outcome["comparison"] = _compare_verdict(row, outcome)
         assert len(output["rows"]) == len(campaign["rows"])
+        failures = [
+            f"{outcome['id']}: {failure}"
+            for outcome in output["rows"]
+            for failure in outcome["comparison"]["hardFailures"]
+        ]
+        assert not failures, failures
     finally:
         Path(_required_environment("GEOSPEC_PYTHON_OUTPUT")).write_text(
             json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

@@ -2,7 +2,7 @@
 import { expect, test } from 'vitest';
 import { loadInstalledCampaign, runVitestCampaign, runVitestContinuousCampaign } from './installed.mjs';
 
-test('should exercise the complete selected corpus through installed Vitest', async () => {
+test('should enforce independent verdicts for the complete selected corpus through installed Vitest', async () => {
   const campaign = process.env.GEOSPEC_VITEST_CAMPAIGN;
   const output = campaign ? await runVitestContinuousCampaign(campaign, expect) : await runVitestCampaign(expect);
   let expectedRows;

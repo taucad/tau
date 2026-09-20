@@ -27,6 +27,18 @@
         "command": "node --test packages/geospec/host-tests/m3-corpus/independent-bindings.test.mjs",
         "forwardAllArgs": false
       }
+    },
+    "test-m3-verdicts": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "commands": [
+          "node --test packages/geospec/host-tests/m3-corpus/verdict-host.mjs",
+          "python3 -B packages/geospec/host-tests/m3-corpus/verdict_host_check.py"
+        ],
+        "parallel": false,
+        "forwardAllArgs": false
+      }
     }
   }
 }

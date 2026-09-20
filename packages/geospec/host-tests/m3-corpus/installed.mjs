@@ -755,7 +755,13 @@ const runContinuousCampaign = async (kind, hostExpect) => {
       outcome.expected = row.expected;
       outcome.budgetControl = row.budgetControl ?? null;
       output.rows.push(outcome);
+      outcome.comparison = compareRecord(row, outcome);
     }
+    assert.deepEqual(
+      output.rows.flatMap((outcome) => outcome.comparison.hardFailures.map((failure) => `${outcome.id}: ${failure}`)),
+      [],
+      'Installed campaign did not satisfy its independent expectations',
+    );
   } finally {
     writeJson(outputPath, output);
   }
@@ -801,9 +807,16 @@ const runCampaign = async (route, outputPath, hostExpect) => {
   try {
     for (const row of campaign.rows) {
       // oxlint-disable-next-line no-await-in-loop -- The native engine is thread-confined and this acceptance route is explicitly serial.
-      output.rows.push(await runInstalledRow(row, route, hostExpect));
+      const outcome = await runInstalledRow(row, route, hostExpect);
+      output.rows.push(outcome);
+      outcome.comparison = compareRecord(row, outcome);
     }
     assert.equal(output.rows.length, campaign.rows.length);
+    assert.deepEqual(
+      output.rows.flatMap((outcome) => outcome.comparison.hardFailures.map((failure) => `${outcome.id}: ${failure}`)),
+      [],
+      'Installed campaign did not satisfy its independent expectations',
+    );
   } finally {
     writeJson(outputPath, output);
   }
@@ -888,30 +901,47 @@ const continuousPythonCampaign = (kind) => ({
 // oxlint-disable-next-line complexity -- One comparison keeps the three evidence tracks explicit in the persisted row record.
 const compareRecord = (row, outcome) => {
   const { report } = outcome;
-  const planUtf8 =
-    row.expected.canonicalPlan.status === 'success'
+  const planUtf8 = row.expected.canonicalPlan
+    ? row.expected.canonicalPlan.status === 'success'
       ? row.expected.canonicalPlan.canonicalUtf8
-      : row.expected.canonicalPlan.derivationUtf8;
-  const claim = JSON.parse(planUtf8).plan.claims[0];
-  const canonicalClaimUtf8 = byteRecord(canonicalize(Buffer.from(JSON.stringify(claim)))).utf8;
+      : row.expected.canonicalPlan.derivationUtf8
+    : null;
+  const claim = planUtf8 === null ? null : JSON.parse(planUtf8).plan.claims[0];
+  const canonicalClaimUtf8 = claim === null ? null : byteRecord(canonicalize(Buffer.from(JSON.stringify(claim)))).utf8;
   const protocol = row.expected.protocolError;
   const actualError = outcome.error;
-  const planEqual = report?.canonicalPlan.utf8 === planUtf8;
-  const claimEqual = report?.canonicalClaim.utf8 === canonicalClaimUtf8;
+  const planEqual = planUtf8 === null ? null : report?.canonicalPlan?.utf8 === planUtf8;
+  const claimEqual = canonicalClaimUtf8 === null ? null : report?.canonicalClaim?.utf8 === canonicalClaimUtf8;
   const resultEqual =
-    row.expected.canonicalResultUtf8 === null
+    row.expected.canonicalResultUtf8 === null || row.expected.canonicalResultUtf8 === undefined
       ? null
-      : report?.canonicalResult.utf8 === row.expected.canonicalResultUtf8;
+      : report?.canonicalResult?.utf8 === row.expected.canonicalResultUtf8;
+  // "full" is a legacy authority label, not a verdict. Use only its frozen result.
+  const expectedStatus =
+    row.expected.status === 'full' && row.expected.canonicalResultUtf8
+      ? JSON.parse(row.expected.canonicalResultUtf8).results.find((result) => result.claimId === row.claimId)?.status
+      : row.expected.status;
+  const statusKnown = ['passed', 'failed', 'unsupported', 'refused', 'invalid', 'cancelled', 'engine-error'].includes(
+    expectedStatus,
+  );
+  const statusEqual = statusKnown && !protocol ? report?.status === expectedStatus : null;
   const exactResultAuthority =
     row.cohort === 'F1' ||
     row.expected.measurement?.classification === 'exact-domain-control' ||
     row.expected.measurement?.classification === 'nonmeasurement';
   const accuracyContract = row.expected.measurement?.accuracyContract ?? null;
   const protocolEqual = protocol
-    ? actualError?.code === protocol.code && actualError?.message === protocol.message
+    ? actualError?.protocolError === true &&
+      actualError.code === protocol.code &&
+      actualError.message === protocol.message &&
+      !report
     : null;
   const hardFailures = [];
-  if (outcome.admittedIdentity?.actual !== outcome.admittedIdentity?.expected) {
+  const admissionIdentityEqual =
+    outcome.admittedIdentity?.expected === null
+      ? null
+      : outcome.admittedIdentity?.actual === outcome.admittedIdentity?.expected;
+  if (admissionIdentityEqual === false) {
     hardFailures.push('admission-identity');
   }
   if (protocol) {
@@ -919,14 +949,25 @@ const compareRecord = (row, outcome) => {
       hardFailures.push('canonical-plan-protocol-error');
     }
   } else {
-    if (!claimEqual) {
+    if (!statusKnown) {
+      hardFailures.push('expected-status-authority');
+    } else if (!statusEqual) {
+      hardFailures.push('expected-status');
+    }
+    if (!report?.canonicalClaim?.utf8 || !report?.canonicalPlan?.utf8 || !report?.canonicalResult?.utf8) {
+      hardFailures.push('missing-report');
+    }
+    if (claimEqual === false) {
       hardFailures.push('canonical-claim');
     }
-    if (!planEqual) {
+    if (planEqual === false) {
       hardFailures.push('canonical-plan');
     }
     if (exactResultAuthority && resultEqual === false) {
       hardFailures.push('authoritative-canonical-result');
+    }
+    if (actualError && (!row.matcher || report?.status === 'passed')) {
+      hardFailures.push('unexpected-error');
     }
     if (row.matcher && report && report.status !== 'passed') {
       const structured =
@@ -940,7 +981,10 @@ const compareRecord = (row, outcome) => {
     hardFailures.push('cleanup');
   }
   return {
-    admissionIdentityEqual: outcome.admittedIdentity?.actual === outcome.admittedIdentity?.expected,
+    expectedStatus: statusKnown ? expectedStatus : null,
+    statusEqual,
+    statusAuthority: protocol ? 'independent-protocol-error' : statusKnown ? 'independent-verdict' : 'withheld',
+    admissionIdentityEqual,
     protocolErrorEqual: protocolEqual,
     canonicalClaimEqual: claimEqual,
     canonicalPlanEqual: planEqual,

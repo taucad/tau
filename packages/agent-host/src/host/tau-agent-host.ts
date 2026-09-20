@@ -1,10 +1,6 @@
 import { util as zodUtility } from 'zod';
 import { createAgentSession } from '#harness/session.js';
-import {
-  createPortableId,
-  transportFailureDiagnosticType,
-  transportFailureFromProviderMessages,
-} from '#harness/session-record.js';
+import { createPortableId, transportFailureDiagnosticType, transportFailureOfRun } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type {
   AgentToolChoice,
@@ -2096,12 +2092,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       return undefined;
     }
     const runId = current?.runId ?? last.runId;
-    /* The assistant diagnostic first, because it carries the transport's own
-     * refusal fields; the lifecycle record when there is no such marker, which
+    /* This run's own assistant diagnostic first, because it carries the
+     * transport's `status` and refusal payload where the terminal row may hold
+     * only a message; the lifecycle record when that run wrote no marker, which
      * is every failure that never was a model call — an external agent's stop
      * writes no assistant message at all. Without the fallback a surface read
-     * no failure for those runs and could only rewind the turn (F1). */
-    const failure = transportFailureFromProviderMessages(messages) ?? terminalFailureOf(events, runId);
+     * no failure for those runs and could only rewind the turn (F1). Both
+     * sources are keyed on `runId`: a chat's history outlives its runs. */
+    const failure = transportFailureOfRun({ events, messages, runId }) ?? terminalFailureOf(events, runId);
     return {
       chatId,
       runId,

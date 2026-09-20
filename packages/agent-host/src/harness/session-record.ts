@@ -105,12 +105,40 @@ const providerMetadataFromDiagnostics = (
   return zodUtility.isObject(value) ? (value as ProviderMessageMetadata) : undefined;
 };
 
-/** Recover a typed transport refusal from durable provider history. @internal */
-export const transportFailureFromProviderMessages = (
-  messages: readonly ProviderMessage[],
-): HostRunFailure | undefined => {
-  for (const message of messages.toReversed()) {
-    if (message.role !== 'assistant' || !Array.isArray(message.metadata?.diagnostics)) {
+/**
+ * Recover the typed transport refusal one run's own messages carry.
+ *
+ * A failure is a fact about the run that hit it, and a chat's history outlives
+ * every run in it: an older refusal's marker survives any turn that did not
+ * rewind it, so the newest diagnostic in the chat is not this run's. Reading it
+ * as one made an abandoned run report a previous turn's code, and the surfaces
+ * key the saved-turn card and `isResumableRunFailure` off exactly that field.
+ * The run owns a message when its own record appended or replaced it.
+ *
+ * @internal
+ * @param input - The chat's durable records, its reduced history and the run to describe.
+ * @returns The refusal that run recorded, or `undefined` when it recorded none.
+ */
+export const transportFailureOfRun = (input: {
+  readonly events: readonly AgentLogEvent[];
+  readonly messages: readonly ProviderMessage[];
+  readonly runId: string;
+}): HostRunFailure | undefined => {
+  const owned = new Set(
+    input.events.flatMap((event) => {
+      if (event.runId === input.runId) {
+        if (event.type === 'message.appended') {
+          return [event.message.id];
+        }
+        if (event.type === 'message.envelope-replaced') {
+          return [event.messageId];
+        }
+      }
+      return [];
+    }),
+  );
+  for (const message of input.messages.toReversed()) {
+    if (!owned.has(message.id) || message.role !== 'assistant' || !Array.isArray(message.metadata?.diagnostics)) {
       continue;
     }
     for (const candidate of message.metadata.diagnostics.toReversed()) {

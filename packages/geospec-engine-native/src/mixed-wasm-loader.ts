@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Emscripten exposes C symbols with leading underscores. */
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package module.
-import { ProtocolError } from '#host-types.js';
+import { appendHostObservationCopies, observeHostCopy, ProtocolError } from '#host-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import resolves an in-package contract type.
-import type { HostBytes } from '#host-types.js';
+import type { HostBytes, HostCopyObservations } from '#host-types.js';
 
 const bindingSpecifier = '#mixed-wasm-binding';
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -34,6 +34,7 @@ type MixedWasmModule = {
   _geospec_engine_native_input_free(pointer: number, length: number): void;
   _geospec_engine_native_engine_new(): number;
   _geospec_engine_native_engine_drop(engine: number): void;
+  _geospec_engine_native_observations(engine: number): number;
   _geospec_engine_native_canonicalize(input: number, inputLength: number): number;
   _geospec_engine_native_ingest_mesh(
     engine: number,
@@ -58,11 +59,11 @@ type MixedWasmModule = {
   _geospec_engine_native_evaluate_plan(engine: number, plan: number, planLength: number): number;
   _geospec_engine_native_result_is_error(result: number): number;
   _geospec_engine_native_result_length(result: number): number;
-  _geospec_engine_native_result_copy(result: number, output: number, capacity: number): number;
+  _geospec_engine_native_result_pointer(result: number): number;
   _geospec_engine_native_result_code_length(result: number): number;
-  _geospec_engine_native_result_code_copy(result: number, output: number, capacity: number): number;
+  _geospec_engine_native_result_code_pointer(result: number): number;
   _geospec_engine_native_result_message_length(result: number): number;
-  _geospec_engine_native_result_message_copy(result: number, output: number, capacity: number): number;
+  _geospec_engine_native_result_message_pointer(result: number): number;
   _geospec_engine_native_result_drop(result: number): void;
 };
 
@@ -129,66 +130,79 @@ const initializedModule = (): MixedWasmModule => {
   return loadedModule;
 };
 
-const allocate = (module: MixedWasmModule, bytes: HostBytes): number => {
+const allocate = (module: MixedWasmModule, bytes: HostBytes, copies?: HostCopyObservations): number => {
   const pointer = module._geospec_engine_native_input_alloc(bytes.byteLength);
   if (bytes.byteLength !== 0 && pointer === 0) {
     throw new ProtocolError('limit-exceeded', 'Compiled GeoSpec WASM module could not register input bytes.');
   }
   module.HEAPU8.set(bytes, pointer);
+  if (copies) {
+    observeHostCopy(copies, 'input', bytes.byteLength);
+  }
   return pointer;
 };
 
-const allocateTransferred = (module: MixedWasmModule, bytes: HostBytes): number => {
+const allocateTransferred = (module: MixedWasmModule, bytes: HostBytes, copies?: HostCopyObservations): number => {
   const pointer = module._geospec_engine_native_input_alloc(bytes.byteLength);
   if (bytes.byteLength !== 0 && pointer === 0) {
     throw new ProtocolError('limit-exceeded', 'Compiled GeoSpec WASM module could not allocate binary input bytes.');
   }
   module.HEAPU8.set(bytes, pointer);
+  if (copies) {
+    observeHostCopy(copies, 'input', bytes.byteLength);
+  }
   return pointer;
 };
 
 type ResultBytes = {
+  readonly copies?: HostCopyObservations | undefined;
   readonly length: (result: number) => number;
-  readonly copy: (result: number, output: number, capacity: number) => number;
+  readonly pointer: (result: number) => number;
 };
 
 const copyResultBytes = (module: MixedWasmModule, result: number, access: ResultBytes): HostBytes => {
-  const byteLength = access.length(result);
-  const pointer = module._geospec_engine_native_input_alloc(byteLength);
-  if (byteLength !== 0 && pointer === 0) {
-    throw new ProtocolError('limit-exceeded', 'Compiled GeoSpec WASM module could not allocate output bytes.');
+  // oxlint-disable-next-line no-bitwise -- Emscripten exposes wasm32 unsigned metadata as signed JS i32 values.
+  const byteLength = access.length(result) >>> 0;
+  // oxlint-disable-next-line no-bitwise -- Normalize the private wasm32 address before range arithmetic.
+  const pointer = access.pointer(result) >>> 0;
+  if (byteLength === 0) {
+    return new Uint8Array(0);
   }
-  try {
-    if (access.copy(result, pointer, byteLength) !== byteLength) {
-      throw new ProtocolError('invalid-request', 'Compiled GeoSpec WASM module returned an inconsistent byte length.');
-    }
-    return Uint8Array.from(module.HEAPU8.subarray(pointer, pointer + byteLength));
-  } finally {
-    if (pointer !== 0) {
-      module._geospec_engine_native_input_free(pointer, byteLength);
-    }
+  // Metadata calls can grow memory. Acquire the current view only afterward,
+  // then copy synchronously before any observer, allocator or result drop.
+  const heap = module.HEAPU8;
+  if (pointer === 0 || pointer > heap.byteLength || byteLength > heap.byteLength - pointer) {
+    throw new ProtocolError('invalid-request', 'Compiled GeoSpec WASM module returned an inconsistent byte range.');
   }
+  const bytes = Uint8Array.from(heap.subarray(pointer, pointer + byteLength));
+  if (access.copies) {
+    observeHostCopy(access.copies, 'output', byteLength);
+  }
+  return bytes;
 };
 
-const readResult = (module: MixedWasmModule, result: number): HostBytes => {
+const readResult = (module: MixedWasmModule, result: number, copies?: HostCopyObservations): HostBytes => {
   if (result === 0) {
     throw new ProtocolError('invalid-request', 'Compiled GeoSpec WASM module returned no result.');
   }
   try {
     if (module._geospec_engine_native_result_is_error(result) !== 0) {
       const code = copyResultBytes(module, result, {
+        copies,
         length: (handle) => module._geospec_engine_native_result_code_length(handle),
-        copy: (handle, output, capacity) => module._geospec_engine_native_result_code_copy(handle, output, capacity),
+        pointer: (handle) => module._geospec_engine_native_result_code_pointer(handle),
       });
       const message = copyResultBytes(module, result, {
+        copies,
         length: (handle) => module._geospec_engine_native_result_message_length(handle),
-        copy: (handle, output, capacity) => module._geospec_engine_native_result_message_copy(handle, output, capacity),
+        pointer: (handle) => module._geospec_engine_native_result_message_pointer(handle),
       });
       throw new ProtocolError(decoder.decode(code), decoder.decode(message));
     }
     return copyResultBytes(module, result, {
+      copies,
       length: (handle) => module._geospec_engine_native_result_length(handle),
-      copy: (handle, output, capacity) => module._geospec_engine_native_result_copy(handle, output, capacity),
+      pointer: (handle) => module._geospec_engine_native_result_pointer(handle),
     });
   } finally {
     module._geospec_engine_native_result_drop(result);
@@ -197,15 +211,15 @@ const readResult = (module: MixedWasmModule, result: number): HostBytes => {
 
 const withInput = (
   module: MixedWasmModule,
-  input: HostBytes,
+  input: { bytes: HostBytes; copies?: HostCopyObservations },
   operation: (pointer: number, length: number) => number,
 ): HostBytes => {
-  const pointer = allocate(module, ordinaryBytes(input));
+  const pointer = allocate(module, ordinaryBytes(input.bytes), input.copies);
   try {
-    return readResult(module, operation(pointer, input.byteLength));
+    return readResult(module, operation(pointer, input.bytes.byteLength), input.copies);
   } finally {
     if (pointer !== 0) {
-      module._geospec_engine_native_input_free(pointer, input.byteLength);
+      module._geospec_engine_native_input_free(pointer, input.bytes.byteLength);
     }
   }
 };
@@ -213,6 +227,7 @@ const withInput = (
 /** Exact byte transport over one retained mixed-WASM engine. @internal */
 export class MixedWasmBinding {
   readonly #module = initializedModule();
+  readonly #copies = { exact: true, inputCopies: 0n, inputBytes: 0n, outputCopies: 0n, outputBytes: 0n };
   #engine = this.#module._geospec_engine_native_engine_new();
 
   public constructor() {
@@ -238,8 +253,8 @@ export class MixedWasmBinding {
   public ingestMesh(request: HostBytes, mesh: HostBytes): HostBytes {
     const meshBytes = ordinaryBytes(mesh);
     const engine = this.engine();
-    return withInput(this.#module, request, (requestPointer, requestLength) => {
-      const meshPointer = allocateTransferred(this.#module, meshBytes);
+    return withInput(this.#module, { bytes: request, copies: this.#copies }, (requestPointer, requestLength) => {
+      const meshPointer = allocateTransferred(this.#module, meshBytes, this.#copies);
       let transferred = false;
       try {
         transferred = true;
@@ -269,7 +284,7 @@ export class MixedWasmBinding {
     const primaryBytes = ordinaryBytes(primary);
     const resourceBytes = ordinaryResources(resources);
     const engine = this.engine();
-    return withInput(this.#module, request, (requestPointer, requestLength) => {
+    return withInput(this.#module, { bytes: request, copies: this.#copies }, (requestPointer, requestLength) => {
       const transferred: Array<{
         readonly pointer: number;
         readonly length: number;
@@ -279,12 +294,12 @@ export class MixedWasmBinding {
       let entered = false;
       try {
         transferred.push({
-          pointer: allocateTransferred(this.#module, primaryBytes),
+          pointer: allocateTransferred(this.#module, primaryBytes, this.#copies),
           length: primaryBytes.byteLength,
         });
         for (const bytes of resourceBytes) {
           transferred.push({
-            pointer: allocateTransferred(this.#module, bytes),
+            pointer: allocateTransferred(this.#module, bytes, this.#copies),
             length: bytes.byteLength,
           });
         }
@@ -341,7 +356,7 @@ export class MixedWasmBinding {
    * @returns Exact subject-handle response bytes.
    */
   public subjectHandle(request: HostBytes): HostBytes {
-    return withInput(this.#module, request, (pointer, length) =>
+    return withInput(this.#module, { bytes: request, copies: this.#copies }, (pointer, length) =>
       this.#module._geospec_engine_native_subject_handle(this.engine(), pointer, length),
     );
   }
@@ -352,7 +367,7 @@ export class MixedWasmBinding {
    * @returns Exact release response bytes.
    */
   public releaseSubject(request: HostBytes): HostBytes {
-    return withInput(this.#module, request, (pointer, length) =>
+    return withInput(this.#module, { bytes: request, copies: this.#copies }, (pointer, length) =>
       this.#module._geospec_engine_native_release_subject(this.engine(), pointer, length),
     );
   }
@@ -363,7 +378,7 @@ export class MixedWasmBinding {
    * @returns Canonical response bytes.
    */
   public processRequest(request: HostBytes): HostBytes {
-    return withInput(this.#module, request, (pointer, length) =>
+    return withInput(this.#module, { bytes: request, copies: this.#copies }, (pointer, length) =>
       this.#module._geospec_engine_native_process_request(this.engine(), pointer, length),
     );
   }
@@ -374,7 +389,7 @@ export class MixedWasmBinding {
    * @returns Canonical plan bytes.
    */
   public canonicalPlan(request: HostBytes): HostBytes {
-    return withInput(this.#module, request, (pointer, length) =>
+    return withInput(this.#module, { bytes: request, copies: this.#copies }, (pointer, length) =>
       this.#module._geospec_engine_native_canonical_plan(this.engine(), pointer, length),
     );
   }
@@ -385,9 +400,18 @@ export class MixedWasmBinding {
    * @returns Canonical response bytes.
    */
   public evaluatePlan(plan: HostBytes): HostBytes {
-    return withInput(this.#module, plan, (pointer, length) =>
+    return withInput(this.#module, { bytes: plan, copies: this.#copies }, (pointer, length) =>
       this.#module._geospec_engine_native_evaluate_plan(this.engine(), pointer, length),
     );
+  }
+
+  /**
+   * Non-mutating observation snapshot, excluding its own transport copies.
+   * @returns Owned cumulative diagnostic bytes.
+   */
+  public observations(): HostBytes {
+    const bytes = readResult(this.#module, this.#module._geospec_engine_native_observations(this.engine()));
+    return appendHostObservationCopies(bytes, this.#copies);
   }
 
   private engine(): number {
@@ -406,5 +430,7 @@ export class MixedWasmBinding {
  */
 export const canonicalizeMixedWasm = (input: HostBytes): HostBytes => {
   const module = initializedModule();
-  return withInput(module, input, (pointer, length) => module._geospec_engine_native_canonicalize(pointer, length));
+  return withInput(module, { bytes: input }, (pointer, length) =>
+    module._geospec_engine_native_canonicalize(pointer, length),
+  );
 };

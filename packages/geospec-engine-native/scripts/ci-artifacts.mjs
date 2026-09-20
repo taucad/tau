@@ -4,7 +4,7 @@
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
  * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
- * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt}.json
+ * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json
  * Exit: 0 complete and matching; 1 missing, changed or failed prerequisite.
  */
 import assert from 'node:assert/strict';
@@ -20,6 +20,8 @@ const packagePath = 'packages/geospec-engine-native';
 const transportPath = 'out/artifacts/geospec-native-engine/ci';
 const inventoryPath = `${transportPath}/inventory.json`;
 const receiptPath = `${transportPath}/mixed-build-receipt.json`;
+const mixedInputsPath = `${transportPath}/mixed-inputs.json`;
+const mixedCommandsPath = `${transportPath}/mixed-commands.json`;
 const outputs = [
   `${packagePath}/bindings/node/generated/index.d.ts`,
   `${packagePath}/bindings/node/generated/index.js`,
@@ -107,12 +109,65 @@ const payload = (root) => {
 };
 /** @type {(root: string, inventory: {source: ReturnType<typeof sourceIdentity>, artifacts: ReturnType<typeof payload>}) => void} */
 const checkReceipt = (root, inventory) => {
-  const { sourceRevision, sourceRoot, manifestSha256, bindingSha256, artifacts } = readJson(resolve(root, receiptPath));
+  const { sourceRevision, sourceRoot, manifestSha256, bindingSha256, artifacts, output } = readJson(
+    resolve(root, receiptPath),
+  );
   assert.ok(sourceRevision === inventory.source.revision, 'Mixed receipt source revision differs.');
   assert.ok(typeof sourceRoot === 'string' && posix.isAbsolute(sourceRoot), 'Mixed receipt lacks producer root.');
+  assert.ok(manifestSha256 === fileRecord(root, mixedInputsPath).sha256, 'Mixed receipt/input-manifest hash differs.');
+  const inputs = readJson(resolve(root, mixedInputsPath));
+  assert.ok(inputs.schema === 'geospec-mixed-build-inputs-v2', 'Unsupported mixed input manifest.');
   assert.ok(
-    typeof manifestSha256 === 'string' && /^[\da-f]{64}$/.test(manifestSha256),
-    'Mixed receipt lacks input-manifest hash.',
+    inputs.sourceRoot === sourceRoot && inputs.sourceRevision === sourceRevision,
+    'Mixed input source differs from receipt.',
+  );
+  assert.ok(
+    output === posix.join(sourceRoot, packagePath, 'bindings/emscripten/generated') && inputs.output === output,
+    'Mixed input/receipt output differs.',
+  );
+  assert.ok(typeof inputs.cache === 'string' && posix.isAbsolute(inputs.cache), 'Mixed inputs lack build cache.');
+  assert.ok(inputs.linkOptimization === 'O3', 'Unsupported mixed link profile.');
+  /** @type {unknown} */
+  const commands = JSON.parse(readFileSync(resolve(root, mixedCommandsPath), 'utf8'));
+  assert.ok(Array.isArray(commands) && commands.length === 4, 'Incomplete mixed commands.');
+  /** @type {unknown[]} */
+  const records = commands;
+  const commandArguments = records.map((command, index) => {
+    assert.ok(command !== null && typeof command === 'object' && !Array.isArray(command), 'Invalid mixed command.');
+    const record = /** @type {Record<string, unknown>} */ (command);
+    const tool = ['rustc', 'emxx', 'cargo', 'emxx'][index];
+    assert.ok(tool !== undefined && typeof inputs[tool] === 'string', 'Missing mixed command tool.');
+    assert.ok(
+      record.executable === inputs[tool] &&
+        record.status === 0 &&
+        Array.isArray(record.args) &&
+        record.args.every((argument) => typeof argument === 'string'),
+      'Mixed command/tool selection differs from inputs.',
+    );
+    return record.args;
+  });
+  assert.deepEqual(commandArguments[0], ['-vV'], 'Mixed Rust version command differs.');
+  assert.deepEqual(commandArguments[1], ['--version'], 'Mixed Emscripten version command differs.');
+  assert.deepEqual(
+    commandArguments[2],
+    [
+      'build',
+      '--manifest-path',
+      posix.join(sourceRoot, packagePath, 'bindings/emscripten/Cargo.toml'),
+      '--locked',
+      '--offline',
+      '--release',
+      '--target',
+      'wasm32-unknown-emscripten',
+      '--target-dir',
+      posix.join(inputs.cache, 'target'),
+    ],
+    'Mixed Cargo route differs from inputs.',
+  );
+  assert.ok(
+    commandArguments[3][0] === `-${inputs.linkOptimization}` &&
+      isDeepStrictEqual(commandArguments[3].slice(-2), ['-o', posix.join(output, 'geospec_engine_native.mjs')]),
+    'Mixed link profile/output differs from inputs.',
   );
   assert.ok(
     bindingSha256 === fileRecord(root, `${packagePath}/bindings/emscripten/src/lib.rs`).sha256,
@@ -138,10 +193,10 @@ export const verifyArtifacts = (root) => {
     'Missing GeoSpec artifact inventory; run geospec-engine-native:prepare-geospec-ci-artifacts on Darwin ARM64 or restore its complete same-source transport.',
   );
   const inventory = readJson(resolve(root, inventoryPath));
-  const { schema, source: recordedSource, artifacts: recordedArtifacts, mixedReceipt } = inventory;
+  const { schema, source: recordedSource, artifacts: recordedArtifacts } = inventory;
   const source = sourceIdentity(root);
   const artifacts = payload(root);
-  assert.ok(schema === 'geospec-ci-artifacts-v1', 'Unsupported GeoSpec artifact inventory.');
+  assert.ok(schema === 'geospec-ci-artifacts-v2', 'Unsupported GeoSpec artifact inventory.');
   assert.ok(
     isDeepStrictEqual(recordedSource, source),
     'GeoSpec artifact source revision/inputs differ from this checkout.',
@@ -150,10 +205,13 @@ export const verifyArtifacts = (root) => {
     isDeepStrictEqual(recordedArtifacts, artifacts),
     'GeoSpec artifact membership/bytes/hashes differ from inventory.',
   );
-  assert.ok(
-    isDeepStrictEqual(mixedReceipt, fileRecord(root, receiptPath)),
-    'Mixed build receipt changed during transport.',
-  );
+  for (const [key, path] of [
+    ['mixedReceipt', receiptPath],
+    ['mixedInputs', mixedInputsPath],
+    ['mixedCommands', mixedCommandsPath],
+  ]) {
+    assert.ok(isDeepStrictEqual(inventory[key], fileRecord(root, path)), `${key} changed during transport.`);
+  }
   checkReceipt(root, { source, artifacts });
   return { ...inventory, source, artifacts };
 };
@@ -214,11 +272,15 @@ export const prepareArtifacts = (root) => {
   const artifacts = payload(root);
   mkdirSync(resolve(root, transportPath), { recursive: true });
   writeFileSync(resolve(root, receiptPath), receiptBytes);
+  writeFileSync(resolve(root, mixedInputsPath), inputsBytes);
+  writeFileSync(resolve(root, mixedCommandsPath), readFileSync(join(mixedCache, newAttempt, 'commands.json')));
   const inventory = {
-    schema: 'geospec-ci-artifacts-v1',
+    schema: 'geospec-ci-artifacts-v2',
     source,
     artifacts,
     mixedReceipt: fileRecord(root, receiptPath),
+    mixedInputs: fileRecord(root, mixedInputsPath),
+    mixedCommands: fileRecord(root, mixedCommandsPath),
   };
   checkReceipt(root, inventory);
   writeFileSync(resolve(root, inventoryPath), `${JSON.stringify(inventory, null, 2)}\n`);

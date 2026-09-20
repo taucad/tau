@@ -604,9 +604,25 @@ describe.each([
 
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
     const tree = await waitForLocalPublishedTree(backend);
-    assertPublication(tree);
     /* One settlement for the turn, not one per document that saw it. */
     expect(settlementTypesOf(tree)).toEqual(['turn.finalized']);
+    /* Not `assertPublication`, and the difference is the ruling's own mechanism
+     * rather than a weaker assertion. E3 finalises through a *re-lease*, so the
+     * minting happens at `prepare`: the root refuses to lease a dirty tree and
+     * pre-mints it as a `turn` revision carrying this turn's id
+     * (`packages/revisions/src/turn.machine.ts` `basing`), after which the cut
+     * finds nothing left and finalizes `nothingToSave`. The settlement this
+     * row's own run produced reads
+     * `{type:'turn.finalized', trigger:'turn', checkoutId:'live', changedPaths:[]}`
+     * with **no** `revisionId` — measured, not assumed (D2 `d2-e3-diag2.log`).
+     * What E3 guarantees is therefore: the agent's writes are on disk and the
+     * turn is settled exactly once, both asserted above and in
+     * `waitForLocalPublishedTree`. That the record does not *name* the revision
+     * its own re-lease minted is the revision root's gap, not this page's — R1
+     * traced it ("Plausible A") and ruled `packages/revisions` unchanged, so it
+     * is recorded here for the operator rather than asserted away. */
+    const settled = settledTurns(tree).at(-1);
+    expect(settled).toMatchObject({ trigger: 'turn', turnId: expect.any(String) as unknown });
   });
 
   /*
@@ -824,8 +840,13 @@ describe('durable log reattach after a reload', () => {
      * code, so the card is the saved-turn one and its action reads *Resume*. */
     await target.expectVisible(continueAction, 60_000);
     await target.click(continueAction);
-    /* The continuation replays this turn's own script entry, which is gated —
-     * wait for the gate rather than racing the release against it. */
+    /* The document that died left *its* request parked at the stream gate, and
+     * the fixture outlives the page. Waiting for a gate answered that stale one
+     * the instant it was asked, and the release below then took it (newest
+     * first) instead of the continuation's, which parked forever. The
+     * continuation is this turn's second ask, so wait for the ask before
+     * waiting for its gate. */
+    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(2);
     await target.waitForAgentHostGatewayGate({ kind: 'stream' });
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);

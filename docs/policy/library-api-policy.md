@@ -23,6 +23,14 @@ Consistent API design reduces cognitive load for consumers and plugin authors. T
 
 For versioning, stability tiers, and breaking change management, see [Version Policy](version-policy.md). For release mechanics, see [Release Policy](release-policy.md). For resource cleanup conventions (`Disposable`, `DisposableStore`, semantic cleanup names), see [Resource Cleanup Policy](resource-cleanup-policy.md). For API evolution, stability annotations, and advanced patterns, see [API Evolution Policy](api-evolution-policy.md).
 
+## 0. Design the API Before the Implementation
+
+A change to what a package exports, to a `defineX` contract or hook, to an operation input or outcome, to an error code, to a persisted or wire-visible name, or to an agent tool's name, schema or description starts as an **API design guide**, produced with the [`create-ts-api`](../../.agents/skills/create-ts-api/SKILL.md) skill and approved by the operator before implementation. The guide shows every audience's call site (consumer, plugin author, host, agent) as sketches that compile against Tau's real types, scores at least two options against the skill's review rubric, designs the failures, and lists the open questions. A blueprint work package that adds or reshapes an export is gated on its approved guide.
+
+Internal refactors with no exported or agent-visible change are exempt. A rename caught in review, or a correction the policy already decides (a fourth positional parameter becoming a named input), needs no guide; a new concept does.
+
+**Why**: The public surface is the part that is expensive to change; everything behind it is cheap. Reviewing prose about an API misses what a call site shows at a glance, and a sketch that compiles cannot describe a type that does not exist.
+
 ## 1. Factory Functions Over Classes
 
 Use `createX()` factory functions for consumer-facing instances. Keep class internals hidden behind the returned interface.

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import test from 'node:test';
-import { sha256, verifyBroadFixtures } from '#bench/lib';
+import { overlapMatches, planBroadWorkload, sha256, verifyBroadFixtures } from '#bench/lib';
 import type { BroadFixtureDescriptor, BroadFixtureManifest, SizedArtifact } from '#bench/broad-fixtures';
 
 await test('should verify all broad families once per file and retain recipes as pending non-ingestible metadata', async (context) => {
@@ -37,16 +37,16 @@ await test('should verify all broad families once per file and retain recipes as
         demandReuse: 'permitted',
         status: 'obligation-not-observation',
       },
+      claims: [
+        { claimId: 'bounds', subject: 'mesh', query: { kind: 'bounds' } },
+        { claimId: 'area', subject: 'mesh', query: { kind: 'surface-area' } },
+      ],
     };
     const recipe = await write(
       'claims.json',
       JSON.stringify({
         schemaVersion: 1,
         ...pending,
-        claims: [
-          { claimId: 'bounds', subject: 'mesh', query: { kind: 'bounds' } },
-          { claimId: 'area', subject: 'mesh', query: { kind: 'surface-area' } },
-        ],
       }),
     );
     const fixtures: BroadFixtureDescriptor[] = [
@@ -56,7 +56,12 @@ await test('should verify all broad families once per file and retain recipes as
         format: 'gltf',
         primary: mesh,
         resources: [shared],
-        analyticFacts: { declaredOccurrences: 1 },
+        analyticFacts: {
+          declaredOccurrences: 1,
+          componentCount: 2,
+          aabb: { min: [0, 0, 0], max: [1, 2, 4] },
+          componentSurfaceArea: [28, 1],
+        },
         qualification: 'input metadata only',
       },
       {
@@ -65,7 +70,12 @@ await test('should verify all broad families once per file and retain recipes as
         format: 'step',
         primary: occurrences,
         resources: [shared],
-        analyticFacts: { occurrences: 2 },
+        analyticFacts: {
+          occurrences: 2,
+          aabb: { min: [0, 0, 0], max: [3, 4, 5] },
+          nominalSurfaceArea: [94, 1],
+          nominalVolume: [60, 1],
+        },
         qualification: 'input metadata only',
       },
       {
@@ -136,6 +146,69 @@ await test('should verify all broad families once per file and retain recipes as
       assert.equal(new Set(paths).size, 7);
       assert.equal(paths.filter((path) => path === shared.path).length, 1);
       assert.notEqual(receipt.fixtures[0]?.analyticFacts, fixtures[0]?.analyticFacts);
+      const plan = planBroadWorkload(receipt, 'claims');
+      assert.equal(plan.authoredClaims, 2);
+      assert.equal(plan.claims.length, 2);
+      assert.deepEqual(
+        plan.claims.map(({ claimId, capability, payload }) => ({ claimId, capability, payload })),
+        [
+          {
+            claimId: 'bounds',
+            capability: 'toHaveBoundingBox',
+            payload: {
+              expected: {
+                min: [0, 0, 0],
+                max: [1, 2, 4],
+                center: [0.5, 1, 2],
+                size: [1, 2, 4],
+                tolerance: 0,
+              },
+              kind: 'boundingBox',
+            },
+          },
+          {
+            claimId: 'area',
+            capability: 'toHaveSurfaceArea',
+            payload: { expected: { tolerance: 0, value: 56 }, kind: 'surfaceArea' },
+          },
+        ],
+      );
+      const overlapPlan = {
+        ...plan,
+        overlapOracle: {
+          claimIds: ['overlap'],
+          leftLabel: 'claim-subject-a#0',
+          rightLabel: 'claim-subject-b#0',
+          volume: 21 / 8,
+        },
+      };
+      const overlapResult = {
+        claimId: 'overlap',
+        status: 'passed',
+        evidence: {
+          success: true,
+          evidence: {
+            componentCount: 2,
+            checkedPairs: 1,
+            overlaps: [{ leftLabel: 'claim-subject-a#0', rightLabel: 'claim-subject-b#0', intersectionVolume: 2.625 }],
+          },
+        },
+      };
+      assert.equal(overlapMatches(overlapPlan, [overlapResult]), true);
+      const differentGeometry = structuredClone(overlapResult);
+      differentGeometry.evidence.evidence.overlaps[0]!.intersectionVolume = 2;
+      assert.equal(overlapMatches(overlapPlan, [differentGeometry]), false);
+      const stepPlan = planBroadWorkload(receipt, 'occurrences');
+      assert.deepEqual(
+        stepPlan.claims.map(({ claimId, capability }) => ({ claimId, capability })),
+        [
+          { claimId: 'broad.occurrences.valid-brep', capability: 'toBeValidBrep' },
+          { claimId: 'broad.occurrences.bounding-box', capability: 'toHaveBoundingBox' },
+          { claimId: 'broad.occurrences.surface-area', capability: 'toHaveSurfaceArea' },
+          { claimId: 'broad.occurrences.volume', capability: 'toHaveVolume' },
+        ],
+      );
+      assert.deepEqual(stepPlan.claims[0]?.payload, { expected: {}, kind: 'validBrep' });
     } finally {
       reader.mock.restore();
       syncBuiltinESMExports();

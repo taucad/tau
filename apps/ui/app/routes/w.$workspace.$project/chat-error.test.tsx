@@ -16,6 +16,7 @@ import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode } from '#utils/error.utils.js';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
@@ -254,6 +255,32 @@ describe('ChatError', () => {
       expect(regenerate).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('should not offer Try again when a too-long run cannot resume', () => {
+    render(<ChatErrorTooLong resumable={false} />);
+
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+  });
+
+  it('should keep the host compaction sentence reachable in Details', async () => {
+    const user = userEvent.setup();
+    const hostSentence = 'Model invocation attempt-overflow has no durable result; it will not be sent again.';
+    resumableFailureOverrides.add('SUMMARY_REQUIRED');
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'This chat hit a problem while Tau was tidying its history.',
+      code: 'SUMMARY_REQUIRED',
+      raw: hostSentence,
+    });
+
+    render(<ChatErrorBanner />);
+
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByTestId('code-viewer')).toHaveTextContent(hostSentence);
+  });
 
   /* Ruling Q6: taking leadership back is a protocol, not an error action. */
   it('should state that another tab continued the chat and offer nothing', () => {

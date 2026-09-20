@@ -145,8 +145,38 @@ jobs:
           pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart
           pnpm nx affected -t test --exclude tag:scope:api
 
+      - name: Select affected benchmark statistics
+        id: benchmark-statistics
+        run: |
+          projects=$(pnpm nx show projects --affected --with-target test-benchmark-statistics --json | tail -1)
+          if [ "$projects" = '[]' ]; then
+            echo "required=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup benchmark analysis Python
+        if: steps.benchmark-statistics.outputs.required == 'true'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.14'
+
+      - name: Prepare benchmark statistics dependencies
+        if: steps.benchmark-statistics.outputs.required == 'true'
+        run: |
+          python -m venv "$RUNNER_TEMP/geospec-benchmark-analysis"
+          "$RUNNER_TEMP/geospec-benchmark-analysis/bin/python" -m pip install --disable-pip-version-check numpy==2.3.5
+
+      - name: Check affected benchmark harnesses
+        env:
+          GEOSPEC_BENCH_ANALYSIS_PYTHON: ${{ runner.temp }}/geospec-benchmark-analysis/bin/python
+        run: pnpm nx affected -t lint-benchmark-entry typecheck-benchmark-entry test-benchmark-entry test-benchmark-statistics
+
       - name: Check affected critical coverage gates
         run: pnpm nx affected -t check-coverage-gate
+
+      - name: Check affected legacy reference fixtures
+        run: pnpm nx affected -t prepare-legacy-reference typecheck-legacy-reference
 
       - name: Check workspace root hygiene
         if: always()

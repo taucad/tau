@@ -27,7 +27,8 @@
       "execErrState": "OK",
       "for": "1m",
       "annotations": {
-        "summary": "Redis connection is down. Chat RPC, session management, and adapter services are degraded."
+        "summary": "Redis connection is down. Chat RPC, session management, and adapter services are degraded.",
+        "runbook_url": "docs/handbooks/cloud/playbooks/redis-loss.md"
       },
       "labels": {
         "severity": "critical",
@@ -102,7 +103,8 @@
       "execErrState": "Error",
       "for": "0s",
       "annotations": {
-        "summary": "Database probe or migration failed during API startup. Inspect Loki for `Database connectivity probe failed` / `Database migration failed` lines and act on the structured `hint` field (paused provider, DNS, TCP timeout, role rotation, pooler exhaustion, privilege)."
+        "summary": "Database probe or migration failed during API startup. Inspect Loki for `Database connectivity probe failed` / `Database migration failed` lines and act on the structured `hint` field (paused provider, DNS, TCP timeout, role rotation, pooler exhaustion, privilege).",
+        "runbook_url": "docs/handbooks/cloud/playbooks/postgres-saturation.md"
       },
       "labels": {
         "severity": "critical",
@@ -157,7 +159,8 @@
       "execErrState": "OK",
       "for": "5m",
       "annotations": {
-        "summary": "SUM(credit_transaction.deltaMicro) disagrees with materialised balances (C12). Money invariant broken \u2014 treat as a page, not a log line. Runbook: repos/tau-cloud/docs/stripe-iac-runbook.md."
+        "summary": "SUM(credit_transaction.deltaMicro) disagrees with materialised balances (C12). Money invariant broken \u2014 treat as a page, not a log line. Runbook: repos/tau-cloud/docs/stripe-iac-runbook.md.",
+        "runbook_url": "docs/handbooks/cloud/playbooks/ledger-drift.md"
       },
       "labels": {
         "severity": "critical",

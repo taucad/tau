@@ -183,7 +183,15 @@ export const clearChatTurnServices = (chatId: string): void => {
 export const resetChatTurnServices = (): void => {
   admissionsByChat.clear();
   settlementsByChat.clear();
+  releaseChatTurnHold('admission');
+  releaseChatTurnHold('settlement');
 };
+
+/**
+ * Upper bound on waiting for a chat's route to publish a turn service.
+ * Milliseconds.
+ */
+const turnServiceWaitTimeout = 30_000;
 
 /**
  * Wait until this chat has published the named service.
@@ -191,21 +199,30 @@ export const resetChatTurnServices = (): void => {
  * The chat's seeded first turn is requested from inside the store's own chat
  * loader, one render before the route that publishes these services has
  * mounted. Whoever knows when the condition clears does the waiting (the
- * publisher's topic), so nothing polls and nothing times out on another owner's
- * state; the abort signal of the invoking state is the only bound.
+ * publisher's topic), so nothing polls.
+ *
+ * Bounded as well as aborted (I6). Only the *focused* chat mounts the
+ * `ChatTurnHost` that publishes an admission, while the sidebar seeds a turn
+ * for any acquired chat with an eligible startup request — so for a chat that
+ * never gets focus this condition can never clear, and the unbounded wait left
+ * the turn in `queued.admitting` forever, pinning the session with `runHeld`
+ * and putting nothing on the row to click (T3-D4). An unbounded wait is only
+ * sound when the condition is guaranteed to clear; this one is not, so it
+ * expires and the turn fails visibly instead.
  */
 const awaitTurnService = async <T>(
   registry: Map<string, T>,
   chatId: string,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<T | undefined> => {
   const present = registry.get(chatId);
-  if (present !== undefined || signal.aborted) {
+  if (present !== undefined || signal?.aborted === true) {
     return present;
   }
   return new Promise<T | undefined>((resolve) => {
     const finish = (value: T | undefined): void => {
-      signal.removeEventListener('abort', onAbort);
+      globalThis.clearTimeout(serviceExpiry);
+      signal?.removeEventListener('abort', onAbort);
       unsubscribe();
       resolve(value);
     };
@@ -221,12 +238,62 @@ const awaitTurnService = async <T>(
       },
       interestedIn: (event) => event.chatId === chatId,
     });
-    signal.addEventListener('abort', onAbort, { once: true });
+    const serviceExpiry = globalThis.setTimeout(onAbort, turnServiceWaitTimeout);
+    signal?.addEventListener('abort', onAbort, { once: true });
     const late = registry.get(chatId);
     if (late !== undefined) {
       finish(late);
     }
   });
+};
+
+/** The two points an e2e row can park a chat's turn at. @public */
+export type ChatTurnHold = 'admission' | 'settlement';
+
+const holds = new Map<ChatTurnHold, PromiseWithResolvers<void>>();
+
+/**
+ * Park this chat's next admission or settlement until it is released.
+ *
+ * `TAU_DEBUG` only, and armed only through the debug probes, because the two
+ * states a browser row most needs to observe — `run.queued.admitting` and
+ * `run.finishing.*` — are the two it cannot hold open from the outside: the
+ * admission window is microseconds long and the settlement runs after the
+ * stream the row is watching has already closed. Holding them is the only way
+ * a row can make a gesture, a reload or a stop land *inside* them.
+ *
+ * Global rather than per chat: a row drives one chat.
+ *
+ * The gate is the caller, not a flag read here: `DebugProbes` is the only
+ * thing in the app that arms a hold, and `ChatInterfaceSessionGate` mounts it
+ * only under `ENV.TAU_DEBUG`. Nothing arms one in a production bundle, so the
+ * wait below is a map lookup that finds nothing.
+ *
+ * @param hold - Which point to park at.
+ * @public
+ */
+export const armChatTurnHold = (hold: ChatTurnHold): void => {
+  if (holds.has(hold)) {
+    return;
+  }
+  holds.set(hold, Promise.withResolvers<void>());
+};
+
+/**
+ * Let a parked admission or settlement carry on.
+ *
+ * @param hold - The point to release; releasing one that was never armed is a
+ *   no-op, so a row's cleanup never has to ask.
+ * @public
+ */
+export const releaseChatTurnHold = (hold: ChatTurnHold): void => {
+  holds.get(hold)?.resolve();
+  holds.delete(hold);
+};
+
+/** Wait out a debug hold; nothing armed is one map lookup. */
+const awaitChatTurnHold = async (hold: ChatTurnHold): Promise<void> => {
+  await holds.get(hold)?.promise;
 };
 
 /**
@@ -242,22 +309,37 @@ export const chatTurnAdmission = fromSafeAsync<
   { readonly type: 'turnAdmitted'; readonly turn: ChatTurn },
   { readonly chatId: string; readonly gesture: ChatTurnGesture }
 >(async ({ input, signal }) => {
+  /* Held from here, because the release below runs *after* this admission ends
+   * — which is after the dispose that usually aborts it, and dispose empties
+   * this registry (`clearChatTurnServices`). Looking the publisher up on the
+   * abort path then found nothing and waited out the bound for a publisher
+   * that is never coming back, leaving the lease held: T3-D2's leak, one
+   * registry read later. A published settlement is a function; a reference to
+   * it cannot be deleted out from under the release. */
+  const publishedSettle = settlementsByChat.get(input.chatId);
   const admit = await awaitTurnService(admissionsByChat, input.chatId, signal);
   if (admit === undefined) {
     throw new Error('This chat is not ready to run a turn yet.');
   }
+  await awaitChatTurnHold('admission');
   const turn = await admit(input.gesture);
   if (signal.aborted) {
-    await settlementsByChat
-      .get(input.chatId)?.({
-        chatId: input.chatId,
-        runId: turn.runId,
-        leaseTurnId: turn.leaseTurnId,
-        outcome: 'cancelled',
-      })
-      .catch((error: unknown) => {
-        console.error('[chatTurnAdmission] an abandoned lease was not released', error);
-      });
+    /* The publisher this admission started with, or — for a chat whose route
+     * had not published one yet — a wait under a bound of its own, not this
+     * actor's signal: that signal is already aborted. Reading the registry
+     * directly meant the release was an optional call on `undefined` — a
+     * silent no-op that left the checkout leased and `admitted` forever, so
+     * every later turn of the chat waited fifteen seconds and died on a stale
+     * claim (T3-D2). */
+    const settle = publishedSettle ?? (await awaitTurnService(settlementsByChat, input.chatId));
+    await settle?.({
+      chatId: input.chatId,
+      runId: turn.runId,
+      leaseTurnId: turn.leaseTurnId,
+      outcome: 'cancelled',
+    }).catch((error: unknown) => {
+      console.error('[chatTurnAdmission] an abandoned lease was not released', error);
+    });
     throw new Error('This turn was replaced before it started.');
   }
   return { type: 'turnAdmitted', turn };
@@ -272,5 +354,6 @@ export const chatTurnAdmission = fromSafeAsync<
  */
 export const chatTurnSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input, signal }) => {
   const settle = await awaitTurnService(settlementsByChat, input.chatId, signal);
+  await awaitChatTurnHold('settlement');
   await settle?.(input);
 });

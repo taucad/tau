@@ -30,8 +30,12 @@ import { externalAgentStopCodes, externalAgentStopSchema, isResumableRunFailure 
  * the host would resume from is complete. The category cannot tell them apart:
  * the masked in-stream failure arrives on an HTTP 200, which reads as
  * `generic`, and a 502 reads as `server`.
+ *
+ * `RUN_ABANDONED` is the host's record of a run whose document died: nothing
+ * the person did failed, and the host resumes it from what it had saved.
  */
 const pausedTurnCodes = new Set([
+  'RUN_ABANDONED',
   'NETWORK_ERROR',
   'PROVIDER_UNAVAILABLE',
   'MALFORMED_RESPONSE',
@@ -139,6 +143,28 @@ function codedErrorCard({
 
   if (chatTooLongCodes.has(code)) {
     return <ChatErrorTooLong className={className} resumable={resumable} />;
+  }
+
+  /* Not a failure: the host was asked to continue a run it no longer holds —
+   * it was already settled, or it ended in a way a resume cannot pick up. The
+   * turn is whole and nothing was spent, so the card says so and offers the
+   * one thing that does work, which is running the turn again. */
+  if (code === 'RESUME_UNAVAILABLE') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={Bot}
+        title='Nothing left to continue'
+        description={error.message}
+        actions={
+          <Button variant='outline' size='sm' onClick={onTryAgain}>
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
+      />
+    );
   }
 
   // Another tab holds this chat's log. Taking it back is a leadership protocol,

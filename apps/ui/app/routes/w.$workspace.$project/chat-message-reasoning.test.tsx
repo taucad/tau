@@ -215,4 +215,20 @@ describe('ChatMessageReasoning', () => {
     const blank = renderReasoning([reasoning('  ')]);
     expect(blank.container).toBeEmptyDOMElement();
   });
+
+  it('keeps the streaming reasoning body mounted across a delta so the fade frontier commits', () => {
+    const { rerender } = renderReasoning([reasoning('Check', { start: 0, state: 'streaming' })], { active: true });
+    const body = screen.getByTestId('reasoning-markdown');
+
+    rerender(
+      <ChatMessageReasoning
+        parts={[reasoning('Check the grid', { start: 0, state: 'streaming' })]}
+        hasContent={false}
+        isMessageActive
+      />,
+    );
+
+    expect(screen.getByTestId('reasoning-markdown')).toBe(body);
+    expect(body).toHaveTextContent('Check the grid');
+  });
 });

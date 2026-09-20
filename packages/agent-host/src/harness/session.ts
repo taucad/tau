@@ -62,9 +62,9 @@ import {
   providerMessageToPi,
   toJsonValue,
   toolInputToProvider,
-  transportFailureFromProviderMessages,
+  transportFailureOfRun,
 } from '#harness/session-record.js';
-import type { AttachmentReader, MessageIdentities, SessionRecord } from '#harness/session-record.js';
+import type { AttachmentReader, MessageIdentities, SessionLogEvent, SessionRecord } from '#harness/session-record.js';
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
 import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
@@ -851,6 +851,13 @@ export type CreateAgentSessionOptions = {
   readonly snapshot?: JsonValue | undefined;
   readonly contextMessages?: readonly UserProviderMessage[] | undefined;
   readonly eventLog: DurableEventLog;
+  /**
+   * The owner's durable writer, when this session shares its log (I2).
+   *
+   * Absent, the session stamps its own positions off `eventLog`'s tail, which
+   * is correct only while it is the log's one writer.
+   */
+  readonly appendEvent?: ((event: SessionLogEvent) => Promise<void>) | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
   readonly substituteToolResult?: ToolResultSubstituter | undefined;
@@ -944,8 +951,9 @@ const appendAgentEvent = async (options: {
 const runFailureDetail = async (
   final: AgentMessage | undefined,
   record: SessionRecord,
+  runId: string,
 ): Promise<RunFailureDetail | undefined> => {
-  const typed = transportFailureFromProviderMessages(await record.history());
+  const typed = transportFailureOfRun({ events: await record.events(), messages: await record.history(), runId });
   if (typed) {
     return typed;
   }
@@ -963,6 +971,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     leaderEpoch: options.leaderEpoch,
     createId,
     now: () => now().toISOString(),
+    ...(options.appendEvent ? { append: options.appendEvent } : {}),
   });
   /*
    * D15: durable rows name attachments; a model reads bytes. Each user message
@@ -1480,7 +1489,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     // Without this the durable log said only "failed": the typed transport code
     // and its message were stranded on the assistant message's diagnostics, and
     // every client could render was a generic host-failure string.
-    const detail = state === 'failed' ? await runFailureDetail(final, record) : undefined;
+    const detail = state === 'failed' ? await runFailureDetail(final, record, options.runId) : undefined;
     await record.append({
       type: 'run.lifecycle',
       state,
@@ -1581,7 +1590,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     },
     snapshot: async () => {
       const messages = await record.history();
-      const failure = transportFailureFromProviderMessages(messages);
+      const failure = transportFailureOfRun({ events: await record.events(), messages, runId: options.runId });
       return {
         chatId: options.chatId,
         runId: options.runId,

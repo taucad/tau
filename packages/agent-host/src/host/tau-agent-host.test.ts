@@ -11,10 +11,11 @@ import type {
 import {
   createTauAgentHost,
   hostRunStateOfLifecycle,
+  isHostLifecycleLegal,
   isResumableRunFailure,
   runLedgerOf,
 } from '#host/tau-agent-host.js';
-import type { ExternalAgentPort } from '#host/tau-agent-host.js';
+import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
@@ -844,7 +845,7 @@ describe('createTauAgentHost', () => {
         trigger: 'submit',
         message: { id: 'replacement-turn', role: 'user', content: 'Do not bypass recovery.' },
       }),
-    ).rejects.toThrow('has a non-terminal run; resume it');
+    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE', runId: 'run-recovery', state: 'running' });
     const final = await resumedHost.resume('chat-recovery');
 
     expect(resumedInvoke).not.toHaveBeenCalled();
@@ -1073,7 +1074,7 @@ the cancelled tools left the system unchanged.
     });
     const cancellation = host.cancel({ runId: 'run-reserved' });
 
-    await expect(duplicate).rejects.toMatchObject({ code: 'RUN_ADMISSION_CONFLICT' });
+    await expect(duplicate).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE', state: 'reserved' });
     await cancellation;
     release.resolve();
     await first;
@@ -1785,7 +1786,7 @@ the cancelled tools left the system unchanged.
         trigger: 'submit',
         message: { id: 'turn-1-again', role: 'user', content: 'Again.' },
       }),
-    ).rejects.toMatchObject({ code: 'RUN_ADMISSION_CONFLICT' });
+    ).rejects.toMatchObject({ code: 'RUN_ID_TAKEN', runId: 'run-1' });
     await host.close();
   });
 
@@ -1976,5 +1977,684 @@ describe('the host run ledger', () => {
     ['cancelled', 'terminal'],
   ] as const)('should read the lifecycle %s as %s', (lifecycle, expected) => {
     expect(hostRunStateOfLifecycle(lifecycle)).toBe(expected);
+  });
+});
+
+describe('the attempt ledger and its refusal taxonomy', () => {
+  /** A first turn stopped inside the admission window: records, and no projection. */
+  const stoppedInAdmission: readonly SeededLogEvent[] = [
+    { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+    { type: 'run.lifecycle', runId: 'run-1', state: 'cancelled' },
+  ];
+
+  const settlementOf = (
+    input: { readonly runId: string; readonly chatId: string } & Partial<{ readonly revisionId: string }>,
+  ) =>
+    ({
+      type: 'turn.finalized',
+      turnId: `turn-${input.runId}`,
+      chatId: input.chatId,
+      projectId: 'project-1',
+      changedPaths: ['main.ts'],
+      trigger: 'turn',
+      runIds: [input.runId],
+      ...(input.revisionId === undefined ? {} : { revisionId: input.revisionId }),
+    }) as const;
+
+  const silentHost = (file: ReturnType<typeof createMemoryLogFile>, idPrefix: string, stream?: ModelTransport) =>
+    createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: stream ?? {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'text-delta', text: 'ok' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix,
+      }),
+    );
+
+  it('admits a rewinding gesture on a chat whose first run committed no turn', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, stoppedInAdmission);
+    const host = silentHost(file, 'wedge');
+
+    /* The log is not empty and the projection is: gating the prefix check on
+     * records instead of history refused this forever with
+     * `HISTORY_PREFIX_INVALID`. */
+    await host.admit({
+      chatId: 'chat-wedge',
+      runId: 'run-2',
+      trigger: 'regenerate',
+      retainedMessageIds: [],
+      message: { id: 'turn-2', role: 'user', content: 'Try again.' },
+    });
+
+    const events = await readLog(file);
+    expect(
+      events.flatMap((event) => (event.type === 'run.lifecycle' && event.runId === 'run-2' ? [event.state] : [])),
+    ).toEqual(['admitted', 'running', 'completed']);
+    await host.close();
+  });
+
+  it('retains a whole history prefix, as the reducer already allows', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = silentHost(file, 'prefix');
+    const retained = reduceEventLog(await readLog(file)).map((message) => message.id);
+
+    /* `>=` was one stricter than `reducer.ts`'s `retained.length <= messages.length`. */
+    await host.admit({
+      chatId: 'chat-prefix',
+      runId: 'run-2',
+      trigger: 'edit',
+      retainedMessageIds: retained,
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+
+    expect(await host.snapshot('chat-prefix')).toMatchObject({ runId: 'run-2', state: 'completed' });
+    await host.close();
+  });
+
+  it('rules every lifecycle record an attempt may add', () => {
+    // `admitted` is a run's first word.
+    expect(
+      isHostLifecycleLegal({ next: 'admitted', state: 'unadmitted', lifecycle: undefined, reopenable: false }),
+    ).toBe(true);
+    expect(isHostLifecycleLegal({ next: 'admitted', state: 'open', lifecycle: 'running', reopenable: false })).toBe(
+      false,
+    );
+    expect(isHostLifecycleLegal({ next: 'admitted', state: 'terminal', lifecycle: 'failed', reopenable: true })).toBe(
+      false,
+    );
+    // Everything before the settlement stays legal: teardown re-records, resume reopens.
+    expect(
+      isHostLifecycleLegal({ next: 'cancelled', state: 'terminal', lifecycle: 'cancelled', reopenable: false }),
+    ).toBe(true);
+    expect(isHostLifecycleLegal({ next: 'running', state: 'terminal', lifecycle: 'failed', reopenable: false })).toBe(
+      true,
+    );
+    /* A settlement that landed while the run was executing does not stop it
+     * recording how it ended — refusing that row would kill a live run. */
+    expect(isHostLifecycleLegal({ next: 'completed', state: 'settled', lifecycle: 'running', reopenable: false })).toBe(
+      true,
+    );
+    // Once it has ended and settled, only a reopening `running` may follow.
+    expect(isHostLifecycleLegal({ next: 'completed', state: 'settled', lifecycle: 'failed', reopenable: true })).toBe(
+      false,
+    );
+    expect(isHostLifecycleLegal({ next: 'running', state: 'settled', lifecycle: 'failed', reopenable: false })).toBe(
+      false,
+    );
+    expect(isHostLifecycleLegal({ next: 'running', state: 'settled', lifecycle: 'failed', reopenable: true })).toBe(
+      true,
+    );
+  });
+
+  it('refuses a lifecycle record an external runner writes for a settled run', async () => {
+    const file = createMemoryLogFile();
+    const refusals: unknown[] = [];
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        await turn.append([
+          { type: 'turn.failed', chatId: 'chat-external-settled', turnId: 'turn-1', reason: 'Nothing to record.' },
+        ]);
+        await turn.append([{ type: 'run.lifecycle', state: 'admitted' }]).catch((error: unknown) => {
+          refusals.push(error);
+        });
+        return undefined;
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-settled',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId: 'chat-external-settled',
+      runId: 'run-external-settled',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'Run this elsewhere.' },
+      config: { systemPrompt: 'unused', toolChoice: 'none', agent: { kind: 'acp', id: 'stub-agent' } },
+    });
+
+    await vi.waitFor(() => {
+      expect(refusals).toHaveLength(1);
+    });
+    expect(refusals[0]).toMatchObject({ code: 'RUN_ID_TAKEN', runId: 'run-external-settled' });
+    await host.close();
+  });
+
+  it('refuses the second of two differing settlements appended in one batch', async () => {
+    const file = createMemoryLogFile();
+    const refusals: unknown[] = [];
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        await turn
+          .append([
+            { type: 'turn.failed', chatId: 'chat-external-batch', turnId: 'turn-1', reason: 'First.' },
+            { type: 'turn.failed', chatId: 'chat-external-batch', turnId: 'turn-1', reason: 'Second.' },
+          ])
+          .catch((error: unknown) => {
+            refusals.push(error);
+          });
+        return undefined;
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-batch',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId: 'chat-external-batch',
+      runId: 'run-external-batch',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'Run this elsewhere.' },
+      config: { systemPrompt: 'unused', toolChoice: 'none', agent: { kind: 'acp', id: 'stub-agent' } },
+    });
+
+    await vi.waitFor(() => {
+      expect(refusals).toHaveLength(1);
+    });
+    expect(refusals[0]).toMatchObject({ code: 'SETTLEMENT_CONFLICT' });
+    const recorded = await readLog(file);
+    expect(recorded.filter((event) => event.type === 'turn.failed')).toHaveLength(1);
+    await host.close();
+  });
+
+  it('records a settlement for one run while another run of the chat is streaming', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const settled: unknown[] = [];
+    const host: TauAgentHost = silentHost(file, 'concurrent', {
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        yield { type: 'text-delta', text: 'still going' };
+        /* The collision the two writers made: this lands at the sequence the
+         * streaming run's own private counter is about to reuse. */
+        await host
+          .recordSettlement({
+            chatId: 'chat-concurrent',
+            runId: 'run-1',
+            event: settlementOf({ runId: 'run-1', chatId: 'chat-concurrent', revisionId: 'rev-1' }),
+          })
+          .then(
+            () => settled.push('ok'),
+            (error: unknown) => settled.push(error),
+          );
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    });
+
+    await host.admit({
+      chatId: 'chat-concurrent',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+
+    expect(settled).toEqual(['ok']);
+    const events = await readLog(file);
+    expect(
+      events.flatMap((event) => (event.type === 'run.lifecycle' && event.runId === 'run-2' ? [event.state] : [])),
+    ).toEqual(['admitted', 'running', 'completed']);
+    expect(events.filter((event) => event.type === 'turn.finalized')).toHaveLength(1);
+    await host.close();
+  });
+
+  it('refuses a settlement that drops what the stored one named', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = silentHost(file, 'settlement-union');
+    const stored = settlementOf({ runId: 'run-1', chatId: 'chat-union', revisionId: 'rev-1' });
+    await host.recordSettlement({ chatId: 'chat-union', runId: 'run-1', event: stored });
+
+    /* Comparing only the *new* body's keys made a settlement that named no
+     * revision dedupe against one that named a revision: the key was absent,
+     * so it was never compared. */
+    const { revisionId: _dropped, ...poorer } = stored;
+    await expect(host.recordSettlement({ chatId: 'chat-union', runId: 'run-1', event: poorer })).rejects.toMatchObject({
+      code: 'SETTLEMENT_CONFLICT',
+    });
+
+    // An identical repeat is still the delivery guarantee doing its job.
+    await host.recordSettlement({ chatId: 'chat-union', runId: 'run-1', event: { ...stored } });
+    const recorded = await readLog(file);
+    expect(recorded.filter((event) => event.type === 'turn.finalized')).toHaveLength(1);
+    await host.close();
+  });
+
+  it('refuses a settlement written while its run is only reserved', async () => {
+    const file = createMemoryLogFile();
+    const refusals: unknown[] = [];
+    const host: TauAgentHost = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'reserved',
+      }),
+      /* Awaited inside `sessionFor`: the reservation exists, the session does
+       * not, and the run has no lifecycle record — the window an abandoned
+       * lease's `turn.failed` used to land in. */
+      clientContext: async () => {
+        await host
+          .recordSettlement({
+            chatId: 'chat-reserved',
+            runId: 'run-reserved',
+            event: {
+              type: 'turn.failed',
+              chatId: 'chat-reserved',
+              turnId: 'turn-reserved',
+              reason: 'The turn ended before it recorded a revision.',
+            },
+          })
+          .catch((error: unknown) => {
+            refusals.push(error);
+          });
+        return undefined;
+      },
+    });
+
+    await host.admit({
+      chatId: 'chat-reserved',
+      runId: 'run-reserved',
+      trigger: 'submit',
+      message: { id: 'turn-reserved', role: 'user', content: 'First.' },
+    });
+
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({ code: 'SETTLEMENT_WITHOUT_RUN' });
+    await host.close();
+  });
+
+  it('refuses a live chat with one code, in memory and durably alike', async () => {
+    const durableFile = createMemoryLogFile();
+    await seedLog(durableFile, [
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+    ]);
+    const durableHost = silentHost(durableFile, 'live-durable');
+
+    /* The branch a reload-then-send reaches: a fresh worker's host has no run
+     * in memory, so only the ledger knows. It carried no code at all, and the
+     * page's recovery could not recognise it. */
+    await expect(
+      durableHost.admit({
+        chatId: 'chat-live-durable',
+        runId: 'run-2',
+        trigger: 'submit',
+        message: { id: 'turn-2', role: 'user', content: 'Second.' },
+      }),
+    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE', runId: 'run-1', state: 'running' });
+
+    // And the same run id, refused as taken rather than as a live run.
+    await expect(
+      durableHost.admit({
+        chatId: 'chat-live-durable',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'turn-3', role: 'user', content: 'Third.' },
+      }),
+    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+    await durableHost.close();
+
+    const memoryFile = createMemoryLogFile();
+    const release = Promise.withResolvers<void>();
+    const memoryHost = silentHost(memoryFile, 'live-memory', {
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        await release.promise;
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    });
+    const first = memoryHost.admit({
+      chatId: 'chat-live-memory',
+      runId: 'run-a',
+      trigger: 'submit',
+      message: { id: 'turn-a', role: 'user', content: 'First.' },
+    });
+    await vi.waitFor(async () => {
+      const live = await memoryHost.describeRun('chat-live-memory');
+      expect(live?.state).toBe('running');
+    });
+    await expect(
+      memoryHost.admit({
+        chatId: 'chat-live-memory',
+        runId: 'run-b',
+        trigger: 'submit',
+        message: { id: 'turn-b', role: 'user', content: 'Second.' },
+      }),
+    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE', runId: 'run-a' });
+    release.resolve();
+    await first;
+    await memoryHost.close();
+  });
+
+  it('describes a chat with no admitted run instead of refusing it', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [settlementOnlySecondRun]);
+    const host = silentHost(file, 'describe');
+
+    /* `attach` and every command epilogue read through here: a thrown
+     * `NO_RUN_ADMITTED` made a chat in this shape impossible to open again. */
+    await expect(host.describeRun('chat-settlement-only')).resolves.toBeUndefined();
+    await expect(host.snapshot('chat-settlement-only')).rejects.toMatchObject({ code: 'NO_RUN_ADMITTED' });
+    await expect(host.describeRun('chat-never-written')).resolves.toBeUndefined();
+    await host.close();
+  });
+
+  it('waits for the admission of the run the caller names', async () => {
+    const file = createMemoryLogFile();
+    const release = Promise.withResolvers<void>();
+    const host = silentHost(file, 'ack', {
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        await release.promise;
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    });
+    const running = host.admit({
+      chatId: 'chat-ack',
+      runId: 'run-a',
+      trigger: 'submit',
+      message: { id: 'turn-a', role: 'user', content: 'First.' },
+    });
+
+    await expect(host.waitForAdmission('chat-ack', 'run-a')).resolves.toMatchObject({ runId: 'run-a' });
+    /* Asking by chat alone answered one command with whatever run the chat was
+     * on, which is the run-id mismatch this wait exists to prevent. */
+    await expect(host.waitForAdmission('chat-ack', 'run-b')).resolves.toBeUndefined();
+    release.resolve();
+    await running;
+    await host.close();
+  });
+
+  it('records an abandoned run as failed rather than resuming it', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+    ]);
+    const requests: ModelStreamRequest[] = [];
+    const host = silentHost(file, 'abandoned', {
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        requests.push(request);
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    });
+
+    const marked = await host.markAbandoned('chat-abandoned');
+
+    /* Never a provider call: the turn was asked once and paid for once. */
+    expect(requests).toHaveLength(0);
+    expect(marked).toMatchObject({ runId: 'run-1', state: 'failed' });
+    expect(marked?.failure).toMatchObject({ code: 'RUN_ABANDONED' });
+    expect(isResumableRunFailure(marked?.failure)).toBe(true);
+    await host.close();
+  });
+
+  it('leaves a paused run paused and a live run alone', async () => {
+    const pausedFile = createMemoryLogFile();
+    await seedLog(pausedFile, [
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'paused' },
+    ]);
+    const host = silentHost(pausedFile, 'paused-abandon');
+    const before = await readLog(pausedFile);
+
+    expect(await host.markAbandoned('chat-paused')).toMatchObject({ runId: 'run-1', state: 'paused' });
+    expect(await readLog(pausedFile)).toHaveLength(before.length);
+    await host.close();
+  });
+
+  /** One assistant message as the stream wrapper leaves it when a call is refused. */
+  const refusalMarker = (id: string, code: string): ProviderMessage => ({
+    id,
+    role: 'assistant',
+    content: [],
+    metadata: {
+      diagnostics: [
+        {
+          type: 'tau.model-transport-failure',
+          timestamp: 1,
+          error: { name: 'GatewayModelTransportError', message: 'The stream dropped.', code },
+          details: { status: 200, refusal: { routeId: 'route' } },
+        },
+      ],
+    },
+  });
+
+  it("names this run's failure after an older run left its marker in the history", async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      { type: 'message.appended', runId: 'run-1', message: refusalMarker('assistant-1', 'NETWORK_ERROR') },
+      {
+        type: 'run.lifecycle',
+        runId: 'run-1',
+        state: 'failed',
+        detail: { code: 'NETWORK_ERROR', message: 'The stream dropped.' },
+      },
+      /* A plain resend rather than a Resume: nothing rewinds run-1's marker, so
+       * it is still the newest diagnostic the chat's history holds. */
+      { type: 'message.appended', runId: 'run-2', message: { id: 'turn-2', role: 'user', content: 'Second.' } },
+      { type: 'run.lifecycle', runId: 'run-2', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-2', state: 'running' },
+    ]);
+    const host = silentHost(file, 'stale-marker');
+
+    const marked = await host.markAbandoned('chat-stale-marker');
+
+    /* A snapshot's failure is a fact about the run it names: the page keys the
+     * saved-turn card and `isResumableRunFailure` off it, so an older run's
+     * refusal leaking in shows the wrong card for this one. */
+    expect(marked).toMatchObject({ runId: 'run-2', state: 'failed' });
+    expect(marked?.failure).toEqual({
+      code: 'RUN_ABANDONED',
+      message: 'The host executing this run is gone. Resume the turn to continue it.',
+    });
+    await host.close();
+  });
+
+  it("prefers a run's own transport diagnostic to the codeless detail its terminal row carries", async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      { type: 'message.appended', runId: 'run-1', message: refusalMarker('assistant-1', 'RATE_LIMITED') },
+      /* What the host's own catch records for a throw that carried no code:
+       * the transport's status and refusal fields live only on the marker. */
+      { type: 'run.lifecycle', runId: 'run-1', state: 'failed', detail: { message: 'The stream dropped.' } },
+    ]);
+    const host = silentHost(file, 'own-marker');
+
+    const described = await host.snapshot('chat-own-marker');
+
+    expect(described.failure).toEqual({
+      code: 'RATE_LIMITED',
+      message: 'The stream dropped.',
+      status: 200,
+      details: { routeId: 'route' },
+    });
+    await host.close();
+  });
+
+  /** A run whose page died mid-turn, as `markAbandoned` leaves it. */
+  const abandonedAfter = (tail: ProviderMessage): readonly SeededLogEvent[] => [
+    { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+    { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+    { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+    { type: 'message.appended', runId: 'run-1', message: tail },
+    {
+      type: 'run.lifecycle',
+      runId: 'run-1',
+      state: 'failed',
+      detail: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
+    },
+  ];
+
+  it('resumes an abandoned run from the agent work its tail already holds', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(
+      file,
+      abandonedAfter({ id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'Half an answer.' }] }),
+    );
+    const requests: ModelStreamRequest[] = [];
+    const host = silentHost(file, 'abandoned-tail', {
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        requests.push(request);
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    });
+
+    /* `RUN_ABANDONED` is resumable, so the terminal branch runs the failure
+     * marker's clearance over a tail that is not a marker at all: the agent's
+     * own committed text. Rewinding it loses the work and asks — and pays for —
+     * the turn a second time. */
+    const resumed = await host.resume('chat-abandoned-tail');
+    const events = await readLog(file);
+
+    expect(events.filter((event) => event.type === 'history.rewound')).toHaveLength(0);
+    expect(resumed.at(-1)).toMatchObject({ id: 'assistant-1', content: [{ type: 'text', text: 'Half an answer.' }] });
+    expect(requests).toHaveLength(0);
+    await host.close();
+  });
+
+  it("answers an abandoned run's unanswered tool call instead of retracting it", async () => {
+    const file = createMemoryLogFile();
+    await seedLog(
+      file,
+      abandonedAfter({
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Reading main.ts.' },
+          { type: 'toolCall', id: 'call-read', name: 'read_file', arguments: { targetFile: 'main.ts' } },
+        ],
+      }),
+    );
+    const requests: ModelStreamRequest[] = [];
+    const invoke = vi.fn(async () => ({ content: 'must-not-run', isError: false }));
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(request): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            yield { type: 'text-delta', text: 'Recovered.' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(invoke),
+        idPrefix: 'abandoned-call',
+      }),
+    );
+
+    const resumed = await host.resume('chat-abandoned-call');
+    const events = await readLog(file);
+
+    expect(events.filter((event) => event.type === 'history.rewound')).toHaveLength(0);
+    expect(resumed.find((message) => message.id === 'assistant-1')).toMatchObject({
+      content: [{ type: 'text' }, { type: 'toolCall', id: 'call-read' }],
+    });
+    /* The dangling call gets the same synthetic result the tool-input path
+     * gets: a provider refuses an unanswered call, and the tool itself is never
+     * re-run. */
+    expect(resumed.find((message) => message.role === 'tool-output')).toMatchObject({
+      toolCallId: 'call-read',
+      isError: true,
+      content: { errorCode: 'CLIENT_DISCONNECTED' },
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    await host.close();
+  });
+
+  it('reopens a settled run whose refusal is resumable, and refuses one that is not', async () => {
+    const reopenFile = createMemoryLogFile();
+    await seedLog(reopenFile, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      {
+        type: 'run.lifecycle',
+        runId: 'run-1',
+        state: 'failed',
+        detail: { code: 'INSUFFICIENT_CREDIT', message: 'Top up.' },
+      },
+      {
+        type: 'turn.failed',
+        runId: 'run-1',
+        chatId: 'chat-reopen',
+        turnId: 'turn-1',
+        reason: 'The turn ended before it recorded a revision.',
+      },
+    ]);
+    const host = silentHost(reopenFile, 'reopen');
+
+    await host.resume('chat-reopen');
+
+    /* The second attempt settles on its own terms: the reopening row clears the
+     * first attempt's settlement slot, so this is no longer the
+     * `SETTLEMENT_CONFLICT` that left the turn with no revision. */
+    await host.recordSettlement({
+      chatId: 'chat-reopen',
+      runId: 'run-1',
+      event: settlementOf({ runId: 'run-1', chatId: 'chat-reopen', revisionId: 'rev-1' }),
+    });
+    expect(await host.snapshot('chat-reopen')).toMatchObject({ runId: 'run-1', state: 'completed' });
+    await host.close();
+
+    const closedFile = createMemoryLogFile();
+    await seedLog(closedFile, [
+      { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+      {
+        type: 'turn.failed',
+        runId: 'run-1',
+        chatId: 'chat-closed',
+        turnId: 'turn-1',
+        reason: 'The turn ended before it recorded a revision.',
+      },
+    ]);
+    const closedHost = silentHost(closedFile, 'closed');
+    const before = await readLog(closedFile);
+
+    /* A settled attempt that cannot reopen: `resume` re-ran it and its second,
+     * differing settlement was then refused with no way forward. */
+    await closedHost.resume('chat-closed');
+    expect(await readLog(closedFile)).toHaveLength(before.length);
+    await closedHost.close();
   });
 });

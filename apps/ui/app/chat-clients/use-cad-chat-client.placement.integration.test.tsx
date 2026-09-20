@@ -191,8 +191,10 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
     };
   },
   useOptionalChatWorkspaceAuthority: () => ({
+    ready: true,
     get: () => workspaceHarness.current,
     prepare: workspaceHarness.prepare,
+    attachment: async () => workspaceHarness.current,
     finalize: async () => undefined,
     discard: async () => undefined,
     markAdmitted: async () => {

@@ -1323,6 +1323,115 @@ describe('ChatSessionStore', () => {
   // ===========================================================================
 
   describe('acquire / release', () => {
+    /*
+     * T3-D2. Disposing a chat mid-admission stopped its actor, then deleted the
+     * turn-service registries the abandoned admission's own release reads —
+     * with `?.`, so the release was a silent no-op and the checkout's lease
+     * stayed `admitted` forever. `drop` then refuses every later turn's release
+     * and the chat cannot run again until reload. An actor that holds a turn or
+     * is admitting one is a reference on the session, exactly as `runHeld` is.
+     */
+    it('should not dispose a chat whose turn owner is still admitting', async () => {
+      const store = createStore();
+      store.acquire('chat_dispose_admitting');
+      startTurnOwner(store, 'resource_dispose_admitting');
+      publishChatTurnAdmission(
+        'chat_dispose_admitting',
+        async () =>
+          new Promise<never>(() => {
+            /* Never answers: the admission is in flight for the whole row. */
+          }),
+      );
+      publishChatTurnSettlement('chat_dispose_admitting', async () => undefined);
+
+      void store.requestTurn('chat_dispose_admitting', { kind: 'regenerate' });
+      await vi.waitFor(() => {
+        expect(
+          store
+            .get('chat_dispose_admitting')
+            ?.stateActorRef?.getSnapshot()
+            .matches({ run: { queued: 'admitting' } }),
+        ).toBe(true);
+      });
+
+      store.release('chat_dispose_admitting');
+
+      expect(store.list()).toContain('chat_dispose_admitting');
+    });
+
+    /*
+     * T3-D11. `requestTurn` resolves when the actor leaves `queued.admitting`,
+     * through a `next`-only observer. An actor stopped while admitting never
+     * emits again, so the promise never settled — and it is what the composer's
+     * editable lock awaits, so the editor stayed read-only until reload.
+     */
+    it('should release the composer when the turn owner is stopped mid-admission', async () => {
+      const store = createStore();
+      store.acquire('chat_stopped_admitting');
+      startTurnOwner(store, 'resource_stopped_admitting');
+      const owner = turnOwners.at(-1)!;
+      publishChatTurnAdmission(
+        'chat_stopped_admitting',
+        async () =>
+          new Promise<never>(() => {
+            /* Never answers: the admission is in flight for the whole row. */
+          }),
+      );
+      publishChatTurnSettlement('chat_stopped_admitting', async () => undefined);
+
+      const requested = store.requestTurn('chat_stopped_admitting', { kind: 'regenerate' });
+      await vi.waitFor(() => {
+        expect(
+          store
+            .get('chat_stopped_admitting')
+            ?.stateActorRef?.getSnapshot()
+            .matches({ run: { queued: 'admitting' } }),
+        ).toBe(true);
+      });
+
+      // The idle policy stops the project session, and its chat children with it.
+      owner.stop();
+
+      await expect(requested).resolves.toBeUndefined();
+    });
+
+    /*
+     * W10-8c, the same wait from the other side. The gesture arrives *after*
+     * the owner was stopped: the store still holds the stale ref, whose last
+     * snapshot still matches `admitting`, and subscribing to a stopped actor
+     * registers no observer at all (XState drops it, and only emits `complete`
+     * for a snapshot whose status is `done` — a machine stopped mid-run is
+     * still `active`). Nothing ever calls back, so the promise the composer's
+     * editable lock awaits never settles.
+     */
+    it('should release the composer for a gesture made after its turn owner was stopped', async () => {
+      const store = createStore();
+      store.acquire('chat_stopped_before');
+      startTurnOwner(store, 'resource_stopped_before');
+      const owner = turnOwners.at(-1)!;
+      publishChatTurnAdmission(
+        'chat_stopped_before',
+        async () =>
+          new Promise<never>(() => {
+            /* Never answers: the admission is in flight for the whole row. */
+          }),
+      );
+      publishChatTurnSettlement('chat_stopped_before', async () => undefined);
+
+      void store.requestTurn('chat_stopped_before', { kind: 'regenerate' });
+      await vi.waitFor(() => {
+        expect(
+          store
+            .get('chat_stopped_before')
+            ?.stateActorRef?.getSnapshot()
+            .matches({ run: { queued: 'admitting' } }),
+        ).toBe(true);
+      });
+      owner.stop();
+
+      await expect(store.requestTurn('chat_stopped_before', { kind: 'regenerate' })).resolves.toBeUndefined();
+    });
+
     it('retains and resumes an API-discovered run without a focused view', async () => {
       const store = createStore();
 
@@ -1423,6 +1532,66 @@ describe('ChatSessionStore', () => {
           { chatId: 'chat_reconcile', runId: 'run_reconcile', leaseTurnId: undefined, outcome: 'completed' },
         ]);
       });
+    });
+
+    /**
+     * T2-D4 / I7. After a reload the run this page settles is the one the
+     * *host's* log named — the stream resolved it from there — and not whatever
+     * run id reload discovery retained from a workspace claim this document
+     * never wrote. Keying the reconciliation on page memory settled a run the
+     * host does not hold, or none at all.
+     */
+    it('should settle the run the host named, not the one page memory retained', async () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_host_named');
+      const settlements = publishSettlementRecorder('chat_host_named');
+      store.acquire('chat_host_named');
+      // Reload discovery retained a *stale* claim's run; the reattach then
+      // resolved the run the chat's log actually ends on.
+      store.retainDurableRun({ chatId: 'chat_host_named', runId: 'run_stale_claim', state: 'active' });
+      bindDurableChatRun('chat_host_named', 'run_from_host_log');
+
+      harness.created.find((entry) => entry.id === 'chat_host_named')!.finish();
+
+      await vi.waitFor(() => {
+        expect(settlements).toEqual([
+          { chatId: 'chat_host_named', runId: 'run_from_host_log', leaseTurnId: undefined, outcome: 'completed' },
+        ]);
+      });
+    });
+
+    /**
+     * I4/I7. A takeover records an abandoned run as `failed` and never drives
+     * it, so the reattach that found it closes cleanly — nothing aborted and
+     * nothing errored. Reading the SDK's own flags then settled that run as
+     * *completed*, which asks the revision root to record a dead turn's writes
+     * as its revision. How the run ended is the host's fact.
+     */
+    it('should settle an abandoned run as failed, not as the clean stream it replayed', async () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_abandoned');
+      const settlements = publishSettlementRecorder('chat_abandoned');
+      const abandoned = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
+        runId: 'run_abandoned',
+        state: 'failed',
+        eventCount: 4,
+        failure: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
+      });
+
+      try {
+        store.acquire('chat_abandoned');
+        bindDurableChatRun('chat_abandoned', 'run_abandoned');
+
+        harness.created.find((entry) => entry.id === 'chat_abandoned')!.finish();
+
+        await vi.waitFor(() => {
+          expect(settlements).toEqual([
+            { chatId: 'chat_abandoned', runId: 'run_abandoned', leaseTurnId: undefined, outcome: 'failed' },
+          ]);
+        });
+      } finally {
+        abandoned.mockRestore();
+      }
     });
 
     /**
@@ -1531,6 +1700,38 @@ describe('ChatSessionStore', () => {
       // changes; only the first one may reattach.
       store.reattachHostChat({ chatId: 'chat_daemon', hostId: 'origin' });
       store.reattachHostChat({ chatId: 'chat_daemon', hostId: 'origin' });
+
+      await vi.waitFor(() => {
+        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
+      });
+    });
+
+    /*
+     * I7. `ChatTurnHost` mounts as soon as a chat is focused, and its binding
+     * publishes once per placement — so a reattach that lands while the chat's
+     * row is still being read has no later pass to catch it. Dropped, the log
+     * was never attached: no `RUN_ABANDONED`, no settlement, and the next open
+     * reconciled the same run again. The condition is the store's, so the
+     * request waits here rather than on a React dependency array.
+     */
+    it('holds a reattach requested while the chat is loading and applies it once, after the load', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      const chatId = 'chat_loading_reattach';
+      const loading = Promise.withResolvers<ChatEntity>();
+      deps.getChat.mockReturnValue(loading.promise);
+      store.setDependencies(deps);
+      const session = store.acquire(chatId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(true);
+      });
+
+      store.reattachHostChat({ chatId, hostId: 'tau' });
+      store.reattachHostChat({ chatId, hostId: 'tau' });
+      await Promise.resolve();
+      expect(harness.created[0]?.resumeStream).not.toHaveBeenCalled();
+
+      loading.resolve(chatRow(chatId, 'project_test', { name: 'Late-loading chat' }));
 
       await vi.waitFor(() => {
         expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
@@ -1832,6 +2033,30 @@ describe('ChatSessionStore', () => {
      * what it composed and reaches no second verdict; the row that pins the
      * decision is in `use-cad-chat-client.test.tsx`.
      */
+
+    /*
+     * I1. The banner's *Resume* is an attempt at a run that has already ended,
+     * so there is no live `activeRunBody` left to fall back on — the settlement
+     * that ended the run cleared it — and `ChatTurnHost` composes no body for a
+     * continuation on purpose (no body, no rewind trigger). Requiring one
+     * refused the dispatch with *"No agent configuration is available"* after
+     * the turn had been admitted and its lease taken, so the chat sat in
+     * `queued.dispatched` and the person's Resume did nothing at all.
+     * `reconnectToStream` reads no body: the host continues the run from its
+     * own durable log.
+     */
+    it('dispatches a bodyless continuation, because a resume carries no run body', async () => {
+      const chatId = 'chat_resume_bodyless';
+      const store = createStore();
+      const session = store.acquire(chatId);
+      const fake = harness.created.at(-1)!;
+
+      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+
+      await vi.waitFor(() => {
+        expect(fake.resumeStream).toHaveBeenCalledOnce();
+      });
+    });
 
     it('does not arm the host resume from a continue no browser host can consume', async () => {
       const chatId = 'chat_resume_request_unplaced';
@@ -2855,6 +3080,222 @@ describe('ChatSessionStore', () => {
       store.release('chat_seed_late_owner');
     });
 
+    /*
+     * T3-D3. The seed was protected from an unbound owner (V3a); the person's
+     * own gestures were not — `requestTurn` returned silently whenever
+     * `stateActorRef` was undefined, which is every chat of a project between
+     * `setProjectSession(id, undefined)` and the next registration, and every
+     * chat whose project session the idle policy stopped. The composer had
+     * already cleared, so the message was gone with no banner and no transcript
+     * row. One parking slot, one flush site, for every gesture.
+     */
+    it('holds a gesture made before the project session binds and admits it on bind', async () => {
+      const store = createStore();
+      store.acquire('chat_unbound_gesture');
+      const fake = harness.created.find((entry) => entry.id === 'chat_unbound_gesture')!;
+
+      // No project session: the chat has no owner to ask.
+      await store.requestTurn('chat_unbound_gesture', { kind: 'regenerate' });
+      expect(fake.regenerate).not.toHaveBeenCalled();
+
+      startTurnOwner(store, 'resource_unbound_gesture');
+      publishAdmission('chat_unbound_gesture', () => ({
+        kind: 'regenerate',
+        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+      }));
+
+      await vi.waitFor(() => {
+        expect(fake.regenerate).toHaveBeenCalledTimes(1);
+      });
+
+      store.release('chat_unbound_gesture');
+    });
+
+    /*
+     * W10-4, I5. A gesture parked on an unbound owner lives in one in-memory
+     * field that dies with the document: it is in neither the transcript nor
+     * the composer, which is exactly what I5 forbids. The composer keeps the
+     * text until something takes the gesture — and the flush that admits it is
+     * what clears it, once.
+     */
+    it('keeps a send parked on an unbound owner in the composer until its flush admits it', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_parked_draft');
+      const fake = harness.created.find((entry) => entry.id === 'chat_parked_draft')!;
+      const message = buildUserMessage({ text: 'parked message' });
+      session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
+
+      await store.requestTurn('chat_parked_draft', { kind: 'send', message });
+
+      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('parked message');
+
+      startTurnOwner(store, 'resource_parked_draft');
+      publishAdmission('chat_parked_draft', () => ({
+        kind: 'send',
+        message,
+        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+      }));
+
+      await vi.waitFor(() => {
+        expect(fake.sendMessage).toHaveBeenCalledTimes(1);
+      });
+      await vi.waitFor(() => {
+        expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+      });
+
+      store.release('chat_parked_draft');
+    });
+
+    /*
+     * The other half of that contract: the composer is cleared for the gesture
+     * that took it, never over what the person has written since. A parked send
+     * can sit there for as long as the chat has no owner, which is long enough
+     * to start typing the next message.
+     */
+    it('does not clear a composer the person has typed into since the parked send was made', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_parked_retyped');
+      const fake = harness.created.find((entry) => entry.id === 'chat_parked_retyped')!;
+      const message = buildUserMessage({ text: 'parked message' });
+      session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
+
+      await store.requestTurn('chat_parked_retyped', { kind: 'send', message });
+      session.draftActorRef.send({ type: 'setDraftText', text: 'and now something else' });
+
+      startTurnOwner(store, 'resource_parked_retyped');
+      publishAdmission('chat_parked_retyped', () => ({
+        kind: 'send',
+        message,
+        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+      }));
+
+      await vi.waitFor(() => {
+        expect(fake.sendMessage).toHaveBeenCalledTimes(1);
+      });
+      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('and now something else');
+
+      store.release('chat_parked_retyped');
+    });
+
+    /*
+     * W10-C / the browser-rows lane's read of `#settleComposer`. Two gestures
+     * over one admission: the second displaces the first, and *both*
+     * `requestTurn` calls answer the composer when the machine finally leaves
+     * `admitting`. Whichever order they answer in, the send that never reached
+     * the transcript is what the composer holds (I5, E2).
+     */
+    it('returns a displaced send to the composer whichever requestTurn call observes it', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_two_sends');
+      startTurnOwner(store, 'resource_two_sends');
+      const admitted = Promise.withResolvers<void>();
+      const second = buildUserMessage({ text: 'second message' });
+      publishChatTurnAdmission('chat_two_sends', async (gesture) => {
+        await admitted.promise;
+        return {
+          runId: 'run_two_sends',
+          leaseTurnId: undefined,
+          request:
+            gesture.kind === 'send'
+              ? { kind: 'send', message: gesture.message }
+              : { kind: 'edit', messageId: 'msg_edit', content: 'edited' },
+        };
+      });
+      publishChatTurnSettlement('chat_two_sends', async () => undefined);
+
+      const first = store.requestTurn('chat_two_sends', {
+        kind: 'send',
+        message: buildUserMessage({ text: 'first message' }),
+      });
+      await Promise.resolve();
+      const displacing = store.requestTurn('chat_two_sends', { kind: 'send', message: second });
+      admitted.resolve();
+      await Promise.all([first, displacing]);
+
+      await vi.waitFor(() => {
+        expect(session.draftActorRef.getSnapshot().context.draftText).toBe('first message');
+      });
+
+      store.release('chat_two_sends');
+    });
+
+    /* The same ordering with an `edit` doing the displacing: the edit rewinds to
+     * a message the transcript still holds, so the only text at risk is the
+     * send's — and its own `requestTurn` resolves last, holding the clear. */
+    it('returns a send displaced by an edit to the composer', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_send_then_edit');
+      startTurnOwner(store, 'resource_send_then_edit');
+      const admitted = Promise.withResolvers<void>();
+      publishChatTurnAdmission('chat_send_then_edit', async (gesture) => {
+        await admitted.promise;
+        return {
+          runId: 'run_send_then_edit',
+          leaseTurnId: undefined,
+          request:
+            gesture.kind === 'send'
+              ? { kind: 'send', message: gesture.message }
+              : { kind: 'edit', messageId: 'msg_edit', content: 'edited' },
+        };
+      });
+      publishChatTurnSettlement('chat_send_then_edit', async () => undefined);
+
+      const sent = store.requestTurn('chat_send_then_edit', {
+        kind: 'send',
+        message: buildUserMessage({ text: 'unsent message' }),
+      });
+      await Promise.resolve();
+      const edited = store.requestTurn('chat_send_then_edit', {
+        kind: 'edit',
+        messageId: 'msg_edit',
+        text: 'edited',
+      });
+      admitted.resolve();
+      await Promise.all([sent, edited]);
+
+      await vi.waitFor(() => {
+        expect(session.draftActorRef.getSnapshot().context.draftText).toBe('unsent message');
+      });
+
+      store.release('chat_send_then_edit');
+    });
+
+    /*
+     * W10-1: the two halves of `#bindSessionOwner` meeting. The flush puts the
+     * parked gesture into `run.queued.admitting`; the discovery below it sent
+     * `adoptRun` for the chat's still-live run — and the root-level handler
+     * honoured it mid-admission, stopping the admission actor and taking the
+     * person's message with it, composer already cleared.
+     */
+    it('admits a gesture parked on an unbound owner while a run of that chat is still live', async () => {
+      const store = createStore();
+      store.acquire('chat_parked_live_run');
+      const fake = harness.created.find((entry) => entry.id === 'chat_parked_live_run')!;
+      const live = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
+        runId: 'run_live_elsewhere',
+        state: 'running',
+        eventCount: 2,
+      });
+
+      try {
+        await store.requestTurn('chat_parked_live_run', { kind: 'regenerate' });
+        expect(fake.regenerate).not.toHaveBeenCalled();
+
+        startTurnOwner(store, 'resource_parked_live_run');
+        publishAdmission('chat_parked_live_run', () => ({
+          kind: 'regenerate',
+          body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+        }));
+
+        await vi.waitFor(() => {
+          expect(fake.regenerate).toHaveBeenCalledTimes(1);
+        });
+      } finally {
+        live.mockRestore();
+        store.release('chat_parked_live_run');
+      }
+    });
+
     it('restores a plain pending user tail to draft on hydration without regenerating', async () => {
       const store = new ChatSessionStore();
       const deps = createStubDeps();
@@ -3325,6 +3766,33 @@ describe('ChatSessionStore', () => {
       expect(text?.text).toBe('edited prompt');
       expect(rebuilt.metadata?.status).toBe('pending');
       expect(typeof rebuilt.metadata?.createdAt).toBe('number');
+    });
+
+    /* T3-D5: the admission refuses an edit whose message has gone, so this
+     * dispatch is only reachable in the microtask between `turnAdmitted` and
+     * the dispatch itself. It used to `return` silently — no request, no
+     * banner, `requestLifecycle` stuck in `invoking` and the turn's lease held
+     * until reload. Every dispatch that cannot run ends its request. */
+    it('ends the request when the edited message vanished before the dispatch ran', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_edit_vanished');
+      const fake = harness.created.find((entry) => entry.id === 'chat_edit_vanished')!;
+      fake.messages = [];
+
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: {
+          kind: 'edit',
+          messageId: 'msg_gone',
+          content: 'edited prompt',
+          body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'm' }, kernel: 'replicad' } },
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
+      });
+      expect(fake.regenerate).not.toHaveBeenCalled();
     });
   });
 
@@ -3853,6 +4321,48 @@ describe('ChatSessionStore — composer records (W7)', () => {
     });
     expect(second.store.isUnread(chatId)).toBe(false);
     second.store.release(chatId);
+  });
+
+  /*
+   * I5 for attachments, ruling E2. A displaced send's text came back to the
+   * composer but its files did not: the bytes were promoted into the chat's own
+   * directory when the gesture was taken and the draft-stage copies released
+   * with the draft, so the restored chips pointed at blobs the composer could
+   * no longer read or re-send. The decision that hands a message back is the
+   * decision that must not release — and must re-retain what it hands back.
+   */
+  it('should hand a displaced send back to the composer with its attachment still usable', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId);
+    startTurnOwner(store, projectId);
+    publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
+    await attachBoth(session);
+    const { draftAttachments } = session.draftActorRef.getSnapshot().context;
+    await store.promoteDraftAttachments(chatId, draftAttachments);
+    const second = buildUserMessage({ text: 'second message', attachments: draftAttachments });
+
+    await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'first message' }) });
+    // Queued behind the live turn: the composer clears and its blobs are let go.
+    await store.requestTurn(chatId, { kind: 'send', message: second, attachments: draftAttachments });
+    expect(client.namesUnder(draftAttachmentsDirectory(projectId, chatId))).toEqual([]);
+
+    // Displaced by a third gesture, so it comes back — bytes included.
+    await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'third message' }) });
+
+    await vi.waitFor(() => {
+      expect(session.draftActorRef.getSnapshot().context).toMatchObject({
+        draftText: 'second message',
+        draftAttachments: [
+          { hash: pngHash, mediaType: 'image/png' },
+          { hash: pdfHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' },
+        ],
+      });
+    });
+    expect(client.namesUnder(draftAttachmentsDirectory(projectId, chatId))).toEqual(
+      [`${pngHash}.png`, `${pdfHash}.pdf`].sort(),
+    );
+    store.release(chatId);
   });
 
   it('promotes both blobs into the chat directory on send and clears the draft-stage copies', async () => {

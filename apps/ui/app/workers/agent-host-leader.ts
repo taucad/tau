@@ -15,7 +15,17 @@ export type ChatLeaderLease =
       release(): void;
     };
 
-export const agentHostProtocolVersion = 1;
+/**
+ * The leader protocol's schema generation.
+ *
+ * Bumped whenever a `LeaderBroadcast` member or a worker command changes shape:
+ * the Web Lock and the BroadcastChannel are both keyed on it, so two builds
+ * that disagree about the frames never share either. Version 1 spanned two
+ * incompatible leader schemas (`replay` deleted from the broadcast union, and
+ * `trigger` narrowed to edit/regenerate), which left a deploy's old tab posting
+ * frames the new tab's strict parse dropped without a word.
+ */
+export const agentHostProtocolVersion = 2;
 
 export type FollowerStaleReason = 'heartbeat' | 'tail';
 
@@ -109,10 +119,23 @@ export const agentHostAuthorityName = (options: {
     .map((part) => encodeURIComponent(part))
     .join(':');
 
+/**
+ * Name the exclusive write lease for one chat's durable log.
+ *
+ * Deliberately **not** keyed on {@link agentHostProtocolVersion}: the lease is
+ * what makes one chat log have one writer, and that has to hold across a
+ * deploy. Versioning it would let an old tab and a new tab each take their own
+ * lock over the same `events.jsonl` and both append, which the log can only
+ * answer by killing one run on `EVENT_MUTATED`. The *frames* are versioned
+ * instead, so the two builds never try to read each other's protocol: a
+ * follower of the wrong generation is simply never answered and fails with
+ * `LEADER_RESPONSE_TIMEOUT`, which the page shows.
+ *
+ * @param options - The project and chat the lease covers.
+ * @returns The Web Lock name.
+ */
 const agentHostLeaseName = (options: { readonly projectId: string; readonly chatId: string }): string =>
-  ['agent-host-log', `v${agentHostProtocolVersion}`, options.projectId, options.chatId]
-    .map((part) => encodeURIComponent(part))
-    .join(':');
+  ['agent-host-log', options.projectId, options.chatId].map((part) => encodeURIComponent(part)).join(':');
 
 /** Acquire and hold the native Web Lock for one chat without blocking followers. */
 export const acquireChatLeaderLease = async (options: {
@@ -145,15 +168,41 @@ export const acquireChatLeaderLease = async (options: {
   return { isLeader: true, generation: options.createGeneration(), completion, release: release.resolve };
 };
 
-/** Resume the non-terminal snapshot observed immediately after a follower acquires leadership. */
-export const recoverAttachedRun = async <Snapshot extends { readonly state: string }>(options: {
-  readonly snapshot: () => Promise<Snapshot>;
-  readonly resume: () => Promise<unknown>;
-}): Promise<Snapshot> => {
-  const snapshot = await options.snapshot();
-  if (snapshot.state !== 'completed' && snapshot.state !== 'failed' && snapshot.state !== 'cancelled') {
-    await options.resume();
-    return options.snapshot();
+/**
+ * Await a forwarded response for as long as the leader keeps proving it is alive.
+ *
+ * A fixed deadline was a *work* bound on someone else's command: a `start` is
+ * answered at admission time, which includes turn preparation and can outlast
+ * any constant. Past it the follower deleted the leader's generation, failed to
+ * win the lock the live leader still held, and re-broadcast the same command —
+ * so the leader ran it twice. Liveness is the only thing a follower can
+ * legitimately bound, and the leader already publishes it once a second.
+ *
+ * @param options - The response to await and the follower's view of the leader.
+ * @returns The response, or `undefined` once the leader stops answering.
+ */
+export const awaitWhileLeaderLives = async <Value>(options: {
+  readonly response: Promise<Value>;
+  /** When this follower last heard from the leader, as the monitor records it. */
+  readonly lastSeenAt: () => number | undefined;
+  readonly heartbeatTimeout: number;
+  readonly now?: (() => number) | undefined;
+}): Promise<Value | undefined> => {
+  const now = options.now ?? Date.now;
+  const expired = Promise.withResolvers<undefined>();
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  const check = (): void => {
+    const seen = options.lastSeenAt();
+    if (seen !== undefined && now() - seen < options.heartbeatTimeout) {
+      timer = globalThis.setTimeout(check, options.heartbeatTimeout);
+      return;
+    }
+    expired.resolve(undefined);
+  };
+  timer = globalThis.setTimeout(check, options.heartbeatTimeout);
+  try {
+    return await Promise.race([options.response, expired.promise]);
+  } finally {
+    globalThis.clearTimeout(timer);
   }
-  return snapshot;
 };

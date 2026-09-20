@@ -1,8 +1,8 @@
+import type { ProductCampaign } from '#bench/campaign';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Type-only self-owned benchmark module; no generator execution.
 import type { BroadFixtureManifest, BroadFixtureDescriptor, SizedArtifact } from '#bench/broad-fixtures';
 
 /** Hashed runtime input retained in the dispatch receipt. @internal */
@@ -70,6 +70,129 @@ export type BenchmarkConfig = {
   timingGate?: { timingEligible: boolean; artifactHandoff?: string; quietWindowObservedAt?: string };
   toolchain: JsonValue;
 };
+
+/** Installed-product consumer kinds represented by the benchmark driver. @internal */
+export type ProductConsumer = 'standalone' | 'vitest' | 'python';
+/** A product route that can execute now through the bundled worker. @internal */
+export type InstalledProductRoute = {
+  state: 'ready';
+  consumer: ProductConsumer;
+  backend: 'legacy' | 'native' | 'mixed';
+  profile: string;
+  comparison: string;
+  parityProfile?: string;
+  expectedResults?: Record<string, { outputIdentity: string; statusCounts: Record<string, number> }>;
+  supportedWorkloads?: string[];
+  /** Explicit event-adapter state support, bound by the frozen executable closure. */
+  stateContracts?: Array<'warm-engine-cold-subject' | 'resident-warm' | 'incremental-edit' | 'persisted-warm'>;
+  cacheContract?: 'native-authenticated-overlap-a3';
+  workloadGaps?: Record<
+    string,
+    { classification: 'capability-unsupported' | 'adapter-not-implemented'; reason: string }
+  >;
+  execution:
+    | {
+        kind: 'installed-js';
+        consumerRoot: string;
+        harness: Artifact;
+        binding: Artifact;
+        assertionClient: Artifact;
+        campaign?: Artifact;
+      }
+    | {
+        kind: 'installed-legacy-js';
+        consumerRoot: string;
+        engine: Artifact;
+        receipt: Artifact;
+      }
+    | {
+        kind: 'event-command';
+        executable: string;
+        arguments: string[];
+        cwd: string;
+        environment?: Record<string, string>;
+      };
+  artifacts: Artifact[];
+};
+/** A selected consumer route that cannot yet emit truthful boundary events. @internal */
+export type UnavailableProductRoute = {
+  state: 'unavailable';
+  consumer: ProductConsumer;
+  backend: 'legacy' | 'native' | 'mixed';
+  profile: string;
+  comparison: string;
+  reason: string;
+  artifacts?: Artifact[];
+};
+/** Product route declaration. @internal */
+export type ProductRoute = InstalledProductRoute | UnavailableProductRoute;
+/** Frozen product or generated broad workload. @internal */
+export type ProductWorkload =
+  | { id: string; kind: 'm3-row'; rowId: string }
+  | { id: string; kind: 'broad-fixture'; fixtureId: string }
+  | { id: string; kind: 'common-tetrahedron-bounds' }
+  | {
+      id: string;
+      kind: 'independent-subject-batch' | 'selected-suite';
+      members: Array<{ id: string; workload: string }>;
+    };
+/** Provisional installed-product benchmark configuration. @internal */
+export type ProductBenchmarkConfig = {
+  schemaVersion: 2;
+  campaign?: ProductCampaign;
+  source: string;
+  workspaceRoot: string;
+  broadFixtures: Artifact;
+  routes: Record<string, ProductRoute>;
+  workloads: ProductWorkload[];
+  repeats: number;
+  campaignGate: {
+    provisional: true;
+    releaseCampaign: false;
+    reason: string;
+  };
+  toolchain: JsonValue;
+};
+
+/**
+ * Resolve one public consumer result before exposing its actionable boundary.
+ * @internal
+ * @returns The same resolved public report after its boundary observer returns.
+ */
+export const observePublicConsumerResult = async <Report>({
+  consume,
+  acknowledge,
+}: {
+  consume: () => Promise<Report>;
+  acknowledge: (report: Report) => void | Promise<void>;
+}): Promise<Report> => {
+  const report = await consume();
+  await acknowledge(report);
+  return report;
+};
+
+/** One claim generated from independent broad-fixture facts. @internal */
+export type BroadClaim = {
+  claimId: string;
+  capability: string;
+  payload: JsonValue;
+  polarity: 'positive';
+  subjectSlots: ['subject'];
+  workUnitBudget: number;
+};
+/** Executable broad subject and claim batch. @internal */
+export type BroadWorkloadPlan = {
+  fixture: BroadFixtureDescriptor;
+  subject: BroadFixtureDescriptor;
+  claims: BroadClaim[];
+  authoredClaims: number;
+  unsupportedClaims: string[];
+  independentFacts: Record<string, unknown>;
+  overlapOracle?: { claimIds: string[]; leftLabel: string; rightLabel: string; volume: number };
+};
+/** Public A3 Node cache options; private storage remains explicitly selected. @internal */
+export type ProductCacheOptions = { root: string; projectRoot: string };
+
 /** Native/WASM byte methods exercised by the retained workloads. @internal */
 export type NewBinding = {
   Engine: new () => {
@@ -85,14 +208,31 @@ export type NewBinding = {
 export type LegacyImplementation = {
   host: {
     analyzeMesh: (request: {
-      source: ReturnType<typeof decodeMesh>;
-      format: 'mesh-buffer';
+      source: ReturnType<typeof decodeMesh> | string | Uint8Array<ArrayBuffer>;
+      format: 'mesh-buffer' | 'gltf' | 'glb';
+      sourceUnit?: 'mm';
+      unit?: 'mm';
     }) => Promise<
       | { success: true; subject: { subjectId: string }; stats: { boundingBox: LegacyBoundingBox } }
       | { success: false; diagnostics: JsonValue }
     >;
   };
   protocol: {
+    initialize: (request: { protocolVersion: 2; client: { name: string; version: string } }) => {
+      protocolVersion: number;
+      capabilities: Array<{ name: string; registryVersion: number }>;
+    };
+    ingestSubject: (
+      request: {
+        requestId: string;
+        contentHash: string;
+        format: 'step' | 'stp';
+        frame: { coordinateSystem: 'z-up'; sourceUnit: string; targetUnit: 'mm' };
+        provenance: JsonValue;
+        options: JsonValue;
+      },
+      bytes: Uint8Array<ArrayBuffer>,
+    ) => Promise<{ requestId: string; subject: { subjectId: string; contentHash: string } }>;
     submitClaims: (request: {
       requestId: string;
       registryVersion: number | undefined;
@@ -200,6 +340,7 @@ export type PendingBroadRecipe = {
   claimCount: number;
   profileRequirements: Record<string, unknown>;
   metadataObligations: Record<string, unknown>;
+  claims: Array<{ claimId: string; subject: string; query: { kind: string; left?: string; right?: string } }>;
 };
 /** Verified input metadata only; no geometry or performance qualification. @internal */
 export type VerifiedBroadFixtures = {
@@ -303,8 +444,19 @@ const parseBroadRecipe = (bytes: FileBytes): PendingBroadRecipe => {
     isRecord(recipe.profileRequirements) && isRecord(recipe.metadataObligations),
     'Recipe mapping metadata is required.',
   );
+  const claims = recipe.claims as PendingBroadRecipe['claims'];
+  for (const claim of claims) {
+    assert.ok(
+      isRecord(claim) &&
+        typeof claim.claimId === 'string' &&
+        claim.subject === recipe.subject &&
+        isRecord(claim.query) &&
+        typeof claim.query.kind === 'string',
+      'Recipe claim shape mismatch.',
+    );
+  }
   const { id, subject, claimCount, profileRequirements, metadataObligations } = recipe;
-  return { id, subject, claimCount, profileRequirements, metadataObligations };
+  return { id, subject, claimCount, profileRequirements, metadataObligations, claims };
 };
 
 /**
@@ -383,6 +535,212 @@ export const verifyBroadFixtures = async (artifact?: Artifact): Promise<Verified
     deliveryRoutes: 'pending',
     performanceQualification: 'pending',
     analyticFactsStatus: 'supplied-independent-metadata-not-engine-observations',
+  };
+};
+
+const factNumber = (value: unknown, label: string): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number' &&
+    value[1] !== 0
+  ) {
+    return value[0] / value[1];
+  }
+  throw new Error(`Broad fixture ${label} must be a finite number or rational pair.`);
+};
+
+const factVector = (value: unknown, label: string): Vector3 => {
+  assert.ok(Array.isArray(value) && value.length === 3, `Broad fixture ${label} must be a three-vector.`);
+  return value.map((entry, index) => factNumber(entry, `${label}[${index}]`)) as Vector3;
+};
+
+const broadBoundingBox = (facts: Record<string, unknown>): JsonValue => {
+  const source = isRecord(facts['aabb'])
+    ? facts['aabb']
+    : Array.isArray(facts['outerDimensions'])
+      ? { min: [0, 0, 0], max: facts['outerDimensions'] }
+      : undefined;
+  assert.ok(source !== undefined, 'Broad fixture requires independent AABB facts.');
+  const min = factVector(source['min'], 'aabb.min');
+  const max = factVector(source['max'], 'aabb.max');
+  return {
+    min,
+    max,
+    center: min.map((value, axis) => (value + max[axis]!) / 2),
+    size: min.map((value, axis) => max[axis]! - value),
+    tolerance: 0,
+  };
+};
+
+const broadClaim = ({
+  claimId,
+  capability,
+  kind,
+  expected,
+}: {
+  claimId: string;
+  capability: string;
+  kind: string;
+  expected: JsonValue;
+}): BroadClaim => ({
+  claimId,
+  capability,
+  payload: { expected, kind },
+  polarity: 'positive',
+  subjectSlots: ['subject'],
+  workUnitBudget: 8_000_000,
+});
+
+const broadScalarClaim = ({
+  fixtureId,
+  suffix,
+  capability,
+  kind,
+  value,
+}: {
+  fixtureId: string;
+  suffix: string;
+  capability: string;
+  kind: string;
+  value: number;
+}): BroadClaim =>
+  broadClaim({
+    claimId: `broad.${fixtureId}.${suffix}`,
+    capability,
+    kind,
+    expected: { tolerance: 0, value },
+  });
+
+/**
+ * Map the generated broad manifest to the already-supported product profile.
+ * @internal
+ * @param fixtures - Hash-verified broad fixture receipt.
+ * @param fixtureId - Selected generated fixture or request recipe.
+ * @returns Exact subject plus claims derived from independent generator facts.
+ */
+export const planBroadWorkload = (fixtures: VerifiedBroadFixtures, fixtureId: string): BroadWorkloadPlan => {
+  const fixture = fixtures.fixtures.find(({ id }) => id === fixtureId);
+  assert.ok(fixture !== undefined, `Unknown broad fixture ${fixtureId}.`);
+  if (fixture.recipe === undefined) {
+    assert.notEqual(fixture.format, 'request-construction-json', `${fixtureId} has no verified recipe.`);
+    const claims = [
+      broadClaim({
+        claimId: `broad.${fixture.id}.bounding-box`,
+        capability: 'toHaveBoundingBox',
+        kind: 'boundingBox',
+        expected: broadBoundingBox(fixture.analyticFacts),
+      }),
+    ];
+    const surfaceArea =
+      fixture.analyticFacts['surfaceArea'] ??
+      fixture.analyticFacts['nominalSurfaceArea'] ??
+      fixture.analyticFacts['nominalMaterialSurfaceArea'];
+    const volume =
+      fixture.analyticFacts['volume'] ??
+      fixture.analyticFacts['nominalVolume'] ??
+      fixture.analyticFacts['nominalMaterialVolume'];
+    if (surfaceArea !== undefined) {
+      claims.push(
+        broadScalarClaim({
+          fixtureId: fixture.id,
+          suffix: 'surface-area',
+          capability: 'toHaveSurfaceArea',
+          kind: 'surfaceArea',
+          value: factNumber(surfaceArea, 'surfaceArea'),
+        }),
+      );
+    }
+    if (volume !== undefined) {
+      claims.push(
+        broadScalarClaim({
+          fixtureId: fixture.id,
+          suffix: 'volume',
+          capability: 'toHaveVolume',
+          kind: 'volume',
+          value: factNumber(volume, 'volume'),
+        }),
+      );
+    }
+    if (fixture.format === 'step') {
+      claims.unshift(
+        broadClaim({
+          claimId: `broad.${fixture.id}.valid-brep`,
+          capability: 'toBeValidBrep',
+          kind: 'validBrep',
+          expected: {},
+        }),
+      );
+    }
+    return {
+      fixture,
+      subject: fixture,
+      claims,
+      authoredClaims: claims.length,
+      unsupportedClaims: [],
+      independentFacts: fixture.analyticFacts,
+    };
+  }
+  const subject = fixtures.fixtures.find(({ id }) => id === fixture.recipe!.subject);
+  assert.ok(
+    subject !== undefined && subject.format !== 'request-construction-json',
+    `${fixtureId} subject is missing.`,
+  );
+  const boundingBox = broadBoundingBox(subject.analyticFacts);
+  const componentSurfaceArea = factNumber(subject.analyticFacts['componentSurfaceArea'], 'componentSurfaceArea');
+  const componentCount =
+    subject.analyticFacts['componentCount'] === undefined
+      ? 1
+      : factNumber(subject.analyticFacts['componentCount'], 'componentCount');
+  const surfaceArea = componentSurfaceArea * componentCount;
+  const claims = fixture.recipe.claims.map(({ claimId, query }) => {
+    if (query.kind === 'bounds') {
+      return broadClaim({ claimId, capability: 'toHaveBoundingBox', kind: 'boundingBox', expected: boundingBox });
+    }
+    if (query.kind === 'surface-area') {
+      return broadClaim({
+        claimId,
+        capability: 'toHaveSurfaceArea',
+        kind: 'surfaceArea',
+        expected: { tolerance: 0, value: surfaceArea },
+      });
+    }
+    assert.equal(query.kind, 'selected-overlap-pair', `Unsupported broad query kind ${query.kind}.`);
+    assert.equal(query.left, 'claim-subject-a');
+    assert.equal(query.right, 'claim-subject-b');
+    assert.equal(componentCount, 2, 'The supported overlap workload has exactly the authored pair.');
+    return {
+      claimId,
+      capability: 'analyzeMeshOverlap',
+      payload: { tolerance: 0.001 },
+      polarity: 'positive',
+      subjectSlots: ['subject'],
+      workUnitBudget: 8_000_000,
+    } satisfies BroadClaim;
+  });
+  return {
+    fixture,
+    subject,
+    claims,
+    authoredClaims: fixture.recipe.claimCount,
+    unsupportedClaims: [],
+    independentFacts: { ...fixture.analyticFacts, subject: subject.analyticFacts },
+    ...(fixture.recipe.claims.some(({ query }) => query.kind === 'selected-overlap-pair')
+      ? {
+          overlapOracle: {
+            claimIds: fixture.recipe.claims
+              .filter(({ query }) => query.kind === 'selected-overlap-pair')
+              .map(({ claimId }) => claimId),
+            leftLabel: 'claim-subject-a#0',
+            rightLabel: 'claim-subject-b#0',
+            volume: factNumber(subject.analyticFacts['overlapVolume'], 'overlapVolume'),
+          },
+        }
+      : {}),
   };
 };
 
@@ -685,4 +1043,327 @@ export const analyzeComparableRoutes = ({
     decisions.push({ workload, axis: 'wasm-vs-native', pairCount: pairs.length, ...statistics, classification });
   }
   return decisions;
+};
+
+/** Completed evaluation is independent of the geometric verdict. @internal
+ * @param results - Complete public results.
+ * @param count - Authored claim count.
+ * @returns Whether each authored claim completed with a geometric verdict.
+ */
+export const evaluationCompleted = (results: ReadonlyArray<{ status?: unknown }>, count: number): boolean =>
+  results.length === count && count > 0 && results.every(({ status }) => status === 'passed' || status === 'failed');
+
+/** Check independent two-box intersection facts. @internal
+ * @param workload - Frozen claim intent and analytic oracle.
+ * @param results - Settled public results.
+ * @returns Whether every selected pair agrees with the independent oracle.
+ */
+export const overlapMatches = (
+  workload: BroadWorkloadPlan,
+  results: ReadonlyArray<Record<string, unknown>>,
+): boolean => {
+  if (workload.overlapOracle === undefined) {
+    return true;
+  }
+  const oracle = workload.overlapOracle;
+  return oracle.claimIds.every((claimId) => {
+    const result = results.find((row) => row['claimId'] === claimId);
+    const observation = result?.['evidence'];
+    if (!isRecord(observation) || observation['success'] !== true || result?.['status'] !== 'passed') {
+      return false;
+    }
+    const { evidence } = observation;
+    if (!isRecord(evidence) || evidence['componentCount'] !== 2 || evidence['checkedPairs'] !== 1) {
+      return false;
+    }
+    const { overlaps } = evidence;
+    if (!Array.isArray(overlaps) || overlaps.length !== 1 || !isRecord(overlaps[0])) {
+      return false;
+    }
+    const pair = overlaps[0];
+    return (
+      pair['leftLabel'] === oracle.leftLabel &&
+      pair['rightLabel'] === oracle.rightLabel &&
+      pair['intersectionVolume'] === oracle.volume
+    );
+  });
+};
+
+/** Compare complete ordered same-profile reports, retaining false verdicts. @internal
+ * @param left - First complete public suite.
+ * @param right - Second complete public suite.
+ * @returns Exact equality of every report and canonical byte record.
+ */
+export const compareProductReports = (left: unknown, right: unknown): boolean =>
+  Array.isArray(left) && left.length > 0 && isDeepStrictEqual(left, right);
+
+/** Complete installed public assertion report. @internal */
+export type PublicConsumerReport = {
+  status: string;
+  claimId: string;
+  canonicalClaim: Uint8Array<ArrayBuffer>;
+  canonicalPlan: Uint8Array<ArrayBuffer>;
+  canonicalResult: Uint8Array<ArrayBuffer>;
+  result: { status: string; evidence?: unknown; diagnostics?: unknown };
+};
+
+/** Retain exact public bytes. @internal
+ * @param bytes - Installed public canonical bytes.
+ * @returns Length, digest and unmodified UTF-8.
+ */
+export const byteRecord = (bytes: Uint8Array<ArrayBuffer>): { byteLength: number; sha256: string; utf8: string } => {
+  const value = Buffer.from(bytes);
+  return { byteLength: value.byteLength, sha256: sha256(value), utf8: value.toString() };
+};
+
+/** Retain the complete canonical claim, plan and result. @internal
+ * @param report - Settled public report.
+ * @returns Complete report receipt.
+ */
+export const consumerReportRecord = (report: PublicConsumerReport): Record<string, unknown> => ({
+  claimId: report.claimId,
+  status: report.status,
+  resultStatus: report.result.status,
+  canonicalClaim: byteRecord(report.canonicalClaim),
+  canonicalPlan: byteRecord(report.canonicalPlan),
+  canonicalResult: byteRecord(report.canonicalResult),
+  result: report.result,
+});
+
+/** Independent dimensions of benchmark qualification. @internal */
+export type ProductQualification = {
+  evaluationCompleted: boolean;
+  geometricVerdicts: Record<string, number>;
+  expectedMatches: boolean | WireNull;
+  outputIdentity: string;
+  overlapVerified: boolean;
+};
+
+/** Qualify a complete public suite against retained expectations and independent facts. @internal
+ * @param options - Route profile, ordered reports and preflighted claim intent.
+ * @returns Separate evaluation, expected-output and analytic-oracle decisions.
+ */
+export const qualifyProductReports = ({
+  route,
+  workload,
+  suiteReports,
+  prepared,
+}: {
+  route: InstalledProductRoute;
+  workload: string;
+  suiteReports: Array<Record<string, unknown>> | WireNull;
+  prepared?: BroadWorkloadPlan;
+}): ProductQualification => {
+  const reports = suiteReports ?? [];
+  const results =
+    route.backend === 'legacy' ? reports : reports.map((record) => record['result'] as Record<string, unknown>);
+  const expected = route.expectedResults?.[workload];
+  const outputIdentity =
+    route.backend === 'legacy'
+      ? sha256(JSON.stringify(results))
+      : sha256(reports.map((record) => JSON.stringify(record['canonicalResult'])).join('\n'));
+  const statusCounts = Object.fromEntries(
+    [...new Set(results.map((row) => String(row['status'])))].map((status) => [
+      status,
+      results.filter((row) => row['status'] === status).length,
+    ]),
+  );
+  const completed = evaluationCompleted(results, prepared?.authoredClaims ?? 1);
+  const expectedMatches =
+    expected === undefined
+      ? null
+      : expected.outputIdentity === outputIdentity && isDeepStrictEqual(expected.statusCounts, statusCounts);
+  const overlapVerified = prepared === undefined || overlapMatches(prepared, results);
+  return {
+    evaluationCompleted: completed,
+    geometricVerdicts: statusCounts,
+    expectedMatches,
+    outputIdentity,
+    overlapVerified,
+  };
+};
+
+/** Installed product binding methods exercised by the benchmark. @internal */
+export type ProductEngine = {
+  observations?: () => Uint8Array<ArrayBuffer>;
+  processRequest: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  ingestMesh: (request: Uint8Array<ArrayBuffer>, mesh: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  ingestSubject: (
+    request: Uint8Array<ArrayBuffer>,
+    primary: Uint8Array<ArrayBuffer>,
+    resources: ReadonlyArray<Uint8Array<ArrayBuffer>>,
+  ) => Uint8Array<ArrayBuffer>;
+  subjectHandle: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  canonicalPlan: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  evaluatePlan: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  releaseSubject: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  close?: () => void;
+  flushCache?: () => Uint8Array<ArrayBuffer>;
+  cacheProducerIdentity?: () => Uint8Array<ArrayBuffer>;
+};
+
+/** Installed binding module surface, without a build-time native import. @internal */
+export type ProductBinding = {
+  Engine: { prototype: ProductEngine; new (options?: ProductCacheOptions): ProductEngine };
+  canonicalize: (input: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  initialize?: () => Promise<void>;
+};
+
+/** Installed runner-independent assertion client. @internal */
+export type PublicAssertionClient = {
+  expectGeo: (subject: Record<string, string>) => Record<string, unknown> & { not: Record<string, unknown> };
+  query: (options: {
+    capability: string;
+    claimId: string;
+    payload: unknown;
+    subject: Record<string, string>;
+  }) => Promise<PublicConsumerReport>;
+};
+
+/** Installed assertion factory without importing a native artifact at build time. @internal */
+export type AssertionClientModule = {
+  createGeoSpecAssertionClient: (options: {
+    engine: Pick<ProductEngine, 'processRequest' | 'canonicalPlan' | 'evaluatePlan'>;
+    canonicalize: ProductBinding['canonicalize'];
+    claimId: () => string;
+    subjectSlot: string;
+    workUnitLimit: number;
+  }) => PublicAssertionClient;
+};
+
+/** Public Vitest adapter result surface used by the real matcher bridge. @internal */
+export type ProductVitestModule = {
+  createGeoSpecVitestAdapter: (client: PublicAssertionClient) => {
+    matchers: Record<
+      string,
+      (
+        this: unknown,
+        received: unknown,
+        ...arguments_: unknown[]
+      ) => Promise<{ actual: PublicConsumerReport; pass: boolean; message: () => string }>
+    >;
+    flush: () => Promise<void>;
+  };
+};
+
+/** Exact bounded diagnostics outside the canonical result envelope. @internal */
+export type EngineObservation = {
+  schema: string;
+  numericProfile: string;
+  exact: boolean;
+  scope: string;
+  logical: Record<string, string>;
+  physical: Record<string, string>;
+  copies: Record<string, string>;
+  unavailable: string[];
+};
+
+/** Read an available non-mutating engine snapshot; historical bindings remain unknown.
+ * @internal
+ * @param engine - Actual selected installed engine.
+ * @returns Its observation, or null when unavailable.
+ */
+export const readEngineObservation = (engine: ProductEngine): EngineObservation | WireNull =>
+  engine.observations ? (JSON.parse(new TextDecoder().decode(engine.observations())) as EngineObservation) : null;
+
+/** Compute exact measured deltas after excluding prefill, never from a configured limit.
+ * @internal
+ * @param before - Warm baseline; null means a new engine's zero state.
+ * @param after - Snapshot after the timed report and before cleanup.
+ * @returns Complete observation attribution with unknown usage retained as null.
+ */
+export const observationWork = (
+  before: EngineObservation | WireNull,
+  after: EngineObservation | WireNull,
+): Record<string, unknown> => {
+  const unavailable = {
+    engineReportedConsumedWorkUnits: null,
+    observationStart: before,
+    observationEnd: after,
+    observations: null,
+  };
+  if (
+    !after ||
+    !after.exact ||
+    after.schema !== 'geospec-engine-observations-v1' ||
+    (before &&
+      (!before.exact ||
+        before.schema !== after.schema ||
+        before.numericProfile !== after.numericProfile ||
+        before.scope !== after.scope))
+  ) {
+    return unavailable;
+  }
+  const observation: EngineObservation = { ...after, logical: {}, physical: {}, copies: {} };
+  for (const section of ['logical', 'physical', 'copies'] as const) {
+    if (
+      before &&
+      JSON.stringify(Object.keys(before[section]).sort()) !== JSON.stringify(Object.keys(after[section]).sort())
+    ) {
+      return unavailable;
+    }
+    for (const [key, value] of Object.entries(after[section])) {
+      const start = before?.[section][key] ?? '0';
+      if (!/^(0|[1-9]\d*)$/.test(value) || !/^(0|[1-9]\d*)$/.test(start)) {
+        return unavailable;
+      }
+      const delta = BigInt(value) - BigInt(start);
+      if (delta < 0n) {
+        return unavailable;
+      }
+      observation[section][key] = delta.toString();
+    }
+  }
+  return {
+    engineReportedConsumedWorkUnits: observation.logical['chargedUnits'] ?? null,
+    observationStart: before,
+    observationEnd: after,
+    observations: observation,
+  };
+};
+
+/** Sum compatible measured member observations, preserving every original member.
+ * @internal
+ * @param members - Ordered independent member work records.
+ * @returns Their exact compatible sum, or unknown when any observation is missing.
+ */
+export const aggregateObservationWork = (
+  members: Array<Record<string, unknown> | undefined>,
+): Record<string, unknown> => {
+  const unavailable = { members, engineReportedConsumedWorkUnits: null, observations: null };
+  if (members.length === 0) {
+    return unavailable;
+  }
+  const observations = members.map((member) => member?.['observations'] as EngineObservation | WireNull | undefined);
+  const first = observations[0];
+  if (first?.schema !== 'geospec-engine-observations-v1') {
+    return unavailable;
+  }
+  const total: EngineObservation = { ...first, logical: {}, physical: {}, copies: {}, unavailable: [] };
+  for (const observation of observations) {
+    if (
+      !observation ||
+      !observation.exact ||
+      observation.schema !== first.schema ||
+      observation.numericProfile !== first.numericProfile ||
+      observation.scope !== first.scope
+    ) {
+      return unavailable;
+    }
+    for (const section of ['logical', 'physical', 'copies'] as const) {
+      if (
+        JSON.stringify(Object.keys(first[section]).sort()) !== JSON.stringify(Object.keys(observation[section]).sort())
+      ) {
+        return unavailable;
+      }
+      for (const [key, value] of Object.entries(observation[section])) {
+        if (!/^(0|[1-9]\d*)$/.test(value)) {
+          return unavailable;
+        }
+        total[section][key] = (BigInt(total[section][key] ?? '0') + BigInt(value)).toString();
+      }
+    }
+    total.unavailable = [...new Set([...total.unavailable, ...observation.unavailable])];
+  }
+  return { members, engineReportedConsumedWorkUnits: total.logical['chargedUnits'] ?? null, observations: total };
 };

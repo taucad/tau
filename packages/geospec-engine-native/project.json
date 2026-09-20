@@ -301,7 +301,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "node --test packages/geospec-engine-native/bench/lib.test.ts packages/geospec-engine-native/bench/broad-harness.test.ts",
+        "command": "node --test packages/geospec-engine-native/bench/lib.test.ts packages/geospec-engine-native/bench/broad-harness.test.ts packages/geospec-engine-native/bench/measurements.test.ts",
         "forwardAllArgs": false
       }
     },
@@ -319,11 +319,11 @@
       "options": {
         "commands": [
           {
-            "command": "pnpm exec oxlint -c .oxlintrc.json --type-aware \"$PWD/packages/geospec-engine-native/bench/lib.ts\" \"$PWD/packages/geospec-engine-native/bench/worker.ts\" \"$PWD/packages/geospec-engine-native/bench/run.ts\" \"$PWD/packages/geospec-engine-native/bench/lib.test.ts\" \"$PWD/packages/geospec-engine-native/bench/broad-harness.test.ts\"",
+            "command": "pnpm exec oxlint -c .oxlintrc.json --type-aware \"$PWD/packages/geospec-engine-native/bench/lib.ts\" \"$PWD/packages/geospec-engine-native/bench/worker.ts\" \"$PWD/packages/geospec-engine-native/bench/run.ts\" \"$PWD/packages/geospec-engine-native/bench/lib.test.ts\" \"$PWD/packages/geospec-engine-native/bench/broad-harness.test.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign-run.ts\" \"$PWD/packages/geospec-engine-native/bench/report-delay.ts\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer-event.mjs\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer.vitest.test.mjs\" \"$PWD/packages/geospec-engine-native/bench/measurements.ts\" \"$PWD/packages/geospec-engine-native/bench/measurements.test.ts\" \"$PWD/packages/geospec-engine-native/bench/process-rss.ts\" \"$PWD/packages/geospec-engine-native/bench/report-validation.ts\" \"$PWD/packages/geospec-engine-native/bench/worker-state.ts\" \"$PWD/packages/geospec-engine-native/bench/source-reward.ts\" \"$PWD/packages/geospec-engine-native/bench/cache-state.ts\"",
             "forwardAllArgs": false
           },
           {
-            "command": "pnpm exec eslint \"$PWD/packages/geospec-engine-native/bench/lib.ts\" \"$PWD/packages/geospec-engine-native/bench/worker.ts\" \"$PWD/packages/geospec-engine-native/bench/run.ts\" \"$PWD/packages/geospec-engine-native/bench/lib.test.ts\" \"$PWD/packages/geospec-engine-native/bench/broad-harness.test.ts\"",
+            "command": "pnpm exec eslint \"$PWD/packages/geospec-engine-native/bench/lib.ts\" \"$PWD/packages/geospec-engine-native/bench/worker.ts\" \"$PWD/packages/geospec-engine-native/bench/run.ts\" \"$PWD/packages/geospec-engine-native/bench/lib.test.ts\" \"$PWD/packages/geospec-engine-native/bench/broad-harness.test.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign.ts\" \"$PWD/packages/geospec-engine-native/bench/campaign-run.ts\" \"$PWD/packages/geospec-engine-native/bench/report-delay.ts\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer-event.mjs\" \"$PWD/packages/geospec-engine-native/bench/vitest-consumer.vitest.test.mjs\" \"$PWD/packages/geospec-engine-native/bench/measurements.ts\" \"$PWD/packages/geospec-engine-native/bench/measurements.test.ts\" \"$PWD/packages/geospec-engine-native/bench/process-rss.ts\" \"$PWD/packages/geospec-engine-native/bench/report-validation.ts\" \"$PWD/packages/geospec-engine-native/bench/worker-state.ts\" \"$PWD/packages/geospec-engine-native/bench/source-reward.ts\" \"$PWD/packages/geospec-engine-native/bench/cache-state.ts\"",
             "forwardAllArgs": false
           }
         ],
@@ -896,6 +896,18 @@
         "verify": {
           "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py verify"
         }
+      }
+    },
+    "test-benchmark-statistics": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "forwardAllArgs": false,
+        "commands": [
+          "\"${GEOSPEC_BENCH_ANALYSIS_PYTHON:?Select the pinned analysis Python with NumPy}\" -B packages/geospec-engine-native/bench/campaign-analysis.test.py",
+          "\"${GEOSPEC_BENCH_ANALYSIS_PYTHON:?Select the pinned analysis Python with NumPy}\" -B packages/geospec-engine-native/bench/python-consumer-event.test.py"
+        ],
+        "parallel": false
       }
     },
     "prepare-legacy-reference": {

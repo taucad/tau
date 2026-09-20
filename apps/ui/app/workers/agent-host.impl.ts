@@ -61,6 +61,7 @@ import {
   agentLiveEventSchema,
   eventLogBatchSchema,
   forwardedAgentHostResponseSchema,
+  readCommandReturnAddress,
 } from '#workers/agent-host.contract.js';
 import {
   acquireChatLeaderLease,
@@ -345,6 +346,15 @@ export const listenAgentHostWorkerLiveEvents = (signal: AbortSignal): AsyncItera
 const codedErrorSchema = z.object({ code: z.string() });
 const errorCode = (error: unknown): string => codedErrorSchema.safeParse(error).data?.code ?? 'AGENT_HOST_ERROR';
 
+/**
+ * A command the leader refused because it addressed an older generation.
+ *
+ * The refusal is decided before the command runs, which is what makes one
+ * re-address safe: unlike `LEADERSHIP_LOST`, which a leader raises partway
+ * through work it may already have done, nothing has happened here.
+ */
+const leaderGenerationStaleCode = 'LEADER_GENERATION_STALE';
+
 const errorResponse = (requestId: string, error: unknown): ForwardedAgentHostResponse & { readonly type: 'error' } => ({
   type: 'error',
   requestId,
@@ -419,7 +429,11 @@ const responseBelongsToChat = (response: ForwardedResponse, chatId: string): boo
   return response.type === 'result' ? response.snapshot.chatId === chatId : true;
 };
 
-const validatedBroadcast = (value: unknown, active: WorkerSession, chatId: string): LeaderBroadcast | undefined => {
+const validatedBroadcast = (
+  value: unknown,
+  active: WorkerSession,
+  chatId: string,
+): LeaderBroadcast | 'unreadable' | undefined => {
   const parsed = leaderBroadcastSchema.safeParse(value);
   if (!parsed.success) {
     /* This channel is keyed on `agentHostProtocolVersion`, so a frame that
@@ -427,7 +441,7 @@ const validatedBroadcast = (value: unknown, active: WorkerSession, chatId: strin
      * its schema — a real defect, not a deploy skew. Dropping it in silence
      * burned the forwarding wait instead, and the page saw a bare timeout. */
     console.error('[agentHost] dropped a leader frame this protocol cannot read', chatId, parsed.error.issues);
-    return undefined;
+    return 'unreadable';
   }
   const message = parsed.data as LeaderBroadcast;
   if (
@@ -890,12 +904,35 @@ const executeCommand = async (
 const postForwardedResponse = async (options: {
   readonly channel: BroadcastChannel;
   readonly senderId: string;
+  /** The generation this command was accepted under, for the answer it is owed. */
+  readonly generation: string;
   readonly command: AgentHostWorkerCommand;
 }): Promise<void> => {
-  const { channel, senderId, command } = options;
+  const { channel, senderId, generation, command } = options;
   const active = session;
+  if (!active) {
+    /* The whole worker session is gone and every chat's heartbeat with it, so
+     * the follower's liveness bound expires and recovers. There is no session
+     * binding left to address a frame with in any case. */
+    return;
+  }
   const state = leadership.get(command.chatId);
-  if (!active || !state) {
+  if (!state) {
+    /* Leadership ended between accepting this command and running it — a close
+     * clears the heartbeat and releases the lease, so another tab can already
+     * be leading and heartbeating, which keeps the follower's liveness bound
+     * from ever firing. Nothing ran here, so it is re-addressable. */
+    refuseCommand({
+      channel,
+      active,
+      chatId: command.chatId,
+      generation,
+      targetId: senderId,
+      requestId: command.requestId,
+      error: Object.assign(new Error(`Chat ${command.chatId} changed leader before this command ran.`), {
+        code: leaderGenerationStaleCode,
+      }),
+    });
     return;
   }
   let response: ForwardedResponse;
@@ -911,6 +948,59 @@ const postForwardedResponse = async (options: {
     generation: state.lease.generation,
     response,
   } satisfies LeaderBroadcast);
+};
+
+/**
+ * Answer a command this leader will not execute.
+ *
+ * The follower's wait is bounded by this leader's heartbeat, so every command
+ * it declines is declined out loud; the alternative is a pending request that
+ * outlives the turn with nothing on screen.
+ *
+ * @param options - The refusing leader, the follower to answer and the reason.
+ */
+const refuseCommand = (options: {
+  readonly channel: BroadcastChannel;
+  readonly active: WorkerSession;
+  readonly chatId: string;
+  readonly generation: string;
+  readonly targetId: string;
+  readonly requestId: string;
+  readonly error: unknown;
+}): void => {
+  options.channel.postMessage({
+    ...broadcastBinding(options.active, options.chatId),
+    type: 'response',
+    targetId: options.targetId,
+    generation: options.generation,
+    response: errorResponse(options.requestId, options.error),
+  } satisfies LeaderBroadcast);
+};
+
+/** Refuse a `command` frame the strict broadcast schema rejected, when its envelope survives. */
+const refuseUnreadableCommand = (options: {
+  readonly channel: BroadcastChannel;
+  readonly active: WorkerSession;
+  readonly chatId: string;
+  readonly frame: unknown;
+}): void => {
+  const state = leadership.get(options.chatId);
+  const address = readCommandReturnAddress(options.frame);
+  if (!state || !address) {
+    // Not this chat's leader, or nothing left to address: the console record above stands alone.
+    return;
+  }
+  refuseCommand({
+    channel: options.channel,
+    active: options.active,
+    chatId: options.chatId,
+    generation: state.lease.generation,
+    targetId: address.senderId,
+    requestId: address.requestId,
+    error: Object.assign(new Error(`The leader of ${options.chatId} could not read that command frame.`), {
+      code: 'LEADER_COMMAND_UNREADABLE',
+    }),
+  });
 };
 
 const sendTailBatch = async (options: {
@@ -1001,6 +1091,10 @@ function channelFor(chatId: string): BroadcastChannel {
       return;
     }
     const message = validatedBroadcast(event.data, current, chatId);
+    if (message === 'unreadable') {
+      refuseUnreadableCommand({ channel, active: current, chatId, frame: event.data });
+      return;
+    }
     if (!message) {
       return;
     }
@@ -1011,11 +1105,19 @@ function channelFor(chatId: string): BroadcastChannel {
       return;
     }
     if (message.type === 'response') {
-      const knownGeneration = leaderGenerations.get(chatId);
-      if (message.targetId !== current.tabId || (knownGeneration && knownGeneration !== message.generation)) {
+      if (message.targetId !== current.tabId) {
         return;
       }
-      observeFollowerLeader(chatId, message.generation);
+      /* Only learn a generation this follower still believes in: a late answer
+       * from a leader that has since been replaced must not re-arm the monitor
+       * on a dead heartbeat. The answer itself is kept either way — it is
+       * addressed to this tab, for a request id this tab minted and is waiting
+       * on, and discarding it left that request pending forever whenever
+       * leadership rolled over while a command was in flight. */
+      const knownGeneration = leaderGenerations.get(chatId);
+      if (!knownGeneration || knownGeneration === message.generation) {
+        observeFollowerLeader(chatId, message.generation);
+      }
       const pending = forwarded.get(message.response.requestId);
       if (pending) {
         forwarded.delete(message.response.requestId);
@@ -1099,26 +1201,45 @@ function channelFor(chatId: string): BroadcastChannel {
     if (message.type !== 'command') {
       return;
     }
-    if (message.targetGeneration === undefined || message.targetGeneration === state.lease.generation) {
-      const commandMessage = message;
-      trackTask(
-        async () =>
-          postForwardedResponse({
-            channel,
-            senderId: commandMessage.senderId,
-            command: commandMessage.command,
-          }),
-        (error) => {
-          channel.postMessage({
-            ...broadcastBinding(current, chatId),
-            type: 'response',
-            targetId: commandMessage.senderId,
-            generation: state.lease.generation,
-            response: errorResponse(commandMessage.command.requestId, error),
-          } satisfies LeaderBroadcast);
-        },
-      );
+    if (message.targetGeneration !== undefined && message.targetGeneration !== state.lease.generation) {
+      /* Leadership rolled over between the follower's last heartbeat and its
+       * send. Dropping the frame left that follower waiting on a leader it can
+       * still see heartbeating, so its liveness bound never fired and the
+       * composer sat on the request for the life of the tab. Nothing has run
+       * yet — the refusal is decided before any work — so the follower can
+       * re-learn the leader and broadcast this same command once more. */
+      refuseCommand({
+        channel,
+        active: current,
+        chatId,
+        generation: state.lease.generation,
+        targetId: message.senderId,
+        requestId: message.command.requestId,
+        error: Object.assign(new Error(`Chat ${chatId} is led by a newer generation; re-address this command.`), {
+          code: leaderGenerationStaleCode,
+        }),
+      });
+      return;
     }
+    const commandMessage = message;
+    trackTask(
+      async () =>
+        postForwardedResponse({
+          channel,
+          senderId: commandMessage.senderId,
+          generation: state.lease.generation,
+          command: commandMessage.command,
+        }),
+      (error) => {
+        channel.postMessage({
+          ...broadcastBinding(current, chatId),
+          type: 'response',
+          targetId: commandMessage.senderId,
+          generation: state.lease.generation,
+          response: errorResponse(commandMessage.command.requestId, error),
+        } satisfies LeaderBroadcast);
+      },
+    );
   });
   channels.set(chatId, channel);
   return channel;
@@ -1233,7 +1354,10 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
     });
   }
   const first = await waitForForwardedResponse(active, command);
-  if (first) {
+  /* A stale-generation refusal takes the same recovery as no answer at all: the
+   * leader ran nothing, and the re-broadcast below carries no target generation
+   * (or the one just learned), which the current leader accepts. */
+  if (first && !(first.type === 'error' && first.code === leaderGenerationStaleCode)) {
     if (first.type === 'tail' || first.type === 'attach') {
       followerCursors.set(command.chatId, first.batch.nextCursor);
     }

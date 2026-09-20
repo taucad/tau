@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { DirectIdbProvider, OPFSProvider } from '@taucad/filesystem/backend';
 import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
+import { agentHostAuthorityName, agentHostProtocolVersion } from '#workers/agent-host-leader.js';
 import { handleAgentHostWorkerRequest } from '#workers/agent-host.impl.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- The browser vitest config reads this same composed source fixture until FIX-PROJ adds the UI package dependency.
@@ -829,6 +830,89 @@ it('attaches to a chat whose log holds records but no admitted run', async () =>
     expect(attached.type === 'attach' ? attached.snapshot : 'missing').toBeUndefined();
     expect(attached.type === 'attach' ? attached.batch.events : []).toHaveLength(1);
   } finally {
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/*
+ * W10 finding 3. The follower's forwarding wait is bounded by the leader's
+ * heartbeat alone (T4-11 removed the fixed 2 s deadline, which was a *work*
+ * bound on someone else's command). A leader that drops a command in silence
+ * therefore wedges that request for the life of the tab: it keeps heartbeating,
+ * the wait never expires, `forwardCommand`'s re-address is unreachable, and the
+ * composer sits on the send with no banner. Both silent drops answer now.
+ *
+ * UNRUN: browser tier, machine gate (W6/W10 hold).
+ */
+it('answers every command it declines: a stale generation and a frame it cannot read', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-refusals-${crypto.randomUUID()}`;
+  const chatId = 'chat-refusals';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  await seedChatLog(fileSystemProvider, {
+    providerBasePath,
+    chatId,
+    runId: 'run-refusals',
+    rows: [{ type: 'run.lifecycle', state: 'admitted' }],
+  });
+  // A second channel object receives its own context's posts; only the sending
+  // object is skipped. This one plays the follower whose command is declined.
+  const followerChannel = new BroadcastChannel(
+    agentHostAuthorityName({ projectId: providerBasePath, workspaceId: providerBasePath, chatId }),
+  );
+  const refusals = new Map<string, { readonly code: string; readonly targetId: string | undefined }>();
+  const answered = Promise.withResolvers<void>();
+  followerChannel.addEventListener('message', (event: MessageEvent<unknown>) => {
+    const frame = event.data as {
+      readonly type?: string;
+      readonly targetId?: string;
+      readonly response?: { readonly type: string; readonly requestId: string; readonly code: string };
+    };
+    if (frame.type !== 'response' || frame.response?.type !== 'error') {
+      return;
+    }
+    refusals.set(frame.response.requestId, { code: frame.response.code, targetId: frame.targetId });
+    if (refusals.size === 2) {
+      answered.resolve();
+    }
+  });
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    // This context takes leadership of the chat; the frames below address it.
+    await handleAgentHostWorkerRequest(
+      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
+      sessionId,
+    );
+    const binding = {
+      version: agentHostProtocolVersion,
+      projectId: providerBasePath,
+      workspaceId: providerBasePath,
+      chatId,
+    };
+    // A well-formed command addressed to a generation that has rolled over.
+    followerChannel.postMessage({
+      ...binding,
+      type: 'command',
+      senderId: 'tab-follower',
+      targetGeneration: 'generation-that-has-rolled-over',
+      command: { type: 'tail', chatId, cursor: 0, limit: agentHostTailBatchLimit, requestId: 'req-stale', sessionId },
+    });
+    // A command frame this protocol cannot read, whose envelope still survives.
+    followerChannel.postMessage({
+      ...binding,
+      type: 'command',
+      senderId: 'tab-follower',
+      command: { type: 'teleport', chatId, requestId: 'req-unreadable', sessionId },
+    });
+
+    await answered.promise;
+    expect(refusals.get('req-stale')).toEqual({ code: 'LEADER_GENERATION_STALE', targetId: 'tab-follower' });
+    expect(refusals.get('req-unreadable')).toEqual({ code: 'LEADER_COMMAND_UNREADABLE', targetId: 'tab-follower' });
+  } finally {
+    followerChannel.close();
     await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
   }
 });

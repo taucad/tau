@@ -3,7 +3,7 @@
  * Usage: node --test scripts/src/prepare-geospec-test-consumer.check.ts
  * Environment: installed workspace TypeScript; no build or product inputs needed.
  * Output: Node test results; all simulated packages and receipts stay in memory.
- * Exit: 0 all five checks pass; 1 a preparation invariant fails.
+ * Exit: 0 all checks pass; 1 a preparation invariant fails.
  */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -13,6 +13,7 @@ import { test } from 'node:test';
 import * as url from 'node:url';
 import vm from 'node:vm';
 import * as ts from 'typescript';
+import { load } from 'js-yaml';
 
 type Manifest = {
   name: string;
@@ -29,6 +30,14 @@ type Receipt = {
   installed: unknown[];
   packages: unknown[];
   source: { revision: string };
+  lock: { sha256: string };
+  frameworkSuccessor: {
+    version: string;
+    lock: { sha256: string };
+    initialLock: { sha256: string };
+    unchangedPackages: string[];
+  };
+  harness: Array<{ source: { path: string; sha256: string }; staged: { path: string; sha256: string } }>;
 };
 type Fault = 'missing-build' | 'missing-wasm' | 'registry' | 'stale-assembly';
 
@@ -64,6 +73,18 @@ const nativePayload = [
   'dist/bindings/mixed-wasm/geospec_engine_native.wasm',
 ];
 const manifest = (name: string): Manifest => ({ name, version: '0.1.0', exports: { '.': './dist/index.mjs' } });
+const harnessPaths = [
+  'm3-corpus/installed.mjs',
+  'm3-corpus/installed.vitest.test.mjs',
+  'm3-corpus/vitest.config.mjs',
+  'm3-corpus/corpus.mjs',
+  'm3-corpus/profile-v3.mjs',
+  'f1-public-a1/authority.mjs',
+  'f1-public-a1/f1-public.vitest.test.mjs',
+  'f1-public-a1/vitest.config.mjs',
+  'fixtures/read-fixture.mjs',
+  'fixtures/manifest.json',
+];
 
 const prepare = async (fault?: Fault) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
@@ -71,7 +92,10 @@ const prepare = async (fault?: Fault) => {
   const commands: RecordedCommand[] = [];
   const archives = new Map<string, Manifest>();
   const add = (name: string, value: unknown): void => {
-    files.set(name, Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)));
+    files.set(
+      name,
+      Buffer.from(value instanceof Uint8Array || typeof value === 'string' ? value : JSON.stringify(value)),
+    );
     for (let directory = path.dirname(name); directory !== '/'; directory = path.dirname(directory)) {
       directories.add(directory);
     }
@@ -94,6 +118,10 @@ const prepare = async (fault?: Fault) => {
     add(`/repo/packages/geospec-engine-native/${entry}`, 'inert payload bytes');
   }
   add('/repo/scripts/src/prepare-geospec-test-consumer.ts', source);
+  add('/repo/pnpm-workspace.yaml', 'catalog:\n  vitest: 4.1.11\n');
+  for (const name of harnessPaths) {
+    add(`/repo/packages/geospec/host-tests/${name}`, `inert harness ${name}`);
+  }
   add(`/repo/packages/geospec-engine-native/bindings/node/generated/${platformManifest.main}`, 'inert addon bytes');
   const archive = (name: string, metadata: Manifest): void => {
     add(name, `inert tarball ${metadata.name}`);
@@ -115,6 +143,7 @@ const prepare = async (fault?: Fault) => {
   const scope = vm.createContext({
     assert,
     createHash,
+    load,
     ...url,
     ...path,
     process: {
@@ -187,6 +216,18 @@ const prepare = async (fault?: Fault) => {
         }
         case 'npm': {
           assert.deepEqual(commandArguments.slice(0, 4), ['install', '--ignore-scripts', '--no-audit', '--no-fund']);
+          if (args.includes('--save-dev')) {
+            assert.deepEqual(commandArguments.slice(4), ['--save-dev', '--save-exact', 'vitest@4.1.11']);
+            assert.ok(files.has('/tmp/tau-geospec-consumer-inert/receipt.json'));
+            assert.ok(files.has('/tmp/tau-geospec-consumer-inert/sdk-package-lock.json'));
+            const lock = JSON.parse(Buffer.from(read(path.join(options.cwd, 'package-lock.json'))).toString()) as {
+              packages: Record<string, unknown>;
+            };
+            lock.packages['node_modules/vitest'] = { version: '4.1.11' };
+            add(path.join(options.cwd, 'package-lock.json'), lock);
+            add(path.join(options.cwd, 'node_modules/vitest/package.json'), { name: 'vitest', version: '4.1.11' });
+            break;
+          }
           const packages: Record<string, { version: string; resolved: string; integrity: string }> = {};
           for (const name of args.slice(4)) {
             const metadata = archives.get(name);
@@ -236,6 +277,7 @@ const prepare = async (fault?: Fault) => {
   return {
     commands,
     error: capturedError,
+    files,
     receipt: files.has('/out/receipt.json')
       ? (JSON.parse(new TextDecoder().decode(read('/out/receipt.json'))) as Receipt)
       : undefined,
@@ -245,13 +287,32 @@ const prepare = async (fault?: Fault) => {
 void test('should prepare one local-tarball closure and record source, payload and installed bytes without probes', async () => {
   const result = await prepare();
   assert.ifError(result.error);
-  assert.equal(result.commands.filter((command) => command.command === 'npm').length, 1);
+  assert.equal(result.commands.filter((command) => command.command === 'npm').length, 2);
   assert.equal(result.commands.filter((command) => command.command === 'pnpm').length, 2);
   assert.ok(result.receipt);
   assert.equal(result.receipt.installed.length, 4);
   assert.equal(result.receipt.source.revision, 'inert-revision');
   assert.ok(result.receipt.consumerRoot.startsWith('/tmp/'));
   assert.equal(result.receipt.packages.length, 4);
+  assert.equal(result.receipt.frameworkSuccessor.version, '4.1.11');
+  assert.equal(result.receipt.frameworkSuccessor.unchangedPackages.length, 4);
+  assert.equal(result.receipt.lock.sha256, result.receipt.frameworkSuccessor.lock.sha256);
+  assert.notEqual(result.receipt.lock.sha256, result.receipt.frameworkSuccessor.initialLock.sha256);
+  assert.deepEqual(
+    result.receipt.harness.map((entry) =>
+      path.relative(`${result.receipt!.consumerRoot}/host-tests`, entry.staged.path),
+    ),
+    harnessPaths,
+  );
+  for (const entry of result.receipt.harness) {
+    assert.equal(entry.source.sha256, entry.staged.sha256);
+    assert.deepEqual(result.files.get(entry.source.path), result.files.get(entry.staged.path));
+  }
+  const initial = JSON.parse(
+    Buffer.from(result.files.get('/tmp/tau-geospec-consumer-inert/receipt.json')!).toString(),
+  ) as Receipt;
+  assert.equal(initial.lock.sha256, result.receipt.frameworkSuccessor.initialLock.sha256);
+  assert.equal(initial.frameworkSuccessor, undefined);
 });
 for (const fault of ['missing-build', 'missing-wasm', 'registry', 'stale-assembly'] as const) {
   void test(`should reject ${fault} without a successful receipt`, async () => {

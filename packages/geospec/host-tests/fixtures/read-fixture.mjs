@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-/** Repository root for the source harness, independent of the invoking cwd. @internal */
-export const fixtureWorkspaceRoot = resolve(import.meta.dirname, '../../../..');
+/** Explicit source workspace for staged harnesses; defaults to this source checkout. @internal */
+export const fixtureWorkspaceRoot = process.env.GEOSPEC_WORKSPACE_ROOT
+  ? resolve(process.env.GEOSPEC_WORKSPACE_ROOT)
+  : resolve(import.meta.dirname, '../../../..');
 
 const manifest = /** @type {{ files: Record<string, { path: string, byteLength: number, sha256: string }> }} */ (
   /** @type {unknown} */ (JSON.parse(readFileSync(new URL('manifest.json', import.meta.url), 'utf8')))

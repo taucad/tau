@@ -4,17 +4,15 @@ on:
   push:
     tags: ['v*.*.*']
 
+env:
+  pnpm_config_verify_deps_before_run: warn
+
 jobs:
-  publish:
-    name: Publish to npm
+  plan:
+    name: Plan release artifact prerequisites
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      GEOSPEC_WORKERS: 1
-      NPM_CONFIG_PROVENANCE: true
-      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+    outputs:
+      geospec-required: ${{ steps.geospec.outputs.geospec-required }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -24,7 +22,165 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      - name: Plan expanded release gate
+        id: geospec
+        run: |
+          mkdir -p out/artifacts/geospec-native-engine/plan
+          pnpm nx run scripts:release-gate --graph=out/artifacts/geospec-native-engine/plan/release.json
+          pnpm nx run-many -t pkgcheck --projects tag:type:package --graph=out/artifacts/geospec-native-engine/plan/packages.json
+          pnpm nx run scripts:plan-geospec-ci -- out/artifacts/geospec-native-engine/plan/*.json
+
+  geospec-producer:
+    env:
+      GEOSPEC_WORKERS: 1
+    name: Produce current GeoSpec artifacts
+    needs: [plan]
+    if: needs.plan.outputs.geospec-required == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+
+      - name: Setup producer Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.14'
+
+      # The hosted label is not a capacity qualification. Fail before source/SDK
+      # downloads if the existing sources/tools/prefixes reserve (19 GiB) is unavailable.
+      - name: Check producer host, capacity and installed tools
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("GeoSpec producer capacity unavailable");'
+          python3 -c 'import sys; assert sys.version_info >= (3, 12); print(sys.version)'
+          cmake --version
+          ninja --version
+          xcrun --find clang++
+
+      - name: Setup selected CPython 3.13 tooling
+        id: python313
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13.14'
+          update-environment: false
+
+      - name: Setup selected CPython 3.14 tooling
+        id: python314
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.7'
+          update-environment: false
+
+      - name: Provision pinned Python wrapper tooling
+        env:
+          GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
+          GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tomllib
+
+          project = Path('packages/geospec-engine-native/bindings/python/pyproject.toml')
+          requirements = tomllib.loads(project.read_text())['build-system']['requires']
+          assert len(requirements) == 1 and re.fullmatch(r'maturin==[0-9]+\.[0-9]+\.[0-9]+', requirements[0])
+          for selector, name in [('GEOSPEC_PYTHON313', 'python-venv'), ('GEOSPEC_PYTHON314', 'python314-venv')]:
+              environment = Path('node_modules/.cache/geospec-engine-native') / name
+              subprocess.run([os.environ[selector], '-m', 'venv', str(environment)], check=True)
+              subprocess.run([str(environment / 'bin/python'), '-m', 'pip', 'install',
+                              '--disable-pip-version-check', '--only-binary=:all:', '--no-deps', requirements[0]], check=True)
+              subprocess.run([str(environment / 'bin/python'), '--version'], check=True)
+              subprocess.run([str(environment / 'bin/maturin'), '--version'], check=True)
+          PYTHON
+
+      - name: Install the selected native Rust toolchain
+        run: |
+          rustup toolchain install 1.88 --profile minimal
+          rustup run 1.88 rustc --version
+
+      - name: Prepare complete current-source transport
+        run: pnpm nx run-many -t prepare-geospec-ci-artifacts --parallel=1
+
+      - name: Upload complete current-source transport
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            packages/geospec-engine-native/bindings/node/generated/index.d.ts
+            packages/geospec-engine-native/bindings/node/generated/index.js
+            packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node
+            packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.mjs
+            packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm
+            out/artifacts/geospec-native-engine/ci
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare current installed GeoSpec consumer
+        env:
+          GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
+        run: |
+          pnpm nx run-many -t require-geospec-delivery --parallel=1
+          pnpm nx run scripts:prepare-geospec-test-consumer
+          node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
+
+      - name: Run the complete release gate on the artifact host
+        run: pnpm nx run scripts:release-gate --skip-nx-cache
+
+  publish:
+    name: Publish to npm
+    needs: [plan, geospec-producer]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GEOSPEC_WORKERS: 1
+      NPM_CONFIG_PROVENANCE: true
+      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+    steps:
+      # Preserve failure in this existing required job when a needed producer
+      # (including its host suites) fails. An unneeded producer may be skipped.
+      - name: Require artifact producer success
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
+          PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
+        run: |
+          test "$PLAN_RESULT" = success
+          if [ "$PRODUCER_REQUIRED" = true ]; then test "$PRODUCER_RESULT" = success; fi
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24' }}
+
+      - name: Download same-run GeoSpec transport
+        if: needs.plan.outputs.geospec-required == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          path: .
+
+      - name: Verify GeoSpec transport against this checkout
+        if: needs.plan.outputs.geospec-required == 'true'
+        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
+
       - name: Run the release gate
+        if: needs.plan.outputs.geospec-required != 'true'
         run: pnpm nx run scripts:release-gate
 
       # Nx delegates `nx-release-publish` to the workspace package manager, and only

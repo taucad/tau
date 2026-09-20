@@ -2,7 +2,7 @@
 /**
  * Prepare or verify the complete Node/mixed package payload for CI transport.
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
- * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify
+ * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
  * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json
  * Exit: 0 complete and matching; 1 missing, changed or failed prerequisite.
@@ -10,8 +10,18 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, posix, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +32,11 @@ const inventoryPath = `${transportPath}/inventory.json`;
 const receiptPath = `${transportPath}/mixed-build-receipt.json`;
 const mixedInputsPath = `${transportPath}/mixed-inputs.json`;
 const mixedCommandsPath = `${transportPath}/mixed-commands.json`;
+const proofPath = `${transportPath}/native-proof/identity-source-proof.json`;
+const archiveNames = ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz'];
+const archivePaths = archiveNames.map((name) => `${transportPath}/assembly/tarballs/${name}`);
+/** @type {() => {id: string | null, attempt: string | null}} */
+const workflowRun = () => ({ id: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null });
 const outputs = [
   `${packagePath}/bindings/node/generated/index.d.ts`,
   `${packagePath}/bindings/node/generated/index.js`,
@@ -53,18 +68,7 @@ const sourceIdentity = (root) => {
     '--cached',
     '-z',
     '--',
-    ...[
-      'rust',
-      'native',
-      'bindings/node',
-      'bindings/emscripten',
-      'scripts',
-      'src',
-      'package.json',
-      'project.json',
-      'tsdown.config.ts',
-      'tsconfig*.json',
-    ].map((path) => `${packagePath}/${path}`),
+    packagePath,
     'package.json',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
@@ -74,8 +78,10 @@ const sourceIdentity = (root) => {
   ])
     .split('\0')
     .filter(Boolean);
-  // Explicitly cover this owned new script before its first commit; never scan untracked build trees.
+  // Bind the source-kit package, including licenses; also cover owned helpers before their first commit.
   paths.push(`${packagePath}/scripts/ci-artifacts.mjs`);
+  paths.push(`${packagePath}/scripts/collect-native-proof.py`);
+  paths.push(`${packagePath}/scripts/test_native_proof.py`);
   return {
     revision: git(['rev-parse', 'HEAD']).trim(),
     files: [...new Set(paths)].sort().map((path) => fileRecord(root, path)),
@@ -216,6 +222,29 @@ export const verifyArtifacts = (root) => {
   return { ...inventory, source, artifacts };
 };
 
+/** Verify the final assembly as well as the build inputs; portable across checkout paths.
+ * @type {(root: string) => ReturnType<typeof verifyArtifacts>}
+ * @internal
+ */
+export const verifyDelivery = (root) => {
+  const inventory = verifyArtifacts(root);
+  const archives = archivePaths.map((path) => fileRecord(root, path));
+  assert.ok(
+    archives.every((file) => file.bytes > 0),
+    'Empty delivery archive.',
+  );
+  assert.ok(
+    isDeepStrictEqual(inventory.delivery, {
+      platform: 'darwin-arm64',
+      run: workflowRun(),
+      archives,
+      nativeProof: fileRecord(root, proofPath),
+    }),
+    'Delivery archive/proof hashes or workflow run differ.',
+  );
+  return inventory;
+};
+
 /**
  * Run the existing producers sequentially and inventory only their successful outputs.
  * @type {(root: string) => ReturnType<typeof verifyArtifacts>}
@@ -226,21 +255,81 @@ export const prepareArtifacts = (root) => {
   const source = sourceIdentity(root);
   const { GEOSPEC_DELIVERY_CACHE: deliveryCache } = process.env;
   const cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery');
+  mkdirSync(cache, { recursive: true });
+  const nativeTarget = mkdtempSync(join(cache, 'ci-node-target-'));
+  const environment = {
+    ...process.env,
+    CARGO_HOME: resolve(root, process.env.CARGO_HOME ?? join(homedir(), '.cargo')),
+    pnpm_config_verify_deps_before_run: 'warn',
+    GEOSPEC_DELIVERY_CACHE: cache,
+    GEOSPEC_NODE_MANIFEST: 'bindings/node/Cargo.toml',
+    GEOSPEC_OCCT_PREFIX: join(cache, 'occt-native/install'),
+    GEOSPEC_MIXED_INPUTS: resolve(root, mixedInputsPath),
+    GEOSPEC_MIXED_COMMANDS: resolve(root, mixedCommandsPath),
+    GEOSPEC_MIXED_RECEIPT: resolve(root, receiptPath),
+    GEOSPEC_PRODUCER_RECEIPT: resolve(root, proofPath),
+  };
   const inputsPath = join(cache, 'mixed-inputs.json');
-  /** @type {(target: string) => void} */
+  mkdirSync(resolve(root, transportPath), { recursive: true });
+  /** @type {(target: string) => string} */
   const run = (target) => {
-    const result = childProcess.spawnSync('pnpm', ['nx', 'run', `geospec-engine-native:${target}`], {
+    const argv = ['pnpm', 'nx', 'run', `geospec-engine-native:${target}`];
+    const capture = target === 'build-node' || target === 'assemble-package';
+    const overrides =
+      target === 'build-node'
+        ? { CARGO_TARGET_DIR: nativeTarget, RUSTC_LOG: 'rustc_codegen_ssa::back::link=info' }
+        : {};
+    const started = new Date().toISOString();
+    const result = childProcess.spawnSync('pnpm', argv.slice(1), {
       cwd: root,
-      stdio: 'inherit',
+      stdio: capture ? 'pipe' : 'inherit',
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 ** 2,
       env: {
-        ...process.env,
-        pnpm_config_verify_deps_before_run: 'warn',
-        GEOSPEC_NODE_MANIFEST: 'bindings/node/Cargo.toml',
-        GEOSPEC_OCCT_PREFIX: join(cache, 'occt-native/install'),
-        GEOSPEC_MIXED_INPUTS: inputsPath,
+        ...environment,
+        GEOSPEC_MIXED_INPUTS: target === 'assemble-package' ? environment.GEOSPEC_MIXED_INPUTS : inputsPath,
+        ...overrides,
       },
     });
+    if (capture) {
+      writeFileSync(resolve(root, transportPath, `${target}.stdout`), result.stdout || '');
+      writeFileSync(resolve(root, transportPath, `${target}.stderr`), result.stderr || String(result.error ?? ''));
+    }
     assert.ok(result.status === 0, `GeoSpec producer ${target} failed: ${result.error?.message ?? result.status}`);
+    if (target === 'build-node') {
+      const project = readJson(resolve(root, packagePath, 'project.json'));
+      writeFileSync(
+        resolve(root, transportPath, 'native-invocation.json'),
+        `${JSON.stringify(
+          {
+            argv,
+            cwd: root,
+            started,
+            exitCode: result.status,
+            source,
+            addon: fileRecord(root, outputs[2]),
+            environment: {
+              CARGO_TARGET_DIR: nativeTarget,
+              CARGO_HOME: environment.CARGO_HOME,
+              GEOSPEC_OCCT_PREFIX: environment.GEOSPEC_OCCT_PREFIX,
+              GEOSPEC_NODE_MANIFEST: environment.GEOSPEC_NODE_MANIFEST,
+              RUSTC_LOG: overrides.RUSTC_LOG,
+            },
+            prefixBuilder: resolve(
+              root,
+              process.env.GEOSPEC_OCCT_PRODUCER_BUILDER ?? `${packagePath}/native/occt/build-occt.sh`,
+            ),
+            ownedTarget: /** @type {{'build-node': unknown}} */ (project.targets)['build-node'],
+            logs: ['build-node.stdout', 'build-node.stderr'].map((name) =>
+              fileRecord(root, `${transportPath}/${name}`),
+            ),
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    }
+    return result.stdout || '';
   };
   for (const target of [
     'prepare-delivery:sources',
@@ -284,17 +373,84 @@ export const prepareArtifacts = (root) => {
   };
   checkReceipt(root, inventory);
   writeFileSync(resolve(root, inventoryPath), `${JSON.stringify(inventory, null, 2)}\n`);
-  return verifyArtifacts(root);
+  verifyArtifacts(root);
+  // The collector is a source-owned adaptation of the accepted ordinary identity observation.
+  // It runs only on the real producer; pure tests replace this subprocess with inert metadata.
+  const proofDirectory = resolve(root, transportPath, 'native-proof');
+  rmSync(proofDirectory, { recursive: true, force: true });
+  const collection = childProcess.spawnSync(
+    'python3',
+    [
+      '-B',
+      resolve(root, packagePath, 'scripts/collect-native-proof.py'),
+      root,
+      resolve(root, transportPath, 'native-invocation.json'),
+      proofDirectory,
+      process.execPath,
+    ],
+    {
+      cwd: root,
+      stdio: 'inherit',
+      env: environment,
+    },
+  );
+  assert.ok(collection.status === 0, 'Native producer proof collection failed.');
+  // Node materials include the locked Python Cargo license closure. Seed the same
+  // native Cargo home that the unchanged generator reads with --locked --offline.
+  const pythonSources = childProcess.spawnSync(
+    'rustup',
+    [
+      'run',
+      '1.88',
+      'cargo',
+      'fetch',
+      '--locked',
+      '--manifest-path',
+      resolve(root, packagePath, 'bindings/python/Cargo.toml'),
+    ],
+    { cwd: root, stdio: 'inherit', env: environment },
+  );
+  assert.ok(pythonSources.status === 0, 'Locked Python Cargo material fetch failed.');
+  const assemblyOutput = run('assemble-package');
+  const selections = [...assemblyOutput.matchAll(/^ASSEMBLY_ROOT=(.+)$/gm)].map((match) => match[1]?.trim());
+  assert.ok(
+    selections.length === 1 && selections[0] && posix.isAbsolute(selections[0]),
+    'Missing unique successful assembly root.',
+  );
+  mkdirSync(resolve(root, transportPath, 'assembly/tarballs'), { recursive: true });
+  for (const name of archiveNames) {
+    copyFileSync(join(selections[0], 'tarballs', name), resolve(root, transportPath, 'assembly/tarballs', name));
+  }
+  assert.ok(isDeepStrictEqual(source, sourceIdentity(root)), 'GeoSpec sources changed during assembly.');
+  const complete = {
+    ...inventory,
+    delivery: {
+      platform: 'darwin-arm64',
+      run: workflowRun(),
+      archives: archivePaths.map((path) => fileRecord(root, path)),
+      nativeProof: fileRecord(root, proofPath),
+    },
+  };
+  writeFileSync(resolve(root, inventoryPath), `${JSON.stringify(complete, null, 2)}\n`);
+  return verifyDelivery(root);
 };
 
 const invokedScript = process.argv.at(1);
 if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(import.meta.url)) {
   try {
     const root = resolve(import.meta.dirname, '../../..');
-    assert.ok(process.argv.length === 3, 'Usage: ci-artifacts.mjs prepare|verify');
+    assert.ok(process.argv.length === 3, 'Usage: ci-artifacts.mjs prepare|verify|verify-delivery');
     const mode = process.argv[2];
-    assert.ok(mode === 'prepare' || mode === 'verify', 'Usage: ci-artifacts.mjs prepare|verify');
-    const inventory = mode === 'prepare' ? prepareArtifacts(root) : verifyArtifacts(root);
+    assert.ok(
+      mode === 'prepare' || mode === 'verify' || mode === 'verify-delivery',
+      'Usage: ci-artifacts.mjs prepare|verify|verify-delivery',
+    );
+    const inventory =
+      mode === 'prepare'
+        ? prepareArtifacts(root)
+        : mode === 'verify-delivery'
+          ? verifyDelivery(root)
+          : verifyArtifacts(root);
     console.log(`Verified ${inventory.artifacts.length} GeoSpec artifacts for ${inventory.source.revision}.`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

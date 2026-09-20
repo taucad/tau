@@ -3,8 +3,17 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/geospec",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "host:darwin-arm64"],
   "targets": {
+    "test": {
+      "dependsOn": [
+        "build",
+        "test-m3-corpus",
+        "test-m3-independent-bindings",
+        "test-m3-verdicts",
+        "test-installed-vitest"
+      ]
+    },
     "test-m3-corpus": {
       "executor": "nx:run-commands",
       "cache": false,
@@ -38,6 +47,14 @@
           "python3 -B packages/geospec/host-tests/m3-corpus/verdict_host_check.py"
         ],
         "parallel": false,
+        "forwardAllArgs": false
+      }
+    },
+    "test-installed-vitest": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "set -eu\nconsumer=\"${GEOSPEC_INSTALLED_CONSUMER_ROOT:?Run scripts:prepare-geospec-test-consumer first}\"\nexport GEOSPEC_WORKSPACE_ROOT=\"${NX_WORKSPACE_ROOT:?}\"\nexport GEOSPEC_INSTALLED_BACKEND=native\nexport GEOSPEC_F1_OUTPUT=\"$GEOSPEC_WORKSPACE_ROOT/out/artifacts/geospec-test-consumer/f1-vitest.json\"\nexport GEOSPEC_VITEST_OUTPUT=\"$GEOSPEC_WORKSPACE_ROOT/out/artifacts/geospec-test-consumer/m3-vitest.json\"\nexport GEOSPEC_VITEST_CACHE=\"$GEOSPEC_WORKSPACE_ROOT/out/artifacts/geospec-test-consumer/vitest-cache\"\nunset GEOSPEC_CAMPAIGN_INPUTS GEOSPEC_CAMPAIGN_INPUTS_SHA256 GEOSPEC_VITEST_CAMPAIGN GEOSPEC_F1_RESULTS GEOSPEC_F1_ADMISSIONS\nmkdir -p \"$GEOSPEC_WORKSPACE_ROOT/out/artifacts/geospec-test-consumer\"\nnode \"$consumer/node_modules/vitest/vitest.mjs\" run --root \"$consumer/host-tests/f1-public-a1\" --config \"$consumer/host-tests/f1-public-a1/vitest.config.mjs\"\nnode \"$consumer/node_modules/vitest/vitest.mjs\" run --root \"$consumer/host-tests\" --config \"$consumer/host-tests/m3-corpus/vitest.config.mjs\"",
         "forwardAllArgs": false
       }
     }

@@ -2,7 +2,7 @@
  * Prepare one current installed GeoSpec test consumer; never import or probe products.
  * Usage: node scripts/src/prepare-geospec-test-consumer.ts <assembly-root> <receipt.json>
  * Inputs: completed SDK dependency builds and assemble-package.sh's root/platform TGZs.
- * Output: retained OS-temporary consumer plus an explicit receipt (no old-cache fallback).
+ * Output: retained consumer, initial SDK/framework receipts and ten hash-bound harness files.
  * Environment: existing Node/pnpm/npm/tar/git on PATH; no build or install scripts run.
  * Exit: 0 prepared and inventoried; 1 missing inputs, incomplete closure or install failure.
  */
@@ -25,6 +25,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { publishable, publishableClosure, workspace } from '@taucad/nx';
+import { load } from 'js-yaml';
 
 type Manifest = {
   name: string;
@@ -262,9 +263,83 @@ const main = async (): Promise<void> => {
     lock: fileRecord(join(consumerRoot, 'package-lock.json')),
     qualification: 'Installation and byte identity only; no product execution',
   };
-  writeFileSync(join(temporaryRoot, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
+  const initialReceiptPath = join(temporaryRoot, 'receipt.json');
+  writeFileSync(initialReceiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  for (const name of ['package.json', 'package-lock.json']) {
+    writeFileSync(join(temporaryRoot, `sdk-${name}`), readFileSync(join(consumerRoot, name)));
+  }
+  const catalog = load(readFileSync(join(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8')) as {
+    catalog: Record<string, unknown>;
+  };
+  const vitestVersion = catalog.catalog['vitest'];
+  assert.ok(typeof vitestVersion === 'string' && /^\d+\.\d+\.\d+$/.test(vitestVersion), 'Pin an exact Vitest version');
+  run(
+    'npm',
+    ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', '--save-exact', `vitest@${vitestVersion}`],
+    consumerRoot,
+  );
+  const successorLock = JSON.parse(readFileSync(join(consumerRoot, 'package-lock.json'), 'utf8')) as typeof lock;
+  // Framework installation may change npm flags, but never the selected local package identities.
+  for (const path of new Set([...Object.keys(lock.packages), ...Object.keys(successorLock.packages)])) {
+    const name = path.split('node_modules/').at(-1)!;
+    if (!workspaceNames.has(name) && !byName.has(name)) {
+      continue;
+    }
+    const before = lock.packages[path];
+    const after = successorLock.packages[path];
+    assert.ok(before && after, `Framework install changed local package occurrences: ${path}`);
+    for (const field of ['version', 'resolved', 'integrity', 'link'] as const) {
+      assert.equal(after[field], before[field], `Framework install changed ${path} ${field}`);
+    }
+  }
+  for (const entry of installed) {
+    assert.deepEqual(installedFiles(entry.root), entry.files, `Framework install changed ${entry.name} bytes`);
+  }
+  for (const entry of packed) {
+    assert.deepEqual(fileRecord(entry.tarball.path), entry.tarball, 'Selected tarball changed during preparation');
+  }
+  const frameworkManifestPath = join(consumerRoot, 'node_modules/vitest/package.json');
+  assert.equal(readManifest(frameworkManifestPath).version, vitestVersion);
+  assert.equal(successorLock.packages['node_modules/vitest']?.version, vitestVersion);
+  const frameworkSuccessor = {
+    initialReceipt: fileRecord(initialReceiptPath),
+    initialManifest: fileRecord(join(temporaryRoot, 'sdk-package.json')),
+    initialLock: fileRecord(join(temporaryRoot, 'sdk-package-lock.json')),
+    version: vitestVersion,
+    manifest: fileRecord(frameworkManifestPath),
+    lock: fileRecord(join(consumerRoot, 'package-lock.json')),
+    unchangedPackages: installed.map((entry) => entry.name),
+  };
+  writeFileSync(join(temporaryRoot, 'framework-successor.json'), `${JSON.stringify(frameworkSuccessor, null, 2)}\n`);
+  const harness = [
+    'm3-corpus/installed.mjs',
+    'm3-corpus/installed.vitest.test.mjs',
+    'm3-corpus/vitest.config.mjs',
+    'm3-corpus/corpus.mjs',
+    'm3-corpus/profile-v3.mjs',
+    'f1-public-a1/authority.mjs',
+    'f1-public-a1/f1-public.vitest.test.mjs',
+    'f1-public-a1/vitest.config.mjs',
+    'fixtures/read-fixture.mjs',
+    'fixtures/manifest.json',
+  ].map((path) => {
+    const input = fileRecord(join(repositoryRoot, 'packages/geospec/host-tests', path));
+    const destination = join(consumerRoot, 'host-tests', path);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, readFileSync(input.path));
+    const staged = fileRecord(destination);
+    assert.equal(staged.sha256, input.sha256, `Harness copy differs: ${path}`);
+    return { source: input, staged };
+  });
+  for (const entry of harness) {
+    assert.deepEqual(fileRecord(entry.source.path), entry.source, 'Harness source changed during preparation');
+  }
+  assert.deepEqual(sourceIdentity(), source, 'Source inputs changed during framework/harness preparation');
   mkdirSync(dirname(receiptPath), { recursive: true });
-  writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  writeFileSync(
+    receiptPath,
+    `${JSON.stringify({ ...receipt, lock: frameworkSuccessor.lock, frameworkSuccessor, harness }, null, 2)}\n`,
+  );
   console.log(JSON.stringify({ consumerRoot, receiptPath }));
 };
 

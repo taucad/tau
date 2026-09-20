@@ -18,6 +18,7 @@ import type {
 } from '@taucad/filesystem';
 import { pendingProjectCommitInputSchema } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   ChangeEvent,
   CheckedFileWrite,
@@ -172,7 +173,7 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider & {
  *
  * @public
  */
-export type ArchiveOptions = { readonly versionedOnly?: boolean };
+export type ArchiveOptions = ContentExportFilter;
 
 /**
  * Caller-owned cap and shape of a rooted search.

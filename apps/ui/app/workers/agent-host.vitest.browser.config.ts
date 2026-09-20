@@ -101,6 +101,7 @@ export default defineConfig({
       'app/workers/headless-capture-in-worker.browser.test.ts',
       'app/workers/skill-resources.browser.test.ts',
       'app/machines/file-manager.browser.test.ts',
+      'app/machines/web-locks.browser.test.ts',
       'app/components/geometry/loader/metal-morph-spinner.browser.test.tsx',
     ],
     fileParallelism: false,

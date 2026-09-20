@@ -373,6 +373,25 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     expect(viewReadFile).not.toHaveBeenCalled();
   });
 
+  it('should refuse writing a project path through the Home view', async () => {
+    const { client, view } = await harness(undefined, '/');
+    const viewWriteFile = vi.spyOn(view, 'writeFile');
+
+    await expect(client.writeFile('/projects/proj_a/main.ts', 'export {};\n')).rejects.toThrow(
+      /No rooted view serves/u,
+    );
+
+    expect(viewWriteFile).not.toHaveBeenCalled();
+  });
+
+  it('should refuse preflighting a project path through the Home view', async () => {
+    const { client, view } = await harness(undefined, '/');
+
+    await expect(client.canCreate('/projects/proj_a/new.ts', 'file')).rejects.toThrow(/No rooted view serves/u);
+
+    expect(view.canCreate).not.toHaveBeenCalled();
+  });
+
   /*
    * C2: the alias is a mount outside the checkout, so it is its own root with its
    * own `'user'` view (W11) — and that view classifies its root as if it were a

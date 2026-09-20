@@ -355,6 +355,14 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
   __TAU_CHAT_SESSION_LIVENESS__?: () => ChatSessionLivenessSnapshot;
 };
 
+/**
+ * The text a message puts in — or took out of — the composer.
+ *
+ * The draft's own `loadMessage` keeps the first text part and nothing else, so
+ * this is the same string on the way back (I5).
+ */
+const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
+
 /** The two phases that OPEN a run; every other phase settles one. */
 const opensRun = (phase: ChatRunPhase): boolean => phase === 'admitted' || phase === 'running';
 
@@ -746,6 +754,21 @@ export class ChatSessionStore {
     if (!session) {
       return;
     }
+    await this.#requestTurn(session, gesture);
+  }
+
+  /**
+   * The body of {@link ChatSessionStore.requestTurn}, by session.
+   *
+   * Separate because `#bindSessionOwner` flushes a parked gesture through it
+   * while the session is still being created, before it is in `#sessions` —
+   * and a flush that skipped this path left the composer holding a message the
+   * chat had already taken (I5).
+   *
+   * @param session - The chat that acted.
+   * @param gesture - What the person did.
+   */
+  async #requestTurn(session: InternalSession, gesture: ChatTurnGesture): Promise<void> {
     /* The banner belongs to the request lifecycle, and the gesture is what
      * clears it — the dispatch is an admission away. */
     session.persistenceActorRef.send({ type: 'turnRequested' });
@@ -761,6 +784,17 @@ export class ChatSessionStore {
     /* Read before the send: the slot this gesture is about to overwrite. */
     const displaced = owner.getSnapshot().context.pendingGesture;
     owner.send({ type: 'requestTurn', gesture });
+    if (owner.getSnapshot().context.pendingGesture !== gesture) {
+      /* The ref is stale: a stopped actor takes no event and never emits
+       * again, and its last snapshot can still read `admitting`, so the wait
+       * below would never end — the composer's editable lock is what awaits it
+       * (T3-D11, from the other side). The gesture is nobody's until this chat
+       * is given a new owner, which is what the unbound path above is for. */
+      const parked = session.pendingGesture;
+      session.pendingGesture = gesture;
+      await this.#settleComposer(session, gesture, parked);
+      return;
+    }
     /* S01: the composer stays busy until the turn is admitted or refused, so a
      * send does not look finished while its checkout is still being leased.
      * The owner says when that is; nothing here polls it. A gesture queued
@@ -770,8 +804,10 @@ export class ChatSessionStore {
     if (admitting()) {
       await new Promise<void>((resolve) => {
         const settle = (): void => {
-          subscription.unsubscribe();
+          /* Resolved before the unsubscribe it closes over, so an observer
+           * called back during `subscribe` itself still settles this promise. */
           resolve();
+          subscription.unsubscribe();
         };
         const subscription = owner.subscribe({
           next: () => {
@@ -833,6 +869,15 @@ export class ChatSessionStore {
     gesture: ChatTurnGesture,
     displaced: ChatTurnGesture | undefined,
   ): Promise<void> {
+    /* Only what this gesture took out of the composer is the composer's to
+     * clear or write over. A gesture can be answered a long time after it was
+     * made — a chat with no owner parks it until one binds — and by then the
+     * person may have typed the next message into the same box. Neither the
+     * clear nor a returning message may land on that. */
+    const { draftText } = session.draftActorRef.getSnapshot().context;
+    if (gesture.kind === 'send' && draftText !== '' && draftText !== composedText(gesture.message)) {
+      return;
+    }
     /* An `edit` and a `regenerate` rewind to a message the transcript still
      * holds, so nothing the person wrote is lost when one is displaced. */
     const returning = displaced?.kind === 'send' ? displaced.message : undefined;
@@ -841,10 +886,17 @@ export class ChatSessionStore {
       return;
     }
     const held = session.stateActorRef?.getSnapshot().context;
-    if (gesture.kind === 'send' && held !== undefined && held.turn === undefined && held.pendingGesture === undefined) {
-      /* The admission refused it and the chat is holding nothing: the banner
-       * says why, and the message the person wrote comes back to the composer
-       * rather than vanishing with the turn that never started. */
+    if (
+      gesture.kind === 'send' &&
+      (held === undefined || (held.turn === undefined && held.pendingGesture === undefined))
+    ) {
+      /* Nothing took it. Either the chat has no owner yet and the gesture is
+       * parked on the session — `pendingGesture` is a field that dies with the
+       * document, so the composer is the only durable copy (I5) — or the
+       * admission refused it and the chat is holding nothing, where the banner
+       * says why and the message comes back rather than vanishing with the
+       * turn that never started. `#bindSessionOwner` flushes a parked gesture
+       * back through `#requestTurn`, so the clear below is still what ends it. */
       await this.#restoreDraftMessage(session, gesture.message);
       return;
     }
@@ -1273,7 +1325,11 @@ export class ChatSessionStore {
     const heldGesture = session.pendingGesture;
     if (heldGesture !== undefined && session.stateActorRef !== undefined) {
       session.pendingGesture = undefined;
-      session.stateActorRef.send({ type: 'requestTurn', gesture: heldGesture });
+      /* Through the request path, not straight at the actor: the composer is
+       * still holding this message (I5), and `#requestTurn` is the one writer
+       * that knows when it has been taken. Floating, as the gesture's own
+       * request is: the flush outlives this bind. */
+      void this.#requestTurn(session, heldGesture);
     }
     /* A run outlives the view that started it (V5). Navigating away and back
      * gives this chat a new actor while its run is still in flight, and an

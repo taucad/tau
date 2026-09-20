@@ -5,6 +5,7 @@ import {
   armChatTurnHold,
   chatTurnAdmission,
   chatTurnSettlement,
+  clearChatTurnServices,
   publishChatTurnAdmission,
   publishChatTurnSettlement,
   releaseChatTurnHold,
@@ -151,6 +152,44 @@ describe('chatTurnAdmission', () => {
       expect(settlements).toEqual([input]);
     });
     actor.stop();
+  });
+
+  /*
+   * W10-6. The abort that abandons an admission is usually the chat's own
+   * dispose, which runs `clearChatTurnServices` — and the release runs *after*
+   * the admission ends, i.e. after dispose. Looking the publisher up then finds
+   * an emptied registry, so the bounded wait below simply expires and the lease
+   * is left held: the same leak T3-D2 closed, one registry read later. The
+   * publisher this admission started with is a function; holding it costs
+   * nothing and cannot be deleted out from under the release.
+   */
+  it('should release an abandoned lease through the publisher it started with, after dispose', async () => {
+    const settlements: ChatTurnSettlementInput[] = [];
+    publishChatTurnSettlement('chat-disposed', async (input) => {
+      settlements.push(input);
+    });
+    const reached = Promise.withResolvers<void>();
+    const leased = Promise.withResolvers<ChatTurn>();
+    publishChatTurnAdmission('chat-disposed', async () => {
+      reached.resolve();
+      return leased.promise;
+    });
+    const actor = createActor(chatTurnAdmission, {
+      input: { chatId: 'chat-disposed', gesture: { kind: 'regenerate' } },
+    });
+    actor.start();
+    await reached.promise;
+
+    // The session is disposed while the lease is still being taken.
+    clearChatTurnServices('chat-disposed');
+    actor.stop();
+    leased.resolve(turn);
+
+    await vi.waitFor(() => {
+      expect(settlements).toEqual([
+        { chatId: 'chat-disposed', runId: 'run-1', leaseTurnId: 'user-1', outcome: 'cancelled' },
+      ]);
+    });
   });
 
   it('should wait for the settlement publisher before giving up on an abandoned lease', async () => {

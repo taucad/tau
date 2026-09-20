@@ -1411,7 +1411,9 @@ describe('useCadChatClient', () => {
    */
   it('re-runs the turn when a browser-placed chat has no resumable run, and resumes when it has', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    /* One user message, because a continuation leases it: a transcript with
+     * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
+    Object.defineProperty(chat, 'messages', { get: () => [{ id: 'user_1', role: 'user', parts: [] }] });
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
     renderClient();

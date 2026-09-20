@@ -238,7 +238,7 @@ export const validateAgentConfig = (root: string): AgentConfigResult => {
       const target = resolve(dirname(path), decodeURIComponent(link.split('#')[0] ?? ''));
       const local = repoPath(root, target);
       const absentOptionalDocs = relocatableDocumentation.some(
-        (prefix) => local.startsWith(`${prefix}/`) && !existsSync(resolve(root, prefix)),
+        (prefix) => (local === prefix || local.startsWith(`${prefix}/`)) && !existsSync(resolve(root, prefix)),
       );
       if (!existsSync(target) && !absentOptionalDocs && !local.startsWith('repos/')) {
         report(path, `broken local link: ${link}`);

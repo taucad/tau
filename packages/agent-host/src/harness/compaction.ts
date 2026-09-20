@@ -55,8 +55,6 @@ export type CompactionOutcome = {
   readonly evicted: number;
 };
 
-type CompactionRun = CompactionOutcome & { readonly persist: () => Promise<void> };
-
 /** Host callback that summarizes an evicted provider-history prefix. @public */
 export type CompactionSummarizer = (input: {
   readonly messages: readonly AgentMessage[];
@@ -69,6 +67,7 @@ export type CompactionSummarizer = (input: {
 type CreateCompactionOptions = {
   readonly agent: Agent;
   readonly record: SessionRecord;
+  readonly projectHistory: () => Promise<AgentMessage[]>;
   readonly contextWindow: number;
   readonly summarize?: CompactionSummarizer | undefined;
   readonly models?: Models | undefined;
@@ -225,22 +224,49 @@ const compactionEntries = (messages: readonly AgentMessage[]): Entry[] =>
         };
   });
 
-const tokenBudgetCutoff = (messages: readonly AgentMessage[], settings: CompactionSettings): number => {
-  const entries = compactionEntries(messages);
-  const cut = findCutPoint(entries, 0, entries.length, settings.keepRecentTokens);
-  if (!cut.isSplitTurn) {
-    return cut.firstKeptEntryIndex;
+const isValidCutPoint = (message: AgentMessage): boolean => message.role !== 'toolResult';
+
+const laterCutoff = (messages: readonly AgentMessage[], after: number): number | undefined => {
+  for (let index = after + 1; index < messages.length; index++) {
+    if (isValidCutPoint(messages[index]!)) {
+      return index;
+    }
   }
-  const turnStart = findTurnStartIndex(entries, cut.firstKeptEntryIndex, 0);
-  /*
-   * A chat whose whole history is one oversized turn starts that turn at index
-   * 0, so rolling the cut back to the turn start leaves nothing to evict and
-   * the turn is refused for good. Cut inside the turn instead and summarise its
-   * head, the way pi's own `prepareCompaction` handles a split turn. pi never
-   * offers a tool result as a cut point, so the retained tail still opens on the
-   * assistant message that made the call.
-   */
-  return turnStart > 0 ? turnStart : cut.firstKeptEntryIndex;
+  return undefined;
+};
+
+const tokenBudgetCutoff = (messages: readonly AgentMessage[], keepRecentTokens: number): number => {
+  const entries = compactionEntries(messages);
+  const cut = findCutPoint(entries, 0, entries.length, keepRecentTokens);
+  let cutoff = cut.firstKeptEntryIndex;
+  if (cutoff === 0 && messages.length > 1) {
+    for (let index = messages.length - 1; index > 0; index--) {
+      if (isValidCutPoint(messages[index]!)) {
+        cutoff = index;
+        break;
+      }
+    }
+  }
+  if (cut.isSplitTurn) {
+    const turnStart = findTurnStartIndex(entries, cutoff, 0);
+    /*
+     * A chat whose whole history is one oversized turn starts that turn at index
+     * 0, so rolling the cut back to the turn start leaves nothing to evict and
+     * the turn is refused for good. Cut inside the turn instead and summarise its
+     * head, the way pi's own `prepareCompaction` handles a split turn. pi never
+     * offers a tool result as a cut point, so the retained tail still opens on the
+     * assistant message that made the call.
+     */
+    cutoff = turnStart > 0 ? turnStart : cutoff;
+  }
+  while (messageTokens(messages.slice(cutoff)) > keepRecentTokens) {
+    const later = laterCutoff(messages, cutoff);
+    if (later === undefined) {
+      break;
+    }
+    cutoff = later;
+  }
+  return cutoff;
 };
 
 const userText = (message: AgentMessage): string => {
@@ -283,12 +309,11 @@ const preserveDuringCompaction = (message: AgentMessage, tags: readonly string[]
   return tags.some((tag) => text.includes(tag));
 };
 
-/** Install two-tier compaction on pi's durable, ephemeral, and overflow seams. @public */
+/** Install two-tier compaction on pi's durable turn and overflow seams. @public */
 export const installCompaction = (
   options: CreateCompactionOptions,
 ): {
-  readonly prepareTurn: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
-  readonly transformContext: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+  readonly prepareTurn: (signal?: AbortSignal) => Promise<AgentMessage[]>;
   readonly wrapStreamFn: (base: StreamFn) => StreamFn;
 } => {
   const { agent } = options;
@@ -296,13 +321,7 @@ export const installCompaction = (
   const now = options.now ?? Date.now;
   let strikes = 0;
   let anchorOverhead: { readonly anchor: string | AgentMessage; readonly tokens: number } | undefined;
-  let memo:
-    | { readonly fromLength: number; readonly sourceFingerprint: string; readonly run: CompactionRun }
-    | undefined;
   let pendingFailure: HostCompactionError | undefined;
-
-  const fingerprint = (messages: readonly AgentMessage[]): string =>
-    JSON.stringify(messages.map((message) => options.record.messages.id(message)));
 
   /*
    * Estimate what the next request will cost the provider.
@@ -352,79 +371,66 @@ export const installCompaction = (
     return { tokens: anchorOverhead.tokens + messageTokens(messages), anchored: true };
   };
 
-  const needsCompaction = (messages: readonly AgentMessage[], forced = false): boolean => {
-    const estimate = contextTokens(messages);
-    /*
-     * The overflow lane runs on the provider's own refusal, so an unanchored
-     * projection cannot certify that clearing a few tool bodies made this
-     * request fit. Summarise rather than spend a call on the same refusal.
-     */
-    return (
-      (forced && !estimate.anchored) ||
-      shouldCompact(estimate.tokens, options.contextWindow, compactionSettings(options.contextWindow))
-    );
+  const projectionId = (message: AgentMessage): string => {
+    const id = options.record.messages.get(message);
+    if (!id) {
+      throw new Error('Compaction received a message outside its durable projection.');
+    }
+    return id;
   };
 
-  const memoMatches = (messages: readonly AgentMessage[]): boolean =>
-    memo !== undefined &&
-    memo.fromLength <= messages.length &&
-    memo.sourceFingerprint === fingerprint(messages.slice(0, memo.fromLength));
-
-  const applyMemo = (messages: readonly AgentMessage[]): AgentMessage[] => [
-    ...memo!.run.messages,
-    ...messages.slice(memo!.fromLength),
-  ];
-
-  const persistCleared = async (cleared: readonly ClearedToolResult[]): Promise<void> => {
-    const replacements = cleared.map(({ original, replacement }) => {
+  const prepareClearings = (cleared: readonly ClearedToolResult[]) =>
+    cleared.map(({ original, replacement }) => {
       options.record.messages.transfer(original, replacement);
-      const messageId = options.record.messages.get(replacement);
-      if (!messageId) {
-        throw new HostCompactionError('SESSION_LOG_INTEGRITY', 'A durable tool result has no session-log identity.');
-      }
-      return { messageId, replacement };
+      return {
+        messageId: projectionId(replacement),
+        replacement: piMessageToProvider(replacement, options.record.messages),
+      };
     });
+
+  const persistClearings = async (replacements: ReturnType<typeof prepareClearings>): Promise<void> => {
     for (const { messageId, replacement } of replacements) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Event-log cursor writes must remain ordered.
       await options.record.append({
         type: 'message.envelope-replaced',
         messageId,
-        replacement: piMessageToProvider(replacement, options.record.messages),
+        replacement,
       });
     }
   };
 
   const compact = async ({
     input,
-    durable,
     signal,
     force = false,
   }: {
     readonly input: readonly AgentMessage[];
-    readonly durable: boolean;
     readonly signal?: AbortSignal | undefined;
     readonly force?: boolean | undefined;
-  }): Promise<CompactionRun> => {
+  }): Promise<CompactionOutcome> => {
     /*
      * Measure the anchor against the untouched input, even when the overflow
      * lane forces the pass: tier one's candidate has already had tool-result
      * text removed, and measuring there would credit that text to the fixed
      * per-call overhead the provider reported.
      */
-    const oversized = needsCompaction(input);
+    const settings = compactionSettings(options.contextWindow);
+    const trigger = contextTokens(input);
+    const oversized = (force && !trigger.anchored) || shouldCompact(trigger.tokens, options.contextWindow, settings);
     if (!force && !oversized) {
-      return { messages: [...input], cleared: 0, evicted: 0, persist: async () => undefined };
+      return { messages: [...input], cleared: 0, evicted: 0 };
     }
+    const messageBudget = Math.max(
+      32,
+      options.contextWindow - settings.reserveTokens - Math.max(0, trigger.tokens - messageTokens(input)),
+    );
     const tierOne = clearOldToolResults(input);
-    if (tierOne.cleared.length > 0 && !needsCompaction(tierOne.messages, force)) {
-      let persisted: Promise<void> | undefined;
-      const persist = async (): Promise<void> => {
-        persisted ??= persistCleared(tierOne.cleared);
-        await persisted;
-      };
-      if (durable) {
-        await persist();
-      }
+    if (
+      tierOne.cleared.length > 0 &&
+      (!force || trigger.anchored) &&
+      messageTokens(tierOne.messages) <= messageBudget
+    ) {
+      await persistClearings(prepareClearings(tierOne.cleared));
       strikes = 0;
       const outcome: CompactionOutcome = {
         messages: tierOne.messages,
@@ -433,7 +439,7 @@ export const installCompaction = (
         evicted: 0,
       };
       options.onCompaction?.(outcome);
-      return { ...outcome, persist };
+      return outcome;
     }
 
     strikes++;
@@ -447,106 +453,132 @@ export const installCompaction = (
       throw new HostCompactionError('SUMMARY_REQUIRED', 'Tier-two compaction requires the session model summarizer.');
     }
 
-    const settings = compactionSettings(options.contextWindow);
-    const cutoff = tokenBudgetCutoff(tierOne.messages, settings);
     const tags = keepContextTags(tierOne.messages);
-    const prefix = tierOne.messages.slice(0, cutoff);
-    const evicted = prefix.filter((message) => !preserveDuringCompaction(message, tags));
-    if (evicted.length === 0) {
+    if (tierOne.messages.length <= 1) {
       throw new HostCompactionError('NO_EVICTABLE_HISTORY', 'Context is oversized but has no safe history to evict.');
     }
-    const previousSummary = evicted.findLast((message) => summaryText(message) !== undefined);
-    const previousSummaryText = previousSummary ? summaryText(previousSummary) : undefined;
-    const messagesToSummarize = evicted.filter((message) => message !== previousSummary);
-    let compactedSummary: string;
-    if (options.summarize) {
-      compactedSummary = await options.summarize({
-        messages: messagesToSummarize,
-        query: lastUserText(tierOne.messages.slice(cutoff)),
-        keepContextTags: tags,
-        previousSummary: previousSummaryText,
-        signal,
-      });
-    } else {
-      const sentinel: UserMessage = { role: 'user', content: 'keep', timestamp: now() };
-      const prepared = prepareCompaction(compactionEntries([...evicted, sentinel]), {
-        ...settings,
-        keepRecentTokens: 1,
-      });
-      if (!prepared.ok || !prepared.value) {
-        throw new HostCompactionError(
-          'SUMMARY_REQUIRED',
-          prepared.ok ? 'Pi could not prepare tier-two compaction.' : prepared.error.message,
-        );
+    let cutoff = tokenBudgetCutoff(tierOne.messages, messageBudget);
+    let evicted: AgentMessage[] = [];
+    let summary: UserMessage;
+    let messages: AgentMessage[];
+    for (;;) {
+      const prefix = tierOne.messages.slice(0, cutoff);
+      evicted = prefix.filter((message) => !preserveDuringCompaction(message, tags));
+      if (evicted.length === 0) {
+        const later = laterCutoff(tierOne.messages, cutoff);
+        if (later !== undefined) {
+          cutoff = later;
+          continue;
+        }
+        throw new HostCompactionError('SUMMARY_REQUIRED', 'Pinned context leaves no history available to summarize.');
       }
-      const result = await compactWithPi(
-        { ...prepared.value, retainedTail: [], tokensBefore: estimateContextTokens(tierOne.messages).tokens, settings },
-        options.models!,
-        agent.state.model as Model<Api>,
-        undefined,
-        signal,
-      );
-      if (!result.ok) {
-        throw new HostCompactionError('SUMMARY_REQUIRED', result.error.message);
-      }
-      compactedSummary = result.value.summary;
-    }
-    const summary: UserMessage = {
-      role: 'user',
-      content: [{ type: 'text', text: `<summary>\n${compactedSummary}\n</summary>` }],
-      timestamp: now(),
-    };
-    const evictedSet = new Set(evicted);
-    const firstIndex = tierOne.messages.findIndex((message) => evictedSet.has(message));
-    const messages = tierOne.messages.filter((message) => !evictedSet.has(message));
-    messages.splice(firstIndex, 0, summary);
-
-    let persisted: Promise<void> | undefined;
-    const persist = async (): Promise<void> => {
-      persisted ??= (async () => {
-        await persistCleared(tierOne.cleared.filter(({ original }) => !evictedSet.has(original)));
-        const piIds = evicted.map((message) => options.record.messages.get(message));
-        if (piIds.some((id) => id === undefined)) {
+      const previousSummary = evicted.findLast((message) => summaryText(message) !== undefined);
+      const previousSummaryText = previousSummary ? summaryText(previousSummary) : undefined;
+      const messagesToSummarize = evicted.filter((message) => message !== previousSummary);
+      let compactedSummary: string;
+      if (options.summarize) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result must widen and summarize the new cut in the same pass.
+        compactedSummary = await options.summarize({
+          messages: messagesToSummarize,
+          query: lastUserText(tierOne.messages.slice(cutoff)),
+          keepContextTags: tags,
+          previousSummary: previousSummaryText,
+          signal,
+        });
+      } else {
+        const sentinel: UserMessage = { role: 'user', content: 'keep', timestamp: now() };
+        const prepared = prepareCompaction(compactionEntries([...evicted, sentinel]), {
+          ...settings,
+          keepRecentTokens: 1,
+        });
+        if (!prepared.ok || !prepared.value) {
           throw new HostCompactionError(
-            'SESSION_LOG_INTEGRITY',
-            'Durable compacted history has missing session-log ids.',
+            'SUMMARY_REQUIRED',
+            prepared.ok ? 'Pi could not prepare tier-two compaction.' : prepared.error.message,
           );
         }
-        const evictedIds = new Set(piIds as string[]);
-        const toolCallIds = new Set(
-          evicted.flatMap((message) => {
-            if (message.role === 'toolResult') {
-              return [message.toolCallId];
-            }
-            return message.role === 'assistant'
-              ? message.content.flatMap((block) => (block.type === 'toolCall' ? [block.id] : []))
-              : [];
-          }),
+        // oxlint-disable-next-line eslint/no-await-in-loop -- An over-budget result must widen and summarize the new cut in the same pass.
+        const result = await compactWithPi(
+          {
+            ...prepared.value,
+            retainedTail: [],
+            tokensBefore: estimateContextTokens(tierOne.messages).tokens,
+            settings,
+          },
+          options.models!,
+          agent.state.model as Model<Api>,
+          undefined,
+          signal,
         );
-        const history = await options.record.history();
-        const durableIds = history
-          .filter(
-            (message) =>
-              evictedIds.has(message.id) ||
-              ((message.role === 'tool-input' || message.role === 'tool-output') &&
-                toolCallIds.has(message.toolCallId)),
-          )
-          .map((message) => message.id);
-        if (history.length > 0 && piIds.some((id) => !durableIds.includes(id!))) {
-          throw new HostCompactionError('SESSION_LOG_INTEGRITY', 'Durable compacted history diverged from pi history.');
+        if (!result.ok) {
+          throw new HostCompactionError('SUMMARY_REQUIRED', result.error.message);
         }
-        await options.record.append({
-          type: 'history.compacted',
-          evictedMessageIds: history.length > 0 ? durableIds : (piIds as string[]),
-          summary: piMessageToProvider(summary, options.record.messages),
-        });
-      })();
-      await persisted;
-    };
-    if (durable) {
-      await persist();
+        compactedSummary = result.value.summary;
+      }
+      if (compactedSummary === '') {
+        throw new HostCompactionError('SUMMARY_REQUIRED', 'Compaction produced an empty summary.');
+      }
+      summary = {
+        role: 'user',
+        content: [{ type: 'text', text: `<summary>\n${compactedSummary}\n</summary>` }],
+        timestamp: now(),
+      };
+      const evictedSet = new Set(evicted);
+      const firstIndex = tierOne.messages.findIndex((message) => evictedSet.has(message));
+      messages = tierOne.messages.filter((message) => !evictedSet.has(message));
+      messages.splice(firstIndex, 0, summary);
+      if (messageTokens(messages) <= messageBudget) {
+        break;
+      }
+      const later = laterCutoff(tierOne.messages, cutoff);
+      if (later === undefined) {
+        throw new HostCompactionError('SUMMARY_REQUIRED', 'Compaction summary could not restore provider headroom.');
+      }
+      cutoff = later;
     }
-    strikes = needsCompaction(messages) ? 2 : 0;
+
+    const evictedSet = new Set(evicted);
+    for (const { original, replacement } of tierOne.cleared) {
+      options.record.messages.transfer(original, replacement);
+    }
+    const piIds = evicted.map((message) => projectionId(message));
+    const piIdSet = new Set(piIds);
+    const toolCallIds = new Set(
+      evicted.flatMap((message) => {
+        if (message.role === 'toolResult') {
+          return [message.toolCallId];
+        }
+        return message.role === 'assistant'
+          ? message.content.flatMap((block) => (block.type === 'toolCall' ? [block.id] : []))
+          : [];
+      }),
+    );
+    const history = await options.record.history();
+    const durableIds = history
+      .filter(
+        (message) => piIdSet.has(message.id) || (message.role === 'tool-input' && toolCallIds.has(message.toolCallId)),
+      )
+      .map((message) => message.id);
+    const projectedDurableIds = history
+      .filter((message) => message.role !== 'tool-input' && durableIds.includes(message.id))
+      .map((message) => message.id);
+    if (
+      piIdSet.size !== projectedDurableIds.length ||
+      projectedDurableIds.some((id) => !piIdSet.has(id)) ||
+      piIds.some((id) => !projectedDurableIds.includes(id))
+    ) {
+      throw new Error('Compaction projection diverged from durable history.');
+    }
+    const retainedClearings = tierOne.cleared.filter(({ replacement }) => !evictedSet.has(replacement));
+    const durableSummary = piMessageToProvider(summary, options.record.messages);
+    const clearingEvents = prepareClearings(retainedClearings);
+    await options.record.append({
+      type: 'history.compacted',
+      evictedMessageIds: durableIds,
+      summary: durableSummary,
+    });
+    await persistClearings(clearingEvents);
+    strikes = 0;
     options.onSummary?.();
     const outcome: CompactionOutcome = {
       messages,
@@ -555,45 +587,23 @@ export const installCompaction = (
       evicted: evicted.length,
     };
     options.onCompaction?.(outcome);
-    return { ...outcome, persist };
+    return outcome;
   };
 
-  const transformContext = async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
+  const prepareTurn = async (signal?: AbortSignal): Promise<AgentMessage[]> => {
+    const messages = await options.projectHistory();
+    agent.state.messages = messages;
     try {
-      if (!needsCompaction(messages)) {
-        return messages;
-      }
-      if (memoMatches(messages)) {
-        return applyMemo(messages);
-      }
-      const outcome = await compact({ input: messages, durable: false, signal });
-      memo = { fromLength: messages.length, sourceFingerprint: fingerprint(messages), run: outcome };
-      return outcome.messages;
-    } catch (error) {
-      if (!(error instanceof HostCompactionError)) {
-        throw error;
-      }
-      pendingFailure = error;
-      memo = undefined;
-      return messages;
-    }
-  };
-
-  const prepareTurn = async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
-    memo = undefined;
-    try {
-      const outcome = await compact({ input: messages, durable: true, signal });
+      const outcome = await compact({ input: messages, signal });
       pendingFailure = undefined;
-      if (outcome.tier) {
-        agent.state.messages = outcome.messages;
-      }
+      agent.state.messages = outcome.messages;
       return outcome.messages;
     } catch (error) {
       /*
        * Fail the turn, not the chat. Escaping here left the run stranded on
        * `admitted` with nothing committed, so a chat whose history cannot be
        * compacted could never take another turn. The failure rides the same
-       * seam the ephemeral and between-turn legs use: the stream wrapper turns
+       * seam the between-turn leg uses: the stream wrapper turns
        * it into this turn's coded error message.
        */
       if (!(error instanceof HostCompactionError)) {
@@ -611,21 +621,10 @@ export const installCompaction = (
       messages: agent.state.messages,
       tools: agent.state.tools,
     };
+    const projected = await options.projectHistory();
+    agent.state.messages = projected;
     try {
-      const pending = memo;
-      if (pending && memoMatches(priorContext.messages)) {
-        await pending.run.persist();
-        const messages = applyMemo(priorContext.messages);
-        memo = undefined;
-        pendingFailure = undefined;
-        agent.state.messages = messages;
-        return { ...prior, context: { ...priorContext, messages } };
-      }
-      memo = undefined;
-      const outcome = await compact({ input: priorContext.messages, durable: true, signal });
-      if (!outcome.tier) {
-        return prior;
-      }
+      const outcome = await compact({ input: projected, signal });
       pendingFailure = undefined;
       agent.state.messages = outcome.messages;
       return { ...prior, context: { ...priorContext, messages: outcome.messages } };
@@ -634,8 +633,7 @@ export const installCompaction = (
         throw error;
       }
       pendingFailure = error;
-      memo = undefined;
-      return prior;
+      return { ...prior, context: { ...priorContext, messages: projected } };
     }
   };
 
@@ -653,19 +651,13 @@ export const installCompaction = (
         return first;
       }
       try {
+        const projected = await options.projectHistory();
         const emergency = await compact({
-          input: context.messages as AgentMessage[],
-          durable: false,
+          input: projected,
           signal: streamOptions?.signal,
           force: true,
         });
-        await emergency.persist();
         options.agent.state.messages = emergency.messages;
-        memo = {
-          fromLength: emergency.messages.length,
-          sourceFingerprint: fingerprint(emergency.messages),
-          run: emergency,
-        };
         return await base(
           model,
           { ...context, messages: emergency.messages as typeof context.messages },
@@ -679,5 +671,5 @@ export const installCompaction = (
       }
     };
 
-  return { prepareTurn, transformContext, wrapStreamFn: wrapStreamFunction };
+  return { prepareTurn, wrapStreamFn: wrapStreamFunction };
 };

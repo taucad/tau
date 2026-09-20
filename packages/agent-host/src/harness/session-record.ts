@@ -457,10 +457,11 @@ const metadataNumber = (message: ProviderMessage, key: string, fallback = 0): nu
 
 /** Convert one pi message to the provider-native A1 log envelope. @public */
 export const piMessageToProvider = (message: AgentMessage, identities: MessageIdentities): ProviderMessage => {
-  const id =
-    message.role === 'assistant'
-      ? (liveMessageIdFromDiagnostics(message.diagnostics) ?? identities.id(message))
-      : identities.id(message);
+  const liveId = message.role === 'assistant' ? liveMessageIdFromDiagnostics(message.diagnostics) : undefined;
+  if (liveId) {
+    identities.set(message, liveId);
+  }
+  const id = liveId ?? identities.id(message);
   if (message.role === 'user') {
     return {
       id,

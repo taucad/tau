@@ -642,7 +642,7 @@ export const createTransportStreamFunction =
               createProviderMetadataDiagnostic(durableMetadata, partial.timestamp),
             ],
           };
-          options.identities.set(partial, options.identities.id(partial), durableMetadata);
+          options.identities.set(partial, messageId, durableMetadata);
         }
         if (stopReason === 'error' || stopReason === 'aborted') {
           output.push({ type: 'error', reason: stopReason, error: partial });
@@ -672,7 +672,7 @@ export const createTransportStreamFunction =
             ...(failure.diagnostics ?? []),
             createProviderMetadataDiagnostic(durableMetadata, failure.timestamp),
           ];
-          options.identities.set(failure, options.identities.id(failure), durableMetadata);
+          options.identities.set(failure, messageId, durableMetadata);
         }
         output.push({ type: 'error', reason, error: failure });
       }
@@ -701,6 +701,7 @@ const compactionModelsWithTransport = (options: {
   readonly createId: () => string;
   readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
+  readonly completedAttempts?: Set<string> | undefined;
   /** The session's side table, so a summarised document keeps its name (P32). */
   readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
@@ -792,6 +793,7 @@ const compactionModelsWithTransport = (options: {
             timestamp: Date.now(),
           };
         }
+        options.completedAttempts?.add(attemptId);
         return {
           role: 'assistant',
           content: [{ type: 'text', text: summary }],
@@ -1013,6 +1015,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       const hydrated = providerMessageToPi(message, model, record.messages);
       return hydrated ? [hydrated] : [];
     });
+  const projectHistory = async (): Promise<AgentMessage[]> =>
+    hydrateHistory(await materializeHistory(await record.history()));
   const initialMessages = hydrateHistory(await materializeHistory(initialHistory));
   const committedMessageIds = new Set(initialHistory.map((message) => message.id));
   const toolInputIds = new Map(
@@ -1186,6 +1190,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       });
     }
   };
+  const completedCompactionAttempts = new Set<string>();
   const prepareInvocation = async (
     purpose: 'generation' | 'compaction',
     modelId: string,
@@ -1199,22 +1204,24 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       const bound = events.find(
         (event) => event.type === 'model.invocation-bound' && event.attemptId === prepared.attemptId,
       );
-      const completed = events.slice(preparedIndex + 1).some((event) => {
-        if (prepared.purpose === 'compaction') {
-          return event.type === 'history.compacted';
-        }
-        const message =
-          event.type === 'message.appended'
-            ? event.message
-            : event.type === 'message.envelope-replaced'
-              ? event.replacement
-              : undefined;
-        return (
-          message?.role === 'assistant' &&
-          message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
-          message.metadata.tauInternal['attemptId'] === prepared.attemptId
-        );
-      });
+      const completed =
+        (prepared.purpose === 'compaction' && completedCompactionAttempts.has(prepared.attemptId)) ||
+        events.slice(preparedIndex + 1).some((event) => {
+          if (prepared.purpose === 'compaction') {
+            return event.type === 'history.compacted';
+          }
+          const message =
+            event.type === 'message.appended'
+              ? event.message
+              : event.type === 'message.envelope-replaced'
+                ? event.replacement
+                : undefined;
+          return (
+            message?.role === 'assistant' &&
+            message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
+            message.metadata.tauInternal['attemptId'] === prepared.attemptId
+          );
+        });
       if (!completed) {
         const transport = options.modelTransport;
         const recovered = await transport.lookupAttempt?.(prepared.attemptId, signal);
@@ -1381,6 +1388,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const compaction = installCompaction({
     agent,
     record,
+    projectHistory,
     contextWindow: effectiveModel.contextWindow,
     summarize: options.summarize,
     models: options.summarize
@@ -1395,25 +1403,28 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           createId,
           documents: () => documents,
           ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
+          completedAttempts: completedCompactionAttempts,
         }),
     onSummary: () => {
+      completedCompactionAttempts.clear();
       restoreRecentSkillContent = true;
     },
     onCompaction: options.onCompaction,
     now: () => now().getTime(),
   });
-  agent.transformContext = async (messages, signal) => {
-    const safeguarded = await safeguards.transformContext(messages);
-    const compacted = await compaction.transformContext(messages, signal);
-    return safeguarded.length === messages.length ? compacted : [...compacted, ...safeguarded.slice(messages.length)];
+  const continueWithoutPreparation = agent.continue.bind(agent);
+  agent.continue = async () => {
+    await compaction.prepareTurn();
+    await continueWithoutPreparation();
   };
+  agent.transformContext = async (messages) => safeguards.transformContext(messages);
   agent.streamFunction = composeModelCallMiddleware(base, [
+    asMiddleware(compaction.wrapStreamFn),
     createToolResultTrimmerMiddleware({
       allowImageBlocks: options.allowImageBlocks,
     }),
     asMiddleware(safeguards.wrapStreamFn),
     latexDelimiterMiddleware,
-    asMiddleware(compaction.wrapStreamFn),
   ]);
 
   let state = lastLifecycleState(initialEvents, options.runId);
@@ -1486,8 +1497,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         clientContext: options.clientContext,
         recentSkills: options.recentSkills,
       });
-      const beforeCompaction = await record.history();
-      await compaction.prepareTurn(hydrateHistory(await materializeHistory(beforeCompaction)));
+      await compaction.prepareTurn();
       const retainedHistory = await record.history();
       const retainedMessageIds = retainedHistory.map((retained) => retained.id);
       await record.append({
@@ -1522,7 +1532,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       }
       agent.state.systemPrompt = committedContext.systemPrompt;
       agent.state.messages = hydrateHistory(await materializeHistory(await record.history()));
-      await agent.continue();
+      await continueWithoutPreparation();
     },
     steer: (message) => {
       agent.steer({

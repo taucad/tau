@@ -53,12 +53,41 @@ import { getFileContentMetadata } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
 import { parseRoute } from '#project-routes.js';
+import { mapConcurrent } from '#concurrency.js';
 
 const maximumCheckedWritePreconditions = 32;
 const maximumCheckedWriteBytes = 8 * 1024 * 1024;
 
 const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
   typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+
+/** Deepest path every given path lies at or inside, by segment. */
+const commonAncestorPath = (paths: readonly string[]): string => {
+  let segments = paths[0]!.split('/');
+  for (const path of paths.slice(1)) {
+    const other = path.split('/');
+    let shared = 0;
+    while (shared < segments.length && shared < other.length && segments[shared] === other[shared]) {
+      shared += 1;
+    }
+    segments = segments.slice(0, shared);
+  }
+  return segments.join('/');
+};
+
+/**
+ * Writes one batch may have in flight.
+ *
+ * A provider that coalesces writes into its own batched commit takes the whole
+ * batch at once — that is what lets IndexedDB drain a bulk import in one native
+ * transaction. Any other provider takes them one at a time, as the per-file
+ * lock sets used to make it do: a handle per file in flight is how a thousand
+ * of them exhaust a descriptor limit.
+ */
+const batchWriteConcurrency = (ownedFiles: ReadonlyArray<{ resolution: Pick<MountResolution, 'provider'> }>): number =>
+  ownedFiles.every(({ resolution }) => resolution.provider.capabilities.coalescesWrites === true)
+    ? ownedFiles.length
+    : 1;
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
@@ -420,6 +449,13 @@ export class MutationPipeline {
    * Write many already-resolved files as one batch: every write settles, then
    * the rejected paths alone lose their derivatives (Rule 5a).
    *
+   * The batch holds one lock set and one queue entry covering every path, so a
+   * provider that coalesces writes commits the whole batch natively (Rule 34)
+   * instead of once per file. Nothing else about the contract moves: each path
+   * keeps its own commit, cache and index bookkeeping, its own `fileWritten`
+   * and its own cross-tab notification, and a partial failure still leaves the
+   * settled writes durable while only the rejected paths lose derivatives.
+   *
    * @param ownedFiles - Resolved targets whose bytes the caller already owns.
    * @param context - Optional mutation source metadata for change-bus subscribers.
    * @returns Resolves when all writes complete.
@@ -432,10 +468,38 @@ export class MutationPipeline {
     }>,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const results = await Promise.allSettled(
-      ownedFiles.map(async ({ path, resolution, content }) =>
-        this.writeFileResolved({ path, resolution, data: content, context }),
-      ),
+    if (ownedFiles.length === 0) {
+      return;
+    }
+    const operations = ownedFiles.map(({ path, resolution }) => ({ path, resolution }));
+    const locks = this.batchLockPaths(operations);
+    const results = await this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async () => {
+        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
+        const settled = await mapConcurrent(
+          ownedFiles,
+          batchWriteConcurrency(ownedFiles),
+          async ({ path, resolution, content }): Promise<PromiseSettledResult<void>> => {
+            try {
+              await this.writeFileUnlocked({ path, resolution, data: content, context });
+              return { status: 'fulfilled', value: undefined };
+            } catch (error) {
+              return { status: 'rejected', reason: error };
+            }
+          },
+        );
+        for (const [index, result] of settled.entries()) {
+          if (result.status === 'fulfilled') {
+            const { path, resolution } = operations[index]!;
+            this._crossTabCoordinator.notifyMutation({
+              type: 'write',
+              path,
+              authority: this.physicalAuthority(resolution),
+            });
+          }
+        }
+        return settled;
+      }),
     );
     const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (firstFailure !== undefined) {
@@ -448,10 +512,7 @@ export class MutationPipeline {
           this._treeIndexes.removeFile(path);
         }
       }
-      const operationsByBackend = Map.groupBy(
-        ownedFiles.map(({ path, resolution }) => ({ path, resolution })),
-        ({ resolution }) => resolution.backend,
-      );
+      const operationsByBackend = Map.groupBy(operations, ({ resolution }) => resolution.backend);
       for (const [backend, operations] of operationsByBackend) {
         this.emitChangeEvent({ type: 'backendChanged', backend }, context, {
           operations,
@@ -1045,6 +1106,39 @@ export class MutationPipeline {
       }
     }
     return [...locks];
+  }
+
+  /**
+   * The locks one batch holds: per mount, the hierarchy of the deepest path
+   * that every operation in it lies at or inside.
+   *
+   * Exclusion is what a per-file set gave. Every mutation's own set carries its
+   * ancestors up to its mount prefix and its storage root's own token, so a peer
+   * writing any path inside the batch still conflicts on the tokens held here —
+   * while a thousand-file batch requests a handful of locks instead of nesting
+   * one `navigator.locks` request per file (the recursion in
+   * {@link withCrossTabLocks}, which a bulk import overflowed).
+   *
+   * @param operations - Every resolved path the batch writes.
+   * @returns Lock tokens covering the whole batch.
+   */
+  public batchLockPaths(operations: ReadonlyArray<{ path: string; resolution: MountResolution }>): string[] {
+    const byMount = Map.groupBy(operations, ({ resolution }) => resolution.entry);
+    return [
+      ...new Set(
+        [...byMount.values()].flatMap((group) =>
+          this.mutationLockPaths([
+            {
+              path: commonAncestorPath(group.map(({ path }) => path)) || '/',
+              resolution: {
+                ...group[0]!.resolution,
+                path: commonAncestorPath(group.map(({ resolution }) => resolution.path)),
+              },
+            },
+          ]),
+        ),
+      ),
+    ];
   }
 
   public physicalAuthority(resolution: MountResolution): PhysicalAuthority {

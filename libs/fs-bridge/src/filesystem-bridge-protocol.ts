@@ -262,6 +262,7 @@ const providerCapabilitiesSchema: z.ZodType<ProviderCapabilities> = z.looseObjec
   quotaBased: z.boolean(),
   // Version-1 peers sent only the three booleans. Current providers include durability.
   durability: durabilityClassSchema.optional(),
+  coalescesWrites: z.boolean().optional(),
 });
 
 const fileStatSchema: z.ZodType<FileStat> = z.custom<FileStat>((value) => {

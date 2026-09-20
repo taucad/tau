@@ -276,10 +276,10 @@ Never place `renderTimeout` in kernel render options, worker runtime definitions
 
 The framework builds higher-level operations from these primitives internally:
 
-- `ensureDirectoryExists(path)` via `mkdir(path, { recursive: true })`
+- `ensureDir(path)` via `mkdir(path, { recursive: true })`
 - `readFiles(paths)` via `Promise.all(paths.map(readFile))`
-- `getDirectoryContents(dir)` via `readdir(dir)` + `Promise.all(names.map(readFile))`
-- `getDirectoryStat(dir)` via `readdir(dir)` + `Promise.all(names.map(stat))`
+- `readdirContents(dir)` via `readdir(dir)` + file reads
+- `readdirStat(dir)` via `readdir(dir)` + `Promise.all(names.map(stat))`
 
 Convenience constructors (all opaque, transport-ready): `fromNodeFs(basePath)`, `fromMemoryFs()`, `fromFsLike(fsLike)`, `fromBrowserFs(...)`, and `fromFileSystemBridge(openConnection)`. `fromFsLike` adapts an already-confined filesystem and does not accept an authority root. The bridge factory opens a fresh scoped connection for each runtime binding or initialize retry.
 

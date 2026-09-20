@@ -14,7 +14,7 @@ import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 import type { ChatLogExpectation, LogRecord } from '#support/chat-admission-log.js';
-import { foldChatLog, shapeOf } from '#support/chat-admission-log.js';
+import { foldChatLog } from '#support/chat-admission-log.js';
 import {
   composerSelector,
   dismissCookies,
@@ -54,25 +54,14 @@ export const chatLog = async (chatId: string): Promise<readonly LogRecord[]> => 
 };
 
 /**
- * The settlement each run of one chat ended with, oldest run first.
- *
- * @param chatId - The chat to read.
- * @returns One kind per run, `'none'` for a run that never settled.
- */
-export const settlementKinds = async (chatId: string): Promise<readonly string[]> => {
-  const records = await chatLog(chatId);
-  return [...new Set(records.map((record) => record.runId))].map((runId) => shapeOf(records, runId).settlement);
-};
-
-/**
  * Assert the admission and attempt invariants over one chat's log, waiting for
  * them to hold.
  *
- * The last run's settlement is written as its turn leaves `finishing`, a moment
- * after its reply is on screen, so a single read races it: every row of this
- * file failed with `settlements: 0` on the last run when the machine was
- * loaded. Waiting cannot hide a missing settlement — a run that never settles
- * still fails the row, it just takes the timeout to say so.
+ * The last attempt's settlement is written as its turn leaves `finishing`, a
+ * moment after its reply is on screen, so a single read races it: every row of
+ * this file failed with `settlements: 0` on the last run when the machine was
+ * loaded. Waiting cannot hide a missing settlement — an attempt that never
+ * settles still fails the row, it just takes the timeout to say so.
  *
  * @param chatId - The chat to read.
  * @param expected - The run count, or the full expectation.
@@ -81,11 +70,11 @@ export const settlementKinds = async (chatId: string): Promise<readonly string[]
 export const expectLogInvariant = async (chatId: string, expected: number | ChatLogExpectation): Promise<void> => {
   const wanted: ChatLogExpectation = typeof expected === 'number' ? { runs: expected } : expected;
   await expect
-    .poll(async () => foldChatLog(await chatLog(chatId), wanted), { timeout: 60_000 })
+    .poll(async () => foldChatLog(await chatLog(chatId), wanted), { timeout: wanted.timeoutMilliseconds ?? 60_000 })
     .toEqual({
       runs: wanted.runs,
       ...(wanted.settlements === undefined ? {} : { settlements: wanted.settlements }),
-      ...(wanted.executions === undefined ? {} : { executions: wanted.executions }),
+      ...(wanted.attempts === undefined ? {} : { attempts: wanted.attempts }),
       violations: [],
     });
 };
@@ -225,12 +214,15 @@ export const editFirstMessage = async (suffix: string): Promise<void> => {
   await target.press(editComposer, 'Enter');
 };
 
-/*
- * The error card's one continuing action. A refusal the host can resume reads
- * *Resume* (the paused-turn card); one it cannot reads *Try again*. Both press
- * the same gesture, and which it is belongs to the row's assertions, not here.
+/**
+ * The error card's one continuing action.
+ *
+ * A refusal the host can resume reads *Resume* (the paused-turn card); one it
+ * cannot reads *Try again*. Both press the same gesture, and which it is
+ * belongs to the row's assertions, not here — so one locator, owned here rather
+ * than copied into each spec that waits for the card.
  */
-const continueAction = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
+export const continueAction = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
 
 /**
  * Refuse the next provider call, send `text`, and wait for the error card.

@@ -27,10 +27,10 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { composerSelector, pdfModelName, selectModel, sendDraft } from '#support/chat-attachments.js';
-import { settlementTypes } from '#support/chat-admission-log.js';
 import {
   chatLog,
   completeFirstTurn,
+  continueAction,
   editFirstMessage,
   expectLogInvariant,
   expectNoAdmissionRefusal,
@@ -60,27 +60,6 @@ const expectAsksByTurn = async (asks: ReadonlyArray<readonly [string, number]>):
   expect(await gatewayAsksByTurn()).toEqual(asks.map(([turn, count]) => ({ turn, asks: count })));
 };
 
-/*
- * `expectLogInvariant` cannot speak for a *reopened* run. Its fold treats a
- * second `failed` row, or any non-reopening lifecycle row after a settlement,
- * as illegal — and that is exactly what a second attempt of one run writes
- * (`chat-admission-log.ts` `shapeOf`: `duplicateLifecycle`, `afterSettlement`).
- * Rows that resume a run therefore assert its settlements and its run count
- * directly. See the cross-lane request in W8b's report.
- */
-
-/** Every settlement one chat's log holds, oldest first, attempts included. */
-const settlementsOf = async (chatId: string): Promise<readonly string[]> => {
-  const records = await chatLog(chatId);
-  return records.filter((record) => settlementTypes.has(record.type)).map((record) => record.type);
-};
-
-/** How many distinct runs one chat's log holds. */
-const runCountOf = async (chatId: string): Promise<number> => {
-  const records = await chatLog(chatId);
-  return new Set(records.map((record) => record.runId)).size;
-};
-
 /** How many rewinds one chat's log records; a continuation records none. */
 const rewindCountOf = async (chatId: string): Promise<number> => {
   const records = await chatLog(chatId);
@@ -104,16 +83,6 @@ const sendWhileLive = async (text: string): Promise<void> => {
   await target.type(composer, text);
   await target.press(composer, 'Enter');
 };
-
-/**
- * The card's continuation button.
- *
- * One locator for both spellings, because the label states the behaviour the
- * gesture will get: `Resume` when the host can continue the run,
- * `Try again` when it cannot (`chat-error-paused-turn.tsx:84-93`). Both call
- * `continueChat()`.
- */
-const continueAction = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
 
 test('sends a second plain message after a completed turn', async () => {
   const [chatId] = await openChat(twoTurnScript);
@@ -223,10 +192,11 @@ test('edits a turn after resuming a refused one', async () => {
   await expectNoAdmissionRefusal();
   /* Two runs, three attempts: the refused turn's continuation keeps its run,
    * and only the edit mints a new one. */
-  await expect
-    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
-    .toEqual(['turn.failed', 'turn.finalized', 'turn.finalized']);
-  expect(await runCountOf(chatId!)).toBe(2);
+  await expectLogInvariant(chatId!, {
+    runs: 2,
+    attempts: [2, 1],
+    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
+  });
 });
 
 test('edits twice in a row after a completed turn', async () => {
@@ -267,10 +237,11 @@ test('resumes a refused turn that follows a completed one', async () => {
   const texts = await gatewayUserTexts();
   expect(texts.at(-1)).toContain('Second plain message.');
   await expectNoAdmissionRefusal();
-  await expect
-    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
-    .toEqual(['turn.finalized', 'turn.failed', 'turn.finalized']);
-  expect(await runCountOf(chatId!)).toBe(2);
+  await expectLogInvariant(chatId!, {
+    runs: 2,
+    attempts: [1, 2],
+    settlements: ['turn.finalized', 'turn.failed', 'turn.finalized'],
+  });
   await expectAsksByTurn([
     ['First plain message.', 1],
     ['Second plain message.', 2],
@@ -297,10 +268,11 @@ test('resumes a refused turn twice', async () => {
   await expectNoAdmissionRefusal();
   /* One run, three attempts, three settlements. The retry verb used to rewind
    * and mint a fresh run id, which paid for the refused prefix again (W7). */
-  await expect
-    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
-    .toEqual(['turn.failed', 'turn.failed', 'turn.finalized']);
-  expect(await runCountOf(chatId!)).toBe(1);
+  await expectLogInvariant(chatId!, {
+    runs: 1,
+    attempts: [3],
+    settlements: ['turn.failed', 'turn.failed', 'turn.finalized'],
+  });
 });
 
 test('edits a turn before its revision is saved', async () => {
@@ -337,10 +309,11 @@ test('resumes, edits, then sends a new message', async () => {
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(4);
   await target.expectVisible(selectors.getByText('Reply three.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
-  await expect
-    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
-    .toEqual(['turn.failed', 'turn.finalized', 'turn.finalized', 'turn.finalized']);
-  expect(await runCountOf(chatId!)).toBe(3);
+  await expectLogInvariant(chatId!, {
+    runs: 3,
+    attempts: [2, 1, 1],
+    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized', 'turn.finalized'],
+  });
 });
 
 test('alternates turns between two chats of one project', async () => {
@@ -483,9 +456,12 @@ test('resumes a refused turn under its own run, rewinding nothing', async () => 
   /* One run, two attempts. *Try again* entered as a `regenerate` before W7: it
    * rewound, minted a fresh run id and paid for the refused prefix again, and
    * the host's record for the old id was orphaned so `drop` could not match it. */
-  expect(await runCountOf(chatId!)).toBe(1);
+  await expectLogInvariant(chatId!, {
+    runs: 1,
+    attempts: [2],
+    settlements: ['turn.failed', 'turn.finalized'],
+  });
   expect(await rewindCountOf(chatId!)).toBe(0);
-  await expect.poll(async () => settlementsOf(chatId!), { timeout: 60_000 }).toEqual(['turn.failed', 'turn.finalized']);
   /* Two attempts, two asks. The refused call never reached a reply, so the
    * continuation asks the provider again for the same turn — the charge the
    * person consented to by pressing the card's own verb. */
@@ -512,7 +488,7 @@ test('sends again after reloading while a turn is queued', async () => {
   /* I4: the document that placed the run is gone, so the new document's attach
    * *records* it — one `turn.failed` carrying `RUN_ABANDONED` — and never
    * drives it. The turn keeps its single ask; the reload spends nothing. */
-  await expect.poll(async () => settlementsOf(chatId!), { timeout: 120_000 }).toEqual(['turn.failed']);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
   await selectModel(pdfModelName);
@@ -523,8 +499,7 @@ test('sends again after reloading while a turn is queued', async () => {
     ['First plain message.', 1],
     ['Second plain message.', 1],
   ]);
-  expect(await runCountOf(chatId!)).toBe(2);
-  await expect.poll(async () => settlementsOf(chatId!), { timeout: 60_000 }).toEqual(['turn.failed', 'turn.finalized']);
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
   /* `RUN_ABANDONED` is the record the takeover just wrote, so the page reports
    * it; every other refusal in the union is still a failure here. */
   await expectNoAdmissionRefusal(['RUN_ABANDONED']);
@@ -546,7 +521,7 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
    * resumed. The takeover used to resume it on the next gesture's attach — a
    * full-price re-ask of a turn the person had already paid for, with the reply
    * they watched erased and no settlement written at all (Finding 1). */
-  await expect.poll(async () => settlementsOf(chatId!), { timeout: 120_000 }).toEqual(['turn.failed']);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
   /* The person's own gesture is what spends: the saved turn's card continues
@@ -568,9 +543,10 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
     ['First plain message.', 2],
     ['Second plain message.', 1],
   ]);
-  expect(await runCountOf(chatId!)).toBe(2);
-  await expect
-    .poll(async () => settlementsOf(chatId!), { timeout: 60_000 })
-    .toEqual(['turn.failed', 'turn.finalized', 'turn.finalized']);
+  await expectLogInvariant(chatId!, {
+    runs: 2,
+    attempts: [2, 1],
+    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
+  });
   await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });

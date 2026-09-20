@@ -171,6 +171,15 @@
         "forwardAllArgs": false
       }
     },
+    "clippy-mixed-binding": {
+      "executor": "nx:run-commands",
+      "description": "Lint the current mixed C ABI on the host; build-wasm separately checks the Emscripten target.",
+      "cache": false,
+      "options": {
+        "command": "PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/bindings/emscripten/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/mixed-clippy-target -- -D warnings",
+        "forwardAllArgs": false
+      }
+    },
     "test-node-host": {
       "executor": "nx:run-commands",
       "cache": false,

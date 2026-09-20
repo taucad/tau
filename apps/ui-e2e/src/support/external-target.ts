@@ -78,6 +78,13 @@ export type TargetTauBillingOperation = {
   readonly terminalRevision: string | null;
 };
 export type TargetWebGpuProfile = 'disabled' | 'hardware' | 'software';
+/** What the scripted gateway fixture needs beyond its turn script. */
+export type AgentHostGatewayFixtureOptions = {
+  /** Replaces the context window every catalog row advertises, so scripted usage can cross the compaction threshold. */
+  readonly contextWindow?: number;
+  /** Answers the host's compaction summary call (the one request it sends with no tools); `''` fails it. */
+  readonly summary?: string;
+};
 /** The AV-4 daemon fixture: an origin to navigate to, and a directory to read. */
 export type TargetTauServeFixture = {
   readonly origin: string;
@@ -160,7 +167,10 @@ export type UiBrowserCommands = {
   uiFocusTarget(selector: string, surface?: TargetSurface): Promise<void>;
   uiGrantPermissions(permissions: readonly string[]): Promise<void>;
   uiHoverTarget(selector: string, surface?: TargetSurface): Promise<void>;
-  uiInstallAgentHostGatewayFixture(script?: readonly GatewayScriptTurn[]): Promise<void>;
+  uiInstallAgentHostGatewayFixture(
+    script?: readonly GatewayScriptTurn[],
+    options?: AgentHostGatewayFixtureOptions,
+  ): Promise<void>;
   uiKeyboardPress(key: string, surface?: TargetSurface): Promise<void>;
   uiMouseClick(x: number, y: number, options?: TargetClickOptions, surface?: TargetSurface): Promise<void>;
   uiMouseDown(options?: { readonly button?: 'left' | 'middle' | 'right' }, surface?: TargetSurface): Promise<void>;
@@ -437,8 +447,10 @@ export const readTauServeFile = (relativePath: string): Promise<string | undefin
   server.commands.uiReadTauServeFile(relativePath);
 export const listTauServeChats = (): Promise<readonly string[]> => server.commands.uiListTauServeChats();
 /** Installs the Anthropic-wire gateway fixture; omit `script` for the default browser-host script. */
-export const installAgentHostGatewayFixture = (script?: readonly GatewayScriptTurn[]): Promise<void> =>
-  server.commands.uiInstallAgentHostGatewayFixture(script);
+export const installAgentHostGatewayFixture = (
+  script?: readonly GatewayScriptTurn[],
+  options?: AgentHostGatewayFixtureOptions,
+): Promise<void> => server.commands.uiInstallAgentHostGatewayFixture(script, options);
 export const readAgentHostGatewayRequests = (): Promise<unknown[]> => server.commands.uiReadAgentHostGatewayRequests();
 export const releaseAgentHostGatewayFixture = (): Promise<void> => server.commands.uiReleaseAgentHostGatewayFixture();
 /** Every `/v1/chat/...` path the page asked the (absent) API for since the fixture was installed. */

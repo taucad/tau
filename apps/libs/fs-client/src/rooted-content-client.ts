@@ -167,9 +167,10 @@ export const createRootedContentClient = <Consumer extends string>(input: {
       if (opened === generation) {
         releases.push(connection.dispose);
       } else {
-        /* Released while this one was still opening; closing it here leaks no port,
-         * and the caller's own call answers on a connection nobody else holds. */
+        /* Released while this one was still opening; close it and reject the
+         * pending call before it can use the released port. */
         connection.dispose();
+        throw new DOMException('The rooted connection was released before opening completed.', 'AbortError');
       }
       return connection;
     })();

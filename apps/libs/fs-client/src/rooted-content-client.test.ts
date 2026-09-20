@@ -217,16 +217,34 @@ describe('rooted content client', () => {
     expect(callsOn(opener.opened.get('/projects/proj_a'), 'stat')).toEqual([['tau.json']]);
   });
 
-  it('should close a connection that finishes opening after a release', async () => {
+  it('should abort a call whose connection finishes opening after a release', async () => {
     const opener = recordingOpener();
     let admit = (): void => undefined;
+    let callsAfterDispose = 0;
     const admitted = new Promise<void>((resolve) => {
       admit = resolve;
     });
     const owner = createRootedContentClient({
       open: async (root, consumer) => {
         await admitted;
-        return opener.open(root, consumer);
+        const connection = await opener.open(root, consumer);
+        let disposed = false;
+        return {
+          files: {
+            ...connection.files,
+            stat: async (path) => {
+              if (disposed) {
+                callsAfterDispose += 1;
+                throw new DOMException('The test connection is closed.', 'AbortError');
+              }
+              return connection.files.stat(path);
+            },
+          },
+          dispose: () => {
+            disposed = true;
+            connection.dispose();
+          },
+        };
       },
     });
     const client = owner.files('working-copy');
@@ -234,9 +252,13 @@ describe('rooted content client', () => {
     const pending = client.stat('/projects/proj_a/tau.json');
     owner.dispose();
     admit();
-    await pending;
+    await expect(pending).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'The rooted connection was released before opening completed.',
+    });
 
     expect(opener.disposed).toEqual(['/projects/proj_a']);
+    expect(callsAfterDispose).toBe(0);
   });
 
   it('should reopen a root whose first connection failed', async () => {

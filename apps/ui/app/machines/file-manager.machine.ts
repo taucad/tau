@@ -365,6 +365,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
 
 type ProjectConfigLookup = Awaited<ReturnType<typeof getProjectFileSystemConfig>>;
 
+// oxlint-disable complexity -- cancellation-safe resource handoff adds one lifecycle path to the existing initializer.
 const initializeServicesActor = fromSafeAsync<
   WorkerInitializedEvent | WebAccessUnavailableEvent,
   { context: FileManagerContext }
@@ -437,6 +438,7 @@ const initializeServicesActor = fromSafeAsync<
    * content.
    */
   const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  signal.throwIfAborted();
   const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
   const viewProxy = createFileSystemBridgeProxy(viewConnection);
   /*
@@ -456,101 +458,132 @@ const initializeServicesActor = fromSafeAsync<
       dependencyProxy.dispose();
     });
   };
-  const workerChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
-  const client = createComposedViewClient({
-    workspace: proxy,
-    view: viewProxy,
-    dependencies: dependencyProxy,
-    paths,
-  });
-
-  /*
-   * The first listing of the root, through the same composition every later
-   * listing of it uses (CI3). Read off the raw workspace surface it showed the
-   * control plane with no provenance, and `initialEntries` marks the root
-   * resolved — so that listing was the one the tree kept (blueprint Finding 3).
-   */
-  let initialEntries: FileEntry[] = [];
-  try {
-    const absolutePath = normalizePath(context.rootDirectory);
-    if (backend === 'webaccess') {
-      await proxy.pollExternalChanges(absolutePath);
+  let workerChangeChannel: WorkerChangeChannel | undefined;
+  let contentService: FileContentService | undefined;
+  let treeService: FileTreeService | undefined;
+  let ownsConstructed = true;
+  const disposeConstructed = (): void => {
+    if (!ownsConstructed) {
+      return;
     }
-    const rootNodes = await client.readDirectory(absolutePath);
-    for (const node of rootNodes) {
-      const common = {
-        path: node.name,
-        name: node.name,
-        size: node.size,
-        mtimeMs: node.mtimeMs,
-        isLoaded: false,
-        ...(node.provenance === undefined ? {} : { provenance: node.provenance }),
-      };
-      if (node.children !== undefined) {
-        initialEntries.push({ ...common, type: 'dir', isDirectoryResolved: false });
-      } else if (node.contentKind === 'text') {
-        initialEntries.push({ ...common, type: 'file', contentKind: 'text', lineCount: node.lineCount });
-      } else {
-        initialEntries.push({ ...common, type: 'file', contentKind: 'binary' });
-      }
-    }
-  } catch {
-    initialEntries = [];
-  }
-
-  const contentService = new FileContentService({
-    proxy: client,
-    paths,
-    channel: workerChangeChannel,
-    refreshGuard,
-    cacheOptions: {
-      maxEntries: fileCacheMaxEntries,
-      maxTotalBytes: fileCacheMaxTotalBytes,
-      maxSingleFileBytes: fileCacheMaxSingleFileBytes,
-    },
-    filePool,
-  });
-
-  const treeService = new FileTreeService({
-    proxy: client,
-    paths,
-    channel: workerChangeChannel,
-    visibility: visibilityProvider,
-    initialEntries,
-    onExternalPollTelemetry: context.onExternalPollTelemetry,
-  });
-
-  treeService.connectToContentService(contentService);
-
-  // The root listing carries the mount's own row; eagerly load each package
-  // directory inside it through the regular treeService so the file tree renders
-  // the bundled-types subtree without user interaction (cmd+click was the
-  // smoking gun before R1). The mount is populated by the FM worker before
-  // `workerReady`, so these listings always see the full set of kernel typings.
-  try {
-    const rootEntries = await treeService.listDirectory(bundledTypesWorkspaceRootSegment, { signal });
-    await Promise.all(
-      rootEntries
-        .filter((entry) => entry.isFolder)
-        .map(async (entry) =>
-          treeService.listDirectory(`${bundledTypesWorkspaceRootSegment}/${entry.name}`, { signal }),
-        ),
-    );
-  } catch {
-    // Bundled types remain lazily loadable through the regular tree path.
-  }
-  return {
-    type: 'workerInitialized',
-    configuredBackend: backend,
-    activeWorkspaceId,
-    activeWorkspaceName,
-    contentService,
-    treeService,
-    viewClient: client,
-    workerChangeChannel,
-    disposeComposedView,
+    ownsConstructed = false;
+    safeDispose(() => contentService?.dispose());
+    safeDispose(() => treeService?.dispose());
+    safeDispose(() => workerChangeChannel?.dispose());
+    disposeComposedView();
   };
+  const disposeOnAbort = (): void => {
+    disposeConstructed();
+  };
+  signal.addEventListener('abort', disposeOnAbort, { once: true });
+
+  try {
+    const initializedChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
+    workerChangeChannel = initializedChangeChannel;
+    const client = createComposedViewClient({
+      workspace: proxy,
+      view: viewProxy,
+      dependencies: dependencyProxy,
+      paths,
+    });
+
+    /*
+     * The first listing of the root, through the same composition every later
+     * listing of it uses (CI3). Read off the raw workspace surface it showed the
+     * control plane with no provenance, and `initialEntries` marks the root
+     * resolved — so that listing was the one the tree kept (blueprint Finding 3).
+     */
+    let initialEntries: FileEntry[] = [];
+    try {
+      const absolutePath = normalizePath(context.rootDirectory);
+      if (backend === 'webaccess') {
+        await proxy.pollExternalChanges(absolutePath);
+      }
+      const rootNodes = await client.readDirectory(absolutePath);
+      for (const node of rootNodes) {
+        const common = {
+          path: node.name,
+          name: node.name,
+          size: node.size,
+          mtimeMs: node.mtimeMs,
+          isLoaded: false,
+          ...(node.provenance === undefined ? {} : { provenance: node.provenance }),
+        };
+        if (node.children !== undefined) {
+          initialEntries.push({ ...common, type: 'dir', isDirectoryResolved: false });
+        } else if (node.contentKind === 'text') {
+          initialEntries.push({ ...common, type: 'file', contentKind: 'text', lineCount: node.lineCount });
+        } else {
+          initialEntries.push({ ...common, type: 'file', contentKind: 'binary' });
+        }
+      }
+    } catch {
+      initialEntries = [];
+    }
+    signal.throwIfAborted();
+
+    const initializedContentService = new FileContentService({
+      proxy: client,
+      paths,
+      channel: initializedChangeChannel,
+      refreshGuard,
+      cacheOptions: {
+        maxEntries: fileCacheMaxEntries,
+        maxTotalBytes: fileCacheMaxTotalBytes,
+        maxSingleFileBytes: fileCacheMaxSingleFileBytes,
+      },
+      filePool,
+    });
+    contentService = initializedContentService;
+
+    const initializedTreeService = new FileTreeService({
+      proxy: client,
+      paths,
+      channel: initializedChangeChannel,
+      visibility: visibilityProvider,
+      initialEntries,
+      onExternalPollTelemetry: context.onExternalPollTelemetry,
+    });
+    treeService = initializedTreeService;
+
+    initializedTreeService.connectToContentService(initializedContentService);
+
+    // The root listing carries the mount's own row; eagerly load each package
+    // directory inside it through the regular treeService so the file tree renders
+    // the bundled-types subtree without user interaction (cmd+click was the
+    // smoking gun before R1). The mount is populated by the FM worker before
+    // `workerReady`, so these listings always see the full set of kernel typings.
+    try {
+      const rootEntries = await initializedTreeService.listDirectory(bundledTypesWorkspaceRootSegment, { signal });
+      await Promise.all(
+        rootEntries
+          .filter((entry) => entry.isFolder)
+          .map(async (entry) =>
+            initializedTreeService.listDirectory(`${bundledTypesWorkspaceRootSegment}/${entry.name}`, { signal }),
+          ),
+      );
+    } catch {
+      // Bundled types remain lazily loadable through the regular tree path.
+    }
+    signal.throwIfAborted();
+    ownsConstructed = false;
+    return {
+      type: 'workerInitialized',
+      configuredBackend: backend,
+      activeWorkspaceId,
+      activeWorkspaceName,
+      contentService: initializedContentService,
+      treeService: initializedTreeService,
+      viewClient: client,
+      workerChangeChannel: initializedChangeChannel,
+      disposeComposedView,
+    };
+  } finally {
+    signal.removeEventListener('abort', disposeOnAbort);
+    disposeConstructed();
+  }
 });
+// oxlint-enable complexity
 
 const fileManagerActors = {
   connectWorkerActor,

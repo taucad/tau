@@ -144,6 +144,14 @@ describe('archive', () => {
     await expect(archive(counting, '', { maxBytes: 4096 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
     expect(read).toBeLessThanOrEqual(4096 + 1024);
   });
+
+  it('should refuse an oversized file before reading its bytes', async () => {
+    const provider = await seeded({ 'oversized.bin': 'x'.repeat(8192) });
+    const readFile = vi.spyOn(provider, 'readFile');
+
+    await expect(archive(provider, '', { maxBytes: 1024 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
+    expect(readFile).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

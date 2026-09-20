@@ -16,7 +16,7 @@ import type {
   WatchEvent,
   WorkspaceMutationContext,
 } from '#types.js';
-import { MutationPipeline, isProjectDirectoryPath } from '#mutation-pipeline.js';
+import { MutationPipeline, causeToMutationError, isProjectDirectoryPath } from '#mutation-pipeline.js';
 import type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
 import { RootedViews } from '#rooted-views.js';
 import type { RootedFileSystem } from '#rooted-views.js';
@@ -65,6 +65,7 @@ import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#proj
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
+const treeIndexBuildAttempts = 3;
 
 /** One project or checkout route staged for installation, before its provider is resolved. */
 type StagedRouteMount = {
@@ -568,7 +569,30 @@ export class WorkspaceFileService {
    * @returns The {@link BulkMoveResult} describing successes + the failure (if any).
    */
   public async bulkMove(edits: readonly BulkMoveEdit[], context?: WorkspaceMutationContext): Promise<BulkMoveResult> {
-    return this._pipeline.bulkMove(async (source, target) => this.move(source, target, context), edits);
+    const resolved = [];
+    const failures = new Map<BulkMoveEdit, BulkMoveResult['failed'][number]>();
+    for (const edit of edits) {
+      try {
+        const source = resolveAuthorityPath(edit.source);
+        const target = resolveAuthorityPath(edit.target);
+        this._assertGenericMutationPath(source, target);
+        this._assertGenericMutationPath(target, source);
+        resolved.push({
+          edit,
+          source,
+          target,
+          sourceResolution: this._resolveProvider(source),
+          targetResolution: this._resolveProvider(target),
+        });
+      } catch (error) {
+        failures.set(edit, { edit, error: causeToMutationError(error, edit.source, edit.target) });
+      }
+    }
+    const result = await this._pipeline.bulkMove(resolved, context);
+    for (const failure of result.failed) {
+      failures.set(failure.edit, failure);
+    }
+    return { moved: result.moved, failed: edits.flatMap((edit) => failures.get(edit) ?? []) };
   }
 
   /*
@@ -1550,13 +1574,23 @@ export class WorkspaceFileService {
    * @returns The warm index for that root.
    */
   private async _treeIndexFor(root: string): Promise<TreeIndex> {
-    const warm = this._treeIndexes.get(root);
-    if (warm !== undefined) {
-      return warm;
+    for (let attempt = 0; attempt < treeIndexBuildAttempts; attempt++) {
+      const warm = this._treeIndexes.get(root);
+      if (warm !== undefined) {
+        return warm;
+      }
+      const generation = this._treeIndexes.generation(root);
+      const { provider, path } = this._resolveProvider(root);
+      // oxlint-disable-next-line no-await-in-loop -- An invalidated cold scan must retry from current storage.
+      const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
+      const published = this._treeIndexes.build(root, stats, generation);
+      if (published !== undefined) {
+        return published;
+      }
     }
     const { provider, path } = this._resolveProvider(root);
     const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-    return this._treeIndexes.build(root, stats);
+    return this._treeIndexes.buildDetached(stats);
   }
 
   private _treeEntriesToNodes(entries: Map<string, TreeEntry>): FileTreeNode[] {

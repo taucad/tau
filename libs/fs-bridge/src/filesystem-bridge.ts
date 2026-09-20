@@ -6,6 +6,7 @@ import {
   getEventOrigin,
   isEventGloballyVisible,
   isWorkspaceMutationError,
+  policyAtRoot,
   RootedFileSystemError,
 } from '@taucad/filesystem';
 import { safeDispose } from '@taucad/utils/dispose';
@@ -839,23 +840,27 @@ function exposeFileSystemHandlers(
   /** Every served scoped port, with the authority root and the surface it asked for. */
   const scopedPorts = new Map<MessagePort, { readonly root: string; readonly consumer: RootedBridgeConsumer }>();
 
-  const classify = options?.policy?.classify;
+  const policy = options?.policy;
   /**
    * Whether a root-relative path is hidden, answered once per spelling per
    * dispatch rather than once per handle: delivery is a hot path (event-fanout
    * policy) and ports on one root all ask the same question.
    */
   const hiddenByPath = new Map<string, boolean>();
+  const policyByRoot = new Map<string, PathPolicy>();
   const hidden =
-    classify === undefined
+    policy === undefined
       ? undefined
-      : (relativePath: string): boolean => {
-          const memoized = hiddenByPath.get(relativePath);
+      : (root: string, relativePath: string): boolean => {
+          const key = `${root}\0${relativePath}`;
+          const memoized = hiddenByPath.get(key);
           if (memoized !== undefined) {
             return memoized;
           }
-          const answer = classify(relativePath).agentAccess === 'hidden';
-          hiddenByPath.set(relativePath, answer);
+          const rootPolicy = policyByRoot.get(root) ?? policyAtRoot(policy, root);
+          policyByRoot.set(root, rootPolicy);
+          const answer = rootPolicy.classify(relativePath).agentAccess === 'hidden';
+          hiddenByPath.set(key, answer);
           return answer;
         };
 
@@ -891,7 +896,14 @@ function exposeFileSystemHandlers(
         const masked = scope.consumer !== 'working-copy';
         const memoKey = `${masked ? 'masked' : 'whole'}\0${scope.root}`;
         if (!scopedByRoot.has(memoKey)) {
-          scopedByRoot.set(memoKey, scopeEventToRoot(event, scope.root, masked ? hidden : undefined));
+          scopedByRoot.set(
+            memoKey,
+            scopeEventToRoot(
+              event,
+              scope.root,
+              masked && hidden !== undefined ? (relativePath) => hidden(scope.root, relativePath) : undefined,
+            ),
+          );
         }
         const scoped = scopedByRoot.get(memoKey);
         if (scoped !== undefined) {

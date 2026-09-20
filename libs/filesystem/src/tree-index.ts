@@ -466,6 +466,9 @@ export class TreeIndexes {
   /** Absolute scan root to its index; in-memory paths are relative to the key. */
   private readonly _byRoot = new Map<string, TreeIndex>();
 
+  /** Mutations seen since each root's latest cold-build admission. */
+  private readonly _generationByRoot = new Map<string, number>();
+
   /** Live prefixes of the installed mounts, as the boundary check reads them. */
   private readonly _mountPrefixes: () => Iterable<string>;
 
@@ -483,23 +486,29 @@ export class TreeIndexes {
    * @param entries - Flat file entries relative to `root`.
    * @returns The built index.
    */
-  public build(root: string, entries: readonly FileStatEntry[]): TreeIndex {
-    const index = new TreeIndex();
-    index.build(
-      entries.map((entry) =>
-        entry.type === 'dir'
-          ? { path: entry.path, type: 'dir', size: entry.size, mtimeMs: entry.mtimeMs }
-          : {
-              path: entry.path,
-              type: 'file',
-              size: entry.size,
-              mtimeMs: entry.mtimeMs,
-              ...fileMetadataFields(entry),
-            },
-      ),
-    );
-    this._byRoot.set(normalizePath(root), index);
+  public build(root: string, entries: readonly FileStatEntry[]): TreeIndex;
+  public build(root: string, entries: readonly FileStatEntry[], expectedGeneration: number): TreeIndex | undefined;
+  public build(root: string, entries: readonly FileStatEntry[], expectedGeneration?: number): TreeIndex | undefined {
+    const normalizedRoot = normalizePath(root);
+    const index = this._build(entries);
+    if (expectedGeneration !== undefined && this.generation(normalizedRoot) !== expectedGeneration) {
+      return undefined;
+    }
+    this._byRoot.set(normalizedRoot, index);
     return index;
+  }
+
+  /** Build an index for one response without publishing it as a reusable root. */
+  public buildDetached(entries: readonly FileStatEntry[]): TreeIndex {
+    return this._build(entries);
+  }
+
+  /** Capture the generation that a cold scan must still match before publish. */
+  public generation(root: string): number {
+    const normalizedRoot = normalizePath(root);
+    const generation = this._generationByRoot.get(normalizedRoot) ?? 0;
+    this._generationByRoot.set(normalizedRoot, generation);
+    return generation;
   }
 
   /**
@@ -602,16 +611,16 @@ export class TreeIndexes {
   public rename(from: string, to: string): void {
     const source = normalizePath(from);
     const target = normalizePath(to);
-    for (const [root, index] of this._byRoot) {
+    for (const root of this._knownRoots()) {
       const relativeFrom = treeRelative(root, source);
       const relativeTo = treeRelative(root, target);
-      if (
-        relativeFrom !== undefined &&
-        relativeTo !== undefined &&
-        !this._crossesMount(root, source) &&
-        !this._crossesMount(root, target)
-      ) {
-        index.rename(relativeFrom, relativeTo);
+      const sourceInside = relativeFrom !== undefined && !this._crossesMount(root, source);
+      const targetInside = relativeTo !== undefined && !this._crossesMount(root, target);
+      if (sourceInside || targetInside) {
+        this._bump(root);
+      }
+      if (sourceInside && targetInside) {
+        this._byRoot.get(root)?.rename(relativeFrom, relativeTo);
       }
     }
   }
@@ -628,8 +637,9 @@ export class TreeIndexes {
    */
   public evict(absolutePath: string): void {
     const changed = normalizePath(absolutePath);
-    for (const root of this._byRoot.keys()) {
+    for (const root of this._knownRoots()) {
       if (treeRelative(changed, root) !== undefined || treeRelative(root, changed) !== undefined) {
+        this._bump(root);
         this._byRoot.delete(root);
       }
     }
@@ -642,6 +652,9 @@ export class TreeIndexes {
    * {@link evict}.
    */
   public clear(): void {
+    for (const root of this._knownRoots()) {
+      this._bump(root);
+    }
     this._byRoot.clear();
   }
 
@@ -654,9 +667,44 @@ export class TreeIndexes {
   }
 
   private _apply(absolutePath: string, update: (index: TreeIndex, relative: string) => void): void {
-    for (const { index, relative } of this._matching(normalizePath(absolutePath))) {
-      update(index, relative);
+    const normalized = normalizePath(absolutePath);
+    for (const root of this._knownRoots()) {
+      const relative = treeRelative(root, normalized);
+      if (relative === undefined || this._crossesMount(root, normalized)) {
+        continue;
+      }
+      this._bump(root);
+      const index = this._byRoot.get(root);
+      if (index !== undefined) {
+        update(index, relative);
+      }
     }
+  }
+
+  private _knownRoots(): Set<string> {
+    return new Set([...this._generationByRoot.keys(), ...this._byRoot.keys()]);
+  }
+
+  private _bump(root: string): void {
+    this._generationByRoot.set(root, (this._generationByRoot.get(root) ?? 0) + 1);
+  }
+
+  private _build(entries: readonly FileStatEntry[]): TreeIndex {
+    const index = new TreeIndex();
+    index.build(
+      entries.map((entry) =>
+        entry.type === 'dir'
+          ? { path: entry.path, type: 'dir', size: entry.size, mtimeMs: entry.mtimeMs }
+          : {
+              path: entry.path,
+              type: 'file',
+              size: entry.size,
+              mtimeMs: entry.mtimeMs,
+              ...fileMetadataFields(entry),
+            },
+      ),
+    );
+    return index;
   }
 
   /** Every index that may speak for `absolutePath`, with the path relative to its root. */

@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/assertion-client';
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { loadM3CorpusProfileV3 } from './profile-v3.mjs';
-import { requireEvaluationEnvelope } from './corpus.mjs';
+import { loadCurrentM3Campaign, requireEvaluationEnvelope } from './corpus.mjs';
 import { fixturePath, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
@@ -208,7 +208,8 @@ const f1CampaignRow = (sourceRow, binding) => {
   };
 };
 
-const loadDefaultInstalledCampaign = () => {
+// Retained prospective adapter for the immutable legacy profile; current CI uses the independent overlay below.
+export const loadProspectiveInstalledCampaign = () => {
   const profile = loadM3CorpusProfileV3(requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
   const rows = profile.rows.map((binding) => campaignRow(binding.sourceRow, binding));
   const f1Bindings = new Map(profile.f1.rows.map((row) => [row.id, row]));
@@ -259,6 +260,14 @@ const materializeCampaignRow = (campaignPath, row) => {
       },
     },
     ...(row.warmup ? { warmup: materializeCampaignRow(campaignPath, row.warmup) } : {}),
+  };
+};
+
+const loadDefaultInstalledCampaign = () => {
+  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
+  return {
+    ...campaign,
+    rows: campaign.rows.map((row) => materializeCampaignRow(campaign.sourcePath, row)),
   };
 };
 

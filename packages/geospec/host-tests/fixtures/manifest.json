@@ -470,6 +470,86 @@
       "path": "packages/geospec-engine/fixtures/selector/unnamed-import/model.step",
       "byteLength": 34413,
       "sha256": "9327a306b7bd4130d7a1b083de62e2ee7d78d01935cc4c4a173e9c1933afa856"
+    },
+    "packages/geospec/host-tests/fixtures/data/9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60": {
+      "path": "packages/geospec/host-tests/fixtures/data/9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60",
+      "byteLength": 481,
+      "sha256": "9e6002828c855b60b8acab3fcb553f25a2a5f4c4dec50e90388de8aeb223cc60"
+    },
+    "packages/geospec/host-tests/fixtures/data/44e591ff58befb886e14f45d6b795bd74a669e8c2e3604e2fb0b7687ec9d45a8": {
+      "path": "packages/geospec/host-tests/fixtures/data/44e591ff58befb886e14f45d6b795bd74a669e8c2e3604e2fb0b7687ec9d45a8",
+      "byteLength": 54,
+      "sha256": "44e591ff58befb886e14f45d6b795bd74a669e8c2e3604e2fb0b7687ec9d45a8"
+    },
+    "packages/geospec/host-tests/fixtures/data/d04abc048f84bdb394034a2bcb18a1140528740e05d7ea080a3c8fba77e3c18e": {
+      "path": "packages/geospec/host-tests/fixtures/data/d04abc048f84bdb394034a2bcb18a1140528740e05d7ea080a3c8fba77e3c18e",
+      "byteLength": 54,
+      "sha256": "d04abc048f84bdb394034a2bcb18a1140528740e05d7ea080a3c8fba77e3c18e"
+    },
+    "packages/geospec/host-tests/fixtures/data/e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29": {
+      "path": "packages/geospec/host-tests/fixtures/data/e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29",
+      "byteLength": 272,
+      "sha256": "e8f81bc96be92adb804d4805d95226654813c819d5e2e5689b4076072c115e29"
+    },
+    "packages/geospec/host-tests/fixtures/data/9c52077b0e6f734e346ed8b02a1c7b64e4208453d68c1f603b7ad91756464256": {
+      "path": "packages/geospec/host-tests/fixtures/data/9c52077b0e6f734e346ed8b02a1c7b64e4208453d68c1f603b7ad91756464256",
+      "byteLength": 272,
+      "sha256": "9c52077b0e6f734e346ed8b02a1c7b64e4208453d68c1f603b7ad91756464256"
+    },
+    "packages/geospec/host-tests/fixtures/data/53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d": {
+      "path": "packages/geospec/host-tests/fixtures/data/53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d",
+      "byteLength": 274,
+      "sha256": "53511679969b7e28cea94878c19130a15e866491998beac08de85c31ea36287d"
+    },
+    "packages/geospec/host-tests/fixtures/data/d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c": {
+      "path": "packages/geospec/host-tests/fixtures/data/d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c",
+      "byteLength": 328,
+      "sha256": "d0e263bfc72c4d7bef5635b186c8d98404b461edbcf2dbd82f7b8c617737546c"
+    },
+    "packages/geospec/host-tests/fixtures/data/2d563a9054aa0fd031921c2684e7ecc0b61e4d3ce0e95b65d4bd3f1e9d141ee3": {
+      "path": "packages/geospec/host-tests/fixtures/data/2d563a9054aa0fd031921c2684e7ecc0b61e4d3ce0e95b65d4bd3f1e9d141ee3",
+      "byteLength": 274,
+      "sha256": "2d563a9054aa0fd031921c2684e7ecc0b61e4d3ce0e95b65d4bd3f1e9d141ee3"
+    },
+    "packages/geospec/host-tests/fixtures/data/bb5e8b4360348939c607b528a7861f7d514e119a0846652bf536afa59e852897": {
+      "path": "packages/geospec/host-tests/fixtures/data/bb5e8b4360348939c607b528a7861f7d514e119a0846652bf536afa59e852897",
+      "byteLength": 270,
+      "sha256": "bb5e8b4360348939c607b528a7861f7d514e119a0846652bf536afa59e852897"
+    },
+    "packages/geospec/host-tests/fixtures/data/15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad": {
+      "path": "packages/geospec/host-tests/fixtures/data/15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad",
+      "byteLength": 12672,
+      "sha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad"
+    },
+    "packages/geospec/host-tests/fixtures/data/f7a5e8964c5f72fdcb0ca1e6f39fa2162dbdb7215384f83eb6ce1489808d4e5b": {
+      "path": "packages/geospec/host-tests/fixtures/data/f7a5e8964c5f72fdcb0ca1e6f39fa2162dbdb7215384f83eb6ce1489808d4e5b",
+      "byteLength": 12663,
+      "sha256": "f7a5e8964c5f72fdcb0ca1e6f39fa2162dbdb7215384f83eb6ce1489808d4e5b"
+    },
+    "packages/geospec/host-tests/fixtures/data/29885a5441bd1eadd0d56f203f26d9e1f38d704974b71cd034375551156b21b7": {
+      "path": "packages/geospec/host-tests/fixtures/data/29885a5441bd1eadd0d56f203f26d9e1f38d704974b71cd034375551156b21b7",
+      "byteLength": 12672,
+      "sha256": "29885a5441bd1eadd0d56f203f26d9e1f38d704974b71cd034375551156b21b7"
+    },
+    "packages/geospec/host-tests/fixtures/data/e7dcd2561b927e107fccba84aaf247b9af1ab159a4c81ccb0ff9bce5baa2363f": {
+      "path": "packages/geospec/host-tests/fixtures/data/e7dcd2561b927e107fccba84aaf247b9af1ab159a4c81ccb0ff9bce5baa2363f",
+      "byteLength": 12672,
+      "sha256": "e7dcd2561b927e107fccba84aaf247b9af1ab159a4c81ccb0ff9bce5baa2363f"
+    },
+    "packages/geospec/host-tests/fixtures/data/467252ee5a3c75909e6b621974c94d23acaf80b0fe55f9c57e200ce2b3668180": {
+      "path": "packages/geospec/host-tests/fixtures/data/467252ee5a3c75909e6b621974c94d23acaf80b0fe55f9c57e200ce2b3668180",
+      "byteLength": 12663,
+      "sha256": "467252ee5a3c75909e6b621974c94d23acaf80b0fe55f9c57e200ce2b3668180"
+    },
+    "packages/geospec/host-tests/fixtures/data/59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521": {
+      "path": "packages/geospec/host-tests/fixtures/data/59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521",
+      "byteLength": 878030,
+      "sha256": "59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521"
+    },
+    "packages/geospec/host-tests/m3-corpus/current-authority-v3.json": {
+      "path": "packages/geospec/host-tests/fixtures/data/fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
+      "byteLength": 1620319,
+      "sha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51"
     }
   }
 }

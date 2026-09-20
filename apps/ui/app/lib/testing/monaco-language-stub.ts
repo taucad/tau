@@ -14,6 +14,7 @@
  * leaky test is loud.
  */
 import type * as Monaco from 'monaco-editor';
+import { Topic } from '@taucad/events';
 
 type OnLanguageCallback = () => void;
 type ModelLanguageChangeEvent = {
@@ -41,10 +42,10 @@ export type MonacoTestStub = {
 const noopDisposable: Monaco.IDisposable = { dispose: () => undefined };
 
 export function createMonacoTestStub(): MonacoTestStub {
-  const onLanguageCallbacks = new Map<string, Set<OnLanguageCallback>>();
+  const onLanguageTopics = new Map<string, Topic<void>>();
   const firedLanguageIds = new Set<string>();
-  const createModelCallbacks = new Set<(model: Monaco.editor.ITextModel) => void>();
-  const languageChangeCallbacks = new Set<(event: ModelLanguageChangeEvent) => void>();
+  const createdModels = new Topic<Monaco.editor.ITextModel>({ name: 'monaco-stub:onDidCreateModel' });
+  const languageChanges = new Topic<ModelLanguageChangeEvent>({ name: 'monaco-stub:onDidChangeModelLanguage' });
   const models = new Map<string, StubModel>();
 
   const fireOnLanguage = (id: string): void => {
@@ -52,13 +53,7 @@ export function createMonacoTestStub(): MonacoTestStub {
       return;
     }
     firedLanguageIds.add(id);
-    const callbacks = onLanguageCallbacks.get(id);
-    if (!callbacks) {
-      return;
-    }
-    for (const callback of callbacks) {
-      callback();
-    }
+    onLanguageTopics.get(id)?.emit();
   };
 
   const createStubModel = (uri: string, languageId: string): StubModel => {
@@ -80,9 +75,7 @@ export function createMonacoTestStub(): MonacoTestStub {
           return;
         }
         currentLanguage = next;
-        for (const callback of languageChangeCallbacks) {
-          callback({ model: model as unknown as Monaco.editor.ITextModel, oldLanguage: previous });
-        }
+        languageChanges.emit({ model: model as unknown as Monaco.editor.ITextModel, oldLanguage: previous });
         fireOnLanguage(next);
       },
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal shape; unused fields throw if read
@@ -99,23 +92,18 @@ export function createMonacoTestStub(): MonacoTestStub {
     },
     languages: {
       onLanguage(id: string, callback: OnLanguageCallback): Monaco.IDisposable {
-        let callbacks = onLanguageCallbacks.get(id);
-        if (!callbacks) {
-          callbacks = new Set();
-          onLanguageCallbacks.set(id, callbacks);
+        let topic = onLanguageTopics.get(id);
+        if (!topic) {
+          topic = new Topic<void>({ name: `monaco-stub:onLanguage:${id}` });
+          onLanguageTopics.set(id, topic);
         }
-        callbacks.add(callback);
+        const unsubscribe = topic.subscribe(callback);
 
         if (firedLanguageIds.has(id)) {
           callback();
         }
 
-        const ownerCallbacks = callbacks;
-        return {
-          dispose(): void {
-            ownerCallbacks.delete(callback);
-          },
-        };
+        return { dispose: unsubscribe };
       },
       register(): void {
         // No-op: stub does not validate language metadata
@@ -186,29 +174,17 @@ export function createMonacoTestStub(): MonacoTestStub {
         const resolvedUri = uri?.toString() ?? `inmemory://stub/${models.size}`;
         const model = createStubModel(resolvedUri, languageId ?? 'plaintext');
         models.set(resolvedUri, model);
-        for (const callback of createModelCallbacks) {
-          callback(model as unknown as Monaco.editor.ITextModel);
-        }
+        createdModels.emit(model as unknown as Monaco.editor.ITextModel);
         if (languageId) {
           fireOnLanguage(languageId);
         }
         return model as unknown as Monaco.editor.ITextModel;
       },
       onDidCreateModel(callback: (model: Monaco.editor.ITextModel) => void): Monaco.IDisposable {
-        createModelCallbacks.add(callback);
-        return {
-          dispose(): void {
-            createModelCallbacks.delete(callback);
-          },
-        };
+        return { dispose: createdModels.subscribe(callback) };
       },
       onDidChangeModelLanguage(callback: (event: ModelLanguageChangeEvent) => void): Monaco.IDisposable {
-        languageChangeCallbacks.add(callback);
-        return {
-          dispose(): void {
-            languageChangeCallbacks.delete(callback);
-          },
-        };
+        return { dispose: languageChanges.subscribe(callback) };
       },
       onWillDisposeModel(): Monaco.IDisposable {
         return noopDisposable;
@@ -228,17 +204,18 @@ export function createMonacoTestStub(): MonacoTestStub {
     __createModel(uri, languageId) {
       const model = createStubModel(uri, languageId);
       models.set(uri, model);
-      for (const callback of createModelCallbacks) {
-        callback(model as unknown as Monaco.editor.ITextModel);
-      }
+      createdModels.emit(model as unknown as Monaco.editor.ITextModel);
       fireOnLanguage(languageId);
       return model;
     },
     __reset() {
-      onLanguageCallbacks.clear();
+      for (const topic of onLanguageTopics.values()) {
+        topic.dispose();
+      }
+      onLanguageTopics.clear();
       firedLanguageIds.clear();
-      createModelCallbacks.clear();
-      languageChangeCallbacks.clear();
+      createdModels.dispose();
+      languageChanges.dispose();
       models.clear();
     },
   };

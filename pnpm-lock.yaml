@@ -3949,9 +3949,6 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
-      '@taucad/tau-examples':
-        specifier: workspace:*
-        version: link:../../../libs/tau-examples
       jsdom:
         specifier: 'catalog:'
         version: 26.0.0(canvas@3.2.3)(supports-color@10.2.2)

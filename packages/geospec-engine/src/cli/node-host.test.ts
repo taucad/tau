@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- VM paths are object keys here. */
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

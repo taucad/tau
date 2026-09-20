@@ -83,7 +83,8 @@ describe('ChatContextIndicatorDisplay', () => {
     const meter = screen.getByRole('meter');
     await userEvent.hover(meter);
 
-    expect((await screen.findAllByText('Overflow retry trimmed context')).length).toBeGreaterThanOrEqual(1);
+    const overflowRows = await screen.findAllByText('Overflow retry trimmed context');
+    expect(overflowRows.length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Trigger: provider overflow').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -102,7 +103,8 @@ describe('ChatContextIndicatorDisplay', () => {
     const meter = screen.getByRole('meter');
     await userEvent.hover(meter);
 
-    expect((await screen.findAllByText('Compaction scheduled next turn')).length).toBeGreaterThanOrEqual(1);
+    const scheduledRows = await screen.findAllByText('Compaction scheduled next turn');
+    expect(scheduledRows.length).toBeGreaterThanOrEqual(1);
   });
 
   it('should clamp aria-valuenow at 100 for overflow', () => {

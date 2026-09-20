@@ -1,8 +1,11 @@
+/* oxlint-disable no-restricted-imports -- the Nx plugin under test is workspace tooling under tools/, with no package specifier */
+
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CreateNodesContextV2 } from '@nx/devkit';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the Nx plugin under test is workspace tooling, not a project
 import { createNodesV2 } from '../../tools/tsgo.plugin.js';
 
 /**

@@ -33,9 +33,11 @@ export const getCaptchaComponentFromPlugins = (
   return undefined;
 };
 
+// oxlint-disable typescript/consistent-type-definitions -- declaration merging into the upstream `AuthPluginRegister` interface only works with `interface`; a type alias silently fails to widen and leaves `useAuth().plugins` as `any[]`.
 declare module '@better-auth-ui/core' {
   /** Widens `useAuth().plugins` to the shadcn-typed `AuthPlugin`. */
   interface AuthPluginRegister {
     shadcn: AuthPlugin;
   }
 }
+// oxlint-enable typescript/consistent-type-definitions

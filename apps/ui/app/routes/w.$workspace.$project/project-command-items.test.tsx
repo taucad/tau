@@ -78,7 +78,7 @@ vi.mock('#components/ui/sonner.js', () => ({
     promise: vi.fn(
       async (
         work: Promise<unknown> | (() => Promise<unknown>),
-        messages: { success?: (value: unknown) => unknown; error?: unknown },
+        messages: { success?: (value: unknown) => unknown; error?: string | ((error: unknown) => unknown) },
       ) => {
         try {
           const value = await (typeof work === 'function' ? work() : work);

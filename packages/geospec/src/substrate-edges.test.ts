@@ -120,7 +120,7 @@ describe('matcher budget private test controls', () => {
   it('should accept a private wall backstop', () => {
     const diagnostics = withMatcherBudget({
       matcher: 'stalled',
-      wallBackstop: 0.000_001,
+      wallBackstop: 0.000001,
       evaluate: () => {
         const start = Date.now();
         while (Date.now() <= start) {

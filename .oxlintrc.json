@@ -32,11 +32,19 @@
     "experiments/**",
     // Opt-in benchmark/parity CLIs run by hand against a locally built native
     // addon; unpublished (`files` excludes them) and outside every tsconfig.
-    "bench/**",
+    "packages/plugins/opencascade-native/bench/**",
     // Compute-reuse baseline harness (charter W0): opt-in benchmark code
     // reaching runtime-internal seams through a loader hook; outside tsconfig.
     "apps/runtime-e2e/src/compute-baseline/harness/**",
+    // Frozen matcher-performance POC (docs/research/geospec-matcher-performance-poc.md):
+    // its `#mesh/*` modules moved out in the engine extraction (117b66d66), so it no
+    // longer resolves or runs. Kept as the artifact its research cites, not linted.
+    "packages/geospec-engine/experiments/matcher-performance/**",
     "**/*.jscad.js",
+    // Same class: the design-story splash imports these JSCAD model sources with `?raw`
+    // and checks them against a baked evidence digest, so any byte change makes the
+    // splash throw "Design story evidence is stale". They are model data, not app code.
+    "apps/ui/app/components/geometry/splash/planetary/**",
     "**/fixtures/scripts/**"
   ],
   "plugins": [
@@ -986,6 +994,15 @@
   },
   "overrides": [
     {
+      // The compiler reports a real redeclaration (ts(2451)); the core rule only misreads a
+      // type and a same-named value (`type Placement` + `const Placement`). Mirrors
+      // typescript-eslint's `eslint-recommended`.
+      "files": ["**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "no-redeclare": "off"
+      }
+    },
+    {
       /*
        * NestJS overrides:
        * - consistent-type-imports: off — DI requires runtime imports, type-only imports would break injection.
@@ -1313,10 +1330,16 @@
       // CAD examples may not always follow typical conventions. For example, it's
       // easier to read d_x rather than dX, so we relax the rules here.
       // Multi-file Tau examples are also editor-loadable fixture trees, so they
-      // use local relative imports rather than Tau-only package aliases.
-      "files": ["libs/tau-examples/src/kernels/**/*.ts"],
+      // use local relative imports rather than Tau-only package aliases. Bundler
+      // fixtures also author `.tsx`/`.js`/`.jsx` modules, pragma JSX and directory
+      // index imports that the library tsconfig cannot type, so `any` operands are
+      // warnings like the other unsafe-`any` rules.
+      "files": ["libs/tau-examples/src/kernels/**/*.{ts,tsx,js,jsx}"],
       "rules": {
         "no-restricted-imports": "off",
+        "tau-lint/no-impl-in-index": "off",
+        "react/react-in-jsx-scope": "off",
+        "@typescript-eslint/restrict-plus-operands": "warn",
         "import/extensions": "off",
         "import/consistent-type-specifier-style": "off",
         "no-barrel-files/no-barrel-files": "off",

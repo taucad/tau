@@ -59,7 +59,7 @@ const harness = (options?: { readonly budget?: number; readonly closeNever?: boo
   });
 
   const actor = createActor(sessionsMachine.provide({ actors: { projectSession } }), {
-    input: { ...(options?.budget === undefined ? {} : { budget: options.budget }) },
+    input: options?.budget === undefined ? {} : { budget: options.budget },
   });
   const emitted: SessionsMachineEmitted[] = [];
   for (const type of ['liveSetChanged', 'budgetRefused', 'quiesced'] as const) {

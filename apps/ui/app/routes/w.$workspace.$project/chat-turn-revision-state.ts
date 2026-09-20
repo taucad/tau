@@ -1,6 +1,6 @@
 import type { MyMetadata } from '@taucad/chat';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import type { ChatSidebarState } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 
 /** One message's persisted lifecycle status. @public */
 export type MessageStatus = NonNullable<MyMetadata['status']>;

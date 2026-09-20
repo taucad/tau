@@ -22,7 +22,7 @@ const logDepthFragmentChunk = '#include <logdepthbuf_fragment>';
 
 const replaceExactlyOnce = (source: string, replacement: string): string => {
   const first = source.indexOf(logDepthFragmentChunk);
-  if (first < 0 || first !== source.lastIndexOf(logDepthFragmentChunk)) {
+  if (first === -1 || first !== source.lastIndexOf(logDepthFragmentChunk)) {
     throw new Error('GLTF surface depth bias requires exactly one <logdepthbuf_fragment> chunk');
   }
   return `${source.slice(0, first)}${replacement}${source.slice(first + logDepthFragmentChunk.length)}`;

@@ -79,7 +79,10 @@ const runMetadataChild = async (directory: string, command: 'metadata-put' | 'me
   const output: string[] = [];
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => output.push(chunk));
-  const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+  // oxlint-disable-next-line typescript/no-restricted-types -- a child killed by a signal closes with a null exit code.
+  const code = await new Promise<number | null>((resolve) => {
+    child.on('close', resolve);
+  });
   expect(code).toBe(0);
   expect(output.join('')).toContain('"status"');
 };

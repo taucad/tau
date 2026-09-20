@@ -1,3 +1,5 @@
+/* oxlint-disable no-restricted-imports -- standalone scripts use relative imports */
+
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,9 +17,8 @@ import {
   resolveRepos,
   setRepoDescription,
   unforkRepo,
-  type PrivateCatalog,
-  type PublicCatalog,
 } from './lib.ts';
+import type { PrivateCatalog, PublicCatalog } from './lib.ts';
 
 vi.mock('node:child_process', () => ({ execSync: vi.fn(() => '') }));
 
@@ -25,6 +26,7 @@ const roots: string[] = [];
 
 const publicCatalog = (): PublicCatalog => ({
   version: 1,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- `repos_dir` keeps the repos.yaml wire spelling.
   repos_dir: 'repos',
   owner: 'taucad',
   groups: {
@@ -201,9 +203,10 @@ describe('strict validation', () => {
       undefined,
       /Group "brain" is forbidden/,
     ],
+    // oxlint-disable-next-line max-params -- it.each row arity: name, public catalog, private catalog, expected error
   ])('rejects %s', (_name, publicValue, privateValue, expected) => {
     const root = makeRoot({ public: publicValue, ...(privateValue && { private: privateValue }) });
-    expect(() => readManifest(root)).toThrow(expected as RegExp);
+    expect(() => readManifest(root)).toThrow(expected);
   });
 });
 
@@ -313,9 +316,15 @@ describe('catalog-aware commands', () => {
     const root = makeRoot();
     process.env['TAU_ROOT'] = root;
     const before = readFileSync(join(root, 'repos.yaml'), 'utf8');
-    expect(() => run(['add', 'example/new', '--catalog', 'all', '-d', 'No'])).toThrow(/cannot target all/);
-    expect(() => run(['remove', 'public-source', '--catalog', 'public'])).toThrow(/infers the owning catalog/);
-    expect(() => run(['add', 'example/new', '-d', 'No'])).toThrow(/Authorized setup/);
+    expect(() => {
+      run(['add', 'example/new', '--catalog', 'all', '-d', 'No']);
+    }).toThrow(/cannot target all/);
+    expect(() => {
+      run(['remove', 'public-source', '--catalog', 'public']);
+    }).toThrow(/infers the owning catalog/);
+    expect(() => {
+      run(['add', 'example/new', '-d', 'No']);
+    }).toThrow(/Authorized setup/);
     expect(readFileSync(join(root, 'repos.yaml'), 'utf8')).toBe(before);
   });
 });

@@ -97,10 +97,10 @@ const usagePart = (overrides: Partial<UsageData> = {}): UsageData => ({
 const stubReceipts = (byOperationId: Readonly<Record<string, unknown>>): void => {
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: string) => {
+    vi.fn(async (input: string) => {
       const operationId = decodeURIComponent(input.split('/').at(-1) ?? '');
       const body = byOperationId[operationId];
-      return Promise.resolve(body === undefined ? { ok: false, status: 404 } : { ok: true, json: async () => body });
+      return body === undefined ? { ok: false, status: 404 } : { ok: true, json: async () => body };
     }),
   );
 };
@@ -125,8 +125,8 @@ afterEach(() => {
 
 describe('ChatMessageDataUsage', () => {
   it('shows the credits the receipt says were charged, not a local price', async () => {
-    stubReceipts({ op_1: terminalReceipt('op_1', '12345') });
-    renderUsage([usagePart({ operationId: 'op_1', attemptId: 'att_1', billingStatus: 'terminal' })]);
+    stubReceipts({ op1: terminalReceipt('op1', '12345') });
+    renderUsage([usagePart({ operationId: 'op1', attemptId: 'att_1', billingStatus: 'terminal' })]);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Tau credits: 1.23')).toBeInTheDocument();
@@ -141,8 +141,8 @@ describe('ChatMessageDataUsage', () => {
   });
 
   it('shows Pending until the operation has a receipt', async () => {
-    stubReceipts({ op_1: pendingReceipt('op_1') });
-    renderUsage([usagePart({ operationId: 'op_1', billingStatus: 'pending' })]);
+    stubReceipts({ op1: pendingReceipt('op1') });
+    renderUsage([usagePart({ operationId: 'op1', billingStatus: 'pending' })]);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Tau credits: Pending')).toBeInTheDocument();
@@ -150,8 +150,8 @@ describe('ChatMessageDataUsage', () => {
   });
 
   it('notes how many charges are still pending beside the settled total', async () => {
-    stubReceipts({ op_1: terminalReceipt('op_1', '12345'), op_2: pendingReceipt('op_2') });
-    renderUsage([usagePart({ operationId: 'op_1' }), usagePart({ id: 'dat_2', operationId: 'op_2' })]);
+    stubReceipts({ op1: terminalReceipt('op1', '12345'), op2: pendingReceipt('op2') });
+    renderUsage([usagePart({ operationId: 'op1' }), usagePart({ id: 'dat_2', operationId: 'op2' })]);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Tau credits: 1.23 · 1 pending')).toBeInTheDocument();
@@ -166,8 +166,8 @@ describe('ChatMessageDataUsage', () => {
     ['another environment', { environment: 'staging' }],
     ['another operation', { operationId: 'op_other' }],
   ])('refuses a receipt belonging to %s', async (_label, override) => {
-    stubReceipts({ op_1: { ...terminalReceipt('op_1', '12345'), ...override } });
-    renderUsage([usagePart({ operationId: 'op_1' })]);
+    stubReceipts({ op1: { ...terminalReceipt('op1', '12345'), ...override } });
+    renderUsage([usagePart({ operationId: 'op1' })]);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Tau credits: Pending')).toBeInTheDocument();

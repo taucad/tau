@@ -11,7 +11,7 @@ import { ConverterFileTree } from '#components/geometry/converter/converter-file
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { createExportArtifactZip } from '#utils/export-artifact-set.utils.js';
-import type { ConverterExportFormat, ConverterImportFormat } from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterExportFormat, ConverterImportFormat } from '@taucad/converter/runtime';
 
 type UploadedFileInfo = {
   readonly name: string;

@@ -71,7 +71,6 @@
     "@taucad/assimp": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
-    "@taucad/tau-examples": "workspace:*",
     "jsdom": "catalog:",
     "jszip": "^3.10.1",
     "uint8array-extras": "catalog:",

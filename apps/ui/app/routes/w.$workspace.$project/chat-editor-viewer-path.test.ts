@@ -7,7 +7,7 @@ describe('createMonacoPath', () => {
   });
 
   it('rejects legacy absolute and noncanonical Tau paths', () => {
-    for (const path of ['/main.ts', '../main.ts', 'src/../main.ts', 'src\\main.ts']) {
+    for (const path of ['/main.ts', '../main.ts', 'src/../main.ts', String.raw`src\main.ts`]) {
       expect(() => createMonacoPath(path)).toThrow();
     }
   });

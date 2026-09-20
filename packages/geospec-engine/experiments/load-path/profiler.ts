@@ -1,3 +1,4 @@
+/* oxlint-disable no-await-in-loop -- Each profiler iteration is one timed sample: running them concurrently would measure contention instead of the load path. */
 import { WebIO } from '@gltf-transform/core';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,7 @@ import { analyzeMeshOverlap } from '#mesh/overlap.js';
 import { buildMeshAnalysisRecord, recordGeometryStats } from '#mesh/analysis-record.js';
 import type { GeometrySubject } from '#mesh/types.js';
 import { createSerialGeoSpecRunner } from '#runner/serial.js';
+import type { GeoSpecModelLoader } from 'geospec/model';
 import { summarizeLoadPathSamples } from '#experiments/load-path/summary.js';
 import type { LoadPathBucket, LoadPathSummary, LoadPathTimingSample } from '#experiments/load-path/summary.js';
 
@@ -140,10 +142,10 @@ const runNodeCli = async (options: {
     let stdoutBytes = 0;
     let stderrBytes = 0;
 
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
       stdoutBytes += chunk.byteLength;
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
       stderrBytes += chunk.byteLength;
     });
     child.on('error', reject);
@@ -263,17 +265,15 @@ export const profileCanonicalPerTestLoadPath = async (options: {
   let underlyingModelLoaderCalls = 0;
   let passed = 0;
   let failed = 0;
+  const modelLoader: GeoSpecModelLoader = async () => {
+    underlyingModelLoaderCalls += 1;
+    return exposeEngineSubject(await createSubjectFromGlb({ bytes: options.glbBytes, io, samples }));
+  };
 
   for (let iteration = 0; iteration < iterations; iteration++) {
     const filesystem = new MemoryProfileFileSystem();
     filesystem.setText('main.geospec.ts', canonicalPerTestGeoSpecSource);
-    const runner = createSerialGeoSpecRunner({
-      filesystem,
-      modelLoader: async () => {
-        underlyingModelLoaderCalls += 1;
-        return exposeEngineSubject(await createSubjectFromGlb({ bytes: options.glbBytes, io, samples }));
-      },
-    });
+    const runner = createSerialGeoSpecRunner({ filesystem, modelLoader });
     const result = await measure('geospecRun', samples, async () => {
       try {
         return await runner.run({ files: ['main.geospec.ts'] });

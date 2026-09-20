@@ -196,7 +196,7 @@ const ConsolePanelBody = ({ params }: { readonly params: ConsolePanelParams }): 
           atBottomStateChange={setAtBottom}
           itemContent={renderLog}
         />
-        {!atBottom ? (
+        {atBottom ? null : (
           <PaneButton
             className='absolute right-4 bottom-4 z-10 size-7 border border-border bg-card shadow-sm'
             tooltip='Scroll to latest logs'
@@ -207,7 +207,7 @@ const ConsolePanelBody = ({ params }: { readonly params: ConsolePanelParams }): 
           >
             <ChevronsDown />
           </PaneButton>
-        ) : null}
+        )}
       </>
     );
   } else {
@@ -360,9 +360,9 @@ export const ChatConsole = memo(function ChatConsole(): React.JSX.Element {
 
     for (const projection of result.values()) {
       projection.logs.reverse();
-      projection.logs.forEach((log, index) => {
+      for (const [index, log] of projection.logs.entries()) {
         log.infoIndex = index;
-      });
+      }
     }
     return result;
   }, [allLogs, enabledLevels, entryPaths, query]);

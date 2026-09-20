@@ -1067,8 +1067,8 @@ class TransformControlsGizmo extends Object3D {
 
     // Gizmo definitions - custom hierarchy definitions for setupGizmo() function
 
-    const gizmoTranslationScaleFactor = 0.000_25;
-    const pickerTranslationScaleFactor = 0.000_25;
+    const gizmoTranslationScaleFactor = 0.00025;
+    const pickerTranslationScaleFactor = 0.00025;
 
     const gizmoTranslationScale = [
       gizmoTranslationScaleFactor,
@@ -1083,7 +1083,7 @@ class TransformControlsGizmo extends Object3D {
     const gizmoMeshOffset = 0.3;
 
     // Rotation text and box offsets
-    const gizmoRotationScaleFactor = 0.000_15;
+    const gizmoRotationScaleFactor = 0.00015;
     const gizmoRotationScaleFactorZ = gizmoTranslationScaleFactor;
     const pickerRotationScaleFactor = 0.0003;
     const gizmoRotationScale = [gizmoRotationScaleFactor, gizmoRotationScaleFactor, gizmoRotationScaleFactorZ];

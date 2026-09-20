@@ -977,7 +977,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * @returns When the cut has settled.
    */
   const awaitCut = async (trigger: 'save' | 'hidden' | 'close'): Promise<void> => {
-    const checkoutId = selectRevisionStatus(actor.getSnapshot()).checkoutId;
+    const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before close.');
     }

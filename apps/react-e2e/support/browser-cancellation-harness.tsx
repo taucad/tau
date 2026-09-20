@@ -131,7 +131,13 @@ export function BrowserCancellationHarness({ createWorker }: BrowserCancellation
   return (
     <section aria-labelledby='browser-cancellation-heading'>
       <h2 id='browser-cancellation-heading'>Browser cancellation</h2>
-      <button type='button' disabled={cooperativeStatus === 'running'} onClick={() => void runCooperativeTimeout()}>
+      <button
+        type='button'
+        disabled={cooperativeStatus === 'running'}
+        onClick={() => {
+          void runCooperativeTimeout();
+        }}
+      >
         Run delayed render
       </button>
       <output role='status' aria-label='Cooperative timeout status'>
@@ -167,7 +173,13 @@ export function BrowserCancellationHarness({ createWorker }: BrowserCancellation
         </dl>
       ) : null}
 
-      <button type='button' disabled={hardStatus === 'running'} onClick={() => void runHardTimeout()}>
+      <button
+        type='button'
+        disabled={hardStatus === 'running'}
+        onClick={() => {
+          void runHardTimeout();
+        }}
+      >
         Run blocking render
       </button>
       <output role='status' aria-label='Hard timeout status'>

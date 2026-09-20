@@ -69,7 +69,7 @@ const operationAreas = (backend: CapPolygonBooleanBackend): readonly [number, nu
     measureCapMultiPolygonArea(
       operations.unionCapPolygons([
         islands(),
-        square({ minX: 10_000.125_000_01, minY: -10_000.5, maxX: 10_001.125_000_01, maxY: -9_999.5 }),
+        square({ minX: 10_000.12500001, minY: -10_000.5, maxX: 10_001.12500001, maxY: -9999.5 }),
       ]).multiPolygon,
     ),
   ];
@@ -102,7 +102,10 @@ describe('section cap polygon boolean backends', () => {
         version: '0.4.0',
       });
       expect(wasmBackend.info.initializationTime).toEqual(expect.any(Number));
-      expect(operationAreas(wasmBackend)).toEqual(operationAreas(tsBackend).map((area) => expect.closeTo(area, 6)));
+      expect(operationAreas(wasmBackend)).toEqual(
+        // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- `expect.closeTo` is typed `any` by vitest.
+        operationAreas(tsBackend).map((area) => expect.closeTo(area, 6)),
+      );
     } finally {
       wasmBackend.dispose();
       tsBackend.dispose();

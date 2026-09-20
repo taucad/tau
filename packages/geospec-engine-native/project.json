@@ -740,7 +740,37 @@
       }
     },
     "build": {
-      "cache": false
+      "cache": false,
+      "dependsOn": ["require-geospec-artifacts"]
+    },
+    "prepare-geospec-ci-artifacts": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "outputs": [
+        "{projectRoot}/bindings/node/generated",
+        "{projectRoot}/bindings/emscripten/generated",
+        "{workspaceRoot}/out/artifacts/geospec-native-engine/ci"
+      ],
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare",
+        "forwardAllArgs": false
+      }
+    },
+    "require-geospec-artifacts": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node packages/geospec-engine-native/scripts/ci-artifacts.mjs verify",
+        "forwardAllArgs": false
+      }
+    },
+    "check-ci-artifacts": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --test packages/geospec-engine-native/scripts/ci-artifacts.test.mjs",
+        "forwardAllArgs": false
+      }
     },
     "test-feature-metrics-m3": {
       "executor": "nx:run-commands",

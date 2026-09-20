@@ -184,7 +184,34 @@ describe('createNodeAgentLauncher', () => {
         runId: 'run-second',
         message: { id: 'user-2', role: 'user', content: 'again' },
       }),
-    ).rejects.toMatchObject({ code: 'RUN_ADMISSION_CONFLICT' });
+    ).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE', runId: 'run-first', state: 'running' });
+  });
+
+  /*
+   * V9 on the daemon: the run id is the idempotency key, so a client that
+   * re-sends one `start` over a reconnected socket is answered with the run it
+   * already has. The launcher went straight to `admit`, which refused the id as
+   * taken and lost the turn; the browser worker reads the same replay check.
+   */
+  it('answers a re-sent start with the run it already admitted', async () => {
+    const host = await makeLauncher(stalledGateway({}));
+    const first = await host.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: 'chat-replayed',
+      runId: 'run-replayed',
+      message: { id: 'user-1', role: 'user', content: 'hello' },
+    });
+    expect(first).toMatchObject({ type: 'result', snapshot: { runId: 'run-replayed' } });
+
+    const replayed = await host.execute({
+      type: 'start',
+      trigger: 'submit',
+      chatId: 'chat-replayed',
+      runId: 'run-replayed',
+      message: { id: 'user-1', role: 'user', content: 'hello' },
+    });
+    expect(replayed).toMatchObject({ type: 'result', operation: 'start', snapshot: { runId: 'run-replayed' } });
   });
 
   it('refuses a chat id that is not one storage path segment', async () => {
@@ -359,11 +386,26 @@ describe('createNodeAgentLauncher', () => {
       'utf8',
     );
 
-    let attached = await first.execute({ type: 'attach', chatId: 'chat-interrupted', cursor: 0, limit: 16 });
-    expect(attached.type).toBe('attach');
+    /* I4: attach *records* the abandonment. Resuming it here re-asked the
+     * provider for a turn nobody requested — a second full-price call for one
+     * user turn, on nothing but a reconnect. */
+    const attached = await first.execute({ type: 'attach', chatId: 'chat-interrupted', cursor: 0, limit: 16 });
+    expect(attached.type === 'attach' && attached.snapshot).toMatchObject({
+      runId: 'run-interrupted',
+      state: 'failed',
+      failure: { code: 'RUN_ABANDONED' },
+    });
+    expect(attached.type === 'attach' && attached.takeover).toBe(true);
+
+    /* And the person's own Resume continues it on the model row the committed
+     * turn context carries, which a model-less launcher has nowhere else. */
+    const resumed = await first.execute({ type: 'resume', chatId: 'chat-interrupted' });
+    expect(resumed).toMatchObject({ type: 'result', snapshot: { runId: 'run-interrupted' } });
+    // Always-on: `resume` answers at admission, and the run finishes unattended.
+    let settled = await first.execute({ type: 'attach', chatId: 'chat-interrupted', cursor: 0, limit: 16 });
     for (
       let attempt = 0;
-      attempt < 200 && attached.type === 'attach' && attached.snapshot?.state !== 'completed';
+      attempt < 200 && settled.type === 'attach' && settled.snapshot?.state !== 'completed';
       attempt++
     ) {
       // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
@@ -371,9 +413,9 @@ describe('createNodeAgentLauncher', () => {
         setTimeout(resolve, 10);
       });
       // oxlint-disable-next-line no-await-in-loop -- each poll depends on the previous projection.
-      attached = await first.execute({ type: 'attach', chatId: 'chat-interrupted', cursor: 0, limit: 16 });
+      settled = await first.execute({ type: 'attach', chatId: 'chat-interrupted', cursor: 0, limit: 16 });
     }
-    expect(attached.type === 'attach' && attached.snapshot?.state).toBe('completed');
+    expect(settled.type === 'attach' && settled.snapshot?.state).toBe('completed');
   });
 
   /*

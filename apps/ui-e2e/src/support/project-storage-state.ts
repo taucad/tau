@@ -410,13 +410,26 @@ export const readIndexedDbTree = async (providerBasePath: string): Promise<Reado
     }
   }, providerBasePath);
 
-/** Snapshot names and file text below an OPFS directory path for no-write assertions. */
+/**
+ * Snapshot names and file text below an OPFS directory path for no-write assertions.
+ *
+ * An absent directory answers `{}` rather than throwing: a tree that has not
+ * been materialized yet is a legitimate reading, and every caller's assertion is
+ * over the returned map either way.
+ */
 export const readOpfsTree = async (fixture: string): Promise<Readonly<Record<string, string>>> =>
   target.evaluate(async (fixtureName) => {
     const root = await navigator.storage.getDirectory();
     let fixtureRoot = root;
-    for (const segment of fixtureName.split('/').filter(Boolean)) {
-      fixtureRoot = await fixtureRoot.getDirectoryHandle(segment);
+    try {
+      for (const segment of fixtureName.split('/').filter(Boolean)) {
+        fixtureRoot = await fixtureRoot.getDirectoryHandle(segment);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'NotFoundError') {
+        return {};
+      }
+      throw error;
     }
     const entries: Array<readonly [string, string]> = [];
     const visit = async (directory: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
@@ -443,4 +456,51 @@ export const readProjectTree = async (config: StoredProjectConfig): Promise<Read
     return readIndexedDbTree(config.providerBasePath);
   }
   throw new Error('Webaccess tree evidence requires the directory-picker fixture handle.');
+};
+
+/**
+ * Where one project's linked checkouts live.
+ *
+ * Beside the project on its *own* storage root, never inside its tree: a
+ * physical project directory is a single flat, non-dot-prefixed segment of that
+ * root (`handle-store.ts` `isFlatProjectBasePath`, mirroring
+ * `WorkspaceFileService._configureProjectRoots`), and the revision worker mounts
+ * each checkout at `.tau/checkouts/<projectId>/<checkoutId>` on the project's
+ * provider (`apps/ui/app/machines/file-manager.worker.revisions.ts` `createCheckoutRoutes`,
+ * `libs/filesystem/src/mount-table.ts` `CheckoutRootConfig`, and the
+ * `.tau/checkouts/` guard in `workspace-file-service.ts`). There is no `tree/`
+ * segment — that spelling was the daemon's and is written by nothing.
+ *
+ * So a checkout can never appear in `readProjectTree`, whose prefix filter is
+ * the project's own base path. A reader that looked for one there was
+ * unsatisfiable by construction (T1 row 12).
+ *
+ * @param config - The project's durable config.
+ * @param storageRoot - Path of the storage root itself, for a fixture-rooted backend.
+ * @returns The path holding every checkout of that project.
+ */
+export const checkoutTreeBasePath = (config: StoredProjectConfig, storageRoot = ''): string => {
+  const prefix = storageRoot.replace(/\/+$/u, '');
+  return `${prefix === '' ? '' : `${prefix}/`}.tau/checkouts/${config.projectId}`;
+};
+
+/**
+ * Read one project's linked-checkout trees through the backend its config names.
+ *
+ * @param config - The project's durable config.
+ * @param storageRoot - Path of the storage root itself, for a fixture-rooted backend.
+ * @returns Paths `/<checkoutId>/…`, empty when nothing has been materialized.
+ */
+export const readProjectCheckoutTree = async (
+  config: StoredProjectConfig,
+  storageRoot = '',
+): Promise<Readonly<Record<string, string>>> => {
+  const base = checkoutTreeBasePath(config, storageRoot);
+  if (config.backend === 'opfs') {
+    return readOpfsTree(base);
+  }
+  if (config.backend === 'indexeddb') {
+    return readIndexedDbTree(base);
+  }
+  throw new Error('Webaccess checkout evidence requires the directory-picker fixture handle.');
 };

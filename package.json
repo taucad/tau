@@ -298,6 +298,7 @@
     "@silvenon/vite-plugin-devtools-json": "^1.0.1",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.1",
+    "@taucad/agent-host": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/geometry-core": "workspace:*",

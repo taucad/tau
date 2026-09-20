@@ -27,9 +27,10 @@ import { useChatWorkspaceAuthority, usePreparedChatWorkspace } from '#providers/
 import { publishChatTurnSettlement } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import {
-  clearBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
+  persistBrowserTurnSettlement,
+  retireBrowserAgentHostRun,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 /**
@@ -61,9 +62,16 @@ const retireUnsubstantiatedRun = async (input: {
  * claim that names no run.
  */
 const isRetirableClaim = (
-  store: Pick<ChatSessionStore, 'getStatus' | 'getDurableRunState'>,
+  store: Pick<ChatSessionStore, 'getStatus' | 'getDurableRunState' | 'holdsTurn'>,
   chatId: string,
 ): boolean => {
+  /* First, and from the turn's own owner. The AI SDK status is `ready` for the
+   * whole admission window — the dispatch is deferred by a microtask and no
+   * bytes have flowed — so a claim for the run being admitted *right now* read
+   * as retirable, and discovery released its lease under it (T3-D9). */
+  if (store.holdsTurn(chatId)) {
+    return false;
+  }
   const status = store.getStatus(chatId);
   if (status === 'submitted' || status === 'streaming') {
     return false;
@@ -211,20 +219,79 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
       }
       const localRun = getBrowserAgentHostRun(chatId);
       const attested = getHostFinalizedTurns().some((settlement) => settlement.runId === runId);
+      /* Three answers, not two, because the claim is keyed by chat and this
+       * settlement names a run. This page holds *this run's* lease; it holds
+       * none, because the document that leased it is gone and the root's epoch
+       * sweep retired it on open (E3, I7); or the chat's claim has rolled on to
+       * a newer run — a second view, or a `prepare` that landed while this run
+       * was finishing.
+       *
+       * The last one is nobody's to settle here. `prepare`, `finalize` and
+       * `discard` all refuse a claim naming another run (`CHAT_CLAIM_RUN_MISMATCH`,
+       * the refusal T3-amp added so a settlement learns its lease was *not*
+       * retired) — and this run holds no lease here, so there is nothing to
+       * retire and nothing to learn. Asking anyway threw away everything below:
+       * the durable settlement, the hold release and the run record, after
+       * which the one retry repeated the same deterministic throw. */
+      const held = await workspaceAuthority.reclaim(chatId);
+      const adopted = held?.runId !== runId;
+      const rolledOn = held !== undefined && adopted;
       /* Publish only a run this page saw complete and the host has not already
        * attested. Everything else — a refusal, a stop, a run whose host log
        * this tab does not own, and a settlement the host already recorded —
        * releases the hold without asking for a revision over newer live edits. */
-      if (!attested && outcome === 'completed' && localRun?.runId === runId && localRun.state === 'completed') {
+      if (
+        !rolledOn &&
+        !attested &&
+        outcome === 'completed' &&
+        localRun?.runId === runId &&
+        localRun.state === 'completed'
+      ) {
+        if (adopted) {
+          /* E3: the run completed and the page died inside the settlement
+           * window, so the agent's writes are sitting in the checkout with
+           * nothing to attribute them to. Re-leasing the turn is what
+           * attributes them: the root refuses to lease a dirty tree and mints
+           * it first as a `turn` revision carrying *this* turn's id (D17), so
+           * the work lands on the turn rather than being swept into the next
+           * person's save. The cut that follows then finds nothing left and
+           * finalizes; the root's own conflict rules decide `turn.conflicted`
+           * if the tree moved on underneath it. */
+          await workspaceAuthority.prepare(chatId, {
+            ...(localRun.turnId === undefined ? {} : { turnId: localRun.turnId }),
+            runId,
+          });
+        }
         if (localRun.userMessage !== undefined) {
           store.reconcileDurableUserMessage({ chatId, runId, message: localRun.userMessage });
         }
         await workspaceAuthority.finalize(chatId, runId);
       } else {
-        await workspaceAuthority.discard(chatId, runId);
+        if (!rolledOn) {
+          await workspaceAuthority.discard(chatId, runId);
+        }
+        if (adopted && !attested) {
+          /* No lease, so the root retired nothing and will emit no settlement
+           * of its own — and a run with no settlement is one every later open
+           * reconciles again. The outcome is recorded where every other host
+           * settlement lives: the chat's durable log (I1, I7). The writer is
+           * whichever stream is driving this chat, or one opened for this single
+           * write; a chat with no registration at all — an unfocused one —
+           * answers `false` and says so, and the next open tries again. */
+          await persistBrowserTurnSettlement({
+            type: 'turn.failed',
+            chatId,
+            runId,
+            turnId: localRun?.turnId ?? runId,
+            checkoutId: undefined,
+            reason: localRun?.failure?.message ?? 'The turn ended before it recorded a revision.',
+          }).catch((error: unknown) => {
+            console.error('[ProjectChatRunSettlement] an adopted run was not settled durably', error);
+          });
+        }
       }
       store.releaseDurableRun({ chatId, runId });
-      clearBrowserAgentHostRun(chatId);
+      retireBrowserAgentHostRun(chatId, runId);
     },
     [chatId, store, workspaceAuthority],
   );

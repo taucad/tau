@@ -1548,6 +1548,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.1
         version: 4.3.1(vite@8.0.10(@types/node@24.0.15)(esbuild@0.27.7)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:packages/agent-host
       '@taucad/chat':
         specifier: workspace:*
         version: link:libs/chat

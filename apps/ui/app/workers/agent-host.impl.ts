@@ -23,7 +23,7 @@ import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
-import { createTauAgentHost } from '@taucad/agent-host';
+import { createTauAgentHost, replayedStartOutcome } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
   AgentLogEvent,
@@ -61,16 +61,16 @@ import {
   agentLiveEventSchema,
   eventLogBatchSchema,
   forwardedAgentHostResponseSchema,
+  readCommandReturnAddress,
 } from '#workers/agent-host.contract.js';
 import {
   acquireChatLeaderLease,
   agentHostAuthorityName,
   agentHostProtocolVersion,
+  awaitWhileLeaderLives,
   createFollowerRecoveryMonitor,
-  recoverAttachedRun,
 } from '#workers/agent-host-leader.js';
 import type { AgentHostLockRequest, ChatLeaderLease } from '#workers/agent-host-leader.js';
-import { replayedStartOutcome } from '#workers/agent-host-replay.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
@@ -286,7 +286,7 @@ const wholeLogLimit = Number.MAX_SAFE_INTEGER;
 const channels = new Map<string, BroadcastChannel>();
 const leadership = new Map<string, LeadershipState>();
 const leadershipAttempts = new Map<string, Promise<boolean>>();
-const takeoverAttempts = new Map<string, Promise<HostRunSnapshot>>();
+const takeoverAttempts = new Map<string, Promise<HostRunSnapshot | undefined>>();
 const forwarded = new Map<string, ReturnType<typeof Promise.withResolvers<ForwardedResponse>>>();
 const leaderGenerations = new Map<string, string>();
 const followerCursors = new Map<string, number>();
@@ -345,6 +345,15 @@ export const listenAgentHostWorkerLiveEvents = (signal: AbortSignal): AsyncItera
 
 const codedErrorSchema = z.object({ code: z.string() });
 const errorCode = (error: unknown): string => codedErrorSchema.safeParse(error).data?.code ?? 'AGENT_HOST_ERROR';
+
+/**
+ * A command the leader refused because it addressed an older generation.
+ *
+ * The refusal is decided before the command runs, which is what makes one
+ * re-address safe: unlike `LEADERSHIP_LOST`, which a leader raises partway
+ * through work it may already have done, nothing has happened here.
+ */
+const leaderGenerationStaleCode = 'LEADER_GENERATION_STALE';
 
 const errorResponse = (requestId: string, error: unknown): ForwardedAgentHostResponse & { readonly type: 'error' } => ({
   type: 'error',
@@ -420,10 +429,19 @@ const responseBelongsToChat = (response: ForwardedResponse, chatId: string): boo
   return response.type === 'result' ? response.snapshot.chatId === chatId : true;
 };
 
-const validatedBroadcast = (value: unknown, active: WorkerSession, chatId: string): LeaderBroadcast | undefined => {
+const validatedBroadcast = (
+  value: unknown,
+  active: WorkerSession,
+  chatId: string,
+): LeaderBroadcast | 'unreadable' | undefined => {
   const parsed = leaderBroadcastSchema.safeParse(value);
   if (!parsed.success) {
-    return undefined;
+    /* This channel is keyed on `agentHostProtocolVersion`, so a frame that
+     * reaches here was posted by a peer claiming *this* protocol and failing
+     * its schema — a real defect, not a deploy skew. Dropping it in silence
+     * burned the forwarding wait instead, and the page saw a bare timeout. */
+    console.error('[agentHost] dropped a leader frame this protocol cannot read', chatId, parsed.error.issues);
+    return 'unreadable';
   }
   const message = parsed.data as LeaderBroadcast;
   if (
@@ -630,15 +648,18 @@ const trackTask = (operation: () => Promise<void>, onError: (error: unknown) => 
 
 const acknowledgeRun = async (
   active: WorkerSession,
-  chatId: string,
+  run: { readonly chatId: string; readonly runId?: string | undefined },
   completion: Promise<unknown>,
 ): Promise<HostRunSnapshot> => {
+  const { chatId, runId } = run;
   /* A refused admission is an answer, not a race to lose: `waitForAdmission`
    * asks the *chat* what is running, so a command the host refused — because
    * the chat's previous run has not ended — used to be answered with that
    * previous run's snapshot, and the caller reported a run-id mismatch while
-   * the real reason was swallowed with the rejected promise. */
-  const admitted = await Promise.race([active.host.waitForAdmission(chatId), completion.then(() => undefined)]);
+   * the real reason was swallowed with the rejected promise. The run id makes
+   * the answer this command's own: two admissions racing on one chat can no
+   * longer be answered with each other's snapshot. */
+  const admitted = await Promise.race([active.host.waitForAdmission(chatId, runId), completion.then(() => undefined)]);
   if (!admitted) {
     await completion;
     return active.host.snapshot(chatId);
@@ -647,7 +668,12 @@ const acknowledgeRun = async (
     async () => {
       await completion;
     },
-    () => undefined,
+    /* The caller was answered at admission and the run's own failure row is
+     * durable, so there is nobody left to reject to — but a run that died after
+     * its admission is a fact this worker must not discard in silence. */
+    (error) => {
+      console.error('[agentHost] run failed after it was admitted', chatId, runId, error);
+    },
   );
   return admitted;
 };
@@ -683,25 +709,35 @@ const executeCommand = async (
     let snapshot: HostRunSnapshot | undefined;
     if (firstBatch.endCursor > 0) {
       if (takeover) {
+        /* I4: a takeover *records* what it found, it never drives it. Resuming
+         * here re-asked the provider for a turn the person had already paid
+         * for, on a run no page owned — no lease, no revision, no settlement —
+         * and it fired on the next gesture's attach, not on any decision. The
+         * host decides what the record is: an abandoned run fails with
+         * `RUN_ABANDONED` so the saved-turn card can offer Resume, a paused run
+         * is left paused for the interrupt this batch republishes, and a run
+         * this host is still driving is left alone. */
         const current = takeoverAttempts.get(command.chatId);
-        const attempt =
-          current ??
-          recoverAttachedRun({
-            snapshot: async () => active.host.snapshot(command.chatId),
-            resume: async () => acknowledgeRun(active, command.chatId, active.host.resume(command.chatId)),
-          });
+        const attempt = current ?? active.host.markAbandoned(command.chatId);
         takeoverAttempts.set(command.chatId, attempt);
         try {
-          await attempt;
+          snapshot = await attempt;
+        } catch (error) {
+          /* A run that cannot be recorded must not make the chat unopenable:
+           * the client still needs the transcript it attached for. The
+           * leadership check below turns a lost lease into its own refusal. */
+          console.error('[agentHost] could not record an abandoned run', command.chatId, error);
+          snapshot = await active.host.describeRun(command.chatId);
         } finally {
           if (takeoverAttempts.get(command.chatId) === attempt) {
             takeoverAttempts.delete(command.chatId);
           }
         }
         batch = await active.host.readEvents(command);
-        snapshot = await active.host.snapshot(command.chatId);
       } else {
-        snapshot = await active.host.snapshot(command.chatId);
+        /* Non-throwing: `snapshot`'s `NO_RUN_ADMITTED` escaping here made a chat
+         * whose log holds records but no run impossible to open at all. */
+        snapshot = await active.host.describeRun(command.chatId);
       }
     }
     const state = leadership.get(command.chatId);
@@ -717,15 +753,19 @@ const executeCommand = async (
       batch,
       leadership: { role: 'leader', generation: state.lease.generation },
       ...(snapshot ? { snapshot } : {}),
+      /* This attach took the chat over from a dead driver *and* the run it
+       * found still wants the attaching page: one it has just recorded as
+       * abandoned, or one left non-terminal (paused on a person, or still
+       * driven by this host). The page rebuilds from the log either way. */
       takeover:
         takeover &&
         snapshot !== undefined &&
-        snapshot.state !== 'completed' &&
-        snapshot.state !== 'failed' &&
-        snapshot.state !== 'cancelled',
+        (snapshot.failure?.code === 'RUN_ABANDONED' ||
+          (snapshot.state !== 'completed' && snapshot.state !== 'failed' && snapshot.state !== 'cancelled')),
     };
   }
   if (command.type === 'start') {
+    let outcome: ReturnType<typeof replayedStartOutcome> = 'admit';
     try {
       /* The whole log, because the fact that decides this is a record anywhere
        * in it — the run's committed turn — not the state of its tail.
@@ -738,20 +778,35 @@ const executeCommand = async (
        * the log's size, and the upgrade path is the host's own run ledger
        * (`runLedgerOf`) exposed as a cached read. */
       const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
-      const outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
-      if (outcome !== 'admit') {
-        if (outcome === 'resume') {
-          await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId));
-        }
-        return {
-          type: 'result',
-          requestId: command.requestId,
-          operation: command.type,
-          snapshot: await active.host.snapshot(command.chatId),
-        };
-      }
+      outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
     } catch {
-      // The command was not durably admitted; replay it below.
+      // The log could not be read, so nothing proves this command was already
+      // admitted; replay it below. Only this read is forgiven — a resume or a
+      // snapshot that fails is reported as itself, not as an admission conflict.
+      outcome = 'admit';
+    }
+    if (outcome !== 'admit') {
+      if (outcome === 'resume') {
+        /* A duplicate `start` for a run this worker is *still executing* has
+         * nothing to resume: the host would refuse the reservation as a live
+         * chat, and the duplicate — a re-broadcast forward, a double-fired
+         * effect — would surface as a failed turn beside a turn that is running
+         * fine. Answer it with the admission it already has. */
+        const running = await active.host.waitForAdmission(command.chatId, command.runId);
+        if (!running) {
+          await acknowledgeRun(
+            active,
+            { chatId: command.chatId, runId: command.runId },
+            active.host.resume(command.chatId),
+          );
+        }
+      }
+      return {
+        type: 'result',
+        requestId: command.requestId,
+        operation: command.type,
+        snapshot: await active.host.snapshot(command.chatId),
+      };
     }
   }
   switch (command.type) {
@@ -800,7 +855,7 @@ const executeCommand = async (
         type: 'result',
         requestId: command.requestId,
         operation: command.type,
-        snapshot: await acknowledgeRun(active, command.chatId, completion),
+        snapshot: await acknowledgeRun(active, { chatId: command.chatId, runId: command.runId }, completion),
       };
     }
     case 'resume': {
@@ -808,7 +863,9 @@ const executeCommand = async (
         type: 'result',
         requestId: command.requestId,
         operation: command.type,
-        snapshot: await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId)),
+        /* A `resume` command names no run: the host continues whatever the
+         * chat's ledger ends on, so the chat is the key this one waits by. */
+        snapshot: await acknowledgeRun(active, { chatId: command.chatId }, active.host.resume(command.chatId)),
       };
     }
     case 'record-settlement': {
@@ -847,12 +904,35 @@ const executeCommand = async (
 const postForwardedResponse = async (options: {
   readonly channel: BroadcastChannel;
   readonly senderId: string;
+  /** The generation this command was accepted under, for the answer it is owed. */
+  readonly generation: string;
   readonly command: AgentHostWorkerCommand;
 }): Promise<void> => {
-  const { channel, senderId, command } = options;
+  const { channel, senderId, generation, command } = options;
   const active = session;
+  if (!active) {
+    /* The whole worker session is gone and every chat's heartbeat with it, so
+     * the follower's liveness bound expires and recovers. There is no session
+     * binding left to address a frame with in any case. */
+    return;
+  }
   const state = leadership.get(command.chatId);
-  if (!active || !state) {
+  if (!state) {
+    /* Leadership ended between accepting this command and running it — a close
+     * clears the heartbeat and releases the lease, so another tab can already
+     * be leading and heartbeating, which keeps the follower's liveness bound
+     * from ever firing. Nothing ran here, so it is re-addressable. */
+    refuseCommand({
+      channel,
+      active,
+      chatId: command.chatId,
+      generation,
+      targetId: senderId,
+      requestId: command.requestId,
+      error: Object.assign(new Error(`Chat ${command.chatId} changed leader before this command ran.`), {
+        code: leaderGenerationStaleCode,
+      }),
+    });
     return;
   }
   let response: ForwardedResponse;
@@ -868,6 +948,59 @@ const postForwardedResponse = async (options: {
     generation: state.lease.generation,
     response,
   } satisfies LeaderBroadcast);
+};
+
+/**
+ * Answer a command this leader will not execute.
+ *
+ * The follower's wait is bounded by this leader's heartbeat, so every command
+ * it declines is declined out loud; the alternative is a pending request that
+ * outlives the turn with nothing on screen.
+ *
+ * @param options - The refusing leader, the follower to answer and the reason.
+ */
+const refuseCommand = (options: {
+  readonly channel: BroadcastChannel;
+  readonly active: WorkerSession;
+  readonly chatId: string;
+  readonly generation: string;
+  readonly targetId: string;
+  readonly requestId: string;
+  readonly error: unknown;
+}): void => {
+  options.channel.postMessage({
+    ...broadcastBinding(options.active, options.chatId),
+    type: 'response',
+    targetId: options.targetId,
+    generation: options.generation,
+    response: errorResponse(options.requestId, options.error),
+  } satisfies LeaderBroadcast);
+};
+
+/** Refuse a `command` frame the strict broadcast schema rejected, when its envelope survives. */
+const refuseUnreadableCommand = (options: {
+  readonly channel: BroadcastChannel;
+  readonly active: WorkerSession;
+  readonly chatId: string;
+  readonly frame: unknown;
+}): void => {
+  const state = leadership.get(options.chatId);
+  const address = readCommandReturnAddress(options.frame);
+  if (!state || !address) {
+    // Not this chat's leader, or nothing left to address: the console record above stands alone.
+    return;
+  }
+  refuseCommand({
+    channel: options.channel,
+    active: options.active,
+    chatId: options.chatId,
+    generation: state.lease.generation,
+    targetId: address.senderId,
+    requestId: address.requestId,
+    error: Object.assign(new Error(`The leader of ${options.chatId} could not read that command frame.`), {
+      code: 'LEADER_COMMAND_UNREADABLE',
+    }),
+  });
 };
 
 const sendTailBatch = async (options: {
@@ -958,6 +1091,10 @@ function channelFor(chatId: string): BroadcastChannel {
       return;
     }
     const message = validatedBroadcast(event.data, current, chatId);
+    if (message === 'unreadable') {
+      refuseUnreadableCommand({ channel, active: current, chatId, frame: event.data });
+      return;
+    }
     if (!message) {
       return;
     }
@@ -968,11 +1105,19 @@ function channelFor(chatId: string): BroadcastChannel {
       return;
     }
     if (message.type === 'response') {
-      const knownGeneration = leaderGenerations.get(chatId);
-      if (message.targetId !== current.tabId || (knownGeneration && knownGeneration !== message.generation)) {
+      if (message.targetId !== current.tabId) {
         return;
       }
-      observeFollowerLeader(chatId, message.generation);
+      /* Only learn a generation this follower still believes in: a late answer
+       * from a leader that has since been replaced must not re-arm the monitor
+       * on a dead heartbeat. The answer itself is kept either way — it is
+       * addressed to this tab, for a request id this tab minted and is waiting
+       * on, and discarding it left that request pending forever whenever
+       * leadership rolled over while a command was in flight. */
+      const knownGeneration = leaderGenerations.get(chatId);
+      if (!knownGeneration || knownGeneration === message.generation) {
+        observeFollowerLeader(chatId, message.generation);
+      }
       const pending = forwarded.get(message.response.requestId);
       if (pending) {
         forwarded.delete(message.response.requestId);
@@ -1056,26 +1201,45 @@ function channelFor(chatId: string): BroadcastChannel {
     if (message.type !== 'command') {
       return;
     }
-    if (message.targetGeneration === undefined || message.targetGeneration === state.lease.generation) {
-      const commandMessage = message;
-      trackTask(
-        async () =>
-          postForwardedResponse({
-            channel,
-            senderId: commandMessage.senderId,
-            command: commandMessage.command,
-          }),
-        (error) => {
-          channel.postMessage({
-            ...broadcastBinding(current, chatId),
-            type: 'response',
-            targetId: commandMessage.senderId,
-            generation: state.lease.generation,
-            response: errorResponse(commandMessage.command.requestId, error),
-          } satisfies LeaderBroadcast);
-        },
-      );
+    if (message.targetGeneration !== undefined && message.targetGeneration !== state.lease.generation) {
+      /* Leadership rolled over between the follower's last heartbeat and its
+       * send. Dropping the frame left that follower waiting on a leader it can
+       * still see heartbeating, so its liveness bound never fired and the
+       * composer sat on the request for the life of the tab. Nothing has run
+       * yet — the refusal is decided before any work — so the follower can
+       * re-learn the leader and broadcast this same command once more. */
+      refuseCommand({
+        channel,
+        active: current,
+        chatId,
+        generation: state.lease.generation,
+        targetId: message.senderId,
+        requestId: message.command.requestId,
+        error: Object.assign(new Error(`Chat ${chatId} is led by a newer generation; re-address this command.`), {
+          code: leaderGenerationStaleCode,
+        }),
+      });
+      return;
     }
+    const commandMessage = message;
+    trackTask(
+      async () =>
+        postForwardedResponse({
+          channel,
+          senderId: commandMessage.senderId,
+          generation: state.lease.generation,
+          command: commandMessage.command,
+        }),
+      (error) => {
+        channel.postMessage({
+          ...broadcastBinding(current, chatId),
+          type: 'response',
+          targetId: commandMessage.senderId,
+          generation: state.lease.generation,
+          response: errorResponse(commandMessage.command.requestId, error),
+        } satisfies LeaderBroadcast);
+      },
+    );
   });
   channels.set(chatId, channel);
   return channel;
@@ -1168,10 +1332,14 @@ const waitForForwardedResponse = async (
     targetGeneration: leaderGenerations.get(command.chatId),
     command,
   } satisfies LeaderBroadcast);
-  const deadline = new Promise<undefined>((resolve) => {
-    globalThis.setTimeout(resolve, 2000);
+  /* Liveness, not a work bound: a `start` is answered at admission time, which
+   * includes preparing the turn, so a constant deadline re-broadcast a command
+   * the leader was still working on — and the leader then executed it twice. */
+  const response = await awaitWhileLeaderLives({
+    response: pending.promise,
+    lastSeenAt: () => followerMonitors.get(command.chatId)?.lastSeenAt(),
+    heartbeatTimeout: followerHeartbeatTimeout,
   });
-  const response = await Promise.race([pending.promise, deadline]);
   if (forwarded.get(command.requestId) === pending) {
     forwarded.delete(command.requestId);
   }
@@ -1186,7 +1354,10 @@ const forwardCommand = async (command: AgentHostWorkerCommand): Promise<Forwarde
     });
   }
   const first = await waitForForwardedResponse(active, command);
-  if (first) {
+  /* A stale-generation refusal takes the same recovery as no answer at all: the
+   * leader ran nothing, and the re-broadcast below carries no target generation
+   * (or the one just learned), which the current leader accepts. */
+  if (first && !(first.type === 'error' && first.code === leaderGenerationStaleCode)) {
     if (first.type === 'tail' || first.type === 'attach') {
       followerCursors.set(command.chatId, first.batch.nextCursor);
     }
@@ -1684,11 +1855,8 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
   session = active;
 };
 
-const close = async (): Promise<void> => {
-  if (closing) {
-    return;
-  }
-  closing = true;
+const releaseSession = async (): Promise<void> => {
+  takeoverAttempts.clear();
   for (const monitor of followerMonitors.values()) {
     monitor.stop();
   }
@@ -1756,14 +1924,27 @@ const close = async (): Promise<void> => {
     tailInFlight.clear();
     leaderGenerations.clear();
   }
-  /* The flag guards a *re-entrant* close, not the worker's whole lifetime.
-   * Leaving it latched made `close` permanently a no-op, so the next
-   * `initialize` kept the released session and refused the new one with
-   * SESSION_CONFLICT — invisible in a real worker, which terminates after
-   * closing, and fatal to anything that reuses the module. */
-  closing = false;
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Browser agent host could not release every session resource.');
+  }
+};
+
+const close = async (): Promise<void> => {
+  if (closing) {
+    return;
+  }
+  closing = true;
+  try {
+    await releaseSession();
+  } finally {
+    /* The flag guards a *re-entrant* close, not the worker's whole lifetime.
+     * Leaving it latched made `close` permanently a no-op, so the next
+     * `initialize` kept the released session and refused the new one with
+     * SESSION_CONFLICT — invisible in a real worker, which terminates after
+     * closing, and fatal to anything that reuses the module. A throw from the
+     * disposal below used to re-latch exactly that wedge, so it is cleared
+     * here rather than on the happy path. */
+    closing = false;
   }
 };
 

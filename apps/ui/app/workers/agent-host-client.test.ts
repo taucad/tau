@@ -18,6 +18,7 @@ import {
   agentHostWorkerCommandSchema,
   agentHostWorkerProtocolSchemas,
   parseAgentHostWorkerConnect,
+  readCommandReturnAddress,
 } from '#workers/agent-host.contract.js';
 
 type ErrorListener = (event: ErrorEvent) => void;
@@ -848,5 +849,33 @@ describe('the browser worker command contract', () => {
 
     expect(agentHostWorkerCommandSchema.safeParse(resolution)).toMatchObject({ success: true });
     expect(agentHostWorkerCommandSchema.safeParse({ ...resolution, optionId: '' }).success).toBe(false);
+  });
+
+  /* A follower's forwarding wait is bounded only by the leader's liveness, so a
+   * live leader that drops a command it cannot read wedges that request for the
+   * life of the tab. The return address is what makes the refusal possible. */
+  it('salvages the return address of a command frame this protocol cannot read', () => {
+    const unreadable = {
+      version: 2,
+      projectId: 'project-1',
+      workspaceId: 'workspace-1',
+      chatId: 'chat-1',
+      type: 'command',
+      senderId: 'tab-follower',
+      // A command shape from a build this one does not know: the frame fails the
+      // strict broadcast schema, and only the envelope survives it.
+      command: { type: 'teleport', chatId: 'chat-1', requestId: 'req-1', sessionId: 'session-1' },
+    };
+
+    expect(readCommandReturnAddress(unreadable)).toEqual({ senderId: 'tab-follower', requestId: 'req-1' });
+  });
+
+  it('leaves nobody to answer when the sender or the request id is the unreadable part', () => {
+    const base = { type: 'command', senderId: 'tab-follower', command: { requestId: 'req-1' } };
+
+    expect(readCommandReturnAddress({ ...base, senderId: '' })).toBeUndefined();
+    expect(readCommandReturnAddress({ ...base, command: {} })).toBeUndefined();
+    expect(readCommandReturnAddress({ ...base, type: 'response' })).toBeUndefined();
+    expect(readCommandReturnAddress('not a frame')).toBeUndefined();
   });
 });

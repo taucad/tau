@@ -52,6 +52,7 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
 }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () => ({
+    ready: true,
     get: () => host.workspace,
     subscribe: () => () => undefined,
   }),

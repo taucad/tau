@@ -191,6 +191,10 @@ export type ProjectRevisionsMachineContext = Readonly<{
    * be answered `cutFailed`. Both hosts waited out a bounded timer instead; the
    * root holds them here and replays them the moment the registry lands, which
    * is the A38 answer — settled values out, no host compensation.
+   *
+   * The same buffer holds an admission delayed by a held turn id (V8). An entry
+   * leaves it when that turn retires and it is replayed, or when the host that
+   * asked for it gives up and abandons its run — never on a timer of its own.
    */
   pendingAdmissions: ReadonlyArray<Readonly<{ turnId: string; chatId: string; runId: string; checkoutId?: string }>>;
   /**
@@ -261,8 +265,12 @@ export type ProjectRevisionsMachineEvent =
   /* R9: the two verbs a host drives most, and the lease facts children raise. */
   | Readonly<{ type: 'changed'; checkoutId: string; paths: readonly string[]; generation: number }>
   | Readonly<{ type: 'turnCompleted'; turnId: string }>
-  | Readonly<{ type: 'turnAbandoned'; turnId: string }>
-  | Readonly<{ type: 'release'; turnId: string }>
+  /* `runId` names the run this verb is about. One turn id is held by one run
+   * while the next run of the same message queues behind it (V8), so a verb
+   * that carries it ends exactly that run — queued or spawned — and a verb
+   * without it keeps the old meaning: whatever run holds the turn id. */
+  | Readonly<{ type: 'turnAbandoned'; turnId: string; runId?: string }>
+  | Readonly<{ type: 'release'; turnId: string; runId?: string }>
   | Readonly<{ type: 'leaseWritten'; checkoutId: string | undefined; runId: string }>
   | Readonly<{
       type: 'turnReleased';
@@ -446,6 +454,26 @@ const heldByTurn = (context: ProjectRevisionsMachineContext, checkoutId: string)
   });
 
 /**
+ * The turn actor a turn-ending verb may reach.
+ *
+ * A verb that names no run keeps its original meaning — whatever run holds that
+ * turn id. One that names a run may only end *that* run: a turn id is held by
+ * one run while the next run of the same message queues behind it (V8), so
+ * abandoning the queued one must not retire the running one's lease.
+ *
+ * @param context - The root's own context.
+ * @param event - The `turnAbandoned` or `release` that arrived.
+ * @returns The turn actor to forward to, or `undefined` when it names another run.
+ */
+const endingTurnRef = (
+  context: ProjectRevisionsMachineContext,
+  event: Readonly<{ turnId: string; runId?: string }>,
+): ActorRefFrom<typeof turnMachine> | undefined => {
+  const ref = context.turnRefs[event.turnId];
+  return event.runId === undefined || ref?.getSnapshot().context.runId === event.runId ? ref : undefined;
+};
+
+/**
  * Headless root of one project's revision actor tree.
  *
  * @public
@@ -475,10 +503,17 @@ export const projectRevisionsMachine = setup({
   guards: {
     turnIsNew: ({ context }, params: Readonly<{ turnId: string }>) => context.turnRefs[params.turnId] === undefined,
     registryUnanswered: ({ context }) => !context.registrySettled,
-    /* V9: a run id is minted once per gesture and *is* the idempotency key, so
-     * the same one arriving twice is a bug in the caller, never a queue. */
+    /*
+     * V9: a run id is minted once per gesture and *is* the idempotency key, so
+     * the same one arriving twice is a bug in the caller, never a queue.
+     *
+     * Read across every turn rather than the one the turn id happens to name: a
+     * run id is also its lease's own key (`.tau/runs/<runId>.json`), so a second
+     * turn admitted under it writes and retires the first turn's lease.
+     */
     runIsAlreadyHeld: ({ context, event }) =>
-      event.type === 'admitTurn' && context.turnRefs[event.turnId]?.getSnapshot().context.runId === event.runId,
+      event.type === 'admitTurn' &&
+      Object.values(context.turnRefs).some((ref) => ref.getSnapshot().context.runId === event.runId),
   },
   actions: {
     /* R12: every terminal state of a turn drops its ref, not just the two that
@@ -757,6 +792,19 @@ export const projectRevisionsMachine = setup({
             }),
           },
           {
+            guard: 'runIsAlreadyHeld',
+            actions: emit(
+              ({ event }): Extract<ProjectRevisionsMachineEmitted, { readonly type: 'turnRefused' }> => ({
+                type: 'turnRefused',
+                turnId: event.turnId,
+                chatId: event.chatId,
+                runId: event.runId,
+                code: 'TURN_ALREADY_LEASED',
+                reason: 'This run has already taken this chat’s checkout.',
+              }),
+            ),
+          },
+          {
             guard: { type: 'turnIsNew', params: ({ event }) => ({ turnId: event.turnId }) },
             actions: assign({
               turnRefs: ({ context, event, self, spawn }) => ({
@@ -773,19 +821,6 @@ export const projectRevisionsMachine = setup({
                 }),
               }),
             }),
-          },
-          {
-            guard: 'runIsAlreadyHeld',
-            actions: emit(
-              ({ event }): Extract<ProjectRevisionsMachineEmitted, { readonly type: 'turnRefused' }> => ({
-                type: 'turnRefused',
-                turnId: event.turnId,
-                chatId: event.chatId,
-                runId: event.runId,
-                code: 'TURN_ALREADY_LEASED',
-                reason: 'This run has already taken this chat’s checkout.',
-              }),
-            ),
           },
           {
             /*
@@ -949,19 +984,43 @@ export const projectRevisionsMachine = setup({
             }
           }),
         },
+        /*
+         * T4-02: a turn-ending verb reaches the queue as well as the ref.
+         *
+         * An admission whose caller stopped waiting is still queued behind the
+         * turn id it is held by, and the root raised it anyway when that turn
+         * retired: the turn it spawned took the checkout's lease with nothing
+         * left to send it `turnCompleted`, so the checkout read as held for the
+         * rest of the session, every manual save on it answered
+         * `nothingToSave`, and every later edit of that message queued behind
+         * it. A lease has no heartbeat by policy (§8), so the host giving up
+         * *is* its liveness signal, and the run id is what tells the run that
+         * gave up from the one still recording.
+         */
         turnAbandoned: {
           actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = context.turnRefs[event.turnId];
+            const ref = endingTurnRef(context, event);
             if (ref !== undefined) {
               enqueue.sendTo(ref, { type: 'turnAbandoned' });
             }
+            if (event.runId !== undefined) {
+              enqueue.assign({
+                pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.runId !== event.runId),
+              });
+            }
           }),
         },
+        /* The other half of the same verb, and the same queue rule. */
         release: {
           actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = context.turnRefs[event.turnId];
+            const ref = endingTurnRef(context, event);
             if (ref !== undefined) {
               enqueue.sendTo(ref, { type: 'release' });
+            }
+            if (event.runId !== undefined) {
+              enqueue.assign({
+                pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.runId !== event.runId),
+              });
             }
           }),
         },

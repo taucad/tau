@@ -39,9 +39,8 @@ import {
 import type { BrowserAgentHostRegistration } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { publishChatHostServices, publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
 import {
-  getBrowserAgentHostRun,
   isBrowserAgentHostPlaced,
-  isBrowserAgentHostRunResumable,
+  resumableBrowserAgentHostRunId,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -60,8 +59,9 @@ import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 /**
  * Where a turn with this execution runs.
  *
- * The chat's binding re-registers on this and on nothing else: a model change
- * is read at `createClient` time, so it must not churn the registration.
+ * The chat's binding re-registers on this and on nothing else: `createClient`
+ * reads the live model itself, so a model change must not churn the
+ * registration.
  */
 const placementOf = (execution: CadAgentExecution): string => daemonPlacementOf(execution) ?? execution.kind;
 
@@ -138,9 +138,29 @@ export function ChatTurnHost(): ReactNode {
       if (execution.kind !== 'tau') {
         return undefined;
       }
-      if (!workspaceAuthority || fileManagerRef === undefined || syncProjectRoots === undefined) {
+      /* `ready` is part of the guard, not an extra check: a registration whose
+       * `createClient` cannot prepare is not a registration. Composing one
+       * before the file manager's worker existed is what broke open-time
+       * discovery — `prepare` threw inside the resume below, the AI SDK
+       * swallowed it into `onError`, and the chat's log was never attached. */
+      if (
+        !workspaceAuthority ||
+        !workspaceAuthority.ready ||
+        fileManagerRef === undefined ||
+        syncProjectRoots === undefined
+      ) {
         return undefined;
       }
+      /* I7: what the host knows about this chat's run, the page learns at chat
+       * open from the host's own snapshot. Reload discovery substantiates a run
+       * from this browser's *workspace claim*, which the dead document took
+       * with it — so after a reload nothing reattached a browser-placed run,
+       * the chat looked idle with no reply, and the next gesture's attach
+       * picked the orphan up by accident and re-asked the provider for a turn
+       * the person had already paid for (T2-D1). The placement is the trigger
+       * here exactly as it is for a daemon; the run identity comes from the
+       * log. */
+      store.reattachHostChat({ chatId: activeChatId, hostId: execution.kind });
       let projectStorage: Promise<ProjectFileSystemConfig> | undefined;
       const resolveProjectStorage = async (): Promise<ProjectFileSystemConfig> => {
         const resolved =
@@ -195,21 +215,36 @@ export function ChatTurnHost(): ReactNode {
         markRunId: async (runId) => workspaceAuthority.markRunId(activeChatId, runId),
         createClient: async () => {
           await syncProjectRoots();
+          /* Never `prepare`: every turn reaches here with `admitWorkspace`'s
+           * claim already taken, so minting one would only ever happen for the
+           * open-time attach — which drives nothing and must lease nothing.
+           * When it did, the chat's abandoned run settled under the id that
+           * attach minted and the durable log refused it (I7). */
           const [prepared, storage, capabilities] = await Promise.all([
-            // `admitWorkspace` already prepared this chat's claim in the picked
-            // mode; this reuses it rather than choosing again.
-            workspaceAuthority.prepare(activeChatId),
+            workspaceAuthority.attachment(activeChatId),
             resolveProjectStorage(),
             readRootedBridgeCapabilities(openProjectRootBridge),
           ]);
+          if (prepared === undefined) {
+            throw new Error('This chat has no checkout to run or replay a turn on.');
+          }
           if (!capabilities.writable || !capabilities.durability) {
             throw new Error('The active project filesystem is not writable or did not declare durability.');
           }
+          /* The model the person has selected *now*, not the one this
+           * registration was composed on. A bodyless Resume carries no
+           * admission, so the host runs it on whatever its worker was
+           * initialised with — and the card that offers Resume says "change the
+           * model, then resume". Composed once per placement, `execution` is as
+           * old as the chat's focus; the placement invariant is about `kind` and
+           * `hostId`, so a same-kind execution is free to bring its own model. */
+          const liveExecution =
+            agentRef.current.execution.kind === execution.kind ? agentRef.current.execution : execution;
           const config = agentHostConfig({
-            agent: { ...agentRef.current, execution },
+            agent: { ...agentRef.current, execution: liveExecution },
             chatId: activeChatId,
             runId: activeChatId,
-            resolvedModel: resolveModelRef.current(execution.model),
+            resolvedModel: resolveModelRef.current(liveExecution.model),
           });
           return createBrowserAgentHostClient({
             openFileSystemBridge: prepared.openFileSystemBridge,
@@ -244,13 +279,18 @@ export function ChatTurnHost(): ReactNode {
   }, [composeRegistration]);
 
   const placement = placementOf(agent.execution);
+  /* The binding actor calls `compose` when it binds and never again on its own.
+   * The revision root connects after this component's first render, so the
+   * first composition would be the one that cannot prepare — re-publishing on
+   * the flip is what makes the actor compose a working registration. */
+  const authorityReady = workspaceAuthority?.ready ?? false;
   useEffect(
     () =>
       publishChatHostServices(activeChatId, {
         placement,
         compose: () => composeRef.current(boundExecutionRef.current),
       }),
-    [activeChatId, placement],
+    [activeChatId, authorityReady, placement],
   );
   /* The chat session actor holds the binding; it re-invokes it when — and only
    * when — the placement it was given moves. */
@@ -266,6 +306,10 @@ export function ChatTurnHost(): ReactNode {
    * Every route — an explicit send, an edit, *Try again*, the auto-retry and
    * the homepage-seeded first turn — arrives here as one gesture, and
    * `turnIntentOf` is the one derivation of the rewind point (V7).
+   *
+   * Every one of them is an *attempt*: one lease, one execution, one
+   * settlement (I1). A continuation is the only one that does not mint its own
+   * run id, because the run it continues is one the host already holds.
    */
   const admit = useCallback(
     async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
@@ -284,32 +328,42 @@ export function ChatTurnHost(): ReactNode {
         });
         store.setTurnPlacement(activeChatId, placementOf(execution));
       }
-      /* A stream the host can still continue is the *same* turn: resuming it
-       * takes no lease and mints no run id, and rewinding it instead would
-       * charge a second time for tool work the customer already paid for. A
-       * turn the gateway refused at admission leaves a terminal run and no
-       * live stream, so *Try again* on one is a new turn, not a resume. */
-      if (
-        gesture.kind === 'continue' &&
-        (!isBrowserAgentHostPlaced(activeChatId) || isBrowserAgentHostRunResumable(activeChatId))
-      ) {
-        return {
-          runId: getBrowserAgentHostRun(activeChatId)?.runId,
-          leaseTurnId: undefined,
-          request: { kind: 'continue' },
-        };
+      /* A placement with no browser host answers its own resume over the wire:
+       * the daemon owns the run, its files and its lease, so there is nothing
+       * to fence here and nothing to derive. */
+      if (gesture.kind === 'continue' && !isBrowserAgentHostPlaced(activeChatId)) {
+        return { runId: undefined, leaseTurnId: undefined, request: { kind: 'continue' } };
       }
+      /* A run the host can still continue is the *same* turn, and rewinding it
+       * would charge a second time for tool work the customer already paid for
+       * — but continuing it is still an *attempt*, and an attempt holds a
+       * lease. The lease-less `continue` this replaces wrote the resumed
+       * execution's files unfenced, minted no revision on completion and left
+       * nothing that could settle it (I1, T2-D3/D4). A turn nothing can
+       * continue is a new turn, so it falls through to the rewind below. */
+      const resumableRunId = gesture.kind === 'continue' ? resumableBrowserAgentHostRunId(activeChatId) : undefined;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
-      const intent = turnIntentOf(
-        messages,
-        gesture.kind === 'send'
-          ? { kind: 'send', messageId: gesture.message.id }
-          : gesture.kind === 'edit'
-            ? { kind: 'edit', messageId: gesture.messageId }
-            : { kind: 'regenerate' },
-      );
       try {
-        const [target, preparedRunId] = await admitWorkspace(intent.leaseTurnId, execution);
+        const intent = turnIntentOf(
+          messages,
+          gesture.kind === 'send'
+            ? { kind: 'send', messageId: gesture.message.id }
+            : gesture.kind === 'edit'
+              ? { kind: 'edit', messageId: gesture.messageId }
+              : gesture.kind === 'continue' && resumableRunId !== undefined
+                ? { kind: 'continue' }
+                : { kind: 'regenerate' },
+        );
+        /* The claim's run id must be the host's, so the settlement that ends
+         * this attempt names the run `drop` is holding. */
+        const [target, preparedRunId] = await admitWorkspace(intent.leaseTurnId, execution, resumableRunId);
+        if (intent.trigger === 'resume') {
+          return {
+            runId: preparedRunId ?? resumableRunId,
+            leaseTurnId: intent.leaseTurnId,
+            request: { kind: 'continue' },
+          };
+        }
         /* One id for the lease, the host request and the settlement. A daemon
          * placement leases nothing here, so the key is minted for it. */
         const runId = preparedRunId ?? generatePrefixedId(idPrefix.request);

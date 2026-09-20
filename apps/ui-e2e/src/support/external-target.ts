@@ -2,7 +2,7 @@
 import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
 import { locators, server as vitestServer } from 'vitest/browser';
-import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
+import type { GatewayScriptTurn, GatewayTurnCount } from '#support/agent-host-gateway-script.js';
 
 export type TargetSurface = 'primary' | 'secondary';
 export type TargetSelector = Locator | string;
@@ -31,6 +31,20 @@ export type TargetCookie = {
   readonly url?: string;
   readonly value: string;
 };
+/** Where one gateway request is parked, and the turn it asks for. */
+export type TargetGatewayGate = {
+  readonly kind: 'request' | 'stream';
+  readonly turn: string;
+};
+
+/** What the agent-host gateway fixture holds and has been asked, right now. */
+export type TargetGatewayState = {
+  /** Every request parked at a gate, oldest first. Its length is the pending count. */
+  readonly parked: readonly TargetGatewayGate[];
+  /** Per-turn provider-call counts, in the order the turns were first asked. */
+  readonly turns: readonly GatewayTurnCount[];
+};
+
 export type TargetReadOptions = { readonly attributes?: readonly string[] };
 export type TargetState = {
   readonly attributes: Readonly<Record<string, string | null>>;
@@ -184,9 +198,20 @@ export type UiBrowserCommands = {
   uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
   uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
   uiReadAgentHostApiRequests(): Promise<string[]>;
+  uiHoldNextAgentHostGatewayRequest(): Promise<void>;
   uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
-  uiReleaseAgentHostGatewayFixture(): Promise<void>;
-  uiSetAgentHostGatewayFailure(failure?: { readonly status: number; readonly message: string }): Promise<void>;
+  uiReadAgentHostGatewayState(): Promise<TargetGatewayState>;
+  uiReleaseAgentHostGatewayFixture(turn?: string): Promise<void>;
+  uiReleaseAgentHostGatewayRequest(turn?: string): Promise<void>;
+  uiWaitForAgentHostGatewayGate(
+    match?: { readonly kind?: 'request' | 'stream'; readonly turn?: string },
+    timeoutMilliseconds?: number,
+  ): Promise<TargetGatewayGate>;
+  uiSetAgentHostGatewayFailure(failure?: {
+    readonly status: number;
+    readonly message: string;
+    readonly type?: string;
+  }): Promise<void>;
   uiReadTargetEvents(): Promise<{
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
@@ -452,13 +477,80 @@ export const installAgentHostGatewayFixture = (
   options?: AgentHostGatewayFixtureOptions,
 ): Promise<void> => server.commands.uiInstallAgentHostGatewayFixture(script, options);
 export const readAgentHostGatewayRequests = (): Promise<unknown[]> => server.commands.uiReadAgentHostGatewayRequests();
-export const releaseAgentHostGatewayFixture = (): Promise<void> => server.commands.uiReleaseAgentHostGatewayFixture();
+/** Releases a response parked mid-stream; omit `turn` for the newest gate. */
+export const releaseAgentHostGatewayFixture = (turn?: string): Promise<void> =>
+  server.commands.uiReleaseAgentHostGatewayFixture(turn);
+/** Holds the next provider request at its entry — the turn stays in `queued.dispatched` (F1). */
+export const holdNextAgentHostGatewayRequest = (): Promise<void> => server.commands.uiHoldNextAgentHostGatewayRequest();
+/** Releases a request parked at its entry; omit `turn` for the newest gate. */
+export const releaseAgentHostGatewayRequest = (turn?: string): Promise<void> =>
+  server.commands.uiReleaseAgentHostGatewayRequest(turn);
+/** What the gateway holds and what it has been asked: parked gates and per-turn call counts (F5). */
+export const readAgentHostGatewayState = (): Promise<TargetGatewayState> =>
+  server.commands.uiReadAgentHostGatewayState();
+/** Waits until a request is parked at a matching gate, and answers which one (F2). */
+export const waitForAgentHostGatewayGate = (
+  match?: { readonly kind?: 'request' | 'stream'; readonly turn?: string },
+  timeoutMilliseconds?: number,
+): Promise<TargetGatewayGate> => server.commands.uiWaitForAgentHostGatewayGate(match, timeoutMilliseconds);
 /** Every `/v1/chat/...` path the page asked the (absent) API for since the fixture was installed. */
 export const readAgentHostApiRequests = (): Promise<string[]> => server.commands.uiReadAgentHostApiRequests();
-/** Arms (or disarms, with no argument) a coded provider refusal on the gateway fixture. */
+
+/** The two points a row can park a chat's turn at; see {@link holdChatTurn}. */
+export type ChatTurnHold = 'admission' | 'settlement';
+
+/**
+ * Park this chat's next admission or settlement.
+ *
+ * The gateway fixture cannot hold either: `run.queued.admitting` is over before
+ * a provider call exists, and `run.finishing.settling` runs after the stream
+ * the row is watching has closed. The page's own `TAU_DEBUG` probe holds them
+ * (`apps/ui/app/chat-clients/debug-probes.tsx`, mounted by `focused-chat-gate.tsx`
+ * only under `ENV.TAU_DEBUG`, which `global-setup.ts` sets for this suite).
+ *
+ * Waits for the probe rather than racing the focused chat's mount. Arming twice
+ * is a no-op, and the probe releases both holds when it unmounts.
+ *
+ * @param hold - Which point to park at.
+ * @returns Nothing.
+ */
+export const holdChatTurn = async (hold: ChatTurnHold): Promise<void> => {
+  await expect
+    .poll(
+      async () => evaluate(() => typeof (globalThis as Record<string, unknown>)['__tauHoldChatTurn'] === 'function'),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  await evaluate((which: ChatTurnHold) => {
+    (globalThis as unknown as { __tauHoldChatTurn: (value: ChatTurnHold) => void }).__tauHoldChatTurn(which);
+  }, hold);
+};
+
+/**
+ * Let a parked admission or settlement carry on; releasing an unarmed hold is a no-op.
+ *
+ * @param hold - The point to release.
+ * @returns Nothing.
+ */
+export const releaseChatTurn = async (hold: ChatTurnHold): Promise<void> => {
+  await evaluate((which: ChatTurnHold) => {
+    (globalThis as unknown as { __tauReleaseChatTurn?: (value: ChatTurnHold) => void }).__tauReleaseChatTurn?.(which);
+  }, hold);
+};
+/**
+ * Arms (or disarms, with no argument) a provider refusal on the gateway fixture.
+ *
+ * `type` is the wire error type and is what decides whether the refused run can
+ * be continued: omit it and the fixture answers the upstream provider's own
+ * `api_error`, which the gateway maps to `UNKNOWN_GATEWAY_ERROR` — a failure no
+ * resume can continue, so the card reads *Try again* and re-admits. Name one of
+ * the gateway's own codes (`INVALID_REQUEST`, `INSUFFICIENT_CREDIT`, …) for the
+ * refusal a resume *can* continue under the same run.
+ */
 export const setAgentHostGatewayFailure = (failure?: {
   readonly status: number;
   readonly message: string;
+  readonly type?: string;
 }): Promise<void> => server.commands.uiSetAgentHostGatewayFailure(failure);
 
 export const expectVisible = async (

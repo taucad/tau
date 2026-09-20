@@ -8,15 +8,15 @@ import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
-  clearBrowserAgentHostRun,
+  retireBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
-  isBrowserAgentHostRunResumable,
   persistBrowserTurnSettlement,
   recordHostTurnSettlement,
   registerAgentHost,
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
+  resumableBrowserAgentHostRunId,
   resolveBrowserAgentHostInterrupt,
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
@@ -296,7 +296,7 @@ describe('BrowserPlacementChatTransport', () => {
 
     /* What project settlement does the moment it finalizes the turn. The
      * stream is still subscribed, waiting out this run's settlement. */
-    clearBrowserAgentHostRun(chatId);
+    retireBrowserAgentHostRun(chatId, runId);
     listener?.(chatId, {
       version: 1,
       leaderEpoch: 'leader-cleared',
@@ -1054,7 +1054,7 @@ describe('BrowserPlacementChatTransport', () => {
     });
     // The store's `continue` dispatch answers the Resume the credits card
     // offers, and reads the same answer before choosing its verb.
-    expect(isBrowserAgentHostRunResumable(chatId)).toBe(true);
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
     requestBrowserAgentHostResume(chatId);
     await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
 
@@ -1065,6 +1065,730 @@ describe('BrowserPlacementChatTransport', () => {
     await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
 
     expect(client.resume).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  /*
+   * The replay a continuation opens with is not this request's outcome.
+   *
+   * `run.lifecycle: failed` projects to an `error` chunk, and the AI SDK's
+   * stream reader rethrows the first one it sees: the resume's request ended
+   * with `isError` before `client.resume` had even answered, the page settled
+   * the reopened attempt `turn.failed`, and cancelling the readable cancelled
+   * the run the host was still executing. The failure being continued is
+   * already on screen from the attempt that produced it.
+   */
+  it('replays no failure chunk for the run a resume is about to continue', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-resume-replay';
+    const runId = 'run-resume-replay';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-resume-replay',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const detail = { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 };
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      {
+        ...base,
+        sequence: 2,
+        type: 'message.appended',
+        message: { id: 'user-resume-replay', role: 'user', content: 'Build it.' },
+      },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      { ...base, sequence: 4, type: 'run.lifecycle', state: 'failed', detail },
+    ] satisfies AgentLogEvent[];
+    const refusedSnapshot = {
+      chatId,
+      runId,
+      turnId: 'user-resume-replay',
+      state: 'failed',
+      messages: [{ id: 'user-resume-replay', role: 'user', content: 'Build it.' }],
+      failure: detail,
+    } as const;
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({ cursor: 0, nextCursor: 4, endCursor: 4, events, snapshot: refusedSnapshot })),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-resume-replay',
+        backend: 'opfs',
+        providerBasePath: 'project-resume-replay',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+    const chunksOf = async (): Promise<UIMessageChunk[]> => {
+      const stream = await transport.reconnectToStream({ chatId, metadata: undefined });
+      const reader = stream!.getReader();
+      const collected: UIMessageChunk[] = [];
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- reading a stream is sequential by construction.
+        const next = await reader.read();
+        if (next.done) {
+          return collected;
+        }
+        collected.push(next.value);
+      }
+    };
+
+    // A plain reattach still reports the failure: nobody is continuing it.
+    const reattached = await chunksOf();
+
+    expect(reattached.filter((chunk) => chunk.type === 'error')).toHaveLength(1);
+
+    requestBrowserAgentHostResume(chatId);
+    const resumed = await chunksOf();
+
+    expect(client.resume).toHaveBeenCalledWith(chatId);
+    expect(resumed.filter((chunk) => chunk.type === 'error')).toEqual([]);
+    expect(resumed.at(-1)).toMatchObject({ type: 'finish' });
+
+    unregister();
+  });
+
+  /*
+   * E3, I7: a reattach that finds a completed run the log never settled is the
+   * page's to settle, and the writer that settlement needs is this stream's
+   * client. A read-only reattach used to close it at the end of the replay, so
+   * finalise-on-return minted the revision and recorded nothing — the log kept
+   * a `completed` run with no settlement and every later open reconciled it
+   * again.
+   */
+  it('opens a settlement writer for a completed run the log never settled', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-unsettled-return';
+    const runId = 'run-unsettled-return';
+    const turnId = 'user-unsettled-return';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-unsettled-return',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      { ...base, sequence: 4, type: 'run.lifecycle', state: 'completed' },
+    ] satisfies AgentLogEvent[];
+    const finalized = {
+      type: 'turn.finalized',
+      chatId,
+      runId,
+      turnId,
+      projectId: 'project-unsettled-return',
+      checkoutId: 'live',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: [runId],
+      revisionId: 'rev-unsettled-return',
+    } as const satisfies HostTurnSettlement;
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 4,
+        endCursor: 4,
+        events,
+        snapshot: {
+          chatId,
+          runId,
+          turnId,
+          state: 'completed',
+          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+        } as const,
+      })),
+      recordSettlement: vi.fn(async () => undefined),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-unsettled-return',
+        backend: 'opfs',
+        providerBasePath: 'project-unsettled-return',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(reattached!.getReader());
+    /* The readable is done once the replay ends; the settlement the page
+     * produces on return lands after it, and this stream still owns the
+     * writer for it. */
+    await expect(persistBrowserTurnSettlement(finalized)).resolves.toBe(true);
+    recordHostTurnSettlement(finalized);
+    unregister();
+  });
+
+  /*
+   * The stream deletes its `activeClients` entry and *then* closes its worker,
+   * which holds the chat's log lock for as long as the close takes. A fallback
+   * writer opened in that window is a second worker contending for the same
+   * lock over a leadership channel keyed on a workspace the first one may not
+   * share — seven seconds of nothing, and a lost settlement.
+   */
+  it('waits for a closing stream to let go of the chat log before it opens a settlement writer', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-close-window';
+    const runId = 'run-close-window';
+    const turnId = 'user-close-window';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-close-window',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'completed' },
+    ] satisfies AgentLogEvent[];
+    const closing = Promise.withResolvers<void>();
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events,
+        snapshot: {
+          chatId,
+          runId,
+          turnId,
+          state: 'completed',
+          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+        } as const,
+      })),
+      recordSettlement: vi.fn(async () => undefined),
+      close: vi.fn(async () => closing.promise),
+    });
+    const createClient = vi.fn(async () => client);
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-close-window',
+        backend: 'opfs',
+        providerBasePath: 'project-close-window',
+      }),
+      createClient,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(reattached!.getReader());
+    await vi.waitFor(() => {
+      expect(client.close).toHaveBeenCalledTimes(1);
+    });
+    const persisted = persistBrowserTurnSettlement({
+      type: 'turn.finalized',
+      chatId,
+      runId,
+      turnId,
+      projectId: 'project-close-window',
+      checkoutId: 'live',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: [runId],
+      revisionId: 'rev-close-window',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The first worker still holds the log; nothing may dial a second one yet.
+    expect(createClient).toHaveBeenCalledTimes(1);
+
+    closing.resolve();
+    await expect(persisted).resolves.toBe(true);
+    expect(createClient).toHaveBeenCalledTimes(2);
+    unregister();
+  });
+
+  /*
+   * A daemon registration builds its client with no `recordSettlement` — the
+   * option is the browser worker's alone — so this branch dialled the daemon
+   * and then walked away from the channel. Every settlement routed to a
+   * daemon-registered chat leaked one.
+   */
+  it('closes the writer it opened for a registration that cannot record settlements', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-writerless-registration';
+    const runId = 'run-writerless-registration';
+    const client = clientFor(chatId, runId);
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-writerless',
+        backend: 'opfs',
+        providerBasePath: 'project-writerless',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    await expect(
+      persistBrowserTurnSettlement({
+        type: 'turn.finalized',
+        chatId,
+        runId,
+        turnId: 'user-writerless',
+        projectId: 'project-writerless',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+        revisionId: 'rev-writerless',
+      }),
+    ).resolves.toBe(false);
+
+    expect(client.close).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  /*
+   * I1/E3: `registrations` is written by the *focused* chat's turn host, while
+   * the settlement root publishes for every chat of the project — so an
+   * unfocused chat's settlement is dropped, and the next open of that chat
+   * reconciles the same run again and mints a second revision. Silence made
+   * that duplicate unattributable.
+   */
+  it('names the chat and run of a settlement it has no registration to write', async () => {
+    installBrowserGlobals();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      persistBrowserTurnSettlement({
+        type: 'turn.finalized',
+        chatId: 'chat-unregistered-settlement',
+        runId: 'run-unregistered-settlement',
+        turnId: 'user-unregistered-settlement',
+        projectId: 'project-unregistered-settlement',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-unregistered-settlement'],
+        revisionId: 'rev-unregistered-settlement',
+      }),
+    ).resolves.toBe(false);
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('no settlement writer') as unknown,
+      'chat-unregistered-settlement',
+      'run-unregistered-settlement',
+    );
+    warn.mockRestore();
+  });
+
+  /*
+   * The other half of the same rule: only the *replay* is silent. The reopened
+   * attempt's own failure is this request's outcome, and silencing it left the
+   * saved-turn card unrendered — a second Resume had nothing to press.
+   */
+  it('reports the failure of the attempt a resume reopened', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-resume-refailed';
+    const runId = 'run-resume-refailed';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-resume-refailed',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const turnId = 'user-resume-refailed';
+    const first = { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 };
+    const second = { message: 'Refused twice.', code: 'INVALID_REQUEST', status: 400 };
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'failed', detail: first },
+    ] satisfies AgentLogEvent[];
+    let notify: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        notify = next;
+        return () => {
+          notify = undefined;
+        };
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events,
+        snapshot: { chatId, runId, turnId, state: 'failed', messages: [], failure: first } as const,
+      })),
+      resume: vi.fn(async (resumedChat: string) => {
+        notify?.(resumedChat, {
+          ...base,
+          leaderEpoch: 'leader-resume-refailed-2',
+          sequence: 1,
+          type: 'run.lifecycle',
+          state: 'failed',
+          detail: second,
+        });
+        return { chatId, runId, turnId, state: 'failed', messages: [], failure: second } as const;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-resume-refailed',
+        backend: 'opfs',
+        providerBasePath: 'project-resume-refailed',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    const first_ = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(first_!.getReader());
+    requestBrowserAgentHostResume(chatId);
+    const resumed = await transport.reconnectToStream({ chatId, metadata: undefined });
+    const reader = resumed!.getReader();
+    const chunks: UIMessageChunk[] = [];
+    // oxlint-disable-next-line no-await-in-loop -- reading a stream is sequential by construction.
+    for (let next = await reader.read(); !next.done; next = await reader.read()) {
+      chunks.push(next.value);
+    }
+
+    expect(chunks.filter((chunk) => chunk.type === 'error')).toEqual([
+      { type: 'error', errorText: expect.stringContaining('Refused twice.') as unknown },
+    ]);
+    unregister();
+  });
+
+  /*
+   * I1: one attempt, one settlement — so the gate that holds this stream's
+   * durable writer open belongs to the attempt, not to the run id.
+   *
+   * The replay a continuation opens with republishes the *previous* attempt's
+   * `turn.failed` under the same run id, which resolved the wait before the
+   * reopened attempt had started. The stream then closed its client the moment
+   * `resume` answered, and the `turn.finalized` the root minted a tick later
+   * found no writer: a revision on screen, nothing in the chat's durable log,
+   * and every later open reconciling the run again.
+   */
+  it('holds its own settlement writer for the attempt a resume reopens', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-resume-settlement';
+    const runId = 'run-resume-settlement';
+    const turnId = 'user-resume-settlement';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-resume-settlement',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const settlement = {
+      chatId,
+      runId,
+      turnId,
+      projectId: 'project-resume-settlement',
+      checkoutId: 'live',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: [runId],
+    } as const;
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      {
+        ...base,
+        sequence: 4,
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 },
+      },
+      // The first attempt's own settlement, already in the log.
+      { ...base, sequence: 5, type: 'turn.failed', ...settlement, reason: 'Refused once.' },
+    ] satisfies AgentLogEvent[];
+    const finalized = {
+      type: 'turn.finalized',
+      ...settlement,
+      revisionId: 'rev-resume-settlement',
+    } as const satisfies HostTurnSettlement;
+    let persistedByThisStream: boolean | undefined;
+    let notify: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const settleAfterTheStream = async (): Promise<void> => {
+      persistedByThisStream = await persistBrowserTurnSettlement(finalized);
+      recordHostTurnSettlement(finalized);
+    };
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        notify = next;
+        return () => {
+          notify = undefined;
+        };
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 5,
+        endCursor: 5,
+        events,
+        snapshot: {
+          chatId,
+          runId,
+          turnId,
+          state: 'failed',
+          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+          failure: { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 },
+        } as const,
+      })),
+      recordSettlement: vi.fn(async () => undefined),
+      resume: vi.fn(async (resumedChat: string) => {
+        notify?.(resumedChat, {
+          ...base,
+          leaderEpoch: 'leader-resume-settlement-2',
+          sequence: 1,
+          type: 'run.lifecycle',
+          state: 'running',
+        });
+        notify?.(resumedChat, {
+          ...base,
+          leaderEpoch: 'leader-resume-settlement-2',
+          sequence: 2,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        /* The page settles the reopened attempt after the stream's last chunk,
+         * one macrotask later — exactly where the real `settle` runs. */
+        globalThis.setTimeout(settleAfterTheStream, 0);
+        return { chatId, runId, turnId, state: 'completed', messages: [] } as const;
+      }),
+    });
+    const createClient = vi.fn(async () => client);
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-resume-settlement',
+        backend: 'opfs',
+        providerBasePath: 'project-resume-settlement',
+      }),
+      createClient,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(reattached!.getReader());
+    requestBrowserAgentHostResume(chatId);
+    const continued = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(continued!.getReader());
+
+    expect(client.resume).toHaveBeenCalledTimes(1);
+    /* The readable is done once the last chunk is written; the writer this
+     * asserts is held open past it, for the settlement that follows. */
+    await vi.waitFor(() => {
+      expect(persistedByThisStream).toBe(true);
+    });
+    /* This stream's own client, not one opened for the write: two streams,
+     * two clients. A third call means the hold let go too early and the
+     * fallback writer had to cover for it. */
+    expect(createClient).toHaveBeenCalledTimes(2);
+    unregister();
+  });
+
+  /*
+   * The other gate the replay resolves, and the race the conditional re-arm
+   * lost. The host appends `run.lifecycle: running` and publishes it *before*
+   * it answers `resume`, so the row is already drained by the time the resume's
+   * snapshot is reconciled: the re-arm's `terminal(state)` reads false, nothing
+   * re-arms, and the stream closed on the previous attempt's gate while the
+   * continuation was still producing the reply — A2's exact symptom, re-armed.
+   */
+  it('keeps a continuation open until the reopened attempt ends, not until its resume answers', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-resume-open';
+    const runId = 'run-resume-open';
+    const turnId = 'user-resume-open';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-resume-open',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const refusal = { message: 'Refused once.', code: 'INVALID_REQUEST', status: 400 };
+    const events = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
+      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
+      { ...base, sequence: 4, type: 'run.lifecycle', state: 'failed', detail: refusal },
+    ] satisfies AgentLogEvent[];
+    const finalized = {
+      type: 'turn.finalized',
+      chatId,
+      runId,
+      turnId,
+      projectId: 'project-resume-open',
+      checkoutId: 'live',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: [runId],
+      revisionId: 'rev-resume-open',
+    } as const satisfies HostTurnSettlement;
+    let notify: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        notify = next;
+        return () => {
+          notify = undefined;
+        };
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 4,
+        endCursor: 4,
+        events,
+        snapshot: {
+          chatId,
+          runId,
+          turnId,
+          state: 'failed',
+          messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
+          failure: refusal,
+        } as const,
+      })),
+      recordSettlement: vi.fn(async () => undefined),
+      resume: vi.fn(async (resumedChat: string) => {
+        /* The host's own ordering: the reopened attempt is already running and
+         * its row is on the subscription before this command answers. */
+        notify?.(resumedChat, {
+          ...base,
+          leaderEpoch: 'leader-resume-open-2',
+          sequence: 1,
+          type: 'run.lifecycle',
+          state: 'running',
+        });
+        globalThis.setTimeout(() => {
+          notify?.(resumedChat, {
+            ...base,
+            leaderEpoch: 'leader-resume-open-2',
+            sequence: 2,
+            type: 'message.appended',
+            message: {
+              id: 'assistant-resume-open',
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Reply one.' }],
+            },
+          });
+          notify?.(resumedChat, {
+            ...base,
+            leaderEpoch: 'leader-resume-open-2',
+            sequence: 3,
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+          recordHostTurnSettlement(finalized);
+        }, 0);
+        return { chatId, runId, turnId, state: 'running', messages: [] } as const;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-resume-open',
+        backend: 'opfs',
+        providerBasePath: 'project-resume-open',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+
+    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
+    await drain(reattached!.getReader());
+    requestBrowserAgentHostResume(chatId);
+    const continued = await transport.reconnectToStream({ chatId, metadata: undefined });
+    const reader = continued!.getReader();
+    const chunks: UIMessageChunk[] = [];
+    // oxlint-disable-next-line no-await-in-loop -- reading a stream is sequential by construction.
+    for (let next = await reader.read(); !next.done; next = await reader.read()) {
+      chunks.push(next.value);
+    }
+
+    expect(chunks).toContainEqual({ type: 'text-delta', id: 'assistant-resume-open:text:0', delta: 'Reply one.' });
+    unregister();
+  });
+
+  /*
+   * T3-D8. A settlement retires this page's record of the run — it is the
+   * page's live bookkeeping and the turn is over — but resumability is a fact
+   * about the *host's* run, and it survives that. Reading it from the retired
+   * record made every *Try again* after a credit refusal a full re-admission:
+   * a new lease, a new run id and a rewind, which pays a second time for the
+   * tool work the customer already paid for.
+   */
+  it('keeps a credit-refused run resumable after settlement retires the page record', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refused-settled';
+    const runId = 'run-refused-settled';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-refused-settled',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const client = clientFor(chatId, runId, {
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+      /* The admission is answered as soon as the run is admitted — long before
+       * the model call the gateway refuses — so the failure reaches a live turn
+       * on the run's own terminal row and never in a snapshot. */
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          ...base,
+          sequence: 1,
+          type: 'run.lifecycle',
+          state: 'failed',
+          detail: {
+            message: 'Insufficient Tau credit for this model request.',
+            code: 'INSUFFICIENT_CREDIT',
+            status: 402,
+          },
+        } satisfies AgentLogEvent);
+        return { chatId, runId, turnId: 'user-refused-settled', state: 'running', messages: [] } as const;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refused-settled',
+        backend: 'opfs',
+        providerBasePath: 'project-refused-settled',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [{ id: 'user-refused-settled', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+      abortSignal: undefined,
+      body: {
+        admission: { version: 1, idempotencyKey: runId },
+        browserHost: { trigger: 'submit', agent: { kind: 'acp', id: 'codex' } },
+      },
+    });
+    await drain(stream.getReader());
+
+    expect(getBrowserAgentHostRun(chatId)).toMatchObject({
+      runId,
+      state: 'failed',
+      failure: { code: 'INSUFFICIENT_CREDIT' },
+    });
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
+
+    // The turn settled: the page's own record of the run is retired with it.
+    retireBrowserAgentHostRun(chatId, runId);
+
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
+    expect(resumableBrowserAgentHostRunId(chatId)).toBe(runId);
     unregister();
   });
 
@@ -1100,10 +1824,16 @@ describe('BrowserPlacementChatTransport', () => {
     const transport = new BrowserPlacementChatTransport();
 
     requestBrowserAgentHostResume(chatId);
-    await drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader());
+    /* The Resume flag is one-shot and is spent the moment the stream opens, so
+     * a resume nothing can honour has to say so: replaying and closing in
+     * silence left the person having pressed Resume with no continuation and no
+     * message. */
+    await expect(
+      drain((await transport.reconnectToStream({ chatId, metadata: undefined }))!.getReader()),
+    ).rejects.toMatchObject({ code: 'RESUME_UNAVAILABLE' });
 
     expect(client.resume).not.toHaveBeenCalled();
-    expect(isBrowserAgentHostRunResumable(chatId)).toBe(false);
+    expect(resumableBrowserAgentHostRunId(chatId)).toBeUndefined();
     unregister();
   });
 
@@ -1855,12 +2585,12 @@ describe('BrowserPlacementChatTransport', () => {
    * The page came back to a chat mid-turn: this document never attached to the
    * run the worker is still driving, and the workspace claim that reload
    * discovery reads was dropped when the previous document unloaded. The host
-   * is the only authority that knows, and it says so — `admit is refused`
-   * because the chat has a running run. Ending the turn on that banner made
-   * *navigate away mid-turn and back* a dead chat; the stream waits for the
-   * live run to end and admits once, which is what the person asked for.
+   * is the only authority that knows, and it says so with `CHAT_RUN_LIVE`.
+   * Ending the turn on that banner made *navigate away mid-turn and back* a
+   * dead chat; the stream waits for the live run to end and admits once, which
+   * is what the person asked for.
    */
-  it('waits out a live run the host refuses to admit over, then admits once', async () => {
+  it('waits out the live run the host named, then admits once', async () => {
     installBrowserGlobals();
     const chatId = 'chat-live-refusal';
     const runId = 'run-live-refusal';
@@ -1870,10 +2600,7 @@ describe('BrowserPlacementChatTransport', () => {
       start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
         refusals += 1;
         if (refusals === 1) {
-          throw new AgentHostWorkerError(
-            'RUN_ADMISSION_CONFLICT',
-            `Chat ${chatId} has a running run; admit is refused.`,
-          );
+          throw new AgentHostWorkerError('CHAT_RUN_LIVE', `Chat ${chatId} has a running run; admit the next turn.`);
         }
         listener?.(chatId, {
           version: 1,
@@ -1937,6 +2664,79 @@ describe('BrowserPlacementChatTransport', () => {
       expect(refusals).toBe(2);
     } finally {
       unregister();
+    }
+  });
+
+  /**
+   * The other half of the same refusal: after a document died with no takeover,
+   * nobody drives the run the host is refusing over, so it never ends. The wait
+   * used to have no timer and no abort — the composer sat on *Planning next
+   * moves…* for as long as the page stayed open. A bounded wait turns an
+   * invisible hang back into a failure the person can act on — and another
+   * view's run ending is not this run ending, so it must not release the wait.
+   */
+  it('surfaces a live run nobody is driving once the settlement bound expires', async () => {
+    installBrowserGlobals();
+    vi.useFakeTimers();
+    const chatId = 'chat-live-forever';
+    const runId = 'run-live-forever';
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        throw new AgentHostWorkerError('CHAT_RUN_LIVE', `Chat ${chatId} has a running run; admit the next turn.`);
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: snapshot(chatId, 'run-orphan', 'running'),
+      })),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        globalThis.setTimeout(() => {
+          next(chatId, {
+            version: 1,
+            leaderEpoch: 'leader-live-forever',
+            sequence: 4,
+            recordedAt: '2026-09-18T00:00:04.000Z',
+            runId: 'run-someone-else',
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+        }, 1000);
+        return () => undefined;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-live-forever',
+        backend: 'opfs',
+        providerBasePath: 'project-live-forever',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-live-forever',
+        messages: [{ id: 'message-live-forever', role: 'user', parts: [{ type: 'text', text: 'Second.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      /* Observed before the clock moves: the bound rejects inside the advance,
+       * and a rejection nothing is watching yet is reported as unhandled. */
+      const refusal = expect(drain(stream.getReader())).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await refusal;
+      /* Once: the unrelated run ending at 1 s is not this run ending, so it
+       * never released the wait into a second admission. */
+      expect(client.start).toHaveBeenCalledOnce();
+    } finally {
+      unregister();
+      vi.useRealTimers();
     }
   });
 
@@ -2527,7 +3327,7 @@ describe('BrowserPlacementChatTransport attachments', () => {
     } finally {
       consoleError.mockRestore();
       unregister();
-      clearBrowserAgentHostRun(chatId);
+      retireBrowserAgentHostRun(chatId, runId);
     }
   });
 });

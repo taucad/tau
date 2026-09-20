@@ -29,8 +29,8 @@ import { testBaseURL } from './base-url.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
 import type { TauServeFixture, TauServeFixtureOptions } from './tau-serve-fixture.ts';
-import { browserHostScript } from './agent-host-gateway-script.ts';
-import type { GatewayScriptTurn } from './agent-host-gateway-script.ts';
+import { browserHostScript, createGatewayScriptWalk } from './agent-host-gateway-script.ts';
+import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
 
 type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
@@ -39,6 +39,36 @@ type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
 type AgentHostGatewayFailure = {
   readonly status: number;
   readonly message: string;
+  /**
+   * The wire error type, which is what decides the run's coded failure.
+   *
+   * Tau's own gateway refuses with one of `gatewayModelErrorCodes` here, and
+   * `gatewayErrorCode` maps anything else — an upstream provider's own
+   * `api_error`, for one — to `UNKNOWN_GATEWAY_ERROR`, which
+   * `isResumableRunFailure` rejects. So the default refusal is one the turn
+   * cannot continue from and *Try again* rewinds; a row that means to exercise
+   * a *resumable* refusal (I1: one run, two attempts) has to name a code the
+   * host can continue, exactly as the gateway would.
+   */
+  readonly type?: string;
+};
+
+/** Where a gateway request is parked, and which turn it belongs to. */
+type AgentHostGatewayGate = {
+  /** `request` parks before any byte is answered; `stream` parks mid-response. */
+  readonly kind: 'request' | 'stream';
+  /** The user text of the turn this request asks for. */
+  readonly turn: string;
+};
+
+type ParkedGate = AgentHostGatewayGate & { readonly release: () => void };
+
+/** What the fixture is holding and what it has been asked, right now. */
+export type AgentHostGatewayState = {
+  /** Every request parked at a gate, oldest first. Its length is the pending count. */
+  readonly parked: readonly AgentHostGatewayGate[];
+  /** Per-turn provider-call counts, in the order the turns were first asked. */
+  readonly turns: readonly GatewayTurnCount[];
 };
 
 type Session = {
@@ -53,9 +83,12 @@ type Session = {
   readonly primary: TargetPage;
   readonly workerIds: WeakMap<object, string>;
   nextWorkerId: number;
+  readonly agentHostGatewayGates: ParkedGate[];
   agentHostGatewayFailure?: AgentHostGatewayFailure | undefined;
-  agentHostGatewayRelease?: (() => void) | undefined;
+  /** Armed by `uiHoldNextAgentHostGatewayRequest`; consumed by the next request. */
+  agentHostGatewayRequestHold?: boolean;
   agentHostGatewayServer?: Server;
+  agentHostGatewayWalk?: GatewayScriptWalk;
   secondary?: TargetPage;
   testUserEmail?: string;
   tracing: boolean;
@@ -177,8 +210,9 @@ const observePage = (session: Session, page: TargetPage): void => {
 
 const disposeSession = async (session: Session): Promise<void> => {
   const errors: unknown[] = [];
-  session.agentHostGatewayRelease?.();
-  session.agentHostGatewayRelease = undefined;
+  for (const gate of session.agentHostGatewayGates.splice(0)) {
+    gate.release();
+  }
   if (session.agentHostGatewayServer) {
     const server = session.agentHostGatewayServer;
     session.agentHostGatewayServer = undefined;
@@ -301,6 +335,7 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
   const primary = await context.newPage();
   const session: Session = {
     agentHostApiRequests: [],
+    agentHostGatewayGates: [],
     agentHostGatewayRequests: [],
     consoleMessages: [],
     context,
@@ -368,6 +403,43 @@ export const uiStartHostFixture: BrowserCommand<[], string> = async (commandCont
   return started;
 };
 
+/**
+ * Park one request at a gate until a spec releases it.
+ *
+ * Gates are a list, not one resolver: two chats can be mid-run at once, and a
+ * request-entry hold and a stream hold can be pending together. The entry is
+ * removed when it resolves, so `parked` is what is waiting *now*.
+ */
+const parkAtGate = async (session: Session, kind: 'request' | 'stream', turn: string): Promise<void> => {
+  const gate = Promise.withResolvers<void>();
+  const entry: ParkedGate = { kind, turn, release: gate.resolve };
+  session.agentHostGatewayGates.push(entry);
+  try {
+    await gate.promise;
+  } finally {
+    const index = session.agentHostGatewayGates.indexOf(entry);
+    if (index !== -1) {
+      session.agentHostGatewayGates.splice(index, 1);
+    }
+  }
+};
+
+/* Newest first: a single-resolver fixture overwrote its resolver, so the gate a
+ * bare release answered was always the most recent one. */
+const releaseGate = (session: Session, kind: ParkedGate['kind'], turn: string | undefined, absent: string): void => {
+  const index = session.agentHostGatewayGates.findLastIndex(
+    (gate) => gate.kind === kind && (turn === undefined || gate.turn.includes(turn)),
+  );
+  if (index === -1) {
+    throw new Error(absent);
+  }
+  /* Removed here, not only in `parkAtGate`'s `finally`: that runs a microtask
+   * later, and two releases in a row would otherwise both answer the same gate
+   * and leave the second request parked. */
+  const [gate] = session.agentHostGatewayGates.splice(index, 1);
+  gate!.release();
+};
+
 /* eslint-disable @typescript-eslint/naming-convention -- Anthropic's provider wire uses snake_case. */
 /**
  * Write one scripted assistant turn onto Anthropic's streaming wire: an
@@ -379,18 +451,14 @@ const writeScriptedTurn = async (options: {
   readonly currentRequest: number;
   readonly session: Session;
   readonly turn: GatewayScriptTurn;
+  /** The user text of the turn this response answers, so its gate is addressable. */
+  readonly turnKey: string;
   readonly writeEvent: (event: string, data: unknown) => void;
 }): Promise<void> => {
-  const { currentRequest, session, turn, writeEvent } = options;
+  const { currentRequest, session, turn, turnKey, writeEvent } = options;
   const pause = async (required = turn.gated === true): Promise<void> => {
-    if (!required) {
-      return;
-    }
-    const gate = Promise.withResolvers<void>();
-    session.agentHostGatewayRelease = gate.resolve;
-    await gate.promise;
-    if (session.agentHostGatewayRelease === gate.resolve) {
-      session.agentHostGatewayRelease = undefined;
+    if (required) {
+      await parkAtGate(session, 'stream', turnKey);
     }
   };
   let index = 0;
@@ -503,10 +571,14 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   const session = sessionFor(commandContext);
   session.agentHostGatewayRequests.length = 0;
   session.agentHostApiRequests.length = 0;
-  session.agentHostGatewayRelease = undefined;
+  for (const gate of session.agentHostGatewayGates.splice(0)) {
+    gate.release();
+  }
+  session.agentHostGatewayRequestHold = false;
   session.agentHostGatewayFailure = undefined;
+  const walk = createGatewayScriptWalk(script);
+  session.agentHostGatewayWalk = walk;
   let requestIndex = 0;
-  let scriptIndex = 0;
   const headers = {
     'access-control-allow-credentials': 'true',
     'access-control-allow-headers': 'accept,content-type',
@@ -543,8 +615,24 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
         for await (const chunk of request) {
           body.push(String(chunk));
         }
-        const payload = JSON.parse(body.join('')) as { readonly tools?: readonly unknown[] };
-        session.agentHostGatewayRequests.push(payload);
+        const parsed = JSON.parse(body.join('')) as Parameters<typeof walk.record>[0] & {
+          readonly tools?: readonly unknown[];
+        };
+        session.agentHostGatewayRequests.push(parsed);
+        /* A compaction summary is the one call the host sends with no tools
+         * (`compactionModelsWithTransport`, `session.ts`) and it lands between
+         * the agent's own calls. It is not a turn, so it is answered off-script
+         * and never reaches the walk: recording it would count as an ask of the
+         * turn it summarises. `summary: ''` is the summariser failure a turn
+         * must survive. Without the option the fixture behaves as it did. */
+        const isSummaryRequest = options.summary !== undefined && (parsed.tools?.length ?? 0) === 0;
+        const step = isSummaryRequest ? undefined : walk.record(parsed);
+        // F1: park at request entry, before any byte is answered, so a spec can
+        // hold its turn in `queued.dispatched` instead of racing the stream.
+        if (step !== undefined && session.agentHostGatewayRequestHold === true) {
+          session.agentHostGatewayRequestHold = false;
+          await parkAtGate(session, 'request', step.turn);
+        }
         const { agentHostGatewayFailure } = session;
         if (agentHostGatewayFailure) {
           // A coded provider refusal, not a dropped socket: the browser host
@@ -558,7 +646,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
             JSON.stringify({
               type: 'error',
               error: {
-                type: 'api_error',
+                type: agentHostGatewayFailure.type ?? 'api_error',
                 message: agentHostGatewayFailure.message,
               },
             }),
@@ -575,20 +663,14 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
           'x-tau-operation-id': `browser-host-e2e-operation-${String(currentRequest)}`,
         });
         response.flushHeaders();
-        /* A compaction summary is the one call the host sends with no tools
-         * (`compactionModelsWithTransport`, `session.ts`) and it lands between
-         * the agent's own calls, so answering it off-script keeps the turn walk
-         * aligned; `summary: ''` is the summariser failure a turn must survive.
-         * Without the option the fixture behaves exactly as it did. */
-        const isSummaryRequest = options.summary !== undefined && (payload.tools?.length ?? 0) === 0;
-        // The walk wraps: a retried turn replays the script from the top, which
-        // is what the rewind vertical in `browser-agent-host.spec.ts` asserts on.
         await writeScriptedTurn({
           currentRequest,
           session,
-          turn: isSummaryRequest
-            ? { text: options.summary, usage: { inputTokens: 40, outputTokens: 10 } }
-            : script[scriptIndex++ % script.length]!,
+          turn:
+            step === undefined
+              ? { text: options.summary, usage: { inputTokens: 40, outputTokens: 10 } }
+              : walk.serve(step),
+          turnKey: step?.turn ?? '',
           writeEvent,
         });
         response.end();
@@ -670,12 +752,78 @@ export const uiReadAgentHostApiRequests: BrowserCommand<[], string[]> = (command
   ...sessionFor(commandContext).agentHostApiRequests,
 ];
 
-export const uiReleaseAgentHostGatewayFixture: BrowserCommand = (commandContext) => {
+/** Release a response parked mid-stream; omit `turn` for the newest one. */
+export const uiReleaseAgentHostGatewayFixture: BrowserCommand<[turn?: string]> = (commandContext, turn) => {
+  releaseGate(
+    sessionFor(commandContext),
+    'stream',
+    turn,
+    'Agent-host gateway completion is not waiting at its deterministic gate.',
+  );
+};
+
+/** Hold the next request at its entry, before the gateway answers a single byte (F1). */
+export const uiHoldNextAgentHostGatewayRequest: BrowserCommand = (commandContext) => {
+  sessionFor(commandContext).agentHostGatewayRequestHold = true;
+};
+
+/** Release a request parked at its entry; omit `turn` for the newest one. */
+export const uiReleaseAgentHostGatewayRequest: BrowserCommand<[turn?: string]> = (commandContext, turn) => {
+  releaseGate(
+    sessionFor(commandContext),
+    'request',
+    turn,
+    'No agent-host gateway request is waiting at its entry gate.',
+  );
+};
+
+/**
+ * What the fixture holds and what it has been asked (F5).
+ *
+ * `parked.length` is the pending count, and `turns` separates *asks* of a turn
+ * from its agent-loop continuations — one ask per attempt is the contract a
+ * cumulative request total cannot express.
+ */
+export const uiReadAgentHostGatewayState: BrowserCommand<[], AgentHostGatewayState> = (commandContext) => {
   const session = sessionFor(commandContext);
-  if (!session.agentHostGatewayRelease) {
-    throw new Error('Agent-host gateway completion is not waiting at its deterministic gate.');
+  return {
+    parked: session.agentHostGatewayGates.map(({ kind, turn }) => ({ kind, turn })),
+    turns: session.agentHostGatewayWalk?.counts() ?? [],
+  };
+};
+
+/**
+ * Wait until a request is parked at a gate, and answer which one (F2).
+ *
+ * A gated row used to release blind and fail inside the fixture when nothing
+ * was waiting yet; the release keeps that throw, and this is the wait.
+ */
+export const uiWaitForAgentHostGatewayGate: BrowserCommand<
+  [match?: { readonly kind?: 'request' | 'stream'; readonly turn?: string }, timeoutMilliseconds?: number],
+  AgentHostGatewayGate
+> = async (commandContext, match = {}, timeoutMilliseconds = 30_000) => {
+  const session = sessionFor(commandContext);
+  const deadline = Date.now() + timeoutMilliseconds;
+  for (;;) {
+    const parked = session.agentHostGatewayGates.find(
+      (gate) =>
+        (match.kind === undefined || gate.kind === match.kind) &&
+        (match.turn === undefined || gate.turn.includes(match.turn)),
+    );
+    if (parked) {
+      return { kind: parked.kind, turn: parked.turn };
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `No agent-host gateway request parked at ${JSON.stringify(match)} within ${String(timeoutMilliseconds)}ms; parked: ${JSON.stringify(
+          session.agentHostGatewayGates.map(({ kind, turn }) => ({ kind, turn })),
+        )}`,
+      );
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
   }
-  session.agentHostGatewayRelease();
 };
 
 export const uiReadAgentHostGatewayRequests: BrowserCommand<[], unknown[]> = (commandContext) => [
@@ -1557,8 +1705,12 @@ export const uiBrowserCommands = {
   uiFocusTarget,
   uiGrantPermissions,
   uiHoverTarget,
+  uiHoldNextAgentHostGatewayRequest,
   uiInstallAgentHostGatewayFixture,
   uiReadAgentHostApiRequests,
+  uiReadAgentHostGatewayState,
+  uiReleaseAgentHostGatewayRequest,
+  uiWaitForAgentHostGatewayGate,
   uiSetAgentHostGatewayFailure,
   uiKeyboardPress,
   uiMouseClick,

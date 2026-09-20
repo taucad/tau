@@ -38,8 +38,12 @@ const workspaceHarness = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   admissionGate: undefined as Promise<void> | undefined,
   prepare: vi.fn(),
+  /** The lease-less view `createClient` composes an attach from. */
+  attachment: vi.fn(),
   /** Whether the chat renders under a `ChatWorkspaceAuthorityProvider`. */
   mounted: true,
+  /** Whether that provider's revision root is connected yet. */
+  ready: true,
 }));
 const browserHostHarness = vi.hoisted(() => ({
   registration: undefined as
@@ -187,7 +191,7 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   },
   getBrowserAgentHostRun: () => browserHostHarness.run,
   isBrowserAgentHostPlaced: () => browserHostHarness.placed,
-  isBrowserAgentHostRunResumable: () => browserHostHarness.resumable,
+  resumableBrowserAgentHostRunId: () => (browserHostHarness.resumable ? browserHostHarness.run?.runId : undefined),
   resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
 }));
 vi.mock('#services/agent-host-client.js', () => ({
@@ -227,8 +231,10 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () =>
     workspaceHarness.mounted
       ? {
+          ready: workspaceHarness.ready,
           get: () => workspaceHarness.current,
           prepare: workspaceHarness.prepare,
+          attachment: workspaceHarness.attachment,
           finalize: async () => undefined,
           discard: async () => undefined,
           markAdmitted: async () => {
@@ -452,6 +458,7 @@ beforeEach(() => {
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
   workspaceHarness.mounted = true;
+  workspaceHarness.ready = true;
   workspaceHarness.current = {
     execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
@@ -464,10 +471,18 @@ beforeEach(() => {
     admitted: false,
     runId: 'run_workspace_test',
   };
-  workspaceHarness.prepare.mockImplementation(async () => {
-    workspaceHarness.current = workspaceHarness.current ?? mintedClaim;
+  workspaceHarness.prepare.mockImplementation(async (_chatId: string, options?: { readonly runId?: string }) => {
+    /* The real authority keys the claim by the run id its caller named, so a
+     * continuation's lease carries the run the host already holds (I1). */
+    workspaceHarness.current =
+      options?.runId === undefined
+        ? (workspaceHarness.current ?? mintedClaim)
+        : { ...(workspaceHarness.current ?? mintedClaim), runId: options.runId };
     return workspaceHarness.current;
   });
+  /* The attach reuses the claim when there is one and never mints: the real
+   * authority answers a lease-less view of the chat's checkout instead. */
+  workspaceHarness.attachment.mockImplementation(async () => workspaceHarness.current ?? mintedClaim);
   mountAgentMock(buildAgent());
   useChatSelectorMock.mockReturnValue('ready');
   installActiveSession('chat_test');
@@ -676,6 +691,35 @@ describe('useCadChatClient', () => {
     expect(options?.systemPromptBlocks[1]?.cacheControl).toBeUndefined();
   });
 
+  /*
+   * A bodyless Resume names no admission, so the host falls back to the model
+   * its worker was initialised with — this registration's. Composed once, at
+   * chat open, that was the model live when the chat was focused: not the one
+   * the failed attempt ran on, and not the one the INVALID_REQUEST card just
+   * told the person to change. A resume runs on the model selected *now*,
+   * exactly as a send would.
+   */
+  it('creates the client for a resume on the model selected now, not the one the registration composed on', async () => {
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    const view = renderClient();
+    await bindChatHost();
+    // The person changes the model on the refusal card and presses Resume. The
+    // placement does not move, so nothing re-composes the registration.
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-retry' } }));
+    view.rerender({});
+    await browserHostHarness.registration!.createClient();
+
+    expect(browserHostHarness.createClient.mock.calls[0]?.[0]?.model).toMatchObject({
+      id: 'openai-gpt-retry',
+      contextWindow: 64_000,
+    });
+  });
+
   it('places a Tau Host turn on the daemon channel, claiming no browser workspace', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();
@@ -872,7 +916,15 @@ describe('useCadChatClient', () => {
     expect(browserHostHarness.registration).toBeDefined();
   });
 
-  it('leaves a browser-placed chat to reload discovery, which its workspace claim substantiates', async () => {
+  /*
+   * T2-D1 / I7. Reload discovery substantiates a run from this browser's
+   * workspace claim, and the document that held the claim is the one that
+   * died — so a browser-placed run was never reattached at all: no adopt, no
+   * *Reconnecting…*, a chat that looked idle with no reply, and a durable run
+   * left `running` until the next gesture's attach dragged it back by
+   * accident. The placement is the trigger, the host's log is the authority.
+   */
+  it('reattaches a browser-placed chat to the host log its dead document left behind', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
@@ -882,7 +934,45 @@ describe('useCadChatClient', () => {
     renderClient();
 
     await bindChatHost();
+    expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'tau' });
+  });
+
+  /*
+   * The file manager's worker arrives after this component's first render, so
+   * the binding's one composition was the one whose `createClient` could not
+   * prepare: `prepare` threw "This project has no revision root", the AI SDK
+   * swallowed it into `onError`, and the chat's durable log was never attached
+   * — no `RUN_ABANDONED`, no settlement, and the chat's first send wedged
+   * behind the failed resume. `reattachHostChat` latches on the hostId, so the
+   * retry has to be the composition, not the store.
+   */
+  it('waits for the revision root before reattaching, then reattaches once it connects', async () => {
+    workspaceHarness.ready = false;
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    const view = renderClient();
+    await waitFor(() => {
+      expect(chatHostServices('chat_test')).toBeDefined();
+    });
+    const actor = createActor(chatHostBinding, {
+      input: { chatId: 'chat_test', placement: chatHostServices('chat_test')!.placement },
+    });
+    bindings.push(actor);
+    actor.start();
+    expect(browserHostHarness.registration).toBeUndefined();
     expect(reattachHostChat).not.toHaveBeenCalled();
+
+    workspaceHarness.ready = true;
+    view.rerender({});
+
+    await waitFor(() => {
+      expect(browserHostHarness.registration).toBeDefined();
+    });
+    expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'tau' });
   });
 
   it('admits a turn on a host that advertises nothing about revisions', async () => {
@@ -1100,6 +1190,11 @@ describe('useCadChatClient', () => {
 
   it('should call actions.editMessage with the rebuilt content, and admit its own turn, when edit fires', async () => {
     const chat = mock<Chat<MyUIMessage>>();
+    /* An edit rewinds to a message the transcript holds: `turnIntentOf` refuses
+     * one whose message is absent, because there is no rewind point to lease
+     * against (T3-D5). A fixture with no transcript was asserting an admission
+     * the product no longer makes. */
+    chat.messages = [{ id: 'msg_99', role: 'user', parts: [{ type: 'text', text: 'original' }] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -1340,7 +1435,7 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('places a turn through prepare at every call site (W3d)', async () => {
+  it('places a turn through prepare at every admitting call site (W3d)', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
@@ -1351,15 +1446,22 @@ describe('useCadChatClient', () => {
     const prepared = workspaceHarness.current!;
     workspaceHarness.current = undefined;
     workspaceHarness.prepare.mockImplementation(async () => prepared);
+    workspaceHarness.attachment.mockResolvedValue(prepared);
 
     installSessionStore({
       startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
       endRun: vi.fn(),
     });
     const { result } = renderClient();
-    // 1. the browser-host client factory.
+    /* 1. the browser-host client factory — which composes the client from the
+     * chat's workspace but must NOT place a turn: it runs for the open-time
+     * attach too, and the run id a placement mints there is one the host never
+     * admitted, so the abandoned run's settlement named it and the durable log
+     * refused it (I7). Every admitting verb below still places. */
     await bindChatHost();
     await browserHostHarness.registration!.createClient();
+    expect(workspaceHarness.prepare).not.toHaveBeenCalled();
+    expect(workspaceHarness.attachment).toHaveBeenCalledWith('chat_test');
     // 2. the bodyless (seeded) dispatch, which composes and admits on demand.
     await composeTurn({ kind: 'regenerate' });
     // 3. the admission path shared by submit and edit.
@@ -1377,7 +1479,7 @@ describe('useCadChatClient', () => {
 
     /* One `admitTurn` per call site, and no revision mode on any of them:
      * placement is non-branching by default (D7/I18). */
-    expect(workspaceHarness.prepare.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(workspaceHarness.prepare.mock.calls.length).toBeGreaterThanOrEqual(3);
     for (const call of workspaceHarness.prepare.mock.calls) {
       expect(call[0]).toBe('chat_test');
       expect(call[1] ?? {}).not.toHaveProperty('mode');
@@ -1393,7 +1495,9 @@ describe('useCadChatClient', () => {
    */
   it('re-runs the turn when a browser-placed chat has no resumable run, and resumes when it has', async () => {
     const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
+    /* One user message, because a continuation leases it: a transcript with
+     * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
+    Object.defineProperty(chat, 'messages', { get: () => [{ id: 'user_1', role: 'user', parts: [] }] });
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
     renderClient();
@@ -1404,6 +1508,8 @@ describe('useCadChatClient', () => {
 
     browserHostHarness.resumable = true;
     browserHostHarness.run = { runId: 'run_live' };
+    // The rewound turn above settled: its claim is released with it.
+    workspaceHarness.current = undefined;
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',
       request: { kind: 'continue' },
@@ -1413,6 +1519,39 @@ describe('useCadChatClient', () => {
     browserHostHarness.placed = false;
     browserHostHarness.resumable = false;
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({ request: { kind: 'continue' } });
+  });
+
+  /*
+   * I1 / T2-D3, T2-D4. A continuation used to admit `{runId, leaseTurnId:
+   * undefined}` — no lease at all — so the resumed execution wrote the
+   * checkout unfenced, its completion found no claim to finalize and minted no
+   * revision, and no settlement could name it. It is an ordinary attempt: it
+   * leases the turn it continues, under the run id the host already holds, so
+   * the settlement that ends it names the run `drop` is holding.
+   */
+  it('leases the turn a continuation resumes, under the run the host already holds', async () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', {
+      get: () => [
+        { id: 'user_1', role: 'user', parts: [] },
+        { id: 'run_live', role: 'assistant', parts: [] },
+      ],
+    });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+    renderClient();
+
+    browserHostHarness.placed = true;
+    browserHostHarness.resumable = true;
+    browserHostHarness.run = { runId: 'run_live' };
+    workspaceHarness.current = undefined;
+
+    await expect(composeTurn({ kind: 'continue' })).resolves.toEqual({
+      runId: 'run_live',
+      leaseTurnId: 'user_1',
+      request: { kind: 'continue' },
+    });
+    expect(workspaceHarness.prepare).toHaveBeenCalledWith('chat_test', { turnId: 'user_1', runId: 'run_live' });
   });
 
   it('carries the placement on the execution target and never on the execution object', async () => {

@@ -320,6 +320,50 @@ describe('ChatError', () => {
     expect(continueChat).toHaveBeenCalledTimes(1);
   });
 
+  /* T2-D11. A resume the host cannot honour is not a failure: the turn is
+   * whole and nothing was spent. Left to the generic block it read as one —
+   * a red banner with a collapsible stack trace over a message that says
+   * there is nothing to continue. */
+  it('should say a resume has nothing left to continue rather than report a failure', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'This turn has nothing left to continue. Send it again to start a new one.',
+      code: 'RESUME_UNAVAILABLE',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Nothing left to continue')).toBeInTheDocument();
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
+  /* E1. A run whose document died is recorded abandoned, not failed by
+   * anything the person did: the turn is saved and Resume continues it. Left
+   * to the category it read as a generic error offering *Try again*. */
+  it('should present an abandoned run as a paused turn that resumes', async () => {
+    const user = userEvent.setup();
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The host executing this run is gone. Resume the turn to continue it.',
+      code: 'RUN_ABANDONED',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
     const quota: ChatErrorPayload = {
       category: errorCategory.rateLimit,

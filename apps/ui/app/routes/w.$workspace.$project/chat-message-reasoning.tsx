@@ -103,7 +103,7 @@ export function ChatMessageReasoning({
           <div ref={contentRef}>
             {visibleParts.map((part, index) => (
               <MarkdownViewerChat
-                key={`${String(getReasoningStartedAtMs(part))}:${String(getReasoningEndedAtMs(part))}:${part.text}:${String(index)}`}
+                key={`${String(getReasoningStartedAtMs(part))}:${String(index)}`}
                 className='text-muted-foreground'
                 isStreaming={isMessageActive && index === visibleParts.length - 1}
                 isStreamingFade={isMessageActive && index === visibleParts.length - 1}

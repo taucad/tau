@@ -225,13 +225,21 @@ export const editFirstMessage = async (suffix: string): Promise<void> => {
 export const continueAction = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
 
 /**
- * Refuse the next provider call, send `text`, and wait for the error card.
+ * Refuse the next provider call with a refusal a resume can continue, send
+ * `text`, and wait for the saved-turn card.
+ *
+ * `INVALID_REQUEST` is the gateway's own code for a call it will not make, and
+ * it is in `resumableRunFailureCodes` — so the turn stays whole, the card reads
+ * *Resume* and the continuation runs under the run the host still holds (I1).
+ * The fixture's default refusal carries the upstream provider's `api_error`,
+ * which maps to `UNKNOWN_GATEWAY_ERROR` and is *not* resumable; a row that
+ * means to drive the rewind arms that one itself.
  *
  * @param text - The message to send.
  * @returns Nothing.
  */
 export const sendRefused = async (text: string): Promise<void> => {
-  await target.setAgentHostGatewayFailure({ status: 400, message: 'Refused once.' });
+  await target.setAgentHostGatewayFailure({ status: 400, message: 'Refused once.', type: 'INVALID_REQUEST' });
   await sendDraft(text);
   await target.expectVisible(continueAction, 120_000);
   await target.setAgentHostGatewayFailure();

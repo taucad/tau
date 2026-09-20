@@ -197,7 +197,11 @@ export type UiBrowserCommands = {
     match?: { readonly kind?: 'request' | 'stream'; readonly turn?: string },
     timeoutMilliseconds?: number,
   ): Promise<TargetGatewayGate>;
-  uiSetAgentHostGatewayFailure(failure?: { readonly status: number; readonly message: string }): Promise<void>;
+  uiSetAgentHostGatewayFailure(failure?: {
+    readonly status: number;
+    readonly message: string;
+    readonly type?: string;
+  }): Promise<void>;
   uiReadTargetEvents(): Promise<{
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
@@ -521,10 +525,20 @@ export const releaseChatTurn = async (hold: ChatTurnHold): Promise<void> => {
     (globalThis as unknown as { __tauReleaseChatTurn?: (value: ChatTurnHold) => void }).__tauReleaseChatTurn?.(which);
   }, hold);
 };
-/** Arms (or disarms, with no argument) a coded provider refusal on the gateway fixture. */
+/**
+ * Arms (or disarms, with no argument) a provider refusal on the gateway fixture.
+ *
+ * `type` is the wire error type and is what decides whether the refused run can
+ * be continued: omit it and the fixture answers the upstream provider's own
+ * `api_error`, which the gateway maps to `UNKNOWN_GATEWAY_ERROR` — a failure no
+ * resume can continue, so the card reads *Try again* and re-admits. Name one of
+ * the gateway's own codes (`INVALID_REQUEST`, `INSUFFICIENT_CREDIT`, …) for the
+ * refusal a resume *can* continue under the same run.
+ */
 export const setAgentHostGatewayFailure = (failure?: {
   readonly status: number;
   readonly message: string;
+  readonly type?: string;
 }): Promise<void> => server.commands.uiSetAgentHostGatewayFailure(failure);
 
 export const expectVisible = async (

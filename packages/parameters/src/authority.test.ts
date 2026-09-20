@@ -63,7 +63,6 @@ it('loads without writing, pins only the sidecar, and commits once without anoth
     current,
     request: {
       requestId: 'create',
-      draftGeneration: 0,
       fingerprint: 'label',
       pressure: 'final',
       expected: current.identity,
@@ -170,7 +169,6 @@ const request = (
   operation: ParameterSetRequest['operation'],
 ): ParameterSetRequest => ({
   requestId,
-  draftGeneration: 1,
   fingerprint: requestId,
   pressure: 'final',
   expected,
@@ -273,7 +271,7 @@ it('refuses a request built on a manifest the authority has replaced', async () 
   expect(memory.counts().writes).toBe(0);
 });
 
-it('admits one of two stale actors, conflicts the other, and refreshes the loser to the winning record', async () => {
+it('re-plans a stale actor without a field base and commits over the winning record', async () => {
   const memory = memoryAuthority(null);
   const manifest = await widthManifest();
   const actorFor = () =>
@@ -305,14 +303,14 @@ it('admits one of two stale actors, conflicts the other, and refreshes the loser
     status: 'committed',
     write: 'applied',
   });
-  // The loser planned against bytes the winner replaced, so its checked write conflicts.
+  // The second actor has no field base, so the byte conflict refreshes and re-plans the overwrite.
   await expect(submitParameterRequest(second, request('second', identity, unitEdit('15')))).resolves.toMatchObject({
-    status: 'rejected',
-    code: 'STALE_MANIFEST',
+    status: 'committed',
+    write: 'applied',
   });
   await waitFor(second, (state) => state.matches({ open: 'ready' }));
-  expect(second.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 120 });
-  expect(memory.counts().writes).toBe(1);
+  expect(second.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 150 });
+  expect(memory.counts().writes).toBe(2);
   first.stop();
   second.stop();
 });

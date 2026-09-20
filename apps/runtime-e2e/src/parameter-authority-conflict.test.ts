@@ -87,7 +87,6 @@ it('admits one writer across two actual Node transport clients and refreshes the
         submitParameterRequest(actor, {
           requestId: `writer:${index}`,
           fingerprint: `writer:${index}`,
-          draftGeneration: 0,
           pressure: 'final',
           expected: snapshots[index]!.context.current!.identity,
           operation: { kind: 'replace-group-values', group: 'default', values: { width: 20 + index } },

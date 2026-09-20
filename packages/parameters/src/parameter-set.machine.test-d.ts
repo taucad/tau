@@ -1,5 +1,6 @@
 import { assertType, expectTypeOf } from 'vitest';
 import type { AnyStateMachine, SnapshotFrom } from 'xstate';
+import type { JSONValue, ParameterGroup } from '@taucad/types';
 
 import { parameterSetMachine } from '#parameter-set.machine.js';
 import type {
@@ -12,6 +13,12 @@ import type { ParameterSetIdentity, ParameterSetOperation, ParameterSetOutcome, 
 expectTypeOf(parameterSetMachine).toExtend<AnyStateMachine>();
 
 const identity: ParameterSetIdentity = { manifestRevision: 'manifest:1' };
+expectTypeOf<ParameterSetIdentity>().toEqualTypeOf<Readonly<{ manifestRevision: string }>>();
+expectTypeOf<ParameterGroup>().toEqualTypeOf<{
+  values: Record<string, JSONValue>;
+  units?: Record<string, string>;
+  sourceUnits?: Record<string, string>;
+}>();
 const field = { group: 'default', parameterId: 'width', resource: 'urn:test', pointer: '/width' } as const;
 
 // Every operation kind is a positive fixture of the public operation union.
@@ -32,13 +39,11 @@ const operations = [
     unit: 'cm',
     producerCapability: { producer: 'fixture', sourceRevision: 'source:1', capability: 'change-source-unit:v1' },
   },
-  { kind: 'display-preference', parameterId: 'width', unit: 'cm' },
 ] as const satisfies readonly ParameterSetOperation[];
 expectTypeOf(operations).toExtend<readonly ParameterSetOperation[]>();
 
 const request: ParameterSetRequest = {
   requestId: 'edit',
-  draftGeneration: 1,
   pressure: 'final',
   expected: identity,
   base: { pointer: '/width', value: 1, binding: { unit: 'mm', representation: 'binary64' } },
@@ -56,6 +61,20 @@ assertType<ParameterSetOperation>({
   kind: 'bind-parameter',
   ...field,
   binding: { unit: 'mm' },
+});
+assertType<ParameterSetOperation>({
+  // @ts-expect-error -- display preferences are not parameter record operations
+  kind: 'display-preference',
+  parameterId: 'width',
+  unit: 'cm',
+});
+assertType<ParameterSetOperation>({
+  kind: 'source-unit',
+  // @ts-expect-error -- source-unit changes preserve physical size
+  mode: 'reinterpret',
+  ...field,
+  unit: 'cm',
+  producerCapability: { producer: 'fixture', sourceRevision: 'source:1', capability: 'change-source-unit:v1' },
 });
 assertType<ParameterSetRequest>({
   ...request,

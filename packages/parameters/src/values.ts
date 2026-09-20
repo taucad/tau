@@ -9,7 +9,7 @@ import type { FileParameterEntry, JSONValue, ParameterGroup } from '@taucad/type
 import { parseInput } from '@taucad/units/input';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { admitParameterValues, resolveParameterBinding, resolveParameterBindingPointer } from '#manifest.js';
-import type { ParameterBinding, ParameterDeclaration, ParameterManifest, ParameterProvenance } from '#manifest.js';
+import type { ParameterBinding, ParameterManifest, ParameterProvenance } from '#manifest.js';
 
 const failure = (code: string, message: string, applicationState?: string): Error =>
   Object.assign(new Error(message), { code, applicationState });
@@ -216,6 +216,27 @@ const setPointer = (
   return output;
 };
 
+/**
+ * Return the active record group as request input. A source-unit value carries its stored unit as
+ * text so later composition cannot separate the number from the unit it is expressed in.
+ *
+ * @param record - Validated stored parameter record.
+ * @returns A pure copy of the active values suitable for parameter input resolution.
+ * @public
+ */
+export const parameterRecordInputValues = (record: FileParameterEntry): Readonly<Record<string, JSONValue>> => {
+  const group = record.groups[record.activeGroup]!;
+  let values = structuredClone(group.values);
+  for (const pointer of Object.keys(group.sourceUnits ?? {})) {
+    const value = valueAtPointer(values, pointer);
+    const unit = group.units?.[pointer];
+    if (value !== undefined && unit !== undefined) {
+      values = setPointer(values, pointer, `${JSON.stringify(value)} ${unit}`);
+    }
+  }
+  return values;
+};
+
 const admittedBinding = (
   manifest: ParameterManifest,
   input: Readonly<{ parameterId: string; resource: string; pointer: string }>,
@@ -254,7 +275,7 @@ export const resolveEffectiveParameterBinding = (
     // Bounds authored in the producer's unit are restated in the chosen one. With no prior unit
     // there is nothing to convert from, so they stay as the producer wrote them.
     constraints:
-      binding.unit === undefined
+      binding.unit === undefined || group?.sourceUnits?.[pointer] === undefined
         ? binding.constraints
         : convertedConstraints(binding, binding.constraints, binding.unit, unit),
   };
@@ -455,60 +476,6 @@ export const resolveParameterInputValues = (
   return resolved;
 };
 
-/**
- * Convert a checked source-unit record back to one producer's authored execution units. The unit
- * to convert back to comes from the producer's live declaration, never from the record. @public
- */
-export const resolveProducerParameterValues = (
-  input: Readonly<{
-    producer: string;
-    declaration: ParameterDeclaration;
-    entry: FileParameterEntry;
-    values: Readonly<Record<string, unknown>>;
-  }>,
-): Readonly<Record<string, JSONValue>> => {
-  const group = input.entry.groups[input.entry.activeGroup];
-  if (group === undefined) {
-    throw failure('INVALID_RECORD', 'The active parameter group is missing.');
-  }
-  let resolved = structuredClone(input.values) as Record<string, JSONValue>;
-  for (const pointer of Object.keys(group.sourceUnits ?? {})) {
-    const declared = input.declaration.bindings?.[pointer];
-    const chosen = group.units?.[pointer];
-    // The producer must still advertise the capability, still declare a unit to convert back to,
-    // and the record must still name the unit the value was authored in.
-    if (declared?.sourceUnitCapability === undefined || declared.unit === undefined || chosen === undefined) {
-      throw sourceUnitRebindRequired();
-    }
-    const value = valueAtPointer(resolved, pointer);
-    if (value === undefined) {
-      continue;
-    }
-    resolved = setPointer(
-      resolved,
-      pointer,
-      nativeUnitValue(
-        {
-          parameter: { value: pointer, stability: 'revision-scoped' },
-          schema: { resource: input.producer, pointer },
-          // Source-unit changes are admitted only for finite linear binary64 fields.
-          representation: 'binary64',
-          optional: false,
-          nullable: false,
-          unit: declared.unit,
-          ...(declared.quantityKind === undefined ? {} : { quantityKind: declared.quantityKind }),
-          ...(declared.space === undefined ? {} : { space: declared.space }),
-          ...(declared.reference === undefined ? {} : { reference: declared.reference }),
-          constraints: {},
-        },
-        value,
-        chosen,
-      ),
-    );
-  }
-  return resolved;
-};
-
 /** Drop a claim map once it holds nothing, so an untouched group stays at its minimal shape. */
 const withoutEmptyClaims = (group: ParameterGroup): ParameterGroup => ({
   values: group.values,
@@ -541,13 +508,6 @@ export const planParameterRecord = (
     const { operation } = input.request;
     let changed = true;
     switch (operation.kind) {
-      case 'display-preference': {
-        return {
-          status: 'rejected',
-          code: 'DISPLAY_ONLY_ACTION',
-          message: 'Display preferences are not persisted.',
-        };
-      }
       case 'create-group': {
         if (Object.hasOwn(entry.groups, operation.group)) {
           throw failure('GROUP_ALREADY_EXISTS', `Parameter group "${operation.group}" already exists.`);
@@ -569,8 +529,11 @@ export const planParameterRecord = (
       case 'rename-group': {
         changed = operation.group !== operation.nextGroup;
         if (changed) {
-          entry.groups[operation.nextGroup] = entry.groups[operation.group]!;
-          Reflect.deleteProperty(entry.groups, operation.group);
+          entry.groups = Object.fromEntries(
+            Object.entries(entry.groups).map(([name, group]) =>
+              name === operation.group ? [operation.nextGroup, group] : [name, group],
+            ),
+          );
           entry.activeGroup = entry.activeGroup === operation.group ? operation.nextGroup : entry.activeGroup;
         }
         break;
@@ -627,7 +590,6 @@ export const planParameterRecord = (
           throw failure('REPRESENTATION_UNSUPPORTED', 'Source-unit changes require finite linear binary64 semantics.');
         }
         if (
-          operation.mode !== 'preserve-size' ||
           binding.sourceUnitCapability !== 'change-source-unit:preserve-size:v1' ||
           operation.producerCapability.capability !== binding.sourceUnitCapability ||
           operation.producerCapability.producer !== manifest.source.id ||
@@ -655,11 +617,13 @@ export const planParameterRecord = (
           operation.pointer,
           nativeUnitValue({ ...binding, unit: operation.unit }, current, fromUnit),
         );
-        const next = withoutEmptyClaims({
-          values,
-          units: { ...group.units, [operation.pointer]: operation.unit },
-          sourceUnits: { ...group.sourceUnits, [operation.pointer]: operation.unit },
-        });
+        const units = { ...group.units, [operation.pointer]: operation.unit };
+        const sourceUnits = { ...group.sourceUnits, [operation.pointer]: operation.unit };
+        if (operation.unit === binding.unit) {
+          Reflect.deleteProperty(units, operation.pointer);
+          Reflect.deleteProperty(sourceUnits, operation.pointer);
+        }
+        const next = withoutEmptyClaims({ values, units, sourceUnits });
         admitGroupValues(manifest, next, values);
         entry.groups[operation.group] = next;
         return {

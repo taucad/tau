@@ -89,6 +89,7 @@ describe('path registry', () => {
   });
 
   it.each([
+    '.tau/export/preferences.json',
     '.tau/artifacts/export/model.stl',
     '.tau/tool-results/chat/result.json',
     '.tau/offloaded-tool-results/chat/result.json',

@@ -240,6 +240,16 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'root',
     directory: true,
   },
+  {
+    prefix: '.tau/export',
+    class: 'records',
+    versioned: false,
+    agentAccess: 'read-only',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: true,
+  },
   /* `.tau/transcripts` is *not* a row: W17's reconciliation (W1 review R3)
    * found it is `.tau/chats` under an older name. Nothing has written it since
    * `refactor(api)!: Remove the agent execution plane` deleted its only writer,

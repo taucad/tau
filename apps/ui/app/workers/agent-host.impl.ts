@@ -1399,9 +1399,11 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
   const imageService = new headlessImageModule.HeadlessImageService();
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
   const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
+  const geoSpecEngine = request.geoSpecEngine ?? 'legacy';
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(workspaceProvider),
     runtimeConfig,
+    geoSpecEngine,
   });
   const runtimeRpc = createRuntimeRpcClients({
     runtimeClient,
@@ -1581,6 +1583,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     ...runtimeRpc,
     parameters,
     geospec: geoSpecClient,
+    geospecAuthoringMode: geoSpecEngine,
     testingEnabled: request.testingEnabled ?? false,
   });
   const activeReference: { current?: WorkerSession } = {};

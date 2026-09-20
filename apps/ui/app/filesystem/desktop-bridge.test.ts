@@ -144,12 +144,36 @@ describe('desktopBridge', () => {
      * in the services utility, and the root is what main checks before minting
      * anything. Same listener-before-request order as `nodeFs`. */
     await expect(
-      desktopBridge()?.agentHost.connect('/Users/tester/Projects/widget', 'proj_widget', 'durable'),
+      desktopBridge()?.agentHost.connect({
+        workspaceRoot: '/Users/tester/Projects/widget',
+        projectId: 'proj_widget',
+        computeMode: 'durable',
+      }),
     ).resolves.toBe(port);
     expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'agentHost', {
       workspaceRoot: '/Users/tester/Projects/widget',
       projectId: 'proj_widget',
       computeMode: 'durable',
+    });
+  });
+
+  it.each(['legacy', 'native'] as const)('should forward the explicit GeoSpec engine %s', async (geoSpecEngine) => {
+    const { port, requestServicesPort } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+
+    await expect(
+      desktopBridge()?.agentHost.connect({
+        workspaceRoot: '/Users/tester/Projects/widget',
+        projectId: 'proj_widget',
+        computeMode: 'durable',
+        geoSpecEngine,
+      }),
+    ).resolves.toBe(port);
+    expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'agentHost', {
+      workspaceRoot: '/Users/tester/Projects/widget',
+      projectId: 'proj_widget',
+      computeMode: 'durable',
+      geoSpecEngine,
     });
   });
 
@@ -172,7 +196,11 @@ describe('desktopBridge', () => {
 
     await Promise.all([
       bridge?.nodeFs.connect(),
-      bridge?.agentHost.connect('/Users/tester/Projects/widget', 'proj_widget', 'off'),
+      bridge?.agentHost.connect({
+        workspaceRoot: '/Users/tester/Projects/widget',
+        projectId: 'proj_widget',
+        computeMode: 'off',
+      }),
     ]);
 
     const [first] = requestServicesPort.mock.calls[0] as [string, string];

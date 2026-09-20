@@ -463,6 +463,8 @@ type OpenAgentHostChannelOptions = {
   readonly workspaceRoot?: string | undefined;
   /** Canonical manifest project id for a `desktop` placement. */
   readonly projectId?: string | undefined;
+  /** Desktop launcher choice; changing it requires reloading the project host. */
+  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   /** Bridge override, for tests. */
   readonly bridge?: (() => { readonly agentHost: Pick<DesktopBridge['agentHost'], 'connect'> } | undefined) | undefined;
 };
@@ -495,7 +497,15 @@ const desktopAgentPort = async (options: OpenAgentHostChannelOptions): Promise<M
       `Tau has no permission to work in ${workspaceRoot}. Reopen the folder from the desktop app and try again.`,
     );
   };
-  return Promise.race([bridge.agentHost.connect(workspaceRoot, projectId, getComputeReuseMode()), refusal()]);
+  return Promise.race([
+    bridge.agentHost.connect({
+      workspaceRoot,
+      projectId,
+      computeMode: getComputeReuseMode(),
+      geoSpecEngine: options.geoSpecEngine,
+    }),
+    refusal(),
+  ]);
 };
 
 /**

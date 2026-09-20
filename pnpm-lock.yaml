@@ -1951,6 +1951,9 @@ importers:
       '@taucad/geospec-engine':
         specifier: workspace:*
         version: link:../../packages/geospec-engine
+      '@taucad/geospec-engine-native':
+        specifier: workspace:*
+        version: link:../../packages/geospec-engine-native
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -2566,6 +2569,9 @@ importers:
       '@taucad/geospec-engine':
         specifier: workspace:*
         version: link:../../packages/geospec-engine
+      '@taucad/geospec-engine-native':
+        specifier: workspace:*
+        version: link:../../packages/geospec-engine-native
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -2741,6 +2747,9 @@ importers:
       oxc-transform-react:
         specifier: 'catalog:'
         version: 0.148.0
+      vite:
+        specifier: 'catalog:'
+        version: 8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
 
   examples/electron:
     dependencies:

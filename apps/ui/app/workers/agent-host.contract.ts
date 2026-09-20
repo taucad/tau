@@ -112,6 +112,7 @@ export type AgentHostWorkerInitializeRequest = {
     | readonly [ModelSystemPromptBlock, ModelSystemPromptBlock, ModelSystemPromptBlock];
   readonly model: AgentHostModel;
   readonly runtimeConfig: UiRuntimeConfigInput;
+  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   readonly testingEnabled?: boolean | undefined;
 };
 
@@ -505,6 +506,7 @@ const initializeRequestSchema = z.strictObject({
   ]),
   model: agentChannelModelSchema,
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
+  geoSpecEngine: z.enum(['legacy', 'native']).optional(),
   testingEnabled: z.boolean().optional(),
 });
 const agentHostWorkerCallRequestSchema = z.union([

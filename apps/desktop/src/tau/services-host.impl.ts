@@ -42,7 +42,11 @@ import {
   hostRevisionActor,
 } from '@taucad/host';
 import type { AcpAdapter, HostMcpEndpoint, ProjectRevisions, TurnCheckout } from '@taucad/host';
-import { createHostGeoSpecRunner, createHostToolRegistry } from '@taucad/host/agent-tools';
+import {
+  createHostGeoSpecRunner,
+  createHostNativeGeoSpecRunner,
+  createHostToolRegistry,
+} from '@taucad/host/agent-tools';
 import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
@@ -299,6 +303,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const launchers = new Map<string, NodeAgentLauncher>();
   const launcherGenerations = new Map<string, number>();
   const launcherProjectIds = new Map<string, string>();
+  const launcherGeoSpecEngines = new Map<string, 'legacy' | 'native'>();
   const revisionRoots = new Map<string, ProjectRevisions>();
   type DesktopRuntime = ReturnType<typeof createDesktopRuntime>;
   type DesktopClient = ReturnType<typeof createRuntimeClient<DesktopRuntime>>;
@@ -473,6 +478,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     launchers.delete(workspaceRoot);
     launcherGenerations.delete(workspaceRoot);
     launcherProjectIds.delete(workspaceRoot);
+    launcherGeoSpecEngines.delete(workspaceRoot);
     revisionRoots.delete(workspaceRoot);
     const checkoutsRoot = resolve(join(dirname(workspaceRoot), '.tau', 'checkouts', projectId));
     for (const [root, client] of connectedRuntimeClients) {
@@ -630,6 +636,25 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * MCP routes, runtime clients through the checkouts beneath it) shares the
      * one key. */
     const workspaceRoot = canonicalPath(requested);
+    const requestedEngine = context?.['geoSpecEngine'];
+    if (requestedEngine !== undefined && requestedEngine !== 'legacy' && requestedEngine !== 'native') {
+      log('agent-host.invalid-geospec-engine', { geoSpecEngine: requestedEngine });
+      port.close();
+      return;
+    }
+    const geoSpecEngine = requestedEngine ?? 'legacy';
+    const existingEngine = launcherGeoSpecEngines.get(workspaceRoot);
+    if (existingEngine !== undefined && geoSpecEngine !== existingEngine) {
+      log('agent-host.geospec-engine-mismatch', {
+        workspaceRoot,
+        current: existingEngine,
+        requested: geoSpecEngine,
+        reason: 'Reload the project host to change the GeoSpec engine.',
+      });
+      port.close();
+      return;
+    }
+    // A root keeps its first engine choice until its launcher is released.
     launcherProjectIds.set(workspaceRoot, projectId);
     const requestedGeneration = Number(context?.['attachmentGeneration']);
     if (Number.isSafeInteger(requestedGeneration) && requestedGeneration >= 0) {
@@ -882,13 +907,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * and GeoSpec tools read the checkout its file tools write, because the
            * checkout was registered with main as a runtime context above. */
           runtimeClient: async (root) => runtimeClient(root),
+          geospecAuthoringMode: geoSpecEngine,
           geospecRunner: async (root) => {
             const client = await runtimeClient(root);
             /* GeoSpec's deliberately wide export-format carrier accepts every
              * plugin format, while this concrete desktop recipe exposes the
              * actual narrower set. Its loader requests only formats supported
              * by that recipe; bridge the generic variance at this boundary. */
-            return createHostGeoSpecRunner(root, client as unknown as HostGeoSpecRuntimeClient);
+            const createRunner = geoSpecEngine === 'native' ? createHostNativeGeoSpecRunner : createHostGeoSpecRunner;
+            return createRunner(root, client as unknown as HostGeoSpecRuntimeClient);
           },
         });
         const transportOptions = {
@@ -934,6 +961,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         );
       })();
     launchers.set(workspaceRoot, launcher);
+    launcherGeoSpecEngines.set(workspaceRoot, geoSpecEngine);
     if (projectRevisions === undefined) {
       log('agent-host.revisions-unavailable', { workspaceRoot });
       port.close();
@@ -947,7 +975,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       sessionKey: agentSessionKey,
       revisions: projectRevisions.channel,
     });
-    log('agent-host-served', { workspaceRoot, reused: existing !== undefined });
+    log('agent-host-served', { workspaceRoot, reused: existing !== undefined, geoSpecEngine });
   };
 
   /**
@@ -1056,6 +1084,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       nodeFileSystemDisposers.clear();
       launcherGenerations.clear();
       launcherProjectIds.clear();
+      launcherGeoSpecEngines.clear();
       revisionRoots.clear();
       for (const endpoint of mcpEndpoints.values()) {
         void endpoint.close();

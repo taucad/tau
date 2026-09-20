@@ -12,6 +12,7 @@ type CreateGeoSpecWorker = () => Worker;
 export type GeoSpecWorkerRpcClientOptions = {
   openFileSystemBridge: () => FileSystemBridgeConnection;
   runtimeConfig: UiRuntimeConfigInput;
+  geoSpecEngine?: 'legacy' | 'native' | undefined;
   createWorker?: CreateGeoSpecWorker;
   /** Milliseconds. */
   runnerTimeout?: number;
@@ -239,6 +240,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         requestId,
         sessionId: nextSessionId,
         runtimeConfig: options.runtimeConfig,
+        geoSpecEngine: options.geoSpecEngine ?? 'legacy',
         fileSystemPort: fileSystemBridge.port,
       };
       worker.postMessage(request, [fileSystemBridge.port]);

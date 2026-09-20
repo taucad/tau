@@ -1,3 +1,4 @@
+import { Topic } from '@taucad/events';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type {
   AgentLiveEvent,
@@ -162,6 +163,7 @@ export type AgentHostClientOptions = {
   readonly systemPromptBlocks: AgentHostAdmissionConfig['systemPromptBlocks'];
   readonly model: AgentHostModel;
   readonly runtimeConfig: UiRuntimeConfigInput;
+  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   readonly testingEnabled?: boolean | undefined;
   readonly createWorker?: (() => Worker) | undefined;
   readonly initializationTimeout?: number | undefined;
@@ -656,7 +658,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
   }
   const sessionId = randomUuid();
   const channel = connectWorker(worker, sessionId);
-  const closeHandlers = new Set<(reason: AgentHostTransportCloseReason) => void>();
+  const closeHandlers = new Topic<AgentHostTransportCloseReason>({ name: 'AgentHostWorker.close' });
   let death: AgentHostTransportCloseReason | undefined;
   let disposed = false;
 
@@ -665,10 +667,8 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
       return;
     }
     death = reason;
-    for (const handler of closeHandlers) {
-      handler(reason);
-    }
-    closeHandlers.clear();
+    closeHandlers.emit(reason);
+    closeHandlers.dispose();
   };
 
   const onError = (event: ErrorEvent): void => {
@@ -683,6 +683,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
     }
     disposed = true;
     worker.removeEventListener('error', onError);
+    closeHandlers.dispose();
     channel.close();
     worker.terminate();
     bridge.dispose();
@@ -721,6 +722,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
       systemPromptBlocks: options.systemPromptBlocks,
       model: options.model,
       runtimeConfig: options.runtimeConfig,
+      geoSpecEngine: options.geoSpecEngine ?? 'legacy',
       testingEnabled: options.testingEnabled,
     },
     [bridge.port, projectRootBridge.port, ...(computeStorePort ? [computeStorePort] : [])],
@@ -786,8 +788,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
         handler(death);
         return (): void => undefined;
       }
-      closeHandlers.add(handler);
-      return () => closeHandlers.delete(handler);
+      return closeHandlers.subscribe(handler);
     },
     close: dispose,
   };

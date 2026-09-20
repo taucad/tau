@@ -237,6 +237,59 @@ class DisposingKernelWorker extends MockKernelWorker {
 // =============================================================================
 
 describe('KernelWorker lifecycle', () => {
+  class ParameterBoundaryWorker extends MockKernelWorker {
+    public receivedParameters: Record<string, unknown> | undefined;
+
+    protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+      return createParameterDeclaration(
+        { width: 10, height: 5 },
+        {
+          properties: {
+            width: { type: 'double', ucumUnit: 'mm' },
+            height: { type: 'double' },
+          },
+        },
+      );
+    }
+
+    protected override async onCreateGeometry(
+      input: CreateGeometryInput,
+      runtime: KernelRuntime,
+    ): Promise<CreateGeometryResult> {
+      this.receivedParameters = input.parameters;
+      return super.onCreateGeometry(input, runtime);
+    }
+  }
+
+  it('should convert unit-bearing text at the kernel boundary', async () => {
+    const worker = new ParameterBoundaryWorker({ middleware: [], onLog: noopLog });
+
+    const result = await worker.evaluateModel({
+      file: createGeometryFile('main.ts'),
+      parameters: { width: '20 in' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameters?.['width']).toBeCloseTo(508);
+    expect(worker.receivedParameters?.['height']).toBe(5);
+  });
+
+  it('should report SEMANTICS_UNRESOLVED for unit-bearing text on a field with no unit', async () => {
+    const worker = new ParameterBoundaryWorker({ middleware: [], onLog: noopLog });
+
+    const result = await worker.evaluateModel({
+      file: createGeometryFile('main.ts'),
+      parameters: { height: '20 in' },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error('Expected unit-less text to be refused');
+    }
+    expect(result.issues[0]?.code).toBe('SEMANTICS_UNRESOLVED');
+    expect(result.issues[0]?.message).toMatch(/\/height.*20 in.*number|unit declaration/iu);
+  });
+
   it('should stop direct, interactive, and export renders when parameter discovery fails', async () => {
     const issue: KernelIssue = {
       message: 'Workspace changed while reading current schema.',
@@ -2360,6 +2413,40 @@ describe('KernelWorker lifecycle', () => {
   // ---------------------------------------------------------------------------
 
   describe('middleware getDependencies', () => {
+    it('should leave the manifest revision unchanged when a createGeometry-scoped dependency of a middleware that also wraps getParameters changes', async () => {
+      const dependencyPath = '.tau/parameters/main.ts.json';
+      const middleware = defineMiddleware({
+        id: 'operation-scoped-dependency',
+        name: 'operation-scoped-dependency',
+        getDependencies() {
+          return [{ path: dependencyPath, affects: ['createGeometry'] }];
+        },
+        async wrapGetParameters(input, handler) {
+          return handler(input);
+        },
+      });
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({
+        'main.ts': new Uint8Array([1, 2, 3]),
+      });
+      filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([10]));
+      const worker = createConfiguredWorker({ middleware: [middleware], filesystem });
+      const file = createGeometryFile('main.ts');
+
+      const first = await worker.getParameters(file);
+      filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([20]));
+      // @ts-expect-error - accessing the private invalidation seam for contract verification.
+      worker._invalidateCachesForPaths([dependencyPath]);
+      const second = await worker.getParameters(file);
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      if (!first.success || !second.success) {
+        throw new Error('Expected both parameter manifests to resolve');
+      }
+      expect(second.data.revision).toBe(first.data.revision);
+    });
+
     it('should include middleware dependency files in the dependency hash', async () => {
       const parameterFileContent = new Uint8Array([10, 20, 30]);
 
@@ -2367,7 +2454,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '.tau/parameters/main.ts.json' }];
+          return [{ path: '.tau/parameters/main.ts.json', affects: ['createGeometry'] }];
         },
       });
 
@@ -2413,7 +2500,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '.tau/parameters/main.ts.json' }];
+          return [{ path: '.tau/parameters/main.ts.json', affects: ['createGeometry'] }];
         },
       });
 
@@ -2446,7 +2533,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '.tau/missing.json' }];
+          return [{ path: '.tau/missing.json', affects: ['createGeometry'] }];
         },
       });
 
@@ -2539,7 +2626,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'invalid-dependency',
         name: 'invalid-dependency',
         getDependencies() {
-          return [{ path: '../outside.json' }];
+          return [{ path: '../outside.json', affects: ['createGeometry'] }];
         },
       });
       const filesystem = createMockFileSystem();

@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { beforeAll, describe, it, expect, vi } from 'vitest';
-import { parametersDirectory } from '@taucad/runtime/types';
+import { parametersDirectory } from '@taucad/types';
 import { parameterFileResolver } from '#parameter-file-resolver.middleware.js';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockCreateGeometryHandler, createMockInput, createMockRuntime } from '@taucad/runtime-testing';
 
-type ParameterFileOptions = { parametersDir: string; watchDebounce: number };
+type ParameterFileOptions = { watchDebounce: number };
 
 const createDependencyRuntime = (options: ParameterFileOptions) =>
   createMockRuntime<Record<string, never>, ParameterFileOptions>({ options });
@@ -16,7 +16,7 @@ function createTestContext(options?: {
   input?: Parameters<typeof createMockInput>[0];
 }) {
   const runtime = createMockRuntime<Record<string, never>, ParameterFileOptions>({
-    options: { parametersDir: parametersDirectory, watchDebounce: 200 },
+    options: { watchDebounce: 200 },
   });
 
   if (options?.readFileError) {
@@ -199,7 +199,7 @@ describe('parameterFileResolverMiddleware', () => {
     );
   });
 
-  it('should apply active-group values over existing input parameters', async () => {
+  it('should apply input parameters over active-group values', async () => {
     const { input, handler, runtime } = createTestContext({
       readFileResult: makeEntry({
         activeGroup: 'default',
@@ -212,7 +212,7 @@ describe('parameterFileResolverMiddleware', () => {
 
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
-        parameters: { width: 99, height: 20 },
+        parameters: { width: 10, height: 20 },
       }),
     );
   });
@@ -233,6 +233,39 @@ describe('parameterFileResolverMiddleware', () => {
         parameters: { height: 20, width: 99, depth: 40 },
       }),
     );
+  });
+
+  it('should pass a source-unit value as unit-bearing text below caller overrides', async () => {
+    const stored = createTestContext({
+      readFileResult: JSON.stringify({
+        activeGroup: 'default',
+        groups: {
+          default: {
+            values: { width: 20 },
+            units: { '/width': 'in' },
+            sourceUnits: { '/width': 'in' },
+          },
+        },
+      }),
+    });
+    await parameterFileResolverMiddleware.wrapCreateGeometry!(stored.input, stored.handler, stored.runtime);
+    expect(stored.handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { width: '20 in' } }));
+
+    const overridden = createTestContext({
+      readFileResult: JSON.stringify({
+        activeGroup: 'default',
+        groups: {
+          default: {
+            values: { width: 20 },
+            units: { '/width': 'in' },
+            sourceUnits: { '/width': 'in' },
+          },
+        },
+      }),
+      input: { parameters: { width: 508 } },
+    });
+    await parameterFileResolverMiddleware.wrapCreateGeometry!(overridden.input, overridden.handler, overridden.runtime);
+    expect(overridden.handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { width: 508 } }));
   });
 
   describe('nested parameter deep merge', () => {
@@ -258,7 +291,7 @@ describe('parameterFileResolverMiddleware', () => {
         }
       ).parameters;
       expect(calledParams).toEqual({
-        base: { width: 30, depth: 20, cornerRadius: 10 },
+        base: { width: 30, depth: 20, cornerRadius: 5 },
         profile: { line1X: 5, line1Y: 5 },
       });
     });
@@ -293,9 +326,9 @@ describe('parameterFileResolverMiddleware', () => {
         }
       ).parameters;
       expect(calledParams).toEqual({
-        base: { width: 30, depth: 20, cornerRadius: 10 },
+        base: { width: 30, depth: 20, cornerRadius: 5 },
         profile: { line1X: 5 },
-        brim: { width: 2, height: 3 },
+        brim: { width: 2, height: 1 },
       });
     });
 
@@ -324,8 +357,8 @@ describe('parameterFileResolverMiddleware', () => {
         }
       ).parameters;
       expect(calledParams).toEqual({
-        dimensions: [30],
-        nested: { values: [3, 4] },
+        dimensions: [10, 20],
+        nested: { values: [1, 2] },
       });
       expect(input.parameters).toEqual(originalParameters);
     });
@@ -349,46 +382,24 @@ describe('parameterFileResolverMiddleware', () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  it('should support a root-level parameter directory', () => {
-    const runtime = createDependencyRuntime({
-      parametersDir: '',
-      watchDebounce: 0,
-    });
-    const dependencies = parameterFileResolverMiddleware.getDependencies!({ entryPath: 'main.ts' }, runtime);
-
-    expect(dependencies).toEqual([{ path: 'main.ts.json', watchDebounce: 0 }]);
-  });
-
   describe('getDependencies', () => {
     it('should return the per-geometry-unit parameter file path', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
         { entryPath: 'main.ts' },
         createDependencyRuntime({
-          parametersDir: parametersDirectory,
           watchDebounce: 200,
         }),
       );
 
-      expect(result).toEqual([{ path: `${parametersDirectory}/main.ts.json`, watchDebounce: 200 }]);
-    });
-
-    it('should use custom parametersDir option', () => {
-      const result = parameterFileResolverMiddleware.getDependencies!(
-        { entryPath: 'main.ts' },
-        createDependencyRuntime({
-          parametersDir: '.config/params',
-          watchDebounce: 200,
-        }),
-      );
-
-      expect(result).toEqual([{ path: '.config/params/main.ts.json', watchDebounce: 200 }]);
+      expect(result).toEqual([
+        { path: `${parametersDirectory}/main.ts.json`, affects: ['createGeometry'], watchDebounce: 200 },
+      ]);
     });
 
     it('should return synchronously (not a promise)', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
         { entryPath: 'main.ts' },
         createDependencyRuntime({
-          parametersDir: parametersDirectory,
           watchDebounce: 200,
         }),
       );

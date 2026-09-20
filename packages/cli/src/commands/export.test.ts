@@ -4,32 +4,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExportResult, GetParametersResult } from '@taucad/runtime';
+import type { ExportResult } from '@taucad/runtime';
 import type * as RuntimeNode from '@taucad/runtime/node';
-import type * as RuntimeParameter from '@taucad/parameters';
-import type { ParameterManifest } from '@taucad/parameters';
 import { exitCodes } from '#output.js';
 
 vi.mock('@taucad/runtime/node', async (importOriginal) => ({
   ...(await importOriginal<typeof RuntimeNode>()),
   createNodeClient: vi.fn(),
 }));
-vi.mock('@taucad/parameters', async (importOriginal) => ({
-  ...(await importOriginal<typeof RuntimeParameter>()),
-  resolveParameterInputValues: vi.fn((_manifest: unknown, values: Record<string, unknown>) =>
-    values['width'] === '1/2 in' ? { ...values, width: Number('12.700000000000001') } : values,
-  ),
-}));
 vi.mock('#cli-runtime.js', () => ({
   createCliRuntime: vi.fn(async () => ({ plugins: [] })),
 }));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
-const resolveParametersFunction = vi.fn<() => Promise<GetParametersResult>>(async () => ({
-  success: true,
-  data: { fixture: true } as unknown as ParameterManifest,
-  issues: [],
-}));
 const terminate = vi.fn<() => void>();
 const shutdown = vi.fn<(_options?: { drain?: boolean }) => Promise<void>>(async () => undefined);
 const onFunction = vi.fn<(event: string, listener: (entry: unknown) => void) => void>();
@@ -85,7 +72,6 @@ describe('exportCommand', () => {
     runtime.createNodeClient.mockResolvedValue({
       on: onFunction,
       export: exportFunction,
-      resolveParameters: resolveParametersFunction,
       terminate,
       shutdown,
     });
@@ -108,7 +94,6 @@ describe('exportCommand', () => {
       'ext',
       'output',
       'params',
-      'resolutionMode',
       'exportOptions',
       'content',
       'plugin',
@@ -194,10 +179,6 @@ describe('exportCommand', () => {
       source: { path: 'model.ts' },
       parameters: { width: 150 },
     });
-    expect(resolveParametersFunction).toHaveBeenCalledWith({
-      source: { path: 'model.ts' },
-      resolution: { mode: 'default' },
-    });
     const written = await readFile(outputPath);
     expect(new Uint8Array(written)).toEqual(bytes);
     expect(shutdown).toHaveBeenCalledOnce();
@@ -205,55 +186,18 @@ describe('exportCommand', () => {
     expect(terminate).not.toHaveBeenCalled();
   });
 
-  it('converts unit-bearing parameters before request-scoped export', async () => {
+  it('should pass 20in through and export 508', async () => {
     exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
     const command = await importExportCommand();
 
     await runCommand(command, {
-      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'unit.glb')}`, '--params={"width":"1/2 in"}'],
+      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'unit.glb')}`, '--params={"width":"20in"}'],
     });
 
     expect(exportFunction).toHaveBeenCalledWith('glb', {
       source: { path: 'model.ts' },
-      parameters: { width: Number('12.700000000000001') },
+      parameters: { width: '20in' },
     });
-  });
-
-  it('preserves declared-only manifest diagnostics and refuses export', async () => {
-    resolveParametersFunction.mockResolvedValueOnce({
-      success: false,
-      issues: [
-        {
-          code: 'SEMANTICS_UNRESOLVED',
-          message: 'cameraAngle has no declared unit',
-          severity: 'error',
-          details: [{ code: 'SEMANTICS_UNRESOLVED', instancePointer: '/cameraAngle' }],
-        },
-      ],
-    });
-    const command = await importExportCommand();
-
-    await expect(
-      runCommand(command, {
-        rawArgs: [inputPath, '--ext=glb', '--resolution-mode=declared-only', '--params={"cameraAngle":"90 deg"}'],
-      }),
-    ).rejects.toMatchObject({
-      code: 'SEMANTICS_UNRESOLVED',
-      exit: exitCodes.refused,
-      details: {
-        diagnostics: [
-          {
-            code: 'SEMANTICS_UNRESOLVED',
-            instancePointer: '/cameraAngle',
-          },
-        ],
-      },
-    });
-    expect(resolveParametersFunction).toHaveBeenCalledWith({
-      source: { path: 'model.ts' },
-      resolution: { mode: 'declared-only' },
-    });
-    expect(exportFunction).not.toHaveBeenCalled();
   });
 
   it('loads PicoGK resources for an explicit CLI export', async () => {

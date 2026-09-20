@@ -201,7 +201,7 @@ describe('PicoGK kernel', () => {
     expect(runtime.logger.debug).not.toHaveBeenCalledWith(expect.stringContaining('performance'), expect.anything());
     // W17/D2: an aborted build stops the worker cooperatively, which is what the live-edit lane needs.
     expect(value.session.request).toHaveBeenLastCalledWith(expect.objectContaining({ cancelMethod: 'cancel' }));
-    expect(definition.liveEdit).toBe(true);
+    expect(definition.cancellation).toBe('cooperative');
     expect(built.geometry).toMatchObject({ format: 'gltf' });
     const handle = built.nativeHandle as { glb: Uint8Array<ArrayBuffer> };
     expect(handle.glb).toEqual((built.geometry as { content: Uint8Array<ArrayBuffer> }).content);

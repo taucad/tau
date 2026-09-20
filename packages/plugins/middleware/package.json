@@ -75,6 +75,7 @@
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/types": "workspace:*",
     "manifold-3d": "catalog:",
     "zod": "catalog:"
   },

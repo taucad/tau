@@ -15,19 +15,28 @@ const repoRoot = resolve(import.meta.dirname, '../../..');
 const geospecSourceRoot = join(repoRoot, 'packages/geospec/src');
 const outputDirectory = join(import.meta.dirname, 'generated/geospec');
 
-const publicEntries = [
-  ['index.d.ts', 'geospec'],
-  ['brep/index.d.ts', 'geospec/brep'],
-  ['mesh/index.d.ts', 'geospec/mesh'],
-  ['model/index.d.ts', 'geospec/model'],
-  ['runner/index.d.ts', 'geospec/runner'],
-  ['runner/node/index.d.ts', 'geospec/runner/node'],
-  ['runner/web/index.d.ts', 'geospec/runner/web'],
-  ['runner/worker/index.d.ts', 'geospec/runner/worker'],
-  ['step/index.d.ts', 'geospec/step'],
-] as const;
+const publicEntries = {
+  '.': './index.d.ts',
+  './brep': './brep/index.d.ts',
+  './engine': './engine/index.d.ts',
+  './inspection': './inspection/index.d.ts',
+  './mesh': './mesh/index.d.ts',
+  './model': './model/index.d.ts',
+  './proofs': './proofs/index.d.ts',
+  './runner': './runner/index.d.ts',
+  './runner/native': './runner/native/index.d.ts',
+  './runner/node': './runner/node/index.d.ts',
+  './runner/web': './runner/web/index.d.ts',
+  './runner/worker': './runner/worker/index.d.ts',
+  './selector': './selector/index.d.ts',
+  './step': './step/index.d.ts',
+  './assertion-client': './assertion-client/index.d.ts',
+  './vitest': './vitest/index.d.ts',
+  './config': './config/index.d.ts',
+  './config/node': './config/node/index.d.ts',
+} as const;
 
-const entryPaths = publicEntries.map(([relativePath]) =>
+const entryPaths = Object.values(publicEntries).map((relativePath) =>
   join(geospecSourceRoot, relativePath.replace(/\.d\.ts$/u, '.ts')),
 );
 
@@ -99,19 +108,8 @@ const rewriteInternalAliases = (files: Record<string, string>): Record<string, s
   );
 
 const buildPackageJson = (): Record<string, unknown> => {
-  const packageExportEntries = [
-    ['.', './index.d.ts'],
-    ['./brep', './brep/index.d.ts'],
-    ['./mesh', './mesh/index.d.ts'],
-    ['./model', './model/index.d.ts'],
-    ['./runner', './runner/index.d.ts'],
-    ['./runner/node', './runner/node/index.d.ts'],
-    ['./runner/web', './runner/web/index.d.ts'],
-    ['./runner/worker', './runner/worker/index.d.ts'],
-    ['./step', './step/index.d.ts'],
-  ] as const;
   const packageExports: Record<string, { types: string }> = {};
-  for (const [specifier, types] of packageExportEntries) {
+  for (const [specifier, types] of Object.entries(publicEntries)) {
     packageExports[specifier] = { types };
   }
 

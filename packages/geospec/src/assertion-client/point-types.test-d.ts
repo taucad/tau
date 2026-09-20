@@ -6,7 +6,7 @@ const holes = [
   { diameter: 2, center: { x: 1 } },
   { diameter: 2, center: {} },
   { diameter: 2 },
-] satisfies readonly Parameters<GeoSpecAssertionMatchers['toHaveCircularHole']>[0][];
+] satisfies ReadonlyArray<Parameters<GeoSpecAssertionMatchers['toHaveCircularHole']>[0]>;
 
 const patterns = [
   { count: 4, holeDiameter: 2, center: [1, 2, 3] },
@@ -14,7 +14,7 @@ const patterns = [
   { count: 4, holeDiameter: 2, center: { x: 1 } },
   { count: 4, holeDiameter: 2, center: {} },
   { count: 4, holeDiameter: 2 },
-] satisfies readonly Parameters<GeoSpecAssertionMatchers['toHaveCircularHolePattern']>[0][];
+] satisfies ReadonlyArray<Parameters<GeoSpecAssertionMatchers['toHaveCircularHolePattern']>[0]>;
 
 const wrongLength: Parameters<GeoSpecAssertionMatchers['toHaveCircularHole']>[0] = {
   diameter: 2,

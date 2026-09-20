@@ -17,6 +17,13 @@ const createRunnerClosedIssue = (): VmIssue => ({
   type: 'runtime',
 });
 
+const createRunnerActiveIssue = (): VmIssue => ({
+  code: 'GEOSPEC_RUNNER_ACTIVE',
+  message: 'GeoSpec runner already has an active run.',
+  severity: 'error',
+  type: 'runtime',
+});
+
 const createRunnerAbortedIssue = (reason: string | undefined): VmIssue => ({
   code: 'GEOSPEC_RUNNER_ABORTED',
   message: reason ? `GeoSpec run aborted: ${reason}` : 'GeoSpec run aborted.',
@@ -31,7 +38,11 @@ const createRunnerBailIssue = (file: string): VmIssue => ({
   type: 'runtime',
 });
 
-/** Count non-skipped pass/fail totals for runner aggregates (shared with the pool runner, R3). */
+/**
+ * Count non-skipped pass/fail totals for runner aggregates.
+ * @param tests - Settled tests from one module run.
+ * @returns Passed and failed test counts.
+ */
 export const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: number; failed: number } => {
   let passed = 0;
   let failed = 0;
@@ -51,14 +62,15 @@ export const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: n
 /**
  * Create a runner that executes GeoSpec files serially in the current worker host.
  *
+ * @internal
  * @param options - Shared runner dependencies and lifecycle event observer.
  * @returns A GeoSpec runner with run, abort, and close lifecycle methods.
- *
- * @internal
  */
 export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpecRunner => {
   const state: { closed: boolean; aborted?: string } = { closed: false };
   const listeners = new Set<(event: GeoSpecRunnerEvent) => void>();
+  let activeDrain: Promise<void> | undefined;
+  let closePromise: Promise<void> | undefined;
 
   const emit = (event: GeoSpecRunnerEvent): void => {
     for (const listener of listeners) {
@@ -68,23 +80,34 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
 
   const getAbortReason = (): string | undefined => state.aborted;
 
-  return {
-    async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
-      if (state.closed) {
-        const issue = createRunnerClosedIssue();
-        return { success: false, passed: 0, failed: 1, selectedTests: 0, files: [], issues: [issue] };
+  const failedResult = (issue: VmIssue): GeoSpecRunnerResult => ({
+    success: false,
+    passed: 0,
+    failed: 1,
+    selectedTests: 0,
+    files: [],
+    issues: [issue],
+  });
+
+  const executeRun = async (runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> => {
+    const files = [...runOptions.files];
+    const runStartedAt = performance.now();
+    emit({ type: 'run-start', files });
+    let releasedNativeSubjects = false;
+    const releaseNativeSubjects = async (): Promise<void> => {
+      if (releasedNativeSubjects) {
+        return;
       }
+      releasedNativeSubjects = true;
+      await options.nativeModelLoader?.releaseAll();
+    };
 
-      delete state.aborted;
-      const files = [...runOptions.files];
-      const runStartedAt = performance.now();
-      emit({ type: 'run-start', files });
-
-      let passed = 0;
-      let failed = 0;
-      let selectedTests = 0;
-      const fileResults: GeoSpecRunnerResult['files'] = [];
-      const issues: VmIssue[] = [];
+    let passed = 0;
+    let failed = 0;
+    let selectedTests = 0;
+    const fileResults: GeoSpecRunnerResult['files'] = [];
+    const issues: VmIssue[] = [];
+    try {
       for (const file of files) {
         const abortReason = getAbortReason();
         if (abortReason !== undefined) {
@@ -106,6 +129,8 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           matcherWallBackstop: runOptions.matcherWallBackstop,
           forensic: runOptions.forensic,
           ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
+          ...(options.nativeAssertions ? { nativeAssertions: options.nativeAssertions } : {}),
+          ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
           ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
           ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
           ...(options.internalProfile ? { internalProfile: options.internalProfile } : {}),
@@ -134,6 +159,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         failed += 1;
       }
 
+      await releaseNativeSubjects();
       const aggregate: GeoSpecRunnerResult = {
         success: failed === 0 && issues.length === 0,
         passed,
@@ -145,6 +171,34 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
       };
       emit({ type: 'run-complete', result: aggregate });
       return aggregate;
+    } finally {
+      await releaseNativeSubjects();
+    }
+  };
+
+  return {
+    async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
+      if (state.closed) {
+        return failedResult(createRunnerClosedIssue());
+      }
+      if (activeDrain !== undefined) {
+        return failedResult(createRunnerActiveIssue());
+      }
+
+      delete state.aborted;
+      let finishDrain: () => void = () => undefined;
+      const currentDrain = new Promise<void>((resolve) => {
+        finishDrain = resolve;
+      });
+      activeDrain = currentDrain;
+      try {
+        return await executeRun(runOptions);
+      } finally {
+        finishDrain();
+        if (activeDrain === currentDrain) {
+          activeDrain = undefined;
+        }
+      }
     },
 
     on(event, handler) {
@@ -162,11 +216,15 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
     },
 
     async close(): Promise<void> {
-      if (state.closed) {
-        return;
+      if (closePromise === undefined) {
+        state.closed = true;
+        state.aborted ??= 'runner closed';
+        closePromise = (async () => {
+          await activeDrain;
+          emit({ type: 'close' });
+        })();
       }
-      state.closed = true;
-      emit({ type: 'close' });
+      await closePromise;
     },
   };
 };

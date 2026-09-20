@@ -16,7 +16,7 @@ The host page owns a kernel `Worker` and a file-manager `Worker`: the transport 
 wire in the kernel worker, the filesystem lives in the FM worker behind a bridge.
 
 `createWebWorkerClientOptions` takes `createWorker` plus
-`fileSystem: fromFileSystemBridge(() => openFileSystemBridge(fmWorker, { root: '/projects/widget' }))`;
+`fileSystem: fromFileSystemBridge(() => openFileSystemBridge(fmWorker, { root: '/projects/widget', consumer: 'agent' }))`;
 the wiring in full is in the published
 [Embedding in a Host](https://docs.tau.new/runtime/guides/embedding-in-a-host) guide.
 

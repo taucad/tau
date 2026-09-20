@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'vitest';
 import { page as selectors, server } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { readOpfsTree, readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
+import {
+  checkoutTreeBasePath,
+  readOpfsTree,
+  readProjectCheckoutTree,
+  readProjectStorageState,
+  readProjectTree,
+} from '#support/project-storage-state.js';
+import type { StoredProjectConfig } from '#support/project-storage-state.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 
 type TestBackend = 'indexeddb' | 'opfs' | 'webaccess';
@@ -23,8 +30,8 @@ const seedRoute = '/__e2e/project-file-tree';
 const composer = '[aria-label="Ask Tau to build anything..."]';
 const partialText = 'Browser host started the workspace change.';
 const finalText = 'Browser host completed the workspace change.';
-/** The Anthropic-wire model the retry menu switches to (search term: `haiku`). */
-const retryModel = 'anthropic-claude-haiku-4.5';
+/** The one prompt this spec sends, and the accessible name of its user bubble. */
+const seedPrompt = 'Create the browser-host proof file.';
 
 const ensureChatOpen = async (): Promise<void> => {
   // Give hydration a moment to restore a persisted-open chat lane first —
@@ -98,7 +105,7 @@ const prepareBrowserHost = async (backend: ActiveBackend, script?: readonly Gate
 };
 
 const submitAndWaitForPartial = async (): Promise<void> => {
-  await target.type(composer, 'Create the browser-host proof file.');
+  await target.type(composer, seedPrompt);
   await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
   await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
   await expect.poll(readGatewayRequestCount, { timeout: 30_000 }).toBe(1);
@@ -110,16 +117,15 @@ const readGatewayRequestCount = async (): Promise<number> => {
   return requests.length;
 };
 
-const readGatewayRequestModels = async (): Promise<readonly string[]> => {
-  const requests = (await target.readAgentHostGatewayRequests()) as ReadonlyArray<{ readonly model?: unknown }>;
-  return requests.map((request) => String(request.model));
+const activeProjectConfig = async (backend: ActiveBackend): Promise<StoredProjectConfig | undefined> => {
+  const state = await readProjectStorageState();
+  return state.configs.find((config) =>
+    backend === 'home' ? config.backend !== 'webaccess' : config.backend === backend,
+  );
 };
 
 const readActiveProjectTree = async (backend: ActiveBackend): Promise<Readonly<Record<string, string>>> => {
-  const state = await readProjectStorageState();
-  const project = state.configs.find((config) =>
-    backend === 'home' ? config.backend !== 'webaccess' : config.backend === backend,
-  );
+  const project = await activeProjectConfig(backend);
   if (!project) {
     return {};
   }
@@ -129,16 +135,23 @@ const readActiveProjectTree = async (backend: ActiveBackend): Promise<Readonly<R
 };
 
 /**
- * Materialized run trees, in the layout that replaced `.tau/workspaces` (S7).
+ * This project's materialized linked checkouts, read where they actually live.
  *
- * A linked checkout is `.tau/checkouts/<checkoutId>/tree/…`; the retired
- * `.tau/workspaces/run_<id>/tree` spelling is written by nothing (W14 review
- * R2, and `chat-workspace-authority-provider.tsx:24` — "There is no
- * materialized workspace any more and no claim file"). Branch mode is the only
- * placement that materializes one at all.
+ * Beside the project on its own storage root, at `.tau/checkouts/<projectId>/<checkoutId>`
+ * — never inside the project tree and with no `tree/` segment. The reader this
+ * replaced filtered `readProjectTree`'s keys for `/.tau/checkouts/<id>/tree/`,
+ * which a project's flat base path can never contain, so it answered `[]`
+ * whatever the product did (T1 row 12).
  */
-const runTreePaths = (tree: Readonly<Record<string, string>>): readonly string[] =>
-  Object.keys(tree).filter((path) => /^\/\.tau\/checkouts\/[^/]+\/tree\//u.test(path));
+const readActiveCheckoutTree = async (backend: ActiveBackend): Promise<Readonly<Record<string, string>>> => {
+  const project = await activeProjectConfig(backend);
+  if (!project) {
+    return {};
+  }
+  return backend === 'webaccess'
+    ? readOpfsTree(checkoutTreeBasePath(project, workspaceFixture))
+    : readProjectCheckoutTree(project);
+};
 
 /**
  * Settled turns, as the chat's own durable log records them.
@@ -171,13 +184,13 @@ const waitForPublishedTree = async (
   return tree;
 };
 
-/** A default ("Locally") turn publishes without ever materializing a run tree. */
+/** A default ("Locally") turn publishes without ever materializing a checkout tree. */
 const waitForLocalPublishedTree = async (
   backend: ActiveBackend,
   minimumPublications = 1,
 ): Promise<Readonly<Record<string, string>>> => {
   const tree = await waitForPublishedTree(backend, minimumPublications);
-  expect(runTreePaths(tree)).toEqual([]);
+  expect(await readActiveCheckoutTree(backend)).toEqual({});
   return tree;
 };
 
@@ -319,6 +332,21 @@ const activityUxScript: readonly GatewayScriptTurn[] = [
   },
 ];
 
+/*
+ * The reasoning disclosure, as the product renders it today: one trigger
+ * `Button` named by the thought and one `role='region'` body named
+ * `<label> details` (`chat-message-reasoning.tsx:78-101`). The label is
+ * `Thinking…` while the last block is still streaming and `Thought briefly` /
+ * `Thought for N seconds` once it has ended (`:68-69`), so both locators admit
+ * either spelling.
+ */
+const reasoningTrigger = selectors.getByRole('button', {
+  name: /^(?:Thinking…|Thought (?:briefly|for \d+ seconds?))$/u,
+});
+const reasoningBody = selectors.getByRole('region', {
+  name: /^(?:Thinking…|Thought (?:briefly|for \d+ seconds?)) details$/u,
+});
+
 streamingFadeTest('presents sequential reasoning and semantic activity through completion and reload', async () => {
   await prepareBrowserHost('indexeddb', activityUxScript);
   await target.type(composer, 'Inspect the current model.');
@@ -332,7 +360,11 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
       return { fontStyle: style.fontStyle, fontWeight: style.fontWeight };
     }),
   ).toEqual({ fontStyle: 'italic', fontWeight: '400' });
-  await target.expectCount(selectors.getByRole('group', { name: 'Collapse thought' }), 1);
+  /* Both reasoning blocks share one disclosure: one trigger `Button` named by
+   * the thought, one `region` body named `<label> details`. The retired
+   * `role='group'` named `Collapse thought` went with the second toggle
+   * (`df777801e`); `chat-message-reasoning.tsx:78-101` is the whole surface. */
+  await target.expectCount(reasoningBody, 1);
 
   await target.releaseAgentHostGatewayFixture();
   await target.expectVisible(
@@ -341,24 +373,24 @@ streamingFadeTest('presents sequential reasoning and semantic activity through c
     }),
     30_000,
   );
-  await target.expectCount(selectors.getByRole('group', { name: 'Collapse thought' }), 1);
+  await target.expectCount(reasoningBody, 1);
 
-  await target.click(selectors.getByRole('group', { name: 'Collapse thought' }));
-  const thoughtTrigger = selectors.getByRole('button', { name: /^Thought (?:briefly|for \d+ seconds?)$/u });
-  await target.expectVisible(thoughtTrigger, 30_000);
-  expect(await target.evaluate(() => document.activeElement?.textContent.startsWith('Thought') ?? false)).toBe(true);
+  await target.click(reasoningTrigger);
+  await target.expectCount(reasoningBody, 0);
+  await target.expectFocused(reasoningTrigger, 30_000);
 
   await target.releaseAgentHostGatewayFixture();
   await target.expectVisible(selectors.getByText('The model is ready.', { exact: true }), 120_000);
   await target.expectVisible(selectors.getByRole('button', { name: 'Read files' }), 60_000);
-  await target.expectCount(selectors.getByRole('group', { name: 'Collapse thought' }), 0);
+  /* A settled thought behind a message that has content stays collapsed. */
+  await target.expectCount(reasoningBody, 0);
 
-  await target.click(thoughtTrigger);
-  const reasoningBody = selectors.getByRole('group', { name: 'Collapse thought' });
-  const reasoningTrigger = selectors.getByRole('button', { name: 'Collapse thought' });
-  await target.expectVisible(reasoningBody, 30_000);
-  await target.press(reasoningTrigger, 'Enter');
+  const thoughtTrigger = selectors.getByRole('button', { name: /^Thought (?:briefly|for \d+ seconds?)$/u });
   await target.expectVisible(thoughtTrigger, 30_000);
+  await target.click(thoughtTrigger);
+  await target.expectVisible(reasoningBody, 30_000);
+  await target.press(thoughtTrigger, 'Enter');
+  await target.expectCount(reasoningBody, 0);
   await target.press(thoughtTrigger, 'Space');
   await target.expectVisible(reasoningBody, 30_000);
 
@@ -519,6 +551,11 @@ describe.each([
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 60_000);
   });
 
+  // W8b: this row reloads the instant `run.lifecycle: completed` appears, i.e.
+  // inside the settlement window, and nothing re-settles a terminal run in the
+  // new document — the proof file and `turn.finalized` are simply lost (T1 rows
+  // 3-5, blueprint T1-G4a / ruling E3). It is left as written until the lane
+  // that finalises an unsettled run on return lands.
   runs('rebuilds the transcript and publication from the durable terminal log after reload', async ({ skip }) => {
     await prepareBrowserHost(backend);
     await requireOpfsSession(skip, backend);
@@ -541,7 +578,20 @@ describe.each([
     assertPublication(await waitForLocalPublishedTree(backend));
   });
 
-  runs('retries through a durable history rewind and publishes the fresh workspace', async ({ skip }) => {
+  /*
+   * The rewind, through the affordance that still exists.
+   *
+   * This row used to click `button:has(svg.lucide-refresh-cw)` and then pick a
+   * model from the retry menu. Both went with the per-message retry verb
+   * (`be3d0eb6e`, ruled deliberate), so the model-switch-on-retry contract has
+   * no owner and is dropped with them (ruling E4). What survives is the edit:
+   * `chat-message.tsx:828-831` makes a user bubble a `role='button'` named by
+   * its own text, clicking it swaps in an edit composer (`:795-816`), and its
+   * submit calls `cadChat.edit`, which is a rewinding trigger — so the host
+   * appends `history.rewound` (`tau-agent-host.ts:2149-2162`) and runs the turn
+   * again.
+   */
+  runs('rewinds a durable history through an edit and publishes the fresh workspace', async ({ skip }) => {
     await prepareBrowserHost(backend);
     await requireOpfsSession(skip, backend);
     await submitAndWaitForPartial();
@@ -549,23 +599,18 @@ describe.each([
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
     await waitForLocalPublishedTree(backend);
 
-    await target.click(selectors.getByCss('button:has(svg.lucide-refresh-cw)').last());
-    await target.click(selectors.getByCss('button:has(svg.lucide-chevron-right)').last());
-    // Filter to one row instead of trusting catalogue order: the last entry is
-    // whichever provider the catalogue happens to end on (xAI today), and the
-    // gateway fixture speaks only the Anthropic wire — an off-wire pick made
-    // the retry vanish into a rejected request and a silent 120s poll timeout.
-    await target.type(selectors.getByCss('[data-slot="command-input"]').last(), 'haiku');
-    await target.click(selectors.getByCss('[data-slot="command-item"]').last());
+    await target.click(selectors.getByRole('button', { name: /Create the browser-host proof file/u }).first());
+    const editComposer = selectors.getByCss(`article ${composer}`).first();
+    await target.expectVisible(editComposer, 30_000);
+    await target.type(editComposer, ' Again.');
+    await target.press(editComposer, 'Enter');
+
+    /* The edited text is a turn the script walk has not seen, so it replays the
+     * default script from its start: the gated tool turn, then the closing one
+     * (`agent-host-gateway-script.ts` `createGatewayScriptWalk`). */
     await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(3);
-    // The picked model must override the retried turn on the wire.
-    const retryModels = await readGatewayRequestModels();
-    expect(retryModels[2]).toBe(retryModel);
-    expect(retryModels[2]).not.toBe(retryModels[0]);
     await target.releaseAgentHostGatewayFixture();
     await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(4);
-    const settledModels = await readGatewayRequestModels();
-    expect(settledModels[3]).toBe(retryModel);
 
     const tree = await waitForLocalPublishedTree(backend, 2);
     const events = eventLog(tree);
@@ -616,13 +661,25 @@ describe('storage ladder', () => {
  * turn is allowed to run and retired once it settles — so polling this to
  * `undefined` asserts what the claim assertion asserted: the seeded turn
  * finished and left nothing held.
+ *
+ * The record is a `TurnLease` (`packages/revisions/src/revision-effects.ts:201-212`,
+ * written at `:2242-2251`). It has no `mode` and no `admitted`: those were the
+ * retired claim's fields, and a lease exists only because the turn *was*
+ * admitted, so its presence is the admission.
  */
-const seededLease = async (): Promise<{ readonly runId?: string; readonly chatId?: string } | undefined> => {
+type SeededLease = Readonly<{
+  runId?: string;
+  turnId?: string;
+  chatId?: string;
+  checkoutId?: string;
+  authorityEpoch?: string;
+  startedAt?: number;
+}>;
+
+const seededLease = async (): Promise<SeededLease | undefined> => {
   const tree = await readActiveProjectTree('home');
   const lease = Object.entries(tree).find(([path]) => /^\/\.tau\/runs\/[^/]+\.json$/u.test(path));
-  return lease === undefined
-    ? undefined
-    : (JSON.parse(lease[1]) as { readonly runId?: string; readonly chatId?: string });
+  return lease === undefined ? undefined : (JSON.parse(lease[1]) as SeededLease);
 };
 
 describe('seeded first turn', () => {
@@ -630,37 +687,42 @@ describe('seeded first turn', () => {
     // "New project → first prompt" is the operator's primary flow and the only
     // dispatch that never runs `withWorkspace`: hydration replays the chat's
     // one-shot `startupRequest` through the chat-session store's
-    // latest-agent-body fallback, so nothing marks the claim admitted except the
-    // run id. Every other vertical here submits explicitly, and a claim left
-    // `{ admitted: false, runId }` never settles — the agent's work never
-    // reaches the live tree and the next submit is blocked behind the admission
-    // wait. The seed route creates the project exactly the way the home composer
-    // does (pending first message + `startupRequest`). The turn dispatches
-    // before the capability probe answers, so it must WAIT for it: `pending` is
-    // not `unsupported`, and with the API placement gone there is nothing to
+    // latest-agent-body fallback, so nothing marks the turn placed except its
+    // lease. Every other vertical here submits explicitly, and a turn whose
+    // lease is never written never settles — the agent's work never reaches the
+    // live tree and the next submit is blocked behind the admission wait. The
+    // seed route creates the project exactly the way the home composer does
+    // (pending first message + `startupRequest`). The turn dispatches before the
+    // capability probe answers, so it must WAIT for it: `pending` is not
+    // `unsupported`, and with the API placement gone there is nothing to
     // downgrade to.
     await target.installAgentHostGatewayFixture();
     await target.setViewport({ width: 1440, height: 900 });
-    await target.navigate(`${seedRoute}?prompt=${encodeURIComponent('Create the browser-host proof file.')}`);
+    await target.navigate(`${seedRoute}?prompt=${encodeURIComponent(seedPrompt)}`);
     await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
     await ensureChatOpen();
 
     // No submit: the seeded turn dispatches itself.
-    // Admission is the contract under test: a seeded turn used to leave its
-    // claim `{ admitted: false }` forever, so settlement never published and the
-    // next submit hit the admission wait.
+    // The lease is the contract under test: a seeded turn used to sit in the
+    // admission window forever, so settlement never published and the next
+    // submit hit the admission wait. `writeLease` runs after `prepare` placed
+    // the turn, so the record existing *is* the admission.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
-      mode: 'local',
-      admitted: true,
+      chatId: expect.any(String) as unknown,
+      checkoutId: expect.any(String) as unknown,
+      turnId: expect.any(String) as unknown,
     });
-    // The full chain, not just the claim: the seeded turn used to admit as a
+    // The full chain, not just the lease: the seeded turn used to admit as a
     // `regenerate` against an empty durable log, which `packages/agent-host`
     // refuses with HISTORY_PREFIX_INVALID — so it never reached the gateway,
     // never bound a run, and "New project → first prompt" produced nothing.
-    // A claim alone proves nothing: an API-placed dispatch admits one too.
+    // A lease alone proves nothing: any placed turn writes one.
     await expect.poll(readGatewayRequestCount, { timeout: 60_000 }).toBe(1);
+    // Run ids are `run_`-prefixed (`generatePrefixedId(idPrefix.run)`,
+    // `libs/types/src/constants/id.constants.ts:52`); `req_` was the retired
+    // claim's request id.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
-      runId: expect.stringMatching(/^req_/u) as unknown,
+      runId: expect.stringMatching(/^run_/u) as unknown,
     });
     await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
     await target.releaseAgentHostGatewayFixture();
@@ -674,9 +736,9 @@ describe('seeded first turn', () => {
         .filter(({ type }) => type === 'run.lifecycle')
         .map(({ state }) => state),
     ).toEqual(['admitted', 'running', 'completed']);
-    // Settlement releases the claim it admitted; a retained one blocks the next turn.
+    // Settlement retires the lease it took; a retained one blocks the next turn.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
-    // A released claim proves the settlement happened; whether it *failed* on
+    // A released lease proves the settlement happened; whether it *failed* on
     // the way is only visible in the console. The turn's owner attempts one
     // settlement per turn (C3) — the five-attempt retry timer this row used to
     // wait out is gone with the effect that owned it.
@@ -692,6 +754,16 @@ describe('seeded first turn', () => {
  * failed one showed no reason, and the next submit vanished. The log is the
  * authority: these two verticals reload a live run out from under itself and
  * assert the reattach settles it from the log alone.
+ *
+ * W8b: both rows assert an *automatic* resume, which the product deliberately
+ * does not do — the host is a dedicated worker that dies with the document, and
+ * the transport resumes only on a person's Resume gesture ("a page refresh must
+ * never spend the credit the user has just topped up without being asked",
+ * `browser-agent-host-transport.ts`). Ruling E1 keeps that rule and makes
+ * takeover *record* an abandoned run, so these rows are rewritten against the
+ * saved-turn card and its Resume by the lane that lands it (T1 rows 10-11,
+ * blueprint T2-D1/D2/D4). The stale `{ admitted: true }` lease shape at the end
+ * of the second row goes with that rewrite.
  */
 describe('durable log reattach after a reload', () => {
   const assertNoApiRunCalls = async (): Promise<void> => {
@@ -759,9 +831,11 @@ describe('durable log reattach after a reload', () => {
     // vertical exists for was a chat that accepted no further turn.
     await target.setAgentHostGatewayFailure();
     const priorRequests = await readGatewayRequestCount();
-    await target.type(composer, 'Create the browser-host proof file.');
+    await target.type(composer, seedPrompt);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBeGreaterThan(priorRequests);
+    // W8b: `{ admitted: true }` is the retired claim shape — a `TurnLease` has
+    // no such field. Rewritten with this row's Resume contract.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({ admitted: true });
   });
 });
@@ -778,7 +852,7 @@ describe('branch revision mode', () => {
     await submitAndWaitForPartial();
 
     await expect
-      .poll(async () => runTreePaths(await readActiveProjectTree('home')).length, { timeout: 60_000 })
+      .poll(async () => Object.keys(await readActiveCheckoutTree('home')).length, { timeout: 60_000 })
       .toBeGreaterThan(0);
 
     await target.releaseAgentHostGatewayFixture();

@@ -3,9 +3,9 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     mem::size_of,
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
 use crate::{
@@ -20,6 +20,8 @@ use crate::{
     result::Diagnostic,
     subject::Subject,
 };
+
+mod cache;
 
 pub(crate) const DEFAULT_TOLERANCE_MM: f64 = 0.001;
 pub(crate) const TESSELLATION_PROFILE: TessellationProfile = TessellationProfile {
@@ -125,12 +127,84 @@ pub(crate) struct PreparedOverlap {
     completed: RefCell<Option<CompletedOverlap>>,
 }
 
+/// Physical retention only: this ceiling never changes admission or verdicts.
+const MAX_RESIDENT_OVERLAP_BYTES: u64 = 8 * 1024 * 1024;
+
+/// One engine-wide LRU over the existing subject-owned completed values. Weak
+/// entries neither keep subjects alive nor copy their evidence/mesh allocations.
+pub(crate) struct ResidentOverlaps {
+    max_bytes: u64,
+    // ponytail: linear scans are bounded by the engine's retained subject count
+    // (32 at entry); use an indexed queue only if that bound grows materially.
+    entries: VecDeque<(Weak<PreparedComponents>, u64)>,
+}
+
+impl ResidentOverlaps {
+    pub(crate) fn new(analysis_limit: u64) -> Self {
+        Self {
+            max_bytes: analysis_limit.min(MAX_RESIDENT_OVERLAP_BYTES),
+            entries: VecDeque::new(),
+        }
+    }
+
+    pub(crate) fn prune(&mut self) {
+        self.entries.retain(|(owner, _)| owner.strong_count() != 0);
+    }
+
+    fn forget(&mut self, owner: &Rc<PreparedComponents>) {
+        let key = Rc::downgrade(owner);
+        self.entries
+            .retain(|(entry, _)| entry.strong_count() != 0 && !entry.ptr_eq(&key));
+    }
+
+    fn touch(&mut self, owner: &Rc<PreparedComponents>) {
+        let key = Rc::downgrade(owner);
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|(entry, _)| entry.ptr_eq(&key))
+        {
+            let entry = self.entries.remove(index).expect("located resident entry");
+            self.entries.push_back(entry);
+        }
+    }
+
+    fn insert(&mut self, owner: &Rc<PreparedComponents>, completed: CompletedOverlap) {
+        let PreparedComponents::Ready(prepared) = owner.as_ref() else {
+            return;
+        };
+        self.forget(owner);
+        *prepared.completed.borrow_mut() = None;
+        let bytes = completed.allocated_bytes();
+        if bytes > self.max_bytes {
+            return;
+        }
+        let mut retained: u64 = self.entries.iter().map(|(_, bytes)| bytes).sum();
+        while retained > self.max_bytes - bytes {
+            let (evicted, size) = self
+                .entries
+                .pop_front()
+                .expect("resident bytes have an owner");
+            if let Some(evicted) = evicted.upgrade() {
+                if let PreparedComponents::Ready(value) = evicted.as_ref() {
+                    *value.completed.borrow_mut() = None;
+                }
+            }
+            retained -= size;
+        }
+        *prepared.completed.borrow_mut() = Some(completed);
+        self.entries.push_back((Rc::downgrade(owner), bytes));
+    }
+}
+
 // Owned data only: no source or temporary backend handles enter this cell.
+#[derive(Clone)]
 struct CompletedOverlap {
     evidence: Evidence,
     requests: Vec<OverlapRequest>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum OverlapRequest {
     // Identity is the enclosing PreparedOverlap's immutable operand_identity.
     Source { component: u32, units: u64 },
@@ -140,7 +214,7 @@ enum OverlapRequest {
 
 impl CompletedOverlap {
     fn matches(&self, tolerance: f64, selected: Option<&[SelectedPair]>) -> bool {
-        self.evidence.tolerance.to_bits() == tolerance.to_bits()
+        normalized_bits(self.evidence.tolerance) == normalized_bits(tolerance)
             && self.evidence.selected_pairs.as_deref() == selected
     }
 
@@ -170,6 +244,14 @@ impl CompletedOverlap {
             }
         }
         bytes
+    }
+}
+
+const fn normalized_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0
+    } else {
+        value.to_bits()
     }
 }
 
@@ -313,8 +395,8 @@ pub(crate) fn analyze_overlap(
             }
         }
     }
-    let prepared = subject.overlap_components()?;
-    let prepared = match prepared.as_ref() {
+    let prepared_owner = subject.overlap_components()?;
+    let prepared = match prepared_owner.as_ref() {
         PreparedComponents::Ready(value) => value,
         PreparedComponents::Refused(diagnostics) => {
             return Ok(Analysis::Refused(diagnostics.clone()))
@@ -345,12 +427,18 @@ pub(crate) fn analyze_overlap(
                     OverlapRequest::Boolean | OverlapRequest::Properties => csg.charge(1)?,
                 }
             }
+            if let Some(resident) = &subject.resident_overlaps {
+                resident.borrow_mut().touch(&prepared_owner);
+            }
             return Ok(Analysis::Complete(cached.evidence.clone()));
         }
     }
     // One most-recent success only. An obsolete retained result must not overlap
     // the next demand's retained allocations, including on a refused demand.
     *prepared.completed.borrow_mut() = None;
+    if let Some(resident) = &subject.resident_overlaps {
+        resident.borrow_mut().forget(&prepared_owner);
+    }
 
     let allowed: Option<BTreeMap<(u32, u32), &SelectedPair>> = selected.map(|pairs| {
         pairs
@@ -372,6 +460,37 @@ pub(crate) fn analyze_overlap(
                 continue;
             }
             candidates.push((left, right));
+        }
+    }
+    if let (Some(store), Some(producer)) = (&subject.overlap_cache, &subject.producer_identity) {
+        let context = cache::EvidenceContext {
+            subject,
+            producer,
+            tolerance,
+            selected,
+            components,
+            candidates: &candidates,
+        };
+        if let Some(cached) = cache::load(&context, store.as_ref()) {
+            if prepared
+                .retained_bytes
+                .saturating_add(cached.allocated_bytes())
+                <= subject.retention_limits.max_mesh_bytes
+            {
+                for request in &cached.requests {
+                    match request {
+                        OverlapRequest::Source { component, units } => {
+                            csg.charge_cached_source(&operand_identity, *component, *units)?;
+                        }
+                        OverlapRequest::Boolean | OverlapRequest::Properties => csg.charge(1)?,
+                    }
+                }
+                let evidence = cached.evidence.clone();
+                if let Some(resident) = &subject.resident_overlaps {
+                    resident.borrow_mut().insert(&prepared_owner, cached);
+                }
+                return Ok(Analysis::Complete(evidence));
+            }
         }
     }
 
@@ -460,7 +579,21 @@ pub(crate) fn analyze_overlap(
         .saturating_add(completed.allocated_bytes())
         <= subject.retention_limits.max_mesh_bytes
     {
-        *prepared.completed.borrow_mut() = Some(completed);
+        if let (Some(store), Some(producer)) = (&subject.overlap_cache, &subject.producer_identity)
+        {
+            let context = cache::EvidenceContext {
+                subject,
+                producer,
+                tolerance,
+                selected,
+                components,
+                candidates: &candidates,
+            };
+            cache::publish(&context, &completed, store.as_ref());
+        }
+        if let Some(resident) = &subject.resident_overlaps {
+            resident.borrow_mut().insert(&prepared_owner, completed);
+        }
     }
     Ok(Analysis::Complete(evidence))
 }
@@ -720,6 +853,10 @@ pub(crate) fn overlap_json(overlap: &Overlap) -> Json {
     }
     Json::Object(fields)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/overlap_resident_lru.rs"]
+mod resident_lru_tests;
 
 #[cfg(test)]
 #[path = "../../../tests/overlap_observation.rs"]

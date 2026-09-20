@@ -1,11 +1,16 @@
+use geospec_engine_native_cache_host::AuthenticatedOverlapCache;
 use geospec_engine_native_core::ProtocolError as CoreProtocolError;
-use geospec_engine_native_runtime::{create_engine, Engine, EngineConfig};
+use geospec_engine_native_runtime::{
+    create_engine, create_engine_with_overlap_cache, producer_identity_bytes,
+    producer_identity_verified, Engine, EngineConfig,
+};
 use pyo3::{
     create_exception,
-    exceptions::PyException,
+    exceptions::{PyException, PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyBytes, PyModule},
 };
+use std::rc::Rc;
 
 create_exception!(geospec_engine_native, ProtocolError, PyException);
 
@@ -19,16 +24,67 @@ fn protocol_error(py: Python<'_>, error: CoreProtocolError) -> PyErr {
 
 #[pyclass(name = "Engine", unsendable)]
 struct PyEngine {
-    inner: Engine,
+    inner: Option<Engine>,
+    cache: Option<Rc<AuthenticatedOverlapCache>>,
+}
+
+impl PyEngine {
+    fn engine(&self) -> PyResult<&Engine> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("GeoSpec native engine is closed."))
+    }
+
+    fn engine_mut(&mut self) -> PyResult<&mut Engine> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("GeoSpec native engine is closed."))
+    }
 }
 
 #[pymethods]
 impl PyEngine {
     #[new]
-    fn new() -> Self {
-        Self {
-            inner: create_engine(EngineConfig::entry()),
+    #[pyo3(signature = (cache_root=None, project_root=None))]
+    fn new(cache_root: Option<String>, project_root: Option<String>) -> PyResult<Self> {
+        match (cache_root, project_root) {
+            (None, None) => Ok(Self {
+                inner: Some(create_engine(EngineConfig::entry())),
+                cache: None,
+            }),
+            (Some(root), Some(project)) => {
+                if !producer_identity_verified() {
+                    return Err(PyValueError::new_err(
+                        "Persistent evidence requires the verified release producer profile.",
+                    ));
+                }
+                let cache = Rc::new(
+                    AuthenticatedOverlapCache::open(root, project)
+                        .map_err(|error| PyValueError::new_err(error.to_string()))?,
+                );
+                Ok(Self {
+                    inner: Some(
+                        create_engine_with_overlap_cache(EngineConfig::entry(), cache.clone())
+                            .map_err(PyValueError::new_err)?,
+                    ),
+                    cache: Some(cache),
+                })
+            }
+            _ => Err(PyValueError::new_err(
+                "cache_root and project_root must be supplied together",
+            )),
         }
+    }
+
+    fn close(&mut self) {
+        if self.inner.is_none() {
+            return;
+        }
+        if let Some(cache) = &self.cache {
+            cache.flush();
+        }
+        self.inner.take();
+        self.cache.take();
     }
 
     fn ingest_subject<'py>(
@@ -39,7 +95,7 @@ impl PyEngine {
         resources: Vec<Vec<u8>>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = self
-            .inner
+            .engine_mut()?
             .ingest_subject(request, primary.to_vec(), resources)
             .map_err(|error| protocol_error(py, error))?;
         Ok(PyBytes::new(py, &result))
@@ -52,7 +108,7 @@ impl PyEngine {
         mesh: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = self
-            .inner
+            .engine_mut()?
             .ingest_mesh(request, mesh)
             .map_err(|error| protocol_error(py, error))?;
         Ok(PyBytes::new(py, &result))
@@ -64,7 +120,7 @@ impl PyEngine {
         request: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = self
-            .inner
+            .engine()?
             .subject_handle(request)
             .map_err(|error| protocol_error(py, error))?;
         Ok(PyBytes::new(py, &result))
@@ -76,7 +132,7 @@ impl PyEngine {
         request: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = self
-            .inner
+            .engine_mut()?
             .release_subject(request)
             .map_err(|error| protocol_error(py, error))?;
         Ok(PyBytes::new(py, &result))
@@ -88,7 +144,7 @@ impl PyEngine {
         request: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = self
-            .inner
+            .engine()?
             .process_request(request)
             .map_err(|error| protocol_error(py, error))?;
         Ok(PyBytes::new(py, &result))
@@ -100,7 +156,7 @@ impl PyEngine {
         request: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = self
-            .inner
+            .engine()?
             .canonical_plan(request)
             .map_err(|error| protocol_error(py, error))?;
         Ok(PyBytes::new(py, &result))
@@ -112,10 +168,29 @@ impl PyEngine {
         plan: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
         let result = self
-            .inner
+            .engine()?
             .evaluate_plan(plan)
             .map_err(|error| protocol_error(py, error))?;
         Ok(PyBytes::new(py, &result))
+    }
+
+    fn flush_cache<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        self.engine()?;
+        let bytes = self.cache.as_ref().map_or_else(
+            || br#"{"enabled":false,"sealed":true}"#.to_vec(),
+            |cache| cache.flush(),
+        );
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    fn clear_overlap_cache(&self) -> PyResult<bool> {
+        self.engine()?;
+        Ok(self.cache.as_ref().is_some_and(|cache| cache.clear()))
+    }
+
+    fn cache_producer_identity<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        self.engine()?;
+        Ok(PyBytes::new(py, &producer_identity_bytes()))
     }
 }
 

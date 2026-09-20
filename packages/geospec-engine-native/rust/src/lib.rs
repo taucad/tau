@@ -2,6 +2,7 @@ mod analysis;
 mod ancillary;
 pub mod backend;
 mod budget;
+pub mod cache;
 pub mod certificates;
 mod codec;
 mod identity;

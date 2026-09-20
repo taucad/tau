@@ -163,3 +163,85 @@ describe('exposeFileSystem masked change delivery', () => {
     expect(received).toEqual([]);
   });
 });
+
+/*
+ * Delivery is O(events × ports) today; the derivation inside it need not be.
+ * A scoped event is a function of the event, the root and whether the mask
+ * applies, so every port sharing those three shares one derivation (W9d).
+ */
+describe('exposeFileSystem scoped delivery cost', () => {
+  let messageHandlers: Array<(event: MessageEvent) => void>;
+
+  beforeEach(() => {
+    messageHandlers = [];
+    vi.stubGlobal('self', {
+      addEventListener: (_type: string, handler: (event: MessageEvent) => void) => {
+        messageHandlers.push(handler);
+      },
+      removeEventListener: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should derive one scoped event per root and mask however many ports share them', async () => {
+    const bus = new ChangeEventBus();
+    const handle = exposeFileSystem(
+      {},
+      {
+        changeEventBus: bus,
+        policy: tauPathPolicy,
+        handlerForRoot: () => ({
+          capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
+          readFile: async () => new Uint8Array([1]),
+        }),
+      },
+    );
+    const consumers: RootedBridgeConsumer[] = [
+      ...Array.from({ length: 25 }, (): RootedBridgeConsumer => 'agent'),
+      ...Array.from({ length: 25 }, (): RootedBridgeConsumer => 'working-copy'),
+    ];
+    const channels = consumers.map((consumer) => {
+      const channel = new MessageChannel();
+      messageHandlers.at(-1)!(
+        new MessageEvent('message', {
+          data: {
+            v: fileSystemBridgeProtocolVersion,
+            type: filesystemBridgeConnectMessageType,
+            port: channel.port1,
+            root,
+            consumer,
+          },
+        }),
+      );
+      return channel;
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(handle.serverHandles.size).toBe(consumers.length);
+      });
+      const delivered: unknown[] = [];
+      for (const served of handle.serverHandles.values()) {
+        vi.spyOn(served, 'emit').mockImplementation((_name: string, payload: unknown) => {
+          delivered.push(payload);
+        });
+      }
+
+      bus.emit(written(`${root}/src/main.ts`));
+
+      expect(delivered).toHaveLength(consumers.length);
+      /* One object for the masked ports, one for the working-copy ports. */
+      expect(new Set(delivered).size).toBe(2);
+      expect([...new Set(delivered)]).toEqual([written('src/main.ts'), written('src/main.ts')]);
+    } finally {
+      handle.cleanup();
+      for (const channel of channels) {
+        channel.port1.close();
+        channel.port2.close();
+      }
+    }
+  });
+});

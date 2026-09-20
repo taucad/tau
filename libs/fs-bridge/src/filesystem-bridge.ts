@@ -236,6 +236,43 @@ const wrapFileSystemBridgePort = (port: MessagePortLike, label: string): Port<un
   return wrapped;
 };
 
+/**
+ * Marks a write payload whose bytes the caller hands over.
+ *
+ * A write is copied before it crosses the port, because the caller keeps its own
+ * buffers and a transfer would detach them. An import or a pending commit does
+ * not keep them: mark its argument and the bridge transfers the caller's own
+ * bytes instead of copying every one of them. Nothing else changes — the mark is
+ * a symbol, so it reaches neither the wire nor the service.
+ *
+ * Set it only where the caller never reads those bytes again.
+ *
+ * @public
+ *
+ * @example <caption>Handing an imported tree to the worker</caption>
+ * ```typescript
+ * import { consumableBytes } from '@taucad/fs-bridge';
+ * import type { FileSystemBridgeWorkspaceProxy } from '@taucad/fs-bridge';
+ *
+ * export async function exampleImport(
+ *   client: FileSystemBridgeWorkspaceProxy,
+ *   imported: Record<string, { content: Uint8Array<ArrayBuffer> }>,
+ * ): Promise<void> {
+ *   await client.writeFiles(Object.assign(imported, { [consumableBytes]: true }));
+ * }
+ * ```
+ */
+export const consumableBytes: unique symbol = Symbol('tau.fs-bridge.consumableBytes');
+
+/** Whether any argument carries the {@link consumableBytes} mark. */
+const handsOverBytes = (args: readonly unknown[]): boolean =>
+  args.some(
+    (argument) =>
+      argument !== null &&
+      typeof argument === 'object' &&
+      (argument as Record<symbol, unknown>)[consumableBytes] === true,
+  );
+
 const cloneWritePayloadForTransfer = (value: unknown): unknown => {
   if (value instanceof Uint8Array) {
     return new Uint8Array(value);
@@ -265,6 +302,11 @@ const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
 };
 
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
+  if (handsOverBytes(args)) {
+    /* The caller's own buffers ride the transfer list `wrapAsTransferables`
+     * builds from these arguments, and are detached by the postMessage. */
+    return args;
+  }
   if (method === 'writeFileChecked' && args[0] !== null && typeof args[0] === 'object') {
     const input = args[0] as CheckedFileWrite;
     return [
@@ -824,10 +866,18 @@ function exposeFileSystemHandlers(
    * own root-relative namespace — and never its own writes, which it already
    * knows about.
    */
+  /**
+   * One scoped event per root and mask kind, for the length of one event's
+   * dispatch: a scoped port's spelling is a function of the event, its root and
+   * whether the mask applies, so K ports on one root derive it once between them
+   * instead of K times (event-fanout policy).
+   */
+  const scopedByRoot = new Map<string, ChangeEvent | undefined>();
   const deliverToHandles = (events: ChangeEvent[]): void => {
     for (const event of events) {
       const originClientId = getEventOrigin(event);
       hiddenByPath.clear();
+      scopedByRoot.clear();
       for (const [recipientPort, handle] of serverHandles) {
         const recipientPortId = portIds.get(recipientPort);
         if (originClientId !== undefined && recipientPortId !== undefined && originClientId === recipientPortId) {
@@ -838,7 +888,12 @@ function exposeFileSystemHandlers(
           handle.emit('fileChanged', event);
           continue;
         }
-        const scoped = scopeEventToRoot(event, scope.root, scope.consumer === 'working-copy' ? undefined : hidden);
+        const masked = scope.consumer !== 'working-copy';
+        const memoKey = `${masked ? 'masked' : 'whole'}\0${scope.root}`;
+        if (!scopedByRoot.has(memoKey)) {
+          scopedByRoot.set(memoKey, scopeEventToRoot(event, scope.root, masked ? hidden : undefined));
+        }
+        const scoped = scopedByRoot.get(memoKey);
         if (scoped !== undefined) {
           handle.emit('fileChanged', scoped);
         }

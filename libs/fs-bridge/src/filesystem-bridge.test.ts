@@ -19,6 +19,7 @@ import type { ChangeEvent } from '@taucad/types';
 import type { FileSystemBridgeHello, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import {
   bindMutationContextForPort,
+  consumableBytes,
   createFileSystemBridge,
   createFileSystemBridgeProxy,
   createTransferredFileSystemBridgeProxy,
@@ -1221,6 +1222,63 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       expect(responses[0]!.transfer).toEqual([payload.buffer]);
     } finally {
       client.dispose();
+      handle.cleanup();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+
+  /* A write is copied because the caller keeps its bytes. An import does not
+   * keep them: marked consumable, the caller's own buffers ride the transfer
+   * list instead of being copied first (W9c). */
+  it('should transfer a consumable batch and copy an unmarked one', async () => {
+    const written: Array<Record<string, { content: Uint8Array<ArrayBuffer> }>> = [];
+    const handle = exposeFileSystem({
+      writeFiles: async (files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => {
+        written.push(files);
+      },
+    });
+    const channel = new MessageChannel();
+    const posted: Array<readonly Transferable[] | undefined> = [];
+    const postMessage = channel.port2.postMessage.bind(channel.port2);
+    vi.spyOn(channel.port2, 'postMessage').mockImplementation(
+      (frame: unknown, transfer?: readonly Transferable[] | StructuredSerializeOptions) => {
+        const transferList = Array.isArray(transfer) ? (transfer as readonly Transferable[]) : undefined;
+        posted.push(transferList);
+        Reflect.apply(postMessage, channel.port2, [frame, transferList]);
+      },
+    );
+    messageHandlers[0]!(
+      new MessageEvent('message', {
+        data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+      }),
+    );
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
+
+    try {
+      /* The default transfers a *copy*: the caller's own buffer is not on the
+       * list and its bytes survive the call. */
+      const kept = { '/kept.bin': { content: new Uint8Array([1, 2, 3]) } };
+      const keptBuffer = kept['/kept.bin'].content.buffer;
+      posted.length = 0;
+      await proxy.writeFiles(kept);
+      const copied = posted.filter((transfer) => transfer !== undefined);
+      expect(copied.length).toBe(1);
+      expect(copied[0]!.includes(keptBuffer)).toBe(false);
+      expect(kept['/kept.bin'].content.byteLength).toBe(3);
+
+      const handedOver = { '/given.bin': { content: new Uint8Array([4, 5, 6]) } };
+      const givenBuffer = handedOver['/given.bin'].content.buffer;
+      posted.length = 0;
+      await proxy.writeFiles(Object.assign(handedOver, { [consumableBytes]: true }));
+
+      const transferred = posted.filter((transfer) => transfer !== undefined);
+      expect(transferred.length).toBe(1);
+      expect(transferred[0]!.length === 1 && transferred[0]![0] === givenBuffer).toBe(true);
+      expect(givenBuffer.byteLength).toBe(0);
+      expect(written.map((files) => Object.keys(files))).toEqual([['/kept.bin'], ['/given.bin']]);
+    } finally {
+      proxy.dispose();
       handle.cleanup();
       channel.port1.close();
       channel.port2.close();

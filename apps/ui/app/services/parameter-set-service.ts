@@ -440,7 +440,6 @@ export const createParameterSetService = (
       manifest,
       request: {
         requestId,
-        draftGeneration: sequence,
         expected: input.expected ?? current.identity,
         pressure: 'final',
         operation,
@@ -593,7 +592,6 @@ export const createParameterSetService = (
       target: state.target,
       request: {
         requestId,
-        draftGeneration: sequence,
         expected: current.identity,
         pressure: field.pressure ?? 'final',
         ...(field.base === undefined ? {} : { base: field.base }),

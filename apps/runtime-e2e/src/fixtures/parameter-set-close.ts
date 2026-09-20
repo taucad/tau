@@ -31,7 +31,6 @@ const initial = resolveParameterSnapshot({
 });
 const request = (requestId: string): ParameterSetRequest => ({
   requestId,
-  draftGeneration: 1,
   fingerprint: requestId,
   expected: initial.identity,
   pressure: 'final',

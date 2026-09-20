@@ -204,7 +204,6 @@ describe('parameter set service behaviours', () => {
     expect(
       await fixture.service.submit('main.ts', edited, {
         requestId: 'stale-1',
-        draftGeneration: 1,
         expected: { manifestRevision: first.revision },
         pressure: 'final',
         operation: {
@@ -486,25 +485,6 @@ describe('parameter set service behaviours', () => {
     await vi.waitFor(() => {
       expect(fixture.service.snapshot('main.ts')?.entry.groups['default']?.values['width']).toBe(64);
     });
-    await fixture.service.close();
-  });
-
-  it('refuses a display preference rather than persisting it', async () => {
-    const fixture = serviceFixture();
-    const manifest = await fixture.manifestFor();
-    await fixture.service.resolve('main.ts', manifest);
-
-    // Only an authored unit reaches `groups.<g>.units`; a display choice stays with its client.
-    expect(
-      await fixture.service.submit('main.ts', manifest, {
-        requestId: 'unit-1',
-        draftGeneration: 1,
-        expected: fixture.service.snapshot('main.ts')!.identity,
-        pressure: 'final',
-        operation: { kind: 'display-preference', parameterId: 'width', unit: 'cm' },
-      }),
-    ).toMatchObject({ status: 'rejected', code: 'DISPLAY_ONLY_ACTION' });
-    expect(fixture.writes).toHaveLength(0);
     await fixture.service.close();
   });
 

@@ -350,6 +350,10 @@ export const createComposedViewClient = (input: {
    * Finding 4). Asked once per client: the worker mounts it before the workspace
    * is ready and never unmounts it, and the mount is fail-soft — a profile where
    * it never came up must not grow a row nothing serves.
+   *
+   * Only a resolved row is remembered (G0b-7): the probe swallows every error, so
+   * remembering its absence would let one transient authority failure — or one
+   * listing that raced the mount — cost the session its row for good.
    */
   let dependencyMount: Promise<FileTreeNode | undefined> | undefined;
   const dependencyMountRow = async (): Promise<FileTreeNode | undefined> => {
@@ -363,7 +367,11 @@ export const createComposedViewClient = (input: {
         return undefined;
       }
     })();
-    return dependencyMount;
+    const row = await dependencyMount;
+    if (row === undefined) {
+      dependencyMount = undefined;
+    }
+    return row;
   };
 
   const remember = (relativePath: string, value: FileProvenance | undefined): void => {

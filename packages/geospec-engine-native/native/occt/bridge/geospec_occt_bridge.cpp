@@ -1459,6 +1459,7 @@ struct geospec_occt_document {
   std::string source_length_unit;
   double source_unit_to_millimeters = 1.0;
   geospec_occt_shape_facts shape_facts{};
+  mutable bool admission_validity_reusable = true;
   std::vector<ProductFacts> products;
   std::vector<OccurrenceFacts> occurrences;
   std::vector<SourceFaceFacts> source_faces;
@@ -4939,11 +4940,20 @@ bool build_report(const geospec_occt_document& document,
   return true;
 }
 
-geospec_occt_validity_facts compute_validity(const TopoDS_Shape& shape,
+geospec_occt_validity_facts compute_validity(const geospec_occt_document& document,
                                              std::string& reason) {
+  const TopoDS_Shape& shape = document.shape;
   geospec_occt_validity_facts result{};
-  BRepCheck_Analyzer analyzer(shape, true);
-  result.valid = analyzer.IsValid() ? 1 : 0;
+  std::optional<BRepCheck_Analyzer> analyzer;
+  // Admission already checked this exact shape with the same analyzer settings.
+  // IsValid recursively visits every child, including every solid. Reuse only
+  // that successful proof while no potentially destructive query has run.
+  if (document.admission_validity_reusable && document.shape_facts.valid) {
+    result.valid = 1;
+  } else {
+    analyzer.emplace(shape, true);
+    result.valid = analyzer->IsValid() ? 1 : 0;
+  }
   result.same_parameter = 1;
   result.closed_shells = 1;
   result.closed_solids = 1;
@@ -4990,7 +5000,9 @@ geospec_occt_validity_facts compute_validity(const TopoDS_Shape& shape,
   for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More();
        explorer.Next()) {
     ++result.solid_count;
-    if (!analyzer.IsValid(explorer.Current())) ++result.invalid_solid_count;
+    if (analyzer.has_value() && !analyzer->IsValid(explorer.Current())) {
+      ++result.invalid_solid_count;
+    }
   }
   if (result.solid_count == 0) {
     result.closed_solids = 0;
@@ -6314,7 +6326,7 @@ int geospec_occt_validity(const geospec_occt_document* document,
   }
   return guarded(error, [&]() -> int {
     std::string message;
-    *validity = compute_validity(document->shape, message);
+    *validity = compute_validity(*document, message);
     return write_string(message, reason);
   });
 }
@@ -6396,6 +6408,9 @@ int geospec_occt_common_volume(
     common.SetArguments(arguments);
     common.SetTools(tools);
     common.SetRunParallel(false);
+    // This existing Boolean route permits OCCT to modify its input topology.
+    // Invalidate before execution, including if the operation later fails.
+    document->admission_validity_reusable = false;
     common.Build();
     if (!common.IsDone()) {
       return fail(GEOSPEC_OCCT_NATIVE_ERROR,
@@ -7155,7 +7170,7 @@ int geospec_occt_minimum_wall_thickness(
   return guarded(error, [&]() -> int {
     std::string reason;
     const geospec_occt_validity_facts validity =
-        compute_validity(document->shape, reason);
+        compute_validity(*document, reason);
     if (!validity.valid || !validity.closed_solids) {
       *wall = {};
       wall->outcome = 1;

@@ -98,6 +98,50 @@ fn run_query_order(first: TessellationProfile, second: TessellationProfile, labe
 }
 
 #[test]
+fn original_validation_reuse_preserves_complete_facts_across_query_orders() {
+    let bytes = fixture("two-cube-assembly.step");
+    let expected = geospec_engine_native_core::backend::brep::ValidityFacts {
+        valid: true,
+        checks: None,
+        max_tolerance: Some(1e-7),
+        free_bounds: Some(0),
+        small_edges: None,
+        same_parameter: Some(true),
+        closed_shells: Some(true),
+        closed_solids: Some(true),
+        solid_count: Some(2),
+        invalid_solid_count: Some(0),
+        open_edge_count: Some(0),
+        closed_wires: Some(true),
+        reason: None,
+    };
+
+    let direct = Document::from_step(&bytes).unwrap();
+    let direct_validity = direct.validity().unwrap();
+
+    let reported = Document::from_step(&bytes).unwrap();
+    let report = reported.reported_facts_and_mesh().unwrap();
+    assert!(report.facts.shape.valid);
+    BrepSubject::tessellate(&reported, BrepEntity::Whole, COARSE).unwrap();
+    let reported_validity = reported.validity().unwrap();
+
+    let boolean = Document::from_step(&bytes).unwrap();
+    let common = boolean.common_volume(0, 1).unwrap();
+    assert_eq!(common.volume.to_bits(), 0.0_f64.to_bits());
+    // First validity on a fresh document exercises the C++ fallback. A validity
+    // already retained in Rust's OnceCell intentionally remains unchanged.
+    let boolean_validity = boolean.validity().unwrap();
+
+    for actual in [direct_validity, reported_validity, boolean_validity] {
+        assert_eq!(actual.as_ref(), &expected);
+        assert_eq!(
+            actual.max_tolerance.map(f64::to_bits),
+            Some(1e-7_f64.to_bits())
+        );
+    }
+}
+
+#[test]
 fn fixed_report_bundle_preserves_nominal_queries_and_copy_history_entities() {
     let connector = OcctConnector;
     let identity = connector.identity_profile();

@@ -35,10 +35,13 @@ type OriginalMesh = { id: string; meshHex: string };
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const fixtureRoot = fileURLToPath(new URL('.', import.meta.url));
 const entryPath = 'ordinary.geospec.ts';
-const installedRoot = resolve(root, 'node_modules/.cache/geospec-engine-native');
+const installedRoot = process.env['GEOSPEC_INSTALLED_CONSUMER_ROOT'];
+if (!installedRoot) {
+  throw new Error('GEOSPEC_INSTALLED_CONSUMER_ROOT must select the current prepared installed consumer.');
+}
 const routes = [
-  { name: 'A14 native', path: 'm3-geometry-a1/principal-integration-a14/node', entry: 'node' },
-  { name: 'O3 mixed', path: 'm5-st-link-optimization-a1/node', entry: 'wasm' },
+  { name: 'current native', entry: 'node' },
+  { name: 'current mixed', entry: 'wasm' },
 ] as const;
 const encoder = new TextEncoder();
 const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes).digest('hex');
@@ -88,7 +91,7 @@ const reportBytes = (report: GeoSpecCanonicalClaimReport) => ({
 for (const route of routes) {
   describe(route.name, () => {
     it('ordinary VM assertions equal the installed standalone client', async () => {
-      const packageRoot = resolve(installedRoot, route.path, 'node_modules');
+      const packageRoot = resolve(installedRoot, 'node_modules');
       const modulePath = resolve(packageRoot, '@taucad/geospec-engine-native/dist', `${route.entry}.mjs`);
       const native = (await import(/* @vite-ignore */ pathToFileURL(modulePath).href)) as NativeModule;
       await native.initialize?.();

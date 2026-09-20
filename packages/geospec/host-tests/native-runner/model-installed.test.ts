@@ -35,18 +35,21 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const fixtureRoot = fileURLToPath(new URL('.', import.meta.url));
 const entryPath = 'model.geospec.ts';
 const legacyGuardEntryPath = 'native-helper-legacy.geospec.ts';
-const installedRoot = resolve(root, 'node_modules/.cache/geospec-engine-native');
+const installedRoot = process.env['GEOSPEC_INSTALLED_CONSUMER_ROOT'];
+if (!installedRoot) {
+  throw new Error('GEOSPEC_INSTALLED_CONSUMER_ROOT must select the current prepared installed consumer.');
+}
 const stepPath = resolve(
   root,
-  'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/m4-tau-runtime-integration-a1/snapshot-optional-a3/step-artifacts/baseline.step',
+  'packages/geospec/host-tests/fixtures/data/5e97ff394bd8fd15318efa6b0345fcbdc7c80b4c6d30b8ad87a84b6cade19305',
 );
 const glbPath = resolve(
   root,
-  'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/m4-tau-runtime-integration-a1/snapshot-optional-a3/glb-artifacts/baseline.glb',
+  'packages/geospec/host-tests/fixtures/data/1321806f5b10c87126bece80cee96cf867c6c131db655a9f28558a39a086616d',
 );
 const routes = [
-  { name: 'A14 native', path: 'm3-geometry-a1/principal-integration-a14/node', entry: 'node' },
-  { name: 'O3 mixed', path: 'm5-st-link-optimization-a1/node', entry: 'wasm' },
+  { name: 'current native', entry: 'node' },
+  { name: 'current mixed', entry: 'wasm' },
 ] as const;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -178,7 +181,7 @@ describe('native authoring helper', () => {
 for (const route of routes) {
   describe(route.name, () => {
     it('loads authored STEP/Runtime GLB subjects through the native host', async () => {
-      const packageRoot = resolve(installedRoot, route.path, 'node_modules');
+      const packageRoot = resolve(installedRoot, 'node_modules');
       const modulePath = resolve(packageRoot, '@taucad/geospec-engine-native/dist', `${route.entry}.mjs`);
       const native = (await import(/* @vite-ignore */ pathToFileURL(modulePath).href)) as NativeModule;
       await native.initialize?.();

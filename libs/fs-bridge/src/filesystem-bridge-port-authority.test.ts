@@ -23,7 +23,11 @@ import { wrapMessagePort } from '@taucad/rpc';
 import type { Port } from '@taucad/rpc';
 import { createBridgeServer } from '@taucad/rpc/bridge';
 import { createFileSystemBridgePort, createFileSystemBridgeProxy } from '#filesystem-bridge.js';
-import { createFileSystemBridgeHello, fileSystemBridgeSchemas } from '#filesystem-bridge-protocol.js';
+import {
+  createFileSystemBridgeHello,
+  fileSystemBridgeProtocolVersion,
+  fileSystemBridgeSchemas,
+} from '#filesystem-bridge-protocol.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -165,7 +169,12 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
 
     try {
       await proxy.ready;
-      expect(proxy.hello.payload).toEqual({ v: 1, state: 'ready', capabilities, watchable: true });
+      expect(proxy.hello.payload).toEqual({
+        v: fileSystemBridgeProtocolVersion,
+        state: 'ready',
+        capabilities,
+        watchable: true,
+      });
 
       await expect(proxy.readFile('main.ts', 'utf8')).resolves.toBe('export default 1;\n');
       await expect(proxy.readFile('main.ts')).resolves.toEqual(encoder.encode('export default 1;\n'));

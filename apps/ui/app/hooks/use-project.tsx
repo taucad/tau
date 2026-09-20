@@ -265,13 +265,13 @@ export function ProjectProvider({
     () =>
       createParameterSetService({
         rootDirectory: fileSystemRoot,
-        client: fileManager.files,
+        client: fileManager.parameterFiles,
         subscribe: (path, listener) => fileManager.contentService?.subscribe(path, listener) ?? (() => undefined),
         onError: (error) => {
           toast.error(errorMessage(error));
         },
       }),
-    [fileManager.files, fileManager.contentService, fileSystemRoot],
+    [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot],
   );
   /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:
    * the project session owns the final close and Strict Mode would close a live service. */

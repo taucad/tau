@@ -28,7 +28,7 @@ type ChatSessionStoreProviderProps = {
 export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderProps): React.JSX.Element {
   const [store] = useState(() => new ChatSessionStore());
   const projectManager = useProjectManager();
-  const { files } = useFileManager();
+  const { recordFiles } = useFileManager();
 
   // Mirror the latest project manager closures into the store synchronously
   // during render so child subtrees that acquire a session in the same
@@ -44,7 +44,7 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
     consumeChatStartupRequest: projectManager.consumeChatStartupRequest,
     commitCancelledDraftRestore: projectManager.commitCancelledDraftRestore,
     // Composer records and chat attachments are files, reached through the root that owns them.
-    client: files,
+    client: recordFiles,
   });
 
   return <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>;

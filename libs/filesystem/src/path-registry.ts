@@ -19,6 +19,13 @@
  * own, which is what keeps that default from swallowing them the way a blanket
  * `.tau` exclusion once did.
  *
+ * Every row is compared as the filesystem folds it rather than as spelled: one
+ * rule, no row that is reserved under one spelling and the user's under another.
+ * A revision tree has never been allowed to carry a case alias of a reserved
+ * path (`portable-tree.ts`), so calling one authored only moved the failure to a
+ * wedged commit. Accepted cost: on a case-sensitive disk a directory a person
+ * named `Exports` is Tau's `exports`.
+ *
  * @module
  */
 
@@ -29,8 +36,23 @@ export type PathRegistryRow = PathClassification &
   Readonly<{
     /** Project-relative prefix, or the exact path when `directory` is false. */
     prefix: string;
-    /** Whether an ignore pattern for this row is anchored at the project root. */
+    /**
+     * Whether an ignore pattern for this row is anchored at the project root.
+     *
+     * The generated ignore file's spelling and nothing else. How the row
+     * *classifies* a path is {@link PathRegistryRow.match}: one flag meant both
+     * once, which is how a nested `.git` became the agent's to write.
+     */
     anchored: boolean;
+    /**
+     * Where the row matches: only at the project root, or wherever its name
+     * appears as a path segment.
+     *
+     * Control-plane rows are `segment` so their answer cannot depend on how deep
+     * a repository sits (PP3); the `.tau/*`, `exports` and `thumbnail.webp` rows
+     * are `root` because that is the only place they are Tau's.
+     */
+    match: 'root' | 'segment';
     directory: boolean;
   }>;
 
@@ -85,6 +107,48 @@ export const reservedTauPathClassification: PathClassification = Object.freeze({
  * @public
  */
 export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
+  /* Control plane: hidden from every composed view, refused before provider
+   * I/O. A revision hash never covers its own store — its own or a vendored
+   * dependency's, a submodule's, a second project's (EQ1, CI1), which is why
+   * every row here matches a segment and none of them is anchored in the ignore
+   * file: `versioned` and the generated block have to agree at every depth
+   * (PP5).
+   *
+   * They lead the table because {@link classify} takes the *first* match: behind
+   * the rows below, a store vendored into `node_modules` was the cache's and one
+   * under `.tau/skills` was authored — and therefore versioned, captured into
+   * every revision (G0-3). */
+  {
+    prefix: '.tau/binding.json',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: false,
+  },
+  {
+    prefix: '.jj',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
+  {
+    prefix: '.git',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
+
   /* Generated from the registry itself on every host, so versioning them would
    * put tooling output into revisions. `.gitignore` and `.gitattributes` are
    * deliberately absent: git needs them in the tree, so they take the authored
@@ -96,6 +160,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -105,6 +170,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
   {
@@ -114,6 +180,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
 
@@ -127,6 +194,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -136,6 +204,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -145,6 +214,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
 
@@ -157,6 +227,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -166,6 +237,17 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
+    directory: true,
+  },
+  {
+    prefix: '.tau/export',
+    class: 'records',
+    versioned: false,
+    agentAccess: 'read-only',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
     directory: true,
   },
   /* `.tau/transcripts` is *not* a row: W17's reconciliation (W1 review R3)
@@ -181,6 +263,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -190,6 +273,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -199,6 +283,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -208,6 +293,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: true,
   },
   {
@@ -217,6 +303,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
+    match: 'root',
     directory: false,
   },
 
@@ -228,9 +315,11 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'none',
     anchored: true,
+    match: 'root',
     directory: true,
   },
-  /* Unanchored: a nested `node_modules` is derived too. */
+  /* A nested `node_modules` is derived too, so the ignore file names it wherever
+   * it appears as well. */
   {
     prefix: 'node_modules',
     class: 'cache',
@@ -238,36 +327,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     agentAccess: 'read-write',
     watch: 'none',
     anchored: false,
-    directory: true,
-  },
-
-  /* Control plane: hidden from every composed view, refused before provider
-   * I/O. A revision hash never covers its own store. */
-  {
-    prefix: '.tau/binding.json',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: true,
-    directory: false,
-  },
-  {
-    prefix: '.jj',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: true,
-    directory: true,
-  },
-  {
-    prefix: '.git',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: true,
+    match: 'segment',
     directory: true,
   },
 ] satisfies readonly PathRegistryRow[]);
@@ -275,14 +335,23 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
 /**
  * Whether one row covers one already-normalized path.
  *
- * An anchored row matches at the project root; an unanchored one matches any
- * segment, so `lib/node_modules/x` is cache too. A file row matches exactly.
+ * A `root` row matches at the project root only; a `segment` row matches
+ * wherever its prefix sits on segment boundaries, so `lib/node_modules/x` is
+ * cache and `vendor/dep/.git/config` is the control plane however deep the
+ * repository is. A directory row covers itself and everything beneath it; a file
+ * row covers that path alone — which still catches a `.git` that is a worktree
+ * or submodule pointer file rather than a directory, because the directory row
+ * matches the segment either way.
  */
 const covers = (row: PathRegistryRow, relative: string): boolean => {
-  if (!row.anchored) {
-    return relative.split('/').includes(row.prefix);
+  if (row.directory) {
+    const bounded = `/${relative}/`;
+    const pattern = `/${row.prefix}/`;
+    return row.match === 'segment' ? bounded.includes(pattern) : bounded.startsWith(pattern);
   }
-  return row.directory ? relative === row.prefix || relative.startsWith(`${row.prefix}/`) : relative === row.prefix;
+  const bounded = `/${relative}`;
+  const pattern = `/${row.prefix}`;
+  return row.match === 'segment' ? bounded.endsWith(pattern) : bounded === pattern;
 };
 
 /**
@@ -296,6 +365,58 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
   pathRegistry.map(({ class: storageClass, versioned, agentAccess, watch }) =>
     Object.freeze({ class: storageClass, versioned, agentAccess, watch }),
   ),
+);
+
+/**
+ * Spellings whose fold can differ from the path as written.
+ *
+ * Cheap enough to run on every classified path: a lowercase path with no `:`,
+ * and no trailing dot or space on any segment, already *is* its fold, and only
+ * the paths this admits pay for one below.
+ */
+const mayFold = /[A-Z:]|[. ](?:\/|$)/u;
+
+/**
+ * One path as the filesystem underneath will fold it.
+ *
+ * Every filesystem a `NodeFsProvider` runs on folds case; Win32 folds trailing
+ * dots and spaces, and NTFS resolves an alternate data stream to the entry it
+ * hangs off — so `vendor/.Git/config`, `vendor/.git./HEAD` and
+ * `.git::$INDEX_ALLOCATION/config` all open the real store while a byte
+ * comparison calls them the user's content (G0-1, G0-5, G0b-3). The same defence
+ * `portable-tree.ts` applies to a revision tree, spelled the same way.
+ * Normalization is in it for that reason rather than because it can change an
+ * answer: every prefix is ASCII, which normalization never rewrites.
+ *
+ * A `:` is legal in a name a person types, so the stream suffix is dropped here
+ * rather than rejected by the canonicaliser: `notes: draft.md` stays the user's
+ * file, it simply classifies as `notes` would. Win32 8.3 short names (`GIT~1`)
+ * are a recorded non-goal — no Windows target ships, and the alias is minted by
+ * the filesystem rather than spelled by a caller.
+ *
+ * @param relative - Path relative to the project root, leading `/` already dropped.
+ * @returns The spelling every supported filesystem resolves this path to.
+ */
+const foldSpelling = (relative: string): string =>
+  relative
+    .normalize('NFC')
+    .toLowerCase()
+    .replaceAll(/:[^/]*(?=\/|$)/gu, '')
+    .replaceAll(/[. ]+(?=\/|$)/gu, '');
+
+/** Tau's own directory: the one prefix that decides the reserved fallback. */
+const reservedTau = '.tau';
+
+/**
+ * Every row with its prefix folded, so one comparison answers every spelling.
+ *
+ * Built once at module load. A row's prefix is a literal this repository owns,
+ * and `.tau/AGENTS.md` is the only one the fold rewrites — which is exactly the
+ * row whose spelling used to decide whether the agent could read its own
+ * instructions file (G0b-8).
+ */
+const foldedRegistry: readonly PathRegistryRow[] = Object.freeze(
+  pathRegistry.map((row) => Object.freeze({ ...row, prefix: foldSpelling(row.prefix) })),
 );
 
 /**
@@ -315,10 +436,15 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
  */
 export const classify = (projectRelativePath: string): PathClassification => {
   const relative = projectRelativePath.replace(/^\/+/u, '');
-  const index = pathRegistry.findIndex((row) => covers(row, relative));
+  /* Fold once, then match every row folded (G0b-8, G0b-9): a spelling the
+   * filesystem resolves onto a reserved path is that path, and `portable-tree`
+   * has always refused to carry one as the user's content. A path that is
+   * already its own fold pays one regex test and allocates nothing. */
+  const subject = mayFold.test(relative) ? foldSpelling(relative) : relative;
+  const index = foldedRegistry.findIndex((row) => covers(row, subject));
   return (
     rowClassifications[index] ??
-    (relative.startsWith('.tau/') ? reservedTauPathClassification : unlistedPathClassification)
+    (subject.startsWith(`${reservedTau}/`) ? reservedTauPathClassification : unlistedPathClassification)
   );
 };
 

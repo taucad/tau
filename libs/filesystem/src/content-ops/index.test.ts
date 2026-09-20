@@ -121,6 +121,37 @@ describe('archive', () => {
       'tau.json': tree['tau.json'],
     });
   });
+
+  /**
+   * The ceiling, not the tree, is what bounds an archive's resident bytes: the
+   * whole-tree map is gone, and the ZIP writer is never handed more than the
+   * ceiling plus the file that crossed it — however large the tree is.
+   */
+  it('should refuse an archive over its byte ceiling instead of reading the whole tree', async () => {
+    const kibibyte = 'x'.repeat(1024);
+    const provider = await seeded(
+      Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`f-${index}.txt`, kibibyte])),
+    );
+    let read = 0;
+    const counting = Object.assign(Object.create(provider) as MemoryProvider, {
+      readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+        const bytes = await provider.readFile(path);
+        read += bytes.byteLength;
+        return bytes;
+      },
+    });
+
+    await expect(archive(counting, '', { maxBytes: 4096 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
+    expect(read).toBeLessThanOrEqual(4096 + 1024);
+  });
+
+  it('should refuse an oversized file before reading its bytes', async () => {
+    const provider = await seeded({ 'oversized.bin': 'x'.repeat(8192) });
+    const readFile = vi.spyOn(provider, 'readFile');
+
+    await expect(archive(provider, '', { maxBytes: 1024 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
+    expect(readFile).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

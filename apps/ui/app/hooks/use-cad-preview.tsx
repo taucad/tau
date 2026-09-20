@@ -172,7 +172,7 @@ function CadPreviewPipeline({
 }: CadPreviewPipelineProps): React.JSX.Element {
   'use no memo';
 
-  const { fileManagerRef, files: rootedFiles, workspace } = useFileManager();
+  const { fileManagerRef, previewFiles, workspace } = useFileManager();
   const previewInstance = useId().replaceAll(':', '');
   const previewPrefix = joinPath('/previews', previewInstance);
   const fileSystemRoot = files === undefined ? joinPath('/projects', projectId) : previewPrefix;
@@ -247,7 +247,7 @@ function CadPreviewPipeline({
             });
             mountedPrefixRef.current = previewPrefix;
             signal.throwIfAborted();
-            await rootedFiles.writeFiles(projectFiles);
+            await previewFiles.writeFiles(projectFiles);
           }
         }),
         /* oxlint-enable react/refs -- End XState ActorRef boundary. */

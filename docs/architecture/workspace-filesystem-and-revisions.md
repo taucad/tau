@@ -2,7 +2,7 @@
 
 ## Status
 
-**Current** (2026-09-18) — the implemented architecture for how files, revisions, branches, and agent working copies relate across every Tau host (browser, desktop, `tau serve`, CLI, cloud). It is the filesystem-and-revisions half of the workspace-anchored topology ruled in [docs/research/client-host-topology-and-filesystem-authority.md](../research/client-host-topology-and-filesystem-authority.md) (rulings N1–N36) and refines, without contradicting, [docs/policy/filesystem-authority-policy.md](../policy/filesystem-authority-policy.md) and [docs/policy/filesystem-policy.md](../policy/filesystem-policy.md). The execution history is [docs/research/workspace-filesystem-north-star-blueprint.md](../research/workspace-filesystem-north-star-blueprint.md); the file-tree presentation slice is [docs/research/file-tree-mount-provenance-blueprint.md](../research/file-tree-mount-provenance-blueprint.md).
+**Current** (2026-09-20) — the implemented architecture for how files, revisions, branches, and agent working copies relate across every Tau host (browser, desktop, `tau serve`, CLI, cloud). It is the filesystem-and-revisions half of the workspace-anchored topology ruled in [docs/research/client-host-topology-and-filesystem-authority.md](../research/client-host-topology-and-filesystem-authority.md) (rulings N1–N36) and refines, without contradicting, [docs/policy/filesystem-authority-policy.md](../policy/filesystem-authority-policy.md) and [docs/policy/filesystem-policy.md](../policy/filesystem-policy.md). The execution history is [docs/research/workspace-filesystem-north-star-blueprint.md](../research/workspace-filesystem-north-star-blueprint.md); the file-tree presentation slice is [docs/research/file-tree-mount-provenance-blueprint.md](../research/file-tree-mount-provenance-blueprint.md).
 
 The local implementation and regression matrix are complete. Credentialed GitHub, clean-machine packaged desktop, production R2, and Fly recovery validation remain external operator gates; they do not weaken the local contracts below.
 
@@ -84,10 +84,10 @@ Unchanged. One provider per storage root; mounts route; no overlay provider exis
 
 ### L1 — Authority and the path registry
 
-The authority gains one function that every other layer consults:
+The authority exposes one function that every other layer consults:
 
 ```ts
-classify(path: RootedPath, ctx: { checkout: Checkout }): {
+classify(path: string): {
   class: 'authored' | 'records' | 'cache' | 'control-plane';   // Rule 16 storage class
   versioned: boolean;                                          // enters a revision
   agentAccess: 'read-write' | 'read-only' | 'hidden';          // composed-view mask
@@ -95,28 +95,32 @@ classify(path: RootedPath, ctx: { checkout: Checkout }): {
 }
 ```
 
-The registry is **the** table. Capture, generated ignore content, the agent mask, composed views, and ingress preflight all read `classify`; callers do not maintain private path-prefix policy. Rule 16's four storage classes are the registry's `class` column.
+`path-registry.ts` owns the `PathRegistry` rows and `tauPathPolicy`. Every row is normalized to NFC, lower-cased, stripped of trailing dots and spaces, and stripped of a segment's `:` suffix before matching. Root rows match only the root; control-plane rows match segments at any depth. On a case-sensitive disk, `Exports` is therefore Tau's reserved `exports`; Win32 8.3 short names are outside the contract.
 
 The registry is structural, not a glob: it is keyed by the project's reserved `.tau/**` layout (below), by the mount table (dependencies), and by the checkout kind (a linked checkout classifies its own `.tau/**` the same way the live one does).
 
-The mechanism core never imports it. `composeView` and revision capture take a `PathPolicy` port (`classify`, `versioned`, `agentAccess`); the composition sites — the file-manager worker, the agent host and `packages/host` — pass the Tau layout instance `tauPathPolicy` from `@taucad/filesystem/path-registry`.
+The mechanism core never imports the registry. `composeView` and revision capture take an injected `PathPolicy`; composition sites pass `tauPathPolicy` from `@taucad/filesystem/path-registry`. Generated ignore content takes the matching registry rows explicitly, so a non-default policy must pass its own rows.
 
 #### Who owns what inside L1
 
 `WorkspaceFileService` keeps its name, constructor and queue ownership and is a **composition root**: the authority-global surface it serves is topology (mounts, project routes, the project-directory lifecycle, external-change polling, storage-root teardown) plus the per-path primitives that trusted composition still calls. Everything with a shape of its own lives in its own module of `libs/filesystem`:
 
-| Owner                                                  | Concern                                                                                                                                 |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `MutationPipeline`                                     | every write: locks, provider commit, cache/index bookkeeping, event emission, batch semantics, the move/copy/duplicate porcelain        |
-| `RootedViews` / `createRootedFileSystem`               | one exact mount captured per view; mount-confined, mask-checked reads, writes and porcelain; `ESTALE` after its mount goes              |
-| `TreeIndex` / `TreeIndexes`                            | one in-memory metadata index per root, fed by mutations and external facts; serves rooted `search` and `statTree` with no provider walk |
-| `content-ops` (`walk`, `contents`, `archive`, capture) | pure read content operations over the port, exported at `@taucad/filesystem/content-ops`; the only place ZIP encoding lives             |
-| `project-routes`                                       | the only speller of `/projects/<id>`, `/checkouts/<id>`, `/previews/<id>` and `/node_modules`; `MountEntry.kind` carries the route id   |
-| `ProjectDirectories`                                   | discovery, pending commit, adopt, permanent delete and manifest I/O — the only L1 module that names `ProjectManifest`                   |
-| `ExternalChangeIngest` / `RemoteChanges`               | normalised facts from each backend's declared `observe()` capability, and cross-tab remote facts; no `backend === '…'` branch remains   |
-| `backend/scope.ts`                                     | the storage-scope discriminant (`isDurableScope`, `projectLocatorFor`) the layer above used to infer from a backend name                |
+| Owner                                         | Concern                                                                                                                                 |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `MutationPipeline`                            | every write: locks, provider commit, cache/index bookkeeping, event emission, batch semantics, the move/copy/duplicate porcelain        |
+| `RootedViews` / `createRootedFileSystem`      | one exact mount captured per view; mount-confined, mask-checked reads, writes and porcelain; `ESTALE` after its mount goes              |
+| `TreeIndex` / `TreeIndexes`                   | one in-memory metadata index per root, fed by mutations and external facts; serves rooted `search` and `statTree` with no provider walk |
+| `content-ops` (`walk`, `contents`, `archive`) | pure read content operations over the port, exported at `@taucad/filesystem/content-ops`; the only place ZIP encoding lives             |
+| `project-routes`                              | the only speller of `/projects/<id>`, `/checkouts/<id>`, `/previews/<id>` and `/node_modules`; `MountEntry.kind` carries the route id   |
+| `ProjectDirectories`                          | discovery, pending commit, adopt, permanent delete and manifest I/O — the only L1 module that names `ProjectManifest`                   |
+| `ExternalChangeIngest` / `RemoteChanges`      | normalised facts from each backend's declared `observe()` capability, and cross-tab remote facts; no `backend === '…'` branch remains   |
+| `backend/scope.ts`                            | the storage-scope discriminant (`isDurableScope`, `projectLocatorFor`) the layer above used to infer from a backend name                |
 
-The consumer surface is the **composed view**, not the authority. A client opens a rooted bridge connection declaring its consumer (`'user'`, `'agent'` or `'working-copy'`); `'user'` and `'agent'` are masked by `composeView`, while `'working-copy'` is the raw rooted filesystem and is trusted composition only — the revision port, host record writers and the project-directory lifecycle (Rule 16, charter D8). Revision algorithms are not here at all: they live at `@taucad/revisions/algorithms`, and `libs/filesystem` holds no `revision-*` module.
+The consumer surface is the **composed view**, not the authority. Protocol version 2 has two wires. `workspaceBridgeService(service)` decides the unrooted wire: nine topology, project-lifecycle, polling and teardown calls plus the scope-required `readScopedFile`, `readScopedShallowDirectory` and `getScopedZippedDirectory`; it serves no per-path content call. Every per-path call uses a rooted connection that declares `root` and `consumer` (`'user'`, `'agent'` or `'working-copy'`). `'user'` and `'agent'` are masked by `composeView`; `'working-copy'` is the raw rooted filesystem for trusted composition only. A missing or unrecognised consumer fails closed before `handlerForRoot`. The fs-client connection owner memoizes one connection per `(root, consumer)` and disposes them together.
+
+`'agent'` means the agent's tools **and any executor of the code the agent writes**: the kernel runtime, GeoSpec runner, Quick Look runtime, host-daemon runtime child and desktop `runtimeFileSystem` route all open that view. Its mask applies to reads, mutations and watches. A recursive remove or move refuses hidden paths at the view root for every consumer and at any depth for an agent; a user may remove a vendored directory containing its own nested store. The Node provider refuses a visible symlink that resolves onto a hidden real path with `ELOOP`, and directory listing drops it. This is defence in depth, not a sandbox: Node, desktop and `tau serve` import bundled project code as a real Node module with `node:fs`, and a browser worker can reach browser storage APIs directly.
+
+Every **bridge** rooted open names a consumer. The language plane is currently a direct internal exception rather than a bridge open: `languageFsSyncAttach` holds a read-only raw `createRootedFileSystem` handle so Monaco sees the checkout rather than the composed overlays.
 
 ### L2 — Revisions
 
@@ -125,6 +129,23 @@ The consumer surface is the **composed view**, not the authority. A client opens
 - **Identity.** A revision's id is its commit id. A branch is a ref. A candidate line has a change id so it survives rewrites. `Rev N` is a first-parent ordinal on the _selected branch_, computed at display time, never stored.
 - **What enters a revision** is exactly the set of paths for which `classify(path).versioned` is true. Nothing else, on any host.
 - **Refs beyond branches.** `refs/tau/evidence/*` (compute evidence, N27) and `refs/tau/chats/<chatId>` (chat history shipped with the graph, N28) are the transport of records; the checkout projection is `chat.json` plus foreign `events/<deviceId>.jsonl` segments, while the root `events.jsonl` remains this device's live append log.
+
+The revision effect composition is split by concern:
+
+| Module                   | Owner                                                           |
+| ------------------------ | --------------------------------------------------------------- |
+| `git-tree-id.ts`         | Git tree object identity over a captured tree                   |
+| `handle-table.ts`        | Checkout and capture handle lifetimes                           |
+| `case-collisions.ts`     | Portable case-collision discovery                               |
+| `apply-tree.ts`          | Tree application, recovery and materialization                  |
+| `chat-effects.ts`        | Chat ref recording, publication and replay                      |
+| `sync-queue.ts`          | Durable pending-sync queue reads and writes                     |
+| `revision-projection.ts` | Versioned change filtering and stable status projection         |
+| `remotes.ts`             | `TauCloudAuth`, `publishOverHttp` and `registerProjectOverHttp` |
+
+Each checkout owns a capture memo keyed by `(path, size, mtimeMs)`. It never reuses a stat observed inside the 2 s racy-timestamp window, retains at most 64 MiB by default, and is dropped with the checkout. `applyTree` stages all changed file bytes in one `writeFiles` batch when the surface supports it, then runs the ordered rename, verification and swap stages sequentially.
+
+`RevisionActorsOptions.policy` injects the classifier used by capture, stat admission, temporary-sibling sweeping, evidence filtering and materialization checks. A non-default policy also supplies its own registry rows to `generatedIgnoreContent`; the default `tauRevisionPolicy` pairs Tau's policy and rows.
 
 #### Backends
 

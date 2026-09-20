@@ -17,6 +17,7 @@
 import { isCeilingRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
+import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.machine.js';
 
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
@@ -618,6 +619,141 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
                 'REMOTE_REJECTED'
               : 'REMOTE_UNAVAILABLE';
   return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
+};
+
+/**
+ * How one Tau Cloud API request proves who is asking (A21, I8, W10.5).
+ *
+ * The only thing that differs between the browser leg and a terminal's: a
+ * document has the session cookie the page signed in with and no token to
+ * carry, and a terminal has no cookie jar and carries a bearer value. Both
+ * reach the same endpoints and read the same refusals, which is why the pair is
+ * one parameter rather than two copies of the request.
+ *
+ * @public
+ */
+export type TauCloudAuth = Readonly<{ kind: 'cookie' }> | Readonly<{ kind: 'bearer'; authorization: string }>;
+
+/* The headers and credential mode one leg's request carries. */
+const tauCloudRequestInit = (auth: TauCloudAuth): RequestInit => ({
+  ...(auth.kind === 'cookie' ? { credentials: 'include' } : {}),
+  /* eslint-disable @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire. */
+  headers: {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    ...(auth.kind === 'bearer' ? { Authorization: auth.authorization } : {}),
+  },
+  /* eslint-enable @typescript-eslint/naming-convention -- end wire header names. */
+});
+
+/** The `code` in the API's JSON envelope, or `undefined` when it sent none. */
+const answeredCode = async (response: Response): Promise<Readonly<{ code?: string; message?: string }>> => {
+  const body: unknown = await response.json().catch(() => undefined);
+  const answered = (body ?? {}) as Readonly<{ code?: unknown; message?: unknown }>;
+  return {
+    ...(typeof answered.code === 'string' ? { code: answered.code } : {}),
+    ...(typeof answered.message === 'string' ? { message: answered.message } : {}),
+  };
+};
+
+/**
+ * What to tell a person whose version could not be published (A18, C6).
+ *
+ * One owner, for the same reason {@link registerProjectFailureMessage} has one:
+ * the worker and the daemon each carried a copy and they disagreed about two
+ * classes — 401, where the daemon printed a `TAU_API_TOKEN` hint the browser
+ * never could, and a version too large to share, which the daemon reported as
+ * *"Try again."* One sentence per response, whichever host asked.
+ *
+ * @param status - The HTTP status the API answered.
+ * @param code - The `code` in its JSON envelope, when it sent one.
+ * @returns One sentence to render.
+ * @public
+ */
+export const publishFailureMessage = (status: number, code?: string): string => {
+  if (status === 401) {
+    return 'Sign in to publish this project.';
+  }
+  if (code === 'ENTITLEMENT_REQUIRED') {
+    return 'Private links need the Pro plan.';
+  }
+  if (code === 'MISSING_ENTRY_PATH') {
+    return 'This version does not contain the file this project opens with.';
+  }
+  if (status === 413 || code === 'PAYLOAD_TOO_LARGE') {
+    return 'This version is larger than a shared link may be.';
+  }
+  return 'Tau Cloud could not publish this project. Try again.';
+};
+
+/**
+ * Record one publication on Tau Cloud, from either host (S32, A21, W10.5).
+ *
+ * Nothing is written under the project: the row lives on the API, and the tag
+ * the publication points at was already pushed with the credential this call's
+ * {@link TauCloudAuth} names.
+ *
+ * @param apiBaseUrl - The API origin, with or without a trailing slash.
+ * @param auth - How this host proves who is asking.
+ * @param input - The pointer and the settings the dialog collected.
+ * @returns The publication's id and the link to copy.
+ * @throws Error When Tau Cloud refused, in the words a person can act on.
+ * @public
+ */
+export const publishOverHttp = async (
+  apiBaseUrl: string,
+  auth: TauCloudAuth,
+  input: PublishPublicationActorInput,
+): Promise<PublishPublicationActorOutput> => {
+  const response = await globalThis.fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/publications`, {
+    method: 'POST',
+    ...tauCloudRequestInit(auth),
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const answered = await answeredCode(response);
+    throw new Error(publishFailureMessage(response.status, answered.code));
+  }
+  const body = (await response.json()) as Readonly<{ id?: string; urls?: Readonly<{ share?: string; view?: string }> }>;
+  const url = body.urls?.share ?? body.urls?.view;
+  if (body.id === undefined || url === undefined) {
+    throw new Error('Tau Cloud answered without a link for this publication.');
+  }
+  return { publicationId: body.id, url };
+};
+
+/**
+ * Claim this project on Tau Cloud, so connecting to it can take (P51, W18 DEF-1).
+ *
+ * `PUT /v1/projects/<id>` creates the caller's project row and its bare
+ * repository and is idempotent, so a retried *Connect* costs one request — the
+ * API's insert is `onConflictDoNothing`. Until that row exists both git
+ * advertisements answer `404`.
+ *
+ * @param apiBaseUrl - The API origin, with or without a trailing slash.
+ * @param auth - How this host proves who is asking.
+ * @param project - The id and the manifest name this host knows.
+ * @returns Nothing.
+ * @throws Error When Tau Cloud refused, in the words a person can act on (A18).
+ * @public
+ */
+export const registerProjectOverHttp = async (
+  apiBaseUrl: string,
+  auth: TauCloudAuth,
+  project: Readonly<{ id: string; name: string | undefined }>,
+): Promise<void> => {
+  const response = await globalThis.fetch(
+    `${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(project.id)}`,
+    {
+      method: 'PUT',
+      ...tauCloudRequestInit(auth),
+      body: JSON.stringify(project.name === undefined ? {} : { name: project.name }),
+    },
+  );
+  if (!response.ok) {
+    const answered = await answeredCode(response);
+    throw new Error(registerProjectFailureMessage(response.status, answered.code, answered.message));
+  }
 };
 
 /**

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { MessagePortLike, Port } from '@taucad/rpc';
-import { createTransferredFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
+import {
+  createTransferredFileSystemBridgeProxy,
+  exposeFileSystem,
+  fileSystemBridgeProtocolVersion,
+  openFileSystemBridge,
+} from '@taucad/fs-bridge';
 
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
@@ -127,7 +132,7 @@ describe('bridge Port<T> round-trip', () => {
     const proxy = createTransferredFileSystemBridgeProxy(structuralPort);
     try {
       await proxy.ready;
-      expect(proxy.hello.payload).toMatchObject({ v: 1, state: 'ready' });
+      expect(proxy.hello.payload).toMatchObject({ v: fileSystemBridgeProtocolVersion, state: 'ready' });
       await expect(proxy.readFile(helloPath, 'utf8')).resolves.toBe('from-structural-port');
     } finally {
       proxy.dispose();

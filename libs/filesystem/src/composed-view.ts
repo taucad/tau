@@ -38,10 +38,12 @@ import type {
   DirectoryEntry,
   FileReadStreamOptions,
   FileSystemProvider,
+  PathClassification,
   PathPolicy,
   WatchEvent,
   WatchRequest,
 } from '#types.js';
+import { bufferToStream } from '#backend/stream-utils.js';
 import type { TreeSearchOptions } from '#tree-index.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import type { WorkspaceMutationError } from '#workspace-errors.js';
@@ -170,6 +172,14 @@ export const maskedPathCode = 'WORKSPACE_MASKED_PATH';
 /** Epoch zero: an overlay entry has no history, so it must not look freshly written. */
 const immutableMtimeMs = 0;
 
+/**
+ * Classifications one view remembers. Wide enough that a single listing — the
+ * widest thing that asks for the same path twice — never evicts its own rows;
+ * small enough that a long-lived view holding one per path it ever touched is
+ * still bounded.
+ */
+const classificationMemoEntries = 32_768;
+
 const fileSystemError = (code: string, message: string, extra?: Record<string, unknown>): never => {
   throw Object.assign(new Error(message), { code, ...extra });
 };
@@ -220,16 +230,70 @@ const ancestorsOf = (path: string): string[] => {
  */
 export const composeView = (checkout: ComposedViewCheckout, options: ComposedViewOptions): ComposedView => {
   const base = checkout.filesystem;
-  const { classify } = options.policy;
   const overlays = options.overlays ?? [];
   const masked = options.consumer === 'agent';
 
+  /*
+   * One classification per path per view. The policy's answer is a pure
+   * function of the path, and the same path is asked for two or three times
+   * within one operation: a listing filters every row for visibility and then
+   * asks each row for its provenance, and each of those was a fresh regex plus
+   * a scan of the registry's rows. Cleared wholesale instead of evicted one
+   * entry at a time — the bound only has to outlast one listing, and the whole
+   * map goes with the view.
+   */
+  const classifications = new Map<string, PathClassification>();
+  const classify = (path: string): PathClassification => {
+    const known = classifications.get(path);
+    if (known !== undefined) {
+      return known;
+    }
+    const classification = options.policy.classify(path);
+    if (classifications.size >= classificationMemoEntries) {
+      classifications.clear();
+    }
+    classifications.set(path, classification);
+    return classification;
+  };
+
+  /** Whether this view hides the path at all — the one question the streams ask. */
+  const hidden = (path: string): boolean => classify(path).agentAccess === 'hidden';
+
   /** The policy's answer, refused before any provider I/O: the control plane is in no view (A1, P30). */
   const readablePath = (path: string): string => {
-    if (classify(path).agentAccess === 'hidden') {
+    if (hidden(path)) {
       refuseHidden(path);
     }
     return path;
+  };
+
+  /**
+   * One watch event as this view may deliver it, or nothing.
+   *
+   * The explicit `watch` is a second stream over the same bytes: the bridge masks
+   * its own broadcast, and the node composed views have no bridge in front of
+   * them at all, so the mask belongs here (G0b-1). A rename degrades exactly as
+   * `scopeEventToRoot` degrades one whose other end left the root — the visible
+   * end survives as a change or a delete, and an event with no visible end is
+   * dropped. Fields the base adds to an event (the node provider's `kind`) ride
+   * along with it.
+   */
+  const visibleEvent = (event: WatchEvent): WatchEvent | undefined => {
+    if (event.type === 'reset') {
+      return event;
+    }
+    if (event.type !== 'rename') {
+      return hidden(event.path) ? undefined : event;
+    }
+    const from = hidden(event.oldPath) ? undefined : event.oldPath;
+    const to = hidden(event.newPath) ? undefined : event.newPath;
+    if (from !== undefined && to !== undefined) {
+      return event;
+    }
+    if (to !== undefined) {
+      return { type: 'change', path: to };
+    }
+    return from === undefined ? undefined : { type: 'delete', path: from };
   };
 
   const writablePath = (path: string): string => {
@@ -410,24 +474,85 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return route.kind === 'merge' ? { type: 'dir', size: 0, mtimeMs: immutableMtimeMs } : base.stat(path);
   };
 
-  /** The checkout's own rows of a directory, batched when the base offers it. */
+  /** Every row the checkout holds in a directory, hidden ones included, batched when the base offers it. */
+  const baseEntries = async (path: string): Promise<Array<{ name: string } & FileStat>> => {
+    const batched = await base.readdirWithStats?.(path);
+    if (batched !== undefined) {
+      return batched;
+    }
+    const names = await base.readdir(path);
+    return Promise.all(names.map(async (name) => ({ name, ...(await base.stat(joinRelativePath(path, name))) })));
+  };
+
+  /** The checkout's own rows of a directory, control-plane rows dropped for every consumer. */
   const upperEntries = async (path: string, tolerateMissing: boolean): Promise<Array<{ name: string } & FileStat>> => {
-    const visible = (name: string): boolean => classify(joinRelativePath(path, name)).agentAccess !== 'hidden';
     try {
-      const batched = await base.readdirWithStats?.(path);
-      if (batched !== undefined) {
-        return batched.filter(({ name }) => visible(name));
-      }
-      const entries = await base.readdir(path);
-      const names = entries.filter((name) => visible(name));
-      return await Promise.all(
-        names.map(async (name) => ({ name, ...(await base.stat(joinRelativePath(path, name))) })),
-      );
+      const rows = await baseEntries(path);
+      return rows.filter(({ name }) => !hidden(joinRelativePath(path, name)));
     } catch (error) {
       if (tolerateMissing) {
         return [];
       }
       throw error;
+    }
+  };
+
+  /**
+   * The first path inside a subtree that this view hides, if there is one.
+   *
+   * The walk stops at the first hit and never descends into a hidden directory —
+   * hidden is inherited (PP2), so the directory itself is the answer.
+   *
+   * @param directory - Checkout-relative directory to walk.
+   * @returns The hidden path, or `undefined` when the subtree holds none.
+   */
+  const firstHiddenBelow = async (directory: string): Promise<string | undefined> => {
+    let rows: Array<{ name: string } & FileStat>;
+    try {
+      rows = await baseEntries(directory);
+    } catch {
+      /* ponytail: a path that is not a listable directory has no subtree to
+       * protect, and the base answers the real error when the mutation runs. */
+      return undefined;
+    }
+    for (const { name, type } of rows) {
+      const child = joinRelativePath(directory, name);
+      if (hidden(child)) {
+        return child;
+      }
+      if (type === 'dir') {
+        // oxlint-disable-next-line no-await-in-loop -- The walk exists to stop at the first hidden row; a parallel descent would list the whole subtree.
+        const deeper = await firstHiddenBelow(child);
+        if (deeper !== undefined) {
+          return deeper;
+        }
+      }
+    }
+    return undefined;
+  };
+
+  /**
+   * Refuse a subtree-wide mutation that would reach a path this view hides (G0b-2).
+   *
+   * Hiding a path is not the same as refusing to delete beneath it: a recursive
+   * removal or a directory move reaches paths nobody named, and `classify` was
+   * asked only about the operand (CI1). The ruling splits the two cases the walk
+   * can find. The project's own control plane and reserved records sit at the view
+   * root, so a recursive removal of the root is refused for every consumer,
+   * before anything is deleted. A store nested inside the design — a vendored
+   * dependency's — blocks an agent and goes with its directory for a person, who
+   * must not be left with an undeletable folder.
+   *
+   * @param target - The operand whose subtree the mutation would reach.
+   * @returns Resolves when nothing in the subtree is hidden.
+   */
+  const refuseHiddenSubtree = async (target: string): Promise<void> => {
+    if (!masked && target !== '') {
+      return;
+    }
+    const found = await firstHiddenBelow(target);
+    if (found !== undefined) {
+      refuseHidden(found);
     }
   };
 
@@ -472,6 +597,13 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           }
         }
       }
+    }
+    /* One route for the whole listing whenever no overlay reaches into this
+     * directory: an overlay that touches any child touches the parent too — its
+     * root is then at or below it — so resolving each row again can only find
+     * the project. */
+    if (!overlays.some((overlay) => overlayTouches(overlay.root, target))) {
+      return rows.map((row) => ({ ...row, provenance: projectProvenance(joinRelativePath(target, row.name)) }));
     }
     return Promise.all(
       rows.map(async (row) => {
@@ -526,8 +658,9 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * The mask a copy descends with, asked about project-relative spellings.
    *
    * A copy root can be any directory, so the source is joined back on before
-   * the policy is asked: `src/.git` is an ordinary directory, `.git` under the
-   * project root is the control plane.
+   * the policy is asked: `notes/exports` is an ordinary directory, `exports`
+   * under the project root is a records row. The control plane needs no such
+   * care — it is the control plane at any depth (path policy contract, PP3).
    */
   const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
     ...(base.copyTree === undefined
@@ -536,9 +669,9 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           copyTree: async (source: string, target: string, options?: { admits?: TreeSearchOptions['admits'] }) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
-            /* Every entry a copy writes is a target too: `src/.git` is authored
-             * where it sits, but copied to the project root it would be the
-             * control plane, and a records row is not the agent's to write. */
+            /* Every entry a copy writes is a target too: `notes/exports` is
+             * authored where it sits, but copied to the project root it would be
+             * a records row, which is not the agent's to write. */
             const writableBelow = (relativePath: string): boolean => {
               const { agentAccess } = classify(joinRelativePath(to!, relativePath));
               return agentAccess !== 'hidden' && (!masked || agentAccess === 'read-write');
@@ -563,6 +696,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       : {
           move: async (source: string, target: string): Promise<FileStat> => {
             const [from, to] = await writableTargets([source, target]);
+            await refuseHiddenSubtree(from!);
             return base.move!(from!, to!);
           },
         }),
@@ -570,7 +704,12 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       ? {}
       : {
           bulkMove: async (edits: ReadonlyArray<{ source: string; target: string }>) => {
-            await writableTargets(edits.flatMap(({ source, target }) => [source, target]));
+            const targets = await writableTargets(edits.flatMap(({ source, target }) => [source, target]));
+            /* Every source, before the first edit: a batch that refused halfway
+             * would have moved the ones before it. */
+            await Promise.all(
+              targets.filter((_, index) => index % 2 === 0).map(async (from) => refuseHiddenSubtree(from)),
+            );
             return base.bulkMove!(edits);
           },
         }),
@@ -666,10 +805,20 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       return mutate(path, async (target) => base.unlink(target));
     },
     async rmdir(path, rmdirOptions?: { recursive?: boolean }) {
-      return mutate(path, async (target) => base.rmdir(target, rmdirOptions));
+      return mutate(path, async (target) => {
+        if (rmdirOptions?.recursive === true) {
+          await refuseHiddenSubtree(target);
+        }
+        return base.rmdir(target, rmdirOptions);
+      });
     },
     async rename(from, to) {
-      return mutate(from, async (source) => mutate(to, async (target) => base.rename(source, target)));
+      return mutate(from, async (source) =>
+        mutate(to, async (target) => {
+          await refuseHiddenSubtree(source);
+          return base.rename(source, target);
+        }),
+      );
     },
     ...(base.writeFileChecked === undefined
       ? {}
@@ -696,33 +845,54 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         }),
     ...(base.watch === undefined
       ? {}
-      : { watch: (request: WatchRequest, handler: (event: WatchEvent) => void) => base.watch!(request, handler) }),
+      : {
+          /* A hidden request path is refused like any other hidden read, and the
+           * stream carries only what this view would serve. The base's own
+           * disposer is returned as it is, so a `watch` that answers a promise of
+           * one (`NodeFsProviderClient`) keeps working. */
+          watch: (request: WatchRequest, handler: (event: WatchEvent) => void) =>
+            base.watch!(
+              { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
+              (event: WatchEvent) => {
+                const visible = visibleEvent(event);
+                if (visible !== undefined) {
+                  handler(visible);
+                }
+              },
+            ),
+        }),
     ...(base.readFileStream === undefined
       ? {}
       : {
           readFileStream: (path: string, streamOptions?: FileReadStreamOptions) => {
             /*
-             * One stream for both routes: `readFile` already resolves the route,
-             * the mask and the overlay's declared length, so the requested
-             * window is a slice of what it answers. The mask itself still
-             * refuses synchronously, before any stream exists.
-             *
-             * ponytail: a project file is buffered whole instead of keeping the
-             * base's chunking. No consumer of a composed view streams yet; give
-             * the project route back to `base.readFileStream` when one does.
+             * A project file rides the base's own stream, exactly as `readFile`
+             * hands that route to the base; only an overlay entry is buffered,
+             * because the overlay serves whole bytes against a declared length.
+             * The route is asked once, on the first pull, and the mask still
+             * refuses synchronously — before any stream exists.
              */
             const target = readablePath(canonical(path));
+            let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
             return new ReadableStream<Uint8Array<ArrayBuffer>>({
-              async start(controller) {
+              async pull(controller) {
                 streamOptions?.signal?.throwIfAborted();
-                const bytes = await readFile(target);
+                if (reader === undefined) {
+                  const route = await routeFor(target);
+                  reader =
+                    route.kind === 'overlay'
+                      ? bufferToStream(await readFile(target), streamOptions).getReader()
+                      : base.readFileStream!(target, streamOptions).getReader();
+                }
+                const result = await reader.read();
                 streamOptions?.signal?.throwIfAborted();
-                const from = streamOptions?.position ?? 0;
-                controller.enqueue(
-                  bytes.subarray(from, streamOptions?.length === undefined ? undefined : from + streamOptions.length),
-                );
-                controller.close();
+                if (result.done) {
+                  controller.close();
+                } else {
+                  controller.enqueue(result.value);
+                }
               },
+              cancel: async (reason) => reader?.cancel(reason),
             });
           },
         }),

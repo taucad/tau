@@ -18,7 +18,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createChannelServer, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
 import type { Channel, ChannelServerHandle, MessagePortMainLike, Port, WebSocketLike } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
-import { createFileSystemBridgePort } from '@taucad/fs-bridge';
+import { createFileSystemBridgePort, fileSystemBridgeProtocolVersion } from '@taucad/fs-bridge';
 import { contentDigest, digestAction } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import type { Geometry } from '@taucad/types';
@@ -1026,7 +1026,8 @@ describe('transport conformance — web-socket (C2)', () => {
           v: 1,
           k: 'lh',
           o: 1,
-          d: { v: 1, state: 'ready', watchable },
+          /* The inner hello is the filesystem bridge's, not the RPC frame's. */
+          d: { v: fileSystemBridgeProtocolVersion, state: 'ready', watchable },
         });
       } finally {
         await client.close();

@@ -72,14 +72,30 @@ const mockCreateFileSystemBridge = vi.fn(() => ({
   },
   dispose: vi.fn(),
 }));
-const mockOpenFileSystemBridge = vi.fn(() => ({
+const mockOpenFileSystemBridge = vi.fn((_worker: unknown, _options: unknown) => ({
   port: new MessageChannel().port1,
   dispose: vi.fn(),
 }));
 
+/* Observe the connection the opaque runtime filesystem opens, without changing
+ * it: the thunk is only called when a runtime binds, so the pin calls it. */
+const runtimeBridgeOpens = vi.hoisted(() => [] as Array<() => unknown>);
+
+vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
+  type RuntimeFileSystemModule = typeof import('@taucad/runtime/filesystem');
+  const original = await importOriginal<RuntimeFileSystemModule>();
+  return {
+    ...original,
+    fromFileSystemBridge: (open: Parameters<RuntimeFileSystemModule['fromFileSystemBridge']>[0]) => {
+      runtimeBridgeOpens.push(open);
+      return original.fromFileSystemBridge(open);
+    },
+  };
+});
+
 vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
-  openFileSystemBridge: () => mockOpenFileSystemBridge(),
+  openFileSystemBridge: (worker: unknown, options: unknown) => mockOpenFileSystemBridge(worker, options),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
   createFileSystemBridgeProxy: vi.fn(() => ({
     configureProjectRoots: mockConfigureProjectRoots,
@@ -87,7 +103,11 @@ vi.mock('@taucad/fs-bridge', () => ({
     unmount: mockUnmount,
     disposeStorageRoot: mockInvalidateStandaloneProvider,
     getDirectoryStat: vi.fn(async () => []),
-    readShallowDirectory: vi.fn(async () => []),
+    /* The authority's wire spells its three scoped reads for the scope they
+     * require; a routed read has a root that owns it (W11). */
+    readScopedShallowDirectory: vi.fn(async () => []),
+    readScopedFile: vi.fn(async () => new Uint8Array()),
+    getScopedZippedDirectory: vi.fn(async () => new Blob()),
     readDirectory: vi.fn(async () => []),
     readdirWithStats: vi.fn(async () => []),
     canDelete: mockProxyCanDelete,
@@ -659,6 +679,28 @@ describe('FileManagerProvider — client + workspace facades', () => {
       code: 'EROFS',
     });
     expect(mockProxyMove).not.toHaveBeenCalled();
+  });
+
+  /* Quick Look and the RPC handlers run project code the agent wrote through this
+   * runtime, so it opens the agent's view and not the working copy (CI1, W14). */
+  it('should open the runtime filesystem as the agent consumer', async () => {
+    const { result } = renderProvider();
+
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    const open = runtimeBridgeOpens.at(-1);
+    if (!open) {
+      throw new TypeError('Expected the runtime filesystem to hold a bridge opener.');
+    }
+    mockOpenFileSystemBridge.mockClear();
+    open();
+
+    expect(mockOpenFileSystemBridge).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      expect.objectContaining({ consumer: 'agent' }),
+    );
   });
 
   it('rotates the opaque runtime filesystem when replacement services become authoritative', async () => {

@@ -31,13 +31,18 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { createFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
-import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
+import {
+  createFileSystemBridgeProxy,
+  exposeFileSystem,
+  openFileSystemBridge,
+  workspaceBridgeService,
+} from '@taucad/fs-bridge';
+import type { FileSystemBridgeProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ComposedViewClient, ComposedViewProxy } from '@taucad/fs-client/composed-view-client';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { WorkspaceAuthorityClient } from '@taucad/fs-client/file-system-client';
 import { joinPath } from '@taucad/utils/path';
 
 const projectRoot = '/projects/w12b-change-transport';
@@ -57,6 +62,8 @@ type Harness = {
   readonly announced: string[];
   /** A second rooted connection, standing in for another tab's or the agent's writes. */
   readonly peer: FileSystemBridgeProxy;
+  /** One more connection on the same authority, for the surface a consumer names. */
+  readonly openRooted: (consumer: RootedBridgeConsumer) => Promise<FileSystemBridgeProxy>;
 };
 
 /**
@@ -91,13 +98,13 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
   });
 
   const messageSource = new EventTarget();
-  const exposed = exposeFileSystem(fileService, {
+  const exposed = exposeFileSystem(workspaceBridgeService(fileService), {
     changeEventBus: eventBus,
     messageSource,
     handlerForRoot: (root, context, consumer) => {
       const filesystem = fileService.createRootedFileSystem(root, context);
       const view =
-        consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
+        consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
       return withReadContentOps(view, tauPathPolicy);
     },
     /* The window the file manager actually runs with; a self-echo that only a
@@ -111,8 +118,8 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
     },
   };
 
-  const openRooted = async (): Promise<FileSystemBridgeProxy> => {
-    const connection = openFileSystemBridge(worker, { root, consumer: 'user' });
+  const openRooted = async (consumer: RootedBridgeConsumer = 'user'): Promise<FileSystemBridgeProxy> => {
+    const connection = openFileSystemBridge(worker, { root, consumer });
     const proxy = createFileSystemBridgeProxy(connection);
     await proxy.ready;
     disposers.push(() => {
@@ -133,8 +140,11 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
   channel.onFileWritten({ handler: (event) => announced.push(event.path) });
 
   const client = createComposedViewClient({
-    workspace: workspaceProxy as unknown as FileSystemClient,
+    workspace: workspaceProxy as unknown as WorkspaceAuthorityClient,
     view: viewProxy as unknown as ComposedViewProxy,
+    /* No dependency mount in this fixture; the arm is wired so the composition is
+     * the production one (W11). */
+    dependencies: await openRooted(),
     paths,
   });
 
@@ -148,7 +158,7 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
     eventBus.dispose();
   });
 
-  return { client, announced, peer: await openRooted() };
+  return { client, announced, peer: await openRooted(), openRooted };
 };
 
 describe('the file manager change transport (charter D12, W12b)', () => {
@@ -184,6 +194,19 @@ describe('the file manager change transport (charter D12, W12b)', () => {
  * every one of its own writes as somebody else's (gate G-D, H1).
  */
 describe('the Home file manager change transport (charter D12, gate G-D H1)', () => {
+  it('should mask the Home file manager initial listing', async () => {
+    const { client, openRooted } = await createHarness('/');
+    const workingCopy = await openRooted('working-copy');
+    await workingCopy.writeFile('visible.scad', 'cube(1);');
+    await workingCopy.mkdir('.git', { recursive: true });
+    await workingCopy.writeFile('.git/HEAD', 'ref: refs/heads/main');
+
+    const rows = await client.readDirectory('/');
+
+    expect(rows.map(({ name }) => name)).toContain('visible.scad');
+    expect(rows.map(({ name }) => name)).not.toContain('.git');
+  });
+
   it('should not announce the Home file manager its own write as an external change', async () => {
     const { client, announced, peer } = await createHarness('/');
 
@@ -204,5 +227,25 @@ describe('the Home file manager change transport (charter D12, gate G-D H1)', ()
     await vi.waitFor(() => {
       expect(announced).toStrictEqual(['src/nested.scad']);
     });
+  });
+});
+
+/*
+ * The worker's rooted handler switches on the consumer the connection named
+ * (blueprint W2, invariant CI2): `'working-copy'` is the checkout itself, and
+ * `'user'` and `'agent'` are masked composed views. `.git/**` is control plane
+ * — the one surface that tells them apart.
+ */
+describe('the surface a rooted consumer names (blueprint W2)', () => {
+  it('should serve the working copy unmasked and mask the same path for a user', async () => {
+    const { openRooted } = await createHarness();
+    const workingCopy = await openRooted('working-copy');
+    const user = await openRooted('user');
+
+    await workingCopy.mkdir('.git', { recursive: true });
+    await workingCopy.writeFile('.git/HEAD', 'ref: refs/heads/main');
+
+    await expect(workingCopy.readFile('.git/HEAD', 'utf8')).resolves.toBe('ref: refs/heads/main');
+    await expect(user.readFile('.git/HEAD', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
   });
 });

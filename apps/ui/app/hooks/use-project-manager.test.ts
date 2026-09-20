@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { createElement, useEffect, useState } from 'react';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import type { ProjectDiscoveryEntry, ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
+import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import { defaultPanelState } from '#constants/editor.constants.js';
@@ -174,7 +175,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     workerChangeChannel: mockWorkerChangeChannel,
     /* Content reaches the root that owns the path (W12); the authority-global
      * surface below it is topology only (charter D5). */
-    files: {
+    recordFiles: {
       writeFiles: mockWriteFiles,
       writeFile: async (path: string, bytes: Uint8Array<ArrayBuffer>) =>
         isAttachmentPath(path) ? mockWriteAttachment(path, bytes) : mockWriteFile(path, bytes),
@@ -1638,6 +1639,8 @@ describe('useProjectManager.createProject', () => {
       scope: { backend: 'opfs' },
       files: pendingCreate.files,
       manifest: serializeProjectManifest(fakeProject),
+      /* The attempt hands its bytes over: the bridge transfers them instead of copying the import. */
+      [consumableBytes]: true,
     });
     expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
       projectId: fakeProject.id,

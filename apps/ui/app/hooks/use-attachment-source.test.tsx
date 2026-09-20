@@ -15,7 +15,7 @@ const readFile = vi.fn(async (path: string) => {
 });
 
 // One context value, as the real provider keeps one client for its lifetime.
-const fileManager = { files: { readFile } };
+const fileManager = { recordFiles: { readFile } };
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => fileManager,
 }));

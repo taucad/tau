@@ -18,6 +18,7 @@ import type {
 } from '@taucad/filesystem';
 import { pendingProjectCommitInputSchema } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   ChangeEvent,
   CheckedFileWrite,
@@ -34,8 +35,15 @@ import type { WireValidator } from '@taucad/rpc';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
 
-/** Current filesystem bridge protocol version. @public */
-export const fileSystemBridgeProtocolVersion = 1;
+/**
+ * Current filesystem bridge protocol version.
+ *
+ * Version 2 made `consumer` a required member of a rooted connect envelope
+ * (blueprint W2, EQ2), so a version-1 peer is refused by version rather than
+ * by a confusing `ROOT_UNAVAILABLE`.
+ * @public
+ */
+export const fileSystemBridgeProtocolVersion = 2;
 
 const unavailableCapabilities = null;
 
@@ -82,26 +90,19 @@ export type FileSystemBridgeHello =
       };
     };
 
+/**
+ * What an unrooted (workspace) connection may name: **topology only**.
+ *
+ * Charter deviation H3 is closed here (W11, EQ3). The wire used to carry 21
+ * per-path content calls beside these nine, and the authority-global surface
+ * walks the raw provider — so every one of them was an unmasked read or write of
+ * a project tree, which is exactly what the reserved layout refuses everywhere
+ * else (authority Rule 16). Content is now the rooted surface's without
+ * exception: the members still exist on {@link WorkspaceFileService} as
+ * in-process members, because the mutation pipeline and the rooted views call
+ * them, and only the *wire* lost them.
+ */
 type WorkspaceBridgeMethodName =
-  | 'readFile'
-  | 'writeFile'
-  | 'writeFileChecked'
-  | 'appendFile'
-  | 'writeFiles'
-  | 'mkdir'
-  | 'readdir'
-  | 'stat'
-  | 'lstat'
-  | 'move'
-  | 'canMove'
-  | 'canRename'
-  | 'canCreate'
-  | 'canDelete'
-  | 'bulkMove'
-  | 'unlink'
-  | 'rmdir'
-  | 'exists'
-  | 'getZippedDirectory'
   | 'mount'
   | 'unmount'
   | 'configureProjectRoots'
@@ -109,13 +110,33 @@ type WorkspaceBridgeMethodName =
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
-  | 'readShallowDirectory'
   | 'disposeStorageRoot'
-  | 'readDirectory'
   | 'pollExternalChanges';
 
+/**
+ * The `/files` browser's physical-scope reads, under their own wire names
+ * (charter D5, W11).
+ *
+ * Every path here names a {@link WorkspaceScope} the mount table does not route
+ * — a folder the person granted that no project claims — so no composed view
+ * exists to serve it and the authority reads it through a standalone provider.
+ * The names are the authority's own read members plus `Scoped`, because `scope`
+ * is **required** and a member called `readFile` on this surface would invite
+ * precisely the routed-path read W11 removed: a routed path is content, and
+ * content belongs to the root that owns it (D5, D12).
+ *
+ * @public
+ */
+export type FileSystemBridgeScopedReads = {
+  readScopedFile(path: string, options: { readonly encoding: 'utf8'; readonly scope: WorkspaceScope }): Promise<string>;
+  readScopedFile(path: string, options: { readonly scope: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
+  readScopedShallowDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<FileTreeNode[]>;
+  getScopedZippedDirectory(path: string, options: { readonly scope: WorkspaceScope }): Promise<Blob>;
+};
+
 /** Workspace-wide bridge calls, with signatures derived from the authority service. @public */
-export type FileSystemBridgeWorkspaceService = Pick<WorkspaceFileService, WorkspaceBridgeMethodName>;
+export type FileSystemBridgeWorkspaceService = Pick<WorkspaceFileService, WorkspaceBridgeMethodName> &
+  FileSystemBridgeScopedReads;
 
 /** Rooted/runtime bridge calls, including watch registration that may cross an asynchronous authority boundary. @public */
 export type FileSystemBridgeRuntimeService = FileSystemProvider & {
@@ -152,7 +173,7 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider & {
  *
  * @public
  */
-export type ArchiveOptions = { readonly versionedOnly?: boolean };
+export type ArchiveOptions = ContentExportFilter;
 
 /**
  * Caller-owned cap and shape of a rooted search.
@@ -165,35 +186,62 @@ export type ArchiveOptions = { readonly versionedOnly?: boolean };
 export type SearchOptions = { readonly maxResults?: number; readonly includeDirectories?: boolean };
 
 type FileSystemBridgeReadFile = {
-  (path: string, options: 'utf8' | { readonly encoding: 'utf8'; readonly scope?: WorkspaceScope }): Promise<string>;
-  (path: string, options?: { readonly scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
+  (path: string, options: 'utf8' | { readonly encoding: 'utf8' }): Promise<string>;
+  (path: string, options?: { readonly encoding?: undefined }): Promise<Uint8Array<ArrayBuffer>>;
 };
 
 /**
- * What an **unrooted** (workspace) connection answers: the authority's own
- * surface, with the two overloaded calls re-declared for the wire.
+ * What an **unrooted** (workspace) connection answers: the authority's topology
+ * and the `/files` browser's scoped reads, and nothing that names a routed path.
  *
  * @public
  */
-export type FileSystemBridgeUnrootedCalls = Omit<FileSystemBridgeWorkspaceService, 'readFile' | 'writeFileChecked'> & {
-  readFile: FileSystemBridgeReadFile;
-  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
-};
+export type FileSystemBridgeUnrootedCalls = FileSystemBridgeWorkspaceService;
 
 /**
- * What only a **rooted** connection answers (gate G-A F9, G-B G5).
+ * Per-path content the wire carries **only** on a rooted connection (W11, H3).
+ *
+ * The signatures stay the authority's, because the composed view and the raw
+ * rooted filesystem both answer them with those shapes; what changed is which
+ * connection may name them. `readFile` and `writeFileChecked` are re-declared
+ * because the wire carries neither an encoding-plus-scope bag nor an
+ * `AbortSignal`.
+ */
+type RootedBridgeContentMethodName =
+  | 'writeFile'
+  | 'appendFile'
+  | 'writeFiles'
+  | 'mkdir'
+  | 'readdir'
+  | 'stat'
+  | 'lstat'
+  | 'move'
+  | 'canMove'
+  | 'canRename'
+  | 'canCreate'
+  | 'canDelete'
+  | 'bulkMove'
+  | 'unlink'
+  | 'rmdir'
+  | 'exists';
+
+/**
+ * What only a **rooted** connection answers (gate G-A F9, G-B G5; W11).
  *
  * `provenance` and `readdirWithStats` are the composed view's own and need a
  * consumer; `rename` is the rooted spelling of a move; the read content
  * operations, the index queries and the mutating porcelain are the rooted
- * surface's (charter D2, D3, D4). An unrooted connection serves none of them, so
- * they are not on {@link FileSystemBridgeUnrootedCalls} — before W12(d) every
- * proxy type promised them and the workspace half could not deliver.
+ * surface's (charter D2, D3, D4) — and since W11 so is every per-path call,
+ * masked by the view the connection named. An unrooted connection serves none of
+ * them, so they are not on {@link FileSystemBridgeUnrootedCalls}.
  *
  * @public
  */
 export type FileSystemBridgeRootedCalls = Pick<RootedFileSystem, 'rename'> &
+  Pick<WorkspaceFileService, RootedBridgeContentMethodName> &
   Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
+    readFile: FileSystemBridgeReadFile;
+    writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
     archive(path: string, options?: ArchiveOptions): Promise<Blob>;
     contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
     search(query: string, options?: SearchOptions): Promise<FileStatEntry[]>;
@@ -216,9 +264,11 @@ export type FileSystemBridgeService = FileSystemBridgeUnrootedCalls & FileSystem
 
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
 type FileSystemBridgeCallArgs<Name extends FileSystemBridgeCallName> = Name extends 'readFile'
-  ? [path: string, options?: 'utf8' | { readonly encoding?: 'utf8'; readonly scope?: unknown }]
-  : Parameters<FileSystemBridgeService[Name]>;
-type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name extends 'readFile'
+  ? [path: string, options?: 'utf8' | { readonly encoding?: 'utf8' }]
+  : Name extends 'readScopedFile'
+    ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
+    : Parameters<FileSystemBridgeService[Name]>;
+type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name extends 'readFile' | 'readScopedFile'
   ? string | Uint8Array<ArrayBuffer>
   : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
 
@@ -255,6 +305,7 @@ const providerCapabilitiesSchema: z.ZodType<ProviderCapabilities> = z.looseObjec
   quotaBased: z.boolean(),
   // Version-1 peers sent only the three booleans. Current providers include durability.
   durability: durabilityClassSchema.optional(),
+  coalescesWrites: z.boolean().optional(),
 });
 
 const fileStatSchema: z.ZodType<FileStat> = z.custom<FileStat>((value) => {
@@ -558,7 +609,7 @@ const twoStringArgs = z.tuple([z.string(), z.string()]);
 const voidResult: z.ZodType<void> = z.union([z.undefined(), z.null()]).transform(() => undefined);
 const booleanResult = z.boolean();
 const recursiveOptionsSchema = z.looseObject({ recursive: z.boolean().optional() });
-const scopedOptionsSchema = z.looseObject({ scope: workspaceScopeSchema.optional() });
+const scopedOptionsSchema = z.looseObject({ scope: workspaceScopeSchema });
 /** The rooted read content operations take the caller's own export filter. */
 const archiveOptionsSchema = z.looseObject({ versionedOnly: z.boolean().optional() });
 
@@ -595,10 +646,11 @@ const fileSystemBridgeHelloValidator: z.ZodType<FileSystemBridgeHello> = z.prepr
   ]),
 );
 
-const readFileOptionsSchema = z.union([
-  z.literal('utf8'),
-  z.looseObject({ encoding: z.literal('utf8').optional(), scope: workspaceScopeSchema.optional() }),
-]);
+const readFileOptionsSchema = z.union([z.literal('utf8'), z.looseObject({ encoding: z.literal('utf8').optional() })]);
+const scopedReadFileOptionsSchema = z.looseObject({
+  encoding: z.literal('utf8').optional(),
+  scope: workspaceScopeSchema,
+});
 const writePayloadSchema = z.union([z.string(), bytesSchema]);
 const checkedWriteInputSchema: z.ZodType<Omit<CheckedFileWrite, 'signal'>> = z.object({
   path: z.string(),
@@ -668,11 +720,6 @@ const callSchemas = {
   unlink: { args: oneStringArgument, result: voidResult },
   rmdir: { args: z.tuple([z.string(), recursiveOptionsSchema.optional()]), result: voidResult },
   exists: { args: oneStringArgument, result: booleanResult },
-  /* Scope-only: a routed path is archived on its rooted view (`archive`), never here. */
-  getZippedDirectory: {
-    args: z.tuple([z.string(), z.looseObject({ scope: workspaceScopeSchema })]),
-    result: z.instanceof(Blob),
-  },
   mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
@@ -686,9 +733,15 @@ const callSchemas = {
     args: z.tuple([permanentDeleteInputSchema]),
     result: permanentDeleteResultSchema,
   },
-  readShallowDirectory: { args: z.tuple([z.string(), scopedOptionsSchema.optional()]), result: fileTreeNodesSchema },
+  /* The `/files` browser's three, every one of them scope-required (charter D5,
+   * W11): a routed path is content, and content answers on its own root. */
+  readScopedFile: {
+    args: z.tuple([z.string(), scopedReadFileOptionsSchema]),
+    result: z.union([z.string(), bytesSchema]),
+  },
+  readScopedShallowDirectory: { args: z.tuple([z.string(), scopedOptionsSchema]), result: fileTreeNodesSchema },
+  getScopedZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema]), result: z.instanceof(Blob) },
   disposeStorageRoot: { args: oneStringArgument, result: voidResult },
-  readDirectory: { args: oneStringArgument, result: fileTreeNodesSchema },
   pollExternalChanges: {
     args: z.union([z.tuple([]), z.tuple([z.string().optional()])]),
     result: booleanResult,

@@ -6,6 +6,7 @@ import {
   getEventOrigin,
   isEventGloballyVisible,
   isWorkspaceMutationError,
+  policyAtRoot,
   RootedFileSystemError,
 } from '@taucad/filesystem';
 import { safeDispose } from '@taucad/utils/dispose';
@@ -18,6 +19,7 @@ import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
   MkdirOptions,
+  PathPolicy,
   ProviderCapabilities,
   WatchEvent,
   WatchRequest,
@@ -160,26 +162,47 @@ const relativeToRoot = (root: string, path: string): string | undefined => {
 };
 
 /**
+ * One authority path as a scoped port's own view spells it, or `undefined` when
+ * that view does not serve it.
+ *
+ * A path the view hides is as absent from it as one outside the root, which is
+ * what makes the degradations below the view's own answer rather than a second
+ * policy: hidden is inherited, so a hidden ancestor hides its descendants (PP2).
+ */
+const visibleRelativeToRoot = (
+  root: string,
+  path: string,
+  hidden?: (relativePath: string) => boolean,
+): string | undefined => {
+  const relative = relativeToRoot(root, path);
+  return relative === undefined || hidden?.(relative) === true ? undefined : relative;
+};
+
+/**
  * One change event as a scoped port sees it, or `undefined` when nothing in it
  * touches that port's root.
  *
- * A move with one end outside the root is not a move to that port: it is a
- * disappearance or an arrival, exactly as a rooted view's own watch reports it
- * (`WorkspaceFileService.createRootedFileSystem`).
+ * A move with one end outside the root — or hidden from it — is not a move to
+ * that port: it is a disappearance or an arrival, exactly as a rooted view's own
+ * watch reports it (`WorkspaceFileService.createRootedFileSystem`).
  */
-const scopeEventToRoot = (event: ChangeEvent, root: string): ChangeEvent | undefined => {
+const scopeEventToRoot = (
+  event: ChangeEvent,
+  root: string,
+  hidden?: (relativePath: string) => boolean,
+): ChangeEvent | undefined => {
   if (event.type === 'backendChanged') {
     return event;
   }
   if ('path' in event) {
-    const path = relativeToRoot(root, event.path);
+    const path = visibleRelativeToRoot(root, event.path, hidden);
     return path === undefined ? undefined : { ...event, path };
   }
   const directory = event.type === 'directoryRenamed' || event.type === 'directoryCopied';
   const [fromPath, toPath] =
     'oldPath' in event ? ([event.oldPath, event.newPath] as const) : ([event.sourcePath, event.targetPath] as const);
-  const from = relativeToRoot(root, fromPath);
-  const to = relativeToRoot(root, toPath);
+  const from = visibleRelativeToRoot(root, fromPath, hidden);
+  const to = visibleRelativeToRoot(root, toPath, hidden);
   if (from !== undefined && to !== undefined) {
     return 'oldPath' in event
       ? { ...event, oldPath: from, newPath: to }
@@ -214,6 +237,43 @@ const wrapFileSystemBridgePort = (port: MessagePortLike, label: string): Port<un
   return wrapped;
 };
 
+/**
+ * Marks a write payload whose bytes the caller hands over.
+ *
+ * A write is copied before it crosses the port, because the caller keeps its own
+ * buffers and a transfer would detach them. An import or a pending commit does
+ * not keep them: mark its argument and the bridge transfers the caller's own
+ * bytes instead of copying every one of them. Nothing else changes — the mark is
+ * a symbol, so it reaches neither the wire nor the service.
+ *
+ * Set it only where the caller never reads those bytes again.
+ *
+ * @public
+ *
+ * @example <caption>Handing an imported tree to the worker</caption>
+ * ```typescript
+ * import { consumableBytes } from '@taucad/fs-bridge';
+ * import type { FileSystemBridgeRootedProxy } from '@taucad/fs-bridge';
+ *
+ * export async function exampleImport(
+ *   client: FileSystemBridgeRootedProxy,
+ *   imported: Record<string, { content: Uint8Array<ArrayBuffer> }>,
+ * ): Promise<void> {
+ *   await client.writeFiles(Object.assign(imported, { [consumableBytes]: true }));
+ * }
+ * ```
+ */
+export const consumableBytes: unique symbol = Symbol('tau.fs-bridge.consumableBytes');
+
+/** Whether any argument carries the {@link consumableBytes} mark. */
+const handsOverBytes = (args: readonly unknown[]): boolean =>
+  args.some(
+    (argument) =>
+      argument !== null &&
+      typeof argument === 'object' &&
+      (argument as Record<symbol, unknown>)[consumableBytes] === true,
+  );
+
 const cloneWritePayloadForTransfer = (value: unknown): unknown => {
   if (value instanceof Uint8Array) {
     return new Uint8Array(value);
@@ -243,6 +303,11 @@ const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
 };
 
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
+  if (handsOverBytes(args)) {
+    /* The caller's own buffers ride the transfer list `wrapAsTransferables`
+     * builds from these arguments, and are detached by the postMessage. */
+    return args;
+  }
   if (method === 'writeFileChecked' && args[0] !== null && typeof args[0] === 'object') {
     const input = args[0] as CheckedFileWrite;
     return [
@@ -606,23 +671,29 @@ export type CoalescerFactory = (
 ) => ChangeEventCoalescer;
 
 /**
+ * Which surface a rooted bridge connection asks for, named on every rooted
+ * connect envelope (invariant CI2).
+ *
+ * `'user'` and `'agent'` are masked by `composeView`; `'working-copy'` is the
+ * checkout's raw rooted filesystem, which the host's own capture, apply and
+ * language planes read because they must not see the overlays composed above
+ * it (architecture V6). An absent or unknown value is refused — no code path
+ * treats absence as a value.
+ *
+ * `'agent'` means the agent's tools **and any executor of the code the agent
+ * writes**: a kernel runtime, the GeoSpec runner and Quick Look's runtime client
+ * all name it, so agent-authored project code can neither read the control plane
+ * nor rewrite the records Tau keeps itself (invariant CI1, W14).
+ * @public
+ */
+export type RootedBridgeConsumer = ComposedViewConsumer | 'working-copy';
+
+/**
  * Options for configuring the filesystem bridge message type.
  * @public
  */
 export type FileSystemBridgeOptions = {
   messageType?: string;
-  /**
-   * Project mount to expose as `/` for this connection. The root is consumed
-   * by the filesystem server when the connection is accepted; it is never
-   * forwarded to runtime calls.
-   */
-  root?: string;
-  /**
-   * Compose the root as this consumer's view instead of handing back the raw
-   * working copy. Omit it for the host's own capture, apply and language
-   * planes, which read the checkout itself.
-   */
-  consumer?: ComposedViewConsumer;
   /** Coalescing window for UI-bound fileChanged events (default: 500). Milliseconds. */
   uiCoalescingWindow?: number;
   /**
@@ -631,7 +702,23 @@ export type FileSystemBridgeOptions = {
    * When omitted, events pass through without batching.
    */
   createCoalescer?: CoalescerFactory;
-};
+} & (
+  | {
+      /** The workspace surface: no root, and therefore no view to name. */
+      root?: undefined;
+      consumer?: undefined;
+    }
+  | {
+      /**
+       * Project mount to expose as `/` for this connection. The root is consumed
+       * by the filesystem server when the connection is accepted; it is never
+       * forwarded to runtime calls.
+       */
+      root: string;
+      /** Which surface this rooted connection reads; required beside a root (CI2). */
+      consumer: RootedBridgeConsumer;
+    }
+);
 
 /**
  * Minimal event bus interface for broadcasting file change events
@@ -659,12 +746,8 @@ export type ExposeFileSystemHandle = {
 export type RootedFileSystemHandlerFactory = (
   root: string,
   context: WorkspaceMutationContext,
-  /**
-   * Which composed view the connection asked for, or `undefined` for the
-   * checkout's raw working copy — the host's own capture and apply plane,
-   * which must not see composed overlays (architecture V6).
-   */
-  consumer: ComposedViewConsumer | undefined,
+  /** The surface the connection named; an unrecognised one never reaches here. */
+  consumer: RootedBridgeConsumer,
 ) => FileSystemBridgeRuntimeService | undefined;
 
 type FileSystemBridgeConnectEnvelope = {
@@ -672,7 +755,6 @@ type FileSystemBridgeConnectEnvelope = {
   readonly type: string;
   readonly port: MessagePort;
   readonly root?: unknown;
-  readonly consumer?: unknown;
 };
 
 const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<FileSystemBridgeConnectEnvelope> =>
@@ -681,7 +763,18 @@ const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<F
     type: z.literal(messageType),
     port: z.instanceof(MessagePort),
     root: z.unknown().optional(),
-    consumer: z.unknown().optional(),
+  });
+
+/**
+ * The rooted half of a connect envelope: a root always names the surface it
+ * serves. Parsed separately from the envelope above so an envelope that names
+ * no recognised consumer is answered with a typed `ROOT_UNAVAILABLE` (CI2)
+ * instead of failing validation and dropping the port without a word.
+ */
+const rootedConnectSchema: z.ZodType<{ readonly root: string; readonly consumer: RootedBridgeConsumer }> =
+  z.looseObject({
+    root: z.string(),
+    consumer: z.enum(['user', 'agent', 'working-copy']),
   });
 
 const fileSystemBridgePeerEnvelopeSchema = (messageType: string) =>
@@ -724,8 +817,9 @@ type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
   handlerForRoot?: (
     root: string,
     context: WorkspaceMutationContext,
-    consumer: ComposedViewConsumer | undefined,
+    consumer: RootedBridgeConsumer,
   ) => StringKeyedObject | undefined;
+  policy?: PathPolicy;
   changeEventBus?: BridgeChangeEventBus;
   /* Inline `Pick`, no named alias.
    * ponytail: one more port-like type declaration is exactly the failure mode
@@ -743,29 +837,75 @@ function exposeFileSystemHandlers(
   const activePorts = new Set<MessagePort>();
   const serverHandles = new Map<MessagePort, BridgeServerHandle>();
   const portIds = new Map<MessagePort, string>();
-  /** Every scoped port and the authority root it is confined to. */
-  const scopedPorts = new Map<MessagePort, string>();
+  /** Every served scoped port, with the authority root and the surface it asked for. */
+  const scopedPorts = new Map<MessagePort, { readonly root: string; readonly consumer: RootedBridgeConsumer }>();
+
+  const policy = options?.policy;
+  /**
+   * Whether a root-relative path is hidden, answered once per spelling per
+   * dispatch rather than once per handle: delivery is a hot path (event-fanout
+   * policy) and ports on one root all ask the same question.
+   */
+  const hiddenByPath = new Map<string, boolean>();
+  const policyByRoot = new Map<string, PathPolicy>();
+  const hidden =
+    policy === undefined
+      ? undefined
+      : (root: string, relativePath: string): boolean => {
+          const key = `${root}\0${relativePath}`;
+          const memoized = hiddenByPath.get(key);
+          if (memoized !== undefined) {
+            return memoized;
+          }
+          const rootPolicy = policyByRoot.get(root) ?? policyAtRoot(policy, root);
+          policyByRoot.set(root, rootPolicy);
+          const answer = rootPolicy.classify(relativePath).agentAccess === 'hidden';
+          hiddenByPath.set(key, answer);
+          return answer;
+        };
 
   /*
    * Events ride the view (architecture L4, A11). A scoped port is one consumer
    * of one checkout, so it receives exactly the events whose authority path
-   * lies inside its root, spelled in its own root-relative namespace — and
-   * never its own writes, which it already knows about.
+   * lies inside its root *and* inside the surface it asked for, spelled in its
+   * own root-relative namespace — and never its own writes, which it already
+   * knows about.
    */
+  /**
+   * One scoped event per root and mask kind, for the length of one event's
+   * dispatch: a scoped port's spelling is a function of the event, its root and
+   * whether the mask applies, so K ports on one root derive it once between them
+   * instead of K times (event-fanout policy).
+   */
+  const scopedByRoot = new Map<string, ChangeEvent | undefined>();
   const deliverToHandles = (events: ChangeEvent[]): void => {
     for (const event of events) {
       const originClientId = getEventOrigin(event);
+      hiddenByPath.clear();
+      scopedByRoot.clear();
       for (const [recipientPort, handle] of serverHandles) {
         const recipientPortId = portIds.get(recipientPort);
         if (originClientId !== undefined && recipientPortId !== undefined && originClientId === recipientPortId) {
           continue;
         }
-        const root = scopedPorts.get(recipientPort);
-        if (root === undefined) {
+        const scope = scopedPorts.get(recipientPort);
+        if (scope === undefined) {
           handle.emit('fileChanged', event);
           continue;
         }
-        const scoped = scopeEventToRoot(event, root);
+        const masked = scope.consumer !== 'working-copy';
+        const memoKey = `${masked ? 'masked' : 'whole'}\0${scope.root}`;
+        if (!scopedByRoot.has(memoKey)) {
+          scopedByRoot.set(
+            memoKey,
+            scopeEventToRoot(
+              event,
+              scope.root,
+              masked && hidden !== undefined ? (relativePath) => hidden(scope.root, relativePath) : undefined,
+            ),
+          );
+        }
+        const scoped = scopedByRoot.get(memoKey);
         if (scoped !== undefined) {
           handle.emit('fileChanged', scoped);
         }
@@ -802,6 +942,42 @@ function exposeFileSystemHandlers(
     }
   });
 
+  /**
+   * What one rooted connection is served, and the delivery scope it earns.
+   *
+   * A refused connection earns none: it is answered `ROOT_UNAVAILABLE` and never
+   * joins `scopedPorts`, so it is not a recipient of the change stream for the
+   * root it was denied.
+   */
+  const serveRootedPort = (
+    port: MessagePort,
+    envelope: unknown,
+    context: WorkspaceMutationContext,
+  ): { readonly portHandlers: StringKeyedObject; readonly unavailableError?: RootedFileSystemError } => {
+    /* Fail closed (CI2): only an envelope that names its consumer reaches the
+     * handler, so no surface is served to a connection that did not ask for it
+     * by name. Absent and unknown are the same refusal. */
+    const rooted = rootedConnectSchema.safeParse(envelope);
+    try {
+      const rootedHandlers = rooted.success
+        ? options?.handlerForRoot?.(rooted.data.root, context, rooted.data.consumer)
+        : undefined;
+      if (!rooted.success || rootedHandlers === undefined) {
+        const unavailableError = new RootedFileSystemError('ROOT_UNAVAILABLE');
+        return { portHandlers: createUnavailableHandlers(unavailableError), unavailableError };
+      }
+      scopedPorts.set(port, { root: rooted.data.root, consumer: rooted.data.consumer });
+      return { portHandlers: serializeRootedResults(rootedHandlers) };
+    } catch (error) {
+      /* The refusal the hello states is the refusal the caller gets: a
+       * `VirtualPathError` from a non-canonical root used to reach the client as
+       * itself while the hello said `ROOT_UNAVAILABLE`. */
+      const unavailableError =
+        error instanceof RootedFileSystemError ? error : new RootedFileSystemError('ROOT_UNAVAILABLE');
+      return { portHandlers: createUnavailableHandlers(unavailableError), unavailableError };
+    }
+  };
+
   const handler = (event: MessageEvent<unknown>): void => {
     const parsedEnvelope = connectEnvelopeSchema.safeParse(event.data);
     if (!parsedEnvelope.success) {
@@ -810,6 +986,7 @@ function exposeFileSystemHandlers(
         const { port, v } = peerEnvelope.data;
         const error = new FileSystemBridgeProtocolVersionError(v);
         port.postMessage({
+          // The RPC frame version, not the filesystem bridge protocol version.
           v: 1,
           k: 'lh',
           o: 0,
@@ -827,18 +1004,20 @@ function exposeFileSystemHandlers(
     portIds.set(port, portId);
 
     let disconnected = false;
+    /* Held here rather than read back from `serverHandles`, which a refused
+     * connection is deliberately absent from. */
+    let serverHandle: BridgeServerHandle | undefined = undefined;
     const disconnectPort = (): void => {
       if (disconnected) {
         return;
       }
       disconnected = true;
-      const handle = serverHandles.get(port);
       port.removeEventListener('close', disconnectPort);
       activePorts.delete(port);
       portIds.delete(port);
       scopedPorts.delete(port);
       serverHandles.delete(port);
-      safeDispose(() => handle?.dispose());
+      safeDispose(() => serverHandle?.dispose());
       safeDispose(() => {
         port.close();
       });
@@ -847,33 +1026,12 @@ function exposeFileSystemHandlers(
 
     const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
     const requestedRoot = typeof parsedEnvelope.data.root === 'string' ? parsedEnvelope.data.root : undefined;
-    const requestedConsumer =
-      parsedEnvelope.data.consumer === 'agent' || parsedEnvelope.data.consumer === 'user'
-        ? parsedEnvelope.data.consumer
-        : undefined;
     const mutationContext = { originClientId: portId };
-    let portHandlers: StringKeyedObject;
-    let handlersAvailable = true;
-    let unavailableError: RootedFileSystemError | undefined;
-    if (requestedRoot === undefined) {
-      portHandlers = bindMutationContextForPort(handlers, mutationContext);
-    } else {
-      scopedPorts.set(port, requestedRoot);
-      try {
-        const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext, requestedConsumer);
-        handlersAvailable = rootedHandlers !== undefined;
-        unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
-        portHandlers =
-          rootedHandlers === undefined
-            ? createUnavailableHandlers(unavailableError!)
-            : serializeRootedResults(rootedHandlers);
-      } catch (error) {
-        handlersAvailable = false;
-        unavailableError =
-          error instanceof RootedFileSystemError ? error : new RootedFileSystemError('ROOT_UNAVAILABLE');
-        portHandlers = createUnavailableHandlers(error);
-      }
-    }
+    const { portHandlers, unavailableError } =
+      requestedRoot === undefined
+        ? { portHandlers: bindMutationContextForPort(handlers, mutationContext), unavailableError: undefined }
+        : serveRootedPort(port, event.data, mutationContext);
+    const handlersAvailable = unavailableError === undefined;
 
     const handlerRecord = portHandlers as { capabilities?: ProviderCapabilities; watch?: unknown };
 
@@ -899,11 +1057,11 @@ function exposeFileSystemHandlers(
               state: 'unavailable',
               error: {
                 code: 'ROOT_UNAVAILABLE',
-                message: unavailableError?.message ?? 'The requested filesystem root is unavailable.',
+                message: unavailableError.message,
               },
             });
 
-    const serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent, FileSystemBridgeHello>(
+    serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent, FileSystemBridgeHello>(
       portHandlers,
       wrappedPort,
       {
@@ -914,7 +1072,12 @@ function exposeFileSystemHandlers(
         },
       },
     );
-    serverHandles.set(port, serverHandle);
+    /* A refused connection gets its `unavailable` hello and its throwing
+     * handlers, and nothing else: a port answered `ROOT_UNAVAILABLE` is not a
+     * recipient of the change stream for the root it was denied. */
+    if (handlersAvailable) {
+      serverHandles.set(port, serverHandle);
+    }
 
     stopAndReplayMessages();
   };
@@ -955,11 +1118,78 @@ function exposeFileSystemHandlers(
   };
 }
 
+/**
+ * Which authority member answers each call the authority's wire carries (W11).
+ *
+ * The three scoped reads are the `/files` browser's (charter D5) and are the
+ * only content on it; they are spelled `…Scoped…` so the routed-path read this
+ * package removed has no name here to creep back into.
+ */
+const workspaceWireMembers = {
+  mount: 'mount',
+  unmount: 'unmount',
+  configureProjectRoots: 'configureProjectRoots',
+  listProjectManifests: 'listProjectManifests',
+  commitPendingProjectDirectory: 'commitPendingProjectDirectory',
+  adoptProjectDirectory: 'adoptProjectDirectory',
+  permanentlyDeleteProjectDirectory: 'permanentlyDeleteProjectDirectory',
+  disposeStorageRoot: 'disposeStorageRoot',
+  pollExternalChanges: 'pollExternalChanges',
+  watch: 'watch',
+  readScopedFile: 'readFile',
+  readScopedShallowDirectory: 'readShallowDirectory',
+  getScopedZippedDirectory: 'getZippedDirectory',
+} as const satisfies Readonly<Record<string, keyof WorkspaceFileService>>;
+
+/**
+ * The authority as its own wire serves it: topology, `watch`, and the `/files`
+ * browser's scoped reads (charter deviation H3 closed, W11/EQ3).
+ *
+ * A host passes this, never the service, so an unrooted connection has no
+ * per-path content **method** — not merely no type for one. The authority keeps
+ * every removed member as an in-process member, because the mutation pipeline
+ * and the rooted views call them; what a caller off the authority's own isolate
+ * cannot do any more is read or write a project tree without naming the root and
+ * the consumer that owns it (CI1, CI2).
+ *
+ * @param service - The authority this bridge fronts.
+ * @returns Its wire surface, one forwarding member per call the wire carries.
+ * @public
+ *
+ * @example <caption>Expose the authority from a worker</caption>
+ * ```typescript
+ * import type { WorkspaceFileService } from '@taucad/filesystem';
+ * import { exposeFileSystem, workspaceBridgeService } from '@taucad/fs-bridge';
+ *
+ * export function exampleExpose(service: WorkspaceFileService): void {
+ *   exposeFileSystem(workspaceBridgeService(service));
+ * }
+ * ```
+ */
+export function workspaceBridgeService(service: WorkspaceFileService): FileSystemBridgeWorkspaceService {
+  const source = service as unknown as Record<string, (...args: readonly unknown[]) => unknown>;
+  const served: Record<string, (...args: readonly unknown[]) => unknown> = {};
+  for (const [wireName, member] of Object.entries(workspaceWireMembers)) {
+    served[wireName] = (...args: readonly unknown[]): unknown => source[member]!(...args);
+  }
+  return served as unknown as FileSystemBridgeWorkspaceService;
+}
+
 /** Expose the complete workspace filesystem service over validated bridge connections. @public */
 export function exposeFileSystem(
   handlers: FileSystemBridgeWorkspaceService | FileSystemBridgeRuntimeService,
   options?: FileSystemBridgeOptions & {
     handlerForRoot?: RootedFileSystemHandlerFactory;
+    /**
+     * The reserved layout this server enforces on the change stream (D6).
+     *
+     * A masked rooted connection (`'user'`, `'agent'`) is never told about a path
+     * its own view hides, so an agent cannot learn the names or the timing of
+     * control-plane writes it may not read (CI1). Any host that serves a masked
+     * consumer passes its policy here; a `'working-copy'` connection receives the
+     * stream whole either way.
+     */
+    policy?: PathPolicy;
     changeEventBus?: BridgeChangeEventBus;
     /**
      * Where to listen for connect envelopes. Defaults to the worker global,
@@ -1050,8 +1280,7 @@ export function openFileSystemBridge(
     v: fileSystemBridgeProtocolVersion,
     type: messageType,
     port: channel.port1,
-    ...(options?.root === undefined ? {} : { root: options.root }),
-    ...(options?.consumer === undefined ? {} : { consumer: options.consumer }),
+    ...(options?.root === undefined ? {} : { root: options.root, consumer: options.consumer }),
   };
   worker.postMessage(envelope, [channel.port1]);
   const rawPort = asFileSystemBridgePort(channel.port2);

@@ -3,7 +3,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 
 /** Resolve the canonical local project thumbnail through the File Manager. */
 export function useProjectThumbnail(projectId: string | undefined): string | undefined {
-  const { files, workerChangeChannel } = useFileManager();
+  const { recordFiles, workerChangeChannel } = useFileManager();
   const [thumbnail, setThumbnail] = useState<{ projectId: string; url: string }>();
 
   useEffect(() => {
@@ -17,7 +17,7 @@ export function useProjectThumbnail(projectId: string | undefined): string | und
 
     const resolve = async (): Promise<void> => {
       try {
-        const bytes = await files.readFile(path);
+        const bytes = await recordFiles.readFile(path);
         if (cancelled) {
           return;
         }
@@ -56,7 +56,7 @@ export function useProjectThumbnail(projectId: string | undefined): string | und
         URL.revokeObjectURL(currentUrl);
       }
     };
-  }, [files, projectId, workerChangeChannel]);
+  }, [recordFiles, projectId, workerChangeChannel]);
 
   return thumbnail !== undefined && thumbnail.projectId === projectId ? thumbnail.url : undefined;
 }

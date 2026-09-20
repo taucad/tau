@@ -10,6 +10,7 @@ import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
@@ -141,9 +142,15 @@ describe('createServicesHost — concern ports', () => {
     host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [port]));
 
     expect(serve).toHaveBeenCalledTimes(1);
-    const [, options] = serve.mock.calls[0] as unknown as [unknown, { allowRoot: (root: string) => boolean }];
+    const [, options] = serve.mock.calls[0] as unknown as [
+      unknown,
+      { allowRoot: (root: string) => boolean; policy: unknown },
+    ];
     expect(options.allowRoot(`${homeRoot}/widget`)).toBe(true);
     expect(options.allowRoot('/etc')).toBe(false);
+    /* Every provider this host opens enforces the reserved layout, or a symlink
+     * inside a checkout resolves onto the control plane (G0-6). */
+    expect(options.policy).toBe(tauPathPolicy);
     expect(port.start).toHaveBeenCalled();
   });
 
@@ -153,10 +160,14 @@ describe('createServicesHost — concern ports', () => {
     const serveRuntimeFileSystem = vi.fn(
       (_handlers: Parameters<ServeRuntimeFileSystem>[0], _port: Parameters<ServeRuntimeFileSystem>[1]) => bridge,
     );
-    const { host } = hostHarness({
+    const { host, serve } = hostHarness({
       authorityDirectory: '/tmp/tau-desktop-authority-fixture',
       serveRuntimeFileSystem: serveRuntimeFileSystem as ServicesHostOptions['serveRuntimeFileSystem'],
     });
+    /* The internal authority every rooted client here derives from enforces the
+     * reserved layout too (G0-6). */
+    const [, internalOptions] = serve.mock.calls[0] as unknown as [unknown, { policy: unknown }];
+    expect(internalOptions.policy).toBe(tauPathPolicy);
     host.handleMessage(frame({ type: 'allowRoots', roots: [homeRoot] }));
     const port = stubPort();
 
@@ -167,11 +178,56 @@ describe('createServicesHost — concern ports', () => {
     );
 
     expect(serveRuntimeFileSystem).toHaveBeenCalledOnce();
-    expect(serveRuntimeFileSystem.mock.calls[0]?.[0]).toMatchObject({ root: `${homeRoot}/widget` });
+    /* The kernel utility executes project code the agent wrote, so what it is
+     * served is the agent's view over that exact rooted authority client, not the
+     * client itself — the row below pins what the view refuses (W14). */
+    expect(serveRuntimeFileSystem.mock.calls[0]?.[0]).toMatchObject({ id: 'composed-view:agent' });
     expect(serveRuntimeFileSystem.mock.calls[0]?.[1]).toBe(port);
     await host.quiesce();
     expect(bridge.dispose).toHaveBeenCalledOnce();
     host.dispose();
+  });
+
+  it('should refuse the control plane through the runtime filesystem it serves', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-runtime-mask-'));
+    const root = join(sandbox, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    await Promise.all([mkdir(join(root, '.git'), { recursive: true }), mkdir(authorityDirectory)]);
+    await Promise.all([
+      writeFile(join(root, '.git', 'config'), '[remote "origin"]\n'),
+      writeFile(join(root, 'main.ts'), 'export const main = 1;\n'),
+    ]);
+    type ServeRuntimeFileSystem = NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>;
+    let handlers: Parameters<ServeRuntimeFileSystem>[0] | undefined;
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      serveRuntimeFileSystem: (served) => {
+        handlers = served;
+        return { emit: vi.fn(), dispose: vi.fn() };
+      },
+    });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: root } }, [stubPort()]),
+      );
+      if (handlers === undefined) {
+        throw new Error('The runtime filesystem concern was not served.');
+      }
+
+      await expect(handlers.readFile('.git/config', 'utf8')).rejects.toMatchObject({
+        code: 'EPERM',
+        reason: 'WORKSPACE_MASKED_PATH',
+      });
+      /* The positive control: the same view still reads the sources the kernel
+       * renders, from exactly the root main named. */
+      await expect(handlers.readFile('main.ts', 'utf8')).resolves.toBe('export const main = 1;\n');
+    } finally {
+      host.dispose();
+      await rm(sandbox, { recursive: true, force: true });
+    }
   });
 
   it('should serve the runtime filesystem when main names a trusted root by its physical path', async () => {

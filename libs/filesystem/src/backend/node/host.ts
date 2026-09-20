@@ -13,6 +13,7 @@ import { nodeFsProtocolVersion, nodeFsRequestSchema, parseNodeFsFrame } from '#b
 import { NodeFsProvider, writeNodeFileCheckedWithAuthority } from '#backend/node/provider.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
+import type { PathPolicy } from '#types.js';
 import { ResourceQueue } from '#resource-queue.js';
 import type { ResourceQueueClaim } from '#resource-queue.js';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
@@ -268,6 +269,12 @@ export type NodeFsHostOptions = {
   /** Shared host-lifetime authority. Checked writes fail closed when omitted. */
   authority?: NodeFsAuthorityHost;
   /**
+   * The reserved layout an ordinary name may not resolve into, forwarded to
+   * every provider this host opens (G0-6). A host that serves a checkout which
+   * can hold symlinks passes its policy; see {@link NodeFsProvider}.
+   */
+  policy?: PathPolicy;
+  /**
    * Admission decision for a requested root. Required: it is the only thing
    * standing between a renderer-supplied string and the whole host filesystem.
    */
@@ -344,6 +351,9 @@ const runOperation = async (
     case 'readdir': {
       return provider.readdir(request.path);
     }
+    case 'readdirWithStats': {
+      return provider.readdirWithStats(request.path);
+    }
     case 'stat': {
       return provider.stat(request.path);
     }
@@ -419,7 +429,7 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
     if (existing) {
       return existing;
     }
-    const provider = new NodeFsProvider(root);
+    const provider = new NodeFsProvider(root, { policy: options.policy });
     providers.set(root, provider);
     return provider;
   };

@@ -89,8 +89,18 @@ Trusted host code selects an authority route once and supplies a connection fact
 import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileManagerWorker = new Worker(new URL('./file-manager.worker.ts', import.meta.url), { type: 'module' });
-const fileSystem = fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' }));
+const fileSystem = fromFileSystemBridge(() =>
+  openFileSystemBridge(fileManagerWorker, { root: '/projects/widget', consumer: 'working-copy' }),
+);
 ```
+
+A `root` always names the surface it serves. There is no default: an absent or unknown `consumer` is refused, and the connection answers `ROOT_UNAVAILABLE`.
+
+| `consumer`       | Surface                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| `'working-copy'` | The checkout's own files, with no overlays composed above them. What the runtime reads and writes. |
+| `'user'`         | What a person sees in the file tree: host-written records included, the control plane hidden.      |
+| `'agent'`        | What an agent sees: records readable but not writable, the control plane hidden.                   |
 
 Inside runtime, `main.ts`, `.tau/cache/**`, and `node_modules/**` all belong to that rooted capability. The runtime receives no project id or authority-global root and performs no authorization checks; filesystem reachability is the authority boundary. `fromFsLike(fs)` follows the same local-path contract but assumes `fs` is already confined. Use `fromNodeFs(hostRoot)` for raw Node.js access so the adapter can enforce lexical and symlink containment.
 

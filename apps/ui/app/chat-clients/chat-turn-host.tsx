@@ -137,7 +137,17 @@ export function ChatTurnHost(): ReactNode {
       if (execution.kind !== 'tau') {
         return undefined;
       }
-      if (!workspaceAuthority || fileManagerRef === undefined || syncProjectRoots === undefined) {
+      /* `ready` is part of the guard, not an extra check: a registration whose
+       * `createClient` cannot prepare is not a registration. Composing one
+       * before the file manager's worker existed is what broke open-time
+       * discovery — `prepare` threw inside the resume below, the AI SDK
+       * swallowed it into `onError`, and the chat's log was never attached. */
+      if (
+        !workspaceAuthority ||
+        !workspaceAuthority.ready ||
+        fileManagerRef === undefined ||
+        syncProjectRoots === undefined
+      ) {
         return undefined;
       }
       /* I7: what the host knows about this chat's run, the page learns at chat
@@ -204,13 +214,19 @@ export function ChatTurnHost(): ReactNode {
         markRunId: async (runId) => workspaceAuthority.markRunId(activeChatId, runId),
         createClient: async () => {
           await syncProjectRoots();
+          /* Never `prepare`: every turn reaches here with `admitWorkspace`'s
+           * claim already taken, so minting one would only ever happen for the
+           * open-time attach — which drives nothing and must lease nothing.
+           * When it did, the chat's abandoned run settled under the id that
+           * attach minted and the durable log refused it (I7). */
           const [prepared, storage, capabilities] = await Promise.all([
-            // `admitWorkspace` already prepared this chat's claim in the picked
-            // mode; this reuses it rather than choosing again.
-            workspaceAuthority.prepare(activeChatId),
+            workspaceAuthority.attachment(activeChatId),
             resolveProjectStorage(),
             readRootedBridgeCapabilities(openProjectRootBridge),
           ]);
+          if (prepared === undefined) {
+            throw new Error('This chat has no checkout to run or replay a turn on.');
+          }
           if (!capabilities.writable || !capabilities.durability) {
             throw new Error('The active project filesystem is not writable or did not declare durability.');
           }
@@ -253,13 +269,18 @@ export function ChatTurnHost(): ReactNode {
   }, [composeRegistration]);
 
   const placement = placementOf(agent.execution);
+  /* The binding actor calls `compose` when it binds and never again on its own.
+   * The revision root connects after this component's first render, so the
+   * first composition would be the one that cannot prepare — re-publishing on
+   * the flip is what makes the actor compose a working registration. */
+  const authorityReady = workspaceAuthority?.ready ?? false;
   useEffect(
     () =>
       publishChatHostServices(activeChatId, {
         placement,
         compose: () => composeRef.current(boundExecutionRef.current),
       }),
-    [activeChatId, placement],
+    [activeChatId, authorityReady, placement],
   );
   /* The chat session actor holds the binding; it re-invokes it when — and only
    * when — the placement it was given moves. */

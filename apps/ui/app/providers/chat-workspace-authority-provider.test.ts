@@ -251,6 +251,40 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     expect(prepared.execution).not.toHaveProperty('mode');
   });
 
+  /* I7. Open-time discovery has to build a host client before it knows what the
+     chat's log holds. Building it through `prepare` placed a turn at every chat
+     open, and the run id that placement minted is one the host never admitted:
+     the abandoned run's settlement named it and the durable log refused it
+     (*"was never admitted in chat …"*), so `RUN_ABANDONED` never became a
+     `turn.failed` and the saved-turn card had nothing behind it. */
+  it('should compose an attach from the chat checkout without placing a turn', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const attached = await act(async () => result.current.attachment('chat_1'));
+
+    expect(revisionRoot.admitted).toEqual([]);
+    expect(attached?.runId).toBeUndefined();
+    expect(attached?.execution).toEqual({
+      hostId: expect.any(String) as unknown as string,
+      workspaceId: 'checkout-durable',
+    });
+    expect(result.current.get('chat_1')).toBeUndefined();
+  });
+
+  it('should hand an attach the claim its chat already holds', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const prepared = await act(async () => result.current.prepare('chat_1', { turnId: 'turn_1' }));
+    const attached = await act(async () => result.current.attachment('chat_1'));
+
+    expect(attached).toBe(prepared);
+    expect(revisionRoot.admitted).toHaveLength(1);
+  });
+
   /* AC14's second clause: *Ask chat to resolve* is only a real control if the
      turn it seeds can see the conflict. The page binds it to the chat before
      the first turn is placed, and it rides the placement — the turn lands on

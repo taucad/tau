@@ -38,8 +38,12 @@ const workspaceHarness = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   admissionGate: undefined as Promise<void> | undefined,
   prepare: vi.fn(),
+  /** The lease-less view `createClient` composes an attach from. */
+  attachment: vi.fn(),
   /** Whether the chat renders under a `ChatWorkspaceAuthorityProvider`. */
   mounted: true,
+  /** Whether that provider's revision root is connected yet. */
+  ready: true,
 }));
 const browserHostHarness = vi.hoisted(() => ({
   registration: undefined as
@@ -227,8 +231,10 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useOptionalChatWorkspaceAuthority: () =>
     workspaceHarness.mounted
       ? {
+          ready: workspaceHarness.ready,
           get: () => workspaceHarness.current,
           prepare: workspaceHarness.prepare,
+          attachment: workspaceHarness.attachment,
           finalize: async () => undefined,
           discard: async () => undefined,
           markAdmitted: async () => {
@@ -452,6 +458,7 @@ beforeEach(() => {
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
   workspaceHarness.mounted = true;
+  workspaceHarness.ready = true;
   workspaceHarness.current = {
     execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
@@ -473,6 +480,9 @@ beforeEach(() => {
         : { ...(workspaceHarness.current ?? mintedClaim), runId: options.runId };
     return workspaceHarness.current;
   });
+  /* The attach reuses the claim when there is one and never mints: the real
+   * authority answers a lease-less view of the chat's checkout instead. */
+  workspaceHarness.attachment.mockImplementation(async () => workspaceHarness.current ?? mintedClaim);
   mountAgentMock(buildAgent());
   useChatSelectorMock.mockReturnValue('ready');
   installActiveSession('chat_test');
@@ -895,6 +905,44 @@ describe('useCadChatClient', () => {
     renderClient();
 
     await bindChatHost();
+    expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'tau' });
+  });
+
+  /*
+   * The file manager's worker arrives after this component's first render, so
+   * the binding's one composition was the one whose `createClient` could not
+   * prepare: `prepare` threw "This project has no revision root", the AI SDK
+   * swallowed it into `onError`, and the chat's durable log was never attached
+   * — no `RUN_ABANDONED`, no settlement, and the chat's first send wedged
+   * behind the failed resume. `reattachHostChat` latches on the hostId, so the
+   * retry has to be the composition, not the store.
+   */
+  it('waits for the revision root before reattaching, then reattaches once it connects', async () => {
+    workspaceHarness.ready = false;
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    const view = renderClient();
+    await waitFor(() => {
+      expect(chatHostServices('chat_test')).toBeDefined();
+    });
+    const actor = createActor(chatHostBinding, {
+      input: { chatId: 'chat_test', placement: chatHostServices('chat_test')!.placement },
+    });
+    bindings.push(actor);
+    actor.start();
+    expect(browserHostHarness.registration).toBeUndefined();
+    expect(reattachHostChat).not.toHaveBeenCalled();
+
+    workspaceHarness.ready = true;
+    view.rerender({});
+
+    await waitFor(() => {
+      expect(browserHostHarness.registration).toBeDefined();
+    });
     expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'tau' });
   });
 
@@ -1358,7 +1406,7 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('places a turn through prepare at every call site (W3d)', async () => {
+  it('places a turn through prepare at every admitting call site (W3d)', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
@@ -1369,15 +1417,22 @@ describe('useCadChatClient', () => {
     const prepared = workspaceHarness.current!;
     workspaceHarness.current = undefined;
     workspaceHarness.prepare.mockImplementation(async () => prepared);
+    workspaceHarness.attachment.mockResolvedValue(prepared);
 
     installSessionStore({
       startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
       endRun: vi.fn(),
     });
     const { result } = renderClient();
-    // 1. the browser-host client factory.
+    /* 1. the browser-host client factory — which composes the client from the
+     * chat's workspace but must NOT place a turn: it runs for the open-time
+     * attach too, and the run id a placement mints there is one the host never
+     * admitted, so the abandoned run's settlement named it and the durable log
+     * refused it (I7). Every admitting verb below still places. */
     await bindChatHost();
     await browserHostHarness.registration!.createClient();
+    expect(workspaceHarness.prepare).not.toHaveBeenCalled();
+    expect(workspaceHarness.attachment).toHaveBeenCalledWith('chat_test');
     // 2. the bodyless (seeded) dispatch, which composes and admits on demand.
     await composeTurn({ kind: 'regenerate' });
     // 3. the admission path shared by submit and edit.
@@ -1395,7 +1450,7 @@ describe('useCadChatClient', () => {
 
     /* One `admitTurn` per call site, and no revision mode on any of them:
      * placement is non-branching by default (D7/I18). */
-    expect(workspaceHarness.prepare.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(workspaceHarness.prepare.mock.calls.length).toBeGreaterThanOrEqual(3);
     for (const call of workspaceHarness.prepare.mock.calls) {
       expect(call[0]).toBe('chat_test');
       expect(call[1] ?? {}).not.toHaveProperty('mode');

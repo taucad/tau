@@ -1,19 +1,27 @@
-import { classify } from '@taucad/filesystem/path-registry';
+import type { PathPolicy } from '@taucad/filesystem';
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
+import { tauRevisionPolicy } from '#workspace-config.js';
 
 import { RevisionPortError } from '#revision-port.js';
 
-/** Refuse a revision tree that no supported Tau checkout may materialize. */
-export const assertMaterializableRevisionTree = (tree: ImmutableRevisionTree): void => {
+/**
+ * Refuse a revision tree that no supported Tau checkout may materialize.
+ *
+ * @param tree - The tree about to be written or recorded.
+ * @param policy - The layout's classifier (EQ6). An actor set passes the policy
+ *   its project was opened with; an adapter writing a Tau store keeps the
+ *   default, because a Tau store *is* Tau's layout.
+ */
+export const assertMaterializableRevisionTree = (
+  tree: ImmutableRevisionTree,
+  policy: PathPolicy = tauRevisionPolicy.policy,
+): void => {
   const portablePaths = new Map<string, string>();
   for (const { path } of tree.entries()) {
-    if (!classify(path).versioned) {
+    if (!policy.classify(path).versioned) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', `Tracked path is reserved by Tau: ${path}`);
     }
     const portable = path.normalize('NFC').toLowerCase();
-    if (!classify(portable).versioned) {
-      throw new RevisionPortError('UNSUPPORTED_OPERATION', `Tracked path aliases a path reserved by Tau: ${path}`);
-    }
     const collision = portablePaths.get(portable);
     if (collision !== undefined && collision !== path) {
       throw new RevisionPortError(

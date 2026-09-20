@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { assert, asyncProperty, boolean, constantFrom, oneof, record, stringMatching, tuple } from 'fast-check';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { isIgnored } from 'isomorphic-git';
+import { pathRegistry, tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -12,9 +20,19 @@ import { parseRevisionCommitMessage, revisionCommitMessage } from '#revision-hea
 import type { RevisionTrailer } from '#revision-headers.js';
 
 describe('generated ignore file', () => {
+  let ignoreRoot: string;
+
+  beforeAll(async () => {
+    ignoreRoot = await mkdtemp(join(tmpdir(), 'tau-generated-ignore-'));
+    await mkdir(join(ignoreRoot, '.git'));
+    await writeFile(join(ignoreRoot, '.gitignore'), generatedIgnoreContent(undefined));
+  });
+
+  afterAll(async () => rm(ignoreRoot, { recursive: true, force: true }));
+
   it('excludes every unversioned path and keeps the versioned generated files', () => {
     const content = generatedIgnoreContent(undefined);
-    for (const entry of generatedIgnoreEntries) {
+    for (const entry of generatedIgnoreEntries(pathRegistry)) {
       expect(content).toContain(entry);
     }
     expect(content).toContain('/.tau/cache/');
@@ -28,9 +46,96 @@ describe('generated ignore file', () => {
   /* The ignore file is derived from the path registry, so the records rows
    * appear and the deleted Jujutsu configuration does not (W1 pin b). */
   it('lists the records rows and no engine configuration', () => {
-    expect(generatedIgnoreEntries).toContain('/.tau/runs/');
-    expect(generatedIgnoreEntries).toContain('/exports/');
-    expect(generatedIgnoreEntries).not.toContain('/.tau/jj-config.toml');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('/.tau/runs/');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('/exports/');
+    expect(generatedIgnoreEntries(pathRegistry)).not.toContain('/.tau/jj-config.toml');
+  });
+
+  /* PP5: `versioned` agrees with the ignore file — a path is unversioned exactly
+   * when the generated block excludes it, and excluded as far as the row
+   * matches. A row that classifies by segment must be excluded wherever it
+   * appears, or a nested `.git` would be hidden from every view and captured
+   * into the revision anyway.
+   *
+   * PP5 is stated over the rows, not over every spelling of them: `classify`
+   * compares each row folded (G0b-8), so on a case-sensitive disk `Exports/x.step`
+   * is unversioned while this block — a `.gitignore`, which git matches
+   * case-sensitively there — does not name it. Widening the block with every
+   * folded spelling would put Tau's case rules into the person's own ignore file;
+   * the capture's own `exclude` (`!classify(path).versioned`) is what keeps such a
+   * path out of every tree, and that is the half PP5 exists to protect. */
+  it('should exclude every unversioned row as far as it matches, and no versioned one', () => {
+    for (const row of pathRegistry) {
+      const anywhere = generatedIgnoreEntries(pathRegistry).some(
+        (entry) => entry.replace(/\/$/u, '') === `**/${row.prefix}`,
+      );
+      const atRoot = generatedIgnoreEntries(pathRegistry).some(
+        (entry) => entry.replace(/\/$/u, '') === `/${row.prefix}`,
+      );
+
+      expect({ prefix: row.prefix, anywhere, atRoot }).toStrictEqual({
+        prefix: row.prefix,
+        anywhere: !row.versioned && row.match === 'segment',
+        atRoot: !row.versioned && row.match === 'root',
+      });
+    }
+  });
+
+  it('should agree with the generated ignore block for generated project paths', async () => {
+    const rowPath = record({ row: constantFrom(...pathRegistry), nested: boolean() }).map(({ row, nested }) => {
+      const path = `${nested ? 'vendor/' : ''}${row.prefix}`;
+      return row.directory ? `${path}/entry.txt` : path;
+    });
+    const authoredPath = tuple(
+      stringMatching(/^[a-z][a-z0-9_-]{0,12}$/u),
+      stringMatching(/^[a-z][a-z0-9_-]{0,12}$/u),
+    ).map(([directory, name]) => `src/${directory}/${name}.ts`);
+
+    await assert(
+      asyncProperty(oneof(rowPath, authoredPath), async (path) => {
+        const excluded = await isIgnored({ fs, dir: ignoreRoot, filepath: path });
+        expect(tauPathPolicy.classify(path).versioned).toBe(!excluded);
+      }),
+    );
+  });
+
+  /* G0-8: a trailing `/` restricts a gitignore pattern to directories, and a
+   * control-plane row also covers the one-line `.git` a worktree or submodule
+   * leaves behind — a path `classify` calls unversioned, which a directory-only
+   * pattern would not exclude. `node_modules` keeps its slash: a file of that
+   * name is not the cache. */
+  it('should exclude a control-plane pointer file as well as its directory', () => {
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/.git');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/.jj');
+    expect(generatedIgnoreEntries(pathRegistry)).not.toContain('**/.git/');
+    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/node_modules/');
+  });
+
+  /* The whole block, literally: it is the one artifact a person reads in their
+   * own checkout, so a changed row has to arrive as a reviewable diff rather
+   * than as a passing `toContain`. */
+  it('should write the generated block exactly as the registry orders it', () => {
+    expect(generatedIgnoreContent(undefined)).toBe(
+      `# BEGIN Tau generated — derived content is never versioned
+**/.tau/binding.json
+**/.jj
+**/.git
+/.tau/types/
+/.tau/tsconfig.generated.json
+/.tau/lockfile.json
+/.tau/chats/
+/.tau/runs/
+/.tau/export/
+/.tau/artifacts/
+/.tau/tool-results/
+/.tau/offloaded-tool-results/
+/exports/
+/thumbnail.webp
+/.tau/cache/
+**/node_modules/
+# END Tau generated
+`,
+    );
   });
 
   it('keeps a hand-written ignore file and is idempotent', () => {

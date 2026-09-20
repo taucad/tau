@@ -14,7 +14,6 @@ import type { ModelServiceConfig } from '#lib/monaco-model-service.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '@taucad/fs-client/file-content-service';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import type { WorkspaceScope } from '@taucad/filesystem';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
@@ -765,14 +764,11 @@ describe('Monaco external-content production wiring', () => {
   it('rereads an external fileWritten notification and updates an open model', async () => {
     let bytes = new TextEncoder().encode('before');
     const readFileMock = vi.fn(async () => bytes);
-    function readFile(
-      filepath: string,
-      options: 'utf8' | { encoding: 'utf8'; scope?: WorkspaceScope },
-    ): Promise<string>;
-    function readFile(filepath: string, options?: { scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
+    function readFile(filepath: string, options: 'utf8' | { encoding: 'utf8' }): Promise<string>;
+    function readFile(filepath: string, options?: { encoding?: undefined }): Promise<Uint8Array<ArrayBuffer>>;
     async function readFile(
       _filepath: string,
-      options?: 'utf8' | { encoding?: 'utf8'; scope?: WorkspaceScope },
+      options?: 'utf8' | { encoding?: 'utf8' },
     ): Promise<string | Uint8Array<ArrayBuffer>> {
       const data = await readFileMock();
       return options === 'utf8' || options?.encoding === 'utf8' ? new TextDecoder().decode(data) : data;

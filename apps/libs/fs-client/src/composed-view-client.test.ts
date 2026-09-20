@@ -7,7 +7,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { WorkspaceMutationError } from '@taucad/filesystem';
 import { createComposedViewClient } from '#composed-view-client.js';
 import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
-import type { FileSystemClient } from '#file-system-client.js';
+import type { WorkspaceAuthorityClient } from '#file-system-client.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 
 const root = '/projects/abc';
@@ -55,23 +55,21 @@ const overlay = (): ComposedViewOverlay => {
   };
 };
 
-const authorityMock = (): FileSystemClient =>
-  mock<FileSystemClient>({
-    getZippedDirectory: vi.fn().mockResolvedValue(new Blob(['authority'])),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    writeFileChecked: vi.fn().mockResolvedValue({ status: 'applied', content: new Uint8Array() }),
-    writeFiles: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    rmdir: vi.fn().mockResolvedValue(undefined),
-    unlink: vi.fn().mockResolvedValue(undefined),
-    move: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
-    bulkMove: vi.fn().mockResolvedValue({ moved: [], failed: [] }),
-    canMove: vi.fn().mockResolvedValue(true),
-    canRename: vi.fn().mockResolvedValue(true),
-    canCreate: vi.fn().mockResolvedValue(true),
-    canDelete: vi.fn().mockResolvedValue(true),
+/**
+ * What is left of the authority for this client: topology and the change stream
+ * (W11). Every per-path member it used to answer is gone from the type, so a
+ * test cannot assert the fall-through that no longer exists.
+ */
+const authorityMock = (): WorkspaceAuthorityClient =>
+  mock<WorkspaceAuthorityClient>({ pollExternalChanges: vi.fn().mockResolvedValue(false) });
+
+/** The dependency mount as its own rooted view, in the mount's own namespace. */
+const dependenciesMock = (): ComposedViewProxy =>
+  mock<ComposedViewProxy>({
     stat: vi.fn().mockResolvedValue({ type: 'dir', size: 0, mtimeMs: 0 }),
-    readDirectory: vi.fn().mockResolvedValue([{ id: 'three', name: 'three', size: 0, mtimeMs: 0, children: [] }]),
+    readdir: vi.fn().mockResolvedValue(['three']),
+    readdirWithStats: vi.fn().mockResolvedValue([{ name: 'three', type: 'dir', size: 0, mtimeMs: 0 }]),
+    readFile: vi.fn().mockResolvedValue('export {};\n'),
   });
 
 /**
@@ -108,7 +106,8 @@ const harness = async (
   clientRoot: string = root,
 ): Promise<{
   client: ComposedViewClient;
-  authority: FileSystemClient;
+  authority: WorkspaceAuthorityClient;
+  dependencies: ComposedViewProxy;
   view: ComposedViewProxy;
   provider: MemoryProvider;
 }> => {
@@ -116,6 +115,7 @@ const harness = async (
   await provider.writeFile('main.ts', 'export {};\n');
   await seed?.(provider);
   const authority = authorityMock();
+  const dependencies = dependenciesMock();
   /* The rooted connection serves the read content operations over the same
    * composition (charter D2); the worker builds them from `@taucad/filesystem/content-ops`,
    * so what this package owns is the routing, not the archive bytes. */
@@ -125,11 +125,13 @@ const harness = async (
   );
   return {
     authority,
+    dependencies,
     view,
     provider,
     client: createComposedViewClient({
       workspace: authority,
       view,
+      dependencies,
       paths: new WorkspacePathResolver(clientRoot),
     }),
   };
@@ -142,14 +144,13 @@ const harness = async (
  */
 describe('createComposedViewClient mutation guard (north star W2 attempt a2)', () => {
   it('should refuse deleting an overlay file as read-only instead of asking the authority', async () => {
-    const { client, authority } = await harness();
+    const { client } = await harness();
 
     await expect(client.canDelete(`${root}/${skillPath}`)).resolves.toMatchObject({ code: 'READ_ONLY_MOUNT' });
-    expect(authority.canDelete).not.toHaveBeenCalled();
   });
 
   it('should refuse every preflight that would write into an overlay', async () => {
-    const { client, authority } = await harness();
+    const { client } = await harness();
 
     await expect(client.canRename(`${root}/${skillPath}`, 'other.md')).resolves.toMatchObject({
       code: 'READ_ONLY_MOUNT',
@@ -161,16 +162,13 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     await expect(client.canMove(`${root}/main.ts`, `${root}/${skillPath}`)).resolves.toMatchObject({
       code: 'READ_ONLY_MOUNT',
     });
-    expect(authority.canRename).not.toHaveBeenCalled();
-    expect(authority.canCreate).not.toHaveBeenCalled();
-    expect(authority.canMove).not.toHaveBeenCalled();
   });
 
   /* A2 re-review R11: the preflight must not accept what the move refuses —
    * a rename's target is a name in the source's own parent, which can still
    * land on a bundle slug. */
   it('should refuse a rename whose new name lands on an overlay unit', async () => {
-    const { client, authority } = await harness();
+    const { client } = await harness();
 
     await expect(client.canRename(`${root}/${skillsRoot}/notes.md`, 'cad-replicad')).resolves.toMatchObject({
       code: 'READ_ONLY_MOUNT',
@@ -179,20 +177,18 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     await expect(
       client.move(`${root}/${skillsRoot}/notes.md`, `${root}/${skillsRoot}/cad-replicad`),
     ).rejects.toMatchObject({ code: 'EROFS' });
-    expect(authority.canRename).not.toHaveBeenCalled();
   });
 
   /* V8: a bundle is replaced by placing a whole bundle, never by moving one
    * file onto it, so the destination end is refused like any overlay write. */
   it('should refuse a move of a project file onto an overlay path', async () => {
-    const { client, authority } = await harness();
+    const { client } = await harness();
 
     await expect(client.move(`${root}/main.ts`, `${root}/${skillPath}`)).rejects.toMatchObject({ code: 'EROFS' });
-    expect(authority.move).not.toHaveBeenCalled();
   });
 
   it('should refuse the remaining mutating members that reach an overlay', async () => {
-    const { client, authority } = await harness();
+    const { client } = await harness();
 
     await expect(client.duplicateFile(`${root}/main.ts`, `${root}/${skillPath}`)).rejects.toMatchObject({
       code: 'EROFS',
@@ -203,8 +199,6 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     await expect(
       client.bulkMove([{ source: `${root}/main.ts`, target: `${root}/${skillPath}` }]),
     ).rejects.toMatchObject({ code: 'EROFS' });
-    expect(authority.writeFiles).not.toHaveBeenCalled();
-    expect(authority.bulkMove).not.toHaveBeenCalled();
   });
 
   /*
@@ -214,7 +208,7 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
    * which is why the whole guarded surface moves together, not method by method.
    */
   it('should issue every project mutation on the view in its own namespace', async () => {
-    const { client, authority, view, provider } = await harness();
+    const { client, view, provider } = await harness();
 
     await expect(client.canDelete(`${root}/main.ts`)).resolves.toBe(true);
     await client.move(`${root}/main.ts`, `${root}/renamed.ts`);
@@ -244,19 +238,6 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
      * proof: the composed view wrote through to the checkout. */
     await expect(provider.readFile('written.ts', 'utf8')).resolves.toBe('export {};\n');
     await expect(provider.exists('made')).resolves.toBe(false);
-
-    for (const method of [
-      authority.canDelete,
-      authority.move,
-      authority.writeFiles,
-      authority.writeFileChecked,
-      authority.bulkMove,
-      authority.writeFile,
-      authority.mkdir,
-      authority.rmdir,
-    ]) {
-      expect(method).not.toHaveBeenCalled();
-    }
   });
 
   /*
@@ -318,24 +299,26 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
   });
 
   /*
-   * A batch is one operation: half of it on the view and half on the authority
-   * would take two lock sets and two origins, so a path the view cannot serve
-   * sends the whole call to the authority.
+   * A batch is one operation: half of it on the view and half somewhere else
+   * would take two lock sets and two origins. Since W11 there is no second
+   * surface to send the whole call to, and the path outside the root is read-only
+   * by construction — so the batch is refused whole instead.
    */
-  it('should send a batch that reaches outside the project root to the authority whole', async () => {
-    const { client, authority, view } = await harness();
+  it('should refuse a batch that reaches outside the project root, whole', async () => {
+    const { client, view } = await harness();
 
-    await client.writeFiles({
-      [`${root}/a.ts`]: { content: skillBytes },
-      '/node_modules/three/index.d.ts': { content: skillBytes },
-    });
+    await expect(
+      client.writeFiles({
+        [`${root}/a.ts`]: { content: skillBytes },
+        '/node_modules/three/index.d.ts': { content: skillBytes },
+      }),
+    ).rejects.toMatchObject({ code: 'EROFS' });
 
-    expect(authority.writeFiles).toHaveBeenCalledOnce();
     expect(view.writeFiles).not.toHaveBeenCalled();
   });
 
   it('should refuse a checked write when its target or any precondition is read-only', async () => {
-    const { client, authority } = await harness();
+    const { client } = await harness();
 
     await expect(
       client.writeFileChecked({
@@ -344,15 +327,19 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
         preconditions: [{ path: `${root}/${skillPath}`, expected: skillBytes }],
       }),
     ).rejects.toMatchObject({ code: 'EROFS' });
-    expect(authority.writeFileChecked).not.toHaveBeenCalled();
   });
 
-  /* `/node_modules` is a mount, not an overlay: it never reaches the view. */
-  it('should leave a path outside the project root on the authority', async () => {
-    const { client, authority } = await harness();
+  /* `/node_modules` is a mount, not an overlay: it never reaches the checkout's
+   * view, and a dependency is read-only to everyone — so the preflight answers
+   * rather than looking for a surface that would write it (W11). */
+  it('should refuse a mutation of the dependency mount as read-only', async () => {
+    const { client, dependencies } = await harness();
 
-    await expect(client.canDelete('/node_modules/three/package.json')).resolves.toBe(true);
-    expect(authority.canDelete).toHaveBeenCalledWith('/node_modules/three/package.json');
+    await expect(client.canDelete('/node_modules/three/package.json')).resolves.toMatchObject({
+      code: 'READ_ONLY_MOUNT',
+    });
+    await expect(client.unlink('/node_modules/three/package.json')).rejects.toMatchObject({ code: 'EROFS' });
+    expect(dependencies.unlink).not.toHaveBeenCalled();
   });
 
   /*
@@ -360,43 +347,63 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
    * claims every path — including the dependency mount, which no view rooted at
    * Home's own provider can serve (gate G-D, H1 and H9).
    */
-  it('should route a Home-rooted read to the view and the dependency mount to the authority', async () => {
-    const { client, authority, view } = await harness(undefined, '/');
+  it('should route a Home-rooted read to the view and the dependency mount to its own view', async () => {
+    const { client, dependencies, view } = await harness(undefined, '/');
     const viewReaddir = vi.spyOn(view, 'readdir');
 
     await expect(client.readFile('/main.ts', 'utf8')).resolves.toBe('export {};\n');
     await client.readdir('/node_modules/three');
 
-    expect(authority.readdir).toHaveBeenCalledWith('/node_modules/three');
+    expect(dependencies.readdir).toHaveBeenCalledWith('three');
     expect(viewReaddir).not.toHaveBeenCalled();
   });
 
   /*
    * Home's root prefix is `/`, which every path starts with — but a project is
    * its own route on its own mount, and the view at `/` is confined to Home's
-   * provider. The mount table answers those, so the authority is asked.
+   * provider. Since W11 the authority has no per-path call to fall through to,
+   * so a path another route owns is refused here instead of being walked raw.
    */
-  it('should leave a path another route owns to the authority at a Home root', async () => {
-    const { client, authority, view } = await harness(undefined, '/');
+  it('should refuse a path another route owns at a Home root', async () => {
+    const { client, view } = await harness(undefined, '/');
     const viewReadFile = vi.spyOn(view, 'readFile');
 
-    await client.readFile('/projects/proj_a/main.ts', 'utf8');
+    await expect(client.readFile('/projects/proj_a/main.ts', 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
 
-    expect(authority.readFile).toHaveBeenCalledWith('/projects/proj_a/main.ts', 'utf8');
     expect(viewReadFile).not.toHaveBeenCalled();
   });
 
+  it('should refuse writing a project path through the Home view', async () => {
+    const { client, view } = await harness(undefined, '/');
+    const viewWriteFile = vi.spyOn(view, 'writeFile');
+
+    await expect(client.writeFile('/projects/proj_a/main.ts', 'export {};\n')).rejects.toThrow(
+      /No rooted view serves/u,
+    );
+
+    expect(viewWriteFile).not.toHaveBeenCalled();
+  });
+
+  it('should refuse preflighting a project path through the Home view', async () => {
+    const { client, view } = await harness(undefined, '/');
+
+    await expect(client.canCreate('/projects/proj_a/new.ts', 'file')).rejects.toThrow(/No rooted view serves/u);
+
+    expect(view.canCreate).not.toHaveBeenCalled();
+  });
+
   /*
-   * C2: the alias is a mount outside the checkout, so it is the authority's —
-   * and the authority stamps nothing. One producer here is what lets the Files
-   * pane stop deciding read-only from the word `node_modules`.
+   * C2: the alias is a mount outside the checkout, so it is its own root with its
+   * own `'user'` view (W11) — and that view classifies its root as if it were a
+   * checkout, so the mount's own class is stamped here. One producer is what lets
+   * the Files pane stop deciding read-only from the word `node_modules`.
    */
-  it('should serve the dependency mount from the authority with dependency provenance', async () => {
-    const { client, authority } = await harness();
+  it('should serve the dependency mount from its own view with dependency provenance', async () => {
+    const { client, dependencies } = await harness();
 
     const rows = await client.readDirectory('/node_modules');
 
-    expect(authority.readDirectory).toHaveBeenCalledWith('/node_modules');
+    expect(dependencies.readdirWithStats).toHaveBeenCalledWith('');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.provenance).toEqual({
       source: 'dependencies',
@@ -411,6 +418,76 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
       },
     });
   });
+
+  /*
+   * CI3, Finding 4: the root listing is what the file tree treats as
+   * authoritative over the root's children, so a root listing without the mount
+   * deletes the `node_modules` row on every re-list. The mount is the root's
+   * sibling and this client is what owns "what the root contains", so the row is
+   * appended here rather than taught to the tree.
+   */
+  it('should list the dependency mount as one root row with dependency provenance', async () => {
+    const { client } = await harness();
+
+    const rows = await client.readDirectory(root);
+
+    expect(rows.filter(({ name }) => name === 'node_modules')).toHaveLength(1);
+    const mount = rows.find(({ name }) => name === 'node_modules');
+    expect(mount?.children).toStrictEqual([]);
+    expect(mount?.provenance).toEqual({
+      source: 'dependencies',
+      versioned: false,
+      agentAccess: 'read-only',
+    });
+  });
+
+  /* G0b-7: only a resolved row is remembered. The first root listing now runs
+   * inside `initializeServicesActor`, so one transient authority error there — or
+   * one listing that raced the mount — used to cost the session its
+   * `node_modules` row for good, with no recovery path. */
+  it('should list the dependency mount on a later listing when the first probe failed', async () => {
+    const { client, dependencies } = await harness();
+    vi.mocked(dependencies.stat).mockRejectedValueOnce(new Error('the mount is not ready'));
+
+    const first = await client.readDirectory(root);
+    const second = await client.readDirectory(root);
+
+    expect(first.map(({ name }) => name)).not.toContain('node_modules');
+    expect(second.filter(({ name }) => name === 'node_modules')).toHaveLength(1);
+  });
+
+  /* The OPFS mount is fail-soft: a profile where it never came up must not grow
+   * a row for a directory nothing serves. */
+  it('should omit the dependency mount row when the mount is not there', async () => {
+    const { client, dependencies } = await harness();
+    vi.mocked(dependencies.stat).mockRejectedValue(
+      Object.assign(new Error('ENOENT: /node_modules'), { code: 'ENOENT' }),
+    );
+
+    const rows = await client.readDirectory(root);
+
+    expect(rows.map(({ name }) => name)).not.toContain('node_modules');
+  });
+
+  /*
+   * A checkout can hold a `node_modules` of its own — the registry classes it as
+   * cache for every consumer, so the view lists it. The listed row is the one
+   * that stands: two rows of the same name would fight over one tree key.
+   */
+  it('should keep the checkout its own node_modules row instead of adding the mount', async () => {
+    const { client } = await harness(async (provider) => {
+      await provider.mkdir('node_modules/three', { recursive: true });
+      await provider.writeFile('node_modules/three/index.d.ts', 'export {};\n');
+    });
+
+    const rows = await client.readDirectory(root);
+
+    expect(rows.filter(({ name }) => name === 'node_modules')).toHaveLength(1);
+    expect(rows.find(({ name }) => name === 'node_modules')?.provenance).toMatchObject({
+      source: 'project',
+      versioned: false,
+    });
+  });
 });
 
 /*
@@ -420,7 +497,7 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
  */
 describe('createComposedViewClient overrideUnit (north star W4 attempt a2)', () => {
   it('should write every file of the unit under the project and nothing else', async () => {
-    const { client, authority, view } = await harness();
+    const { client, view } = await harness();
 
     await client.overrideUnit(`${skillsRoot}/cad-replicad`);
 
@@ -428,17 +505,16 @@ describe('createComposedViewClient overrideUnit (north star W4 attempt a2)', () 
     const written = vi.mocked(view.writeFiles).mock.calls[0]![0];
     expect(Object.keys(written)).toEqual([skillPath]);
     expect(written[skillPath]!.content).toEqual(skillBytes);
-    expect(authority.writeFiles).not.toHaveBeenCalled();
   });
 
   it('should refuse a unit the project already owns', async () => {
-    const { client, authority } = await harness(async (provider) => {
+    const { client, view } = await harness(async (provider) => {
       await provider.mkdir(`${skillsRoot}/cad-replicad`, { recursive: true });
       await provider.writeFile(`${skillsRoot}/cad-replicad/SKILL.md`, 'mine\n');
     });
 
     await expect(client.overrideUnit(`${skillsRoot}/cad-replicad`)).rejects.toMatchObject({ code: 'EEXIST' });
-    expect(authority.writeFiles).not.toHaveBeenCalled();
+    expect(view.writeFiles).not.toHaveBeenCalled();
   });
 
   it('should report the unit it replaces once the project owns it', async () => {
@@ -463,12 +539,11 @@ describe('createComposedViewClient overrideUnit (north star W4 attempt a2)', () 
  */
 describe('createComposedViewClient read content operations (north star W3)', () => {
   it('should archive a directory inside the project through the view', async () => {
-    const { client, authority, view } = await harness();
+    const { client, view } = await harness();
 
     await expect(client.getZippedDirectory(root, { versionedOnly: true })).resolves.toBeInstanceOf(Blob);
 
     expect(view.archive).toHaveBeenCalledWith('', { versionedOnly: true });
-    expect(authority.getZippedDirectory).not.toHaveBeenCalled();
   });
 
   it('should archive a subfolder at its view-relative path', async () => {
@@ -479,22 +554,11 @@ describe('createComposedViewClient read content operations (north star W3)', () 
     expect(view.archive).toHaveBeenCalledWith('exports', undefined);
   });
 
-  it('should archive an explicit workspace scope on the authority even inside the project root', async () => {
-    const { client, authority, view } = await harness();
-    const scope = { backend: 'memory', storageRootKey: 'memory:scope' } as const;
-
-    await client.getZippedDirectory(root, { scope });
-
-    expect(authority.getZippedDirectory).toHaveBeenCalledWith(root, { scope });
-    expect(view.archive).not.toHaveBeenCalled();
-  });
-
-  it('should refuse an archive outside the project root that names no scope', async () => {
-    const { client, authority, view } = await harness();
+  it('should refuse an archive outside the project root', async () => {
+    const { client, view } = await harness();
 
     await expect(client.getZippedDirectory('/node_modules/three')).rejects.toThrow(/No rooted view serves/u);
 
-    expect(authority.getZippedDirectory).not.toHaveBeenCalled();
     expect(view.archive).not.toHaveBeenCalled();
   });
 

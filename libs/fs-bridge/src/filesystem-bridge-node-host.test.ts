@@ -17,8 +17,14 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ChangeEvent } from '@taucad/types';
-import type { ExposeFileSystemHandle, FileSystemBridgeProxy } from '@taucad/fs-bridge';
-import { createTransferredFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
+import type { ExposeFileSystemHandle, FileSystemBridgeProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
+import {
+  createTransferredFileSystemBridgeProxy,
+  exposeFileSystem,
+  fileSystemBridgeProtocolVersion,
+  openFileSystemBridge,
+  workspaceBridgeService,
+} from '@taucad/fs-bridge';
 
 const encoder = new TextEncoder();
 const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
@@ -61,10 +67,11 @@ const createWorkspace = async (): Promise<Workspace> => {
 
 type NodeHost = {
   readonly exposed: ExposeFileSystemHandle;
-  readonly connect: (
-    root?: string,
-    consumer?: 'user' | 'agent',
-  ) => { proxy: FileSystemBridgeProxy; dispose: () => void };
+  /** The workspace surface takes no arguments; a rooted one names both (CI2). */
+  readonly connect: {
+    (): { proxy: FileSystemBridgeProxy; dispose: () => void };
+    (root: string, consumer: RootedBridgeConsumer): { proxy: FileSystemBridgeProxy; dispose: () => void };
+  };
   readonly dispose: () => void;
 };
 
@@ -75,7 +82,7 @@ type NodeHost = {
  */
 const hostOnNode = ({ service, bus }: Workspace): NodeHost => {
   const boundary = new MessageChannel();
-  const exposed = exposeFileSystem(service, {
+  const exposed = exposeFileSystem(workspaceBridgeService(service), {
     changeEventBus: bus,
     /*
      * The composition every host performs (charter D2): the connection's view,
@@ -85,18 +92,21 @@ const hostOnNode = ({ service, bus }: Workspace): NodeHost => {
     handlerForRoot: (root, context, consumer) => {
       const filesystem = service.createRootedFileSystem(root, context);
       const view =
-        consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
+        consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
       return withReadContentOps(view, tauPathPolicy);
     },
     messageSource: boundary.port2,
   });
   return {
     exposed,
-    connect(root?: string, consumer?: 'user' | 'agent') {
-      const connection = openFileSystemBridge(
-        boundary.port1,
-        root === undefined ? undefined : { root, ...(consumer === undefined ? {} : { consumer }) },
-      );
+    connect(
+      root?: string,
+      consumer: RootedBridgeConsumer = 'working-copy',
+    ): {
+      proxy: FileSystemBridgeProxy;
+      dispose: () => void;
+    } {
+      const connection = openFileSystemBridge(boundary.port1, root === undefined ? undefined : { root, consumer });
       const proxy = createTransferredFileSystemBridgeProxy(connection.port);
       return {
         proxy,
@@ -122,11 +132,11 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
     const workspace = await createWorkspace();
     await workspace.service.writeFile(`${projectRoot}/main.ts`, 'export default 1;\n');
     const host = hostOnNode(workspace);
-    const client = host.connect(projectRoot);
+    const client = host.connect(projectRoot, 'working-copy');
 
     try {
       await client.proxy.ready;
-      expect(client.proxy.hello.payload).toMatchObject({ v: 1, state: 'ready' });
+      expect(client.proxy.hello.payload).toMatchObject({ v: fileSystemBridgeProtocolVersion, state: 'ready' });
       await expect(client.proxy.readFile('main.ts', 'utf8')).resolves.toBe('export default 1;\n');
 
       await client.proxy.writeFile('written.ts', 'export default 2;\n');
@@ -150,7 +160,7 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
     await workspace.service.writeFile('/outside.ts', 'secret');
     await workspace.service.writeFile(`${projectRoot}/inside.ts`, 'visible');
     const host = hostOnNode(workspace);
-    const client = host.connect(projectRoot);
+    const client = host.connect(projectRoot, 'working-copy');
 
     try {
       await client.proxy.ready;
@@ -345,9 +355,11 @@ describe('one rooted connection as the change transport (W12a)', () => {
       await surface.proxy.ready;
 
       await rooted.proxy.writeFile('self.ts', 'mine');
-      /* A peer write after it: the rooted port is FIFO, so once this arrives
-       * the author's own event has had its turn and did not come. */
-      await surface.proxy.writeFile(`${projectRoot}/peer.ts`, 'theirs');
+      /* A peer write after it, made in the authority's own isolate because the
+       * unrooted wire carries no content at all any more (W11): the rooted port
+       * is FIFO, so once this arrives the author's own event has had its turn
+       * and did not come. */
+      await workspace.service.writeFile(`${projectRoot}/peer.ts`, 'theirs');
 
       await vi.waitFor(() => {
         expect(observed.events).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'peer.ts' }));
@@ -361,7 +373,7 @@ describe('one rooted connection as the change transport (W12a)', () => {
     }
   });
 
-  it('delivers a workspace-surface write under the root in the root-relative namespace', async () => {
+  it('delivers an authority write under the root in the root-relative namespace', async () => {
     const workspace = await createWorkspace();
     const host = hostOnNode(workspace);
     const rooted = host.connect(projectRoot, 'user');
@@ -372,7 +384,7 @@ describe('one rooted connection as the change transport (W12a)', () => {
       await rooted.proxy.ready;
       await surface.proxy.ready;
 
-      await surface.proxy.writeFile(`${projectRoot}/src/peer.ts`, 'theirs');
+      await workspace.service.writeFile(`${projectRoot}/src/peer.ts`, 'theirs');
 
       await vi.waitFor(() => {
         expect(observed.events).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'src/peer.ts' }));
@@ -398,8 +410,8 @@ describe('one rooted connection as the change transport (W12a)', () => {
       await rooted.proxy.ready;
       await surface.proxy.ready;
 
-      await surface.proxy.writeFile('/outside.ts', 'secret');
-      await surface.proxy.writeFile(`${projectRoot}/inside.ts`, 'visible');
+      await workspace.service.writeFile('/outside.ts', 'secret');
+      await workspace.service.writeFile(`${projectRoot}/inside.ts`, 'visible');
 
       await vi.waitFor(() => {
         expect(observed.events).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'inside.ts' }));

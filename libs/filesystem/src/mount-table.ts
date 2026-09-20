@@ -303,6 +303,8 @@ export type MountResolution = {
  */
 export class MountTable {
   private _mounts: MountEntry[] = [];
+  /** Derived view of {@link _mounts}, rebuilt on the next read after a change. */
+  private _prefixes: readonly string[] | undefined;
 
   /**
    * Add a mount point. Re-sorts the table by prefix length (longest first).
@@ -337,6 +339,7 @@ export class MountTable {
       routeId: route.id,
     });
     this._mounts.sort((a, b) => b.prefix.length - a.prefix.length);
+    this._prefixes = undefined;
   }
 
   /**
@@ -350,6 +353,21 @@ export class MountTable {
   public unmount(prefix: string): void {
     const normalized = this._normalizePrefix(prefix);
     this._mounts = this._mounts.filter((m) => m.prefix !== normalized);
+    this._prefixes = undefined;
+  }
+
+  /**
+   * Every live mount prefix, longest first.
+   *
+   * Cached because the index's boundary check reads it once per open root per
+   * mutation fact, and this table is the only thing that can know when it
+   * changed.
+   *
+   * @returns The live prefixes; the same array until the next mount change.
+   */
+  public get prefixes(): readonly string[] {
+    this._prefixes ??= this._mounts.map((mount) => mount.prefix);
+    return this._prefixes;
   }
 
   /**
@@ -442,6 +460,7 @@ export class MountTable {
   /** Clear all mount points. */
   public dispose(): void {
     this._mounts = [];
+    this._prefixes = undefined;
   }
 
   private _resolveProviderPath(basePath: string, suffix: string): string {

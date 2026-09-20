@@ -21,9 +21,10 @@ import { createActor, createMachine } from 'xstate';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RootedFileSystem } from '@taucad/filesystem';
-import { classify } from '@taucad/filesystem/path-registry';
+import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
@@ -191,6 +192,21 @@ describe('the tree a cut hashes', () => {
     await filesystem.writeFile('.tau/runs/run-1.json', '{}\n');
     await filesystem.writeFile('.tau/cache/blob', 'cached\n');
     await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
+    /* EQ1: a vendored repository is the control plane at any depth. Git itself
+     * never tracks a nested `.git`; capturing one as ordinary files put its
+     * `config` — credentials included — into every revision. */
+    await filesystem.writeFile('vendor/lib/.git/config', '[remote "origin"]\n');
+    /* G0-3: `classify` answered with the first matching row, so a store under an
+     * authored `.tau` control was that row's — authored and *versioned*. The
+     * skill beside it still arrives, so an empty subtree cannot pass this. */
+    await filesystem.writeFile('.tau/skills/cad/SKILL.md', '---\nname: cad\n---\n');
+    await filesystem.writeFile('.tau/skills/cad/.git/config', '[remote "origin"]\n');
+    /* G0b-9: a case alias of a reserved path wedged this cut. `classify` called it
+     * authored and versioned, so the capture carried it — and `portable-tree`
+     * refused the whole tree at commit, with no way out but deleting the file by
+     * hand. Folded, it is the records row it resolves to on the disk that holds
+     * it, and the cut simply leaves it out. */
+    await filesystem.writeFile('Exports/x.step', 'solid alias\n');
 
     const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
       checkoutId: 'live',
@@ -211,7 +227,7 @@ describe('the tree a cut hashes', () => {
         ?.entries()
         .map(({ path }) => path)
         .toSorted(),
-    ).toEqual(['.gitattributes', '.gitignore', 'main.ts']);
+    ).toEqual(['.gitattributes', '.gitignore', '.tau/skills/cad/SKILL.md', 'main.ts']);
   }, 30_000);
 
   it('refuses a capture whose paths differ only by case', async () => {
@@ -500,6 +516,35 @@ describe('settling a turn', () => {
 });
 
 describe('restore, through the machine that owns it', () => {
+  it('should materialize original bytes from a pointerised revision tree', async () => {
+    const original = 'solid bracket\nendsolid bracket\n';
+    const { port, actors, filesystem } = await fixture({ 'models/bracket.step': original });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: cut.cutId,
+      treeId: cut.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+    const { pointer } = lfsPointerFor(new TextEncoder().encode(original));
+    expect(await filesystem.readFile(`.git/${lfsObjectPath(pointer.oid)}`, 'utf8')).toBe(original);
+
+    await filesystem.writeFile('models/bracket.step', 'solid changed\nendsolid changed\n');
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: 'live',
+      target: written.revisionId,
+    });
+    await run(actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+
+    expect(await filesystem.readFile('models/bracket.step', 'utf8')).toBe(original);
+  }, 30_000);
+
   it('plans a restore, applies it under confirmation, and puts the tree back', async () => {
     const release = vi.fn();
     const onApplyingTree = vi.fn(() => release);
@@ -1821,4 +1866,53 @@ describe('connecting a remote', () => {
       run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
     ).rejects.toThrow('another account');
   });
+});
+
+/**
+ * EQ6 / W10.6: the layout is data, so revisions read the classifier they are given.
+ *
+ * Four `classify` sites inside the actor closure and one in `portable-tree.ts`
+ * imported Tau's own registry directly, which made the rule "what Tau's layout
+ * says" rather than "what this project's policy says" — the same coupling D6
+ * removed from the composed view in L1.
+ */
+describe('the path policy a project is given', () => {
+  /* Everything under `drawings/` is this policy's derived output; nothing else
+   * is. Tau's own rows say the opposite about all four of these paths, so a
+   * capture that still read the registry cannot pass. */
+  const testPolicy = {
+    classify: (path: string) =>
+      path.startsWith('drawings/') ? { ...unlistedPathClassification, versioned: false } : unlistedPathClassification,
+  };
+
+  it('excludes what that policy says and captures what Tau’s own rows would hide', async () => {
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (given) => given, {
+      policy: testPolicy,
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await filesystem.writeFile('drawings/plan.dxf', 'DXF\n');
+    await filesystem.writeFile('node_modules/left/index.js', 'module.exports = 1;\n');
+    await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
+
+    const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: cut.cutId,
+      treeId: cut.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+    const tree = await port.readTree(revisionId(written.revisionId));
+    const paths = (tree?.entries() ?? []).map((entry) => entry.path).sort();
+
+    /* This policy's own exclusion holds… */
+    expect(paths).not.toContain('drawings/plan.dxf');
+    /* …and Tau's, which this project never named, does not apply. */
+    expect(paths).toContain('node_modules/left/index.js');
+    expect(paths).toContain('thumbnail.webp');
+  }, 30_000);
 });

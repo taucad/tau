@@ -97,6 +97,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "fast-check": "catalog:",
     "vitest": "catalog:"
   }
 }

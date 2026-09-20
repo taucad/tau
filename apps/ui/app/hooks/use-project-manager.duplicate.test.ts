@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
+import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
@@ -44,7 +45,7 @@ const mockCommitPendingProjectDirectory = vi.fn(async () => {
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    files: {
+    recordFiles: {
       readFile: vi.fn(async () => lastManifest),
       writeFiles: vi.fn(async () => {
         phases.push('files');
@@ -211,6 +212,8 @@ describe('useProjectManager.duplicateProject', () => {
       scope: { backend: 'indexeddb' },
       files: pendingDuplicate.files,
       manifest: serializeProjectManifest(duplicateProject),
+      /* The attempt hands its bytes over: the bridge transfers them instead of copying the import. */
+      [consumableBytes]: true,
     });
     expect(phases).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete']);
     expect(mockReadVersionedProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);

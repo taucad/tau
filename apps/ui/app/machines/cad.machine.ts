@@ -263,8 +263,10 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     cleanups.push(computeConnection.dispose);
   }
   const kernelOptions = resolveKernelOptions({
-    /* The kernel runs the checkout itself, never a consumer's composed view (G6). */
-    fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot, 'working-copy')),
+    /* The kernel executes project code the agent wrote, so it reads the agent's
+     * own view and never the working copy: the control plane is absent from it and
+     * the records Tau keeps are read-only (invariant CI1, W14). */
+    fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot, 'agent')),
     compute: computeConnection?.compute,
   });
   client = createRuntimeClient(kernelOptions);

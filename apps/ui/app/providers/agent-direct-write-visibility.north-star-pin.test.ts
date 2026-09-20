@@ -22,7 +22,12 @@ import { mock } from 'vitest-mock-extended';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { createFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
+import {
+  createFileSystemBridgeProxy,
+  exposeFileSystem,
+  openFileSystemBridge,
+  workspaceBridgeService,
+} from '@taucad/fs-bridge';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -51,7 +56,6 @@ afterEach(() => {
 
 /** The file-manager worker, its single UI port, and the services that port feeds. */
 const createBrowserHarness = async (): Promise<{
-  readonly uiClient: FileSystemBridgeProxy;
   readonly content: FileContentService;
   readonly worker: { postMessage: (data: unknown) => void };
 }> => {
@@ -79,14 +83,16 @@ const createBrowserHarness = async (): Promise<{
   // `exposeFileSystem` listens on the worker global; the message source is the
   // seam the Node and Electron authorities already use.
   const messageSource = new EventTarget();
-  const exposed = exposeFileSystem(fileService, {
+  const exposed = exposeFileSystem(workspaceBridgeService(fileService), {
     changeEventBus: eventBus,
     messageSource,
-    /* The production handler: a connection that names a consumer reads the
-     * composed view, one that does not reads the checkout itself. */
+    /* The production handler: `'user'` and `'agent'` read the composed view,
+     * `'working-copy'` reads the checkout itself. */
     handlerForRoot: (root, context, consumer) => {
       const filesystem = fileService.createRootedFileSystem(root, context);
-      return consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
+      return consumer === 'working-copy'
+        ? filesystem
+        : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
     },
   });
   const worker = {
@@ -95,12 +101,9 @@ const createBrowserHarness = async (): Promise<{
     },
   };
 
-  const connection = openFileSystemBridge(worker);
-  const uiClient = createFileSystemBridgeProxy(connection);
-  await uiClient.ready;
-
   /* The change transport is the project's own rooted connection (charter D12,
-   * W12b): it delivers root-relative paths and never the UI's own writes. */
+   * W12b): it delivers root-relative paths and never the UI's own writes — and
+   * since W11 it is also the only connection that carries content at all. */
   const viewConnection = openFileSystemBridge(worker, { root: projectRoot, consumer: 'user' });
   const viewClient = createFileSystemBridgeProxy(viewConnection);
   await viewClient.ready;
@@ -112,10 +115,10 @@ const createBrowserHarness = async (): Promise<{
     // about event visibility, not binary transport.
     proxy: mock<ComposedViewClient>({
       readFile: (async (path: string, options?: unknown) => {
-        const text = await uiClient.readFile(path, 'utf8');
+        const text = await viewClient.readFile(paths.toRelativePath(path)!, 'utf8');
         return options === 'utf8' ? text : encoder.encode(text);
       }) as ComposedViewClient['readFile'],
-      stat: async (path: string) => uiClient.stat(path),
+      stat: async (path: string) => viewClient.stat(paths.toRelativePath(path)!),
     }),
     paths,
     channel: new WorkerChangeChannel({ transport: { listen: viewClient.listen } }),
@@ -126,18 +129,18 @@ const createBrowserHarness = async (): Promise<{
     content.dispose();
     viewClient.dispose();
     viewConnection.dispose();
-    uiClient.dispose();
-    connection.dispose();
     exposed.cleanup();
     fileService.dispose();
     provider.dispose();
     eventBus.dispose();
   });
 
-  await uiClient.mkdir(projectRoot, { recursive: true });
-  await uiClient.writeFile(joinPath(projectRoot, 'main.scad'), 'cube(1);');
+  /* The seed is the authority's own, in its own isolate: the workspace wire has
+   * no `mkdir` and no `writeFile` any more (W11). */
+  await fileService.mkdir(projectRoot, { recursive: true });
+  await fileService.writeFile(joinPath(projectRoot, 'main.scad'), 'cube(1);');
 
-  return { uiClient, content, worker };
+  return { content, worker };
 };
 
 /** The filesystem the agent host receives for a direct-mode (`local`) turn. */
@@ -151,7 +154,9 @@ const createAgentFileSystem = async (worker: {
     rootDirectory: projectRoot,
     backend: 'memory',
     openConnection: async () => {
-      const proxy = createFileSystemBridgeProxy(openFileSystemBridge(worker, { root: projectRoot }));
+      const proxy = createFileSystemBridgeProxy(
+        openFileSystemBridge(worker, { root: projectRoot, consumer: 'working-copy' }),
+      );
       await proxy.ready;
       disposers.push(() => {
         proxy.dispose();

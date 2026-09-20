@@ -1,4 +1,5 @@
 import { BoundedFileCache, WorkspaceMutationError } from '@taucad/filesystem';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import { Topic } from '@taucad/events';
 import { PathSubscriberRegistry } from '#path-subscriber-registry.js';
 import type { RefreshGenerationGuard } from '#refresh-generation-guard.js';
@@ -845,7 +846,7 @@ export class FileContentService {
    * @returns Blob containing the archive bytes from the worker.
    * @throws {WorkspaceScopeViolationError} When `path` escapes the workspace root.
    */
-  public async getZippedDirectory(path: string, options?: { versionedOnly?: boolean }): Promise<Blob> {
+  public async getZippedDirectory(path: string, options?: ContentExportFilter): Promise<Blob> {
     const key = this.paths.toWorkspaceRelativeKey('getZippedDirectory', path);
     return this.proxy.getZippedDirectory(this.paths.toAbsolutePath(key), options);
   }

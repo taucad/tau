@@ -4,6 +4,7 @@ import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
 import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
+import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
@@ -481,7 +482,19 @@ const requireStoragePathSegment = (value: string, label: string): string => {
   return value;
 };
 
-const createRuntimeFsLike = (proxy: ProjectFileSystemBridge): FsLike => {
+/**
+ * The runtime's filesystem, adapted from the view the executor reads.
+ *
+ * The kernel runs project code the agent wrote, so its source is the agent's
+ * composed view and not the bridge proxy (W14) — these members are all it needs,
+ * and a view has no `hello` or `watchReady` to give it.
+ */
+type RuntimeFsSource = Pick<
+  ComposedView,
+  'readFile' | 'writeFile' | 'mkdir' | 'readdir' | 'unlink' | 'rmdir' | 'rename' | 'stat' | 'lstat'
+>;
+
+const createRuntimeFsLike = (proxy: RuntimeFsSource): FsLike => {
   const nativeStat = (stat: FileStat) => ({
     size: stat.size,
     mtimeMs: stat.mtimeMs,
@@ -1555,9 +1568,20 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
       );
     },
   });
+  /* One function composes every view on every host (charter D1): the bundles,
+   * the registry mask and provenance are all inside it, so this worker only
+   * adapts the RPC shape over it. The agent view is what the *executors* of
+   * project code read too — the kernel runtime below and the GeoSpec runner's
+   * port — because the code they run is code the agent wrote (CI1, W14). */
+  const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
+  const agentView = composeView(
+    { filesystem: workspaceProvider },
+    { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
+  );
+  const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user', policy: tauPathPolicy });
   const runtimeClient: AppRuntimeClient = createRuntimeClient(
     createDefaultKernelOptions({
-      fileSystem: fromFsLike(createRuntimeFsLike(fileSystem)),
+      fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
       runtimeConfig,
       compute,
     }),
@@ -1568,9 +1592,8 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
   const headlessImageModule = await import('#services/headless-image.service.js');
   const imageService = new headlessImageModule.HeadlessImageService();
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
-  const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
   const geoSpecClient = createGeoSpecWorkerRpcClient({
-    openFileSystemBridge: () => createFileSystemBridgePort(workspaceProvider),
+    openFileSystemBridge: () => createFileSystemBridgePort(agentView),
     runtimeConfig,
   });
   const runtimeRpc = createRuntimeRpcClients({
@@ -1718,14 +1741,6 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     mapRuntimeError: (error) => toRpcError(error),
     parameterActorFor,
   });
-  /* One function composes every view on every host (charter D1): the bundles,
-   * the registry mask and provenance are all inside it, so this worker only
-   * adapts the RPC shape over it. */
-  const agentView = composeView(
-    { filesystem: workspaceProvider },
-    { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
-  );
-  const recordView = composeView({ filesystem: workspaceProvider }, { consumer: 'user', policy: tauPathPolicy });
   const toolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),

@@ -465,6 +465,9 @@ catalogs:
     fake-indexeddb:
       specifier: ^6.2.5
       version: 6.2.5
+    fast-check:
+      specifier: ^4.9.0
+      version: 4.10.1
     fastify:
       specifier: ^5.8.5
       version: 5.8.5
@@ -1217,6 +1220,9 @@ importers:
       fake-indexeddb:
         specifier: 'catalog:'
         version: 6.2.5
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.10.1
       fastify:
         specifier: 'catalog:'
         version: 5.8.5
@@ -2201,6 +2207,9 @@ importers:
       '@testing-library/react':
         specifier: 'catalog:'
         version: 16.2.0(@testing-library/dom@10.4.1)(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.10.1
       react:
         specifier: 'catalog:'
         version: 19.2.7
@@ -3012,6 +3021,9 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.10.1
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
@@ -18402,6 +18414,10 @@ packages:
     resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
     engines: {node: '>=18'}
 
+  fast-check@4.10.1:
+    resolution: {integrity: sha512-sB5Vghiu8MyCyToHoBVGsT0baZg3sZWNIY+a6Ct2EDrQJlT4YdH6MC1BSLNe3kX1k5i5g0q1O52XFgcKK/rGHg==}
+    engines: {node: '>=12.17.0'}
+
   fast-copy@4.0.3:
     resolution: {integrity: sha512-58apWr0GUiDFM8+3afrO6eYwJBn9ZAhDOzG3L+/9llab/haCARS2UIfffmOurYLwbgDRs8n0rfr6qAAPEAuAQw==}
 
@@ -23387,6 +23403,9 @@ packages:
 
   pure-rand@7.0.1:
     resolution: {integrity: sha512-oTUZM/NAZS8p7ANR3SHh30kXB+zK2r2BPcEn/awJIbOvq82WoMN4p62AWWp3Hhw50G0xMsw1mhIBLqHw64EcNQ==}
+
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
 
   pvtsutils@1.3.6:
     resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
@@ -42283,6 +42302,10 @@ snapshots:
 
   fake-indexeddb@6.2.5: {}
 
+  fast-check@4.10.1:
+    dependencies:
+      pure-rand: 8.4.2
+
   fast-copy@4.0.3: {}
 
   fast-decode-uri-component@1.0.1: {}
@@ -48827,6 +48850,8 @@ snapshots:
       - utf-8-validate
 
   pure-rand@7.0.1: {}
+
+  pure-rand@8.4.2: {}
 
   pvtsutils@1.3.6:
     dependencies:

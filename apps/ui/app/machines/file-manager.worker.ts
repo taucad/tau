@@ -9,7 +9,7 @@
 
 /* eslint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
-import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
+import { exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -29,6 +29,7 @@ import {
   ChangeEventBus,
   EventCoalescer,
   MountTable,
+  policyAtRoot,
   ProviderRegistry,
   ResourceQueue,
   WorkspaceFileService,
@@ -49,6 +50,7 @@ import {
   createWorkerRevisionRegistry,
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
+import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -278,19 +280,22 @@ try {
   throw error;
 }
 
-exposeFileSystem(fileService, {
+exposeFileSystem(workspaceBridgeService(fileService), {
   /*
-   * A connection that names a consumer gets that consumer's composed view
-   * (architecture L4); one that does not gets the checkout itself, because the
-   * host's own capture, apply and language planes must read the working copy
-   * and never the overlays composed above it (V6).
+   * Every rooted connection names the surface it reads (architecture L4, W2):
+   * `'user'` and `'agent'` get that consumer's composed view, `'working-copy'`
+   * gets the checkout itself, because the host's own capture, apply and language
+   * planes must read the working copy and never the overlays composed above it
+   * (V6). A connection that names neither never reaches here (CI2).
    */
   handlerForRoot: (root, context, consumer) => {
     const filesystem = fileService.createRootedFileSystem(root, context);
-    const view =
-      consumer === undefined
-        ? filesystem
-        : composeView({ filesystem }, { consumer, overlays: [systemSkillsOverlay()], policy: tauPathPolicy });
+    const policy = policyAtRoot(tauPathPolicy, root);
+    /* A skill bundle belongs to a checkout, not to the dependency mount: the
+     * mount is opened as its own root since W11, and composing the overlay there
+     * would grow an `.agents` row inside `node_modules`. */
+    const overlays = root === dependencyMountRoot ? [] : [systemSkillsOverlay()];
+    const view = consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, overlays, policy });
     /*
      * The read content operations run here, over the view the connection asked
      * for (charter D2); `search` and `statTree` are already on it, answered from
@@ -299,8 +304,11 @@ exposeFileSystem(fileService, {
      * `writeFiles` and the four preflights — which the pipeline executes as one
      * batch and the view mask-checks before any provider I/O (D4).
      */
-    return withReadContentOps(view, tauPathPolicy);
+    return withReadContentOps(view, policy);
   },
+  /* The same layout the views above enforce, so a masked connection is not told
+   * about a path it may not read (CI1). */
+  policy: tauPathPolicy,
   changeEventBus: eventBus,
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),

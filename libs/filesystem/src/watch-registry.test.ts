@@ -1,9 +1,12 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- oxlint false positive: cannot resolve types through #types.js path import */
+// oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for topology tests
+import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WatchRegistry } from '#watch-registry.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import type { ChangeEvent, WatchEvent, WatchRequest } from '#types.js';
 import { tagEventAuthorities } from '#event-origin-registry.js';
+import { createWorkspaceFileService } from '#testing/workspace-service-harness.js';
 
 const testBackend = 'memory';
 
@@ -572,6 +575,44 @@ describe('WatchRegistry', () => {
       expect(failing).toHaveBeenCalledOnce();
       expect(succeeding).toHaveBeenCalledOnce();
       consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('rooted topology resets', () => {
+    it('should reset a rooted watcher after mount, unmount, and project-root configuration', async () => {
+      const context = await createWorkspaceFileService();
+      const handler = vi.fn();
+      const stop = context.service.createRootedFileSystem('/').watch({ paths: [''], recursive: true }, handler);
+
+      try {
+        await context.service.mount('/previews/topology', {
+          class: 'authored',
+          backend: 'memory',
+          storageRootKey: 'memory:preview:topology',
+        });
+        expect(handler).toHaveBeenLastCalledWith({ type: 'reset' });
+
+        handler.mockClear();
+        context.service.unmount('/previews/topology');
+        expect(handler).toHaveBeenLastCalledWith({ type: 'reset' });
+
+        handler.mockClear();
+        await context.service.configureProjectRoots({
+          projects: [
+            {
+              projectId: 'proj_ccccccccccccccccccccc',
+              backend: 'memory',
+              storageRootKey: 'memory:topology-project',
+              providerBasePath: 'project',
+            },
+          ],
+          roots: [],
+        });
+        expect(handler).toHaveBeenLastCalledWith({ type: 'reset' });
+      } finally {
+        stop();
+        context.service.dispose();
+      }
     });
   });
 });

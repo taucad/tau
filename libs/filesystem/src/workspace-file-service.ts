@@ -16,7 +16,7 @@ import type {
   WatchEvent,
   WorkspaceMutationContext,
 } from '#types.js';
-import { MutationPipeline, isProjectDirectoryPath } from '#mutation-pipeline.js';
+import { MutationPipeline, causeToMutationError, isProjectDirectoryPath } from '#mutation-pipeline.js';
 import type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
 import { RootedViews } from '#rooted-views.js';
 import type { RootedFileSystem } from '#rooted-views.js';
@@ -30,6 +30,7 @@ import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-u
 /* The scope discriminants are the backend layer's own vocabulary (D13); the
  * authority reads capabilities and admission answers, never a backend name. */
 import { isDurableScope, matchesProtectedMountScope, scopeForRouteConfig, toScope } from '#backend/scope.js';
+import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurrency.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 /* External change and cross-tab receive are their own modules (D13/W9); the
  * authority keeps the one public poll and owns nothing of either mechanism. */
@@ -64,6 +65,7 @@ import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#proj
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
+const treeIndexBuildAttempts = 3;
 
 /** One project or checkout route staged for installation, before its provider is resolved. */
 type StagedRouteMount = {
@@ -147,7 +149,7 @@ export class WorkspaceFileService {
   private _filePool: SharedPool | undefined;
   private readonly _mountTable: MountTable;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
-  private readonly _treeIndexes = new TreeIndexes(() => this._mountTable.listMounts().map((entry) => entry.prefix));
+  private readonly _treeIndexes = new TreeIndexes(() => this._mountTable.prefixes);
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
@@ -567,7 +569,30 @@ export class WorkspaceFileService {
    * @returns The {@link BulkMoveResult} describing successes + the failure (if any).
    */
   public async bulkMove(edits: readonly BulkMoveEdit[], context?: WorkspaceMutationContext): Promise<BulkMoveResult> {
-    return this._pipeline.bulkMove(async (source, target) => this.move(source, target, context), edits);
+    const resolved = [];
+    const failures = new Map<BulkMoveEdit, BulkMoveResult['failed'][number]>();
+    for (const edit of edits) {
+      try {
+        const source = resolveAuthorityPath(edit.source);
+        const target = resolveAuthorityPath(edit.target);
+        this._assertGenericMutationPath(source, target);
+        this._assertGenericMutationPath(target, source);
+        resolved.push({
+          edit,
+          source,
+          target,
+          sourceResolution: this._resolveProvider(source),
+          targetResolution: this._resolveProvider(target),
+        });
+      } catch (error) {
+        failures.set(edit, { edit, error: causeToMutationError(error, edit.source, edit.target) });
+      }
+    }
+    const result = await this._pipeline.bulkMove(resolved, context);
+    for (const failure of result.failed) {
+      failures.set(failure.edit, failure);
+    }
+    return { moved: result.moved, failed: edits.flatMap((edit) => failures.get(edit) ?? []) };
   }
 
   /*
@@ -1081,7 +1106,7 @@ export class WorkspaceFileService {
       providerBasePath,
       class: config.class,
     });
-    this._resetTopologyState();
+    this._resetTopologyState([canonicalPrefix]);
   }
 
   /**
@@ -1106,7 +1131,7 @@ export class WorkspaceFileService {
     }
     this._mountTable.unmount(canonicalPrefix);
     this._projectRoutes.delete(canonicalPrefix);
-    this._resetTopologyState();
+    this._resetTopologyState([canonicalPrefix]);
   }
 
   /**
@@ -1124,21 +1149,24 @@ export class WorkspaceFileService {
    */
   public disposeStorageRoot(storageRootKey: string): void {
     this._externalChanges.disconnectRoot(storageRootKey);
-    let topologyChanged = false;
+    const changed: string[] = [];
     for (const mount of this._mountTable.listMounts()) {
       if (mount.storageRootKey === storageRootKey) {
         this._mountTable.unmount(mount.prefix);
         this._projectRoutes.delete(mount.prefix);
-        topologyChanged = true;
+        changed.push(mount.prefix);
       }
     }
     const retainedDiscoveryRoots = this._discoveryRoots.filter((root) => root.storageRootKey !== storageRootKey);
     if (retainedDiscoveryRoots.length !== this._discoveryRoots.length) {
       this._discoveryRoots = retainedDiscoveryRoots;
-      topologyChanged = true;
+      /* A discovery root reaches the index only through the routes above, but
+       * which of them is the dropped root's business, not this method's: evict
+       * from the authority root, which covers every index there is. */
+      changed.push('/');
     }
-    if (topologyChanged) {
-      this._resetTopologyState();
+    if (changed.length > 0) {
+      this._resetTopologyState(changed);
     }
     this._registry.disposeRoot(storageRootKey);
   }
@@ -1175,10 +1203,12 @@ export class WorkspaceFileService {
 
     await this._externalChanges.evictReplacedRoots(stagedRoots);
 
-    let topologyChanged = await this._installRouteMounts(stagedInputs);
-    topologyChanged = (await this._installRouteMounts(stagedCheckoutInputs)) || topologyChanged;
-    topologyChanged = this._adoptRoutes(this._projectRoutes, stagedPrefixes) || topologyChanged;
-    topologyChanged = this._adoptRoutes(this._checkoutRoutes, stagedCheckoutPrefixes) || topologyChanged;
+    const changed = [
+      ...(await this._installRouteMounts(stagedInputs)),
+      ...(await this._installRouteMounts(stagedCheckoutInputs)),
+      ...this._adoptRoutes(this._projectRoutes, stagedPrefixes),
+      ...this._adoptRoutes(this._checkoutRoutes, stagedCheckoutPrefixes),
+    ];
     if (
       this._discoveryRoots.length !== configuration.roots.length ||
       this._discoveryRoots.some((current, index) => {
@@ -1186,11 +1216,13 @@ export class WorkspaceFileService {
         return next === undefined || current.storageRootKey !== next.storageRootKey;
       })
     ) {
-      topologyChanged = true;
+      /* Same reason as `disposeStorageRoot`: a changed discovery-root set can
+       * have moved any route's physical bytes, so no index is trustworthy. */
+      changed.push('/');
     }
     this._discoveryRoots = stagedRoots;
-    if (topologyChanged) {
-      this._resetTopologyState();
+    if (changed.length > 0) {
+      this._resetTopologyState(changed);
     }
     await this._externalChanges.syncRoots(stagedRoots);
   }
@@ -1344,13 +1376,13 @@ export class WorkspaceFileService {
    * policy, not by a second mount (RC6 / S5 work 2).
    *
    * @param staged - Staged mounts for one route family.
-   * @returns Whether any mount changed.
+   * @returns The prefixes whose mount changed.
    */
-  private async _installRouteMounts(staged: readonly StagedRouteMount[]): Promise<boolean> {
+  private async _installRouteMounts(staged: readonly StagedRouteMount[]): Promise<string[]> {
     const resolved = await Promise.all(
       staged.map(async (entry) => ({ ...entry, provider: await this._registry.getProvider(entry.scope) })),
     );
-    let topologyChanged = false;
+    const changed: string[] = [];
     for (const { prefix, provider, config, storageRootKey, providerBasePath } of resolved) {
       const existing = this._mountTable.getExactMount(prefix);
       if (
@@ -1365,10 +1397,10 @@ export class WorkspaceFileService {
           providerBasePath,
           class: 'authored',
         });
-        topologyChanged = true;
+        changed.push(prefix);
       }
     }
-    return topologyChanged;
+    return changed;
   }
 
   /**
@@ -1377,21 +1409,21 @@ export class WorkspaceFileService {
    *
    * @param live - Route prefixes currently installed for one kind; replaced in place.
    * @param staged - Route prefixes this configuration names.
-   * @returns Whether any route was unmounted.
+   * @returns The prefixes that were unmounted.
    */
-  private _adoptRoutes(live: Set<string>, staged: ReadonlySet<string>): boolean {
-    let topologyChanged = false;
+  private _adoptRoutes(live: Set<string>, staged: ReadonlySet<string>): string[] {
+    const unmounted: string[] = [];
     for (const prefix of live) {
       if (!staged.has(prefix)) {
         this._mountTable.unmount(prefix);
-        topologyChanged = true;
+        unmounted.push(prefix);
       }
     }
     live.clear();
     for (const prefix of staged) {
       live.add(prefix);
     }
-    return topologyChanged;
+    return unmounted;
   }
 
   private _previewInstance(prefix: string): string | undefined {
@@ -1405,7 +1437,7 @@ export class WorkspaceFileService {
     if (hadRoute) {
       this._mountTable.unmount(path);
       this._projectRoutes.delete(path);
-      this._resetTopologyState();
+      this._resetTopologyState([path]);
     }
     if (mount !== undefined) {
       this._pipeline.emitChangeEvent({ type: 'directoryDeleted', path, backend: mount.backend });
@@ -1421,9 +1453,18 @@ export class WorkspaceFileService {
     }
   }
 
-  private _resetTopologyState(): void {
+  /**
+   * Publish one topology change: the cached reads it invalidates and the reset
+   * every watcher of a moved route needs.
+   *
+   * @param prefixes - The mount prefixes that changed. Each evicts its own index
+   * and the one that now covers it; every other root stays warm (W7c).
+   */
+  private _resetTopologyState(prefixes: readonly string[]): void {
     this._filePool?.clear();
-    this._treeIndexes.clear();
+    for (const prefix of prefixes) {
+      this._treeIndexes.evict(prefix);
+    }
     this._watchRegistry.emitResetAll();
   }
 
@@ -1458,69 +1499,71 @@ export class WorkspaceFileService {
     options?: { signal?: AbortSignal },
   ): Promise<FileStatEntry[]> {
     const { walkPath, basePath } = scan;
-    const fileStats: FileStatEntry[] = [];
-
-    const collectStats = async (currentPath: string, innerBasePath: string): Promise<void> => {
+    const assertLive = (): void => {
       if (options?.signal?.aborted) {
         throw new DOMException('The operation was aborted.', 'AbortError');
       }
+    };
 
+    /** One directory's rows, batched when the provider offers the batch. */
+    const listEntries = async (directory: string): Promise<Array<{ name: string } & FileStat>> => {
+      assertLive();
       if (provider.readdirWithStats) {
-        const statsEntries = await provider.readdirWithStats(currentPath);
-        for (const entry of statsEntries) {
-          if (options?.signal?.aborted) {
-            throw new DOMException('The operation was aborted.', 'AbortError');
-          }
+        return provider.readdirWithStats(directory);
+      }
+      const names = await provider.readdir(directory);
+      return mapConcurrent(names, statConcurrency, async (name) => ({
+        name,
+        ...(await provider.stat(joinRelativePath(directory, name))),
+      }));
+    };
 
-          const fullPath = joinRelativePath(currentPath, entry.name);
-          if (entry.type === 'file') {
-            const relativePath = innerBasePath === '' ? fullPath : fullPath.slice(innerBasePath.length + 1);
-            const segments = relativePath.split('/');
-            const filename = segments.at(-1) ?? relativePath;
-            fileStats.push({
-              path: relativePath,
-              name: filename,
-              type: 'file',
-              size: entry.size,
-              mtimeMs: entry.mtimeMs,
-              ...fileMetadataFields(entry),
-            });
-          } else {
-            // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for recursive tree walk
-            await collectStats(fullPath, innerBasePath);
-          }
-        }
-      } else {
-        const entries = await provider.readdir(currentPath);
+    /* Listed one tree level at a time from a bounded pool. A bounded *recursion*
+     * would instead put `directoryConcurrency ** depth` listings in flight, which
+     * on a real tree is no bound at all. */
+    const listings = new Map<string, Array<{ name: string } & FileStat>>();
+    let level = [walkPath];
+    while (level.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- One level at a time is what bounds the pool.
+      const resolved = await mapConcurrent(
+        level,
+        directoryConcurrency,
+        async (directory) => [directory, await listEntries(directory)] as const,
+      );
+      const next: string[] = [];
+      for (const [directory, entries] of resolved) {
+        listings.set(directory, entries);
         for (const entry of entries) {
-          if (options?.signal?.aborted) {
-            throw new DOMException('The operation was aborted.', 'AbortError');
-          }
-
-          const fullPath = joinRelativePath(currentPath, entry);
-          // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for recursive tree walk
-          const stat = await provider.stat(fullPath);
-          if (stat.type === 'file') {
-            const relativePath = innerBasePath === '' ? fullPath : fullPath.slice(innerBasePath.length + 1);
-            const segments = relativePath.split('/');
-            const filename = segments.at(-1) ?? relativePath;
-            fileStats.push({
-              path: relativePath,
-              name: filename,
-              type: 'file',
-              size: stat.size,
-              mtimeMs: stat.mtimeMs,
-              ...fileMetadataFields(stat),
-            });
-          } else {
-            // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for recursive tree walk
-            await collectStats(fullPath, innerBasePath);
+          if (entry.type !== 'file') {
+            next.push(joinRelativePath(directory, entry.name));
           }
         }
       }
-    };
+      level = next;
+    }
 
-    await collectStats(walkPath, basePath);
+    /* Emitted depth-first, in the order the sequential walk produced: the index
+     * keeps children in first-mention order, and `search` caps its results. */
+    const fileStats: FileStatEntry[] = [];
+    const emit = (directory: string): void => {
+      for (const entry of listings.get(directory) ?? []) {
+        const fullPath = joinRelativePath(directory, entry.name);
+        if (entry.type !== 'file') {
+          emit(fullPath);
+          continue;
+        }
+        const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
+        fileStats.push({
+          path: relativePath,
+          name: relativePath.split('/').at(-1) ?? relativePath,
+          type: 'file',
+          size: entry.size,
+          mtimeMs: entry.mtimeMs,
+          ...fileMetadataFields(entry),
+        });
+      }
+    };
+    emit(walkPath);
     return fileStats;
   }
 
@@ -1531,13 +1574,23 @@ export class WorkspaceFileService {
    * @returns The warm index for that root.
    */
   private async _treeIndexFor(root: string): Promise<TreeIndex> {
-    const warm = this._treeIndexes.get(root);
-    if (warm !== undefined) {
-      return warm;
+    for (let attempt = 0; attempt < treeIndexBuildAttempts; attempt++) {
+      const warm = this._treeIndexes.get(root);
+      if (warm !== undefined) {
+        return warm;
+      }
+      const generation = this._treeIndexes.generation(root);
+      const { provider, path } = this._resolveProvider(root);
+      // oxlint-disable-next-line no-await-in-loop -- An invalidated cold scan must retry from current storage.
+      const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
+      const published = this._treeIndexes.build(root, stats, generation);
+      if (published !== undefined) {
+        return published;
+      }
     }
     const { provider, path } = this._resolveProvider(root);
     const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-    return this._treeIndexes.build(root, stats);
+    return this._treeIndexes.buildDetached(stats);
   }
 
   private _treeEntriesToNodes(entries: Map<string, TreeEntry>): FileTreeNode[] {

@@ -2,13 +2,10 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { expandPath, treeItem } from '#support/file-tree.js';
 
 const seedRoute = '/__e2e/project-file-tree';
 const seedProjectName = 'sgenoud/models file-tree e2e';
-
-const filesPane = (): Locator => selectors.getByRole('region', { name: /^Files for /u }).first();
-const treeItem = (path: string): Locator =>
-  filesPane().getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
 
 const editorTab = (path: string): Locator => selectors.getByCss(`.dv-tab[aria-label="${path}"]`);
 const tabTooltipTrigger = (path: string): Locator =>
@@ -24,24 +21,6 @@ const openViewerFile = async (name: RegExp, path: string): Promise<void> => {
   await target.expectVisible(fileDrawer);
   await target.click(fileDrawer.getByRole('option', { name }));
   await target.expectVisible(editorTab(path), 15_000);
-};
-
-const expandPath = async (path: string): Promise<void> => {
-  const segments = path.split('/');
-  let current = '';
-  for (const segment of segments) {
-    current = current ? `${current}/${segment}` : segment;
-    const item = treeItem(current);
-    // oxlint-disable-next-line no-await-in-loop -- Each child exists only after its parent expands.
-    await target.expectVisible(item, 15_000);
-    // oxlint-disable-next-line no-await-in-loop -- Folder expansion is intentionally sequential.
-    if ((await target.getAttribute(item, 'aria-expanded')) !== 'true') {
-      // oxlint-disable-next-line no-await-in-loop -- Folder expansion is intentionally sequential.
-      await target.click(item, { position: { x: 8, y: 14 } });
-    }
-    // oxlint-disable-next-line no-await-in-loop -- Folder expansion is intentionally sequential.
-    await target.expectAttribute(item, 'aria-expanded', 'true', 15_000);
-  }
 };
 
 const openSeededProject = async (): Promise<void> => {

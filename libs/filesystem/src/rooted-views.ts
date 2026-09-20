@@ -38,7 +38,7 @@ import type {
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { TreeIndex, TreeIndexAdmits, TreeSearchOptions } from '#tree-index.js';
 import type { WalkOptions } from '#content-ops/walk.js';
-import { preflightCreate, preflightDelete, preflightMove } from '#mutation-pipeline.js';
+import { causeToMutationError, preflightCreate, preflightDelete, preflightMove } from '#mutation-pipeline.js';
 import type { BulkMoveEdit, BulkMoveResult, MutationPipeline } from '#mutation-pipeline.js';
 import type { WatchRegistry } from '#watch-registry.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
@@ -353,8 +353,32 @@ export class RootedViews {
       }
       await writeFile(target, await readFile(source));
     };
-    const bulkMove = async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> =>
-      this._pipeline.bulkMove(move, edits);
+    const bulkMove = async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => {
+      const resolved = [];
+      const failures = new Map<BulkMoveEdit, BulkMoveResult['failed'][number]>();
+      for (const edit of edits) {
+        try {
+          const source = resolveLocal(edit.source);
+          const target = resolveLocal(edit.target);
+          assertMutableRoot(source.localPath);
+          assertMutableRoot(target.localPath);
+          resolved.push({
+            edit,
+            source: source.authorityPath,
+            target: target.authorityPath,
+            sourceResolution: source.resolution,
+            targetResolution: target.resolution,
+          });
+        } catch (error) {
+          failures.set(edit, { edit, error: causeToMutationError(error, edit.source, edit.target) });
+        }
+      }
+      const result = await this._pipeline.bulkMove(resolved, mutationContext);
+      for (const failure of result.failed) {
+        failures.set(failure.edit, failure);
+      }
+      return { moved: result.moved, failed: edits.flatMap((edit) => failures.get(edit) ?? []) };
+    };
     const writeFiles = async (files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void> => {
       await this._pipeline.writeFiles(
         Object.entries(files).map(([path, file]) => {
@@ -428,11 +452,13 @@ export class RootedViews {
     const search = async (query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]> => {
       assertCurrent();
       const index = await this._treeIndexFor(root);
+      assertCurrent();
       return index.searchFiles(query, options);
     };
     const statTree = async (path: string, options?: { admits?: TreeIndexAdmits }): Promise<FileStatEntry[]> => {
       const { localPath } = resolveLocal(path);
       const index = await this._treeIndexFor(root);
+      assertCurrent();
       return index.getDirectoryStat(localPath, options);
     };
     const watch = (request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) => {

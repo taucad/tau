@@ -20,6 +20,7 @@ import { createRootedContentClient } from '@taucad/fs-client/rooted-content-clie
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError, WorkspaceScope } from '@taucad/filesystem';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
   getHomeStorageBackend,
@@ -29,7 +30,8 @@ import {
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
-import type { RootedBridgeConsumer, WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
+import type { RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -140,13 +142,49 @@ type DeleteFileOptions = {
 };
 
 /**
+ * What the record stores write through the root that owns the path (W6, H8).
+ *
+ * The whole {@link RootedContentClient} is the unmasked working copy, so it is
+ * not what the context carries: a record store reads, writes, lists and removes
+ * one path at a time, and never relocates one or writes under a precondition.
+ *
+ * @public
+ */
+export type RecordFilesClient = Pick<
+  RootedContentClient,
+  'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'unlink' | 'rmdir'
+>;
+
+/**
+ * What the parameter sidecar writes through the root that owns the path (W6, H8).
+ *
+ * `createParameterSetService`'s own slice: checked single-file writes, the
+ * relocation a renamed target needs, and the directory bookkeeping around them.
+ *
+ * @public
+ */
+export type ParameterFilesClient = Pick<
+  RootedContentClient,
+  'exists' | 'readFile' | 'writeFileChecked' | 'move' | 'unlink' | 'rmdir' | 'mkdir'
+>;
+
+/**
+ * What an ephemeral preview mount takes (W6, H8).
+ *
+ * One batch per mount, so the preview's whole snapshot lands under one lock set.
+ *
+ * @public
+ */
+export type PreviewFilesClient = Pick<RootedContentClient, 'writeFiles'>;
+
+/**
  * The authority's **topology** surface (charter D5, O1.2).
  *
  * Project discovery and the project-directory lifecycle: the four calls whose
  * subject is a *project directory*, not a file inside one. Mount, unmount and
  * storage-root teardown are {@link WorkspaceFacade}'s; content belongs to the
- * root that owns the path ({@link RootedContentClient}); a physical scope the
- * mount table does not route is {@link ScopedStorageClient}'s.
+ * root that owns the path ({@link RecordFilesClient} and its siblings); a
+ * physical scope the mount table does not route is {@link ScopedStorageClient}'s.
  *
  * No content method may reappear here. The authority-global surface walks the
  * raw provider, so any content call on it is an unmasked read or write of a
@@ -276,7 +314,7 @@ type FileManagerContextType = {
    * current root, so an archive taken while a linked checkout is selected is
    * the checkout the workbench is showing.
    */
-  getZippedDirectory: (path: string, options?: { versionedOnly?: boolean }) => Promise<Blob>;
+  getZippedDirectory: (path: string, options?: ContentExportFilter) => Promise<Blob>;
   /**
    * One project's versioned bytes, read through that project's *own* composed
    * view — the snapshot a duplicate journals (authority Rule 12, charter D11).
@@ -289,19 +327,35 @@ type FileManagerContextType = {
    */
   readVersionedProjectFiles: (projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   /**
-   * Content through the root that owns the path (charter D5, D12).
+   * The record stores' slice of the root that owns the path (charter D5, D12).
    *
-   * The trusted stores' surface: composer records, chat records and their
-   * attachments, thumbnails, the parameter sidecar, `tau.json` and the project
-   * library file. Absolute paths as everywhere else in the UI; each call
-   * classifies the path's route and issues the operation on that root's own
-   * `'working-copy'` connection, because host record writers read and write the
-   * checkout itself and never the overlays above it (architecture V6, D8).
+   * Composer records, chat records and their attachments, thumbnails, `tau.json`
+   * and the project library file. Absolute paths as everywhere else in the UI;
+   * each call classifies the path's route and issues the operation on that
+   * root's own `'working-copy'` connection, because host record writers read and
+   * write the checkout itself and never the overlays above it (architecture V6,
+   * D8).
    *
    * Not {@link FileManagerContextType.client}: the authority-global surface is
-   * topology and owns no content.
+   * topology and owns no content. Not the whole rooted surface either — that is
+   * the unmasked working copy, and no component takes more of it than its own
+   * store family writes (H8/EQ4).
    */
-  files: RootedContentClient;
+  recordFiles: RecordFilesClient;
+  /**
+   * The parameter sidecar's slice (`parameter-set-service.ts`).
+   *
+   * One file at a time, under its own precondition, and relocated when a
+   * parameter set's target moves — never a batch and never a listing.
+   */
+  parameterFiles: ParameterFilesClient;
+  /**
+   * The ephemeral preview mount's slice (`use-cad-preview.tsx`).
+   *
+   * One `/previews/<instance>` memory mount, written whole on every mount and
+   * never read back through here.
+   */
+  previewFiles: PreviewFilesClient;
   /**
    * Physical-scope reads for the `/files` workspace browser (charter D5).
    *
@@ -748,6 +802,13 @@ export function FileManagerProvider({
     [bridgeOpener],
   );
 
+  /*
+   * The one-shot read a duplicate journals, on its own connection.
+   *
+   * Not borrowed from the owner below: this reads a project the workbench is
+   * usually *not* rooted at, once per duplication, and the owner would then hold
+   * a `'user'` port open for every project ever duplicated this session.
+   */
   const readVersionedProjectFiles = useCallback(
     async (projectRoot: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => {
       await whenServicesReady();
@@ -763,19 +824,21 @@ export function FileManagerProvider({
   );
 
   /**
-   * One owner for open, reuse and dispose (charter D12).
+   * One owner for open, reuse and dispose, per `(root, consumer)` (charter D12, W6).
    *
-   * A root's `'working-copy'` connection opens the first time a trusted store
-   * touches a path under it and is held until the worker is replaced; the effect
-   * below releases what a replaced client opened.
+   * A connection opens the first time a trusted store touches a path under its
+   * root and is held until the worker is replaced; the effect below releases what
+   * a replaced owner opened. The consumer is half the key because it is half the
+   * capability — an `'agent'` caller must never be answered with the unmasked
+   * handle a record store opened first.
    */
-  const files = useMemo(
+  const rootedConnections = useMemo(
     () =>
       createRootedContentClient({
-        open: async (root) => {
+        open: async (root, consumer: RootedBridgeConsumer) => {
           await whenServicesReady();
           const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-          const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(root, 'working-copy'));
+          const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(root, consumer));
           return {
             files: proxy,
             dispose: () => {
@@ -789,10 +852,19 @@ export function FileManagerProvider({
 
   useEffect(
     () => () => {
-      files.dispose();
+      rootedConnections.dispose();
     },
-    [files],
+    [rootedConnections],
   );
+
+  /*
+   * The trusted stores' working copy, handed out one narrowed slice at a time
+   * (H8/EQ4). Host record writers read and write the checkout itself and never
+   * the overlays above it (architecture V6, charter D8), so all three slices come
+   * off the one `'working-copy'` client and each carries only what its own family
+   * does — the context never exposes the whole surface.
+   */
+  const workingCopyFiles = useMemo(() => rootedConnections.files('working-copy'), [rootedConnections]);
 
   /**
    * The `/files` browser's scoped reads (charter D5).
@@ -805,17 +877,17 @@ export function FileManagerProvider({
     /* One cast, for the one overloaded member: `readFile` answers text or bytes. */
     const readFile = (async (path: string, options: { scope: WorkspaceScope }) => {
       const proxy = await getReadiedProxy();
-      return proxy.readFile(path, options);
+      return proxy.readScopedFile(path, options);
     }) as ScopedStorageClient['readFile'];
     return {
       readFile,
       readShallowDirectory: async (path, options) => {
         const proxy = await getReadiedProxy();
-        return proxy.readShallowDirectory(path, options);
+        return proxy.readScopedShallowDirectory(path, options);
       },
       getZippedDirectory: async (path, options) => {
         const proxy = await getReadiedProxy();
-        return proxy.getZippedDirectory(path, options);
+        return proxy.getScopedZippedDirectory(path, options);
       },
     };
   }, [getReadiedProxy]);
@@ -826,8 +898,9 @@ export function FileManagerProvider({
         if (contentService === undefined) {
           throw new FileManagerNotReadyError('proxy-timeout');
         }
-        /* The runtime reads the checkout itself, never a consumer's view (G6). */
-        return openRootedFileSystemBridge(rootDirectory, 'working-copy');
+        /* Quick Look and the RPC handlers run this runtime over project code the
+         * agent wrote, so it reads the agent's view, not the working copy (CI1, W14). */
+        return openRootedFileSystemBridge(rootDirectory, 'agent');
       }),
     // A successful service initialization is the host's existing binding
     // identity. Rotating the opaque filesystem here makes every owner keyed
@@ -991,7 +1064,7 @@ export function FileManagerProvider({
   );
 
   const getZippedDirectory = useCallback(
-    async (path: string, options?: { versionedOnly?: boolean }): Promise<Blob> => {
+    async (path: string, options?: ContentExportFilter): Promise<Blob> => {
       const { contentService } = await whenServicesReady();
       return contentService.getZippedDirectory(path, options);
     },
@@ -1158,7 +1231,9 @@ export function FileManagerProvider({
       getDirectoryStat,
       getZippedDirectory,
       readVersionedProjectFiles,
-      files,
+      recordFiles: workingCopyFiles,
+      parameterFiles: workingCopyFiles,
+      previewFiles: workingCopyFiles,
       scopedStorage,
       client,
       workspace,
@@ -1196,7 +1271,7 @@ export function FileManagerProvider({
       getDirectoryStat,
       getZippedDirectory,
       readVersionedProjectFiles,
-      files,
+      workingCopyFiles,
       scopedStorage,
       client,
       workspace,

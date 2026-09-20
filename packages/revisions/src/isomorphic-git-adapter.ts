@@ -803,13 +803,25 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       });
     },
 
+    /*
+     * Also the open seam: `revision-effects.ensureStore` calls this once per
+     * authority, before the first question is asked of the store, and
+     * `isomorphic-git`'s own `init` returns early when the config is already
+     * there. So a project created by an older build reaches this with a stale
+     * generated block, and the merge below is its migration (G0-9) — written only
+     * when the merged bytes differ, so a current project's working copy is not
+     * touched on every open and a rewrite cannot repeat.
+     */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
       if (input.createSetupFiles !== false) {
         const ignorePath = generatedIgnorePath;
         const existing = (await filesystem.exists(ignorePath))
           ? await filesystem.readFile(ignorePath, 'utf8')
           : undefined;
-        await filesystem.writeFile(ignorePath, generatedIgnoreContent(existing, input.additionalIgnores ?? []));
+        const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
+        if (ignore !== existing) {
+          await filesystem.writeFile(ignorePath, ignore);
+        }
         /*
          * Beside the ignore file and versioned like it (D24), exactly as the disk
          * leg writes it (`native-git-port.ts`).
@@ -828,7 +840,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         const attributes = (await filesystem.exists(attributesPath))
           ? await filesystem.readFile(attributesPath, 'utf8')
           : undefined;
-        await filesystem.writeFile(attributesPath, generatedGitattributesContent(attributes));
+        const merged = generatedGitattributesContent(attributes);
+        if (merged !== attributes) {
+          await filesystem.writeFile(attributesPath, merged);
+        }
       }
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.

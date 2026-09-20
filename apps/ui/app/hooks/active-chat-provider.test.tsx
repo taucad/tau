@@ -239,7 +239,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
       }
     },
   };
-  return { useFileManager: () => ({ files: client }) };
+  return { useFileManager: () => ({ recordFiles: client }) };
 });
 
 const {

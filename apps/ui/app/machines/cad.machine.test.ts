@@ -18,6 +18,22 @@ const noop = () => {
   /* No-op */
 };
 
+/* Observe the connection the kernel's filesystem opens, without changing it: the
+ * thunk runs when the runtime binds, so the pin calls it (W14). */
+const kernelBridgeOpens = vi.hoisted(() => [] as Array<() => unknown>);
+
+vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
+  type RuntimeFileSystemModule = typeof import('@taucad/runtime/filesystem');
+  const original = await importOriginal<RuntimeFileSystemModule>();
+  return {
+    ...original,
+    fromFileSystemBridge: (open: Parameters<RuntimeFileSystemModule['fromFileSystemBridge']>[0]) => {
+      kernelBridgeOpens.push(open);
+      return original.fromFileSystemBridge(open);
+    },
+  };
+});
+
 const createMockAppRuntimeClient = () => createMockRuntimeClient();
 
 /** A render that settled with its own geometry, so the machine has nothing to re-assert. */
@@ -1806,6 +1822,45 @@ describe('cadMachine', () => {
       expect(selected?.[0]?.message).toBe('The selected CAD render failed');
       expect(selectCadFailureIssues(actor.getSnapshot())).toBe(selected);
       actor.stop();
+    });
+  });
+
+  describe('the surface the kernel reads', () => {
+    /* The kernel executes project code the agent wrote, so its filesystem is the
+     * agent's view of the checkout and not the working copy (CI1, W14). */
+    it('should open the kernel filesystem as the agent consumer', async () => {
+      const openFileSystemBridge = vi.fn(() => ({ port: new MessageChannel().port1, dispose: noop }));
+      const readyFileManager = createActor(
+        setup({}).createMachine({
+          initial: 'ready',
+          context: { contentService: { id: 'content-service' }, openFileSystemBridge },
+          states: { ready: {} },
+        }),
+      ).start();
+      kernelBridgeOpens.length = 0;
+
+      /* The thunk is captured while the kernel options are built, before the real
+       * client is created over them — so how that connection settles is not this
+       * row's subject, only which surface it asked for. */
+      const actor = createActor(cadMachine, {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileManagerRef: readyFileManager as unknown as NonNullable<CadContext['fileManagerRef']>,
+          kernelOptionsFactory: createKernelOptionsFactory(),
+          fileSystemRoot: '/projects/test',
+        },
+      }).start();
+      await waitFor(actor, (state) => state.value !== 'connecting');
+
+      const open = kernelBridgeOpens.at(-1);
+      if (!open) {
+        throw new TypeError('Expected the kernel to hold a bridge opener.');
+      }
+      open();
+
+      expect(openFileSystemBridge).toHaveBeenCalledExactlyOnceWith('/projects/test', 'agent');
+      actor.stop();
+      readyFileManager.stop();
     });
   });
 

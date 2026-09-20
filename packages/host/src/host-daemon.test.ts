@@ -15,6 +15,8 @@ import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 import { tauRemoteUrl } from '@taucad/revisions';
 import type { RuntimeClient } from '@taucad/runtime/client';
+import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
+import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
@@ -22,6 +24,20 @@ import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
+
+/* Observe the filesystem the daemon binds to its runtime child, without changing
+ * it: the captured thunk is the connection that child's bridge opens. */
+const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
+vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@taucad/runtime/filesystem')>();
+  return {
+    ...original,
+    fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {
+      runtimeFileSystemOpens.push(open);
+      return original.fromFileSystemBridge(open);
+    },
+  };
+});
 
 /* Observe the tool-surface decision the daemon forwards, without changing it. */
 const registrySpy = vi.spyOn(agentTools, 'createHostToolRegistry');
@@ -677,6 +693,71 @@ describe('startHostDaemon', () => {
     /* Placement is not a mode any more (S11): the client learns where its chat
        works from the checkout registry, never from a capability array. */
     expect(ready).not.toContain('"revisions"');
+
+    await daemon.close();
+  }, 20_000);
+
+  /* G0-2/W14: the runtime child executes project code the agent wrote, so the
+   * daemon binds it the agent's view. The trusted planes beside it — the
+   * parameter authority and the revisions engine — keep the working copy. */
+  it('should bind the runtime child a masked view and keep the revisions filesystem raw', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-runtime-view-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    registrySpy.mockClear();
+    runtimeFileSystemOpens.length = 0;
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+    await daemon.ready;
+
+    const workspaceRoot = join(temporaryDirectory, 'workspace');
+    await Promise.all([
+      mkdir(join(workspaceRoot, '.git'), { recursive: true }),
+      mkdir(join(workspaceRoot, '.tau'), { recursive: true }),
+      mkdir(join(workspaceRoot, 'vendor', 'dep', '.git'), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(workspaceRoot, '.git', 'config'), '[remote "origin"]\n'),
+      writeFile(join(workspaceRoot, 'vendor', 'dep', '.git', 'config'), '[remote "vendored"]\n'),
+      writeFile(join(workspaceRoot, '.tau', 'binding.json'), '{}\n'),
+      writeFile(join(workspaceRoot, 'main.ts'), 'export const main = 1;\n'),
+    ]);
+
+    const runtimeClient = registrySpy.mock.lastCall?.[0]?.runtimeClient;
+    if (!runtimeClient) {
+      throw new TypeError('Expected the daemon to build its tool registry over a runtime client.');
+    }
+    await runtimeClient(workspaceRoot);
+
+    const open = runtimeFileSystemOpens.at(-1);
+    if (!open) {
+      throw new TypeError('Expected the daemon to bind the runtime child a filesystem.');
+    }
+    const child = createFileSystemBridgeProxy(open());
+    try {
+      await expect(child.readFile('.git/config', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(child.readFile('vendor/dep/.git/config', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+      await expect(child.exists('.tau/binding.json')).resolves.toBe(false);
+      await expect(child.readFile('main.ts', 'utf8')).resolves.toBe('export const main = 1;\n');
+    } finally {
+      child.dispose();
+    }
+
+    /* The revisions engine owns `.git/**`, so its provider is still the checkout. */
+    const { filesystem } = requiredDaemonComposition();
+    const revisionProvider = await Promise.resolve(
+      filesystem({
+        id: 'live',
+        projectId: 'workspace',
+        root: workspaceRoot,
+        kind: 'live',
+        branch: 'main',
+        baseRevisionId: undefined,
+      }),
+    );
+    /* `toContain`, because the daemon's own `git init` writes its `[core]` block
+     * into the same file this fixture seeded. */
+    await expect(revisionProvider.readFile('.git/config', 'utf8')).resolves.toContain('[remote "origin"]');
 
     await daemon.close();
   }, 20_000);

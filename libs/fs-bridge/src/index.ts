@@ -1,5 +1,6 @@
 export {
   bindMutationContextForPort,
+  consumableBytes,
   createFileSystemBridgeProxy,
   createFileSystemBridgePort,
   createTransferredFileSystemBridgeProxy,
@@ -11,6 +12,7 @@ export {
   serveFileSystemBridgePort,
   waitForWorkerReady,
   workerReadyMessageType,
+  workspaceBridgeService,
 } from '#filesystem-bridge.js';
 
 export type {
@@ -28,6 +30,7 @@ export type {
   FileSystemBridgeOptions,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
+  RootedBridgeConsumer,
   RootedFileSystemHandlerFactory,
 } from '#filesystem-bridge.js';
 
@@ -41,6 +44,7 @@ export {
 export type {
   FileSystemBridgeHello,
   FileSystemBridgeRootedCalls,
+  FileSystemBridgeScopedReads,
   FileSystemBridgeRuntimeService,
   FileSystemBridgeService,
   FileSystemBridgeUnrootedCalls,

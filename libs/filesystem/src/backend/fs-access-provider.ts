@@ -16,16 +16,11 @@ import type {
   ProviderCapabilities,
 } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { fileStatFromFile } from '#content-metadata.js';
 import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
-
-/**
- * Concurrent `getFile()` calls per directory listing. High enough to hide
- * per-handle latency, low enough not to swamp the File System Access queue.
- */
-const statConcurrency = 16;
 
 type FileSystemDirectoryEntryHandle = FileSystemDirectoryHandle | FileSystemFileHandle;
 type IterableFileSystemDirectoryHandle = FileSystemDirectoryHandle & {
@@ -216,21 +211,11 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       handles.push(entry);
     }
 
-    const result: Array<{ name: string } & FileStat> = [];
-    for (let offset = 0; offset < handles.length; offset += statConcurrency) {
-      // oxlint-disable-next-line no-await-in-loop -- Chunked awaits are what bounds concurrency to statConcurrency.
-      const chunk = await Promise.all(
-        handles
-          .slice(offset, offset + statConcurrency)
-          .map(async ([name, handle]) =>
-            handle.kind === 'directory'
-              ? ({ name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat)
-              : { name, ...(await fileStatFromFile(await handle.getFile())) },
-          ),
-      );
-      result.push(...chunk);
-    }
-    return result;
+    return mapConcurrent(handles, statConcurrency, async ([name, handle]) =>
+      handle.kind === 'directory'
+        ? ({ name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat)
+        : { name, ...(await fileStatFromFile(await handle.getFile())) },
+    );
   }
 
   /**

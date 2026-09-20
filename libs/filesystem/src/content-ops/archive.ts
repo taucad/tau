@@ -4,24 +4,73 @@
  * @module
  */
 
-import { contents } from '#content-ops/contents.js';
+import { joinRelativePath } from '@taucad/utils/path';
 import type { ContentFileSystem } from '#content-ops/contents.js';
+import { walk } from '#content-ops/walk.js';
 import type { WalkOptions } from '#content-ops/walk.js';
+
+/**
+ * Bytes one archive may hold before it refuses.
+ *
+ * JSZip keeps every file it is handed until it generates, so this ceiling — not
+ * the size of the tree — is what bounds an archive's resident bytes. A tree over
+ * it answers {@link archiveTooLargeCode} instead of taking the tab down with it.
+ *
+ * @public
+ */
+export const archiveByteCeiling: number = 256 * 1024 * 1024;
+
+/** The refusal an archive over its ceiling answers. @public */
+export const archiveTooLargeCode = 'ARCHIVE_TOO_LARGE';
+
+/** What an archive may hold, beyond the walk's own filter. @public */
+export type ArchiveOptions = WalkOptions & {
+  /** Byte ceiling for this archive; {@link archiveByteCeiling} when omitted. */
+  readonly maxBytes?: number;
+};
 
 /**
  * Package a directory's subtree into a ZIP archive.
  *
+ * Each file is read as the walk reaches it and handed straight to the ZIP
+ * writer — there is no whole-tree map in front of it — and the running total is
+ * checked before and after each read, so the writer never receives more than
+ * the ceiling.
+ *
  * @param filesystem - Provider, rooted filesystem or composed view to read through.
  * @param path       - Root-relative directory to archive; `''` is the surface's own root.
- * @param options    - Optional caller filter and abort signal.
+ * @param options    - Optional caller filter, abort signal and byte ceiling.
  * @returns ZIP archive as a `Blob`.
+ * @throws An `Error` carrying `code: 'ARCHIVE_TOO_LARGE'` when the subtree exceeds the ceiling.
  * @public
  */
-export async function archive(filesystem: ContentFileSystem, path: string, options?: WalkOptions): Promise<Blob> {
+export async function archive(filesystem: ContentFileSystem, path: string, options?: ArchiveOptions): Promise<Blob> {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- JSZip is the library's class name
   const { default: JSZip } = await import('jszip');
+  const ceiling = options?.maxBytes ?? archiveByteCeiling;
   const zip = new JSZip();
-  for (const [relativePath, content] of Object.entries(await contents(filesystem, path, options))) {
+  let archivedBytes = 0;
+  const refuse = (): never => {
+    throw Object.assign(new Error(`Archive of '${path}' exceeds its ${String(ceiling)}-byte ceiling.`), {
+      code: archiveTooLargeCode,
+    });
+  };
+  for await (const { relativePath, kind } of walk(filesystem, path, options)) {
+    if (kind !== 'file') {
+      continue;
+    }
+    const filePath = joinRelativePath(path, relativePath);
+    // oxlint-disable-next-line no-await-in-loop -- One file is preflighted immediately before its read.
+    const declared = await filesystem.stat(filePath);
+    if (declared.size > ceiling - archivedBytes) {
+      refuse();
+    }
+    // oxlint-disable-next-line no-await-in-loop -- One file resident at a time is the point of the ceiling.
+    const content = await filesystem.readFile(filePath);
+    archivedBytes += content.byteLength;
+    if (archivedBytes > ceiling) {
+      refuse();
+    }
     zip.file(relativePath, content);
   }
   return zip.generateAsync({ type: 'blob' });

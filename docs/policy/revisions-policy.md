@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-18'
+updated: '2026-09-20'
 related:
   - docs/research/git-storage-substrate-charter.md
   - docs/architecture/revisions-cloud-handbook.md
@@ -94,7 +94,7 @@ Use `classify()` as the sole answer for storage class, versioning, agent access,
 | `.tau/chats/**`, `.tau/runs/**`, `.tau/artifacts/**`, `.tau/tool-results/**`, `.tau/offloaded-tool-results/**`, `exports/**`, `thumbnail.webp`                                          | records             | no        | read-only             | host through the selected checkout authority       |
 | `.git/**`, `.jj/**`, `.tau/binding.json`                                                                                                                                                | control-plane       | never     | hidden                | revision or workspace authority                    |
 
-Keep all record families readable and non-writable to agents and dimmed for users. Hide the control plane from both composed views. Exclude both classes from revisions and project exports. Derive `.gitignore` and `.gitattributes` from the registry; never maintain a second prefix or glob list. Refuse a linked import before materialization when its selected tree contains a tracked path that the registry cannot version; never make that path disappear from the next revision.
+Keep all record families readable and non-writable to agents and dimmed for users. Hide the control plane from both composed views, at any depth: a nested repository's `.git/**` or `.jj/**` (a vendored dependency, a submodule checkout) is control plane exactly as the project's own is, so it is never captured and never agent-writable. A project recorded before this rule that carried such files records their removal at its next revision; history is not rewritten. Exclude both classes from revisions and project exports. Derive `.gitignore` and `.gitattributes` from the registry; never maintain a second prefix or glob list. Refuse a linked import before materialization when its selected tree contains a tracked path that the registry cannot version; never make that path disappear from the next revision.
 
 Compose read-only overlays above the authority rather than storing them: system skills at `.agents/skills/<slug>` and dependencies at `node_modules`. Keep that overlay distinct from project-authored `.tau/skills/**`; both may be visible in one composed tree, but only the latter belongs to project identity. Let a project-authored path override an entire overlay bundle and carry `{ source, versioned, agentAccess, identity?, overrides? }` as provenance. Keep labels in one UI catalog and describe the overlay as `system skill · read-only` without a redundant lock glyph.
 

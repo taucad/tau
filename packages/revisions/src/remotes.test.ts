@@ -21,7 +21,10 @@ import {
   isTauApiUrl,
   lfsRemoteUnsupportedMessage,
   refPatternIsHostLocal,
+  publishFailureMessage,
+  publishOverHttp,
   registerProjectFailureMessage,
+  registerProjectOverHttp,
   remoteCarriesLargeObjects,
   remoteKindOf,
   remoteOf,
@@ -31,6 +34,7 @@ import {
   tauRemoteUrl,
 } from '#remotes.js';
 import type { GitRemoteCredential } from '#remotes.js';
+import type { PublishPublicationActorInput } from '#publish.machine.js';
 /* The two W4 rows assert the *consequence* of the code, not only the code: a
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
@@ -497,5 +501,115 @@ describe('registerProjectFailureMessage', () => {
     );
     expect(registerProjectFailureMessage(404)).toBe('Tau Cloud has no project with this id for your account.');
     expect(registerProjectFailureMessage(500)).toBe('Tau Cloud could not register this project. Try again.');
+  });
+});
+
+/**
+ * W10.5: one publish-refusal ladder for both compositions.
+ *
+ * The browser worker and the Node daemon each carried their own copy, and they
+ * disagreed: the worker answered 401 with *Sign in to publish this project.*
+ * and had a rung for a version too large to share, while the daemon answered
+ * 401 with a `TAU_API_TOKEN` hint and had no 413 rung at all — so the same
+ * response produced a different sentence depending on which host asked (C6).
+ */
+describe('publishFailureMessage', () => {
+  const rows: ReadonlyArray<readonly [status: number, code: string | undefined, message: string]> = [
+    [401, undefined, 'Sign in to publish this project.'],
+    [401, 'ENTITLEMENT_REQUIRED', 'Sign in to publish this project.'],
+    [403, 'ENTITLEMENT_REQUIRED', 'Private links need the Pro plan.'],
+    [400, 'MISSING_ENTRY_PATH', 'This version does not contain the file this project opens with.'],
+    [413, undefined, 'This version is larger than a shared link may be.'],
+    [400, 'PAYLOAD_TOO_LARGE', 'This version is larger than a shared link may be.'],
+    [500, undefined, 'Tau Cloud could not publish this project. Try again.'],
+    [429, 'SOMETHING_NEW', 'Tau Cloud could not publish this project. Try again.'],
+  ];
+
+  it.each(rows)('answers %i/%s with one sentence for every host', (status, code, message) => {
+    expect(publishFailureMessage(status, code)).toBe(message);
+  });
+});
+
+/**
+ * The two legs differ by their credential and by nothing else (W10.5).
+ *
+ * A browser worker has the document's cookie and a terminal has a bearer token;
+ * both reach the same endpoint, read the same body and raise the same sentence,
+ * which is what makes one function the right shape for the pair.
+ */
+describe('the Tau Cloud publish and register legs', () => {
+  const capture = (
+    status: number,
+    body: unknown,
+  ): Readonly<{ calls: RequestInit[]; urls: string[]; restore: () => void }> => {
+    const calls: RequestInit[] = [];
+    const urls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(input instanceof Request ? input.url : input.toString());
+      calls.push(init ?? {});
+      return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof globalThis.fetch;
+    return {
+      calls,
+      urls,
+      restore: () => {
+        globalThis.fetch = original;
+      },
+    };
+  };
+
+  const draft = { revisionId: 'r1', projectId: 'p1', tag: 'v1' } as unknown as PublishPublicationActorInput;
+
+  it('raises the same refusal for the same response on the cookie and the bearer leg', async () => {
+    const refused = capture(413, {});
+    try {
+      await expect(publishOverHttp('https://api.test', { kind: 'cookie' }, draft)).rejects.toThrow(
+        'This version is larger than a shared link may be.',
+      );
+      await expect(
+        publishOverHttp('https://api.test', { kind: 'bearer', authorization: 'Bearer t' }, draft),
+      ).rejects.toThrow('This version is larger than a shared link may be.');
+    } finally {
+      refused.restore();
+    }
+  });
+
+  it('carries the document cookie on one leg and the bearer header on the other', async () => {
+    const answered = capture(200, { id: 'pub-1', urls: { share: 'https://tau.new/s/1' } });
+    try {
+      await publishOverHttp('https://api.test/', { kind: 'cookie' }, draft);
+      await publishOverHttp('https://api.test', { kind: 'bearer', authorization: 'Bearer t' }, draft);
+
+      expect(answered.urls).toEqual(['https://api.test/v1/publications', 'https://api.test/v1/publications']);
+      expect(answered.calls[0]?.credentials).toBe('include');
+      expect((answered.calls[0]?.headers ?? {}) as Record<string, string>).not.toHaveProperty('Authorization');
+      expect(answered.calls[1]?.credentials).toBeUndefined();
+      expect((answered.calls[1]?.headers ?? {}) as Record<string, string>).toHaveProperty('Authorization', 'Bearer t');
+    } finally {
+      answered.restore();
+    }
+  });
+
+  it('registers a project on either leg and raises the shared register ladder', async () => {
+    const refused = capture(403, { code: 'PROJECT_ROLE_INSUFFICIENT', message: 'Forbidden' });
+    try {
+      await expect(
+        registerProjectOverHttp('https://api.test', { kind: 'cookie' }, { id: 'p1', name: 'Alpha' }),
+      ).rejects.toThrow('Only the project owner can back this project up to Tau Cloud.');
+      await expect(
+        registerProjectOverHttp(
+          'https://api.test',
+          { kind: 'bearer', authorization: 'Bearer t' },
+          { id: 'p1', name: undefined },
+        ),
+      ).rejects.toThrow('Only the project owner can back this project up to Tau Cloud.');
+
+      expect(refused.urls).toEqual(['https://api.test/v1/projects/p1', 'https://api.test/v1/projects/p1']);
+      expect(refused.calls[0]?.body).toBe(JSON.stringify({ name: 'Alpha' }));
+      expect(refused.calls[1]?.body).toBe(JSON.stringify({}));
+    } finally {
+      refused.restore();
+    }
   });
 });

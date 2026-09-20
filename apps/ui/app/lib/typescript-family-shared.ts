@@ -6,7 +6,9 @@
  */
 
 import type * as Monaco from 'monaco-editor';
-import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
+import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
 import type { StaticTypeDefinition } from '#lib/type-acquisition-service.js';
 import { TypeAcquisitionService } from '#lib/type-acquisition-service.js';
 
@@ -27,18 +29,31 @@ let ataRefCount = 0;
 
 const decoder = new TextDecoder();
 
-async function waitForProxy(fileManagerRef: FileManagerRef): Promise<FileManagerProxy | undefined> {
-  const initial = fileManagerRef.getSnapshot().context.proxy;
+/**
+ * What the bundled typings need: two reads of the dependency mount.
+ *
+ * The composed client, not the authority proxy: the mount is a root of its own
+ * and is read through its rooted `'user'` connection since W11, so the editor's
+ * typings come from the same composition the file tree's `node_modules` rows do
+ * (charter D1, deviation H3 closed).
+ */
+type DependencyReader = Pick<ComposedViewClient, 'readFile' | 'readdir'>;
+
+/** The dependency mount, as this module addresses it. */
+const dependencyRoot = `/${bundledTypesWorkspaceRootSegment}`;
+
+async function waitForViewClient(fileManagerRef: FileManagerRef): Promise<DependencyReader | undefined> {
+  const initial = fileManagerRef.getSnapshot().context.viewClient;
   if (initial) {
     return initial;
   }
 
-  return new Promise<FileManagerProxy | undefined>((resolve) => {
+  return new Promise<DependencyReader | undefined>((resolve) => {
     const subscription = fileManagerRef.subscribe((snapshot) => {
-      const { proxy } = snapshot.context;
-      if (proxy) {
+      const { viewClient } = snapshot.context;
+      if (viewClient) {
         subscription.unsubscribe();
-        resolve(proxy);
+        resolve(viewClient);
       } else if (snapshot.matches('error')) {
         subscription.unsubscribe();
         resolve(undefined);
@@ -47,7 +62,7 @@ async function waitForProxy(fileManagerRef: FileManagerRef): Promise<FileManager
   });
 }
 
-async function readTextFile(proxy: FileManagerProxy, path: string): Promise<string | undefined> {
+async function readTextFile(proxy: DependencyReader, path: string): Promise<string | undefined> {
   try {
     const bytes = await proxy.readFile(path);
     return typeof bytes === 'string' ? bytes : decoder.decode(bytes);
@@ -57,7 +72,7 @@ async function readTextFile(proxy: FileManagerProxy, path: string): Promise<stri
 }
 
 async function collectDeclarationFiles(
-  proxy: FileManagerProxy,
+  proxy: DependencyReader,
   directory: string,
   packageRoot: string,
 ): Promise<Array<{ relativePath: string; content: string }>> {
@@ -90,10 +105,10 @@ async function collectDeclarationFiles(
 }
 
 async function readStaticTypeDefinitions(
-  proxy: FileManagerProxy,
+  proxy: DependencyReader,
   packageName: string,
 ): Promise<StaticTypeDefinition[]> {
-  const packageRoot = `/node_modules/${packageName}`;
+  const packageRoot = `${dependencyRoot}/${packageName}`;
   const packageJsonContent = await readTextFile(proxy, `${packageRoot}/package.json`);
   const declarationFiles = await collectDeclarationFiles(proxy, packageRoot, packageRoot);
 
@@ -118,10 +133,10 @@ async function readStaticTypeDefinitions(
   }));
 }
 
-async function loadScopedStaticTypes(proxy: FileManagerProxy, scopeName: string): Promise<StaticTypeDefinition[]> {
+async function loadScopedStaticTypes(proxy: DependencyReader, scopeName: string): Promise<StaticTypeDefinition[]> {
   let packageNames: readonly string[];
   try {
-    packageNames = await proxy.readdir(`/node_modules/${scopeName}`);
+    packageNames = await proxy.readdir(`${dependencyRoot}/${scopeName}`);
   } catch {
     return [];
   }
@@ -134,14 +149,14 @@ async function loadScopedStaticTypes(proxy: FileManagerProxy, scopeName: string)
 
 /**
  * Read kernel static type definitions from the FM worker's `/node_modules`
- * mount. The mount is populated eagerly during FM worker init (see
- * `apps/ui/app/machines/file-manager.worker.ts`) so by the time the proxy
- * is non-undefined, every package's `index.d.ts` is on disk.
+ * mount, through the composed client's dependency arm. The mount is populated
+ * eagerly during FM worker init (see `apps/ui/app/machines/file-manager.worker.ts`)
+ * so by the time the client exists, every package's `index.d.ts` is on disk.
  *
  * @public
  */
 export async function loadKernelStaticTypesFromMount(
-  proxy: FileManagerProxy | undefined,
+  proxy: DependencyReader | undefined,
 ): Promise<StaticTypeDefinition[]> {
   if (!proxy) {
     return [];
@@ -149,7 +164,7 @@ export async function loadKernelStaticTypesFromMount(
 
   let packageNames: readonly string[];
   try {
-    packageNames = await proxy.readdir('/node_modules');
+    packageNames = await proxy.readdir(dependencyRoot);
   } catch {
     return [];
   }
@@ -173,7 +188,7 @@ export async function loadKernelStaticTypesFromMount(
 export function ensureAtaBoot(monaco: typeof Monaco, fileManagerRef: FileManagerRef): Monaco.IDisposable {
   ataRefCount += 1;
   ataBootPromise ??= (async (): Promise<void> => {
-    const proxy = await waitForProxy(fileManagerRef);
+    const proxy = await waitForViewClient(fileManagerRef);
     const staticTypes = await loadKernelStaticTypesFromMount(proxy);
     ataInstance = new TypeAcquisitionService();
     ataInstance.initialize(monaco, { staticTypes });

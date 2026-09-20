@@ -164,40 +164,11 @@ const plainPresentation: RowPresentation = Object.freeze({
   isSubtreeRoot: true,
 });
 
-/**
- * The provenance of a mount root the tree synthesized rather than listed.
- *
- * `FileTreeService` mints the row for a directory it was asked to list
- * (`node_modules`) with no provenance, because the composed client stamps the
- * rows *inside* the mount. Reading it back off those rows keeps the lock and the
- * dashed rail anchored on the mount instead of on every package in it.
- *
- * ponytail: delete when the tree service carries provenance onto a synthesized
- * directory row; nothing else changes, the rows simply arrive stamped.
- */
-function mountRootProvenance(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<string, FileProvenance> {
-  const roots = new Map<string, FileProvenance>();
-  for (const [path, entry] of fileTreeMap) {
-    const parent = parentOfTreePath(path);
-    if (
-      parent !== '' &&
-      entry.provenance !== undefined &&
-      entry.provenance.source !== 'project' &&
-      fileTreeMap.get(parent)?.provenance === undefined
-    ) {
-      roots.set(parent, entry.provenance);
-    }
-  }
-  return roots;
-}
-
 /** One pass over the tree snapshot: label every row, then find each non-project subtree's root. */
 function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<string, RowPresentation> {
-  const mountRoots = mountRootProvenance(fileTreeMap);
   const labels = new Map<string, FileProvenanceLabel & { provenance: FileProvenance | undefined }>();
   for (const [path, entry] of fileTreeMap) {
-    const provenance = entry.provenance ?? mountRoots.get(path);
-    labels.set(path, { ...fileProvenanceLabel(provenance, path), provenance });
+    labels.set(path, { ...fileProvenanceLabel(entry.provenance, path), provenance: entry.provenance });
   }
 
   const presentation = new Map<string, RowPresentation>();
@@ -489,37 +460,41 @@ export const ChatEditorFileTree = memo(function ({
   }, [fileTreeMap]);
 
   // Tree state management
-  const [expandedItems, setExpandedItemsRaw] = useState<string[]>(() => [rootId]);
+  const [expandedItems, setExpandedItems] = useState<string[]>(() => [rootId]);
   const previousExpandedRef = useRef<Set<string>>(new Set([rootId]));
 
-  const setExpandedItems = useCallback(
-    (updater: string[] | ((previous: string[]) => string[])) => {
-      setExpandedItemsRaw((previous) => {
-        const next = typeof updater === 'function' ? updater(previous) : updater;
-        const previousSet = previousExpandedRef.current;
-        const newlyExpanded = next.filter((id) => id !== rootId && !previousSet.has(id));
+  /**
+   * Warm the listing of every newly expanded directory.
+   *
+   * A listing is a side effect, so it runs once the expansion has committed.
+   * Fired from inside the `expandedItems` updater it ran during render instead,
+   * where the listing it publishes re-enters React mid-update and reaches
+   * `setConfig` + `rebuildTree` against a tree state React has not applied yet
+   * (close-out W4). Every expansion source — click, keyboard, reveal, drop —
+   * warms through this one effect.
+   */
+  useEffect(() => {
+    const previousSet = previousExpandedRef.current;
+    previousExpandedRef.current = new Set(expandedItems);
+    if (!treeService) {
+      return;
+    }
 
-        if (treeService && newlyExpanded.length > 0) {
-          for (const path of newlyExpanded) {
-            if (!treeService.hasChildrenLoaded(path)) {
-              // async-iife: bootstrap — warm directory listing from expansion update; failures logged only
-              void (async (): Promise<void> => {
-                try {
-                  await treeService.listDirectory(path);
-                } catch (error) {
-                  console.error('[ChatEditorFileTree] listDirectory failed:', error);
-                }
-              })();
-            }
-          }
+    for (const path of expandedItems) {
+      if (path === rootId || previousSet.has(path) || treeService.hasChildrenLoaded(path)) {
+        continue;
+      }
+
+      // async-iife: bootstrap — warm directory listing for a newly expanded row; failures logged only
+      void (async (): Promise<void> => {
+        try {
+          await treeService.listDirectory(path);
+        } catch (error) {
+          console.error('[ChatEditorFileTree] listDirectory failed:', error);
         }
-
-        previousExpandedRef.current = new Set(next);
-        return next;
-      });
-    },
-    [treeService],
-  );
+      })();
+    }
+  }, [expandedItems, treeService]);
 
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [focusedItem, setFocusedItem] = useState<string | undefined>(undefined);
@@ -2111,6 +2086,10 @@ function TreeItem({
   onCopyToProject,
   onForeignDrop,
 }: TreeItemProps): React.JSX.Element {
+  // `item` is a stable handle onto the tree's mutable state, so memoizing on its identity freezes
+  // `aria-expanded`, selection and the chevron at their first value — in compiled builds only, which
+  // is why no jsdom suite sees it: https://headless-tree.lukasbach.com/guides/react-compiler/
+  'use no memo';
   const itemLevel = item.getItemMeta().level;
   const paddingLeft = itemLevel * 16 + 8;
   const isSelected = item.isSelected();
@@ -2183,6 +2162,10 @@ function TreeItem({
   const treeItemProps = item.getProps();
   const treeDragOver = (treeItemProps as { readonly onDragOver?: (event: DragEvent) => void }).onDragOver;
   const treeDrop = (treeItemProps as { readonly onDrop?: (event: DragEvent) => void }).onDrop;
+  /* The library's own row handler: selection, focus, primary action and the
+   * expand/collapse toggle. It reads React's event, never a second dispatch of
+   * the native one, so its propagation controls apply where the click arrived. */
+  const treeClick = (treeItemProps as { readonly onClick?: (event: React.MouseEvent) => void }).onClick;
 
   /* One list for the row's context menu and its actions button alike. */
   const menuItems: SidebarRowMenuItems = ({ Item, Separator }) => (
@@ -2343,11 +2326,7 @@ function TreeItem({
             return;
           }
 
-          // Plain click: delegate to tree's onClick (handles selection, focus, primaryAction, expand/collapse)
-          const { onClick } = treeItemProps as {
-            onClick?: (event: MouseEvent) => void;
-          };
-          onClick?.(event.nativeEvent);
+          treeClick?.(event);
         }}
         onDragOver={(event) => {
           if (canReadForeignFileTreeDrop(event.dataTransfer)) {

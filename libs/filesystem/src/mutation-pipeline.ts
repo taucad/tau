@@ -53,12 +53,41 @@ import { getFileContentMetadata } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
 import { parseRoute } from '#project-routes.js';
+import { mapConcurrent } from '#concurrency.js';
 
 const maximumCheckedWritePreconditions = 32;
 const maximumCheckedWriteBytes = 8 * 1024 * 1024;
 
 const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
   typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+
+/** Deepest path every given path lies at or inside, by segment. */
+const commonAncestorPath = (paths: readonly string[]): string => {
+  let segments = paths[0]!.split('/');
+  for (const path of paths.slice(1)) {
+    const other = path.split('/');
+    let shared = 0;
+    while (shared < segments.length && shared < other.length && segments[shared] === other[shared]) {
+      shared += 1;
+    }
+    segments = segments.slice(0, shared);
+  }
+  return segments.join('/');
+};
+
+/**
+ * Writes one batch may have in flight.
+ *
+ * A provider that coalesces writes into its own batched commit takes the whole
+ * batch at once — that is what lets IndexedDB drain a bulk import in one native
+ * transaction. Any other provider takes them one at a time, as the per-file
+ * lock sets used to make it do: a handle per file in flight is how a thousand
+ * of them exhaust a descriptor limit.
+ */
+const batchWriteConcurrency = (ownedFiles: ReadonlyArray<{ resolution: Pick<MountResolution, 'provider'> }>): number =>
+  ownedFiles.every(({ resolution }) => resolution.provider.capabilities.coalescesWrites === true)
+    ? ownedFiles.length
+    : 1;
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
@@ -238,6 +267,14 @@ export type BulkMoveResult = {
   failed: ReadonlyArray<{ edit: BulkMoveEdit; error: WorkspaceMutationError }>;
 };
 
+type ResolvedMoveEdit = {
+  readonly edit: BulkMoveEdit;
+  readonly source: string;
+  readonly target: string;
+  readonly sourceResolution: MountResolution;
+  readonly targetResolution: MountResolution;
+};
+
 export { causeToMutationError, isProjectDirectoryPath };
 
 /**
@@ -286,33 +323,43 @@ export class MutationPipeline {
    * Move many paths sequentially and report every completed and failed edit.
    * Completed edits are never rolled back over newer peer data.
    *
-   * @param move - The single-path move its own boundary resolves; the authority's and a rooted view's differ only there.
-   * @param edits - Source → target pairs.
+   * @param edits - Resolved source → target pairs.
+   * @param context - Optional mutation source metadata for change-bus subscribers.
    * @returns The {@link BulkMoveResult} describing successes + the failure (if any).
    */
   public async bulkMove(
-    move: (source: string, target: string) => Promise<FileStat>,
-    edits: readonly BulkMoveEdit[],
+    edits: readonly ResolvedMoveEdit[],
+    context?: WorkspaceMutationContext,
   ): Promise<BulkMoveResult> {
     if (edits.length === 0) {
       return { moved: [], failed: [] };
     }
 
-    const completed: Array<{ edit: BulkMoveEdit; stat: FileStat }> = [];
-    const failed: Array<{ edit: BulkMoveEdit; error: WorkspaceMutationError }> = [];
-
-    for (const edit of edits) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Result order and dependent edits require sequential moves.
-        const stat = await move(edit.source, edit.target);
-        completed.push({ edit, stat });
-      } catch (error) {
-        const mutationError = causeToMutationError(error, edit.source, edit.target);
-        failed.push({ edit, error: mutationError });
-      }
-    }
-
-    return { moved: completed, failed };
+    const operations = edits.flatMap(({ source, target, sourceResolution, targetResolution }) => [
+      { path: source, resolution: sourceResolution },
+      { path: target, resolution: targetResolution },
+    ]);
+    const locks = this.batchLockPaths(operations);
+    return this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async () => {
+        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
+        const completed: Array<{ edit: BulkMoveEdit; stat: FileStat }> = [];
+        const failed: Array<{ edit: BulkMoveEdit; error: WorkspaceMutationError }> = [];
+        for (const resolved of edits) {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- Result order and dependent edits require sequential moves.
+            const stat = await this.moveResolvedUnlocked({ ...resolved, context });
+            completed.push({ edit: resolved.edit, stat });
+          } catch (error) {
+            failed.push({
+              edit: resolved.edit,
+              error: causeToMutationError(error, resolved.edit.source, resolved.edit.target),
+            });
+          }
+        }
+        return { moved: completed, failed };
+      }),
+    );
   }
 
   /**
@@ -402,7 +449,7 @@ export class MutationPipeline {
             const globallyVisible = this.isCurrentResolution(destination, destinationResolution);
             if (globallyVisible) {
               this._filePool()?.clear();
-              this._treeIndexes.clear();
+              this._treeIndexes.evict(destination);
             }
             this.emitChangeEvent({ type: 'backendChanged', backend: destinationResolution.backend }, context, {
               operations: [{ path: destination, resolution: destinationResolution }],
@@ -420,6 +467,13 @@ export class MutationPipeline {
    * Write many already-resolved files as one batch: every write settles, then
    * the rejected paths alone lose their derivatives (Rule 5a).
    *
+   * The batch holds one lock set and one queue entry covering every path, so a
+   * provider that coalesces writes commits the whole batch natively (Rule 34)
+   * instead of once per file. Nothing else about the contract moves: each path
+   * keeps its own commit, cache and index bookkeeping, its own `fileWritten`
+   * and its own cross-tab notification, and a partial failure still leaves the
+   * settled writes durable while only the rejected paths lose derivatives.
+   *
    * @param ownedFiles - Resolved targets whose bytes the caller already owns.
    * @param context - Optional mutation source metadata for change-bus subscribers.
    * @returns Resolves when all writes complete.
@@ -432,10 +486,38 @@ export class MutationPipeline {
     }>,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const results = await Promise.allSettled(
-      ownedFiles.map(async ({ path, resolution, content }) =>
-        this.writeFileResolved({ path, resolution, data: content, context }),
-      ),
+    if (ownedFiles.length === 0) {
+      return;
+    }
+    const operations = ownedFiles.map(({ path, resolution }) => ({ path, resolution }));
+    const locks = this.batchLockPaths(operations);
+    const results = await this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async () => {
+        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
+        const settled = await mapConcurrent(
+          ownedFiles,
+          batchWriteConcurrency(ownedFiles),
+          async ({ path, resolution, content }): Promise<PromiseSettledResult<void>> => {
+            try {
+              await this.writeFileUnlocked({ path, resolution, data: content, context });
+              return { status: 'fulfilled', value: undefined };
+            } catch (error) {
+              return { status: 'rejected', reason: error };
+            }
+          },
+        );
+        for (const [index, result] of settled.entries()) {
+          if (result.status === 'fulfilled') {
+            const { path, resolution } = operations[index]!;
+            this._crossTabCoordinator.notifyMutation({
+              type: 'write',
+              path,
+              authority: this.physicalAuthority(resolution),
+            });
+          }
+        }
+        return settled;
+      }),
     );
     const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (firstFailure !== undefined) {
@@ -448,10 +530,7 @@ export class MutationPipeline {
           this._treeIndexes.removeFile(path);
         }
       }
-      const operationsByBackend = Map.groupBy(
-        ownedFiles.map(({ path, resolution }) => ({ path, resolution })),
-        ({ resolution }) => resolution.backend,
-      );
+      const operationsByBackend = Map.groupBy(operations, ({ resolution }) => resolution.backend);
       for (const [backend, operations] of operationsByBackend) {
         this.emitChangeEvent({ type: 'backendChanged', backend }, context, {
           operations,
@@ -773,95 +852,120 @@ export class MutationPipeline {
     ]);
     return this._crossTabCoordinator.withLocks(lockPaths, async () =>
       this._resourceQueue.queueForMany(lockPaths, async () => {
-        let mutationBegan = false;
-        try {
-          await this.refreshMutationProviders([sourceResolution, targetResolution]);
-          this._assertNoDescendantMounts(source, 'move');
-          this._assertNoDescendantMounts(target, 'move');
-          const sourceStat = await sourceResolution.provider.stat(sourceResolution.path);
-          const targetExists = await targetResolution.provider.exists(targetResolution.path);
-          if (targetExists) {
-            const error = new Error(`EEXIST: target already exists '${target}'`);
-            (error as NodeJS.ErrnoException).code = 'EEXIST';
-            throw error;
-          }
-
-          mutationBegan = true;
-          if (sourceResolution.provider === targetResolution.provider) {
-            await sourceResolution.provider.rename(sourceResolution.path, targetResolution.path);
-          } else if (sourceStat.type === 'dir') {
-            await this._copyDirectoryAcrossProviders(
-              sourceResolution.provider,
-              sourceResolution.path,
-              targetResolution.provider,
-              targetResolution.path,
-            );
-            await this.removeRecursive(sourceResolution.provider, sourceResolution.path);
-          } else {
-            const data = await sourceResolution.provider.readFile(sourceResolution.path);
-            await targetResolution.provider.writeFile(targetResolution.path, data);
-            await sourceResolution.provider.unlink(sourceResolution.path);
-          }
-
-          const sourceIsCurrent = this.isCurrentResolution(source, sourceResolution);
-          const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
-          if (sourceIsCurrent && targetIsCurrent) {
-            this._filePool()?.invalidate(source);
-            this._filePool()?.invalidate(target);
-            this._treeIndexes.rename(source, target);
-          } else if (sourceIsCurrent || targetIsCurrent) {
-            this._filePool()?.clear();
-            this._treeIndexes.clear();
-          }
-
-          const resultingStat = await targetResolution.provider.stat(targetResolution.path);
-          this.emitChangeEvent(
-            sourceStat.type === 'dir'
-              ? {
-                  type: 'directoryRenamed',
-                  oldPath: source,
-                  newPath: target,
-                  backend: sourceResolution.backend,
-                }
-              : {
-                  type: 'fileRenamed',
-                  oldPath: source,
-                  newPath: target,
-                  backend: sourceResolution.backend,
-                },
-            context,
-            {
-              operations: [
-                { path: source, resolution: sourceResolution },
-                { path: target, resolution: targetResolution },
-              ],
-            },
-          );
-          this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-
-          return resultingStat;
-        } catch (error) {
-          if (mutationBegan) {
-            const operations = [
-              { path: source, resolution: sourceResolution },
-              { path: target, resolution: targetResolution },
-            ];
-            const globallyVisible = operations.some((operation) =>
-              this.isCurrentResolution(operation.path, operation.resolution),
-            );
-            if (globallyVisible) {
-              this._filePool()?.clear();
-              this._treeIndexes.clear();
-            }
-            for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
-              this.emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
-            }
-            this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-          }
-          throw error;
-        }
+        await this.refreshMutationProviders([sourceResolution, targetResolution]);
+        return this.moveResolvedUnlocked({ source, target, sourceResolution, targetResolution, context });
       }),
     );
+  }
+
+  /** Run one move while the caller already owns its complete lock set. */
+  public async moveResolvedUnlocked({
+    source,
+    target,
+    sourceResolution,
+    targetResolution,
+    context,
+  }: {
+    source: string;
+    target: string;
+    sourceResolution: MountResolution;
+    targetResolution: MountResolution;
+    context?: WorkspaceMutationContext;
+  }): Promise<FileStat> {
+    let mutationBegan = false;
+    let incompleteCrossProviderDirectoryCopy = false;
+    try {
+      this._assertNoDescendantMounts(source, 'move');
+      this._assertNoDescendantMounts(target, 'move');
+      const sourceStat = await sourceResolution.provider.stat(sourceResolution.path);
+      const targetExists = await targetResolution.provider.exists(targetResolution.path);
+      if (targetExists) {
+        const error = new Error(`EEXIST: target already exists '${target}'`);
+        (error as NodeJS.ErrnoException).code = 'EEXIST';
+        throw error;
+      }
+
+      mutationBegan = true;
+      if (sourceResolution.provider === targetResolution.provider) {
+        await sourceResolution.provider.rename(sourceResolution.path, targetResolution.path);
+      } else if (sourceStat.type === 'dir') {
+        incompleteCrossProviderDirectoryCopy = true;
+        await this._copyDirectoryAcrossProviders(
+          sourceResolution.provider,
+          sourceResolution.path,
+          targetResolution.provider,
+          targetResolution.path,
+        );
+        incompleteCrossProviderDirectoryCopy = false;
+        await this.removeRecursive(sourceResolution.provider, sourceResolution.path);
+      } else {
+        const data = await sourceResolution.provider.readFile(sourceResolution.path);
+        await targetResolution.provider.writeFile(targetResolution.path, data);
+        await sourceResolution.provider.unlink(sourceResolution.path);
+      }
+
+      const sourceIsCurrent = this.isCurrentResolution(source, sourceResolution);
+      const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
+      if (sourceIsCurrent && targetIsCurrent) {
+        this._filePool()?.invalidate(source);
+        this._filePool()?.invalidate(target);
+        this._treeIndexes.rename(source, target);
+      } else if (sourceIsCurrent || targetIsCurrent) {
+        this._filePool()?.clear();
+        this._treeIndexes.evict(source);
+        this._treeIndexes.evict(target);
+      }
+
+      const resultingStat = await targetResolution.provider.stat(targetResolution.path);
+      this.emitChangeEvent(
+        sourceStat.type === 'dir'
+          ? {
+              type: 'directoryRenamed',
+              oldPath: source,
+              newPath: target,
+              backend: sourceResolution.backend,
+            }
+          : {
+              type: 'fileRenamed',
+              oldPath: source,
+              newPath: target,
+              backend: sourceResolution.backend,
+            },
+        context,
+        {
+          operations: [
+            { path: source, resolution: sourceResolution },
+            { path: target, resolution: targetResolution },
+          ],
+        },
+      );
+      this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
+
+      return resultingStat;
+    } catch (error) {
+      if (incompleteCrossProviderDirectoryCopy && (await targetResolution.provider.exists(targetResolution.path))) {
+        await this.removeRecursive(targetResolution.provider, targetResolution.path);
+      }
+      if (mutationBegan) {
+        const operations = [
+          { path: source, resolution: sourceResolution },
+          { path: target, resolution: targetResolution },
+        ];
+        const globallyVisible = operations.some((operation) =>
+          this.isCurrentResolution(operation.path, operation.resolution),
+        );
+        if (globallyVisible) {
+          this._filePool()?.clear();
+          this._treeIndexes.evict(source);
+          this._treeIndexes.evict(target);
+        }
+        for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
+          this.emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
+        }
+        this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
+      }
+      throw error;
+    }
   }
 
   public async mkdirResolved({
@@ -1045,6 +1149,39 @@ export class MutationPipeline {
     return [...locks];
   }
 
+  /**
+   * The locks one batch holds: per mount, the hierarchy of the deepest path
+   * that every operation in it lies at or inside.
+   *
+   * Exclusion is what a per-file set gave. Every mutation's own set carries its
+   * ancestors up to its mount prefix and its storage root's own token, so a peer
+   * writing any path inside the batch still conflicts on the tokens held here —
+   * while a thousand-file batch requests a handful of locks instead of nesting
+   * one `navigator.locks` request per file (the recursion in
+   * {@link withCrossTabLocks}, which a bulk import overflowed).
+   *
+   * @param operations - Every resolved path the batch writes.
+   * @returns Lock tokens covering the whole batch.
+   */
+  public batchLockPaths(operations: ReadonlyArray<{ path: string; resolution: MountResolution }>): string[] {
+    const byMount = Map.groupBy(operations, ({ resolution }) => resolution.entry);
+    return [
+      ...new Set(
+        [...byMount.values()].flatMap((group) =>
+          this.mutationLockPaths([
+            {
+              path: commonAncestorPath(group.map(({ path }) => path)) || '/',
+              resolution: {
+                ...group[0]!.resolution,
+                path: commonAncestorPath(group.map(({ resolution }) => resolution.path)),
+              },
+            },
+          ]),
+        ),
+      ),
+    ];
+  }
+
   public physicalAuthority(resolution: MountResolution): PhysicalAuthority {
     if (resolution.entry?.storageRootKey === undefined) {
       throw new Error('Mounted mutation is missing canonical physical authority metadata.');
@@ -1057,7 +1194,13 @@ export class MutationPipeline {
 
   public async refreshMutationProviders(resolutions: readonly MountResolution[]): Promise<void> {
     const providers = new Set(resolutions.map(({ provider }) => provider));
-    // Ponytail: DirectIDB refresh is O(number of keys); add a durable revision only if measurement shows this lock boundary is hot.
+    /* Not cache hygiene: this runs *before* the write, inside the mutation lock,
+     * so a peer tab's committed write is part of what admits ours (the EISDIR and
+     * EEXIST rows in `workspace-file-service-cross-tab.test.ts`). Every provider
+     * that implements `refresh` is one whose projections another writer of the
+     * same bytes can stale, so there is nobody here to skip. The cost — DirectIDB
+     * re-reads its whole key index — is a case for refreshing the mutation's own
+     * key range, which needs its own pin. */
     await Promise.all([...providers].map(async (provider) => provider.refresh?.()));
   }
 
@@ -1286,12 +1429,12 @@ export class MutationPipeline {
     context?: WorkspaceMutationContext,
   ): void {
     // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: full drop, not the path-scoped one `writeFiles` uses. Both callers are
-    // half-finished *recursive* directory mutations, so everything under `path` is
-    // untrustworthy — and neither SharedPool nor TreeIndex can drop a subtree.
-    // Scope it once SharedPool grows a prefix invalidation, if this error path is ever hot.
+    // ponytail: the pool takes a full drop, not the path-scoped one `writeFiles`
+    // uses. Both callers are half-finished *recursive* directory mutations, so
+    // everything under `path` is untrustworthy and SharedPool cannot drop a
+    // subtree. Scope it once SharedPool grows a prefix invalidation.
     this._filePool()?.clear();
-    this._treeIndexes.clear();
+    this._treeIndexes.evict(path);
     const logicalRoot = resolution.entry?.prefix ?? path;
     const rootResolution =
       resolution.entry === undefined ? resolution : { ...resolution, path: resolution.entry.providerBasePath };

@@ -18,6 +18,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { FileManagerProviderProps, useFileManager } from '#hooks/use-file-manager.js';
 import type { WorkspaceScope } from '@taucad/filesystem';
+import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 
 describe('FileManagerProvider props discriminated union', () => {
   it('accepts indexeddb / opfs / memory without a projectId', () => {
@@ -115,18 +116,55 @@ describe('useFileManager surface', () => {
     expectTypeOf<Client>().not.toHaveProperty('canDelete');
   });
 
-  /** Content is the owning root's (W12c); the trusted stores take this one. */
-  it('exposes a rooted content client beside it', () => {
-    expectTypeOf<Context>().toHaveProperty('files');
-    type Files = Context['files'];
-    expectTypeOf<Files>().toHaveProperty('readFile');
-    expectTypeOf<Files>().toHaveProperty('writeFile');
-    expectTypeOf<Files>().toHaveProperty('writeFileChecked');
-    expectTypeOf<Files>().toHaveProperty('rmdir');
-    expectTypeOf<Parameters<Files['unlink']>>().toEqualTypeOf<[path: string]>();
+  /**
+   * H8 / EQ4, asserted where a component would take it (W6).
+   *
+   * Content is the owning root's (W12c), but the whole rooted surface is the
+   * unmasked working copy: a member carrying all of it would hand any component
+   * that reads the context the checkout, `.git/**` mask aside. Each trusted
+   * store takes the slice it is composed with instead, so this fails the moment
+   * one of them is widened back into the full client.
+   */
+  it('carries no unmasked rooted content client', () => {
+    expectTypeOf<Context>().not.toHaveProperty('files');
+    type FullContentMembers = {
+      [Member in keyof Context]-?: Context[Member] extends RootedContentClient ? Member : never;
+    }[keyof Context];
+    expectTypeOf<FullContentMembers>().toEqualTypeOf<never>();
+  });
+
+  /** One `Pick` per trusted-store family, named for the family (W6). */
+  it('hands each trusted store the slice it is composed with', () => {
+    expectTypeOf<Context>().toHaveProperty('recordFiles');
+    type Records = Context['recordFiles'];
+    expectTypeOf<Records>().toHaveProperty('readFile');
+    expectTypeOf<Records>().toHaveProperty('writeFile');
+    expectTypeOf<Records>().toHaveProperty('rmdir');
+    expectTypeOf<Parameters<Records['unlink']>>().toEqualTypeOf<[path: string]>();
     /* Absolute paths, and no `scope`: the root owns the routing. */
-    expectTypeOf<{ recursive: true }>().toExtend<NonNullable<Parameters<Files['rmdir']>[1]>>();
-    expectTypeOf<Files>().not.toHaveProperty('listProjectManifests');
+    expectTypeOf<{ recursive: true }>().toExtend<NonNullable<Parameters<Records['rmdir']>[1]>>();
+    expectTypeOf<Records>().not.toHaveProperty('listProjectManifests');
+    /* A record store never relocates a path nor writes one under a precondition. */
+    expectTypeOf<Records>().not.toHaveProperty('move');
+    expectTypeOf<Records>().not.toHaveProperty('mkdir');
+    expectTypeOf<Records>().not.toHaveProperty('writeFileChecked');
+
+    expectTypeOf<Context>().toHaveProperty('parameterFiles');
+    type ParameterSlice = Context['parameterFiles'];
+    expectTypeOf<ParameterSlice>().toHaveProperty('writeFileChecked');
+    expectTypeOf<ParameterSlice>().toHaveProperty('move');
+    /* The sidecar writes one file at a time, under its own precondition. */
+    expectTypeOf<ParameterSlice>().not.toHaveProperty('writeFile');
+    expectTypeOf<ParameterSlice>().not.toHaveProperty('writeFiles');
+    expectTypeOf<ParameterSlice>().not.toHaveProperty('readdir');
+
+    expectTypeOf<Context>().toHaveProperty('previewFiles');
+    type Preview = Context['previewFiles'];
+    expectTypeOf<Preview>().toHaveProperty('writeFiles');
+    /* An ephemeral preview mount is written whole and never read back. */
+    expectTypeOf<Preview>().not.toHaveProperty('readFile');
+    expectTypeOf<Preview>().not.toHaveProperty('writeFile');
+    expectTypeOf<Preview>().not.toHaveProperty('unlink');
   });
 
   /** The `/files` browser's physical reads: scope required, nothing routed (charter D5). */
@@ -139,6 +177,44 @@ describe('useFileManager surface', () => {
     expectTypeOf<Parameters<Scoped['readShallowDirectory']>[1]>().toEqualTypeOf<{ readonly scope: WorkspaceScope }>();
     expectTypeOf<Parameters<Scoped['getZippedDirectory']>[1]>().toEqualTypeOf<{ readonly scope: WorkspaceScope }>();
     expectTypeOf<Scoped>().not.toHaveProperty('writeFile');
+  });
+
+  /**
+   * The same guard, one level lower (W11, H3): `fileManagerRef`'s own snapshot.
+   *
+   * The context's slices are the intended doors, and the machine's `proxy` is the
+   * only other one — it is the unrooted connection itself, so a caller that
+   * reached it could read or write any project tree unmasked. Since W11 it
+   * carries topology, the change stream and the `/files` browser's scoped reads,
+   * and nothing per-path at all.
+   */
+  it('should keep per-path content off the file-manager snapshot proxy', () => {
+    type Proxy = NonNullable<ReturnType<Context['fileManagerRef']['getSnapshot']>['context']['proxy']>;
+    expectTypeOf<Proxy>().not.toHaveProperty('readFile');
+    expectTypeOf<Proxy>().not.toHaveProperty('writeFile');
+    expectTypeOf<Proxy>().not.toHaveProperty('writeFileChecked');
+    expectTypeOf<Proxy>().not.toHaveProperty('appendFile');
+    expectTypeOf<Proxy>().not.toHaveProperty('writeFiles');
+    expectTypeOf<Proxy>().not.toHaveProperty('mkdir');
+    expectTypeOf<Proxy>().not.toHaveProperty('readdir');
+    expectTypeOf<Proxy>().not.toHaveProperty('stat');
+    expectTypeOf<Proxy>().not.toHaveProperty('lstat');
+    expectTypeOf<Proxy>().not.toHaveProperty('move');
+    expectTypeOf<Proxy>().not.toHaveProperty('canMove');
+    expectTypeOf<Proxy>().not.toHaveProperty('canRename');
+    expectTypeOf<Proxy>().not.toHaveProperty('canCreate');
+    expectTypeOf<Proxy>().not.toHaveProperty('canDelete');
+    expectTypeOf<Proxy>().not.toHaveProperty('bulkMove');
+    expectTypeOf<Proxy>().not.toHaveProperty('unlink');
+    expectTypeOf<Proxy>().not.toHaveProperty('rmdir');
+    expectTypeOf<Proxy>().not.toHaveProperty('exists');
+    expectTypeOf<Proxy>().not.toHaveProperty('getZippedDirectory');
+    expectTypeOf<Proxy>().not.toHaveProperty('readShallowDirectory');
+    expectTypeOf<Proxy>().not.toHaveProperty('readDirectory');
+    /* What it does carry. */
+    expectTypeOf<Proxy>().toHaveProperty('mount');
+    expectTypeOf<Proxy>().toHaveProperty('pollExternalChanges');
+    expectTypeOf<Proxy>().toHaveProperty('readScopedFile');
   });
 
   it('exposes a workspace admin facade with mount/unmount/root teardown', () => {

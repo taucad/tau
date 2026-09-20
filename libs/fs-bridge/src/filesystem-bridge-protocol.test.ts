@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as barrel from '#index.js';
-import { createFileSystemBridgeHello, fileSystemBridgeSchemas } from '#filesystem-bridge-protocol.js';
+import {
+  createFileSystemBridgeHello,
+  fileSystemBridgeProtocolVersion,
+  fileSystemBridgeSchemas,
+} from '#filesystem-bridge-protocol.js';
 
 describe('void call results', () => {
   const { result } = fileSystemBridgeSchemas.calls.writeFile;
@@ -18,6 +22,14 @@ describe('void call results', () => {
 
   it.each([0, '', {}, false])('rejects %o', (value) => {
     expect(result.safeParse(value)).toMatchObject({ success: false });
+  });
+});
+
+/* A literal, so a bump is a deliberate edit to this line and not a silent one:
+ * every other assertion in the suite now reads the constant (G0-11). */
+describe('filesystem bridge protocol version', () => {
+  it('should be 2', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(2);
   });
 });
 
@@ -43,9 +55,9 @@ describe('filesystem bridge hello capabilities', () => {
     expect(fileSystemBridgeSchemas.hello.safeParse(hello)).toEqual({ success: true, data: hello });
   });
 
-  it('still accepts a version-1 hello from before durability classes', () => {
+  it('still accepts a hello from before durability classes', () => {
     const legacy = {
-      v: 1,
+      v: fileSystemBridgeProtocolVersion,
       state: 'ready',
       capabilities: { persistent: true, writable: true, quotaBased: true },
       watchable: false,
@@ -89,13 +101,10 @@ describe('filesystem bridge Zod schemas', () => {
       },
     ];
 
-    const parsedDirectory = fileSystemBridgeSchemas.calls.readDirectory.result.safeParse(tree);
-    const parsedShallowDirectory = fileSystemBridgeSchemas.calls.readShallowDirectory.result.safeParse(tree);
+    const parsedShallowDirectory = fileSystemBridgeSchemas.calls.readScopedShallowDirectory.result.safeParse(tree);
 
-    expect(parsedDirectory.success).toBe(true);
     expect(parsedShallowDirectory.success).toBe(true);
-    if (parsedDirectory.success && parsedShallowDirectory.success) {
-      expect(parsedDirectory.data).toBe(tree);
+    if (parsedShallowDirectory.success) {
       expect(parsedShallowDirectory.data).toBe(tree);
     }
   });

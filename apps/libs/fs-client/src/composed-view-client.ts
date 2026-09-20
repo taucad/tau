@@ -1,7 +1,9 @@
 import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
 import { isWorkspaceMutationError, WorkspaceMutationError } from '@taucad/filesystem';
-import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
-import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '#file-system-client.js';
+import type { FileTreeNode } from '@taucad/filesystem';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
+import type { BulkMoveEdit, BulkMoveResult, FileSystemClient, WorkspaceAuthorityClient } from '#file-system-client.js';
+import { resolveAuthorityPath } from '@taucad/utils/path';
 import { rootedPathOf } from '#rooted-content-client.js';
 import { isGlobalNodeModulesPath } from '#workspace-path-resolver.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
@@ -24,7 +26,7 @@ export type ComposedViewProxy = {
   readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
   provenance(path: string): Promise<FileProvenance>;
   /** ZIP one subtree of the view; `{ versionedOnly }` keeps the bytes that are the project. */
-  archive(path: string, options?: { versionedOnly?: boolean }): Promise<Blob>;
+  archive(path: string, options?: ContentExportFilter): Promise<Blob>;
   /** Search this view's root from its own index; the mask is applied before the cap. */
   search(query: string, options?: { maxResults?: number; includeDirectories?: boolean }): Promise<FileStatEntry[]>;
   /** Recursively stat one directory of the view from the same index. */
@@ -112,6 +114,10 @@ const outsideCheckoutProvenance: FileProvenance = Object.freeze({
   agentAccess: 'read-only',
 });
 
+/** The one mount outside every checkout, as the authority and the tree spell it. */
+const dependencyMountName = 'node_modules';
+const dependencyMountPath = `/${dependencyMountName}`;
+
 const treeNode = (row: { name: string } & FileStat): FileTreeNode => {
   const common = {
     id: row.name,
@@ -143,13 +149,6 @@ const guardedMutations = new Map<string, readonly number[]>([
   ['move', [0, 1]],
   ['duplicateFile', [0, 1]],
 ]);
-
-/**
- * Members the view alone serves: the authority's unmasked equivalent is gone
- * with its last consumer (W12d), so a path outside the root is refused rather
- * than forwarded.
- */
-const viewOnlyMutations = new Set(['duplicateFile']);
 
 /** Preflights: they answer with a {@link WorkspaceMutationError}, never a throw. */
 const guardedPreflights = new Map<string, readonly number[]>([
@@ -280,13 +279,18 @@ const viewArgs = (
  *   this client as somebody else's edit. That is why the routing cannot be split
  *   across two changes — the reads and the writes have to share a port or the UI
  *   re-announces itself.
- * - **Paths outside the project root** (the global `/node_modules` alias the
- *   resolver keeps) are the authority's: dependencies are a mount, not an
- *   overlay, and no rooted handle serves them. A batch with one path outside the
- *   root is the authority's whole call — this client never splits one operation
- *   across both surfaces.
+ * - **The global `/node_modules` alias the resolver keeps** is its own root, and
+ *   since W11 its own `'user'` connection: dependencies are a mount, not an
+ *   overlay, so the view rooted at the checkout has never heard of them — but a
+ *   mount is a root, and a root has a rooted view of its own. Nothing about a
+ *   dependency reaches the authority's global surface, which owns no content at
+ *   all any more (charter deviation H3 closed, EQ3).
+ * - **Any other path** — another route's checkout, a spelling the resolver cannot
+ *   round-trip — has no view to serve it and is refused. It used to fall through
+ *   to the authority's unmasked walk of the raw provider; that is exactly the
+ *   read the reserved layout refuses everywhere else.
  *
- * @param input - The authority client, the rooted view, and the path resolver they share.
+ * @param input - The authority client, the rooted view, the dependency mount's view, and the path resolver they share.
  * @returns A client with the same surface as `workspace`, reading through the view, plus {@link ComposedViewClient.overrideUnit}.
  * @public
  *
@@ -295,20 +299,23 @@ const viewArgs = (
  * import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
  *
  * export function exampleClient(
- *   workspace: FileSystemClient,
+ *   workspace: WorkspaceAuthorityClient,
  *   view: ComposedViewProxy,
+ *   dependencies: ComposedViewProxy,
  *   paths: WorkspacePathResolver,
  * ): ComposedViewClient {
- *   return createComposedViewClient({ workspace, view, paths });
+ *   return createComposedViewClient({ workspace, view, dependencies, paths });
  * }
  * ```
  */
 export const createComposedViewClient = (input: {
-  readonly workspace: FileSystemClient;
+  readonly workspace: WorkspaceAuthorityClient;
   readonly view: ComposedViewProxy;
+  /** The dependency mount as its own rooted view; its paths are `node_modules`-relative. */
+  readonly dependencies: ComposedViewProxy;
   readonly paths: WorkspacePathResolver;
 }): ComposedViewClient => {
-  const { workspace, view, paths } = input;
+  const { workspace, view, dependencies, paths } = input;
   /* Ponytail: provenance memo, filled by the reads that already answer it, so
    * a refusal costs no round trip. A path becomes writable again only after it
    * is re-read, which is what creating an override does anyway. */
@@ -322,6 +329,14 @@ export const createComposedViewClient = (input: {
    * reaches the authority when the answer is an overlay's.
    */
   const firstReadOnly = async (paths: readonly string[]): Promise<string | undefined> => {
+    /* The dependency mount is read-only to everyone, so a mutation that names it
+     * is refused here rather than sent to a surface that would perform it — and
+     * since W11 there is no such surface anyway. A path that is not a path at all
+     * (`canRename`'s bare `..`) is left to the view, which names the refusal. */
+    const dependency = paths.find((absolutePath) => isGlobalNodeModulesPath(absolutePath));
+    if (dependency !== undefined) {
+      return dependency;
+    }
     const relatives = paths.map((absolutePath) => viewPath(absolutePath)).filter((path) => path !== undefined);
     /* One round of probes, not one per path: a multi-select move asks about
      * every path it touches, and the memo answers for none of them the first
@@ -335,6 +350,39 @@ export const createComposedViewClient = (input: {
         }),
     );
     return relatives.find((relative) => provenance.get(relative)?.source !== 'project');
+  };
+
+  /**
+   * The dependency mount as one row of the view's root, or `undefined`.
+   *
+   * The mount is a sibling of the checkout, so no view lists it — but a root
+   * listing is authoritative over the root's children, so a listing that omits
+   * the mount is what deletes the row from the tree on every re-list (blueprint
+   * Finding 4). Asked once per client: the worker mounts it before the workspace
+   * is ready and never unmounts it, and the mount is fail-soft — a profile where
+   * it never came up must not grow a row nothing serves.
+   *
+   * Only a resolved row is remembered (G0b-7): the probe swallows every error, so
+   * remembering its absence would let one transient authority failure — or one
+   * listing that raced the mount — cost the session its row for good.
+   */
+  let dependencyMount: Promise<FileTreeNode | undefined> | undefined;
+  const dependencyMountRow = async (): Promise<FileTreeNode | undefined> => {
+    dependencyMount ??= (async () => {
+      try {
+        const mount = await dependencies.stat('');
+        return mount.type === 'dir'
+          ? treeNode({ name: dependencyMountName, ...mount, provenance: outsideCheckoutProvenance })
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    const row = await dependencyMount;
+    if (row === undefined) {
+      dependencyMount = undefined;
+    }
+    return row;
   };
 
   const remember = (relativePath: string, value: FileProvenance | undefined): void => {
@@ -371,6 +419,33 @@ export const createComposedViewClient = (input: {
   };
 
   /**
+   * The view that serves one absolute path, in that view's own namespace.
+   *
+   * Two roots are addressable from here: the checkout this client is rooted at,
+   * and the dependency mount beside it — a mount is a root, and since W11 it has
+   * a rooted `'user'` connection of its own. A path neither one serves is
+   * refused: the authority's global surface carries no content to fall through
+   * to, because every call on it walked the raw provider unmasked (H3, EQ3).
+   */
+  const servedBy = (absolutePath: string): Readonly<{ proxy: ComposedViewProxy; path: string }> => {
+    if (isGlobalNodeModulesPath(absolutePath)) {
+      const canonical = resolveAuthorityPath(absolutePath);
+      return {
+        proxy: dependencies,
+        path: canonical === dependencyMountPath ? '' : canonical.slice(dependencyMountPath.length + 1),
+      };
+    }
+    const relative = viewPath(absolutePath);
+    if (relative === undefined) {
+      throw Object.assign(new Error(`ENOENT: no rooted view serves ${absolutePath}.`), { code: 'ENOENT' });
+    }
+    return { proxy: view, path: relative };
+  };
+
+  /** Whether a served path is the dependency mount's, whose rows are never the project's. */
+  const isDependency = (proxy: ComposedViewProxy): boolean => proxy === dependencies;
+
+  /**
    * The same refusal in the namespace the caller asked in.
    *
    * A fresh instance, not a mutated one: `path` and `target` are readonly and
@@ -396,15 +471,9 @@ export const createComposedViewClient = (input: {
   };
 
   const readFile = async (absolutePath: string, options?: unknown): Promise<string | Uint8Array<ArrayBuffer>> => {
-    const relative = viewPath(absolutePath);
-    if (relative === undefined) {
-      return (workspace.readFile as (path: string, options?: unknown) => Promise<string | Uint8Array<ArrayBuffer>>)(
-        absolutePath,
-        options,
-      );
-    }
+    const { proxy, path } = servedBy(absolutePath);
     const encoding = options === 'utf8' || (options as { encoding?: string } | undefined)?.encoding === 'utf8';
-    return encoding ? view.readFile(relative, 'utf8') : view.readFile(relative);
+    return encoding ? proxy.readFile(path, 'utf8') : proxy.readFile(path);
   };
 
   /** Every file of one unit, keyed by the view-relative path it is written at. */
@@ -438,36 +507,32 @@ export const createComposedViewClient = (input: {
     overrideUnit,
     readFile,
     readdir: async (absolutePath: string) => {
-      const relative = viewPath(absolutePath);
-      return relative === undefined ? workspace.readdir(absolutePath) : view.readdir(relative);
+      const { proxy, path } = servedBy(absolutePath);
+      return proxy.readdir(path);
     },
     stat: async (absolutePath: string) => {
-      const relative = viewPath(absolutePath);
-      if (relative === undefined) {
-        return {
-          ...(await workspace.stat(absolutePath)),
-          provenance: outsideCheckoutProvenance,
-        };
+      const { proxy, path } = servedBy(absolutePath);
+      const result = await proxy.stat(path);
+      if (isDependency(proxy)) {
+        /* A dependency view classifies its own root as if it were a checkout, so
+         * the mount's class is stamped here, where it is known (blueprint W3). */
+        return { ...result, provenance: outsideCheckoutProvenance };
       }
-      const result = await view.stat(relative);
-      remember(relative, result.provenance);
+      remember(path, result.provenance);
       return result;
     },
     lstat: async (absolutePath: string) => {
-      const relative = viewPath(absolutePath);
-      return relative === undefined ? workspace.lstat(absolutePath) : view.lstat(relative);
+      const { proxy, path } = servedBy(absolutePath);
+      return proxy.lstat(path);
     },
     exists: async (absolutePath: string) => {
-      const relative = viewPath(absolutePath);
-      return relative === undefined ? workspace.exists(absolutePath) : view.exists(relative);
+      const { proxy, path } = servedBy(absolutePath);
+      return proxy.exists(path);
     },
-    getZippedDirectory: async (absolutePath: string, options?: { scope?: WorkspaceScope; versionedOnly?: boolean }) => {
-      if (options?.scope !== undefined) {
-        return workspace.getZippedDirectory(absolutePath, { scope: options.scope });
-      }
+    getZippedDirectory: async (absolutePath: string, options?: ContentExportFilter) => {
       const relative = viewPath(absolutePath);
       if (relative === undefined) {
-        throw new Error(`No rooted view serves ${absolutePath}; pass a workspace scope to archive it`);
+        throw new Error(`No rooted view serves ${absolutePath}; a scoped archive is the /files browser's own call`);
       }
       return view.archive(relative, options);
     },
@@ -494,24 +559,29 @@ export const createComposedViewClient = (input: {
       return view.search(query, options);
     },
     readDirectory: async (absolutePath: string) => {
-      const relative = viewPath(absolutePath);
-      if (relative === undefined) {
-        const rows = await workspace.readDirectory(absolutePath);
-        return rows.map((node) => ({
-          ...node,
-          provenance: outsideCheckoutProvenance,
-        }));
+      const { proxy, path: relative } = servedBy(absolutePath);
+      const rows = await proxy.readdirWithStats(relative);
+      if (isDependency(proxy)) {
+        return rows.map((row) => treeNode({ ...row, provenance: outsideCheckoutProvenance }));
       }
-      const rows = await view.readdirWithStats(relative);
       for (const row of rows) {
         remember(relative === '' ? row.name : `${relative}/${row.name}`, row.provenance);
       }
-      return rows.map((row) => treeNode(row));
+      const nodes = rows.map((row) => treeNode(row));
+      /* A checkout can hold a `node_modules` of its own — the registry classes it
+       * as cache for every consumer, so the view lists it and that row stands:
+       * two rows of one name would fight over one tree key. */
+      if (relative !== '' || nodes.some((node) => node.name === dependencyMountName)) {
+        return nodes;
+      }
+      const mount = await dependencyMountRow();
+      return mount === undefined ? nodes : [...nodes, mount];
     },
   };
 
-  /* The proxy serves one member the authority does not have, so its type is
-   * the handler's contract rather than the target's. */
+  /* The target is the authority only for what is left of it — topology and the
+   * change stream (W11); every content member on the result is an override or a
+   * refusal, so the handler's contract is the type, never the target's. */
   return new Proxy(workspace, {
     get(target, property, receiver) {
       if (typeof property !== 'string') {
@@ -532,36 +602,34 @@ export const createComposedViewClient = (input: {
           }
           const viewMember = viewMutations.get(property);
           const routed = viewMember === undefined ? undefined : viewArgs(property, args, viewPath);
-          if (viewMember !== undefined && routed !== undefined) {
-            const answer = await (view[viewMember] as (...rest: unknown[]) => Promise<unknown>)(...routed);
-            if (property !== 'bulkMove') {
-              /* A preflight answers with a refusal, and the path it names is the
-               * one the caller asked about. */
-              return absoluteRefusal(answer);
-            }
-            /* Callers match outcomes to the edits they sent, so the edits come
-             * back in the namespace they were asked in. */
-            const absolute = <T extends { edit: BulkMoveEdit }>(outcome: T): T => ({
-              ...outcome,
-              edit: {
-                source: paths.toAbsolutePath(outcome.edit.source),
-                target: paths.toAbsolutePath(outcome.edit.target),
-              },
-            });
-            const { moved, failed } = answer as BulkMoveResult;
-            return {
-              moved: moved.map((outcome) => absolute(outcome)),
-              failed: failed.map((outcome) => ({ ...absolute(outcome), error: absoluteRefusal(outcome.error) })),
-            };
-          }
-          if (viewOnlyMutations.has(property)) {
-            /* The authority has no unmasked equivalent since W12d, so there is
-             * nothing to forward a path outside the root to. */
+          if (viewMember === undefined || routed === undefined) {
+            /* Every guarded name is a member of the view and `firstReadOnly` has
+             * already refused every path the view does not serve, so there is
+             * nothing left to forward — and since W11 nowhere to forward it to. */
             throw new Error(
               `No rooted view serves ${touchedPaths(property, args).join(', ')}; ${property} is the view's own operation`,
             );
           }
-          return (target[property as 'writeFile'] as (...rest: unknown[]) => Promise<unknown>).apply(target, args);
+          const answer = await (view[viewMember] as (...rest: unknown[]) => Promise<unknown>)(...routed);
+          if (property !== 'bulkMove') {
+            /* A preflight answers with a refusal, and the path it names is the
+             * one the caller asked about. */
+            return absoluteRefusal(answer);
+          }
+          /* Callers match outcomes to the edits they sent, so the edits come
+           * back in the namespace they were asked in. */
+          const absolute = <T extends { edit: BulkMoveEdit }>(outcome: T): T => ({
+            ...outcome,
+            edit: {
+              source: paths.toAbsolutePath(outcome.edit.source),
+              target: paths.toAbsolutePath(outcome.edit.target),
+            },
+          });
+          const { moved, failed } = answer as BulkMoveResult;
+          return {
+            moved: moved.map((outcome) => absolute(outcome)),
+            failed: failed.map((outcome) => ({ ...absolute(outcome), error: absoluteRefusal(outcome.error) })),
+          };
         };
       }
       const override = overrides[property];
@@ -571,5 +639,5 @@ export const createComposedViewClient = (input: {
       const value = Reflect.get(target, property, receiver) as unknown;
       return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
     },
-  }) as ComposedViewClient;
+  }) as unknown as ComposedViewClient;
 };

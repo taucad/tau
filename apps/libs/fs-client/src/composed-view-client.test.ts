@@ -411,6 +411,59 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
       },
     });
   });
+
+  /*
+   * CI3, Finding 4: the root listing is what the file tree treats as
+   * authoritative over the root's children, so a root listing without the mount
+   * deletes the `node_modules` row on every re-list. The mount is the root's
+   * sibling and this client is what owns "what the root contains", so the row is
+   * appended here rather than taught to the tree.
+   */
+  it('should list the dependency mount as one root row with dependency provenance', async () => {
+    const { client } = await harness();
+
+    const rows = await client.readDirectory(root);
+
+    expect(rows.filter(({ name }) => name === 'node_modules')).toHaveLength(1);
+    const mount = rows.find(({ name }) => name === 'node_modules');
+    expect(mount?.children).toStrictEqual([]);
+    expect(mount?.provenance).toEqual({
+      source: 'dependencies',
+      versioned: false,
+      agentAccess: 'read-only',
+    });
+  });
+
+  /* The OPFS mount is fail-soft: a profile where it never came up must not grow
+   * a row for a directory nothing serves. */
+  it('should omit the dependency mount row when the mount is not there', async () => {
+    const { client, authority } = await harness();
+    vi.mocked(authority.stat).mockRejectedValue(Object.assign(new Error('ENOENT: /node_modules'), { code: 'ENOENT' }));
+
+    const rows = await client.readDirectory(root);
+
+    expect(rows.map(({ name }) => name)).not.toContain('node_modules');
+  });
+
+  /*
+   * A checkout can hold a `node_modules` of its own — the registry classes it as
+   * cache for every consumer, so the view lists it. The listed row is the one
+   * that stands: two rows of the same name would fight over one tree key.
+   */
+  it('should keep the checkout its own node_modules row instead of adding the mount', async () => {
+    const { client } = await harness(async (provider) => {
+      await provider.mkdir('node_modules/three', { recursive: true });
+      await provider.writeFile('node_modules/three/index.d.ts', 'export {};\n');
+    });
+
+    const rows = await client.readDirectory(root);
+
+    expect(rows.filter(({ name }) => name === 'node_modules')).toHaveLength(1);
+    expect(rows.find(({ name }) => name === 'node_modules')?.provenance).toMatchObject({
+      source: 'project',
+      versioned: false,
+    });
+  });
 });
 
 /*

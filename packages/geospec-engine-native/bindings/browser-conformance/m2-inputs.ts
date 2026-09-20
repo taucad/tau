@@ -102,7 +102,7 @@ export type M2BrowserRow = {
   expected: {
     admissionUtf8: string | null;
     bytes?: M2ExpectedBytes;
-    error: null | { message: string; name: string };
+    error: null | { message: string | null; name: string };
     independent: null | M2IndependentBytes;
     status: string;
   };
@@ -331,10 +331,17 @@ const assertCanonicalReportRow = (row: M2BrowserRow): void => {
   if (
     (row.expected.admissionUtf8 === null ||
       row.expected.bytes.canonicalResultUtf8 === null ||
-      row.expected.independent.canonicalResultUtf8 === null) &&
-    (row.expected.status !== 'passed' || row.expected.error !== null || !/^[\da-f]{64}$/.test(row.subjectHash))
+      row.expected.independent.canonicalResultUtf8 === null ||
+      row.expected.error?.message === null) &&
+    (!(
+      (row.expected.status === 'passed' && row.expected.error === null) ||
+      (row.expected.status === 'failed' && row.expected.error?.name === 'GeoSpecAssertionError')
+    ) ||
+      !/^[\da-f]{64}$/.test(row.subjectHash))
   ) {
-    throw new Error(`Supplemental browser row ${row.id} has unavailable authority without a known passed subject.`);
+    throw new Error(
+      `Supplemental browser row ${row.id} has unavailable authority without a known verdict and matching assertion-error expectation.`,
+    );
   }
 };
 

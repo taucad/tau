@@ -48,7 +48,7 @@ type BrowserRow = {
   expected: {
     admissionUtf8: string | null;
     bytes?: ExpectedBytes;
-    error: null | { message: string; name: string };
+    error: null | { message: string | null; name: string };
     independent: null | IndependentBytes;
     status: string;
   };
@@ -387,19 +387,24 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
       ...(row.expected.admissionUtf8 === null ? ['admissionUtf8'] : []),
       ...(row.expected.bytes?.canonicalResultUtf8 === null ? ['canonicalResultUtf8'] : []),
       ...(row.expected.independent?.canonicalResultUtf8 === null ? ['independent.canonicalResultUtf8'] : []),
+      ...(row.expected.error?.message === null ? ['error.message'] : []),
     ];
     if (
       unavailableFields.length > 0 &&
       (!supplemental ||
         row.protocolControl !== undefined ||
-        row.expected.status !== 'passed' ||
-        row.expected.error !== null ||
+        !(
+          (row.expected.status === 'passed' && row.expected.error === null) ||
+          (row.expected.status === 'failed' && row.expected.error?.name === 'GeoSpecAssertionError')
+        ) ||
         !/^[\da-f]{64}$/.test(row.subjectHash) ||
         !row.expected.bytes?.canonicalClaimUtf8 ||
         !row.expected.bytes.canonicalPlanUtf8 ||
         !row.expected.independent?.canonicalPlanUtf8)
     ) {
-      throw new Error(`M2 unavailable authority requires a supplemental independently passed row: ${row.id}.`);
+      throw new Error(
+        `M2 unavailable authority requires a supplemental independently known verdict and matching error expectation: ${row.id}.`,
+      );
     }
     phase = 'engine-construction';
     engine = new Engine();

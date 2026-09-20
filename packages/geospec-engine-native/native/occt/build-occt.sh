@@ -9,9 +9,12 @@
 #   GEOSPEC_OCCT_SOURCE   Extracted exact-pin OCCT source directory.
 #   GEOSPEC_OCCT_CACHE    Build/install cache directory.
 #   GEOSPEC_OCCT_JOBS     Parallel build jobs (default: logical CPU count).
+#   GEOSPEC_OCCT_ARCHIVE  Verified archive materialized by prepare-delivery.py.
+#   GEOSPEC_GIT           Exact Git executable selected by preparation (default: git).
 #
 # Usage:
 #   packages/geospec-engine-native/native/occt/build-occt.sh
+#   Additional arguments are selected CMake options (mixed toolchain/profile).
 #
 # Exit codes:
 #   0  Static OCCT prefix built and installed.
@@ -20,18 +23,28 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT=""
+if [[ -z "${GEOSPEC_OCCT_SOURCE:-}" || -z "${GEOSPEC_OCCT_ARCHIVE:-}" || -z "${GEOSPEC_OCCT_CACHE:-}" ]]; then
+  git_tool="${GEOSPEC_GIT:-git}"
+  command -v "${git_tool}" >/dev/null || { printf 'ERROR: %s is required\n' "${git_tool}" >&2; exit 3; }
+  REPO_ROOT="$("${git_tool}" rev-parse --show-toplevel)"
+fi
 GEOSPEC_OCCT_SOURCE="${GEOSPEC_OCCT_SOURCE:-${REPO_ROOT}/node_modules/.cache/geospec-engine-native/sources/occt}"
 GEOSPEC_OCCT_CACHE="${GEOSPEC_OCCT_CACHE:-${REPO_ROOT}/node_modules/.cache/geospec-engine-native/occt}"
 GEOSPEC_OCCT_JOBS="${GEOSPEC_OCCT_JOBS:-$(sysctl -n hw.logicalcpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')}"
-archive="${REPO_ROOT}/node_modules/.cache/geospec-engine-native/sources/occt-3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz"
+archive="${GEOSPEC_OCCT_ARCHIVE:-${REPO_ROOT}/node_modules/.cache/geospec-engine-native/sources/occt-3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz}"
 expected_archive_hash="ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3"
 build_dir="${GEOSPEC_OCCT_CACHE}/build"
 install_dir="${GEOSPEC_OCCT_CACHE}/install"
 
-for tool in cmake diff ninja shasum tar; do
+for tool in cmake diff find ninja shasum tar; do
   command -v "${tool}" >/dev/null || { printf 'ERROR: %s is required\n' "${tool}" >&2; exit 3; }
 done
+if [[ -d "${GEOSPEC_OCCT_CACHE}" && -n "$(find "${GEOSPEC_OCCT_CACHE}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  printf 'ERROR: OCCT cache must be a fresh empty attempt: %s\n' "${GEOSPEC_OCCT_CACHE}" >&2
+  exit 1
+fi
+mkdir -p "${GEOSPEC_OCCT_CACHE}"
 [[ -f "${archive}" && -f "${GEOSPEC_OCCT_SOURCE}/CMakeLists.txt" ]] || {
   printf '%s\n' 'ERROR: exact OCCT archive/source cache is missing' >&2
   exit 1
@@ -86,7 +99,7 @@ cmake -S "${GEOSPEC_OCCT_SOURCE}" -B "${build_dir}" -G Ninja \
   -DUSE_TCL=OFF \
   -DUSE_TK=OFF \
   -DUSE_FREETYPE=OFF \
-  -DUSE_OPENGL=OFF
+  -DUSE_OPENGL=OFF "$@"
 
 printf '%s\n' '→ building and installing exact OCCT TKDESTEP static closure'
 cmake --build "${build_dir}" --target install --parallel "${GEOSPEC_OCCT_JOBS}"
@@ -96,6 +109,8 @@ config="${install_dir}/lib/cmake/opencascade/OpenCASCADEConfig.cmake"
   printf '%s\n' 'ERROR: installed OCCT prefix lacks TKDESTEP or its CMake contract' >&2
   exit 1
 }
-find "${install_dir}/lib" -maxdepth 1 -type f -name 'libTK*.a' -print | sort \
-  > "${GEOSPEC_OCCT_CACHE}/static-toolkit-closure.txt"
+(
+  cd "${install_dir}"
+  find lib -maxdepth 1 -type f -name 'libTK*.a' -print | sort
+) > "${GEOSPEC_OCCT_CACHE}/static-toolkit-closure.txt"
 printf '✓ OCCT static prefix: %s\n' "${install_dir}"

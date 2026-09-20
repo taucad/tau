@@ -772,6 +772,14 @@
         "forwardAllArgs": false
       }
     },
+    "check-delivery-environment": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "python3 -B packages/geospec-engine-native/scripts/test_deployment_target.py",
+        "forwardAllArgs": false
+      }
+    },
     "test-feature-metrics-m3": {
       "executor": "nx:run-commands",
       "cache": false,

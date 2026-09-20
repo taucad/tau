@@ -834,7 +834,7 @@ def mixed_producer_recipe(mixed):
                        for p in pattern.split(value) if p) or "''"
     environment = mixed_environment(c)
     # Successor invocation controls, not retroactive recorded producer evidence.
-    job_keys = ['GEOSPEC_OCCT_JOBS', 'EMCC_CORES', 'CARGO_BUILD_JOBS']
+    job_keys = ['GEOSPEC_OCCT_JOBS', 'EMCC_CORES', 'CARGO_BUILD_JOBS', 'BINARYEN_CORES']
     control_keys = {*job_keys, 'GIT_CEILING_DIRECTORIES'}
     controls = ' '.join(f'{key}="${{GEOSPEC_OCCT_JOBS:-2}}"' for key in job_keys)
     controls += (' GIT_CEILING_DIRECTORIES="${GEOSPEC_RELINK_ROOT}:'
@@ -882,7 +882,7 @@ cp "$GEOSPEC_RELINK_ROOT/receipts/mixed-sdk-package-lock.json" "$GEOSPEC_MIXED_S
         'producer': mixed['attribution'],
         'recordedEnvironment': environment, 'recordedCommands': mixed['commands'],
         'standaloneExecutionControls': {
-            'jobs': 'GEOSPEC_OCCT_JOBS (default 2) selects outer OCCT, Emscripten and Cargo jobs.',
+            'jobs': 'GEOSPEC_OCCT_JOBS (default 2) selects outer OCCT, Emscripten, Cargo and Binaryen jobs.',
             'gitCeilings': 'Absolute GEOSPEC_RELINK_ROOT, GEOSPEC_MIXED_PREP and GEOSPEC_MIXED_BUILD; source must remain beneath the extracted kit root.',
             'scope': 'Prospective standalone controls only; original recorded environment is unchanged.',
         },

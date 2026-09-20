@@ -298,7 +298,8 @@ def producer_builder():
 def prefix_contract(kind, paths, env, context, producing_builder=None):
     options = [f'-DCMAKE_C_COMPILER={context["compiler"]["clang"]}',
                f'-DCMAKE_CXX_COMPILER={context["compiler"]["clang++"]}',
-               f'-DCMAKE_OSX_SYSROOT={context["sdkPath"]}']
+               f'-DCMAKE_OSX_SYSROOT={context["sdkPath"]}',
+               f'-DCMAKE_OSX_DEPLOYMENT_TARGET={RECIPE["macosDeploymentTarget"]}']
     if kind == 'mixed':
         options = RECIPE['mixedOcctOptions'] + [
             f'-DCMAKE_TOOLCHAIN_FILE={SDK}/emscripten/cmake/Modules/Platform/Emscripten.cmake',
@@ -316,6 +317,8 @@ def prefix_contract(kind, paths, env, context, producing_builder=None):
         'GEOSPEC_OCCT_SOURCE': str(SOURCE),
         'GEOSPEC_OCCT_ARCHIVE': str(CACHE / 'downloads/occt.tar.gz'),
     }
+    if kind == 'native':
+        selected_environment['MACOSX_DEPLOYMENT_TARGET'] = RECIPE['macosDeploymentTarget']
     return {
         'schema': PREFIX_RECEIPT_SCHEMA,
         'kind': kind,

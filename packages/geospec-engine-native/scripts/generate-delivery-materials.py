@@ -382,6 +382,7 @@ def parse_cmake_cache(path):
         'BUILD_ADDITIONAL_TOOLKITS', 'BUILD_LIBRARY_TYPE', 'CMAKE_BUILD_TYPE',
         'CMAKE_CXX_COMPILER', 'CMAKE_CXX_FLAGS', 'CMAKE_CXX_FLAGS_RELEASE',
         'CMAKE_C_COMPILER', 'CMAKE_C_FLAGS', 'CMAKE_C_FLAGS_RELEASE',
+        'CMAKE_OSX_DEPLOYMENT_TARGET',
         'USE_FREETYPE', 'USE_GIT_HASH', 'USE_TBB', 'USE_TCL', 'USE_XLIB',
     }
     selected = {}
@@ -477,6 +478,7 @@ def python_license_material(output, delivery_cache):
 
 
 def native_producer_recipe(napi_identity):
+    deployment_target = read_json(PACKAGE / 'scripts/selected-delivery.json')['macosDeploymentTarget']
     project = read_json(PACKAGE / 'project.json')
     workspace = (ROOT / 'pnpm-workspace.yaml').read_text()
     napi_match = re.search(r"^\s*'@napi-rs/cli':\s*([^\s#]+)\s*$", workspace, re.MULTILINE)
@@ -529,7 +531,8 @@ def native_producer_recipe(napi_identity):
         'python314': project['targets']['build-python314']['options']['command'],
     }
     standalone_routes = {
-        'node': '''(cd "$GEOSPEC_SOURCE_ROOT/packages/geospec-engine-native" && \\
+        'node': f'''(cd "$GEOSPEC_SOURCE_ROOT/packages/geospec-engine-native" && \\
+  MACOSX_DEPLOYMENT_TARGET={shlex.quote(deployment_target)} \\
   GEOSPEC_OCCT_PREFIX="$GEOSPEC_OCCT_PREFIX" \\
   GEOSPEC_PRODUCER_ROUTE=nx-build-node-release-v1 \\
   GEOSPEC_PRODUCER_CARGO_CWD="$PWD" \\
@@ -543,7 +546,8 @@ def native_producer_recipe(napi_identity):
   test -s bindings/node/generated/index.js && \\
   test -s bindings/node/generated/index.d.ts && \\
   test -s bindings/node/generated/geospec-engine-native.darwin-arm64.node)''',
-        'python313': '''(cd "$GEOSPEC_SOURCE_ROOT" && \\
+        'python313': f'''(cd "$GEOSPEC_SOURCE_ROOT" && \\
+  MACOSX_DEPLOYMENT_TARGET={shlex.quote(deployment_target)} \\
   GEOSPEC_OCCT_PREFIX="$GEOSPEC_OCCT_PREFIX" \\
   GEOSPEC_PRODUCER_ROUTE=nx-build-python-release-v1 \\
   GEOSPEC_PRODUCER_CARGO_CWD="$PWD" \\
@@ -552,7 +556,8 @@ def native_producer_recipe(napi_identity):
   --manifest-path packages/geospec-engine-native/bindings/python/Cargo.toml \\
   --interpreter "$GEOSPEC_PYTHON313" --out "$GEOSPEC_BUILD_ROOT/python313-wheels" \\
   --target-dir "$GEOSPEC_BUILD_ROOT/python313-target" --release --locked)''',
-        'python314': '''(cd "$GEOSPEC_SOURCE_ROOT" && \\
+        'python314': f'''(cd "$GEOSPEC_SOURCE_ROOT" && \\
+  MACOSX_DEPLOYMENT_TARGET={shlex.quote(deployment_target)} \\
   GEOSPEC_OCCT_PREFIX="$GEOSPEC_OCCT_PREFIX" \\
   GEOSPEC_PRODUCER_ROUTE=nx-build-python314-release-v1 \\
   GEOSPEC_PRODUCER_CARGO_CWD="$PWD" \\
@@ -571,6 +576,7 @@ def native_producer_recipe(napi_identity):
             'not a byte-identical cross-host or future-build observation'
         ),
         'target': TARGET,
+        'environment': {'MACOSX_DEPLOYMENT_TARGET': deployment_target},
         'profile': {
             'cargo': 'release',
             'PROFILE': 'release',
@@ -1041,7 +1047,8 @@ def make_relink_material(output, delivery_cache, mixed=None):
         output / 'receipts/selected-delivery.json',
     )
     producer_recipe_path = output / 'receipts/native-producer-recipe.json'
-    write_json(producer_recipe_path, native_producer_recipe(napi_identity))
+    native_recipe = native_producer_recipe(napi_identity)
+    write_json(producer_recipe_path, native_recipe)
     revision = run([str(selected_executable('git')), 'rev-parse', 'HEAD']).strip()
     manifest = {
         'schema': 'geospec-native-source-relink-v2',
@@ -1093,12 +1100,14 @@ the rebuilt package bytes in its delivery receipt.
 The recorded prefix is evidence only. Reconstruct into a fresh prefix:
 
 ```bash
+export MACOSX_DEPLOYMENT_TARGET={shlex.quote(native_recipe['environment']['MACOSX_DEPLOYMENT_TARGET'])}
 mkdir occt-source
 tar -xzf archives/{archive_name} --strip-components=1 -C occt-source
 GEOSPEC_OCCT_SOURCE="$PWD/occt-source" \\
 GEOSPEC_OCCT_ARCHIVE="$PWD/archives/{archive_name}" \\
 GEOSPEC_OCCT_CACHE="$PWD/occt-build" \\
-  bash source/packages/geospec-engine-native/native/occt/build-occt.sh
+  bash source/packages/geospec-engine-native/native/occt/build-occt.sh \\
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
 
 ```
 
@@ -1130,7 +1139,10 @@ Reuse receipts/producer-identity-source-proof.json for its recorded manifests,
 configs, profile and dependency graphs, and the selected prefix receipt referenced
 by receipts/occt-static-closure.json for its tools/environment/command. Restore
 the actual producer environment and compiler-driver selection from the selected
-run. The recipe adds no CXX/SDK/deployment/linker overrides; backend ld metadata
+run. Native OCCT and all native binding recipes explicitly select the deployment
+floor from selected-delivery.json. This build selection does not certify runtime
+behavior on older macOS versions; only the recorded release test matrix is qualified.
+The recipe adds no CXX/SDK/linker overrides; backend ld metadata
 must never be used as a Cargo compiler-driver command. Record changed selections
 and the final driver's actual command in the successor producer proof.
 

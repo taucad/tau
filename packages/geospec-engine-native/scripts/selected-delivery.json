@@ -28,6 +28,7 @@
     }
   },
   "nativeRust": "1.88.0",
+  "macosDeploymentTarget": "11.0",
   "emscripten": {
     "version": "6.0.5",
     "commit": "1db513782be24469589d7cb8a1f1834e9a33f271",

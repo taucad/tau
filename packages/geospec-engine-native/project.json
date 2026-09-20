@@ -956,6 +956,12 @@
         "prefixes": {
           "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py prefixes"
         },
+        "reuse-native": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py prefixes --reuse-prefix native"
+        },
+        "reuse-mixed": {
+          "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py prefixes --reuse-prefix mixed"
+        },
         "inputs": {
           "command": "python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py inputs"
         },

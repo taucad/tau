@@ -8,6 +8,8 @@ Stages: check (default, read-only), sources, tools, prefixes, inputs, verify.
 Only explicit prefixes builds OCCT; tools may install the pinned SDK/Rust.
 Optional env: GEOSPEC_DELIVERY_CACHE, GEOSPEC_DELIVERY_RUST_PREFIX,
 GEOSPEC_DELIVERY_EMSDK_PREFIX (existing tools are read-only), GEOSPEC_OCCT_JOBS.
+prefixes --reuse-prefix native|mixed verifies only that existing prefix; never builds it.
+Optional GIT_CEILING_DIRECTORIES is preserved in the selected environment and checked exactly.
 GEOSPEC_OCCT_PRODUCER_BUILDER selects preserved builder source for existing
 prefix verification only; new prefixes always execute the current builder.
 GEOSPEC_OCCT_PRODUCER_RECIPE selects original recipe bytes for a retained prefix;
@@ -252,6 +254,8 @@ def environment(paths, write_config=True):
         'EM_CONFIG': str(config), 'EM_CACHE': str(CACHE / 'em-cache'),
         'PYTHONDONTWRITEBYTECODE': '1',
         'GEOSPEC_GIT': str(paths['git']),
+        **({'GIT_CEILING_DIRECTORIES': os.environ['GIT_CEILING_DIRECTORIES']}
+           if 'GIT_CEILING_DIRECTORIES' in os.environ else {}),
         **scheduling,
     }
 
@@ -459,10 +463,15 @@ def prepare_prefix(kind, paths, env, context):
     print(f'✓ Promoted verified OCCT {kind} prefix: {destination}')
 
 
-def prepare_prefixes(paths, env):
+def prepare_prefixes(paths, env, reuse_prefix=None):
     room('prefixes')
     prepare_sources()
     context = prefix_context(paths, env)
+    if reuse_prefix is not None:
+        prefix = CACHE / f'occt-{reuse_prefix}'
+        verify_prefix(prefix, prefix_contract(reuse_prefix, paths, env, context, producer_builder()))
+        print(f'✓ Reused verified OCCT {reuse_prefix} prefix: {prefix}')
+        return
     for kind in ['native', 'mixed']:
         prepare_prefix(kind, paths, env, context)
 
@@ -588,7 +597,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('stage', nargs='?', default='check', choices=['check', 'sources', 'tools', 'prefixes', 'inputs', 'verify'])
     parser.add_argument('--manifest', type=Path)
+    parser.add_argument('--reuse-prefix', choices=['native', 'mixed'])
     args = parser.parse_args()
+    require(args.reuse_prefix is None or args.stage == 'prefixes', '--reuse-prefix requires the prefixes stage')
     require(sys.version_info >= (3, 12), 'Python 3.12+ required for safe archive extraction')
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Selected recipe is Darwin ARM64 only')
     if args.stage == 'check':
@@ -622,7 +633,7 @@ def main():
         (CACHE / 'tmp').mkdir(exist_ok=True)
         env = environment(paths)
         if args.stage == 'prefixes':
-            prepare_prefixes(paths, env)
+            prepare_prefixes(paths, env, args.reuse_prefix)
         else:
             prepare_inputs(paths, env)
     return 0

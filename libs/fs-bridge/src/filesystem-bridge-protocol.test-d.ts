@@ -34,8 +34,15 @@ describe('filesystem bridge protocol contract', () => {
     expectTypeOf<Parameters<typeof createFileSystemBridgePort>[0]>().toEqualTypeOf<FileSystemBridgeRuntimeService>();
   });
 
-  it('derives the full workspace handler from WorkspaceFileService', () => {
-    expectTypeOf<WorkspaceFileService>().toExtend<FileSystemBridgeWorkspaceService>();
+  /*
+   * The authority no longer satisfies its own wire (W11): the wire's three
+   * scoped reads are named for the scope they require, so a host has to go
+   * through `workspaceBridgeService` and cannot hand a caller a routed-path read
+   * by handing over the service.
+   */
+  it('should derive the topology half of the workspace handler from WorkspaceFileService', () => {
+    expectTypeOf<WorkspaceFileService>().toExtend<Pick<FileSystemBridgeWorkspaceService, 'mount' | 'unmount'>>();
+    expectTypeOf<WorkspaceFileService>().not.toExtend<FileSystemBridgeWorkspaceService>();
     expectTypeOf<{
       readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     }>().not.toExtend<FileSystemBridgeWorkspaceService>();

@@ -12,6 +12,7 @@ export {
   serveFileSystemBridgePort,
   waitForWorkerReady,
   workerReadyMessageType,
+  workspaceBridgeService,
 } from '#filesystem-bridge.js';
 
 export type {
@@ -43,6 +44,7 @@ export {
 export type {
   FileSystemBridgeHello,
   FileSystemBridgeRootedCalls,
+  FileSystemBridgeScopedReads,
   FileSystemBridgeRuntimeService,
   FileSystemBridgeService,
   FileSystemBridgeUnrootedCalls,

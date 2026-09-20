@@ -28,7 +28,7 @@ import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-gua
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
+import { bundledTypesWorkspaceRootSegment, dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
   formatWorkerError,
@@ -439,13 +439,30 @@ const initializeServicesActor = fromSafeAsync<
   const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
   const viewProxy = createFileSystemBridgeProxy(viewConnection);
+  /*
+   * The dependency mount is the checkout's sibling, so no view of the checkout
+   * lists it — but a mount is a root, and since W11 it is read through a rooted
+   * `'user'` connection of its own rather than off the authority's global
+   * surface, which carries no content at all any more (H3, EQ3). Its lifetime is
+   * the project session's, exactly like the checkout's view.
+   */
+  const dependencyConnection = context.openFileSystemBridge!(dependencyMountRoot, 'user');
+  const dependencyProxy = createFileSystemBridgeProxy(dependencyConnection);
   const disposeComposedView = (): void => {
     safeDispose(() => {
       viewProxy.dispose();
     });
+    safeDispose(() => {
+      dependencyProxy.dispose();
+    });
   };
   const workerChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
-  const client = createComposedViewClient({ workspace: proxy, view: viewProxy, paths });
+  const client = createComposedViewClient({
+    workspace: proxy,
+    view: viewProxy,
+    dependencies: dependencyProxy,
+    paths,
+  });
 
   /*
    * The first listing of the root, through the same composition every later

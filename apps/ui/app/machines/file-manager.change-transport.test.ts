@@ -31,13 +31,18 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { createFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
+import {
+  createFileSystemBridgeProxy,
+  exposeFileSystem,
+  openFileSystemBridge,
+  workspaceBridgeService,
+} from '@taucad/fs-bridge';
 import type { FileSystemBridgeProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ComposedViewClient, ComposedViewProxy } from '@taucad/fs-client/composed-view-client';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { WorkspaceAuthorityClient } from '@taucad/fs-client/file-system-client';
 import { joinPath } from '@taucad/utils/path';
 
 const projectRoot = '/projects/w12b-change-transport';
@@ -93,7 +98,7 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
   });
 
   const messageSource = new EventTarget();
-  const exposed = exposeFileSystem(fileService, {
+  const exposed = exposeFileSystem(workspaceBridgeService(fileService), {
     changeEventBus: eventBus,
     messageSource,
     handlerForRoot: (root, context, consumer) => {
@@ -135,8 +140,11 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
   channel.onFileWritten({ handler: (event) => announced.push(event.path) });
 
   const client = createComposedViewClient({
-    workspace: workspaceProxy as unknown as FileSystemClient,
+    workspace: workspaceProxy as unknown as WorkspaceAuthorityClient,
     view: viewProxy as unknown as ComposedViewProxy,
+    /* No dependency mount in this fixture; the arm is wired so the composition is
+     * the production one (W11). */
+    dependencies: await openRooted(),
     paths,
   });
 

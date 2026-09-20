@@ -9,7 +9,7 @@
 
 /* eslint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
-import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
+import { exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -49,6 +49,7 @@ import {
   createWorkerRevisionRegistry,
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
+import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -278,7 +279,7 @@ try {
   throw error;
 }
 
-exposeFileSystem(fileService, {
+exposeFileSystem(workspaceBridgeService(fileService), {
   /*
    * Every rooted connection names the surface it reads (architecture L4, W2):
    * `'user'` and `'agent'` get that consumer's composed view, `'working-copy'`
@@ -288,10 +289,14 @@ exposeFileSystem(fileService, {
    */
   handlerForRoot: (root, context, consumer) => {
     const filesystem = fileService.createRootedFileSystem(root, context);
+    /* A skill bundle belongs to a checkout, not to the dependency mount: the
+     * mount is opened as its own root since W11, and composing the overlay there
+     * would grow an `.agents` row inside `node_modules`. */
+    const overlays = root === dependencyMountRoot ? [] : [systemSkillsOverlay()];
     const view =
       consumer === 'working-copy'
         ? filesystem
-        : composeView({ filesystem }, { consumer, overlays: [systemSkillsOverlay()], policy: tauPathPolicy });
+        : composeView({ filesystem }, { consumer, overlays, policy: tauPathPolicy });
     /*
      * The read content operations run here, over the view the connection asked
      * for (charter D2); `search` and `statTree` are already on it, answered from

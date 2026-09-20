@@ -8,7 +8,6 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
-import { admitParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
@@ -1579,22 +1578,6 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     imageService,
   });
   const parameterActors = new Map<string, Promise<ParameterActor>>();
-  /*
-   * A manifest arriving over the runtime transport is admitted once, at this boundary, and cached by
-   * its revision: re-reading a sidecar carries no new semantic evidence to re-validate.
-   * ponytail: one entry per live revision, cleared when a new one arrives.
-   */
-  const admittedManifests = new Map<string, Promise<ParameterManifest>>();
-  const admitManifestOnce = async (manifest: ParameterManifest): Promise<ParameterManifest> => {
-    const held = admittedManifests.get(manifest.revision);
-    if (held !== undefined) {
-      return held;
-    }
-    const admitted = admitParameterManifest(manifest);
-    admittedManifests.clear();
-    admittedManifests.set(manifest.revision, admitted);
-    return admitted;
-  };
   const parameterActorFor = async (targetFile: string): Promise<ParameterActor> => {
     const existing = parameterActors.get(targetFile);
     if (existing) {
@@ -1636,7 +1619,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
             { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
           );
         }
-        return admitManifestOnce(result.data);
+        return result.data;
       };
       const authority: ParameterAuthority = {
         path: () => sidecar,

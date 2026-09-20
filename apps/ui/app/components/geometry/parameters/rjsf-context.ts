@@ -27,7 +27,6 @@ export type RjsfFieldResetInput = {
 export type ParameterCommit = Readonly<{
   target: ParameterSetTarget;
   group: string;
-  editorInstance: string;
   /** The draft a row left behind when it last unmounted, if it has one. */
   draft(pointer: string): ParameterDraft | undefined;
   /** Retain or clear one row's draft; `undefined` clears it. */
@@ -47,15 +46,17 @@ export type ParameterCommit = Readonly<{
     }>,
   ): Promise<ParameterSetOutcome | undefined>;
   /** Commit one field of the active group; non-numeric widgets never rewrite the whole group. */
-  setValue(field: Readonly<{ pointer: string; value: JSONValue }>): Promise<void>;
+  setValue(
+    field: Readonly<{ pointer: string; value: JSONValue; base: NonNullable<ParameterSetRequest['base']> }>,
+  ): Promise<void>;
   /**
    * Show one field's in-flight drag value without persisting it (D2). Absent when the active kernel
    * did not declare that it can serve the drag lane, in which case the row previews the value alone
    * and the model re-renders on release.
    */
   scrub?(field: Readonly<{ pointer: string; value: JSONValue }>): void;
-  /** End a drag: the released value is committed through `setValue`. */
-  endScrub?(): void;
+  /** End a drag and restore the committed render when no final commit follows. */
+  endScrub?(restore: boolean): void;
 }>;
 
 export type ParameterEdit =

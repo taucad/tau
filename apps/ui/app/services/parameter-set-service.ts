@@ -32,7 +32,6 @@ export type ParameterDraftKey = Readonly<{
   target: ParameterSetTarget;
   group: string;
   pointer: string;
-  editorInstance: string;
 }>;
 
 /**
@@ -97,12 +96,6 @@ export type ParameterSetService = Readonly<{
   ): Promise<ParameterSetOutcome>;
   resolve(filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
   resolveTarget(target: ParameterSetTarget, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
-  submit(filePath: string, manifest: ParameterManifest, request: ParameterSetRequest): Promise<ParameterSetOutcome>;
-  submitTarget(
-    target: ParameterSetTarget,
-    manifest: ParameterManifest,
-    request: ParameterSetRequest,
-  ): Promise<ParameterSetOutcome>;
   readSettled(filePath: string): Promise<Uint8Array<ArrayBuffer> | undefined>;
   replaceValues(
     filePath: string,
@@ -124,7 +117,7 @@ export type ParameterSetService = Readonly<{
   submitValue(
     target: ParameterSetTarget,
     manifest: ParameterManifest,
-    field: Readonly<{ group: string; pointer: string; value: JSONValue }>,
+    field: Readonly<{ group: string; pointer: string; value: JSONValue; base: ParameterSetRequestBase }>,
   ): Promise<void>;
   selectGroup(filePath: string, manifest: ParameterManifest, group: string): Promise<void>;
   createGroup(
@@ -141,9 +134,7 @@ export type ParameterSetService = Readonly<{
     manifest: ParameterManifest,
     input: Readonly<{ group: string; nextGroup: string }>,
   ): Promise<void>;
-  /** Drafts that would be lost by closing or relocating, optionally for one entry and its descendants. */
-  unsavedDrafts(filePath?: string): readonly UnsavedParameterDraft[];
-  /** Discard every unsaved draft (optionally under one entry path) so a refused operation can proceed. */
+  /** Discard drafts under one path, or the drafts named by the last refusal. */
   discardDrafts(filePath?: string): void;
   /** Observe refusals caused by unsaved drafts, so the UI can ask to discard or keep them. */
   subscribeUnsavedDrafts(listener: (refusal: UnsavedParameterDraftsRefusal) => void): () => void;
@@ -181,7 +172,10 @@ export const withPointerValue = (
   return { ...values, [head]: nested };
 };
 
-/** Create the single browser parameter-set owner for a project. */
+// ponytail: repeats the resource @taucad/parameters gives every root-level field (it is not exported). A drift
+// fails loudly as STALE_MANIFEST and the service's real-planner test catches it; export it when a second caller needs it.
+const rootParameterSchemaResource = 'urn:taucad:parameter-schema:root';
+
 /** A person-readable field name for a pointer, such as `/dimensions/cellSize` → `Dimensions › Cell size`. */
 const draftLabel = (group: string, pointer: string): string => {
   const path = pointer
@@ -235,8 +229,7 @@ export const createParameterSetService = (
   });
   const targetKey = (target: ParameterSetTarget): string =>
     JSON.stringify([target.authority, target.root, target.checkout ?? null, target.entry]);
-  const draftKey = (key: ParameterDraftKey): string =>
-    JSON.stringify([targetKey(key.target), key.editorInstance, key.group, key.pointer]);
+  const draftKey = (key: ParameterDraftKey): string => JSON.stringify([targetKey(key.target), key.group, key.pointer]);
   const absolutePath = (filePath: string): string => joinPath(options.rootDirectory, parameterEntryPath(filePath));
   const actorFor = (filePath: string): ActorRefFrom<typeof parameterSetMachine> | undefined =>
     [...clients.values()].find(({ target }) => target.entry === filePath)?.actor;
@@ -322,7 +315,7 @@ export const createParameterSetService = (
     return state;
   };
 
-  async function resolveState(_filePath: string, state: TargetState): Promise<ParameterSetAuthoritySnapshot> {
+  async function resolveState(state: TargetState): Promise<ParameterSetAuthoritySnapshot> {
     const matches = (): boolean =>
       state.actor.getSnapshot().context.current?.manifest.revision === state.manifestRef.current.revision;
     if (!matches() && !state.actor.getSnapshot().matches({ open: 'loading' })) {
@@ -363,11 +356,14 @@ export const createParameterSetService = (
         },
       ];
     });
+  let lastRefusedDraftKeys: readonly string[] = [];
   const refuseUnsaved = (operation: UnsavedParameterDraftsRefusal['operation'], filePath?: string): void => {
-    const unsaved = draftsUnder(filePath).map(({ draft }) => draft);
+    const retained = draftsUnder(filePath);
+    const unsaved = retained.map(({ draft }) => draft);
     if (unsaved.length === 0) {
       return;
     }
+    lastRefusedDraftKeys = retained.map(({ key }) => key);
     unsavedRefusals.emit({ operation, drafts: unsaved });
     const unsubmitted = unsaved.filter(({ reason }) => reason === 'unsubmitted').length;
     throw Object.assign(
@@ -400,7 +396,7 @@ export const createParameterSetService = (
       // oxlint-disable-next-line no-await-in-loop -- each settled relocation can reveal a newer one.
       await Promise.all(activeRelocations);
     }
-    return resolveState(target.entry, stateFor(target.entry, manifest, target));
+    return resolveState(stateFor(target.entry, manifest, target));
   };
 
   const resolve = async (filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot> =>
@@ -417,7 +413,7 @@ export const createParameterSetService = (
     const { filePath, manifest, request, target } = input;
     const state = stateFor(filePath, manifest, target);
     if (state.actor.getSnapshot().context.current === undefined) {
-      await resolveState(filePath, state);
+      await resolveState(state);
     }
     return submitParameterRequest(state.actor, request);
   };
@@ -583,7 +579,7 @@ export const createParameterSetService = (
 
   const commitValue: ParameterSetService['commitValue'] = async (target, manifest, field) => {
     const state = stateFor(target.entry, manifest, target);
-    const current = state.actor.getSnapshot().context.current ?? (await resolveState(target.entry, state));
+    const current = state.actor.getSnapshot().context.current ?? (await resolveState(state));
     const binding = resolveParameterBinding(manifest, field.pointer);
     const requestId = `browser:${target.entry}:${++sequence}`;
     return submitRequest({
@@ -598,8 +594,8 @@ export const createParameterSetService = (
         operation: {
           kind: 'native-value',
           group: field.group,
-          parameterId: binding?.parameter.value ?? field.pointer,
-          resource: binding?.schema.resource ?? 'urn:taucad:ui:parameter',
+          parameterId: binding?.parameter.value ?? `${manifest.source.revision}:${field.pointer}`,
+          resource: binding?.schema.resource ?? rootParameterSchemaResource,
           pointer: field.pointer,
           value: field.value,
         },
@@ -627,10 +623,6 @@ export const createParameterSetService = (
     commitValue,
     resolve,
     resolveTarget,
-    submit: async (filePath, manifest, request) =>
-      submitRequest({ filePath, manifest, request, target: targetFor(filePath) }),
-    submitTarget: async (target, manifest, request) =>
-      submitRequest({ filePath: target.entry, manifest, request, target }),
     readSettled: async (filePath) => {
       const state = [...clients.values()].find(({ target }) => target.entry === filePath);
       if (state !== undefined) {
@@ -678,19 +670,11 @@ export const createParameterSetService = (
         ...(expected === undefined ? {} : { expected }),
       });
     },
-    submitValue: async (target, manifest, { group, pointer, value }) => {
-      const current = await resolveTarget(target, manifest);
-      await submitOperation({
-        filePath: target.entry,
-        manifest,
-        operation: {
-          kind: 'replace-group-values',
-          group,
-          values: withPointerValue(current.entry.groups[group]?.values ?? {}, pointer, value),
-        },
-        target,
-        expected: current.identity,
-      });
+    submitValue: async (target, manifest, { group, pointer, value, base }) => {
+      const outcome = await commitValue(target, manifest, { group, pointer, value, base });
+      if (outcome.status !== 'committed') {
+        throw operationError(outcome);
+      }
     },
     selectGroup: async (filePath, manifest, group) => {
       await submitOperation({
@@ -715,6 +699,15 @@ export const createParameterSetService = (
         operation: { kind: 'delete-group', group },
         target: targetFor(filePath),
       });
+      const discarded = [...drafts].filter(
+        ([, retained]) => retained.key.target.entry === filePath && retained.key.group === group,
+      );
+      for (const [key] of discarded) {
+        drafts.delete(key);
+      }
+      if (discarded.length > 0) {
+        draftChanges.emit();
+      }
     },
     renameGroup: async (filePath, manifest, { group, nextGroup }) => {
       await submitOperation({
@@ -723,6 +716,21 @@ export const createParameterSetService = (
         operation: { kind: 'rename-group', group, nextGroup },
         target: targetFor(filePath),
       });
+      const renamed = [...drafts].filter(
+        ([, retained]) => retained.key.target.entry === filePath && retained.key.group === group,
+      );
+      for (const [key, retained] of renamed) {
+        drafts.delete(key);
+        const nextKey = { ...retained.key, group: nextGroup };
+        drafts.set(draftKey(nextKey), {
+          ...retained,
+          key: nextKey,
+          label: draftLabel(nextGroup, nextKey.pointer),
+        });
+      }
+      if (renamed.length > 0) {
+        draftChanges.emit();
+      }
     },
     subscribeActors: (listener) => actorChanges.subscribe(listener),
     resetRecord: async (filePath) => {
@@ -742,13 +750,19 @@ export const createParameterSetService = (
       }
       actorFor(filePath)?.send({ type: 'watch.changed' });
     },
-    unsavedDrafts: (filePath) => draftsUnder(filePath).map(({ draft }) => draft),
     discardDrafts: (filePath) => {
-      const discarded = draftsUnder(filePath);
-      for (const { key } of discarded) {
-        drafts.delete(key);
+      const keys =
+        filePath === undefined && lastRefusedDraftKeys.length > 0
+          ? lastRefusedDraftKeys
+          : draftsUnder(filePath).map(({ key }) => key);
+      let changed = false;
+      for (const key of keys) {
+        changed = drafts.delete(key) || changed;
       }
-      if (discarded.length > 0) {
+      if (filePath === undefined) {
+        lastRefusedDraftKeys = [];
+      }
+      if (changed) {
         draftChanges.emit();
       }
     },

@@ -1,5 +1,5 @@
 import { XIcon, Download, Info, Check, ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, memo, useState, useMemo, useEffect, useRef, useId } from 'react';
+import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
@@ -669,7 +669,6 @@ export function ExportSchemaForm({
 }): ReactElement {
   'use no memo';
 
-  const parameterEditorInstance = useId();
   const { parameterService } = parameterOwner;
   const legacyValueRef = useRef(value);
   useEffect(() => {
@@ -721,13 +720,11 @@ export function ExportSchemaForm({
           commit: {
             target: compiled.target,
             group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
-            editorInstance: parameterEditorInstance,
             draft: (pointer) =>
               parameterService.draft({
                 target: compiled.target,
                 group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
                 pointer,
-                editorInstance: parameterEditorInstance,
               }),
             setDraft: (pointer, draft) => {
               parameterService.setDraft(
@@ -735,7 +732,6 @@ export function ExportSchemaForm({
                   target: compiled.target,
                   group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
                   pointer,
-                  editorInstance: parameterEditorInstance,
                 },
                 draft,
               );
@@ -764,7 +760,7 @@ export function ExportSchemaForm({
     return () => {
       controller.abort();
     };
-  }, [configuration, parameterEditorInstance, parameterService, provider, resolved]);
+  }, [configuration, parameterService, provider, resolved]);
 
   useEffect(() => {
     if (parameterSession && parameterSnapshot && JSON.stringify(authoritativeValue) !== JSON.stringify(value)) {

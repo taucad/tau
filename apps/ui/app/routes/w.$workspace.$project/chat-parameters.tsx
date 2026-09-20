@@ -11,7 +11,7 @@ import {
   Box,
   FileCode,
 } from 'lucide-react';
-import { useCallback, memo, useState, useMemo, useRef, useEffect, useId } from 'react';
+import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
@@ -142,7 +142,9 @@ const useResolvedParameterActor = (
 const authorityFailureOf = (
   state: ParameterSetState | undefined,
 ): Readonly<{ code: string; message: string }> | undefined =>
-  state?.matches({ open: 'disconnected' }) === true ? state.context.diagnostic : undefined;
+  state?.matches({ open: 'disconnected' }) === true || state?.matches({ open: 'uncertain' }) === true
+    ? state.context.diagnostic
+    : undefined;
 
 /** The single invalid-record policy refuses every unreadable record with this one code. */
 const unreadableRecordCode = 'INVALID_RECORD';
@@ -519,20 +521,20 @@ function ParameterGroupSelector({
  * which is what latest-wins means. Nothing here is persisted; the released value is committed
  * through the ordinary checked write.
  *
- * Returns nothing when the active kernel did not declare {@link liveEdit}, which leaves
+ * Returns nothing when the active kernel did not declare cooperative cancellation, which leaves
  * `ParameterCommit.scrub` absent and the row previewing the value on its own.
  */
-function useScrubDispatch(
-  cadRef: ActorRefFrom<typeof cadMachine>,
-  parameterActor: ReturnType<typeof useResolvedParameterActor>,
-): Pick<ParameterCommit, 'scrub' | 'endScrub'> {
-  const liveEdit = useSelector(cadRef, (state) => {
+function useScrubDispatch(cadRef: ActorRefFrom<typeof cadMachine>): Pick<ParameterCommit, 'scrub' | 'endScrub'> {
+  const canScrub = useSelector(cadRef, (state) => {
     const kernelId = state.context.activeKernelId;
-    return kernelId !== undefined && state.context.capabilities?.renderCapabilities[kernelId]?.liveEdit === true;
+    return (
+      kernelId !== undefined && state.context.capabilities?.renderCapabilities[kernelId]?.cancellation === 'cooperative'
+    );
   });
 
   const pending = useRef<Record<string, unknown> | undefined>(undefined);
   const frame = useRef<number | undefined>(undefined);
+  const sent = useRef(false);
 
   const lane = useMemo(() => {
     function pump(): void {
@@ -547,26 +549,34 @@ function useScrubDispatch(
       const next = pending.current;
       pending.current = undefined;
       cadRef.send({ type: 'scrubParameters', parameters: next });
+      sent.current = true;
     }
     return {
       scrub(field: Readonly<{ pointer: string; value: JSONValue }>): void {
-        const values = activeGroupValuesOf(parameterActor?.getSnapshot()) as Readonly<Record<string, JSONValue>>;
-        pending.current = withPointerValue(values, field.pointer, field.value);
+        pending.current = withPointerValue({}, field.pointer, field.value);
         frame.current ??= requestAnimationFrame(pump);
       },
-      stop(): void {
+      stop(restore: boolean): void {
         pending.current = undefined;
         if (frame.current !== undefined) {
           cancelAnimationFrame(frame.current);
           frame.current = undefined;
         }
+        if (restore && sent.current) {
+          cadRef.send({ type: 'restoreParameters' });
+          sent.current = false;
+        }
       },
     };
-  }, [cadRef, parameterActor]);
+  }, [cadRef]);
 
-  useEffect(() => lane.stop, [lane]);
+  useEffect(() => {
+    return () => {
+      lane.stop(false);
+    };
+  }, [lane]);
 
-  return useMemo(() => (liveEdit ? { scrub: lane.scrub, endScrub: lane.stop } : {}), [lane, liveEdit]);
+  return useMemo(() => (canScrub ? { scrub: lane.scrub, endScrub: lane.stop } : {}), [canScrub, lane]);
 }
 
 // ---------------------------------------------------------------------------
@@ -598,8 +608,7 @@ function GeometryUnitParameters({
   const activeGroup = useSelector(parameterActor, activeGroupOf);
   const parameters = useSelector(parameterActor, activeGroupValuesOf);
   const parameterGroup = useSelector(parameterActor, activeParameterGroupOf, sameGroupClaims);
-  const parameterEditorInstance = useId();
-  const scrub = useScrubDispatch(cadRef, parameterActor);
+  const scrub = useScrubDispatch(cadRef);
   const parameterCommit = useMemo(
     () =>
       parameterManifest === undefined || activeGroup === undefined
@@ -607,13 +616,11 @@ function GeometryUnitParameters({
         : {
             target: parameterService.target(entryPath),
             group: activeGroup,
-            editorInstance: parameterEditorInstance,
             draft: (pointer: string) =>
               parameterService.draft({
                 target: parameterService.target(entryPath),
                 group: activeGroup,
                 pointer,
-                editorInstance: parameterEditorInstance,
               }),
             setDraft: (pointer: string, draft: ParameterDraft | undefined) => {
               parameterService.setDraft(
@@ -621,7 +628,6 @@ function GeometryUnitParameters({
                   target: parameterService.target(entryPath),
                   group: activeGroup,
                   pointer,
-                  editorInstance: parameterEditorInstance,
                 },
                 draft,
               );
@@ -639,7 +645,7 @@ function GeometryUnitParameters({
               }),
             ...scrub,
           },
-    [activeGroup, entryPath, parameterEditorInstance, parameterManifest, parameterService, scrub],
+    [activeGroup, entryPath, parameterManifest, parameterService, scrub],
   );
   const displaySymbol = useSelector(graphicsActor, (state) => state?.context.displayUnits.length.symbol) ?? 'mm';
   // `units` and `parameterEdit` feed the RJSF form context; rebuilding either per render would

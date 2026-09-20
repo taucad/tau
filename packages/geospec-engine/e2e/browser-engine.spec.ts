@@ -1,5 +1,16 @@
 import { describe, expect, test } from 'vitest';
-import { server } from 'vitest/browser';
+import { server as vitestServer } from 'vitest/browser';
+import type { GeoSpecPreviewResult } from '#e2e/browser-command.js';
+
+/**
+ * `BrowserCommands` reaches this file through the `vitest` copy pnpm installs for
+ * `@vitest/browser-playwright`'s peer context, not the one this project resolves, so a
+ * `declare module` augmentation of it never merges and every command call types as
+ * `any`. Binding the command surface here is the same intersection `apps/ui-e2e` uses.
+ */
+const server = vitestServer as typeof vitestServer & {
+  readonly commands: { runGeospecPreview(): Promise<GeoSpecPreviewResult> };
+};
 
 /**
  * The engine's browser contract, exercised the way `apps/ui`'s GeoSpec worker

@@ -1,11 +1,18 @@
 /**
  * Scripted assistant turns for the Anthropic-wire gateway fixture
- * (`uiInstallAgentHostGatewayFixture`): one turn per model request, walked
- * cyclically so a retried turn replays the same script.
+ * (`uiInstallAgentHostGatewayFixture`), and the walk that picks one per model
+ * request.
  *
  * Both halves of a vertical read this module — the node command writes the
  * wire from it, the browser spec asserts its literals — so a fixture edit can
  * never desync from the assertion that depends on it.
+ *
+ * The walk is keyed on the *turn* a request asks for, not on the request
+ * ordinal: a script entry is a step of one turn's agent loop, and a turn that
+ * is asked again (a resume, a *Try again*, a rewind) replays its own steps
+ * from where that turn started. Under the ordinal walk a resumed turn-1 call
+ * consumed the reply scripted for turn 2, and turn 2 then drew turn 1's gated
+ * entry with no release pending (blueprint Q5 defect 2).
  */
 
 /** One scripted `tool_use` block. */
@@ -41,6 +48,112 @@ export type GatewayScriptTurn = {
   readonly toolCalls?: readonly GatewayScriptToolCall[];
   /** Per-turn usage, reported the way a provider reports it. */
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
+};
+
+/** One captured Anthropic request body, as far as the walk reads it. */
+export type GatewayScriptRequest = {
+  readonly messages?: ReadonlyArray<{ readonly role?: string; readonly content?: unknown }>;
+};
+
+/** Which turn one captured request belongs to. */
+export type GatewayRequestStep = {
+  /** The user text this turn was asked with; `''` when the turn carried no text block. */
+  readonly turn: string;
+  /** True when the request carries tool results, i.e. it continues a turn already in flight. */
+  readonly isContinuation: boolean;
+};
+
+/** How often one turn reached the provider. */
+export type GatewayTurnCount = {
+  readonly turn: string;
+  /** Fresh asks of this turn. More than one means the turn was re-asked — a second charge. */
+  readonly asks: number;
+  /** Every request of this turn, its agent-loop continuations included. */
+  readonly calls: number;
+};
+
+const blocksOf = (content: unknown): ReadonlyArray<Readonly<Record<string, unknown>>> =>
+  Array.isArray(content) ? (content as ReadonlyArray<Readonly<Record<string, unknown>>>) : [];
+
+const textOf = (content: unknown): string =>
+  typeof content === 'string'
+    ? content
+    : blocksOf(content)
+        .filter((block) => block['type'] === 'text')
+        .map((block) => (typeof block['text'] === 'string' ? block['text'] : ''))
+        .join('');
+
+/* A tool result rides a `user` message on this wire, so "the last user message"
+ * alone cannot tell a turn apart from its own agent loop. */
+const carriesToolResults = (content: unknown): boolean =>
+  blocksOf(content).some((block) => block['type'] === 'tool_result');
+
+/**
+ * Which turn a captured request asks for.
+ *
+ * @param request - The captured Anthropic request body.
+ * @returns The turn's user text and whether the request continues its loop.
+ */
+export const gatewayRequestStep = (request: GatewayScriptRequest): GatewayRequestStep => {
+  const messages = request.messages ?? [];
+  const asked = messages.findLast((message) => message.role === 'user' && !carriesToolResults(message.content));
+  return { turn: textOf(asked?.content), isContinuation: carriesToolResults(messages.at(-1)?.content) };
+};
+
+/** A script walk: one cursor over `script`, plus where each turn's steps began. */
+export type GatewayScriptWalk = {
+  /** Count one captured request against its turn. Call it for refused requests too. */
+  readonly record: (request: GatewayScriptRequest) => GatewayRequestStep;
+  /** The turn to write for one recorded step, advancing that turn's cursor. */
+  readonly serve: (step: GatewayRequestStep) => GatewayScriptTurn;
+  /** Per-turn provider-call counts, in the order the turns were first asked. */
+  readonly counts: () => readonly GatewayTurnCount[];
+};
+
+/**
+ * Walk one script by turn identity.
+ *
+ * A fresh ask of an unseen turn takes the next unused entry and remembers where
+ * it started; a fresh ask of a turn already seen rewinds to that start; a
+ * continuation takes the next entry. The cursor wraps, so a script shorter than
+ * the run still answers.
+ *
+ * @param script - The scripted assistant turns.
+ * @returns The walk.
+ */
+export const createGatewayScriptWalk = (script: readonly GatewayScriptTurn[]): GatewayScriptWalk => {
+  const starts = new Map<string, number>();
+  const counts = new Map<string, GatewayTurnCount>();
+  let cursor = 0;
+  return {
+    record: (request) => {
+      const step = gatewayRequestStep(request);
+      const count = counts.get(step.turn) ?? { turn: step.turn, asks: 0, calls: 0 };
+      counts.set(step.turn, {
+        turn: step.turn,
+        asks: count.asks + (step.isContinuation ? 0 : 1),
+        calls: count.calls + 1,
+      });
+      return step;
+    },
+    serve: ({ turn, isContinuation }) => {
+      if (!isContinuation) {
+        const start = starts.get(turn);
+        if (start === undefined) {
+          starts.set(turn, cursor);
+        } else {
+          cursor = start;
+        }
+      }
+      const scripted = script[cursor % script.length];
+      cursor += 1;
+      if (!scripted) {
+        throw new Error('The agent-host gateway fixture was installed with an empty script.');
+      }
+      return scripted;
+    },
+    counts: () => [...counts.values()],
+  };
 };
 
 /** Streamed before the deterministic gate of the default script's tool turn. */

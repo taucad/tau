@@ -2,7 +2,7 @@
 import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
 import { locators, server as vitestServer } from 'vitest/browser';
-import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
+import type { GatewayScriptTurn, GatewayTurnCount } from '#support/agent-host-gateway-script.js';
 
 export type TargetSurface = 'primary' | 'secondary';
 export type TargetSelector = Locator | string;
@@ -31,6 +31,20 @@ export type TargetCookie = {
   readonly url?: string;
   readonly value: string;
 };
+/** Where one gateway request is parked, and the turn it asks for. */
+export type TargetGatewayGate = {
+  readonly kind: 'request' | 'stream';
+  readonly turn: string;
+};
+
+/** What the agent-host gateway fixture holds and has been asked, right now. */
+export type TargetGatewayState = {
+  /** Every request parked at a gate, oldest first. Its length is the pending count. */
+  readonly parked: readonly TargetGatewayGate[];
+  /** Per-turn provider-call counts, in the order the turns were first asked. */
+  readonly turns: readonly GatewayTurnCount[];
+};
+
 export type TargetReadOptions = { readonly attributes?: readonly string[] };
 export type TargetState = {
   readonly attributes: Readonly<Record<string, string | null>>;
@@ -174,8 +188,15 @@ export type UiBrowserCommands = {
   uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
   uiReadTauVertexOperations(email: string): Promise<TargetTauBillingOperation[]>;
   uiReadAgentHostApiRequests(): Promise<string[]>;
+  uiHoldNextAgentHostGatewayRequest(): Promise<void>;
   uiReadAgentHostGatewayRequests(): Promise<unknown[]>;
-  uiReleaseAgentHostGatewayFixture(): Promise<void>;
+  uiReadAgentHostGatewayState(): Promise<TargetGatewayState>;
+  uiReleaseAgentHostGatewayFixture(turn?: string): Promise<void>;
+  uiReleaseAgentHostGatewayRequest(turn?: string): Promise<void>;
+  uiWaitForAgentHostGatewayGate(
+    match?: { readonly kind?: 'request' | 'stream'; readonly turn?: string },
+    timeoutMilliseconds?: number,
+  ): Promise<TargetGatewayGate>;
   uiSetAgentHostGatewayFailure(failure?: { readonly status: number; readonly message: string }): Promise<void>;
   uiReadTargetEvents(): Promise<{
     readonly consoleMessages: ReadonlyArray<{
@@ -440,7 +461,22 @@ export const listTauServeChats = (): Promise<readonly string[]> => server.comman
 export const installAgentHostGatewayFixture = (script?: readonly GatewayScriptTurn[]): Promise<void> =>
   server.commands.uiInstallAgentHostGatewayFixture(script);
 export const readAgentHostGatewayRequests = (): Promise<unknown[]> => server.commands.uiReadAgentHostGatewayRequests();
-export const releaseAgentHostGatewayFixture = (): Promise<void> => server.commands.uiReleaseAgentHostGatewayFixture();
+/** Releases a response parked mid-stream; omit `turn` for the newest gate. */
+export const releaseAgentHostGatewayFixture = (turn?: string): Promise<void> =>
+  server.commands.uiReleaseAgentHostGatewayFixture(turn);
+/** Holds the next provider request at its entry — the turn stays in `queued.dispatched` (F1). */
+export const holdNextAgentHostGatewayRequest = (): Promise<void> => server.commands.uiHoldNextAgentHostGatewayRequest();
+/** Releases a request parked at its entry; omit `turn` for the newest gate. */
+export const releaseAgentHostGatewayRequest = (turn?: string): Promise<void> =>
+  server.commands.uiReleaseAgentHostGatewayRequest(turn);
+/** What the gateway holds and what it has been asked: parked gates and per-turn call counts (F5). */
+export const readAgentHostGatewayState = (): Promise<TargetGatewayState> =>
+  server.commands.uiReadAgentHostGatewayState();
+/** Waits until a request is parked at a matching gate, and answers which one (F2). */
+export const waitForAgentHostGatewayGate = (
+  match?: { readonly kind?: 'request' | 'stream'; readonly turn?: string },
+  timeoutMilliseconds?: number,
+): Promise<TargetGatewayGate> => server.commands.uiWaitForAgentHostGatewayGate(match, timeoutMilliseconds);
 /** Every `/v1/chat/...` path the page asked the (absent) API for since the fixture was installed. */
 export const readAgentHostApiRequests = (): Promise<string[]> => server.commands.uiReadAgentHostApiRequests();
 /** Arms (or disarms, with no argument) a coded provider refusal on the gateway fixture. */

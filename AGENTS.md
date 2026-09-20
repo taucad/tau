@@ -6,17 +6,17 @@ Run from the workspace root with pnpm and the actual Nx project name:
 
 ```bash
 pnpm nx show projects
-pnpm nx show project <project>           # Owners, targets and configuration
-pnpm nx lint <project>                  # oxlint then ESLint
-pnpm nx lint <project> --files=<path>    # Focused lint
+pnpm nx show project <project>        # Owners, targets and configuration
+pnpm nx lint <project>                # oxlint then ESLint
+pnpm nx lint <project> --files=<path> # Focused lint
 pnpm nx test <project> --watch=false
 pnpm nx typecheck <project>
-pnpm nx build <project>                 # When the project has this target
+pnpm nx build <project>               # When the project has this target
 pnpm nx affected -t lint test build typecheck
-pnpm docs:validate                      # Policy/research frontmatter
+pnpm docs:validate                    # Policy/research frontmatter
 pnpm nx run scripts:validate-agent-config
-pnpm nx serve ui                        # Production server after build
-pnpm infra:up                           # Local PostgreSQL and Redis
+pnpm nx serve ui                      # Production server after build
+pnpm infra:up                         # Local PostgreSQL and Redis
 pnpm infra:down
 pnpm db:generate
 pnpm db:migrate
@@ -66,6 +66,7 @@ Read these owners when a task touches each concern:
 - Filesystem/runtime/app/UI event fan-out: [event fan-out](docs/policy/event-fanout-policy.md)
 - Filesystem authority, rooted views, mounts or watches: [filesystem](docs/policy/filesystem-policy.md), [authority](docs/policy/filesystem-authority-policy.md)
 - Three.js/TSL, cameras, materials, graphics machines or capture: [graphics backend](docs/policy/graphics-backend-policy.md)
+- Parameter sidecars: [record](docs/policy/parameter-record-policy.md)
 - Geometry assertions/GeoSpec: [GeoSpec](docs/policy/geospec-policy.md), [testing](docs/policy/testing-policy.md)
 - Policy/research/MDX: [documentation](docs/policy/documentation-policy.md); use `create-policy`/`create-research`; published content also follows docs-site gates
 - AGENTS/CLAUDE, skills, agent/MCP config: [agent instructions](docs/policy/agents-md-policy.md), [MCP capabilities](docs/policy/mcp-tool-budget-policy.md); use `create-skill`

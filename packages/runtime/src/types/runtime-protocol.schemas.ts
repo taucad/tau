@@ -288,7 +288,7 @@ const renderCapabilitySchema = z
       })
       .catchall(z.unknown()),
     content: contentCapabilitySchema.optional(),
-    liveEdit: z.boolean().optional(),
+    cancellation: z.literal('cooperative').optional(),
   })
   .catchall(z.unknown());
 

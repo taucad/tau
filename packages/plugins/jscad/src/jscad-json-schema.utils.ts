@@ -171,7 +171,8 @@ function convertParameterDefinitionToJsonSchemaProperty(definition: JscadParamet
       // If no type specified, infer from default value
       if (defaultValue !== undefined) {
         if (typeof defaultValue === 'number') {
-          schema.type = Number.isInteger(defaultValue) ? 'integer' : 'number';
+          // A JavaScript default is a number; a whole sample value says nothing about integrality.
+          schema.type = 'number';
         } else if (typeof defaultValue === 'string') {
           schema.type = 'string';
         } else if (typeof defaultValue === 'boolean') {

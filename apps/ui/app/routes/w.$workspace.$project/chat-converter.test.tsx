@@ -101,10 +101,7 @@ mockGeometryUnits.set('main.ts', mockCadRef);
 const mockParameterEntries = new Map<string, FileParameterEntry>();
 const mockParameterSnapshots = new Map<string, Record<string, unknown>>();
 const parameterIdentity = {
-  sourceRevision: 'source',
   manifestRevision: 'manifest',
-  valueRevision: 'value',
-  dependencyRevision: 'dependency',
 };
 const mockParameterService = {
   entries: () => mockParameterEntries,
@@ -143,13 +140,6 @@ const mockParameterService = {
       });
     },
   ),
-  input: vi.fn(),
-  submitTarget: vi.fn(async (target: { entry: string }, _manifest: unknown, request: { requestId: string }) => ({
-    status: 'committed',
-    requestId: request.requestId,
-    write: 'applied',
-    revision: { ...parameterIdentity, valueRevision: `${target.entry}:next` },
-  })),
 };
 
 vi.mock('#hooks/use-project.js', () => ({

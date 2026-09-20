@@ -148,11 +148,10 @@ const serviceFixture = (initialRecord?: string) => {
         : { base: { pointer: input.pointer, value: input.base, binding: fixtureBinding } }),
       ...(input.pressure === undefined ? {} : { pressure: input.pressure }),
     });
-  const draftKey = (pointer: string, editorInstance: string) => ({
+  const draftKey = (pointer: string) => ({
     target: service.target('main.ts'),
     group: 'default',
     pointer,
-    editorInstance,
   });
   const stored = (name: string): unknown =>
     (parseEntry(files.get(fixtureRecordPath)) as { groups?: Record<string, { values: Record<string, unknown> }> })
@@ -200,23 +199,6 @@ describe('parameter set service behaviours', () => {
     fixture.setSource('source:2');
     const edited = await fixture.manifestFor('source:2');
     await fixture.service.resolve('main.ts', edited);
-    // A request built against the superseded manifest is refused rather than written.
-    expect(
-      await fixture.service.submit('main.ts', edited, {
-        requestId: 'stale-1',
-        draftGeneration: 1,
-        expected: { manifestRevision: first.revision },
-        pressure: 'final',
-        operation: {
-          kind: 'native-value',
-          group: 'default',
-          parameterId: edited.bindings['/width']!.parameter.value,
-          resource: edited.bindings['/width']!.schema.resource,
-          pointer: '/width',
-          value: 115,
-        },
-      }),
-    ).toMatchObject({ code: 'STALE_MANIFEST' });
     expect(await fixture.commit(edited, { pointer: '/width', value: 120, base: 110 })).toMatchObject({
       status: 'committed',
     });
@@ -312,7 +294,7 @@ describe('parameter set service behaviours', () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    fixture.service.setDraft(fixture.draftKey('/width', 'width'), { text: '30', valid: true });
+    fixture.service.setDraft(fixture.draftKey('/width'), { text: '30', valid: true });
     const refusals: unknown[] = [];
     fixture.service.subscribeUnsavedDrafts((refusal) => refusals.push(refusal));
 
@@ -338,13 +320,13 @@ describe('parameter set service behaviours', () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    fixture.service.setDraft(fixture.draftKey('/width', 'width'), { text: '30', valid: true });
+    fixture.service.setDraft(fixture.draftKey('/width'), { text: '30', valid: true });
 
     await expect(fixture.service.close()).rejects.toMatchObject({
       code: 'UNSAVED_PARAMETER_DRAFTS',
       message: 'Some parameter edits were typed but not entered. Enter or discard them first.',
     });
-    expect(fixture.service.unsavedDrafts()).toHaveLength(1);
+    expect(fixture.service.draft(fixture.draftKey('/width'))).toEqual({ text: '30', valid: true });
     fixture.service.discardDrafts();
     await expect(fixture.service.close()).resolves.toBeUndefined();
     expect(fixture.writes).toHaveLength(0);
@@ -356,7 +338,7 @@ describe('parameter set service behaviours', () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    fixture.service.setDraft(fixture.draftKey('/width', 'width'), { text: 'not a quantity', valid: false });
+    fixture.service.setDraft(fixture.draftKey('/width'), { text: 'not a quantity', valid: false });
 
     await expect(fixture.service.close()).rejects.toMatchObject({
       code: 'UNSAVED_PARAMETER_DRAFTS',
@@ -366,23 +348,68 @@ describe('parameter set service behaviours', () => {
     await fixture.service.close();
   });
 
-  it('retains one draft per editor instance and clears it individually', async () => {
+  it('retains one field draft across an editor remount', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
     const changes = vi.fn();
     fixture.service.subscribeDrafts(changes);
-    fixture.service.setDraft(fixture.draftKey('/width', 'panel'), { text: '30', valid: true });
-    fixture.service.setDraft(fixture.draftKey('/width', 'dialog'), { text: '31', valid: true });
+    fixture.service.setDraft(fixture.draftKey('/width'), { text: '30', valid: true });
 
-    expect(fixture.service.draft(fixture.draftKey('/width', 'panel'))).toEqual({ text: '30', valid: true });
-    expect(fixture.service.draft(fixture.draftKey('/width', 'dialog'))).toEqual({ text: '31', valid: true });
-    fixture.service.setDraft(fixture.draftKey('/width', 'panel'), undefined);
-    expect(fixture.service.draft(fixture.draftKey('/width', 'panel'))).toBeUndefined();
-    expect(fixture.service.unsavedDrafts()).toHaveLength(1);
-    expect(changes).toHaveBeenCalledTimes(3);
+    expect(fixture.service.draft(fixture.draftKey('/width'))).toEqual({ text: '30', valid: true });
+    expect(changes).toHaveBeenCalledOnce();
     fixture.service.discardDrafts();
     await fixture.service.close();
+  });
+
+  it('discards only the drafts named by the last refusal', async () => {
+    const fixture = serviceFixture();
+    fixture.service.setDraft(fixture.draftKey('/width'), { text: '30', valid: true });
+    fixture.service.setDraft(
+      {
+        ...fixture.draftKey('/width'),
+        target: fixture.service.target('other.ts'),
+      },
+      { text: '40', valid: true },
+    );
+
+    await expect(
+      fixture.service.prepareFileOperation({ kind: 'delete', path: 'main.ts', directory: false }),
+    ).rejects.toMatchObject({ code: 'UNSAVED_PARAMETER_DRAFTS' });
+    fixture.service.discardDrafts();
+
+    expect(fixture.service.draft(fixture.draftKey('/width'))).toBeUndefined();
+    expect(
+      fixture.service.draft({
+        ...fixture.draftKey('/width'),
+        target: fixture.service.target('other.ts'),
+      }),
+    ).toEqual({ text: '40', valid: true });
+  });
+
+  it('deletes drafts owned by a deleted group', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.createGroup('main.ts', manifest, { group: 'alternate' });
+    fixture.service.setDraft({ ...fixture.draftKey('/width'), group: 'alternate' }, { text: '30', valid: true });
+
+    await fixture.service.deleteGroup('main.ts', manifest, 'alternate');
+
+    expect(fixture.service.draft({ ...fixture.draftKey('/width'), group: 'alternate' })).toBeUndefined();
+  });
+
+  it('rekeys drafts owned by a renamed group', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.createGroup('main.ts', manifest, { group: 'alternate' });
+    const oldKey = { ...fixture.draftKey('/width'), group: 'alternate' };
+    const nextKey = { ...oldKey, group: 'renamed' };
+    fixture.service.setDraft(oldKey, { text: '30', valid: true });
+
+    await fixture.service.renameGroup('main.ts', manifest, { group: 'alternate', nextGroup: 'renamed' });
+
+    expect(fixture.service.draft(oldKey)).toBeUndefined();
+    expect(fixture.service.draft(nextKey)).toEqual({ text: '30', valid: true });
   });
 
   it('moves the record with its source on commit and restores it on rollback', async () => {
@@ -459,6 +486,7 @@ describe('parameter set service behaviours', () => {
       group: 'default',
       pointer: '/label',
       value: 'lid',
+      base: { pointer: '/label', value: 'box' },
     });
     expect([fixture.stored('width'), fixture.stored('label')]).toEqual([50, 'lid']);
   });
@@ -486,25 +514,6 @@ describe('parameter set service behaviours', () => {
     await vi.waitFor(() => {
       expect(fixture.service.snapshot('main.ts')?.entry.groups['default']?.values['width']).toBe(64);
     });
-    await fixture.service.close();
-  });
-
-  it('refuses a display preference rather than persisting it', async () => {
-    const fixture = serviceFixture();
-    const manifest = await fixture.manifestFor();
-    await fixture.service.resolve('main.ts', manifest);
-
-    // Only an authored unit reaches `groups.<g>.units`; a display choice stays with its client.
-    expect(
-      await fixture.service.submit('main.ts', manifest, {
-        requestId: 'unit-1',
-        draftGeneration: 1,
-        expected: fixture.service.snapshot('main.ts')!.identity,
-        pressure: 'final',
-        operation: { kind: 'display-preference', parameterId: 'width', unit: 'cm' },
-      }),
-    ).toMatchObject({ status: 'rejected', code: 'DISPLAY_ONLY_ACTION' });
-    expect(fixture.writes).toHaveLength(0);
     await fixture.service.close();
   });
 

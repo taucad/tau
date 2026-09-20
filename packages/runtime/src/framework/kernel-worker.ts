@@ -7,7 +7,7 @@ import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, FileStat, OnWorkerLog } from '@taucad/types';
-import type { JSONSchema7 } from '@taucad/json-schema';
+import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
 import type { MessagePortLike } from '@taucad/rpc';
 import type {
   HashedGeometryResult,
@@ -122,7 +122,13 @@ import {
 } from '#types/runtime-content.types.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import { packageVersion } from '#utils/package-info.js';
-import { admitParameterManifest, compileParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
+import {
+  admitParameterManifest,
+  compileParameterManifest,
+  ParameterAdmissionError,
+  resolveParameterBinding,
+  resolveParameterInputValues,
+} from '@taucad/parameters';
 import type { ParameterDeclaration, ParameterManifest, ParameterResolutionOptions } from '@taucad/parameters';
 import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 import type {
@@ -196,6 +202,82 @@ const mergeParameterDefaults = (
       arrayMerge: (_target: unknown[], source: unknown[]) => source,
     },
   );
+
+const unitBearingTextPattern = /^\s*[+-]?(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|\d+\s*\/\s*\d+)\s*[^\d\s.,].*$/u;
+
+const schemaObject = (definition: JSONSchema7Definition | undefined): JSONSchema7 | undefined =>
+  typeof definition === 'object' ? definition : undefined;
+
+const schemaIsNumeric = (schema: JSONSchema7 | undefined): boolean => {
+  if (!schema) {
+    return false;
+  }
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  return (
+    types.includes('number') ||
+    types.includes('integer') ||
+    [...(schema.allOf ?? []), ...(schema.anyOf ?? []), ...(schema.oneOf ?? [])].some((branch) =>
+      schemaIsNumeric(schemaObject(branch)),
+    )
+  );
+};
+
+const childSchema = (schema: JSONSchema7 | undefined, key: string, arrayItem: boolean): JSONSchema7 | undefined => {
+  if (!schema) {
+    return undefined;
+  }
+  const direct = arrayItem
+    ? Array.isArray(schema.items)
+      ? schemaObject(schema.items[Number(key)])
+      : schemaObject(schema.items)
+    : schemaObject(schema.properties?.[key]);
+  if (direct) {
+    return direct;
+  }
+  for (const branch of [...(schema.allOf ?? []), ...(schema.anyOf ?? []), ...(schema.oneOf ?? [])]) {
+    const child = childSchema(schemaObject(branch), key, arrayItem);
+    if (child) {
+      return child;
+    }
+  }
+  return undefined;
+};
+
+const unitlessTextParameter = (
+  manifest: ParameterManifest,
+  schema: JSONSchema7,
+  values: Readonly<Record<string, unknown>>,
+): { pointer: string; text: string } | undefined => {
+  const visit = (
+    value: unknown,
+    node: JSONSchema7 | undefined,
+    pointer: string,
+  ): { pointer: string; text: string } | undefined => {
+    if (typeof value === 'string') {
+      if (node && validateJsonSchemaValue({ ...node }, value)) {
+        return undefined;
+      }
+      return schemaIsNumeric(node) &&
+        resolveParameterBinding(manifest, pointer)?.unit === undefined &&
+        unitBearingTextPattern.test(value)
+        ? { pointer, text: value }
+        : undefined;
+    }
+    if (typeof value !== 'object' || value === null) {
+      return undefined;
+    }
+    const arrayItem = Array.isArray(value);
+    for (const [key, child] of Object.entries(value)) {
+      const escaped = key.replaceAll('~', '~0').replaceAll('/', '~1');
+      const found = visit(child, childSchema(node, key, arrayItem), `${pointer}/${escaped}`);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
+  };
+  return visit(values, schema, '');
+};
 
 type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
   RuntimePluginDefinitionCarrier<TranscoderDefinition>;
@@ -418,8 +500,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Native render content declarations keyed by kernel ID. */
   protected readonly kernelRenderContentMap = new Map<string, readonly RuntimeContentKey[]>();
-  /** Kernels that declared they can serve the transient drag lane (D2). */
-  protected readonly kernelLiveEditMap = new Map<string, boolean>();
+  /** Cooperative cancellation support by kernel ID. */
+  protected readonly kernelCancellationMap = new Map<string, 'cooperative'>();
 
   /** Validated init options and verified assets for selected-participant identity. */
   protected readonly kernelInitOptionsMap = new Map<string, Record<string, unknown>>();
@@ -1363,8 +1445,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
 
     const resolvedArray = this.getMiddleware().filter(
-      ({ enabled, middleware }) =>
-        enabled && (Boolean(middleware.wrapGetParameters) || this.middlewareOnlyDeclaresDependencies(middleware)),
+      ({ enabled, middleware }) => enabled && Boolean(middleware.wrapGetParameters ?? middleware.getDependencies),
     );
 
     if (operationOwner.kind === 'render-artifact') {
@@ -1374,6 +1455,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
+      operations: ['getParameters'],
       resolvedMiddleware: resolvedArray,
       dependencyContext,
       owner: operationOwner,
@@ -1623,7 +1705,35 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }): Promise<HashedGeometryResult> {
     return this.enqueueOperation(async () => {
       this.prepareUnobservedFileSystem(true);
-      return this.createGeometryInLane(entry);
+      const dependencyContext: DependencyResolutionContext = {};
+      const owner = await this.createOperationOwner(entry.file, 'render-artifact');
+      const parametersResult = await this.getParametersInLane(entry.file, { dependencyContext, owner });
+      if (!parametersResult.success) {
+        return parametersResult;
+      }
+      const extracted = parametersResult.data;
+      if (extracted.legacyProjection.status !== 'usable') {
+        return createKernelError([
+          {
+            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: extracted.legacyProjection.diagnostics,
+          },
+        ]);
+      }
+      const parameterSchema = extracted.legacyProjection.schema;
+      return this.createGeometryInLane(
+        {
+          ...entry,
+          parameters: mergeParameterDefaults({}, entry.parameters, parameterSchema),
+          parameterDefaults: extracted.defaults,
+          parameterManifest: extracted,
+          parameterSchema,
+        },
+        { dependencyContext, owner },
+      );
     });
   }
 
@@ -1631,7 +1741,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     entry: {
       file: RuntimeFileLocator;
       parameters: Record<string, unknown>;
-      parameterSchema?: JSONSchema7;
+      parameterDefaults: Record<string, unknown>;
+      parameterManifest: ParameterManifest;
+      parameterSchema: JSONSchema7;
       options?: Record<string, unknown>;
       content?: RuntimeContentInput;
     },
@@ -2004,7 +2116,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             ]);
           }
           const parameterSchema = extracted.legacyProjection.schema;
-          const mergedParameters = mergeParameterDefaults(extracted.defaults, request.parameters, parameterSchema);
+          const callerParameters = mergeParameterDefaults({}, request.parameters, parameterSchema);
 
           const renderOptionsResult = this.validateRenderOptions(request.options, owner);
           if (!renderOptionsResult.success) {
@@ -2024,7 +2136,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
           const resolvedArray = this.getExportExecutionList(plan);
           const dependencies = await this.computeDependencies({
-            parameters: mergedParameters,
+            operations: ['createGeometry', 'exportGeometry'],
+            parameters: callerParameters,
             renderOptions: renderOptionsResult.options,
             content: plan.route.content,
             exportDependency: plan.dependency,
@@ -2034,7 +2147,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           });
           const renderIdentity = this.createRenderIdentity({
             file: request.file,
-            parameters: mergedParameters,
+            parameters: callerParameters,
             renderOptions: renderOptionsResult.options,
             content: plan.route.content,
             dependencies,
@@ -2051,7 +2164,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               const materialized = await this.materializeRender(
                 {
                   file: request.file,
-                  parameters: mergedParameters,
+                  parameters: callerParameters,
+                  parameterDefaults: extracted.defaults,
+                  parameterManifest: extracted,
                   parameterSchema,
                   options: renderOptionsResult.options,
                   content: plan.route.content,
@@ -2248,16 +2363,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           },
         ]);
       }
-      const mergedParameters = mergeParameterDefaults(
-        extracted.defaults,
-        input.parameters,
-        extracted.legacyProjection.schema,
-      );
+      const callerParameters = mergeParameterDefaults({}, input.parameters, extracted.legacyProjection.schema);
 
       const { artifact } = await this.materializeRender(
         {
           file: input.file,
-          parameters: mergedParameters,
+          parameters: callerParameters,
+          parameterDefaults: extracted.defaults,
+          parameterManifest: extracted,
           parameterSchema: extracted.legacyProjection.schema,
           options: input.options,
           content: input.content,
@@ -2458,7 +2571,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     entry: {
       file: RuntimeFileLocator;
       parameters: Record<string, unknown>;
-      parameterSchema?: JSONSchema7;
+      parameterDefaults: Record<string, unknown>;
+      parameterManifest: ParameterManifest;
+      parameterSchema: JSONSchema7;
       options?: Record<string, unknown>;
       content?: RuntimeContentInput;
       export?: {
@@ -2560,6 +2675,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
+      operations: [
+        'createGeometry',
+        ...(meshMiddleware.length === 0 ? [] : (['meshGeometry'] as const)),
+        ...(entry.export ? (['exportGeometry'] as const) : []),
+      ],
       parameters: entry.parameters,
       renderOptions: renderOptionsResult.options,
       content: renderContentResult.content,
@@ -2570,6 +2690,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
     const dependencyHash = await this.computeDependencyHash(dependencies);
     const nativeHandleDependencies = await this.computeDependencies({
+      operations: ['createGeometry'],
       parameters: entry.parameters,
       resolvedMiddleware: createMiddleware,
       dependencyContext: options.dependencyContext,
@@ -2616,8 +2737,41 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const createSchema = owner.binding?.kernelId
         ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
         : undefined;
-      const parameters = mergeParameterDefaults({}, handlerInput.parameters, entry.parameterSchema);
-      if (entry.parameterSchema !== undefined && !validateJsonSchemaValue({ ...entry.parameterSchema }, parameters)) {
+      const chainParameters = mergeParameterDefaults({}, handlerInput.parameters, entry.parameterSchema);
+      const unitlessText = unitlessTextParameter(entry.parameterManifest, entry.parameterSchema, chainParameters);
+      if (unitlessText) {
+        computeSpan.end();
+        return createKernelError([
+          {
+            message: `Parameter ${unitlessText.pointer} received unit-bearing text "${unitlessText.text}", but the field declares no unit. Send a number in the field's declared scale or add a unit declaration.`,
+            code: 'SEMANTICS_UNRESOLVED',
+            type: 'kernel',
+            severity: 'error',
+          },
+        ]);
+      }
+      let resolvedParameters: Readonly<Record<string, unknown>>;
+      try {
+        resolvedParameters = resolveParameterInputValues(entry.parameterManifest, chainParameters);
+      } catch (error) {
+        computeSpan.end();
+        const diagnostic = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
+        return createKernelError([
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: diagnostic?.code ?? 'INVALID_SCHEMA',
+            type: 'kernel',
+            severity: 'error',
+            ...(diagnostic ? { details: diagnostic } : {}),
+          },
+        ]);
+      }
+      const parameters = mergeParameterDefaults(
+        entry.parameterDefaults,
+        { ...resolvedParameters },
+        entry.parameterSchema,
+      );
+      if (!validateJsonSchemaValue({ ...entry.parameterSchema }, parameters)) {
         computeSpan.end();
         return createKernelError([
           {
@@ -4082,6 +4236,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
+      operations: ['createGeometry', 'exportGeometry'],
       parameters: options.renderIdentity.parameters,
       renderOptions: options.renderIdentity.renderOptions,
       content: options.plan.route.content,
@@ -4193,10 +4348,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return createKernelError(desiredNativeHandleKey.issues);
     }
     if (!this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key)) {
+      const parametersResult = await this.getParametersInLane(renderArtifact.identity.file, { owner: plan.owner });
+      if (!parametersResult.success) {
+        return parametersResult;
+      }
+      const extracted = parametersResult.data;
+      if (extracted.legacyProjection.status !== 'usable') {
+        return createKernelError([
+          {
+            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: extracted.legacyProjection.diagnostics,
+          },
+        ]);
+      }
       const materialized = await this.materializeRender(
         {
           file: renderArtifact.identity.file,
-          parameters: renderArtifact.identity.parameters,
+          parameters: renderArtifact.identity.nativeBuildInput?.parameters ?? renderArtifact.identity.parameters,
+          parameterDefaults: extracted.defaults,
+          parameterManifest: extracted,
+          parameterSchema: extracted.legacyProjection.schema,
           options: renderArtifact.identity.renderOptions,
           content: plan.route.content,
           export: { ...exportMaterialization, dependency: plan.dependency },
@@ -4455,11 +4629,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             },
           ]);
         }
-        const mergedParameters = mergeParameterDefaults(
-          extracted.defaults,
-          this.currentParameters,
-          extracted.legacyProjection.schema,
-        );
+        const callerParameters = mergeParameterDefaults({}, this.currentParameters, extracted.legacyProjection.schema);
 
         await cooperativeYield();
         if (this.isAborted(record)) {
@@ -4469,7 +4639,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const geometryResult = await this.createGeometryInLane(
           {
             file: this.currentFile!,
-            parameters: mergedParameters,
+            parameters: callerParameters,
+            parameterDefaults: extracted.defaults,
+            parameterManifest: extracted,
             parameterSchema: extracted.legacyProjection.schema,
             options: this.currentRenderOptions,
             content: contentResult.content,
@@ -5051,7 +5223,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       {
         renderOptions: { schema: JSONSchema7; defaults: Record<string, unknown> };
         content?: { schema: JSONSchema7; defaults: RuntimeContentInput };
-        liveEdit?: boolean;
+        cancellation?: 'cooperative';
       }
     > = {};
     for (const kernelId of this.kernelRenderContentMap.keys()) {
@@ -5071,7 +5243,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       renderCapabilities[kernelId] = {
         renderOptions,
         ...(content ? { content } : {}),
-        ...(this.kernelLiveEditMap.get(kernelId) === true ? { liveEdit: true } : {}),
+        ...(this.kernelCancellationMap.get(kernelId) ? { cancellation: 'cooperative' } : {}),
       };
     }
 
@@ -5480,6 +5652,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns Array of all dependencies
    */
   private async computeDependencies(input: {
+    operations: ReadonlyArray<MiddlewareDependencyDeclaration['affects'][number]>;
     parameters?: Record<string, unknown>;
     renderOptions?: Record<string, unknown>;
     content?: RuntimeContentInput;
@@ -5499,6 +5672,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         : [],
     });
     const executionListKey = canonicalJson({
+      operations: input.operations,
       middleware: executionList
         .filter(({ enabled }) => enabled)
         .map(({ id, middleware, options }) => ({ id, version: middleware.version ?? '1', options })),
@@ -5526,7 +5700,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const middlewareDependencyKey = `${commonDependencyKey}|${executionListKey}`;
       middlewareDependencies = this.middlewareDependencyCache.get(middlewareDependencyKey);
       if (!middlewareDependencies) {
-        const pending = this.computeMiddlewareDependencies(input.owner, executionList);
+        const pending = this.computeMiddlewareDependencies(input.owner, executionList, input.operations);
         this.middlewareDependencyCache.set(middlewareDependencyKey, pending);
         middlewareDependencies = this.evictRejectedCacheEntry({
           cache: this.middlewareDependencyCache,
@@ -5724,6 +5898,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async computeMiddlewareDependencies(
     owner: OperationOwner,
     middleware: ResolvedMiddleware[],
+    operations: ReadonlyArray<MiddlewareDependencyDeclaration['affects'][number]>,
   ): Promise<MiddlewareDependencySet> {
     const discoverInput: GetDependenciesInput = {
       entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
@@ -5746,7 +5921,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           options,
         });
         declarations.push(
-          ...resolved.map((declaration) => ({ ...declaration, path: assertRootedPath(declaration.path) })),
+          ...resolved
+            .filter((declaration) => declaration.affects.some((operation) => operations.includes(operation)))
+            .map((declaration) => ({ ...declaration, path: assertRootedPath(declaration.path) })),
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -6142,6 +6319,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return createOptions;
     }
     const dependencies = await this.computeDependencies({
+      operations: ['createGeometry'],
       parameters: input.parameters,
       resolvedMiddleware: this.getCreateExecutionList(input.owner, input.content, input.exportOptions !== undefined),
       owner: input.owner,
@@ -6276,10 +6454,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     exportOperation: boolean,
   ): ResolvedMiddleware[] {
     return this.getMiddleware().filter((resolved) => {
-      if (
-        !resolved.enabled ||
-        (!resolved.middleware.wrapCreateGeometry && !this.middlewareOnlyDeclaresDependencies(resolved.middleware))
-      ) {
+      if (!resolved.enabled || !(resolved.middleware.wrapCreateGeometry ?? resolved.middleware.getDependencies)) {
         return false;
       }
       if (exportOperation) {
@@ -6294,16 +6469,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
       return this.middlewareRunsForRender(resolved, owner, content);
     });
-  }
-
-  private middlewareOnlyDeclaresDependencies(middleware: KernelMiddleware): boolean {
-    return (
-      Boolean(middleware.getDependencies) &&
-      !middleware.wrapGetParameters &&
-      !middleware.wrapCreateGeometry &&
-      !middleware.wrapMeshGeometry &&
-      !middleware.wrapExportGeometry
-    );
   }
 
   private getMeshExecutionList(owner: OperationOwner, content: RuntimeContentInput): ResolvedMiddleware[] {

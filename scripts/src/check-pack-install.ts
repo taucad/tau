@@ -344,7 +344,6 @@ const resolution = await waitFor(actor, snapshot => snapshot.matches({ open: 're
 if (bytes !== null) throw new Error('Reading defaults unexpectedly wrote a sidecar.');
 const outcome = await submitParameterRequest(actor, {
   requestId: 'packed-smoke:replace',
-  draftGeneration: 1,
   fingerprint: 'packed-smoke:replace:v1',
   expected: resolution.context.current.identity,
   pressure: 'final',

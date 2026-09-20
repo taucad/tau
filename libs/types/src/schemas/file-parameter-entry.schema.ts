@@ -125,11 +125,11 @@ const refineParameterEntry = (
 
   for (const [name, group] of Object.entries(entry.groups)) {
     for (const pointer of Object.keys(group.sourceUnits ?? {})) {
-      if (group.units?.[pointer] === undefined) {
+      if (group.units?.[pointer] !== group.sourceUnits?.[pointer]) {
         context.addIssue({
           code: 'custom',
           path: ['groups', name, 'sourceUnits', pointer],
-          message: 'A source unit requires the chosen unit for the same pointer',
+          message: 'A source unit must equal the chosen unit for the same pointer',
         });
       }
     }

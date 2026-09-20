@@ -56,6 +56,7 @@ export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise
       if (type === 'string' || type === 'number' || type === 'integer' || type === 'boolean') {
         return {
           ...processedSchema,
+          type: type === 'integer' ? 'number' : type,
           default: value as JSONSchema7Type,
         };
       }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toolDescriptions, toolName } from '#constants/index.js';
 import {
   applyParameterOperationInputSchema,
   applyParameterOperationOutputSchema,
@@ -24,6 +25,14 @@ const proposal = {
 } as const;
 
 describe('parameter tool schemas', () => {
+  it('should describe the stored-number unit and explicit unit input rule', () => {
+    const rule =
+      'When current.entry.groups[g].units[pointer] exists, it is the unit of the stored number and of native-value writes; use unit-value with inputUnit to be explicit.';
+
+    expect(toolDescriptions[toolName.getParameters]).toContain(rule);
+    expect(toolDescriptions[toolName.applyParameterOperation]).toContain(rule);
+  });
+
   it('admits the checked operation contract and refuses non-finite or extra data', () => {
     expect(applyParameterOperationInputSchema.parse(proposal)).toEqual(proposal);
     // A typeless wire value still has to be real JSON once it is past the provider boundary.
@@ -111,6 +120,28 @@ describe('parameter tool schemas', () => {
         unit: 'cm',
         producerCapability: { producer: 'build123d', sourceRevision: 'source', capability: 'literal-v1' },
         dependencies: { source: 'source' },
+      }),
+    ).toMatchObject({ success: false });
+  });
+
+  it('should refuse retired display-preference and reinterpret operations', () => {
+    expect(
+      parameterSetOperationSchema.safeParse({ kind: 'display-preference', parameterId: 'width', unit: 'cm' }),
+    ).toMatchObject({ success: false });
+    expect(
+      parameterSetOperationSchema.safeParse({
+        kind: 'source-unit',
+        mode: 'reinterpret',
+        group: 'default',
+        parameterId: 'width',
+        resource: 'urn:test',
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: {
+          producer: 'build123d',
+          sourceRevision: 'source',
+          capability: 'literal-v1',
+        },
       }),
     ).toMatchObject({ success: false });
   });

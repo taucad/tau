@@ -3,12 +3,14 @@ import type { CheckedFileWriteResult } from '@taucad/types';
 import { expect, it } from 'vitest';
 import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
 import { parameterSetMachine, submitParameterRequest } from '#parameter-set.machine.js';
+import type { ParameterSetLoadInput } from '#parameter-set.machine.js';
 import { parameterSetHarness } from '#parameter-set.test-helper.js';
+import { planParameterChange } from '#planning.js';
+import type { ParameterChange } from '#planning.js';
 import type { ParameterSetOutcome, ParameterSetRequest } from '#types.js';
 
 const groupRequest = (requestId: string, harness: { snapshot: ParameterSnapshot }): ParameterSetRequest => ({
   requestId,
-  draftGeneration: 0,
   fingerprint: requestId,
   pressure: 'final',
   expected: harness.snapshot.identity,
@@ -79,7 +81,34 @@ it('settles a failed write that left the record untouched as a known refusal', a
   actor.stop();
 });
 
-it('holds a write over foreign bytes as indeterminate, then accepts commands again after a watch event', async () => {
+it('should reconcile a lost reply when the intended write landed', async () => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  let visible = fixture.snapshot;
+  const actor = createActor(
+    parameterSetMachine.provide({
+      actors: {
+        loadParameterSet: fromPromise(async () => structuredClone(visible)),
+        commitParameterSet: fromPromise(async ({ input }): Promise<CheckedFileWriteResult> => {
+          visible = structuredClone(input.proposed);
+          throw new Error('Reply lost after the write landed');
+        }),
+      },
+    }),
+    { input: { target: fixture.snapshot.target } },
+  ).start();
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+
+  await expect(submitParameterRequest(actor, groupRequest('landed', fixture))).resolves.toMatchObject({
+    status: 'committed',
+    requestId: 'landed',
+    write: 'reconciled',
+  });
+  expect(actor.getSnapshot().context.current?.entry.groups).toHaveProperty('landed');
+  actor.stop();
+});
+
+it('should accept a command after a readback that found foreign bytes', async () => {
   const fixture = await parameterSetHarness();
   fixture.actor.stop();
   // A third party replaced the record, so neither the intended nor the planned bytes are on disk.
@@ -110,19 +139,11 @@ it('holds a write over foreign bytes as indeterminate, then accepts commands aga
   actor.on('settled', (event) => settled.push(event.outcome));
   await waitFor(actor, (state) => state.matches({ open: 'ready' }));
   actor.send({ type: 'submit', request: groupRequest('uncertain', fixture) });
-  await waitFor(actor, (state) => state.matches({ open: 'uncertain' }));
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }) && settled.length > 0);
   expect(settled).toEqual([
     expect.objectContaining({ status: 'indeterminate', requestId: 'uncertain', code: 'UNKNOWN_APPLICATION' }),
   ]);
-  await expect(submitParameterRequest(actor, groupRequest('blocked', fixture))).resolves.toMatchObject({
-    status: 'rejected',
-    code: 'WRITE_UNCERTAIN',
-  });
-  // The lockout must not wedge the editor: a later watch event reloads and reopens the actor, and
-  // the already-settled command is never settled a second time.
   visible = fixture.snapshot;
-  actor.send({ type: 'watch.changed' });
-  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
   await expect(submitParameterRequest(actor, groupRequest('after', fixture))).resolves.toMatchObject({
     status: 'committed',
   });
@@ -168,11 +189,11 @@ it('publishes only the latest overlapping load and keeps the last good snapshot 
 it('hands a same-mode re-resolution the held snapshot, leaving the host to decide what it re-reads', async () => {
   const fixture = await parameterSetHarness();
   fixture.actor.stop();
-  const inputs: Array<{ current?: ParameterSnapshot }> = [];
+  const inputs: ParameterSetLoadInput[] = [];
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async ({ input }: { input: { current?: ParameterSnapshot } }) => {
+        loadParameterSet: fromPromise(async ({ input }) => {
           inputs.push(input);
           return fixture.snapshot;
         }),
@@ -228,7 +249,6 @@ it('settles immediate startup submission and three edits with one load and no se
   for (const value of [30, 40, 50]) {
     const request: ParameterSetRequest = {
       requestId: `edit:${value}`,
-      draftGeneration: value,
       fingerprint: `label:${value}`,
       pressure: 'final',
       expected,
@@ -258,7 +278,6 @@ it('refuses a re-delivered group creation from the record, without a durable rec
   const harness = await parameterSetHarness();
   const request: ParameterSetRequest = {
     requestId: 'duplicate',
-    draftGeneration: 1,
     fingerprint: 'untrusted-label',
     pressure: 'final',
     expected: harness.snapshot.identity,
@@ -276,7 +295,6 @@ it('rejects a reused request id while its original command is still in flight', 
   const harness = await parameterSetHarness(false, { gate: gate.promise });
   const request: ParameterSetRequest = {
     requestId: 'reused',
-    draftGeneration: 1,
     fingerprint: 'label',
     pressure: 'final',
     expected: harness.snapshot.identity,
@@ -299,7 +317,6 @@ it('does not let a collision settle the original command and drains an escaped w
   const harness = await parameterSetHarness(false, { gate: gate.promise });
   const request: ParameterSetRequest = {
     requestId: 'in-flight',
-    draftGeneration: 1,
     fingerprint: 'label',
     pressure: 'final',
     expected: harness.snapshot.identity,
@@ -323,7 +340,6 @@ it('recovers a lost acknowledgement once without replaying the write', async () 
   const harness = await parameterSetHarness(false, { loseReply: true });
   const result = await harness.submit({
     requestId: 'lost',
-    draftGeneration: 0,
     fingerprint: 'label',
     pressure: 'final',
     expected: harness.snapshot.identity,
@@ -339,7 +355,6 @@ it('settles queued commands on close while preserving an active checked write', 
   const harness = await parameterSetHarness(false, { gate: gate.promise });
   const request: ParameterSetRequest = {
     requestId: 'active',
-    draftGeneration: 0,
     fingerprint: 'label',
     pressure: 'final',
     expected: harness.snapshot.identity,
@@ -364,7 +379,6 @@ it('keeps invalid drafts open and settles a command across immediate re-resoluti
   harness.actor.send({ type: 'resolve' });
   const result = await harness.submit({
     requestId: 'overlap',
-    draftGeneration: 0,
     fingerprint: 'label',
     pressure: 'final',
     expected: harness.snapshot.identity,
@@ -385,7 +399,6 @@ it('coalesces queued edits, settles every superseded request, and preserves fina
   const harness = await parameterSetHarness(false, { gate: gate.promise });
   const request: ParameterSetRequest = {
     requestId: 'active',
-    draftGeneration: 0,
     fingerprint: 'active',
     pressure: 'final',
     expected: harness.snapshot.identity,
@@ -467,7 +480,6 @@ it('rejects unsafe and over-budget requests before retaining or invoking them', 
     // oxlint-disable-next-line typescript/consistent-type-assertions -- Exercise the public actor's untyped admission boundary.
     const request = {
       requestId: `invalid:${index}`,
-      draftGeneration: 0,
       fingerprint: 'invalid',
       expected: harness.snapshot.identity,
       pressure: 'final',
@@ -495,7 +507,6 @@ const widthEdit =
   (harness: { snapshot: ParameterSnapshot }) =>
   (requestId: string, value: number, expected: ParameterSetRequest['expected']): ParameterSetRequest => ({
     requestId,
-    draftGeneration: 1,
     expected,
     pressure: 'final',
     operation: {
@@ -507,6 +518,14 @@ const widthEdit =
       value,
     },
   });
+
+const proposedSnapshot = (current: ParameterSnapshot, request: ParameterSetRequest): ParameterSnapshot => {
+  const change = planParameterChange({ current, request });
+  if (change.status !== 'prepared') {
+    throw new Error(JSON.stringify(change));
+  }
+  return change.proposed;
+};
 
 it('commits the next command when the previous write echoes during planning', async () => {
   const harness = await parameterSetHarness();
@@ -533,35 +552,169 @@ it('commits a command whose write is already applying when the previous echo lan
   harness.actor.stop();
 });
 
-it('re-plans against fresh bytes when a foreign write lands during planning, and only base refuses', async () => {
-  const harness = await parameterSetHarness();
-  const edit = widthEdit(harness);
-  // A foreign writer moved a different field; the edit still commits against the fresh record.
-  const other = await harness.submit({
-    ...edit('foreign', 0, harness.snapshot.identity),
+it('should re-plan against foreign bytes that land during planning and keep the foreign change', async () => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  const edit = widthEdit(fixture);
+  let visible = fixture.snapshot;
+  const foreign = proposedSnapshot(visible, {
+    ...groupRequest('foreign', fixture),
     operation: { kind: 'create-group', group: 'other' },
   });
-  expect(other).toMatchObject({ status: 'committed' });
-  const current = harness.actor.getSnapshot().context.current!;
-  const widthBinding = current.manifest.bindings['/width']!;
-  const base = {
-    pointer: '/width',
-    value: 25.4,
-    binding: {
-      unit: widthBinding.unit!,
-      quantityKind: widthBinding.quantityKind!,
-      space: widthBinding.space!,
-      representation: widthBinding.representation,
+  const firstPlan = Promise.withResolvers<void>();
+  let plans = 0;
+  const writes: Array<Extract<ParameterChange, { status: 'prepared' }>> = [];
+  const actor = createActor(
+    parameterSetMachine.provide({
+      actors: {
+        loadParameterSet: fromPromise(async () => structuredClone(visible)),
+        planParameterSet: fromPromise(async ({ input }) => {
+          plans += 1;
+          if (plans === 1) {
+            await firstPlan.promise;
+          }
+          return planParameterChange(input);
+        }),
+        commitParameterSet: fromPromise(async ({ input }) => {
+          writes.push(input);
+          visible = structuredClone(input.proposed);
+          return { status: 'applied', content: input.proposed.bytes! };
+        }),
+      },
+    }),
+    { input: { target: fixture.snapshot.target } },
+  ).start();
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  const outcome = submitParameterRequest(actor, {
+    ...edit('local', 30, fixture.snapshot.identity),
+    base: { pointer: '/width', value: 25.4 },
+  });
+  await waitFor(actor, (state) => state.matches({ open: 'planning' }));
+  visible = foreign;
+  actor.send({ type: 'watch.changed' });
+  await expect(outcome).resolves.toMatchObject({ status: 'committed' });
+  expect(writes[0]?.write.preconditions).toEqual([{ path: foreign.path, expected: foreign.bytes }]);
+  expect(writes[0]?.proposed.entry.groups).toHaveProperty('other');
+  expect(writes[0]?.proposed.entry.groups['default']?.values).toEqual({ width: 30 });
+  firstPlan.resolve();
+  actor.stop();
+});
+
+it('should refuse only on base when the foreign write moved the same field', async () => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  const edit = widthEdit(fixture);
+  let visible = fixture.snapshot;
+  const foreign = proposedSnapshot(visible, edit('foreign', 29, fixture.snapshot.identity));
+  const firstPlan = Promise.withResolvers<void>();
+  let plans = 0;
+  let writes = 0;
+  const actor = createActor(
+    parameterSetMachine.provide({
+      actors: {
+        loadParameterSet: fromPromise(async () => structuredClone(visible)),
+        planParameterSet: fromPromise(async ({ input }) => {
+          plans += 1;
+          if (plans === 1) {
+            await firstPlan.promise;
+          }
+          return planParameterChange(input);
+        }),
+        commitParameterSet: fromPromise(async ({ input }) => {
+          writes += 1;
+          visible = structuredClone(input.proposed);
+          return { status: 'applied', content: input.proposed.bytes! };
+        }),
+      },
+    }),
+    { input: { target: fixture.snapshot.target } },
+  ).start();
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  const outcome = submitParameterRequest(actor, {
+    ...edit('local', 30, fixture.snapshot.identity),
+    base: { pointer: '/width', value: 25.4 },
+  });
+  await waitFor(actor, (state) => state.matches({ open: 'planning' }));
+  visible = foreign;
+  actor.send({ type: 'watch.changed' });
+  await expect(outcome).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  expect(writes).toBe(0);
+  firstPlan.resolve();
+  actor.stop();
+});
+
+it('should commit the last of three queued steps on one field', async () => {
+  const gate = Promise.withResolvers<void>();
+  const fixture = await parameterSetHarness(false, { gate: gate.promise });
+  const edit = widthEdit(fixture);
+  const active = fixture.submit({
+    ...edit('step-1', 26, fixture.snapshot.identity),
+    base: { pointer: '/width', value: 25.4 },
+  });
+  await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
+  const displaced = fixture.submit({
+    ...edit('step-2', 27, fixture.snapshot.identity),
+    base: { pointer: '/width', value: 26 },
+  });
+  const latest = fixture.submit({
+    ...edit('step-3', 28, fixture.snapshot.identity),
+    base: { pointer: '/width', value: 27 },
+  });
+  await expect(displaced).resolves.toMatchObject({ status: 'cancelled-before-apply' });
+  gate.resolve();
+  await expect(active).resolves.toMatchObject({ status: 'committed' });
+  await expect(latest).resolves.toMatchObject({ status: 'committed' });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 28 });
+  fixture.actor.stop();
+});
+
+it('should keep a queued final when a later transient for the same field arrives', async () => {
+  const gate = Promise.withResolvers<void>();
+  const fixture = await parameterSetHarness(false, { gate: gate.promise });
+  const edit = widthEdit(fixture);
+  const active = fixture.submit(edit('active', 26, fixture.snapshot.identity));
+  await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
+  const final = fixture.submit(edit('final', 27, fixture.snapshot.identity));
+  const transient = fixture.submit({ ...edit('transient', 28, fixture.snapshot.identity), pressure: 'transient' });
+  expect(fixture.actor.getSnapshot().context.pending.map(({ requestId }) => requestId)).toEqual(['final', 'transient']);
+  fixture.actor.send({ type: 'close' });
+  await expect(final).resolves.toMatchObject({ status: 'cancelled-before-apply' });
+  await expect(transient).resolves.toMatchObject({ status: 'cancelled-before-apply' });
+  gate.resolve();
+  await expect(active).resolves.toMatchObject({ status: 'committed' });
+});
+
+it('should queue finals for two fields and commit both', async () => {
+  const gate = Promise.withResolvers<void>();
+  const fixture = await parameterSetHarness(false, { gate: gate.promise });
+  const edit = widthEdit(fixture);
+  const active = fixture.submit(groupRequest('second', fixture));
+  await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
+  const first = fixture.submit(edit('default-width', 30, fixture.snapshot.identity));
+  const second = fixture.submit({
+    ...edit('second-width', 31, fixture.snapshot.identity),
+    operation: {
+      kind: 'native-value',
+      group: 'second',
+      parameterId: 'width',
+      resource: fixture.snapshot.manifest.bindings['/width']!.schema.resource,
+      pointer: '/width',
+      value: 31,
     },
-  } as const;
-  const settled = harness.submit({ ...edit('r1', 31, current.identity), base });
-  harness.actor.send({ type: 'watch.changed' });
-  expect(await settled).toMatchObject({ status: 'committed' });
-  // The same field now holds 31, so a second edit built on the stale base 25.4 is refused.
-  expect(
-    await harness.submit({ ...edit('r2', 32, harness.actor.getSnapshot().context.current!.identity), base }),
-  ).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
-  harness.actor.stop();
+  });
+  expect(fixture.actor.getSnapshot().context.pending.map(({ requestId }) => requestId)).toEqual([
+    'default-width',
+    'second-width',
+  ]);
+  gate.resolve();
+  await expect(active).resolves.toMatchObject({ status: 'committed' });
+  await expect(first).resolves.toMatchObject({ status: 'committed' });
+  await expect(second).resolves.toMatchObject({ status: 'committed' });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups).toMatchObject({
+    default: { values: { width: 30 } },
+    second: { values: { width: 31 } },
+  });
+  fixture.actor.stop();
 });
 
 it('displaces an older queued value edit for the same field with a newer one', async () => {

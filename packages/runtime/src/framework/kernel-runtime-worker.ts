@@ -657,7 +657,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ),
     );
     this.kernelRenderContentMap.set(config.id, definition.render?.content ?? []);
-    this.kernelLiveEditMap.set(config.id, definition.liveEdit === true);
+    if (definition.cancellation) {
+      this.kernelCancellationMap.set(config.id, definition.cancellation);
+    }
     this.kernelInitOptionsMap.set(config.id, validatedOptions);
     this.kernelImplementationAssetsMap.set(config.id, implementationAssets);
     if (definition.render?.optionsSchema) {

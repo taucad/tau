@@ -96,7 +96,29 @@ const client = createRuntimeClient({
 });
 ```
 
-### 4. Wrap multiple operations
+### 4. Declare operation-scoped dependencies
+
+Use `getDependencies` when a file affects an operation. `affects` is required; list only the operations whose result changes when the file changes:
+
+```typescript
+const metadataMiddleware = defineMiddleware({
+  id: 'metadata',
+  name: 'Metadata',
+  getDependencies({ entryPath }) {
+    return [
+      {
+        path: `${entryPath}.metadata.json`,
+        affects: ['createGeometry'],
+        watchDebounce: 100,
+      },
+    ];
+  },
+});
+```
+
+Dependency scope is not inferred from wrap hooks. The available operation names are `getParameters`, `createGeometry`, `meshGeometry`, and `exportGeometry`.
+
+### 5. Wrap multiple operations
 
 Implement `wrapGetParameters` and `wrapExportGeometry` beside `wrapCreateGeometry` when the middleware spans operations:
 
@@ -125,7 +147,7 @@ const fullMiddleware = defineMiddleware({
 
 - **Version**: Set `version` for cache-key computation. Changing it invalidates caches that include middleware signatures.
 - **Cancellation**: Destructure the fresh operation `signal`, pass it to cancellable APIs, and never retain it after the hook settles — see [Cooperate with Cancellation](./cooperate-with-cancellation).
-- **Dependency hooks**: Implement `getDependencies` to register extra watched paths for the operation.
+- **Parameters**: Treat `input.parameters` as caller overrides plus any values composed by outer middleware. Lay stored values underneath caller values. Leave unit conversion and default filling to the runtime's kernel boundary; a unit-bound numeric field may arrive as a declared-unit number or unit-bearing text such as `"20 in"`.
 
 ## Related
 

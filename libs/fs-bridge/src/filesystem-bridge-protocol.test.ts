@@ -101,13 +101,10 @@ describe('filesystem bridge Zod schemas', () => {
       },
     ];
 
-    const parsedDirectory = fileSystemBridgeSchemas.calls.readDirectory.result.safeParse(tree);
-    const parsedShallowDirectory = fileSystemBridgeSchemas.calls.readShallowDirectory.result.safeParse(tree);
+    const parsedShallowDirectory = fileSystemBridgeSchemas.calls.readScopedShallowDirectory.result.safeParse(tree);
 
-    expect(parsedDirectory.success).toBe(true);
     expect(parsedShallowDirectory.success).toBe(true);
-    if (parsedDirectory.success && parsedShallowDirectory.success) {
-      expect(parsedDirectory.data).toBe(tree);
+    if (parsedShallowDirectory.success) {
       expect(parsedShallowDirectory.data).toBe(tree);
     }
   });

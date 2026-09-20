@@ -876,17 +876,17 @@ export function FileManagerProvider({
     /* One cast, for the one overloaded member: `readFile` answers text or bytes. */
     const readFile = (async (path: string, options: { scope: WorkspaceScope }) => {
       const proxy = await getReadiedProxy();
-      return proxy.readFile(path, options);
+      return proxy.readScopedFile(path, options);
     }) as ScopedStorageClient['readFile'];
     return {
       readFile,
       readShallowDirectory: async (path, options) => {
         const proxy = await getReadiedProxy();
-        return proxy.readShallowDirectory(path, options);
+        return proxy.readScopedShallowDirectory(path, options);
       },
       getZippedDirectory: async (path, options) => {
         const proxy = await getReadiedProxy();
-        return proxy.getZippedDirectory(path, options);
+        return proxy.getScopedZippedDirectory(path, options);
       },
     };
   }, [getReadiedProxy]);

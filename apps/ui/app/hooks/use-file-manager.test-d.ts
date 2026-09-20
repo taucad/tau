@@ -179,6 +179,44 @@ describe('useFileManager surface', () => {
     expectTypeOf<Scoped>().not.toHaveProperty('writeFile');
   });
 
+  /**
+   * The same guard, one level lower (W11, H3): `fileManagerRef`'s own snapshot.
+   *
+   * The context's slices are the intended doors, and the machine's `proxy` is the
+   * only other one — it is the unrooted connection itself, so a caller that
+   * reached it could read or write any project tree unmasked. Since W11 it
+   * carries topology, the change stream and the `/files` browser's scoped reads,
+   * and nothing per-path at all.
+   */
+  it('should keep per-path content off the file-manager snapshot proxy', () => {
+    type Proxy = NonNullable<ReturnType<Context['fileManagerRef']['getSnapshot']>['context']['proxy']>;
+    expectTypeOf<Proxy>().not.toHaveProperty('readFile');
+    expectTypeOf<Proxy>().not.toHaveProperty('writeFile');
+    expectTypeOf<Proxy>().not.toHaveProperty('writeFileChecked');
+    expectTypeOf<Proxy>().not.toHaveProperty('appendFile');
+    expectTypeOf<Proxy>().not.toHaveProperty('writeFiles');
+    expectTypeOf<Proxy>().not.toHaveProperty('mkdir');
+    expectTypeOf<Proxy>().not.toHaveProperty('readdir');
+    expectTypeOf<Proxy>().not.toHaveProperty('stat');
+    expectTypeOf<Proxy>().not.toHaveProperty('lstat');
+    expectTypeOf<Proxy>().not.toHaveProperty('move');
+    expectTypeOf<Proxy>().not.toHaveProperty('canMove');
+    expectTypeOf<Proxy>().not.toHaveProperty('canRename');
+    expectTypeOf<Proxy>().not.toHaveProperty('canCreate');
+    expectTypeOf<Proxy>().not.toHaveProperty('canDelete');
+    expectTypeOf<Proxy>().not.toHaveProperty('bulkMove');
+    expectTypeOf<Proxy>().not.toHaveProperty('unlink');
+    expectTypeOf<Proxy>().not.toHaveProperty('rmdir');
+    expectTypeOf<Proxy>().not.toHaveProperty('exists');
+    expectTypeOf<Proxy>().not.toHaveProperty('getZippedDirectory');
+    expectTypeOf<Proxy>().not.toHaveProperty('readShallowDirectory');
+    expectTypeOf<Proxy>().not.toHaveProperty('readDirectory');
+    /* What it does carry. */
+    expectTypeOf<Proxy>().toHaveProperty('mount');
+    expectTypeOf<Proxy>().toHaveProperty('pollExternalChanges');
+    expectTypeOf<Proxy>().toHaveProperty('readScopedFile');
+  });
+
   it('exposes a workspace admin facade with mount/unmount/root teardown', () => {
     expectTypeOf<Context>().toHaveProperty('workspace');
     type Workspace = Context['workspace'];

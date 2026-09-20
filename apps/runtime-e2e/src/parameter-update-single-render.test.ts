@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import { exposeFileSystem, filesystemBridgeConnectMessageType, openFileSystemBridge } from '@taucad/fs-bridge';
+import {
+  exposeFileSystem,
+  filesystemBridgeConnectMessageType,
+  openFileSystemBridge,
+  workspaceBridgeService,
+} from '@taucad/fs-bridge';
 import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
 import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
@@ -75,7 +80,7 @@ const createProjectWorkspace = async (
   await service.writeFile(`/projects/${projectId}/main.ts`, mainSource);
 
   const workerScope = new EventTarget();
-  const exposed = exposeFileSystem(service, {
+  const exposed = exposeFileSystem(workspaceBridgeService(service), {
     changeEventBus: eventBus,
     handlerForRoot: (root, context) => service.createRootedFileSystem(root, context),
     messageSource: workerScope,

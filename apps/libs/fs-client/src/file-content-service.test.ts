@@ -15,6 +15,7 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createComposedViewClient } from '#composed-view-client.js';
 import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
+import type { WorkspaceAuthorityClient } from '#file-system-client.js';
 
 function createMockProxy(overrides?: Partial<ComposedViewClient>): ComposedViewClient {
   const proxy = mock<ComposedViewClient>({
@@ -1930,14 +1931,14 @@ describe('FileContentService over the composed view (north star W2)', () => {
     };
   };
 
-  const composedHarness = async (): Promise<
-    FileContentHarness & { authority: ComposedViewClient; provider: MemoryProvider }
-  > => {
+  const composedHarness = async (): Promise<FileContentHarness & { provider: MemoryProvider }> => {
     const provider = new MemoryProvider();
     await provider.writeFile('main.ts', 'export {};\n');
-    const authority = createMockProxy();
     const proxy = createComposedViewClient({
-      workspace: authority,
+      workspace: mock<WorkspaceAuthorityClient>(),
+      /* No test here reads a dependency; the mount's own view is wired so the
+       * composition is the production one (W11). */
+      dependencies: mock<ComposedViewProxy>(),
       /* The rooted connection also archives a subtree (charter D2) and serves the
        * mutation pipeline's porcelain (D4); this harness reads and writes single
        * files, which the view itself answers, so the rest is not stubbed. */
@@ -1951,7 +1952,7 @@ describe('FileContentService over the composed view (north star W2)', () => {
       ) as unknown as ComposedViewProxy,
       paths: new WorkspacePathResolver('/projects/abc'),
     });
-    return { ...createHarness({ workspaceRoot: '/projects/abc', proxy }), authority, provider };
+    return { ...createHarness({ workspaceRoot: '/projects/abc', proxy }), provider };
   };
 
   /*
@@ -1979,7 +1980,6 @@ describe('FileContentService over the composed view (north star W2)', () => {
     await expect(harness.service.write(skillPath, new Uint8Array([1]), 'user')).rejects.toMatchObject({
       code: 'EROFS',
     });
-    expect(harness.authority.writeFile).not.toHaveBeenCalled();
     harness.disposeChannel();
   });
 
@@ -1989,9 +1989,8 @@ describe('FileContentService over the composed view (north star W2)', () => {
     expect(new TextDecoder().decode(await harness.service.resolveBytes('main.ts'))).toBe('export {};\n');
     await harness.service.write('main.ts', new TextEncoder().encode('export const a = 1;\n'), 'user');
     /* The write lands on the view, on the same connection the reads use (charter
-     * D12) — never on the authority, whose port would echo it straight back. */
+     * D12) — and since W11 the authority has no `writeFile` for it to land on. */
     await expect(harness.provider.readFile('main.ts', 'utf8')).resolves.toBe('export const a = 1;\n');
-    expect(harness.authority.writeFile).not.toHaveBeenCalled();
     harness.disposeChannel();
   });
 });

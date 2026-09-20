@@ -252,10 +252,10 @@ const wrapFileSystemBridgePort = (port: MessagePortLike, label: string): Port<un
  * @example <caption>Handing an imported tree to the worker</caption>
  * ```typescript
  * import { consumableBytes } from '@taucad/fs-bridge';
- * import type { FileSystemBridgeWorkspaceProxy } from '@taucad/fs-bridge';
+ * import type { FileSystemBridgeRootedProxy } from '@taucad/fs-bridge';
  *
  * export async function exampleImport(
- *   client: FileSystemBridgeWorkspaceProxy,
+ *   client: FileSystemBridgeRootedProxy,
  *   imported: Record<string, { content: Uint8Array<ArrayBuffer> }>,
  * ): Promise<void> {
  *   await client.writeFiles(Object.assign(imported, { [consumableBytes]: true }));
@@ -1104,6 +1104,63 @@ function exposeFileSystemHandlers(
     activePorts,
     serverHandles,
   };
+}
+
+/**
+ * Which authority member answers each call the authority's wire carries (W11).
+ *
+ * The three scoped reads are the `/files` browser's (charter D5) and are the
+ * only content on it; they are spelled `…Scoped…` so the routed-path read this
+ * package removed has no name here to creep back into.
+ */
+const workspaceWireMembers = {
+  mount: 'mount',
+  unmount: 'unmount',
+  configureProjectRoots: 'configureProjectRoots',
+  listProjectManifests: 'listProjectManifests',
+  commitPendingProjectDirectory: 'commitPendingProjectDirectory',
+  adoptProjectDirectory: 'adoptProjectDirectory',
+  permanentlyDeleteProjectDirectory: 'permanentlyDeleteProjectDirectory',
+  disposeStorageRoot: 'disposeStorageRoot',
+  pollExternalChanges: 'pollExternalChanges',
+  watch: 'watch',
+  readScopedFile: 'readFile',
+  readScopedShallowDirectory: 'readShallowDirectory',
+  getScopedZippedDirectory: 'getZippedDirectory',
+} as const satisfies Readonly<Record<string, keyof WorkspaceFileService>>;
+
+/**
+ * The authority as its own wire serves it: topology, `watch`, and the `/files`
+ * browser's scoped reads (charter deviation H3 closed, W11/EQ3).
+ *
+ * A host passes this, never the service, so an unrooted connection has no
+ * per-path content **method** — not merely no type for one. The authority keeps
+ * every removed member as an in-process member, because the mutation pipeline
+ * and the rooted views call them; what a caller off the authority's own isolate
+ * cannot do any more is read or write a project tree without naming the root and
+ * the consumer that owns it (CI1, CI2).
+ *
+ * @param service - The authority this bridge fronts.
+ * @returns Its wire surface, one forwarding member per call the wire carries.
+ * @public
+ *
+ * @example <caption>Expose the authority from a worker</caption>
+ * ```typescript
+ * import type { WorkspaceFileService } from '@taucad/filesystem';
+ * import { exposeFileSystem, workspaceBridgeService } from '@taucad/fs-bridge';
+ *
+ * export function exampleExpose(service: WorkspaceFileService): void {
+ *   exposeFileSystem(workspaceBridgeService(service));
+ * }
+ * ```
+ */
+export function workspaceBridgeService(service: WorkspaceFileService): FileSystemBridgeWorkspaceService {
+  const source = service as unknown as Record<string, (...args: readonly unknown[]) => unknown>;
+  const served: Record<string, (...args: readonly unknown[]) => unknown> = {};
+  for (const [wireName, member] of Object.entries(workspaceWireMembers)) {
+    served[wireName] = (...args: readonly unknown[]): unknown => source[member]!(...args);
+  }
+  return served as unknown as FileSystemBridgeWorkspaceService;
 }
 
 /** Expose the complete workspace filesystem service over validated bridge connections. @public */

@@ -103,7 +103,11 @@ vi.mock('@taucad/fs-bridge', () => ({
     unmount: mockUnmount,
     disposeStorageRoot: mockInvalidateStandaloneProvider,
     getDirectoryStat: vi.fn(async () => []),
-    readShallowDirectory: vi.fn(async () => []),
+    /* The authority's wire spells its three scoped reads for the scope they
+     * require; a routed read has a root that owns it (W11). */
+    readScopedShallowDirectory: vi.fn(async () => []),
+    readScopedFile: vi.fn(async () => new Uint8Array()),
+    getScopedZippedDirectory: vi.fn(async () => new Blob()),
     readDirectory: vi.fn(async () => []),
     readdirWithStats: vi.fn(async () => []),
     canDelete: mockProxyCanDelete,

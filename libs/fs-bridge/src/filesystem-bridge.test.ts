@@ -28,7 +28,11 @@ import {
   filesystemBridgeConnectMessageType,
 } from '@taucad/fs-bridge';
 import { createBridgeCall, createBridgeServer } from '@taucad/rpc/bridge';
-import { exposeFileSystemForTesting as exposeFileSystem } from '#filesystem-bridge.js';
+import {
+  exposeFileSystem as exposeFileSystemPublic,
+  exposeFileSystemForTesting as exposeFileSystem,
+  workspaceBridgeService,
+} from '#filesystem-bridge.js';
 import { createFileSystemBridgeHello } from '#filesystem-bridge-protocol.js';
 
 const testBackend = 'memory';
@@ -768,8 +772,8 @@ describe('exposeFileSystem coalesced delivery', () => {
      * dropped either would leave the `/files` browser's folder download silently
      * wrong rather than failing. Every *routed* archive belongs to the rooted
      * surface now (charter D2); the physical scope no view roots survives here. */
-    const getZippedDirectory = vi.fn(async () => new Blob(['PK\u0003\u0004'], { type: 'application/zip' }));
-    const handle = exposeFileSystem({ getZippedDirectory });
+    const getScopedZippedDirectory = vi.fn(async () => new Blob(['PK\u0003\u0004'], { type: 'application/zip' }));
+    const handle = exposeFileSystem({ getScopedZippedDirectory });
     const channel = new MessageChannel();
     messageHandlers[0]!(
       new MessageEvent('message', {
@@ -780,9 +784,9 @@ describe('exposeFileSystem coalesced delivery', () => {
 
     await proxy.ready;
     const scope = { backend: 'memory', storageRootKey: 'memory:files' } satisfies WorkspaceScope;
-    const archive = await proxy.getZippedDirectory('/models', { scope });
+    const archive = await proxy.getScopedZippedDirectory('/models', { scope });
 
-    expect(getZippedDirectory).toHaveBeenCalledWith('/models', { scope });
+    expect(getScopedZippedDirectory).toHaveBeenCalledWith('/models', { scope });
     /* `text()` on the result is what proves a real `Blob` survived the wire. */
     await expect(archive.text()).resolves.toBe('PK\u0003\u0004');
 
@@ -1818,6 +1822,122 @@ describe('exposeFileSystem skip-originator dispatch', () => {
         code: 'ESTALE',
         message: 'The rooted filesystem is stale and must be reopened.',
       });
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+/**
+ * The authority's wire is topology, the `/files` browser's scoped reads and
+ * `pollExternalChanges` (H3 closed, W11/EQ3).
+ *
+ * `workspaceBridgeService` is the one place that decides it, so this suite
+ * drives the public {@link exposeFileSystem} over a real authority exactly as
+ * the file-manager worker composes it: a per-path content call does not merely
+ * fail to typecheck, it is not a method the served object has.
+ */
+describe('workspaceBridgeService', () => {
+  let messageHandlers: Array<(event: MessageEvent) => void>;
+
+  beforeEach(() => {
+    messageHandlers = [];
+    vi.stubGlobal('self', {
+      addEventListener: (_type: string, handler: (event: MessageEvent) => void) => {
+        messageHandlers.push(handler);
+      },
+      removeEventListener: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const w11Scope: WorkspaceScope = { backend: 'memory', storageRootKey: 'memory:w11' };
+
+  const authority = async (): Promise<WorkspaceFileService> => {
+    const providerRegistry = new ProviderRegistry();
+    const provider = await providerRegistry.getProvider(w11Scope);
+    await provider.writeFile('secret.txt', new TextEncoder().encode('project bytes'));
+    const mountTable = new MountTable();
+    mountTable.mount('/', provider, { class: 'authored', ...w11Scope });
+    return new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      crossTabCoordinator: new CrossTabCoordinator(),
+      mountTable,
+    });
+  };
+
+  const connect = async (): Promise<{ call: ReturnType<typeof createBridgeCall>; cleanup: () => void }> => {
+    const handle = exposeFileSystemPublic(workspaceBridgeService(await authority()));
+    const channel = new MessageChannel();
+    messageHandlers.at(-1)!(
+      new MessageEvent('message', {
+        data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+      }),
+    );
+    const call = createBridgeCall(fsBridgePort(channel.port2, 'w11-unrooted-client'));
+    return {
+      call,
+      cleanup: () => {
+        call.dispose();
+        handle.cleanup();
+        channel.port1.close();
+        channel.port2.close();
+      },
+    };
+  };
+
+  /**
+   * All 21 of them, each with arguments its own wire schema accepts, so the
+   * refusal is the server's dispatch and never an argument shape.
+   */
+  const perPathCalls: ReadonlyArray<readonly [name: string, args: unknown[]]> = [
+    ['readFile', ['/secret.txt']],
+    ['writeFile', ['/secret.txt', 'x']],
+    ['writeFileChecked', [{ path: '/secret.txt', data: 'x', preconditions: [] }]],
+    ['appendFile', ['/secret.txt', 'x']],
+    ['writeFiles', [{ '/secret.txt': { content: 'x' } }]],
+    ['mkdir', ['/dir']],
+    ['readdir', ['/']],
+    ['stat', ['/secret.txt']],
+    ['lstat', ['/secret.txt']],
+    ['move', ['/secret.txt', '/moved.txt']],
+    ['canMove', ['/secret.txt', '/moved.txt']],
+    ['canRename', ['/secret.txt', 'moved.txt']],
+    ['canCreate', ['/new.txt', 'file']],
+    ['canDelete', ['/secret.txt']],
+    ['bulkMove', [[]]],
+    ['unlink', ['/secret.txt']],
+    ['rmdir', ['/dir']],
+    ['exists', ['/secret.txt']],
+    ['getZippedDirectory', ['/', { scope: w11Scope }]],
+    ['readShallowDirectory', ['/', { scope: w11Scope }]],
+    ['readDirectory', ['/']],
+  ];
+
+  it('should answer Unknown method for every per-path content call on an unrooted port', async () => {
+    const { call, cleanup } = await connect();
+    try {
+      for (const [name, args] of perPathCalls) {
+        // oxlint-disable-next-line no-await-in-loop -- One connection, one call at a time; the point is the refusal, not throughput.
+        await expect(call.call(name, args)).rejects.toThrow(`Unknown method: ${name}`);
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('should still serve the scoped read the `/files` browser makes', async () => {
+    const { call, cleanup } = await connect();
+    try {
+      await expect(call.call('readScopedFile', ['/secret.txt', { encoding: 'utf8', scope: w11Scope }])).resolves.toBe(
+        'project bytes',
+      );
+      await expect(call.call('pollExternalChanges', [])).resolves.toBe(false);
     } finally {
       cleanup();
     }

@@ -87,11 +87,11 @@ const createFixture = async (partSource: string) => {
   await fileService.writeFile('/main.ts', validMain);
   await fileService.writeFile('/lib/part.ts', partSource);
 
-  const { exposeFileSystem, filesystemBridgeConnectMessageType, openFileSystemBridge } =
+  const { exposeFileSystem, filesystemBridgeConnectMessageType, openFileSystemBridge, workspaceBridgeService } =
     await import('@taucad/fs-bridge');
   const workerScope = new EventTarget();
   vi.stubGlobal('self', workerScope);
-  const exposedFileSystem = exposeFileSystem(fileService, {
+  const exposedFileSystem = exposeFileSystem(workspaceBridgeService(fileService), {
     changeEventBus: eventBus,
     /* The worker's own switch (W2): the kernel names `'agent'`, so this fixture
      * renders through the masked view it really reads, not the checkout. */

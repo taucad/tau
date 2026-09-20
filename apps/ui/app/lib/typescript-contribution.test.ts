@@ -25,7 +25,9 @@ vi.mock('#lib/type-acquisition-service.js', () => ({
 /* eslint-enable @typescript-eslint/naming-convention -- end type acquisition mock waiver */
 
 function createMockContext(stub: MonacoTestStub): ActivationContext {
-  const proxyStub = {
+  /* The bundled typings are read through the composed client's dependency arm
+   * (W11), so the ATA boot waits on `viewClient`, not on the authority proxy. */
+  const viewClientStub = {
     readdir: vi.fn(async () => [] as string[]),
     readFile: vi.fn(async () => new Uint8Array()),
   };
@@ -39,7 +41,7 @@ function createMockContext(stub: MonacoTestStub): ActivationContext {
       getDirectoryStat: vi.fn(),
     },
     fileManagerRef: {
-      getSnapshot: () => ({ context: { proxy: proxyStub } }),
+      getSnapshot: () => ({ context: { viewClient: viewClientStub } }),
       subscribe: () => ({ unsubscribe: () => undefined }),
     } as unknown as FileManagerRef,
     workspaceFs: {

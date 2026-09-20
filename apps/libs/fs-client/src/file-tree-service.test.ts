@@ -9,6 +9,7 @@ import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directo
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { createComposedViewClient } from '#composed-view-client.js';
 import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
+import type { WorkspaceAuthorityClient } from '#file-system-client.js';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
@@ -54,20 +55,20 @@ const skillOverlay = (): ComposedViewOverlay => {
 };
 
 /**
- * The production client: in-root reads through one composed view, everything
- * else on the authority.
+ * The production client: in-root reads through one composed view, the
+ * dependency mount through its own (W11), and topology on the authority.
  */
-const createComposedProxy = async (workspace?: ComposedViewClient): Promise<ComposedViewClient> => {
+const createComposedProxy = async (dependencies?: ComposedViewProxy): Promise<ComposedViewClient> => {
   const provider = new MemoryProvider();
   await provider.writeFile('main.ts', 'export {};\n');
   return createComposedViewClient({
-    workspace:
-      workspace ??
-      mock<ComposedViewClient>({
-        readDirectory: vi.fn().mockResolvedValue([]),
+    workspace: mock<WorkspaceAuthorityClient>(),
+    dependencies:
+      dependencies ??
+      mock<ComposedViewProxy>({
+        readdirWithStats: vi.fn().mockResolvedValue([]),
         readdir: vi.fn().mockResolvedValue([]),
         stat: vi.fn().mockResolvedValue(textStat()),
-        getDirectoryStat: vi.fn().mockResolvedValue([]),
       }),
     /* The rooted connection also archives a subtree (charter D2) and serves the
      * mutation pipeline's porcelain (D4); this harness reads rows. */
@@ -239,19 +240,19 @@ describe('FileTreeService composed-view provenance (north star W2)', () => {
 });
 
 /**
- * The authority half of the composed client: the dependency mount, which lives
- * outside every checkout and so reaches no view.
+ * The dependency mount's own rooted view: it lives outside every checkout, so
+ * the checkout's view has never heard of it, and since W11 it is its own root
+ * rather than an authority-global read. Its paths are mount-relative.
  */
-const dependencyMountAuthority = (): ComposedViewClient => {
-  const rows = new Map<string, FileTreeNode[]>([
-    ['/node_modules', [directoryNode('three')]],
-    ['/node_modules/three', [textNode('index.d.ts')]],
+const dependencyMountView = (): ComposedViewProxy => {
+  const rows = new Map<string, Array<{ name: string } & FileStat>>([
+    ['', [{ name: 'three', type: 'dir', size: 0, mtimeMs: 0 }]],
+    ['three', [{ name: 'index.d.ts', ...textStat() }]],
   ]);
-  return mock<ComposedViewClient>({
-    readDirectory: vi.fn(async (path: string) => rows.get(path) ?? []),
+  return mock<ComposedViewProxy>({
+    readdirWithStats: vi.fn(async (path: string) => rows.get(path) ?? []),
     readdir: vi.fn().mockResolvedValue([]),
     stat: vi.fn().mockResolvedValue({ type: 'dir', size: 0, mtimeMs: 0 }),
-    getDirectoryStat: vi.fn().mockResolvedValue([]),
   });
 };
 
@@ -264,7 +265,7 @@ describe('FileTreeService dependency mount row (close-out W3)', () => {
   it('should keep the dependency mount and its loaded children across a root refresh', async () => {
     vi.useFakeTimers();
     const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
-      proxy: await createComposedProxy(dependencyMountAuthority()),
+      proxy: await createComposedProxy(dependencyMountView()),
     });
     try {
       const root = await tree.listDirectory('');
@@ -285,20 +286,20 @@ describe('FileTreeService dependency mount row (close-out W3)', () => {
   });
 
   it('should keep the dependency mount and its loaded children across a backend resync', async () => {
-    const authority = dependencyMountAuthority();
+    const dependencies = dependencyMountView();
     const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
-      proxy: await createComposedProxy(authority),
+      proxy: await createComposedProxy(dependencies),
     });
     try {
       await tree.listDirectory('');
       await tree.listDirectory('node_modules');
-      vi.mocked(authority.readDirectory).mockClear();
+      vi.mocked(dependencies.readdirWithStats).mockClear();
 
       emitFileChanged({ type: 'backendChanged', backend: 'indexeddb' });
       /* The resync walks resolved directories root-first, so the mount's own arm
        * runs only while the row survived the root's merge. */
       await vi.waitFor(() => {
-        expect(authority.readDirectory).toHaveBeenCalledWith('/node_modules');
+        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('');
       });
 
       expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);

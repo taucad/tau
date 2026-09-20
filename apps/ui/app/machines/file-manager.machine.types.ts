@@ -11,7 +11,7 @@
 
 import type { ActorRefFrom } from 'xstate';
 import type { FileStatEntry } from '@taucad/types';
-import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { WorkspaceAuthorityClient } from '@taucad/fs-client/file-system-client';
 import type { FileManagerMachine } from '#machines/file-manager.machine.js';
 
 /**
@@ -33,15 +33,19 @@ export type FileManagerApi = {
 };
 
 /**
- * Full FileManager protocol served over MessagePort.
- * Alias of `FileSystemClient` for historical imports.
+ * The FileManager protocol served over the unrooted MessagePort.
+ *
+ * Topology and the `/files` browser's scoped reads, and nothing else: content is
+ * the rooted surface's (charter deviation H3 closed, W11). A consumer that wants
+ * a file names the root and the consumer that owns it — `useFileManager`'s
+ * `contentService`, its `recordFiles` family, or a rooted connection of its own.
  */
-export type FileManagerProtocol = FileSystemClient;
+export type FileManagerProtocol = WorkspaceAuthorityClient;
 
 /**
  * Worker proxy: protocol plus optional `listen` for `fileChanged` and `dispose`.
  */
-export type FileManagerProxy = FileSystemClient & {
+export type FileManagerProxy = WorkspaceAuthorityClient & {
   listen?: (event: string, handler: (data: unknown) => void) => () => void;
   dispose(): void;
 };

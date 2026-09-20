@@ -1,8 +1,45 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- The input is hash-verified frozen JSON without a runtime schema package. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- The standalone data harness reads its local fixture closure without workspace aliases.
-import { fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
+import { fixturePath, fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
+
+const CURRENT_AUTHORITY = 'packages/geospec/host-tests/m3-corpus/current-authority-v3.json';
+const CURRENT_AUTHORITY_SHA256 = 'fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51';
+
+/** Load current semantic expectations; binary provenance belongs to execution receipts. @internal */
+export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceRoot) {
+  assert.ok(backend === 'native' || backend === 'mixed', 'current campaign requires an explicit native/mixed profile');
+  const bytes = readFixture(CURRENT_AUTHORITY, workspaceRoot);
+  assert.equal(sha256(bytes), CURRENT_AUTHORITY_SHA256, 'current independent authority changed');
+  const campaign = JSON.parse(bytes);
+  assert.equal(campaign.protocolVersion, 3);
+  assert.equal(campaign.registryVersion, 5);
+  assert.equal(campaign.canonicalProfile, 'geospec-jcs-v1');
+  assert.equal(campaign.numericProfile, 'geospec-st-logical-requests-v3');
+  for (const definition of Object.values(campaign.definitions)) {
+    const source = readFileSync(resolve(workspaceRoot, definition.path), 'utf8');
+    assert.ok(source.includes(`"${definition.sha256}"`), `independent definition changed: ${definition.path}`);
+  }
+  assert.equal(campaign.rows.length, 352);
+  assert.equal(new Set(campaign.rows.map((row) => row.id)).size, 352);
+  return {
+    ...campaign,
+    backend,
+    sourcePath: fixturePath(CURRENT_AUTHORITY, workspaceRoot),
+    sourceCorpusFingerprint: CURRENT_AUTHORITY_SHA256,
+    rows: campaign.rows.map((row) => ({
+      ...row,
+      expected: {
+        ...row.expected,
+        status:
+          backend === 'mixed' ? (campaign.mixedStatusOverrides[row.id] ?? row.expected.status) : row.expected.status,
+      },
+    })),
+  };
+}
 
 const RUN = 'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation';
 const B35 = `${RUN}/lead/matcher-full-entry/current-approved-b35-inputs.json`;

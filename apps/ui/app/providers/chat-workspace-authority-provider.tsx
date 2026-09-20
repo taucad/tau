@@ -163,7 +163,8 @@ export type WorkspaceFileSystemBinding = {
    * own.
    */
   connection?: Promise<FileSystemBridgeProxy>;
-  openConnection?: () => Promise<FileSystemBridgeProxy>;
+  /** Opens a connection rooted at `root`, or at `rootDirectory` when none is named. */
+  openConnection?: (root?: string) => Promise<FileSystemBridgeProxy>;
 };
 
 /** Read the selected provider's capabilities from its rooted bridge hello. */
@@ -261,7 +262,7 @@ const connectRootedBridge = async (binding: WorkspaceFileSystemBinding): Promise
   if (binding.openConnection === undefined) {
     throw new Error('Rooted filesystem bridge is unavailable.');
   }
-  const request = binding.connection ?? binding.openConnection();
+  const request = binding.connection ?? binding.openConnection(binding.rootDirectory);
   binding.connection = request;
   try {
     const proxy = await request;
@@ -417,6 +418,8 @@ type TurnRecord = {
   readonly prepared: PreparedChatWorkspace;
   /** The turn id the root's lease is keyed by; `turnCompleted` names this one. */
   readonly leaseTurnId: string;
+  /** The turn's own connection when it was placed off the bound root; closed with the claim. */
+  readonly binding?: WorkspaceFileSystemBinding;
 };
 
 type BrowserWorkspaceAuthorityState = {
@@ -510,12 +513,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       rootDirectory,
       backend: fileManager.backendType,
       providerIdentity,
-      openConnection: async () => {
+      openConnection: async (root = rootDirectory) => {
         await fileManager.workspace.syncProjectRoots();
         const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
         const { openFileSystemBridge } = await waitForRootedBridgeOpener(fileManager.fileManagerRef);
         /* Trusted composition: the workspace authority serves the checkout (G6). */
-        const proxy = createFileSystemBridgeProxy(openFileSystemBridge(rootDirectory, 'working-copy'));
+        const proxy = createFileSystemBridgeProxy(openFileSystemBridge(root, 'working-copy'));
         await proxy.ready;
         return proxy;
       },
@@ -639,6 +642,9 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       }
       state.turns.delete(chatId);
       state.placing.delete(chatId);
+      if ('binding' in current) {
+        disposeConnection(current.binding?.connection);
+      }
       revisions?.send({ command, turnId: current.leaseTurnId });
       notify();
     },
@@ -698,7 +704,17 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
           runId,
           ...(checkoutId === undefined ? {} : { checkoutId }),
         });
-        const preparedFileSystems = await createPreparedWorkspaceFileSystems(state.rootedFileSystem);
+        /* The lease names a checkout, and the files have to be that checkout's:
+         * the bound connection is rooted wherever the workbench stood when it
+         * opened, so a turn placed on a branch was handed the project's files,
+         * wrote its work there, and left its own branch nothing to record. */
+        const turnBinding: WorkspaceFileSystemBinding | undefined =
+          placement.root === state.binding.rootDirectory
+            ? undefined
+            : { ...state.binding, rootDirectory: placement.root, connection: undefined };
+        const preparedFileSystems = await createPreparedWorkspaceFileSystems(
+          turnBinding === undefined ? state.rootedFileSystem : createRootedBridgeFileSystem(turnBinding),
+        );
         const prepared: PreparedChatWorkspace = Object.freeze({
           chatId,
           projectId,
@@ -727,7 +743,11 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
           return prepared;
         }
         state.placing.delete(chatId);
-        state.turns.set(chatId, { prepared, leaseTurnId });
+        state.turns.set(chatId, {
+          prepared,
+          leaseTurnId,
+          ...(turnBinding === undefined ? {} : { binding: turnBinding }),
+        });
         notify();
         return prepared;
       })();

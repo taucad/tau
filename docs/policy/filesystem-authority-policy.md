@@ -246,6 +246,8 @@ Every path policy — Tau's or a test's — satisfies these:
 
 A row therefore carries two independent facts, never one flag for both: `anchored` is the generated ignore pattern's spelling, and `match` (`'root' | 'segment'`) is how the row classifies a path. Conflating them is what let a nested `.git` be captured into revisions and written by an agent.
 
+Two prefixes of Tau's own registry are compared as the filesystem folds them rather than as spelled: the control plane at any depth, and the first segment of Tau's `.tau` namespace, which nobody else names. `exports`, `thumbnail.webp` and `node_modules` are compared as spelled, because those are names a person sees and may have typed themselves.
+
 There is no user-configurable policy, no per-project policy file, no plugin API for rows and no policy registry. If a second layout ever becomes real, both halves of the capability take the policy by injection and the properties above say what its policy must satisfy.
 
 **Why**: The mask, the capture filter and the generated ignore file are three readings of one table; they agree by property, not by coincidence.

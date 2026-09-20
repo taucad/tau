@@ -383,6 +383,41 @@ describe('composeView agent mask', () => {
     },
   );
 
+  /* `.tau` is Tau's namespace, so a spelling the filesystem folds onto it is the
+   * row it folds to: this provider is case-sensitive, but on the disks a
+   * `NodeFsProvider` runs on `.TAU/chats/**` is the agent's own durable log, and
+   * calling it authored made it the agent's to rewrite. */
+  it('should answer the folded `.tau` row for an agent rather than the authored default', async () => {
+    await provider.mkdir('.TAU/chats/c1', { recursive: true });
+    await provider.writeFile('.TAU/chats/c1/events.jsonl', '{"type":"run.lifecycle"}\n');
+    await provider.writeFile('.TAU/parameters/main.json', '{}\n');
+    await provider.writeFile('.Tau/library.json', '{}\n');
+    await provider.writeFile('.TAU/binding.json', '{}\n');
+    const view = agentView();
+
+    await expect(view.writeFile('.TAU/chats/c1/events.jsonl', 'forged\n')).rejects.toMatchObject({
+      code: 'EROFS',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+    /* Records stay readable to an agent, so this cannot pass by the whole
+     * subtree having been hidden. */
+    expect(await view.readFile('.TAU/chats/c1/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
+    expect(await view.exists('.Tau/library.json')).toBe(false);
+    expect(await view.exists('.TAU/binding.json')).toBe(false);
+    /* The authored controls keep their own row through the fold. */
+    await expect(view.writeFile('.TAU/parameters/main.json', '{"a":1}\n')).resolves.toBeUndefined();
+  });
+
+  it('should hide a folded `.tau` family from the user consumer too', async () => {
+    await provider.writeFile('.Tau/library.json', '{}\n');
+    await provider.writeFile('.TAU/binding.json', '{}\n');
+    const view = userView();
+
+    expect(await view.exists('.Tau/library.json')).toBe(false);
+    await expect(view.readFile('.Tau/library.json', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.readFile('.TAU/binding.json', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+  });
+
   /* G0-3: the cache row matched `node_modules` first, so a dependency's own
    * store was the agent's to read and write. */
   it('should refuse a repository vendored inside the cache', async () => {

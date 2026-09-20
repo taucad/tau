@@ -19,6 +19,12 @@
  * own, which is what keeps that default from swallowing them the way a blanket
  * `.tau` exclusion once did.
  *
+ * Two prefixes are compared as the filesystem folds them rather than as spelled:
+ * the control plane, wherever it sits, and Tau's own `.tau` namespace, which
+ * nobody else names. `exports`, `thumbnail.webp` and `node_modules` are compared
+ * as spelled — they are names a person sees and may have typed themselves, and
+ * they hold outputs and cache rather than the log of a run.
+ *
  * @module
  */
 
@@ -370,33 +376,51 @@ const controlPlane: readonly PathRegistryRow[] = Object.freeze(
 const mayFold = /[A-Z]|[. ](?:\/|$)/u;
 
 /**
- * The control-plane row a filesystem's own folding of this path lands on, if any.
+ * One path as the filesystem underneath will fold it.
  *
  * Every filesystem a `NodeFsProvider` runs on folds case, and Win32 folds
  * trailing dots and spaces too, so `vendor/.Git/config` and `vendor/.git./HEAD`
  * open the real store while a byte comparison calls them the user's content
- * (G0-1, G0-5). Only the control plane folds — a user's `Exports` directory is
- * theirs — and it folds on every host, because a genuinely separate `.GIT`
- * directory on a case-sensitive disk being hidden is the fail-closed answer and
- * asking the provider would make the mask depend on where the project sits.
- *
- * The same defence `portable-tree.ts` applies to a revision tree, spelled the
- * same way. Normalization is in it for that reason rather than because it can
- * change the answer: all three prefixes are ASCII, which normalization never
- * rewrites.
+ * (G0-1, G0-5). The same defence `portable-tree.ts` applies to a revision tree,
+ * spelled the same way. Normalization is in it for that reason rather than
+ * because it can change an answer: every prefix is ASCII, which normalization
+ * never rewrites.
  *
  * @param relative - Path relative to the project root, leading `/` already dropped.
- * @returns The row's index, or `-1`.
+ * @returns The spelling every supported filesystem resolves this path to.
  */
-const foldedControlPlaneIndex = (relative: string): number => {
-  if (!mayFold.test(relative)) {
-    return -1;
-  }
-  const folded = relative
+const foldSpelling = (relative: string): string =>
+  relative
     .normalize('NFC')
     .toLowerCase()
     .replaceAll(/[. ]+(?=\/|$)/gu, '');
-  return controlPlane.findIndex((row) => covers(row, folded));
+
+/** Tau's own directory: the one row prefix nobody else names. */
+const reservedTau = '.tau';
+
+/**
+ * The same path with Tau's own directory spelled canonically.
+ *
+ * `.tau` is Tau's namespace rather than a name a person claims, so a first
+ * segment the filesystem folds onto it is Tau's directory: on a case-insensitive
+ * disk `.TAU/chats/**` *is* the agent's durable log, and answering the authored
+ * default made it agent-writable and captured it into every revision.
+ *
+ * Only that segment is rewritten. Below it the rows are compared as spelled, so
+ * `.TAU/Chats/…` answers exactly what `.tau/Chats/…` answers — the reserved
+ * default, which is the fail-closed side — and the one row whose own prefix is
+ * not lowercase (`.tau/AGENTS.md`) stays reachable.
+ *
+ * @param relative - Path relative to the project root, leading `/` already dropped.
+ * @param folded - The same path as {@link foldSpelling} folds it.
+ * @returns The path to classify.
+ */
+const canonicalTauNamespace = (relative: string, folded: string): string => {
+  const end = folded.indexOf('/');
+  if ((end === -1 ? folded : folded.slice(0, end)) !== reservedTau) {
+    return relative;
+  }
+  return end === -1 ? reservedTau : `${reservedTau}${relative.slice(relative.indexOf('/'))}`;
 };
 
 /**
@@ -416,13 +440,22 @@ const foldedControlPlaneIndex = (relative: string): number => {
  */
 export const classify = (projectRelativePath: string): PathClassification => {
   const relative = projectRelativePath.replace(/^\/+/u, '');
-  const index = pathRegistry.findIndex((row) => covers(row, relative));
+  /* At most one fold per call, shared by the two rules that need it; a path that
+   * is already its own fold pays one regex test and allocates nothing. */
+  const folded = mayFold.test(relative) ? foldSpelling(relative) : relative;
+  const subject = canonicalTauNamespace(relative, folded);
+  const index = pathRegistry.findIndex((row) => covers(row, subject));
   /* The control plane answers first, and for a spelling the filesystem folds
    * onto one it answers instead of the row that matched (G0-1, G0-3, G0-5). */
-  const folded = index !== -1 && index < controlPlane.length ? -1 : foldedControlPlaneIndex(relative);
+  const aliased =
+    index !== -1 && index < controlPlane.length
+      ? index
+      : folded === relative
+        ? -1
+        : controlPlane.findIndex((row) => covers(row, folded));
   return (
-    rowClassifications[folded === -1 ? index : folded] ??
-    (relative.startsWith('.tau/') ? reservedTauPathClassification : unlistedPathClassification)
+    rowClassifications[aliased === -1 ? index : aliased] ??
+    (subject.startsWith(`${reservedTau}/`) ? reservedTauPathClassification : unlistedPathClassification)
   );
 };
 

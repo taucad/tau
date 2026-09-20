@@ -128,17 +128,61 @@ describe('path registry', () => {
     expect(classify(path)).toStrictEqual(controlPlane);
   });
 
-  /* The fold is the control plane's alone: a user's `Exports` directory and
-   * their `Cafe/` are their content, whatever case they typed. Normalization is
-   * in the fold for the reason `portable-tree.ts` applies it, not because it can
-   * change an answer — all three prefixes are ASCII, which normalization never
-   * rewrites, so a decomposed path answers by its segments alone. */
-  it.each(['Exports/model.step', 'Café/README.md', '.GitHub/workflows/ci.yml'])(
-    'should leave %s on the authored default rather than folding it onto a row',
+  /* `.tau` is Tau's namespace rather than a name a person claims, so a first
+   * segment the filesystem folds onto it is classified as `.tau` is: on a
+   * case-insensitive disk `.TAU/chats/**` *is* the agent's durable log, and
+   * calling it authored made it agent-writable and captured it into revisions. */
+  it.each(['.TAU/chats/c1.json', '.Tau/chats/c1/events.jsonl', '.tau./chats/c1.json'])(
+    'should answer the records row for %s',
     (path) => {
-      expect(classify(path)).toStrictEqual(unlistedPathClassification);
+      expect(classify(path)).toStrictEqual({
+        class: 'records',
+        versioned: false,
+        agentAccess: 'read-only',
+        watch: 'ui',
+      });
     },
   );
+
+  it('should keep a folded `.tau` control writable and a folded generated one unversioned', () => {
+    expect(classify('.TAU/parameters/main.json')).toStrictEqual(unlistedPathClassification);
+    /* The row whose own prefix is not lowercase stays reachable, because only the
+     * first segment is rewritten. */
+    expect(classify('.TAU/AGENTS.md')).toStrictEqual(unlistedPathClassification);
+    expect(classify('.tau./types/kernel.d.ts')).toMatchObject({ versioned: false, agentAccess: 'read-write' });
+  });
+
+  /* A family no row names falls to the reserved answer through the canonical
+   * spelling too. Below the first segment the rows are compared as spelled, so
+   * `.TAU/Chats/…` answers exactly what `.tau/Chats/…` answers — the reserved
+   * default, which is the fail-closed side. */
+  it.each(['.Tau/library.json', '.TAU/Foo/x', '.tau./unknown/y', '.tau/Chats/c1.json', '.TAU/Chats/c1.json'])(
+    'should give %s the reserved `.tau` answer',
+    (path) => {
+      expect(classify(path)).toStrictEqual(reservedTauPathClassification);
+    },
+  );
+
+  /* The accepted boundary: only `.tau` folds. `exports`, `thumbnail.webp` and
+   * `node_modules` are names a person sees and may have typed themselves, and
+   * the rows below `.tau/` are root-matched, so a nested `.TAU` is the user's
+   * directory like any other. Normalization is in the fold for the reason
+   * `portable-tree.ts` applies it, not because it can change an answer — every
+   * prefix is ASCII, which normalization never rewrites, so a decomposed path
+   * answers by its segments alone. */
+  it.each([
+    'Exports/model.step',
+    'Thumbnail.webp',
+    'Node_Modules/replicad/index.d.ts',
+    'Café/README.md',
+    '.GitHub/workflows/ci.yml',
+    '.taurus/main.scad',
+    '.tau-old/chats/c1.json',
+    'x/.TAU/chats/y',
+    '.TAU',
+  ])('should leave %s on the authored default rather than folding it onto a row', (path) => {
+    expect(classify(path)).toStrictEqual(unlistedPathClassification);
+  });
 
   it('should classify a decomposed path by its segments', () => {
     expect(classify('café/.git/config')).toStrictEqual(controlPlane);

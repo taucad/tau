@@ -41,8 +41,8 @@ Never write an absolute path into a page. If `repos/tau-brain` is absent, `docs/
 | Mode | Trigger | What it does |
 | --- | --- | --- |
 | **create** | A new handbook or section | Scaffold the tree, `index.md`, the registers and the source map from the templates |
-| **add** | A new service, procedure or incident class | Pick the `kind`, fill the template from current source, mark every statement, add `sources`, regenerate the source map |
-| **update** | A change touched a path in the source map | List suspect pages from the diff, re-read each page's sources, edit only what changed, bump `updated`. Always ends with the checklist reconciliation |
+| **add** | A new service, procedure or incident class | Pick the `kind`, fill the template from current source, mark every statement, add `sources`, run [generate-source-map.mjs](generate-source-map.mjs) |
+| **update** | A change touched a path in the source map | List suspect pages from the diff, re-read each page's sources, edit only what changed, bump `updated`, re-run [generate-source-map.mjs](generate-source-map.mjs). Always ends with the checklist reconciliation |
 | **verify** | Scheduled review, pre-launch, or after an incident | Re-check declared claims against source and authorized observed claims, log the result, bump `last_verified` |
 | **review** | "Are we ready to launch?", a readiness review, a scheduled pre-launch pass | Read-only digest of the go-live checklist for the operator |
 | **migrate** | Moving content out of a public document | Copy the operational passages into the right pages, leave the public stub, re-point inbound links in the same change |
@@ -52,7 +52,7 @@ Never write an absolute path into a page. If `repos/tau-brain` is absent, `docs/
 1. Start from `git diff --name-only` (against the base the change will merge into) and `reference/source-map.md`. The map's rows map a changed path or glob to the pages it makes suspect.
 2. Re-read each suspect page's `sources` in current source. Edit only what actually changed.
 3. Bump `updated`. Do **not** bump `last_verified` unless the claim was really re-checked — a stale `last_verified` is a lie that survives the incident.
-4. Add a source-map row when the page gained a `sources` entry.
+4. Re-run the source-map generator when any page gained or lost a `sources` entry.
 5. Reconcile the go-live checklist. This step is not optional.
 
 ### verify
@@ -120,7 +120,13 @@ Write short sentences, tables and exact names. No marketing, no filler, no emoji
 
 ## The source map
 
-`reference/source-map.md` is one table generated from every page's `sources`: changed path or glob → the pages it makes suspect. It lives in the handbook, not in this skill, because its rows name private infrastructure. Regenerate it whenever a page's `sources` change; update mode reads it.
+`reference/source-map.md` is one table generated from every page's `sources`: changed path or glob → the pages it makes suspect. The page lives in the handbook, not in this skill, because its rows name private infrastructure. Update mode reads it; regenerate it whenever a page's `sources` change:
+
+```bash
+node .agents/skills/create-handbook/generate-source-map.mjs
+```
+
+Expected: `✓ wrote <path> (<n> source paths across <n> pages)`, or `is up to date`. The handbook root defaults to `docs/handbooks/cloud` and can be given as the first argument. `--check` writes nothing and exits 1 when the table is stale — run it straight after a generate, and in a pre-commit or review pass. The generator preserves the page's frontmatter and intro and moves `updated` only when the table really changed, so re-running it is free. Hand-editing the table is pointless: the next run overwrites it.
 
 ## The go-live checklist
 
@@ -152,7 +158,7 @@ Write short sentences, tables and exact names. No marketing, no filler, no emoji
 
 - **Evidence or it stays open.** `done` needs the row's `Closes when` command re-run with its output summarized and a UTC timestamp, or a run or commit URL. Output that could contain a secret is summarized, never pasted.
 - **Agents close; only the operator accepts.** An agent may add a row, reopen a row and set `done` with evidence. Setting `accepted`, changing a `Gate` and signing off are operator decisions, recorded with the date.
-- **Rows are never deleted and IDs are never reused.** A row that no longer applies becomes `superseded` with the reason.
+- **Rows are never deleted and IDs are never reused.** A row that no longer applies becomes `superseded` with the reason. A new row takes the **next unused integer in its area prefix** — the highest integer the area has ever carried plus one, counting `superseded` and deleted-from-memory rows, not the count of rows now visible.
 - **Owed work from any program lands here.** A charter or blueprint closeout that leaves a pre-launch item owed adds a row, rather than leaving the gate in a closeout note or in memory.
 - **Launch ends the list, not the discipline.** At sign-off the page records the reviewed commit and becomes the launch record; remaining `A` and `P` rows continue in `known-gaps.md` and `calendar.md`.
 
@@ -172,7 +178,8 @@ Write short sentences, tables and exact names. No marketing, no filler, no emoji
 - [ ] `last_verified` is the date the claims were really checked, not the date the page was edited
 - [ ] No secret values, no output that can embed one
 - [ ] Commands one per block, with placeholders and expected output
-- [ ] `sources` listed; `reference/source-map.md` regenerated
+- [ ] `sources` listed; `node .agents/skills/create-handbook/generate-source-map.mjs` re-run and its `--check` clean
+- [ ] A new checklist row uses the next unused integer in its area prefix
 - [ ] Go-live checklist reconciled — row closed with evidence, row added, row reopened, or "no checklist effect" stated in the change summary
 - [ ] `pnpm docs:validate` passes
 - [ ] `git -C repos/tau-brain status --short -- handbooks/` reviewed; nothing unexpected staged

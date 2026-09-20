@@ -77,8 +77,10 @@ playbooks:                         # playbooks actually used; [] when none exist
 
 ## Register row
 
-Add one row to `docs/incidents/index.md`, newest first, in the Incidents table. Drills go in the Drills
-table instead, with `severity` `drill`.
+Add one row to `docs/incidents/index.md`, newest first. `severity: drill` goes in the **Drills** table;
+everything else goes in the **Incidents** table. The two tables have different columns.
+
+### Incidents table — seven columns
 
 ```markdown
 | [2026-10-03-api-503-after-deploy](2026-10-03-api-503-after-deploy/incident.md) | SEV2 | resolved | 2026-10-03T21:04Z | 14m | All production API requests failed | 2 open |
@@ -87,9 +89,24 @@ table instead, with `severity` `drill`.
 | Column | Content |
 | --- | --- |
 | Incident | Relative link to the record, titled with the directory name |
-| Severity | `SEV1` · `SEV2` · `SEV3` · `drill` |
+| Severity | `SEV1` · `SEV2` · `SEV3` |
 | State | `open` · `mitigated` · `resolved` · `closed` |
 | Started (UTC) | `started_at`, best known |
 | To mitigate | `mitigated_at` minus `started_at`, or `—` while open |
 | Customer impact | One line, no more |
+| Open follow-ups | Count of Follow-ups rows not in state `done`, or `none` |
+
+### Drills table — six columns
+
+```markdown
+| [2026-10-05-drill-redis-loss](2026-10-05-drill-redis-loss/incident.md) | Tabletop: production Redis lost to a supplier maintenance window | closed | 2026-10-05T02:10Z | Yes, unaided — triage routed to the playbook in one read and the remedy was reached | 13 open |
+```
+
+| Column | Content |
+| --- | --- |
+| Drill | Relative link to the record, titled with the directory name |
+| Scenario | The scenario as it was given, one line. No severity column: every row here is `severity: drill` |
+| State | `open` · `mitigated` · `resolved` · `closed`, as the record's `state` |
+| Run (UTC) | When the drill was run — its `started_at` |
+| Reached the right remedy | `Yes` · `Yes, partly` · `No`, then the one thing that helped or blocked |
 | Open follow-ups | Count of Follow-ups rows not in state `done`, or `none` |

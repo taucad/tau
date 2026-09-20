@@ -390,6 +390,21 @@ it('should render a sourceUnits field as unit-bearing text and a units-only fiel
   ).toEqual({ sourceLength: '20 in', labelledLength: 30 });
 });
 
+it('should leave a null source-unit value unchanged', () => {
+  expect(
+    parameterRecordInputValues({
+      activeGroup: 'default',
+      groups: {
+        default: {
+          values: { width: null },
+          units: { '/width': 'in' },
+          sourceUnits: { '/width': 'in' },
+        },
+      },
+    }),
+  ).toEqual({ width: null });
+});
+
 it.each([
   { name: 'in', storedUnit: '[in_i]', storedValue: 2, nativeUnit: 'mm', nativeValue: 50.8 },
   { name: 'ft', storedUnit: '[ft_i]', storedValue: 2, nativeUnit: 'mm', nativeValue: 609.6 },

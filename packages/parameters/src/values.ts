@@ -230,7 +230,7 @@ export const parameterRecordInputValues = (record: FileParameterEntry): Readonly
   for (const pointer of Object.keys(group.sourceUnits ?? {})) {
     const value = valueAtPointer(values, pointer);
     const unit = group.units?.[pointer];
-    if (value !== undefined && unit !== undefined) {
+    if (typeof value === 'number' && unit !== undefined) {
       values = setPointer(values, pointer, `${JSON.stringify(value)} ${unit}`);
     }
   }

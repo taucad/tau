@@ -1,4 +1,5 @@
 //! Whole-plan preparation with separate syntax and selector barriers.
+use crate::protocol::{Observations, WorkCounter};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -363,6 +364,7 @@ impl PreparedPlan {
             }
         }
         Ok(ResolvedPlan {
+            observations: None,
             canonical_plan_hash,
             claims: self.claims,
             retained,
@@ -373,6 +375,7 @@ impl PreparedPlan {
 
 /// Construction requires both complete barriers; only this state can evaluate.
 pub(crate) struct ResolvedPlan {
+    observations: Option<Rc<Observations>>,
     canonical_plan_hash: String,
     claims: Vec<Claim>,
     retained: Vec<Rc<Subject>>,
@@ -380,6 +383,12 @@ pub(crate) struct ResolvedPlan {
 }
 
 impl ResolvedPlan {
+    pub(crate) fn with_observations(mut self, observations: Rc<Observations>) -> Self {
+        self.batch.observations = Some(Rc::clone(&observations));
+        self.observations = Some(observations);
+        self
+    }
+
     pub(crate) fn evaluate(
         self,
         connector: Option<&mut dyn CsgConnector>,
@@ -402,10 +411,10 @@ impl ResolvedPlan {
     ) -> Result<Json, ProtocolError> {
         let mut results = Vec::with_capacity(self.claims.len());
         for (claim, subject) in self.claims.into_iter().zip(self.retained) {
+            let budget = claim.execution_budget;
             let evaluation = if let Some(refusal) = claim.refusal {
                 refusal
             } else {
-                let budget = claim.execution_budget;
                 let payload = claim.payload.normalized();
                 let subjects = [subject];
                 let scope = if claim.payload.demand().csg {
@@ -415,6 +424,7 @@ impl ResolvedPlan {
                             None => CsgScope::new(&mut **connector),
                         }
                         .with_budget(&budget)
+                        .with_observations(self.observations.clone())
                     })
                 } else {
                     None
@@ -466,12 +476,19 @@ impl ResolvedPlan {
                     value
                 }
             };
+            if let Some(observations) = &self.observations {
+                observations.add(WorkCounter::ChargedUnits, budget.used());
+                observations.add(WorkCounter::Claims, 1);
+            }
             results.push(result::finish(
                 &claim.id,
                 claim.capability,
                 claim.polarity,
                 evaluation,
             )?);
+        }
+        if let Some(observations) = &self.observations {
+            observations.add(WorkCounter::Evaluations, 1);
         }
         Ok(Json::object([
             (

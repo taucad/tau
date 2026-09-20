@@ -29,6 +29,8 @@ class _NativeEngine(Protocol):
 
     def process_request(self, request: bytes) -> bytes: ...
 
+    def observations(self) -> bytes: ...
+
     def canonical_plan(self, request: bytes) -> bytes: ...
 
     def evaluate_plan(self, plan: bytes) -> bytes: ...
@@ -263,6 +265,14 @@ class GeoSpecEngine:
                     "GeoSpec initialize returned an invalid capability entry."
                 )
         self.capabilities = tuple(capabilities)
+
+    def observations(self) -> bytes:
+        """Return an owned, non-mutating cumulative engine observation snapshot.
+
+        Decimal strings preserve exact integer counts. Diagnostic transfer and
+        independent canonicalizer traffic are excluded from the measured scope.
+        """
+        return bytes(self._ensure_open().observations())
 
     def close(self) -> None:
         """Release every subject generation owned by this engine facade."""

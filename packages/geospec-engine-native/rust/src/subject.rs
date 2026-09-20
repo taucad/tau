@@ -1,5 +1,6 @@
 //! Retained source records and thread-confined shared analysis.
 
+use crate::protocol::{Observations, WorkCounter};
 use std::{
     cell::{OnceCell, RefCell},
     mem::size_of,
@@ -54,6 +55,7 @@ pub(crate) fn subject_cache_key(namespace: &str, identity: &str) -> String {
 
 /// One immutable source/profile identity. Heavy facts remain explicitly lazy.
 pub(crate) struct Subject {
+    pub(crate) observations: Rc<Observations>,
     pub content_hash: String,
     /// Full-format descriptor digest, set once after verified admission.
     /// Raw GSM1 retains its separate original hash namespace.
@@ -122,6 +124,7 @@ impl RetainedContinuousTopology {
 impl Subject {
     pub(crate) fn new(content_hash: String, format: SubjectFormat, source_unit: String) -> Self {
         Self {
+            observations: Rc::default(),
             content_hash,
             semantic_identity: OnceCell::new(),
             format,
@@ -210,6 +213,7 @@ impl Subject {
             kind: BackendErrorKind::Unsupported,
             message: "The retained subject has no BRep tessellation connector.".into(),
         })?;
+        self.observations.add(WorkCounter::Tessellations, 1);
         let mesh = brep.tessellate(entity, profile)?;
         let bytes = (size_of::<TriangleMesh>() as u64)
             .saturating_add(
@@ -262,9 +266,11 @@ impl Subject {
     ) -> Result<Rc<crate::analysis::interference::PreparedComponents>, BackendError> {
         self.cache_identity()?;
         if let Some(value) = self.overlap_components.get() {
+            self.observations.add(WorkCounter::DerivedHits, 1);
             return Ok(Rc::clone(value));
         }
         let value = Rc::new(crate::analysis::interference::prepare_components(self)?);
+        self.observations.add(WorkCounter::ComponentBuilds, 1);
         let _ = self.overlap_components.set(Rc::clone(&value));
         Ok(value)
     }
@@ -297,6 +303,7 @@ impl Subject {
         };
         self.cache_identity()?;
         if let Some(value) = self.report_bundle.get() {
+            self.observations.add(WorkCounter::DerivedHits, 1);
             return Ok(Some(Rc::clone(value)));
         }
         let bundle = brep.reported_facts_and_mesh()?;
@@ -379,6 +386,7 @@ impl Subject {
         // Publish only after all transfers, validation and accounting succeed.
         let _ = self.mesh_record.set(Rc::new(record));
         let _ = self.report_bytes.set(bytes);
+        self.observations.add(WorkCounter::ReportBuilds, 1);
         let _ = self.report_bundle.set(Rc::clone(&bundle));
         Ok(Some(bundle))
     }
@@ -788,6 +796,7 @@ impl Subject {
         }
         self.cache_identity()?;
         if let Some(value) = self.selector_index.get() {
+            self.observations.add(WorkCounter::DerivedHits, 1);
             return Ok(Some(Rc::clone(value)));
         }
         let bundle = self.report_bundle()?.ok_or_else(|| BackendError {
@@ -799,6 +808,7 @@ impl Subject {
             &bundle.whole_faces,
             &bundle.occurrence_faces,
         )?);
+        self.observations.add(WorkCounter::SelectorBuilds, 1);
         let _ = self.selector_index.set(Rc::clone(&value));
         Ok(Some(value))
     }
@@ -806,6 +816,7 @@ impl Subject {
     /// The caller charges deterministic requested work before this lookup.
     pub(crate) fn mesh_analysis(&self) -> Result<Rc<MeshAnalysis>, BackendError> {
         if let Some(analysis) = self.mesh_analysis.get() {
+            self.observations.add(WorkCounter::DerivedHits, 1);
             return Ok(Rc::clone(analysis));
         }
         let record = self.mesh_record.get().ok_or_else(|| BackendError {
@@ -818,6 +829,7 @@ impl Subject {
             analyze(record)?
         });
         // ST owner execution has no intervening concurrent materialization.
+        self.observations.add(WorkCounter::MeshBuilds, 1);
         let _ = self.mesh_analysis.set(Rc::clone(&analysis));
         Ok(analysis)
     }

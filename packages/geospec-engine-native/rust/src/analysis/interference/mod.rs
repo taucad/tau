@@ -1,6 +1,7 @@
 //! Approximate observation of f32-merged polyhedral Boolean output.
 //! Neither the scalar nor the reporting cutoff is a material-overlap proof.
 
+use crate::protocol::WorkCounter;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, VecDeque},
@@ -430,6 +431,9 @@ pub(crate) fn analyze_overlap(
             if let Some(resident) = &subject.resident_overlaps {
                 resident.borrow_mut().touch(&prepared_owner);
             }
+            subject
+                .observations
+                .add(WorkCounter::OverlapResidentHits, 1);
             return Ok(Analysis::Complete(cached.evidence.clone()));
         }
     }
@@ -485,6 +489,7 @@ pub(crate) fn analyze_overlap(
                         OverlapRequest::Boolean | OverlapRequest::Properties => csg.charge(1)?,
                     }
                 }
+                subject.observations.add(WorkCounter::OverlapDiskHits, 1);
                 let evidence = cached.evidence.clone();
                 if let Some(resident) = &subject.resident_overlaps {
                     resident.borrow_mut().insert(&prepared_owner, cached);
@@ -570,6 +575,7 @@ pub(crate) fn analyze_overlap(
         tolerance,
         overlaps,
     };
+    subject.observations.add(WorkCounter::OverlapBuilds, 1);
     let completed = CompletedOverlap {
         evidence: evidence.clone(),
         requests,

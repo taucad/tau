@@ -1,5 +1,6 @@
 //! Finite prepared-batch component demands; no session-wide tolerance map.
 
+use crate::protocol::{Observations, WorkCounter};
 use std::{
     cell::{Cell, OnceCell},
     collections::BTreeMap,
@@ -15,6 +16,7 @@ use crate::{
 
 /// Result storage exists only for keys declared by the complete prepared batch.
 pub(crate) struct BatchAnalysis {
+    pub(crate) observations: Option<Rc<Observations>>,
     components: BTreeMap<(String, u64), OnceCell<Rc<ConnectedComponents>>>,
     retained_bytes: Cell<u64>,
     byte_limit: u64,
@@ -42,6 +44,7 @@ impl BatchAnalysis {
             }
         }
         Ok(Self {
+            observations: None,
             components,
             retained_bytes: Cell::new(0),
             byte_limit: limits.max_mesh_bytes,
@@ -64,7 +67,13 @@ impl BatchAnalysis {
                     .into(),
             })?;
         if let Some(value) = cell.get() {
+            if let Some(observations) = &self.observations {
+                observations.add(WorkCounter::DerivedHits, 1);
+            }
             return Ok(Rc::clone(value));
+        }
+        if let Some(observations) = &self.observations {
+            observations.add(WorkCounter::ComponentBuilds, 1);
         }
         let value = analysis.connected_components(tolerance);
         let bytes = retained_component_bytes(&value);

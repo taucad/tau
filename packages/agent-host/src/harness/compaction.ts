@@ -511,8 +511,9 @@ export const installCompaction = (
       32,
       options.contextWindow - settings.reserveTokens - settings.keepRecentTokens - fixedOverhead,
     );
+    const forcedClearingThreshold = Math.max(messageBudget, settings.keepRecentTokens);
     const emergencyClearings = new Set(
-      input.filter((message) => message.role === 'toolResult' && estimateTokens(message) > messageBudget),
+      input.filter((message) => message.role === 'toolResult' && estimateTokens(message) > forcedClearingThreshold),
     );
     const tierOne = clearOldToolResults(input, emergencyClearings);
     const tierOneTokens = fixedOverhead + messageTokens(tierOne.messages);

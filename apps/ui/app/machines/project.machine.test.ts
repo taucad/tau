@@ -3,7 +3,7 @@ import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
-import { isProjectContentActivityPath, projectMachine } from '#machines/project.machine.js';
+import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -435,6 +435,64 @@ describe('projectMachine', () => {
       expect(actor.getSnapshot().context.geometryUnits.get('main.ts')?.getSnapshot().context.fileSystemRoot).toBe(
         '/previews/test-project',
       );
+      actor.stop();
+    });
+
+    /*
+     * R4 / V2-3: the row says one sentence, so the project keeps one refusal,
+     * tagged with the unit that reported it — the clear rides on a unit
+     * *entering* `connecting`, and a second view's first attempt must not green
+     * a row whose other unit is still refused.
+     */
+    it('keeps the refusal a unit reported until that unit takes it back', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      await vi.waitFor(() => {
+        expect(selectProjectKernelRefusal(actor.getSnapshot())).toBeDefined();
+      });
+      const refused = actor.getSnapshot().context.kernelRefusal?.actorId;
+
+      /* A second view opens and starts connecting: its own clear says nothing
+       * about the unit that is still refused. */
+      actor.send({ type: 'createGeometryUnit', entryPath: 'lib/cube.ts' });
+      expect(actor.getSnapshot().context.kernelRefusal?.actorId).toBe(refused);
+      expect(selectProjectKernelRefusal(actor.getSnapshot())).toBeDefined();
+
+      /* The unit that reported it tries again: only it can take it back. */
+      actor.getSnapshot().context.geometryUnits.get('main.ts')?.send({ type: 'initializeModel', entryPath: 'main.ts' });
+      expect(selectProjectKernelRefusal(actor.getSnapshot())).toBeUndefined();
+      actor.stop();
+    });
+
+    /* R4: a unit nobody holds cannot keep a row red. */
+    it('drops a refusal when the unit that reported it is closed', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'lib/cube.ts' });
+      await vi.waitFor(() => {
+        expect(selectProjectKernelRefusal(actor.getSnapshot())).toBeDefined();
+      });
+
+      actor.send({ type: 'destroyGeometryUnit', entryPath: 'lib/cube.ts' });
+
+      expect(selectProjectKernelRefusal(actor.getSnapshot())).toBeUndefined();
+      actor.stop();
+    });
+
+    /* R3: the live session decides that nobody is looking; this owns the kernels. */
+    it('parks and resumes every geometry unit it owns', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'lib/cube.ts' });
+      const units = () => [...actor.getSnapshot().context.geometryUnits.values()];
+      await vi.waitFor(() => {
+        expect(units().every((unit) => unit.getSnapshot().value === 'error')).toBe(true);
+      });
+
+      actor.send({ type: 'parkRuntime' });
+      expect(units().map((unit) => unit.getSnapshot().value)).toEqual(['parked', 'parked']);
+
+      actor.send({ type: 'resumeRuntime' });
+      expect(units().map((unit) => unit.getSnapshot().value)).toEqual(['connecting', 'connecting']);
       actor.stop();
     });
 

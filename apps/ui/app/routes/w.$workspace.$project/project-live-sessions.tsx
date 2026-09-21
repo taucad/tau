@@ -34,7 +34,12 @@ import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import { ProjectRouteNotice } from '#routes/w.$workspace.$project/project-route-notices.js';
 import { useProjectSession } from '#hooks/use-sessions.js';
-import { forgetProjectRegions, registerProjectSessionServices, reportRegionReady } from '#services/sessions-store.js';
+import {
+  forgetProjectRegions,
+  registerProjectSessionServices,
+  reportRegionFailed,
+  reportRegionReady,
+} from '#services/sessions-store.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
 import {
   useRevisionClientLifecycle,
@@ -43,6 +48,7 @@ import {
 } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
@@ -122,6 +128,8 @@ function ProjectSessionBinding({
   const session = useProjectSession(projectId);
   const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
   const runtimeReady = useSelector(projectRef, (state) => state.context.project !== undefined);
+  /* R4: why this project has no kernel, from the machine that owns its units. */
+  const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
   /* W7 tier 3: the `cloudOpen` marker is read and cleared by the host, through
    * the router, so React sees the change. This half only acts on it. */
@@ -138,11 +146,16 @@ function ProjectSessionBinding({
     }
   }, [projectId, viewsReady]);
 
+  /* One report for one region (R4): a runtime whose kernel was refused is not
+   * ready, however loaded the project itself is, and the sidebar row says which
+   * refusal until the kernel is back. */
   useEffect(() => {
-    if (runtimeReady) {
+    if (kernelRefusal !== undefined) {
+      reportRegionFailed(projectId, 'runtime', kernelRefusal);
+    } else if (runtimeReady) {
       reportRegionReady(projectId, 'runtime');
     }
-  }, [projectId, runtimeReady]);
+  }, [kernelRefusal, projectId, runtimeReady]);
 
   /* What a policy close is allowed to touch (I24, I25), from the one place that
    * knows: the project's own revision projection. The *session* owns these
@@ -229,7 +242,14 @@ function ProjectSessionBinding({
       return;
     }
     const reportVisibility = (): void => {
-      session.send({ type: 'visibilityChanged', visible: isFocused && document.visibilityState === 'visible' });
+      session.send({
+        type: 'visibilityChanged',
+        visible: isFocused && document.visibilityState === 'visible',
+        /* R3/V1-7: the two facts differ while the window is minimised. EQ15 reads
+         * `visible`; the park reads both, so minimising never parks the project
+         * the person is on. */
+        focused: isFocused,
+      });
     };
     reportVisibility();
     document.addEventListener('visibilitychange', reportVisibility);
@@ -237,6 +257,22 @@ function ProjectSessionBinding({
       document.removeEventListener('visibilitychange', reportVisibility);
     };
   }, [isFocused, session]);
+
+  /* R3: the session owns "hidden and idle", the project machine owns the cad
+   * units, and no actor ref joins them — the session's `project` child is the
+   * registry's region relay, not this machine. This binding is where both are in
+   * hand, so it is where the signal crosses. */
+  useEffect(() => {
+    if (session === undefined) {
+      return;
+    }
+    const subscription = session.on('runtimeParking', (event) => {
+      projectRef.send({ type: event.parked ? 'parkRuntime' : 'resumeRuntime' });
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [projectRef, session]);
 
   /* A chat is acquired from inside its own project's route. */
   useEffect(() => {

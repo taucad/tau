@@ -97,14 +97,18 @@ const harness = (options?: {
       input: {
         projectId: 'proj_a',
         idleWindowMilliseconds: 1000,
+        parkWindowMilliseconds: 200,
         startBoundMilliseconds: 500,
         closeFlushMilliseconds: 100,
         ...(options?.parentRef === undefined ? {} : { parentRef: options.parentRef }),
       },
     },
   );
+  /* R3: what the session told its project's runtime to do, in order. */
+  const parking: boolean[] = [];
+  actor.on('runtimeParking', (event) => parking.push(event.parked));
   actor.start();
-  return { actor, order, live };
+  return { actor, order, live, parking };
 };
 
 const settle = async (): Promise<void> => {
@@ -177,6 +181,90 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
+  /* R4: the desktop's fork guard refuses a kernel utility long after the
+   * project opened, so a failure reported while live has to be recorded — the
+   * sidebar row reads `failures` — without moving the session. */
+  it('records a region failure reported while it is live, and clears it when the region returns', async () => {
+    const { actor } = harness();
+    await settle();
+    expect(actor.getSnapshot().matches({ live: 'idle' })).toBe(true);
+
+    actor.send({
+      type: 'childFailed',
+      region: 'runtime',
+      reason:
+        'Electron main refused the tau:runtime:port request: registerElectronRuntimeMain: refusing to exceed 64 utility processes',
+    });
+
+    expect(actor.getSnapshot().matches({ live: 'idle' })).toBe(true);
+    expect(actor.getSnapshot().context.failures['runtime']).toContain('refusing to exceed 64 utility processes');
+
+    actor.send({ type: 'childReady', region: 'runtime' });
+    expect(actor.getSnapshot().context.failures).toEqual({});
+    actor.stop();
+  });
+
+  /*
+   * V2-1, and the blueprint's own case: the ninth project's fork is refused
+   * milliseconds after the unit mounts, while the session is still `opening`
+   * and its runtime region has already reported ready off the manifest load.
+   * The refusal has to survive that window, and the project still opens —
+   * everything but its kernel came up.
+   */
+  it('records a refusal that arrives while it is still opening, and still goes live', async () => {
+    const { actor } = harness({ readyRegions: ['views', 'runtime'] });
+    await settle();
+    expect(actor.getSnapshot().matches({ opening: 'starting' })).toBe(true);
+
+    actor.send({ type: 'childFailed', region: 'runtime', reason: 'refusing to exceed 64 utility processes' });
+    actor.send({ type: 'childReady', region: 'agentHost' });
+    actor.send({ type: 'childReady', region: 'compute' });
+    await settle();
+
+    expect(actor.getSnapshot().matches({ live: 'idle' })).toBe(true);
+    expect(actor.getSnapshot().context.failures['runtime']).toBe('refusing to exceed 64 utility processes');
+
+    actor.send({ type: 'childReady', region: 'runtime' });
+    expect(actor.getSnapshot().context.failures).toEqual({});
+    actor.stop();
+  });
+
+  /* A session that never opened keeps the reason it failed with: `failed` is
+   * terminal for admission — the person reopens the project, which is a new
+   * session — so a region coming back must not leave a red row saying nothing. */
+  it('keeps its reason after it failed to open, whatever a region reports later', async () => {
+    const { actor } = harness({ readyRegions: ['views', 'runtime', 'compute'] });
+    await settle();
+    actor.send({ type: 'childFailed', region: 'agentHost', reason: 'worker refused' });
+    await settle();
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+
+    actor.send({ type: 'childReady', region: 'agentHost' });
+
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(actor.getSnapshot().context.failures).toEqual({ agentHost: 'worker refused' });
+    actor.stop();
+  });
+
+  /* V2-9: a region that failed during `opening` may report ready before the
+   * last sibling finalises the open; the session still fails, and must still
+   * say why. */
+  it("keeps a failed region's reason when it reports ready before the open settles", async () => {
+    const { actor } = harness({ readyRegions: ['views', 'runtime'] });
+    await settle();
+    actor.send({ type: 'childFailed', region: 'agentHost', reason: 'worker refused' });
+    await settle();
+    expect(actor.getSnapshot().matches('opening')).toBe(true);
+
+    actor.send({ type: 'childReady', region: 'agentHost' });
+    actor.send({ type: 'childReady', region: 'compute' });
+    await settle();
+
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(actor.getSnapshot().context.failures).toEqual({ agentHost: 'worker refused' });
+    actor.stop();
+  });
+
   it('is busy while a run is in flight and idle again when the last one settles', async () => {
     const { actor } = harness();
     await settle();
@@ -224,6 +312,88 @@ describe('projectSessionMachine', () => {
     expect(parent.received.some((event) => event.type === 'idleExpired')).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(parent.received).toContainEqual({ type: 'idleExpired', projectId: 'proj_a' });
+    actor.stop();
+  });
+
+  /* R3: process memory, not session state. The 30-minute window above closes the
+   * session; this releases the kernel processes of a project nobody is looking at
+   * and keeps the session, its editor and its sidebar row exactly as they were. */
+  it('parks a hidden idle runtime once the grace elapses, and only once', async () => {
+    const { actor, parking } = harness();
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(199);
+    expect(parking).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(parking).toEqual([true]);
+
+    /* Still hidden, still idle: no second park before the idle window re-arms. */
+    await vi.advanceTimersByTimeAsync(700);
+    expect(parking).toEqual([true]);
+    actor.stop();
+  });
+
+  /* V1-7: `visible` is `focused && the window is on screen`, so minimising Tau
+   * hides every project. The one the person navigated to keeps its kernels. */
+  it('never parks the focused project when the window itself is hidden', async () => {
+    const { actor, parking } = harness();
+    await settle();
+    actor.send({ type: 'visibilityChanged', visible: false, focused: true });
+
+    await vi.advanceTimersByTimeAsync(900);
+
+    expect(parking.includes(true)).toBe(false);
+    /* EQ15 still sees a hidden session: the close window is untouched. */
+    expect(actor.getSnapshot().context.visible).toBe(false);
+    actor.stop();
+  });
+
+  it('never parks a visible project (Q2 — visibility is the intent)', async () => {
+    const { actor, parking } = harness();
+    await settle();
+    actor.send({ type: 'visibilityChanged', visible: true });
+
+    await vi.advanceTimersByTimeAsync(900);
+
+    expect(parking.includes(true)).toBe(false);
+    actor.stop();
+  });
+
+  it('resumes the runtime when the person comes back, and not on another hidden report', async () => {
+    const { actor, parking } = harness();
+    await settle();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(parking).toEqual([true]);
+
+    actor.send({ type: 'visibilityChanged', visible: false });
+    expect(parking).toEqual([true]);
+
+    actor.send({ type: 'visibilityChanged', visible: true });
+    expect(parking).toEqual([true, false]);
+    actor.stop();
+  });
+
+  it('resumes the runtime when a run starts, looked at or not', async () => {
+    const { actor, parking } = harness();
+    await settle();
+    await vi.advanceTimersByTimeAsync(200);
+
+    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+
+    expect(parking).toEqual([true, false]);
+    expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
+    actor.stop();
+  });
+
+  it('re-offers the park when the idle window re-arms, so a busy unit gets another chance', async () => {
+    const { actor, parking } = harness();
+    await settle();
+
+    /* The 30-minute window fires, re-enters `idle` and rearms both delays. */
+    await vi.advanceTimersByTimeAsync(1200);
+
+    expect(parking).toEqual([true, true]);
     actor.stop();
   });
 

@@ -103,8 +103,10 @@ function BranchPicker(): React.JSX.Element | undefined {
                 if (chatId === undefined || authority === undefined) {
                   /* Nothing to place: the verb still runs, and its refusal is
                      the toast channel's — as it is for the pane's own *New
-                     branch*, which also just asks for it. */
-                  void commands.createBranch(name);
+                     branch*, which also just asks for it. Caught because the
+                     verb answers now: `void` would leave the refusal loose. */
+                  // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
+                  void commands.createBranch(name).catch(() => undefined);
                   return;
                 }
                 /* The settling verb *is* the placement: the authority holds the

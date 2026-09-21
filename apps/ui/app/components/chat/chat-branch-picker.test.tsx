@@ -106,6 +106,36 @@ describe('ChatBranchPicker', () => {
     });
   });
 
+  /* Review W8 finding 4: `createBranch` answers the verb now, so `void` on the
+     path with nothing to place discards a rejection rather than handling it —
+     a refused branch (a name already taken, the normal case) went loose. The
+     toast channel already reports it, so handling is all that is owed. */
+  it('handles a refused branch where there is no chat to place it on', async () => {
+    const user = userEvent.setup();
+    activeChatId = undefined;
+    /* The rejection is observable only through the handler the call site
+       attaches: vitest's own `vi.fn` bookkeeping already settles the promise it
+       records, so nothing reaches `process.on('unhandledRejection')` here. */
+    let handled: ReturnType<typeof vi.spyOn> | undefined;
+    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- The call site must see this very promise, not an async wrapper's copy.
+    revisionStatusHarness.commands.createBranch.mockImplementationOnce(() => {
+      const refusal = Promise.reject(
+        Object.assign(new Error('Branch bracket-fillet already exists.'), { code: 'CHECKOUT_CONFLICT' }),
+      );
+      handled = vi.spyOn(refusal, 'catch');
+      return refusal;
+    });
+
+    render(<ChatBranchPicker />, { wrapper });
+    await user.click(screen.getByRole('button', { name: 'Work in main. Choose a branch.' }));
+    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'bracket-fillet');
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
+
+    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('bracket-fillet');
+    expect(handled).toHaveBeenCalled();
+  });
+
   it('names the branch this chat works in, and switches to the one a person picks', async () => {
     const user = userEvent.setup();
     chats = [{ id: 'chat-1', checkoutId: 'co-2' }];

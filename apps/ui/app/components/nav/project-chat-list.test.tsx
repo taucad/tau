@@ -263,16 +263,16 @@ describe('ProjectChatList', () => {
     expect([...slots].every((slot) => slot.dataset['glyph'] === 'none' && slot.childElementCount === 0)).toBe(true);
   });
 
-  /* D9: in flight is a pulsing ring that stops under reduced motion. */
-  it('draws work in flight as a hollow pulsing ring, not a spinner', () => {
+  /* D20: in flight is a pulsing muted disc that stops under reduced motion. */
+  it('draws work in flight as a filled pulsing disc, not a spinner', () => {
     mockChatStatus.mockReturnValue(status({ state: 'tool', toolName: 'bash' }));
     render(<ProjectChatList project={project} isProjectActive />);
     const slot = document.querySelector<HTMLElement>('[data-slot=chat-status]');
     expect(slot?.dataset['glyph']).toBe('running');
     expect(slot?.querySelector('svg')).toBeNull();
-    const ring = slot?.firstElementChild;
-    expect(ring).toHaveClass('ring-1', 'animate-pulse', 'motion-reduce:animate-none', 'rounded-full');
-    expect(ring?.className).not.toMatch(/\bbg-/u);
+    const disc = slot?.firstElementChild;
+    expect(disc).toHaveClass('bg-muted-foreground/70', 'animate-pulse', 'motion-reduce:animate-none', 'rounded-full');
+    expect(disc?.className).not.toMatch(/\bring-/u);
   });
 
   it('stops a running chat without touching the record', () => {

@@ -3,7 +3,7 @@ title: 'Parameter Record Policy'
 description: 'What the parameter sidecar may store, and how concurrency, echoes and rendering are decided around it.'
 status: active
 created: '2026-09-17'
-updated: '2026-09-21'
+updated: '2026-09-22'
 ---
 
 # Parameter Record Policy
@@ -76,6 +76,8 @@ A checked write carries exactly one precondition: the sidecar bytes the change w
 
 **Why**: A source change already produces a new manifest revision, so one in-memory token covers every semantic input. Source files are never digested at the authority boundary.
 
+A field-scoped operation names its field by `group` and `pointer` under that declared revision and carries nothing else that identifies it: never a parameter id, never a schema resource. The package resolves the binding from the pinned manifest and refuses a pointer it declares nowhere with `UNKNOWN_FIELD`, a pointer addressing an object, an array or any other non-scalar with `REPRESENTATION_UNSUPPORTED`, and a unit-bearing operation on a field the manifest gives no unit with `REPRESENTATION_UNSUPPORTED`. Callers never mint an identity for a field the manifest does not bind.
+
 A value edit may also carry a field-scoped `base` — the value and effective binding its editor was working from. The edit commits while its own field still holds that value, so another field's commit, a group operation or an agent write elsewhere in the record never refuses it.
 
 ### 5. Adopt an own-write echo instead of rejecting on it
@@ -109,6 +111,7 @@ At render time the precedence is `defaults ← stored ← caller overrides`: the
 - [ ] The reader calls `requireParameterRecord` and leaves refused bytes alone
 - [ ] The write's only precondition is the sidecar's own bytes
 - [ ] The request carries the live manifest revision, and a value edit carries its field `base`
+- [ ] A field-scoped operation names its field by `group` and `pointer` only, with no parameter id or schema resource
 - [ ] Watch, staged commit and transient scrub preserve `defaults ← stored ← caller overrides`
 
 ## References

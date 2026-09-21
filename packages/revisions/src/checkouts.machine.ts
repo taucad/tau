@@ -171,14 +171,24 @@ export const checkoutsMachine = setup({
       }
     }),
     announceFailure: enqueueActions(
-      ({ context, enqueue }, params: Readonly<{ operation: CheckoutOperation; reason?: string }>) => {
+      (
+        { context, enqueue },
+        params: Readonly<{ operation: CheckoutOperation; reason?: string; code?: RevisionPortErrorCode }>,
+      ) => {
         const fact: CheckoutsMachineEmitted = {
           type: 'checkoutFailed',
           operation: params.operation,
           reason: params.reason ?? context.reason ?? 'The checkout operation failed.',
           /* A reason this call authored is the guard's own sentence, not the
-             port's, so it never carries the last port code (P4). */
-          ...(params.reason === undefined && context.reasonCode !== undefined ? { code: context.reasonCode } : {}),
+             port's, so it never carries the last port code (P4) — it names its
+             own, or the page has nothing to phrase it from (review finding 3). */
+          ...(params.reason === undefined
+            ? context.reasonCode === undefined
+              ? {}
+              : { code: context.reasonCode }
+            : params.code === undefined
+              ? {}
+              : { code: params.code }),
         };
         enqueue.emit(fact);
         /* R11: the root routes this to the workbench; an emit alone never
@@ -373,7 +383,11 @@ export const checkoutsMachine = setup({
               {
                 actions: {
                   type: 'announceFailure',
-                  params: { operation: 'add', reason: 'That branch already has a checkout.' },
+                  params: {
+                    operation: 'add',
+                    reason: 'That branch already has a checkout.',
+                    code: 'CHECKOUT_CONFLICT',
+                  },
                 },
               },
             ],

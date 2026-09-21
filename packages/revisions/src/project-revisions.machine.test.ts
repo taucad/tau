@@ -1234,6 +1234,24 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /*
+   * A trigger-only cut naming no checkout was dropped on the floor, so the
+   * `branch` child sat in `recording` for the whole 30 s bound and the person
+   * watched a spinner rather than a refusal (review finding 10).
+   */
+  it('refuses a branch made on a project with nothing selected, without waiting out the bound', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, []);
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    await flush();
+
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().matches('idle')).toBe(true);
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('CHECKOUT_CONFLICT');
+
+    harness.actor.stop();
+  });
+
   it('tells the branch child when the registry refuses its delegated verb', async () => {
     const harness = start();
 

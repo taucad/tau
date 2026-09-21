@@ -6,6 +6,7 @@ import type { Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
+  failedGatewayToolResults,
   gatewayFixtureFinalText,
   gatewayFixtureModelName,
   gatewayFixtureScadSource,
@@ -79,43 +80,6 @@ const recordTurnMarker = async (page: Page): Promise<() => Promise<readonly stri
   });
   return async () =>
     page.evaluate(() => [...((globalThis as { tauTurnMarkerLabels?: string[] }).tauTurnMarkerLabels ?? [])]);
-};
-
-/** One `tool_result` block as the provider wire carries it. */
-type WireToolResult = {
-  readonly content?: unknown;
-  readonly is_error?: unknown;
-  readonly tool_use_id?: unknown;
-  readonly type?: unknown;
-};
-
-/**
- * Every failed `tool_result` in one forwarded provider request, bounded so the
- * failure message stays readable.
- *
- * The runtime tool below runs in the services utility against the picked folder,
- * which is the one path the deterministic tier never exercised: a root the
- * services host refuses answers the agent with an *error result*, not with a
- * failed run, so every other assertion in this row still passes. Same check as
- * `desktop-image-geospec.spec.ts:131-138`, which only runs in the packaged tier.
- * Every request carries the whole conversation, so the last one covers both
- * turns.
- *
- * @param request - A forwarded provider request body.
- * @returns One bounded JSON line per failed tool result.
- */
-const failedToolResults = (request: unknown): readonly string[] => {
-  const messages = (request as { readonly messages?: ReadonlyArray<{ readonly content?: unknown }> }).messages ?? [];
-  return messages
-    .flatMap((message) => (Array.isArray(message.content) ? (message.content as readonly WireToolResult[]) : []))
-    .filter((block) => block.type === 'tool_result' && block.is_error === true)
-    .map((block) =>
-      JSON.stringify({
-        toolUseId: block.tool_use_id,
-        content:
-          typeof block.content === 'string' ? block.content.slice(0, 2e3) : JSON.stringify(block.content).slice(0, 2e3),
-      }),
-    );
 };
 
 let session: DesktopSession | undefined;
@@ -222,7 +186,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
 
     /* The runtime tools really ran. Asserted after the closing line, because the
      * request that carries the last turn's results is the one that answers it. */
-    const failedTools = failedToolResults(fixture.gatewayRequests.at(-1));
+    const failedTools = failedGatewayToolResults(fixture.gatewayRequests.slice(-1));
     expect(failedTools, `desktop agent tools failed:\n${failedTools.join('\n')}`).toEqual([]);
 
     /* Row 18: working, then the save this turn confirms, in that order.

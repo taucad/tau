@@ -13,6 +13,8 @@
 import { assign, enqueueActions, fromCallback, fromPromise, setup } from 'xstate';
 import type { AnyActorRef, AnyEventObject, SnapshotFrom } from 'xstate';
 
+import type { RevisionPortErrorCode } from '#revision-port.js';
+
 /** How long `finalizing` waits for its checkout to settle the cut. @public */
 export const turnCutSettlementMilliseconds = 30_000;
 
@@ -32,6 +34,30 @@ export const turnCasRetryLimit = 1;
 
 /** How one turn ended. @public */
 export type TurnOutcome = 'finalized' | 'conflicted' | 'released' | 'failed';
+
+/**
+ * Why a turn failed, as a page can act on it (P4).
+ *
+ * A refusal crosses every boundary as a code and the page owns the words
+ * (`apps/ui/app/lib/revision-failure-copy.ts`), so the sentences here are
+ * diagnostics for a console and a test, never copy. The port's own categories
+ * are included because most of what fails a turn is the store refusing: the
+ * four invoked actors reject with whatever the effects behind them raised, and
+ * a `RevisionPortError` already says which kind of refusal it was. The four
+ * that follow are the turn's own, which no port code names — a waited-out cut,
+ * a waited-out base cut, a contended head, and a live tree somebody else holds.
+ *
+ * A failure nothing classified carries no code at all, and the page falls back
+ * per subject rather than showing a sentence a person cannot act on (E5).
+ *
+ * @public
+ */
+export type TurnFailureCode =
+  | RevisionPortErrorCode
+  | 'BASE_CUT_TIMED_OUT'
+  | 'CAS_LOST'
+  | 'CUT_TIMED_OUT'
+  | 'LEASE_UNAVAILABLE';
 
 /** Input accepted when creating the turnMachine actor. @public */
 export type TurnMachineInput = Readonly<{
@@ -65,7 +91,10 @@ export type TurnMachineContext = Readonly<{
   dirtyBase: boolean;
   revisionId: string | undefined;
   outcome: TurnOutcome | undefined;
+  /** The diagnostic: a console reads it, a person never does (E5). */
   reason: string | undefined;
+  /** What the failure was, for the page that has to phrase it (P4). */
+  code: TurnFailureCode | undefined;
   parentRef: AnyActorRef | undefined;
 }>;
 
@@ -167,6 +196,23 @@ export type TurnMergeActorOutput = Readonly<{
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'The turn failed.';
 
+/*
+ * The port's own category, read structurally (P4).
+ *
+ * A machine may import only *types* from this package's contracts (I20, AC22),
+ * so `instanceof RevisionPortError` is not available here; `branch.machine` and
+ * `sync.machine` read the same field the same way.
+ */
+const describeFailureCode = (error: unknown): RevisionPortErrorCode | undefined => {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a rejection is `unknown` until read.
+  const { code } = error as Readonly<{ code?: unknown }>;
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowed to the port's own union.
+  return typeof code === 'string' ? (code as RevisionPortErrorCode) : undefined;
+};
+
 const settlement = (context: TurnMachineContext): TurnSettlement => ({
   turnId: context.turnId,
   chatId: context.chatId,
@@ -233,6 +279,9 @@ export const turnMachine = setup({
       outcome: 'failed',
       reason: ({ event }) =>
         'reason' in event && typeof event.reason === 'string' ? event.reason : 'The turn failed.',
+      /* `cutFailed` passes none: the checkout answers a sentence and no code,
+       * so the page falls back rather than inventing a category (E5). */
+      code: (_, params: Readonly<{ code?: TurnFailureCode }>) => params.code,
     }),
     announceRelease: enqueueActions(({ context, enqueue }) => {
       if (context.parentRef === undefined) {
@@ -245,9 +294,11 @@ export const turnMachine = setup({
         checkoutId: context.checkoutId,
         runId: context.runId,
         outcome: context.outcome ?? 'failed',
-        /* The host shows this to a person, so the turn carries it rather than
-         * the host inferring "something went wrong" from a missing event. */
+        /* The host phrases this for a person from the code, so the turn carries
+         * both rather than the host inferring "something went wrong" from a
+         * missing event — and never shows the diagnostic itself (P4, E5). */
         reason: context.reason,
+        code: context.code,
       });
     }),
     announceSettlement: enqueueActions(
@@ -277,6 +328,7 @@ export const turnMachine = setup({
     revisionId: undefined,
     outcome: undefined,
     reason: undefined,
+    code: undefined,
     parentRef: input.parentRef,
   }),
   initial: 'preparing',
@@ -342,6 +394,7 @@ export const turnMachine = setup({
               actions: assign({
                 outcome: 'failed',
                 reason: ({ event }) => describeFailure(event.error),
+                code: ({ event }) => describeFailureCode(event.error),
               }),
             },
           },
@@ -378,7 +431,7 @@ export const turnMachine = setup({
               actions: assign({ baseRevisionId: ({ event }) => event.revisionId, dirtyBase: false }),
             },
             nothingToSave: { target: 'writingLease', actions: assign({ dirtyBase: false }) },
-            cutFailed: { target: '#turn.failed', actions: 'failWith' },
+            cutFailed: { target: '#turn.failed', actions: { type: 'failWith', params: {} } },
             /* D24: the checkout re-read the head, so one re-ask records onto it. */
             casLost: [
               {
@@ -389,7 +442,7 @@ export const turnMachine = setup({
               },
               {
                 target: '#turn.failed',
-                actions: assign({ outcome: 'failed', reason: 'cas-lost' }),
+                actions: assign({ outcome: 'failed', reason: 'cas-lost', code: 'CAS_LOST' }),
               },
             ],
           },
@@ -400,6 +453,7 @@ export const turnMachine = setup({
               actions: assign({
                 outcome: 'failed',
                 reason: 'The checkout did not settle the base cut in time.',
+                code: 'BASE_CUT_TIMED_OUT',
               }),
             },
           },
@@ -438,6 +492,7 @@ export const turnMachine = setup({
               actions: assign({
                 outcome: 'failed',
                 reason: ({ event }) => describeFailure(event.error),
+                code: ({ event }) => describeFailureCode(event.error),
               }),
             },
           },
@@ -451,7 +506,7 @@ export const turnMachine = setup({
         input: ({ context }) => ({ checkoutId: context.checkoutId ?? '', runId: context.runId }),
       },
       on: {
-        leaseRefused: { target: 'retiring', actions: 'failWith' },
+        leaseRefused: { target: 'retiring', actions: { type: 'failWith', params: { code: 'LEASE_UNAVAILABLE' } } },
         turnAbandoned: { target: 'retiring', actions: assign({ outcome: 'released' }) },
         release: { target: 'retiring', actions: assign({ outcome: 'released' }) },
       },
@@ -491,6 +546,7 @@ export const turnMachine = setup({
               actions: assign({
                 outcome: 'failed',
                 reason: ({ event }) => describeFailure(event.error),
+                code: ({ event }) => describeFailureCode(event.error),
               }),
             },
           },
@@ -519,6 +575,7 @@ export const turnMachine = setup({
               actions: assign({
                 outcome: 'failed',
                 reason: ({ event }) => describeFailure(event.error),
+                code: ({ event }) => describeFailureCode(event.error),
               }),
             },
           },
@@ -546,7 +603,7 @@ export const turnMachine = setup({
               }),
             },
             nothingToSave: { target: '#turn.retiring', actions: assign({ outcome: 'finalized' }) },
-            cutFailed: { target: '#turn.retiring', actions: 'failWith' },
+            cutFailed: { target: '#turn.retiring', actions: { type: 'failWith', params: {} } },
             /*
              * D24: one re-cut, then fail.
              *
@@ -565,7 +622,7 @@ export const turnMachine = setup({
               },
               {
                 target: '#turn.retiring',
-                actions: assign({ outcome: 'failed', reason: 'cas-lost' }),
+                actions: assign({ outcome: 'failed', reason: 'cas-lost', code: 'CAS_LOST' }),
               },
             ],
           },
@@ -575,6 +632,7 @@ export const turnMachine = setup({
               actions: assign({
                 outcome: 'failed',
                 reason: 'The checkout did not settle the cut in time.',
+                code: 'CUT_TIMED_OUT',
               }),
             },
           },

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { VersioningType } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
@@ -9,9 +10,6 @@ import type { Auth } from 'better-auth';
 import { describe, expect, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { wireModelEstimatesSchema } from '@taucad/billing';
-/* oxlint-disable no-restricted-imports -- the generator owns the checked-in policy and lives outside the `#` app aliases. */
-import { developmentPolicyPath } from '../../../scripts/generate-development-billing-policy.mjs';
-/* oxlint-enable no-restricted-imports */
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
@@ -19,7 +17,7 @@ import type { BillingPolicyService } from '#api/billing/billing-policy.service.j
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { BillingController } from '#api/billing/billing.controller.js';
-import { validateCommercialPolicy } from '#api/billing/billing-policy.js';
+import { composeTariff, parseCommercialOverlay } from '#api/billing/billing-policy.sync.js';
 import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 import {
   billableModelRouteIds,
@@ -65,8 +63,12 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
   executionTimeout: 30_000,
 });
 
+/* The tariff `pnpm db:migrate` would publish for development, composed the same way it is. */
+const overlayPath = resolve(import.meta.dirname, '../../../../../infra/billing/development.commercial.json');
 const developmentPolicy = () => {
-  const { policy, contentHash } = validateCommercialPolicy(readFileSync(developmentPolicyPath, 'utf8'));
+  const { policy, contentHash } = composeTariff({
+    overlay: parseCommercialOverlay(readFileSync(overlayPath, 'utf8'), 'development'),
+  });
   return { policyId: 'policy-a', activationId: 'activation-a', policy, contentHash, selectedAt: instant };
 };
 

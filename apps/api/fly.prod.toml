@@ -14,6 +14,10 @@ dockerfile = 'Dockerfile'
 [deploy]
 # Protected one-shot migration (B7 R8 / B8 R3): runs under the DDL identity before any new
 # app machine boots; API replicas only assert schema compatibility and never migrate.
+# It also owns the tariff: with TAU_CLOUD_ENABLED=true it derives the commercial policy from
+# this image's code route table over the BILLING_COMMERCIAL_POLICY secret and publishes it
+# when the content moved, honouring the 30-day notice rule. A commercial-only change is
+# therefore a Terraform apply plus a redeploy of the serving image, with no rebuild.
 release_command = 'node /app/dist/billing-command.js migrate --environment prod-us'
 # Rolling, not bluegreen (charter W8): with `app` at two or more Machines a rolling
 # deploy replaces them one at a time and the group never reaches zero, and it replaces

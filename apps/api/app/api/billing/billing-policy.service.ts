@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -7,6 +7,8 @@ import { DatabaseService } from '#database/database.service.js';
 import type { DatabaseType } from '#database/database.service.js';
 import {
   assertPolicyFleetCompatibility,
+  assertPolicySchemaCompatibility,
+  parseCommercialPolicyDocument,
   qualifiedMeterContracts,
   resolvePolicyRoute,
   validateCommercialPolicy,
@@ -62,6 +64,9 @@ export type CancelPolicyActivationInput = {
   expectedHeadRevision: bigint;
 };
 
+/** A SKU this replica cannot dispatch. Admission denies that SKU alone; every other failure still throws. */
+export class PolicyRouteUnavailableError extends Error {}
+
 export type PolicyPublicationResult = { activationId: string; headRevision: bigint; replay: boolean };
 export type SelectEffectivePolicyInput = {
   environment: FinancialEnvironment;
@@ -112,6 +117,11 @@ const cancellationRequestHash = (input: CancelPolicyActivationInput): string =>
 
 @Injectable()
 export class BillingPolicyService {
+  readonly #logger = new Logger(BillingPolicyService.name);
+  /* ponytail: one entry per activation id this process reads (D9), so the set is bounded by the
+   * publications a replica outlives; clear it if a process is ever asked to read thousands. */
+  readonly #warnedActivations = new Set<string>();
+
   public constructor(@Inject(DatabaseService) private readonly databaseService: Pick<DatabaseService, 'database'>) {}
 
   public async selectEffectivePolicy(
@@ -158,14 +168,18 @@ export class BillingPolicyService {
       throw new Error('no effective billing policy');
     }
     const row = activationRowSchema.parse(rows[0]);
-    const validated = validateCommercialPolicy(row.canonicalContent);
+    /* Read leniently: the stored hash, the environment and the schema floor still gate the document,
+     * but a route this replica cannot dispatch is unreachable anyway (`resolvePolicyRoute` finds no
+     * SKU), so refusing the whole tariff over it only widened the blast radius to every billing read. */
+    const validated = parseCommercialPolicyDocument(row.canonicalContent);
     if (validated.contentHash !== row.contentHash) {
       throw new Error('stored policy content hash mismatch');
     }
     if (validated.policy.environment !== input.environment) {
       throw new Error('stored policy environment mismatch');
     }
-    assertPolicyFleetCompatibility(validated.policy, input.replica.schemaVersion, input.replica.meterContractIds);
+    assertPolicySchemaCompatibility(validated.policy, input.replica.schemaVersion);
+    this.warnUnknownRoutes(row.activationId, validated.policy, input);
     return {
       policyId: row.policyId,
       activationId: row.activationId,
@@ -183,11 +197,11 @@ export class BillingPolicyService {
     const effective = await this.selectEffectivePolicy(input, database);
     const resolved = resolvePolicyRoute(effective.policy, input.sku);
     if (resolved === undefined) {
-      throw new Error(`billing policy route is unavailable for SKU ${input.sku}`);
+      throw new PolicyRouteUnavailableError(`billing policy route is unavailable for SKU ${input.sku}`);
     }
     const requiredDimensions = qualifiedMeterContracts.get(resolved.route.meterContractId);
     if (requiredDimensions === undefined) {
-      throw new Error(`billing policy meter contract is unqualified for SKU ${input.sku}`);
+      throw new PolicyRouteUnavailableError(`billing policy meter contract is unqualified for SKU ${input.sku}`);
     }
     return { ...effective, ...resolved, route: resolved.route as QualifiedPolicyRoute, requiredDimensions };
   }
@@ -255,6 +269,9 @@ export class BillingPolicyService {
         throw new Error('a future policy activation is already pending');
       }
 
+      /* The predecessor is only read to compare terms for the notice rule, through the lenient read
+       * path above, so a predecessor gone stale under the current catalogue no longer blocks the
+       * publication that would replace it. The new document above is still fully validated. */
       let previous: CommercialPolicy | undefined;
       try {
         const effective = await this.selectEffectivePolicy(
@@ -388,6 +405,28 @@ export class BillingPolicyService {
       }
       return { activationId: input.activationId, headRevision: nextRevision, replay: false };
     });
+  }
+
+  /** One structured warning per activation id per process (D9): actionable without a log flood. */
+  private warnUnknownRoutes(activationId: string, policy: CommercialPolicy, input: SelectEffectivePolicyInput): void {
+    const supported = new Set(input.replica.meterContractIds);
+    const routeIds = policy.routes
+      .filter((route) => route.enabled && !supported.has(route.meterContractId))
+      .map((route) => route.routeId);
+    if (routeIds.length === 0 || this.#warnedActivations.has(activationId)) {
+      return;
+    }
+    this.#warnedActivations.add(activationId);
+    this.#logger.warn(
+      {
+        event: 'billing.policy_route_unknown',
+        environment: input.environment,
+        activationId,
+        policyVersion: policy.policyVersion,
+        routeIds,
+      },
+      'Effective billing policy enables routes this replica cannot dispatch; those SKUs are unavailable',
+    );
   }
 
   private async lockHead(

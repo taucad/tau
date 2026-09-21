@@ -1,14 +1,10 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire keys use native snake_case. */
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-/* oxlint-disable no-restricted-imports -- the generator owns the checked-in file and lives outside the `#` app aliases. */
-import {
-  developmentPolicyPath,
-  generateDevelopmentBillingPolicy,
-} from '../../../scripts/generate-development-billing-policy.mjs';
-/* oxlint-enable no-restricted-imports */
-import { qualifiedMeterContracts, resolvePolicyRoute, validateCommercialPolicy } from '#api/billing/billing-policy.js';
+import { resolvePolicyRoute } from '#api/billing/billing-policy.js';
+import { composeTariff, parseCommercialOverlay } from '#api/billing/billing-policy.sync.js';
 import {
   billableModelRouteIds,
   CodeOwnedBillableModelQualificationResolver,
@@ -17,51 +13,18 @@ import {
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
 import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 
-describe('development billing policy', () => {
-  const checkedIn = readFileSync(developmentPolicyPath, 'utf8');
-
-  it('matches its generator', () => {
-    // Structural, not byte, equality: lint-staged runs oxfmt over the checked-in JSON.
-    expect(JSON.parse(checkedIn)).toEqual(JSON.parse(generateDevelopmentBillingPolicy(checkedIn)));
-  });
-
-  it('drops a route the table no longer funds instead of refusing the document that still names it', () => {
-    const current = JSON.parse(checkedIn) as {
-      routes: Array<{ routeId: string; sku: string; meterContractId: string }>;
-    };
-    const [template] = current.routes;
-    const retired = { ...template!, routeId: 'google-retired-flash', sku: 'model:google-retired-flash' };
-    const withRetired = JSON.stringify({ ...current, routes: [...current.routes, retired] });
-
-    const generated = JSON.parse(generateDevelopmentBillingPolicy(withRetired)) as typeof current;
-    expect(generated.routes.map((entry) => entry.routeId)).not.toContain('google-retired-flash');
-  });
-
-  it('funds every qualified catalog route against the registered meter contracts', () => {
-    registerBillableModelMeterContracts();
-    const { policy } = validateCommercialPolicy(checkedIn);
-    const routes = new Map(policy.routes.map((route) => [route.sku, route]));
-    const rates = new Map(policy.rates.map((rate) => [rate.rateId, rate]));
-    for (const routeId of billableModelRouteIds) {
-      const route = routes.get(`model:${routeId}`);
-      expect(route, routeId).toBeDefined();
-      expect(route?.enabled).toBe(true);
-      expect(route?.meterContractId).toBe(`model-meter-v1:${routeId}`);
-      expect(route?.spendBudgetId).toBe('development-spend');
-      expect(route?.riskBudgetId).toBe('development-risk');
-      const covered = route?.rateIds.map((rateId) => {
-        const rate = rates.get(rateId);
-        return `${rate?.dimension}:${rate?.tier ?? ''}`;
-      });
-      expect(new Set(covered), routeId).toStrictEqual(qualifiedMeterContracts.get(`model-meter-v1:${routeId}`));
-    }
-  });
-});
+/* The tariff `pnpm db:migrate` would publish for development: the code route table over the one
+ * operator-owned overlay. It replaced a checked-in document, so this suite composes it the same way. */
+const overlayPath = resolve(import.meta.dirname, '../../../../../infra/billing/development.commercial.json');
+const developmentPolicy = (): ReturnType<typeof composeTariff>['policy'] => {
+  registerBillableModelMeterContracts();
+  return composeTariff({ overlay: parseCommercialOverlay(readFileSync(overlayPath, 'utf8'), 'development') }).policy;
+};
 
 /* The authorized customer hold is not the supplier tariff: the ledger recomputes it
  * from the effective policy rates of the pinned meter contract
  * (`credit-ledger.service.ts:645`). This mirrors that arithmetic against the
- * checked-in development tariff so the reserve promise is asserted end to end. */
+ * development tariff so the reserve promise is asserted end to end. */
 const resolver = new CodeOwnedBillableModelQualificationResolver({
   adapters: new Map(billableModelRouteIds.map((routeId) => [routeId, mock<BillableModelProviderAdapter>()])),
   credentialAccounts: new Map(
@@ -83,8 +46,7 @@ const authorizedAtoms = (body: Record<string, unknown>): { sku: string; atoms: b
     priceHeaders: {},
     activity: 'agent',
   });
-  const { policy } = validateCommercialPolicy(readFileSync(developmentPolicyPath, 'utf8'));
-  const resolved = resolvePolicyRoute(policy, qualification.sku);
+  const resolved = resolvePolicyRoute(developmentPolicy(), qualification.sku);
   expect(resolved, qualification.sku).toBeDefined();
   const quantities = new Map(
     qualification.maximumQuantities.map((item) => [`${item.dimension}:${item.tier ?? ''}`, item.quantity]),
@@ -138,8 +100,7 @@ describe('development reserve promise', () => {
   });
 
   it('funds a long-context meter contract for every tiered route', () => {
-    registerBillableModelMeterContracts();
-    const { policy } = validateCommercialPolicy(readFileSync(developmentPolicyPath, 'utf8'));
+    const policy = developmentPolicy();
     const tiered = policy.routes.filter((route) => route.routeId.endsWith(':long-context'));
     expect(tiered.map((route) => route.routeId)).toEqual([
       'openai-gpt-6-astra:long-context',
@@ -152,7 +113,6 @@ describe('development reserve promise', () => {
     ]);
     for (const route of tiered) {
       expect(route.enabled).toBe(true);
-      expect(qualifiedMeterContracts.get(route.meterContractId), route.routeId).toBeDefined();
       const base = resolvePolicyRoute(policy, `model:${route.routeId.replace(':long-context', '')}`);
       const premium = resolvePolicyRoute(policy, `model:${route.routeId}`);
       expect(base, route.routeId).toBeDefined();

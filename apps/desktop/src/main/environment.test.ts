@@ -35,6 +35,12 @@ describe('desktopEnvironment', () => {
       TAU_FRONTEND_URL: 'https://tau.new',
     });
   });
+
+  it('publishes the billing environment the cloud renderer needs', () => {
+    expect(clientEnvironment({ TAU_BILLING_ENVIRONMENT: 'development' })).toMatchObject({
+      TAU_BILLING_ENVIRONMENT: 'development',
+    });
+  });
 });
 
 describe('desktopAgentGatewayBaseUrl', () => {

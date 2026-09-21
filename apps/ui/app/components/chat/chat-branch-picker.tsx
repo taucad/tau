@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Check, GitBranch } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -7,6 +7,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { NewBranchForm } from '#routes/w.$workspace.$project/revision-branches.js';
 
 /**
@@ -23,6 +24,10 @@ import { NewBranchForm } from '#routes/w.$workspace.$project/revision-branches.j
  * second branch cannot be where the second branch is made, so this is the only
  * always-reachable way out of a fresh project (W7 review R1).
  *
+ * It says where the chat works; it does not record it. The chat workspace
+ * authority is the one writer of `Chat.checkoutId`, and a placement handed to
+ * it as the settling *New branch* verb is one an admission waits for (P1).
+ *
  * @returns The chip and its popover, or nothing before the root has answered.
  */
 export function ChatBranchPicker(): React.JSX.Element | undefined {
@@ -38,27 +43,13 @@ export function ChatBranchPicker(): React.JSX.Element | undefined {
 function BranchPicker(): React.JSX.Element | undefined {
   const { session } = useChatComposer();
   const { projectId } = useProject();
-  const { chats, patchChat } = useChats(projectId);
+  const { chats } = useChats(projectId);
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
+  const authority = useOptionalChatWorkspaceAuthority();
   const chatId = session?.activeChatId;
   const [open, setOpen] = useState(false);
-  const createdBranch = useRef<string | undefined>(undefined);
   const isBusy = status?.branchVerb.busy === true || status?.branchVerb.asking === true;
-
-  useEffect(() => {
-    if (
-      createdBranch.current !== undefined &&
-      !isBusy &&
-      status?.branches.some((row) => row.name === createdBranch.current) === true
-    ) {
-      const created = status.branches.find((row) => row.name === createdBranch.current);
-      if (chatId !== undefined && created?.checkoutId !== undefined) {
-        void patchChat(chatId, 'checkoutId', created.checkoutId);
-      }
-      createdBranch.current = undefined;
-    }
-  }, [chatId, isBusy, patchChat, status?.branches]);
 
   if (status?.branch === undefined) {
     return undefined;
@@ -98,7 +89,7 @@ function BranchPicker(): React.JSX.Element | undefined {
         onSelect={(name) => {
           const selected = status.branches.find((row) => row.name === name);
           if (chatId !== undefined && selected?.checkoutId !== undefined && selected.checkoutId !== checkoutId) {
-            void patchChat(chatId, 'checkoutId', selected.checkoutId);
+            void authority?.placeChat(chatId, selected.checkoutId);
           }
         }}
         footer={
@@ -108,11 +99,20 @@ function BranchPicker(): React.JSX.Element | undefined {
               isBusy={isBusy}
               className='p-1 [&>button]:w-full [&>button]:justify-start'
               onCreate={(name) => {
-                if (!status.branches.some((row) => row.name === name)) {
-                  createdBranch.current = name;
-                }
                 setOpen(false);
-                commands.createBranch(name);
+                if (chatId === undefined || authority === undefined) {
+                  /* Nothing to place: the verb still runs, and its refusal is
+                     the toast channel's — as it is for the pane's own *New
+                     branch*, which also just asks for it. Caught because the
+                     verb answers now: `void` would leave the refusal loose. */
+                  // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
+                  void commands.createBranch(name).catch(() => undefined);
+                  return;
+                }
+                /* The settling verb *is* the placement: the authority holds the
+                   promise, so a send fired before the branch exists waits for
+                   it rather than leasing the one the record still names (Q2). */
+                void authority.placeChat(chatId, commands.createBranch(name));
               }}
             />
           </>

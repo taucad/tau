@@ -31,7 +31,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { gitOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { restoreMachine } from '#restore.machine.js';
-import { createRevisionActors, revisionTreeId } from '#revision-effects.js';
+import { createRevisionActors, describeTurnRelease, revisionTreeId } from '#revision-effects.js';
 import type { RevisionActors, RevisionActorsOptions } from '#revision-effects.js';
 
 const roots: string[] = [];
@@ -1915,4 +1915,50 @@ describe('the path policy a project is given', () => {
     expect(paths).toContain('node_modules/left/index.js');
     expect(paths).toContain('thumbnail.webp');
   }, 30_000);
+});
+
+describe('the fact a released turn publishes', () => {
+  const released = {
+    turnId: 'turn-1',
+    chatId: 'chat-1',
+    runId: 'run-1',
+    checkoutId: 'checkout-1',
+  } as const;
+
+  /* P4: the machine's `reason` is a diagnostic — "The checkout did not settle
+   * the cut in time." names a thing a person has never heard of — so the
+   * category travels beside it and the page chooses the words. */
+  it('carries the refusal’s category beside its diagnostic', () => {
+    expect(
+      describeTurnRelease({
+        ...released,
+        outcome: 'failed',
+        reason: 'The checkout did not settle the cut in time.',
+        code: 'CUT_TIMED_OUT',
+      }),
+    ).toMatchObject({ type: 'turn.failed', code: 'CUT_TIMED_OUT' });
+  });
+
+  /* E5: a failure nothing classified carries no code at all, and the page says
+   * its own fallback rather than a sentence nobody can act on. */
+  it('omits the category entirely when the failure carried none', () => {
+    const failure = describeTurnRelease({ ...released, outcome: 'failed', reason: 'ENOENT: no such file' });
+
+    expect(failure).toMatchObject({ reason: 'ENOENT: no such file' });
+    expect(failure === undefined ? [] : Object.keys(failure)).not.toContain('code');
+  });
+
+  /* A release is not an unclassified failure: the turn was let go before it
+   * recorded anything, and the page can say exactly that. */
+  it('names a released turn with its own category', () => {
+    expect(describeTurnRelease({ ...released, outcome: 'released' })).toMatchObject({
+      reason: 'The turn ended before it recorded a revision.',
+      code: 'TURN_RELEASED',
+    });
+  });
+
+  it('stays silent for the outcomes that settle through their own fact', () => {
+    expect(describeTurnRelease({ ...released, outcome: 'finalized' })).toBeUndefined();
+    expect(describeTurnRelease({ ...released, outcome: 'conflicted' })).toBeUndefined();
+  });
 });

@@ -16,7 +16,8 @@ import { MemoryRouter } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
 import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -50,6 +51,13 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
 }));
 const chats = [{ id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+/* The pane is the second surface on the same notice as the toast; the store
+   behind it is written by `RevisionOutcomes`, which this pane does not mount. */
+let turnOutcomes: readonly TurnOutcomeNotice[] = [];
+vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
+  useTurnOutcomes: () => turnOutcomes,
+  clearTurnOutcome: vi.fn(),
+}));
 
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
@@ -78,6 +86,7 @@ const renderPane = (): void => {
 
 beforeEach(() => {
   revisionStatusHarness.reset();
+  turnOutcomes = [];
 });
 
 describe('Revisions pane', () => {
@@ -423,6 +432,17 @@ describe('Revisions pane', () => {
     expect(screen.queryByRole('status', { name: 'Conflict view for src/bracket.ts' })).not.toBeInTheDocument();
   });
 
+  /* P4, W4 §D: the inline card is the toast's second surface, so it reads the
+     same table. `turn.machine`'s own sentence names a checkout (Rule 1). */
+  it('phrases a turn that saved nothing from its code, never from the machine', () => {
+    turnOutcomes = [{ projectId: 'p', kind: 'failed', turnId: 'turn-1', chatId: 'chat-1', code: 'CUT_TIMED_OUT' }];
+    renderPane();
+
+    const alert = screen.getByRole('alert', { name: 'Turn outcome' });
+    expect(alert).toHaveTextContent('Tau took too long to record that change.');
+    expect(alert.textContent).not.toMatch(/checkout/iu);
+  });
+
   it('switches to a branch the person picked', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = {
@@ -469,6 +489,40 @@ describe('Revisions pane', () => {
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
+  });
+
+  /* Review W8 finding 4: the pane consumes the verb as `(name) => void`, which
+     discards the answer but not its rejection — a duplicate name, the normal
+     refusal here, went loose. The toast channel already reports it. */
+  it('handles a refused branch rather than leaving its rejection loose', async () => {
+    const user = userEvent.setup();
+    /* The *Branches* region appears at two branches (S26). */
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+    const refusing = refuseCreateBranch('enclosure-v2');
+
+    renderPane();
+    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
+    await refusing.settled();
+
+    expect(refusing.asked).toEqual(['enclosure-v2']);
+    expect(refusing.unhandled).toEqual([]);
+    /* And the pane is still here, with its *New branch* ready to try again. */
+    expect(screen.getByRole('button', { name: 'New branch' })).toBeInTheDocument();
   });
 
   it('says the checkout has changes that are not in a revision yet, and offers to drop them', async () => {

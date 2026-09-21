@@ -162,6 +162,7 @@ import type {
   TurnLeaseActorInput,
   TurnMergeActorOutput,
   TurnPrepareActorInput,
+  TurnFailureCode,
   TurnOutcome,
   TurnPrepareActorOutput,
   TurnRetireLeaseActorInput,
@@ -285,7 +286,15 @@ export type TurnFailedEvent = Readonly<{
   runId: string;
   chatId: string;
   checkoutId: string | undefined;
+  /** The diagnostic a console reads. Never shown to a person (Rule 1, E5). */
   reason: string;
+  /**
+   * What the failure was, for the page that phrases it (P4): a
+   * `TurnFailureCode`, or `TURN_RELEASED` for a turn let go before it recorded
+   * anything. A string because it crosses the worker boundary and the durable
+   * log, both of which carry codes as text.
+   */
+  code?: string;
 }>;
 
 /**
@@ -359,6 +368,7 @@ export const describeTurnRelease = (
     checkoutId: string | undefined;
     outcome: TurnOutcome;
     reason?: string;
+    code?: TurnFailureCode;
   }>,
 ): TurnFailedEvent | undefined =>
   event.outcome === 'finalized' || event.outcome === 'conflicted'
@@ -370,6 +380,14 @@ export const describeTurnRelease = (
         chatId: event.chatId,
         checkoutId: event.checkoutId,
         reason: event.reason ?? 'The turn ended before it recorded a revision.',
+        /* Absent rather than `undefined`: this object is compared by value in
+         * the log and validated by the worker's command frame. A release is a
+         * category of its own, not an unclassified failure. */
+        ...(event.code === undefined
+          ? event.outcome === 'released'
+            ? { code: 'TURN_RELEASED' }
+            : {}
+          : { code: event.code }),
       });
 
 /** Dependencies one project's actor set is built from. @public */

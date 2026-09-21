@@ -1434,3 +1434,61 @@ describe.runIf(hasGit)('the disk-host default', () => {
     }
   }, 60_000);
 });
+
+/*
+ * The daemon leg relays a branch refusal whole (review finding 2).
+ *
+ * A *New branch* on this leg is correlated on the toast stream by verb and
+ * branch, and the page phrases it from the code. Relayed as a message alone,
+ * the refusal settled nothing: the caller waited out its bound and the person
+ * read "this project did not answer in time" for a branch that was refused.
+ */
+describe('a branch refusal over the host channel', () => {
+  it('carries the code, the verb and the branch, not only a sentence', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-branch-refusal-'));
+    roots.push(workspaceRoot);
+    const revisions = createProjectRevisions({
+      workspaceRoot,
+      projectId: 'project-1',
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    const abort = new AbortController();
+    const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+    const reading = (async (): Promise<void> => {
+      for await (const frame of revisions.channel.events(abort.signal)) {
+        frames.push(frame);
+      }
+    })();
+    try {
+      await revisions.channel.request({ command: 'open' });
+      /* A project with nothing recorded has nothing to branch from, which is
+         the cheapest refusal this tree mints — any refused verb proves the
+         relay, and this one needs no turn to have run. */
+      await revisions.channel.request({ command: 'createBranch', name: 'isolated-run' });
+
+      await expect
+        .poll(
+          () => frames.find((frame) => frame.kind === 'toast' && (frame.value as { type?: string }).type === 'error'),
+          { timeout: 10_000 },
+        )
+        .toMatchObject({
+          kind: 'toast',
+          value: {
+            type: 'error',
+            subject: 'branch',
+            operation: 'create',
+            branch: 'isolated-run',
+            code: expect.any(String) as unknown as string,
+            message: expect.any(String) as unknown as string,
+          },
+        });
+    } finally {
+      abort.abort();
+      await reading.catch(() => undefined);
+      await revisions.release();
+    }
+  }, 30_000);
+});

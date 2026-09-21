@@ -465,7 +465,7 @@ describe('createRuntimeAgentClients', () => {
 });
 
 describe('createRuntimeParameterAgentClient', () => {
-  const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean }> = {}) => {
+  const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean; unbound?: boolean }> = {}) => {
     const target = { authority: 'test', root: '/project', entry: 'main.py' };
     const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
     const manifest = await compileParameterManifest({
@@ -476,9 +476,13 @@ describe('createRuntimeParameterAgentClient', () => {
           $uses: ['JSONSchemaUnits'],
           name: 'Parameters',
           type: 'object',
-          properties: { width: { type: 'double', ...(options.sourceUnit ? { ucumUnit: 'mm' } : {}) } },
+          properties: {
+            width: { type: 'double', ...(options.sourceUnit ? { ucumUnit: 'mm' } : {}) },
+            // A declared scalar the manifest binds nothing to: only numeric leaves get a binding.
+            ...(options.unbound ? { label: { type: 'string' } } : {}),
+          },
         },
-        defaults: { width: 1 },
+        defaults: { width: 1, ...(options.unbound ? { label: 'plate' } : {}) },
         ...(options.sourceUnit
           ? {
               bindings: {
@@ -551,6 +555,25 @@ describe('createRuntimeParameterAgentClient', () => {
       outcome: { status: 'rejected', requestId: 'agent:1', code: 'STALE_MANIFEST' },
     });
     expect(commit).not.toHaveBeenCalled();
+    actor.stop();
+  });
+
+  it('commits a native-value named by group, pointer and value alone on a field with no binding', async () => {
+    const { actor, adapter, current, persisted } = await fixture(undefined, { unbound: true });
+    await expect(
+      adapter.applyParameterOperation({
+        action: 'propose',
+        targetFile: 'main.py',
+        requestId: 'agent:unbound',
+        expected: current.identity,
+        pressure: 'final',
+        operation: { kind: 'native-value', group: 'default', pointer: '/label', value: 'rail' },
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      outcome: { status: 'committed', requestId: 'agent:unbound' },
+    });
+    expect(persisted().entry.groups['default']?.values['label']).toBe('rail');
     actor.stop();
   });
 
@@ -637,8 +660,6 @@ describe('createRuntimeParameterAgentClient', () => {
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: binding.parameter.value,
-        resource: binding.schema.resource,
         pointer: '/width',
         unit: 'cm',
         producerCapability: {

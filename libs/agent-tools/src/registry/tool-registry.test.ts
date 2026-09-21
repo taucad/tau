@@ -349,8 +349,6 @@ describe('createChatToolRegistry invocation', () => {
           operation: {
             kind: 'native-value',
             group: 'default',
-            parameterId: 'width',
-            resource: 'urn:test',
             pointer: '/width',
             value: 5,
           },

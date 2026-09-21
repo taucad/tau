@@ -751,8 +751,9 @@ export const planParameterRecord = (
         break;
       }
       case 'source-unit': {
-        const binding = admittedBinding(manifest, operation.pointer);
-        if (binding.unit === undefined || binding.representation !== 'binary64' || binding.space === 'point') {
+        // An unbound field has no source unit to change, so "send native-value" would be the wrong recovery.
+        const binding = admittedNativeBinding(manifest, operation.pointer);
+        if (binding?.unit === undefined || binding.representation !== 'binary64' || binding.space === 'point') {
           throw failure('REPRESENTATION_UNSUPPORTED', 'Source-unit changes require finite linear binary64 semantics.');
         }
         if (

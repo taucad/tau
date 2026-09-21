@@ -52,6 +52,11 @@ export default defineConfig(({ command, mode }) => {
       // Nest owns the canonical API CORS policy. Vite otherwise intercepts
       // desktop preflights before they reach the application.
       cors: false,
+      /* A webhook tunnel (ngrok) arrives with its own Host, which Vite's host
+       * check rejects with a 403 before Nest sees the delivery. Opt in per
+       * shell — TAU_DEV_TUNNEL_HOST=<host> — so the default dev posture keeps
+       * the DNS-rebinding guard. */
+      allowedHosts: process.env.TAU_DEV_TUNNEL_HOST ? [process.env.TAU_DEV_TUNNEL_HOST] : undefined,
     },
     plugins: [
       oxcRuntimeEsm(),

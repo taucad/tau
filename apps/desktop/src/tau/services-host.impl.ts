@@ -74,6 +74,21 @@ const agentSessionKey = 'tau-agent';
  */
 const agentHostConfigTimeout = 10_000;
 
+/**
+ * Compose the rejection a refused runtime-port request settles with.
+ *
+ * Main is the only process that knows why it refused — a utility guard, a root
+ * it has not admitted — and this sentence is the whole path that reason takes
+ * to the agent's tool error.
+ *
+ * @param reason - The `message` main sent with its refusal, if it sent one.
+ * @returns The sentence to reject the pending request with.
+ */
+export const refusedRuntimePortMessage = (reason: unknown): string =>
+  typeof reason === 'string' && reason.length > 0
+    ? `Main refused the desktop runtime-port request: ${reason}`
+    : 'Main refused the desktop runtime-port request.';
+
 /** What `createAcpExternalAgentPort` is handed to offer an agent the `tau` server. */
 type McpBinding = NonNullable<Parameters<typeof createAcpExternalAgentPort>[0]['mcp']>;
 

@@ -461,6 +461,56 @@ describe('Electron main runtime helpers', () => {
     liveUtilities.length = 0;
   });
 
+  it('should answer a refused renderer request with the reason instead of a port', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const onError = vi.fn<(error: Error) => void>();
+    const sender = { once: vi.fn() };
+    const handle = registerElectronRuntimeMain({
+      utilityEntry: '/dist/main/kernel-host.js',
+      maxUtilities: 1,
+      onError,
+    });
+
+    const served = requestRuntimePort(sender, undefined, { requestId: 'request-1' });
+    const refused = requestRuntimePort(sender, undefined, { requestId: 'request-2' });
+
+    expect(served.postMessage).toHaveBeenCalledWith(
+      'taucad:connect-runtime:port',
+      expect.objectContaining({ requestId: 'request-1' }),
+      [expect.anything()],
+    );
+    /* No port, and the cap in the payload: the renderer's own await rejects on
+     * this instead of waiting out a hand-off that is never coming. */
+    expect(refused.postMessage).toHaveBeenCalledExactlyOnceWith('taucad:connect-runtime:port', {
+      error: 'registerElectronRuntimeMain: refusing to exceed 1 utility processes',
+      requestId: 'request-2',
+    });
+    expect(onError).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ name: 'ElectronRuntimeUtilityLimitError' }),
+    );
+
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
+  it('should hold as many utilities as the application asks for when no guard is set', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+
+    /* Past the count this broker used to refuse at: how many projects may be
+     * live is the application's admission policy, not the broker's. */
+    for (let index = 0; index < 9; index += 1) {
+      handle.connect({ purpose: 'main-process-client' });
+    }
+
+    expect(liveUtilities).toHaveLength(9);
+
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
   it('kills only the utility process addressed by a renderer release', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     const sender = { once: vi.fn() };

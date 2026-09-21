@@ -50,6 +50,34 @@
         }
       }
     },
+    "test:e2e:kernel-cap": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The kernel-utility cap gate (R5 of docs/research/electron-kernel-utility-cap-blueprint.md): nine live projects in one window, a get_kernel_result turn in the ninth, and the park and return of a hidden one. Kept off test:e2e because the row holds nine kernel utilities at once and waits out the 2-minute park window, neither of which is proven on the Ubuntu e2e runner; promote it once it has been observed green there."
+      },
+      "dependsOn": [
+        {
+          "projects": ["desktop"],
+          "target": "build"
+        },
+        {
+          "projects": ["api"],
+          "target": "build"
+        }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-kernel-utility-cap.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_API_URL": "http://localhost:4014"
+        }
+      }
+    },
     "test:e2e:packaged": {
       "executor": "nx:run-commands",
       "metadata": {

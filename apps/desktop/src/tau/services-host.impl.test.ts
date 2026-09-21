@@ -15,7 +15,7 @@ import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
 
-import { createServicesHost } from '#tau/services-host.impl.js';
+import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
 
 /**
@@ -93,6 +93,21 @@ const frame = (
   data: unknown,
   ports: Array<ReturnType<typeof stubPort>> | readonly UtilityPort[] = [],
 ): UtilityMessage => ({ data, ports }) as unknown as UtilityMessage;
+
+describe('refusedRuntimePortMessage', () => {
+  it('should quote the reason main refused with, so the tool error names it', () => {
+    expect(refusedRuntimePortMessage('registerElectronRuntimeMain: refusing to exceed 64 utility processes')).toBe(
+      'Main refused the desktop runtime-port request: registerElectronRuntimeMain: refusing to exceed 64 utility processes',
+    );
+  });
+
+  it('should fall back to the bare refusal when main names no reason', () => {
+    /* A main that refused before it could compose one, or a frame without it. */
+    for (const silent of [undefined, '', { message: 'not a string' }]) {
+      expect(refusedRuntimePortMessage(silent)).toBe('Main refused the desktop runtime-port request.');
+    }
+  });
+});
 
 describe('createServicesHost — root admission', () => {
   it('trusts nothing until main sends the admitted set', () => {

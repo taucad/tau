@@ -386,3 +386,44 @@ export const installGatewayFixture = async (page: Page, file?: GatewayFixtureFil
   await fixture.routeThrough(page);
   return fixture;
 };
+
+/** One `tool_result` block as the provider wire carries it. */
+type WireToolResult = {
+  readonly content?: unknown;
+  readonly is_error?: unknown;
+  readonly tool_use_id?: unknown;
+  readonly type?: unknown;
+};
+
+/**
+ * Every failed `tool_result` in the given forwarded requests, bounded so the
+ * failure message stays readable.
+ *
+ * The agent's runtime tools (`get_kernel_result`, `screenshot`, `test_model`)
+ * run in the services utility, and a request main refuses answers the agent
+ * with an *error result* rather than a failed run — so every other assertion in
+ * a row still passes while the tool never touched the kernel. This is the seam
+ * that reads it, shared by the three specs that assert on it. Every forwarded
+ * request carries the whole conversation, so the last one covers every turn.
+ *
+ * @param requests - Forwarded provider request bodies, e.g.
+ *   `fixture.gatewayRequests.slice(-1)`.
+ * @returns One bounded JSON line per failed tool result.
+ */
+export const failedGatewayToolResults = (requests: readonly unknown[]): readonly string[] =>
+  requests
+    .flatMap((request) => {
+      const messages =
+        (request as { readonly messages?: ReadonlyArray<{ readonly content?: unknown }> }).messages ?? [];
+      return messages.flatMap((message) =>
+        Array.isArray(message.content) ? (message.content as readonly WireToolResult[]) : [],
+      );
+    })
+    .filter((block) => block.type === 'tool_result' && block.is_error === true)
+    .map((block) =>
+      JSON.stringify({
+        toolUseId: block.tool_use_id,
+        content:
+          typeof block.content === 'string' ? block.content.slice(0, 2e3) : JSON.stringify(block.content).slice(0, 2e3),
+      }),
+    );

@@ -210,11 +210,16 @@ export const awaitElectronRuntimePort = async (
   const port = await awaitElectronRelayedPort(
     relayTag,
     (payload) => {
-      const { hostId: relayed } = payload;
-      if (payload['requestId'] !== requestId || typeof relayed !== 'string') {
+      if (payload['requestId'] !== requestId) {
         return false;
       }
-      hostId = relayed;
+      /* Only a served request carries a lease: main answers a refusal with a
+       * reason and no `hostId`, and requiring one here would drop that answer
+       * and leave the caller waiting on a port that is never coming. */
+      const { hostId: relayed } = payload;
+      if (typeof relayed === 'string') {
+        hostId = relayed;
+      }
       return true;
     },
     target,

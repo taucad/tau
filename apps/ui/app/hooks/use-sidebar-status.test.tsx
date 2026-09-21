@@ -157,6 +157,8 @@ type FakeRegistry = {
   status: Record<string, SessionsProjectStatus>;
   closed: Record<string, { reason: ProjectSessionCloseReason; at: number }>;
   chatReferences: Record<string, Record<string, ChatSessionActorRef>>;
+  /** What the session recorded about a region that did not come up (R4). */
+  failures: Record<string, Record<string, string>>;
   registryListeners: Set<() => void>;
   sessionListeners: Set<() => void>;
 };
@@ -169,13 +171,19 @@ const fakeRegistry: FakeRegistry = {
   status: {},
   closed: {},
   chatReferences: {},
+  failures: {},
   registryListeners: new Set(),
   sessionListeners: new Set(),
 };
 
 const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
   ({
-    getSnapshot: () => ({ context: { chatRefs: fakeRegistry.chatReferences[projectId] ?? {} } }),
+    getSnapshot: () => ({
+      context: {
+        chatRefs: fakeRegistry.chatReferences[projectId] ?? {},
+        failures: fakeRegistry.failures[projectId] ?? {},
+      },
+    }),
     send: sessionSend,
     subscribe: (listener: () => void) => {
       fakeRegistry.sessionListeners.add(listener);
@@ -192,6 +200,7 @@ const resetRegistry = (): void => {
   fakeRegistry.status = {};
   fakeRegistry.closed = {};
   fakeRegistry.chatReferences = {};
+  fakeRegistry.failures = {};
   fakeRegistry.registryListeners.clear();
   fakeRegistry.sessionListeners.clear();
   fakeRegistry.revisionClients.clear();
@@ -573,6 +582,64 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
     expect(rowOf('bracket').glyph).toBe('busy');
     expect(collapsed('bracket')).toEqual({ mark: 'running', sentence: 'Live, busy · 1 agent working' });
     expect(expanded('bracket')).toEqual({ mark: 'none', sentence: 'Live, busy' });
+  });
+
+  /* R4: a live project whose kernel was refused says so on the row, with the
+   * reason the refusal carried — the sentence is the only channel a screen
+   * reader has, because every mark glyph is `aria-hidden`. */
+  it('marks a live project failed when its runtime was refused, naming the reason', () => {
+    liveProject('bracket');
+    fakeRegistry.failures['bracket'] = {
+      runtime:
+        'Electron main refused the tau:runtime:port request: registerElectronRuntimeMain: refusing to exceed 64 utility processes',
+    };
+
+    expect(rowOf('bracket').runtimeFailure).toContain('refusing to exceed 64 utility processes');
+    expect(collapsed('bracket')).toEqual({
+      mark: 'failed',
+      sentence: 'Live · Kernel refused · refusing to exceed 64 utility processes',
+    });
+    expect(expanded('bracket').mark).toBe('failed');
+  });
+
+  /* V2-4: a turn in flight keeps its spinner — it is still doing something,
+   * kernel or no kernel — and the row says both things. */
+  it('leaves a running chat its mark and still names the refusal', () => {
+    liveProject('bracket');
+    driveChat('bracket', 'busy-chat', [{ type: 'runLifecycle', phase: 'running' }]);
+    fakeRegistry.failures['bracket'] = {
+      runtime: 'Electron main refused the tau:runtime:port request: refusing to exceed 64 utility processes',
+    };
+
+    expect(collapsed('bracket')).toEqual({
+      mark: 'running',
+      sentence: 'Live, busy · 1 agent working · Kernel refused · refusing to exceed 64 utility processes',
+    });
+  });
+
+  /* V2-2: only the broker's refusal is called a refusal. Anything else that
+   * stops a kernel is unavailable, and its message is said whole, because
+   * nothing here knows which of its clauses is the subject. */
+  it('calls a kernel that failed for any other reason unavailable, message intact', () => {
+    liveProject('bracket');
+    fakeRegistry.failures['bracket'] = { runtime: 'Kernel boot failed: ENOENT: no such file or directory, open /x' };
+
+    expect(collapsed('bracket')).toEqual({
+      mark: 'failed',
+      sentence: 'Live · Kernel unavailable · Kernel boot failed: ENOENT: no such file or directory, open /x',
+    });
+  });
+
+  it('names the same reason when the refusal beat the session to `live`', () => {
+    liveProject('bracket', { state: 'failed' });
+    fakeRegistry.failures['bracket'] = {
+      runtime: 'Electron main refused the tau:runtime:port request: refusing to exceed 64 utility processes',
+    };
+
+    expect(collapsed('bracket')).toEqual({
+      mark: 'failed',
+      sentence: 'Kernel refused · refusing to exceed 64 utility processes',
+    });
   });
 
   it('lifts the amber count from the chats that need a person', () => {

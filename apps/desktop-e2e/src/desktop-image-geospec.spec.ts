@@ -6,7 +6,12 @@ import { validateGlbData } from '@taucad/runtime-testing';
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { gatewayFixtureFinalText, gatewayFixtureModelName, startGatewayFixture } from '#support/gateway-fixture.js';
+import {
+  failedGatewayToolResults,
+  gatewayFixtureFinalText,
+  gatewayFixtureModelName,
+  startGatewayFixture,
+} from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
@@ -49,31 +54,6 @@ describe('packaged desktop geometry', () => {
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
 let seededEmail: string | undefined;
-
-type ToolResult = {
-  readonly content?: unknown;
-  readonly is_error?: unknown;
-  readonly tool_use_id?: unknown;
-  readonly type?: unknown;
-};
-
-const gatewayToolResults = (requests: readonly unknown[]): readonly ToolResult[] =>
-  requests.flatMap((request) => {
-    const messages = (request as { readonly messages?: ReadonlyArray<{ readonly content?: unknown }> }).messages ?? [];
-    return messages.flatMap((message) =>
-      Array.isArray(message.content)
-        ? message.content.filter((block): block is ToolResult => (block as ToolResult).type === 'tool_result')
-        : [],
-    );
-  });
-
-const boundedToolResult = (result: ToolResult): string =>
-  JSON.stringify({
-    toolUseId: result.tool_use_id,
-    isError: result.is_error,
-    content:
-      typeof result.content === 'string' ? result.content.slice(0, 2e3) : JSON.stringify(result.content).slice(0, 2e3),
-  });
 
 afterEach(async () => {
   await session?.close();
@@ -128,13 +108,9 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
     const slug = await submitPrompt(page, 'Create and verify the packaged image capture fixtures.');
 
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 600_000);
-    const failedToolResults = gatewayToolResults(fixture.gatewayRequests.slice(-1)).filter(
-      (result) => result.is_error === true,
-    );
-    if (failedToolResults.length > 0) {
-      throw new Error(
-        `Packaged agent tools failed: ${failedToolResults.map((result) => boundedToolResult(result)).join('\n')}`,
-      );
+    const failedTools = failedGatewayToolResults(fixture.gatewayRequests.slice(-1));
+    if (failedTools.length > 0) {
+      throw new Error(`Packaged agent tools failed: ${failedTools.join('\n')}`);
     }
     const screenshotActivities = page.getByRole('button', { name: 'Explored 1 screenshot', exact: true });
     for (const activity of await screenshotActivities.all()) {

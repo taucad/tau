@@ -442,6 +442,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_PICOGK_RESOURCE_ROOT: picogkResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
+    /* A fork-loop guard, not a concurrency policy: a live project costs one to
+     * three utilities and the sessions registry admits as many as memory holds,
+     * so this sits an order of magnitude above realistic use. */
+    maxUtilities: 64,
     resolveFork: (context) => {
       const requestedRoot = context['projectRoot'];
       const registeredProjectRoot =

@@ -898,7 +898,7 @@ export const projectRevisionsMachine = setup({
                   checkoutId: event.checkoutId,
                   trigger: event.trigger,
                   reason,
-                  code: 'CHECKOUT_CONFLICT',
+                  code: 'CHECKOUT_UNKNOWN',
                 });
                 return;
               }

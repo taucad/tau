@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#branch.machine.js';
 import { branchMachine, branchRegistryMilliseconds, selectBranchFacet } from '#branch.machine.js';
+import { RevisionPortError } from '#revision-port.js';
 import { createFakeParent, createFakePromiseActors, createManualClock, recordEmitted } from '#test/fake-actors.js';
 import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
 
@@ -39,6 +40,8 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  * 22  `toast.branch` for a `create` names the checkout the registry made
  * 23  a recording cut that failed carries its own code out
  * 24  a recording cut the head moved under is `CAS_LOST`
+ * 25  an ambient cut's answer does not settle a recording `create`
+ * 26  a `checkBranch` refusal carries its code out, as an applied verb does
  * --  start and stop with no child left running, serializable snapshot, no
  *     function in context, one exported machine value
  */
@@ -342,6 +345,50 @@ describe('branchMachine', () => {
         branch: 'isolated-run',
         message: 'This project has no files open to record.',
         code: 'CHECKOUT_CONFLICT',
+      },
+    ]);
+    actor.stop();
+  });
+
+  /*
+   * An ambient cut — `save`, `idle`, `hidden`, `close` — carries no turn id
+   * either, so the checkout match alone let somebody else's revision settle the
+   * branch this verb is still recording for.
+   */
+  it('ignores an ambient cut answer while recording, and settles on the switch it asked for', async () => {
+    const { actor, promises, parent } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    await flush();
+    actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'save', revisionId: 'rev-save' });
+
+    expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
+    expect(types(parent.events)).not.toContain('addCheckout');
+
+    actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-2' });
+
+    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-2' });
+    actor.stop();
+    parent.stop();
+  });
+
+  it('carries the check refusal code out, the way an applied verb does', async () => {
+    const { actor, promises, emitted } = start();
+    promises.script('checkBranch', {
+      error: new RevisionPortError('ENGINE_UNAVAILABLE', 'This project could not be reached.'),
+    });
+
+    actor.send({ type: 'switch', branch: 'bracket-fillet' });
+    await flush();
+
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        operation: 'switch',
+        branch: 'bracket-fillet',
+        message: 'This project could not be reached.',
+        code: 'ENGINE_UNAVAILABLE',
       },
     ]);
     actor.stop();

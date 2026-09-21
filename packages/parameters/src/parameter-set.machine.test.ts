@@ -36,8 +36,6 @@ it('settles a repeated value as a durable no-op without another write', async ()
     operation: {
       kind: 'native-value',
       group: 'default',
-      parameterId: 'width',
-      resource: harness.snapshot.manifest.bindings['/width']!.schema.resource,
       pointer: '/width',
       value: 30,
     },
@@ -255,8 +253,6 @@ it('settles immediate startup submission and three edits with one load and no se
       operation: {
         kind: 'native-value',
         group: 'default',
-        parameterId: 'width',
-        resource: snapshot.manifest.bindings['/width']!.schema.resource,
         pointer: '/width',
         value,
       },
@@ -503,21 +499,21 @@ it('rejects unsafe and over-budget requests before retaining or invoking them', 
  * Evidence for the original defect: `docs/research/artifacts/parameter-story-simplification-review/
  * runs/2026-09-17-review/evidence/echo-race.test.ts`, which settled `r2` as `STALE_MANIFEST`.
  */
-const widthEdit =
-  (harness: { snapshot: ParameterSnapshot }) =>
-  (requestId: string, value: number, expected: ParameterSetRequest['expected']): ParameterSetRequest => ({
-    requestId,
-    expected,
-    pressure: 'final',
-    operation: {
-      kind: 'native-value',
-      group: 'default',
-      parameterId: 'width',
-      resource: harness.snapshot.manifest.bindings['/width']!.schema.resource,
-      pointer: '/width',
-      value,
-    },
-  });
+const widthEdit = (
+  requestId: string,
+  value: number,
+  expected: ParameterSetRequest['expected'],
+): ParameterSetRequest => ({
+  requestId,
+  expected,
+  pressure: 'final',
+  operation: {
+    kind: 'native-value',
+    group: 'default',
+    pointer: '/width',
+    value,
+  },
+});
 
 const proposedSnapshot = (current: ParameterSnapshot, request: ParameterSetRequest): ParameterSnapshot => {
   const change = planParameterChange({ current, request });
@@ -529,9 +525,8 @@ const proposedSnapshot = (current: ParameterSnapshot, request: ParameterSetReque
 
 it('commits the next command when the previous write echoes during planning', async () => {
   const harness = await parameterSetHarness();
-  const edit = widthEdit(harness);
-  expect(await harness.submit(edit('r1', 30, harness.snapshot.identity))).toMatchObject({ status: 'committed' });
-  const settled = harness.submit(edit('r2', 31, harness.actor.getSnapshot().context.current!.identity));
+  expect(await harness.submit(widthEdit('r1', 30, harness.snapshot.identity))).toMatchObject({ status: 'committed' });
+  const settled = harness.submit(widthEdit('r2', 31, harness.actor.getSnapshot().context.current!.identity));
   expect(harness.actor.getSnapshot().matches({ open: 'planning' })).toBe(true);
   harness.actor.send({ type: 'watch.changed' });
   expect(await settled).toMatchObject({ status: 'committed' });
@@ -542,7 +537,7 @@ it('commits the next command when the previous write echoes during planning', as
 it('commits a command whose write is already applying when the previous echo lands', async () => {
   const gate = Promise.withResolvers<void>();
   const harness = await parameterSetHarness(false, { gate: gate.promise });
-  const settled = harness.submit(widthEdit(harness)('r1', 30, harness.snapshot.identity));
+  const settled = harness.submit(widthEdit('r1', 30, harness.snapshot.identity));
   await waitFor(harness.actor, (state) => state.matches({ open: 'applying' }));
   harness.actor.send({ type: 'watch.changed' });
   gate.resolve();
@@ -555,7 +550,6 @@ it('commits a command whose write is already applying when the previous echo lan
 it('should re-plan against foreign bytes that land during planning and keep the foreign change', async () => {
   const fixture = await parameterSetHarness();
   fixture.actor.stop();
-  const edit = widthEdit(fixture);
   let visible = fixture.snapshot;
   const foreign = proposedSnapshot(visible, {
     ...groupRequest('foreign', fixture),
@@ -586,7 +580,7 @@ it('should re-plan against foreign bytes that land during planning and keep the 
   ).start();
   await waitFor(actor, (state) => state.matches({ open: 'ready' }));
   const outcome = submitParameterRequest(actor, {
-    ...edit('local', 30, fixture.snapshot.identity),
+    ...widthEdit('local', 30, fixture.snapshot.identity),
     base: { pointer: '/width', value: 25.4 },
   });
   await waitFor(actor, (state) => state.matches({ open: 'planning' }));
@@ -603,9 +597,8 @@ it('should re-plan against foreign bytes that land during planning and keep the 
 it('should refuse only on base when the foreign write moved the same field', async () => {
   const fixture = await parameterSetHarness();
   fixture.actor.stop();
-  const edit = widthEdit(fixture);
   let visible = fixture.snapshot;
-  const foreign = proposedSnapshot(visible, edit('foreign', 29, fixture.snapshot.identity));
+  const foreign = proposedSnapshot(visible, widthEdit('foreign', 29, fixture.snapshot.identity));
   const firstPlan = Promise.withResolvers<void>();
   let plans = 0;
   let writes = 0;
@@ -631,7 +624,7 @@ it('should refuse only on base when the foreign write moved the same field', asy
   ).start();
   await waitFor(actor, (state) => state.matches({ open: 'ready' }));
   const outcome = submitParameterRequest(actor, {
-    ...edit('local', 30, fixture.snapshot.identity),
+    ...widthEdit('local', 30, fixture.snapshot.identity),
     base: { pointer: '/width', value: 25.4 },
   });
   await waitFor(actor, (state) => state.matches({ open: 'planning' }));
@@ -646,18 +639,17 @@ it('should refuse only on base when the foreign write moved the same field', asy
 it('should commit the last of three queued steps on one field', async () => {
   const gate = Promise.withResolvers<void>();
   const fixture = await parameterSetHarness(false, { gate: gate.promise });
-  const edit = widthEdit(fixture);
   const active = fixture.submit({
-    ...edit('step-1', 26, fixture.snapshot.identity),
+    ...widthEdit('step-1', 26, fixture.snapshot.identity),
     base: { pointer: '/width', value: 25.4 },
   });
   await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
   const displaced = fixture.submit({
-    ...edit('step-2', 27, fixture.snapshot.identity),
+    ...widthEdit('step-2', 27, fixture.snapshot.identity),
     base: { pointer: '/width', value: 26 },
   });
   const latest = fixture.submit({
-    ...edit('step-3', 28, fixture.snapshot.identity),
+    ...widthEdit('step-3', 28, fixture.snapshot.identity),
     base: { pointer: '/width', value: 27 },
   });
   await expect(displaced).resolves.toMatchObject({ status: 'cancelled-before-apply' });
@@ -671,11 +663,10 @@ it('should commit the last of three queued steps on one field', async () => {
 it('should keep a queued final when a later transient for the same field arrives', async () => {
   const gate = Promise.withResolvers<void>();
   const fixture = await parameterSetHarness(false, { gate: gate.promise });
-  const edit = widthEdit(fixture);
-  const active = fixture.submit(edit('active', 26, fixture.snapshot.identity));
+  const active = fixture.submit(widthEdit('active', 26, fixture.snapshot.identity));
   await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
-  const final = fixture.submit(edit('final', 27, fixture.snapshot.identity));
-  const transient = fixture.submit({ ...edit('transient', 28, fixture.snapshot.identity), pressure: 'transient' });
+  const final = fixture.submit(widthEdit('final', 27, fixture.snapshot.identity));
+  const transient = fixture.submit({ ...widthEdit('transient', 28, fixture.snapshot.identity), pressure: 'transient' });
   expect(fixture.actor.getSnapshot().context.pending.map(({ requestId }) => requestId)).toEqual(['final', 'transient']);
   fixture.actor.send({ type: 'close' });
   await expect(final).resolves.toMatchObject({ status: 'cancelled-before-apply' });
@@ -687,17 +678,14 @@ it('should keep a queued final when a later transient for the same field arrives
 it('should queue finals for two fields and commit both', async () => {
   const gate = Promise.withResolvers<void>();
   const fixture = await parameterSetHarness(false, { gate: gate.promise });
-  const edit = widthEdit(fixture);
   const active = fixture.submit(groupRequest('second', fixture));
   await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
-  const first = fixture.submit(edit('default-width', 30, fixture.snapshot.identity));
+  const first = fixture.submit(widthEdit('default-width', 30, fixture.snapshot.identity));
   const second = fixture.submit({
-    ...edit('second-width', 31, fixture.snapshot.identity),
+    ...widthEdit('second-width', 31, fixture.snapshot.identity),
     operation: {
       kind: 'native-value',
       group: 'second',
-      parameterId: 'width',
-      resource: fixture.snapshot.manifest.bindings['/width']!.schema.resource,
       pointer: '/width',
       value: 31,
     },
@@ -720,11 +708,10 @@ it('should queue finals for two fields and commit both', async () => {
 it('displaces an older queued value edit for the same field with a newer one', async () => {
   const gate = Promise.withResolvers<void>();
   const harness = await parameterSetHarness(false, { gate: gate.promise });
-  const edit = widthEdit(harness);
-  const active = harness.submit(edit('active', 30, harness.snapshot.identity));
+  const active = harness.submit(widthEdit('active', 30, harness.snapshot.identity));
   await waitFor(harness.actor, (state) => state.matches({ open: 'applying' }));
-  const superseded = harness.submit(edit('queued', 31, harness.snapshot.identity));
-  const latest = harness.submit(edit('latest', 32, harness.snapshot.identity));
+  const superseded = harness.submit(widthEdit('queued', 31, harness.snapshot.identity));
+  const latest = harness.submit(widthEdit('latest', 32, harness.snapshot.identity));
   expect(harness.actor.getSnapshot().context.pending.map(({ requestId }) => requestId)).toEqual(['latest']);
   expect(await superseded).toMatchObject({ status: 'cancelled-before-apply', requestId: 'queued' });
   gate.resolve();

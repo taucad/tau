@@ -80,7 +80,7 @@ const validBatchOperation = (operation: Readonly<Record<string, unknown>>): bool
   operation['edits'].every(
     (edit) =>
       isRecord(edit) &&
-      hasOperationText(edit, 'parameterId', 'resource', 'pointer') &&
+      hasOperationText(edit, 'pointer') &&
       (edit['inputUnit'] === undefined || hasOperationText(edit, 'inputUnit')) &&
       isJsonValue(edit['value']),
   );
@@ -89,7 +89,7 @@ const validSourceUnitOperation = (operation: Readonly<Record<string, unknown>>):
   const capability = sourceUnitCapability(operation['producerCapability']);
   return (
     operation['mode'] === 'preserve-size' &&
-    hasOperationText(operation, 'group', 'parameterId', 'resource', 'pointer', 'unit') &&
+    hasOperationText(operation, 'group', 'pointer', 'unit') &&
     capability !== undefined &&
     hasOperationText(capability, 'producer', 'sourceRevision', 'capability')
   );
@@ -101,13 +101,10 @@ const validOperation = (value: unknown): value is ParameterSetOperation => {
   }
   switch (value['kind']) {
     case 'native-value': {
-      return hasOperationText(value, 'group', 'parameterId', 'resource', 'pointer') && isJsonValue(value['value']);
+      return hasOperationText(value, 'group', 'pointer') && isJsonValue(value['value']);
     }
     case 'unit-value': {
-      return (
-        hasOperationText(value, 'group', 'parameterId', 'resource', 'pointer', 'inputUnit') &&
-        typeof value['value'] === 'string'
-      );
+      return hasOperationText(value, 'group', 'pointer', 'inputUnit') && typeof value['value'] === 'string';
     }
     case 'batch': {
       return validBatchOperation(value);

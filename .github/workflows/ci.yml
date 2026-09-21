@@ -409,8 +409,11 @@ jobs:
       - name: MinIO smoke (seed + RW)
         run: bash infra/docker-compose.test.sh
 
-      - name: Apply Drizzle migrations
-        run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
+      # `api:db-migrate` is the release migration job: DDL, the billing protections and
+      # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in
+      # `.env.example`, so these lanes get schema and protections only, as Fly does).
+      - name: Apply the protected migration job
+        run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run api:db-migrate
 
       # The default suite, moved here whole from the `affected` lane. `DATABASE_URL`
       # is named here rather than left to `apps/api/.env` — which the step above
@@ -505,8 +508,11 @@ jobs:
       - name: Start Postgres + Redis + MinIO
         run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
-      - name: Apply Drizzle migrations
-        run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
+      # `api:db-migrate` is the release migration job: DDL, the billing protections and
+      # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in
+      # `.env.example`, so these lanes get schema and protections only, as Fly does).
+      - name: Apply the protected migration job
+        run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run api:db-migrate
 
       - name: Run real Stripe billing acceptance (L3)
         run: pnpm nx run-many -t test:billing-stripe

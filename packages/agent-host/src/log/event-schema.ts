@@ -297,6 +297,7 @@ const knownLogEventSchema = z.union([
     chatId: nonEmptyString,
     checkoutId: nonEmptyString.optional(),
     reason: z.string(),
+    code: nonEmptyString.optional(),
   }),
   z.looseObject({
     ...eventBase,

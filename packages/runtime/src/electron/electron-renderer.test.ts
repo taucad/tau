@@ -258,6 +258,63 @@ describe('Electron renderer runtime helpers', () => {
     await client.close();
   });
 
+  it('should reject a runtime port request with the reason main refused it for', async () => {
+    let listener: ((event: MessageEvent) => void) | undefined;
+    const target = {
+      addEventListener: vi.fn((_name: 'message', handler: (event: MessageEvent) => void) => {
+        listener = handler;
+      }),
+      removeEventListener: vi.fn(),
+    } as unknown as Window;
+    const bridge = {
+      /* A refusal carries a reason and no lease: the utility whose `hostId` a
+       * served request reports was never forked. */
+      requestRuntimePort: vi.fn((requestId: string) => {
+        listener?.(
+          relayEvent({
+            taucadRelay: runtimeRelayTag,
+            requestId,
+            error: 'registerElectronRuntimeMain: refusing to exceed 1 utility processes',
+          }),
+        );
+      }),
+      releaseRuntimeHost: vi.fn(),
+      relayTag: { hostExit: hostExitRelayTag, runtime: runtimeRelayTag },
+    };
+
+    await expect(requestElectronRuntimePort({ bridge, target })).rejects.toThrow(
+      'refusing to exceed 1 utility processes',
+    );
+    expect(target.removeEventListener).toHaveBeenCalledWith('message', expect.any(Function));
+  });
+
+  it('should close a relayed port that carries no host lease and say so', async () => {
+    const port = new MessageChannel().port1;
+    const close = vi.spyOn(port, 'close');
+    let listener: ((event: MessageEvent) => void) | undefined;
+    const target = {
+      addEventListener: vi.fn((_name: 'message', handler: (event: MessageEvent) => void) => {
+        listener = handler;
+      }),
+      removeEventListener: vi.fn(),
+    } as unknown as Window;
+    const bridge = {
+      /* A port with neither a lease nor a reason: the caller could never
+       * release the utility behind it, so the port is closed rather than used. */
+      requestRuntimePort: vi.fn((requestId: string) => {
+        listener?.(relayEvent({ taucadRelay: runtimeRelayTag, requestId }, [port]));
+      }),
+      releaseRuntimeHost: vi.fn(),
+      relayTag: { hostExit: hostExitRelayTag, runtime: runtimeRelayTag },
+    };
+
+    await expect(requestElectronRuntimePort({ bridge, target })).rejects.toThrow(
+      'preload relay omitted the runtime host ID',
+    );
+    expect(close).toHaveBeenCalledOnce();
+    expect(bridge.releaseRuntimeHost).not.toHaveBeenCalled();
+  });
+
   it('releases the utility lease when the renderer page is hidden', async () => {
     const { bridge, target, dispatch } = setupRendererHarness('host-hidden');
 

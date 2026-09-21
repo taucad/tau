@@ -59,8 +59,6 @@ const sourceUnitRequest = (current: ParameterSnapshot, requestId = 'unit'): Para
     kind: 'source-unit',
     mode: 'preserve-size',
     group: 'default',
-    parameterId: 'width',
-    resource: current.manifest.bindings['/width']!.schema.resource,
     pointer: '/width',
     unit: 'cm',
     producerCapability: {
@@ -86,8 +84,6 @@ const valueRequest = (current: ParameterSnapshot, requestId: string, value: numb
   operation: {
     kind: 'native-value',
     group: 'default',
-    parameterId: 'width',
-    resource: current.manifest.bindings['/width']!.schema.resource,
     pointer: '/width',
     value,
   },

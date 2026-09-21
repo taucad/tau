@@ -178,8 +178,6 @@ const request = (
 const unitEdit = (value: string): ParameterSetRequest['operation'] => ({
   kind: 'unit-value',
   group: 'default',
-  parameterId: 'width',
-  resource: 'urn:taucad:parameter-schema:root',
   pointer: '/width',
   inputUnit: 'cm',
   value,
@@ -320,7 +318,6 @@ it('honours an authored unit for a field the producer left undeclared, through a
     JSON.stringify({ activeGroup: 'default', groups: { default: { values: {}, units: { '/width': 'mm' } } } }),
   );
   const manifest = await widthManifest('none');
-  const { parameter, schema } = manifest.bindings['/width']!;
   const current = await load(memory, manifest);
   const edited = prepared(
     planParameterChange({
@@ -328,8 +325,6 @@ it('honours an authored unit for a field the producer left undeclared, through a
       request: request('edit', current.identity, {
         kind: 'unit-value',
         group: 'default',
-        parameterId: parameter.value,
-        resource: schema.resource,
         pointer: '/width',
         inputUnit: 'cm',
         value: '12',
@@ -356,8 +351,6 @@ it('rejects an authored unit the declaration contradicts, and an undeclared sour
       request: request('edit-conflicting', declared.identity, {
         kind: 'native-value',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:taucad:parameter-schema:root',
         pointer: '/width',
         value: 12,
       }),
@@ -374,8 +367,6 @@ it('rejects an authored unit the declaration contradicts, and an undeclared sour
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:taucad:parameter-schema:root',
         pointer: '/width',
         unit: 'cm',
         producerCapability: {
@@ -401,8 +392,6 @@ it('records a sanctioned source-unit change as the chosen unit in both claim map
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:taucad:parameter-schema:root',
         pointer: '/width',
         unit: 'cm',
         producerCapability: {

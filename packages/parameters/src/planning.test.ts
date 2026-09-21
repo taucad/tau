@@ -99,7 +99,7 @@ const bindinglessScalarManifest = async () =>
     middleware: digest,
   });
 
-it('should commit a native-value edit on a boolean field that has no binding', async () => {
+it('plans a native-value edit named by group, pointer and value alone on an unbound field', async () => {
   const admitted = await bindinglessScalarManifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const plan = planParameterChange({
@@ -108,14 +108,7 @@ it('should commit a native-value edit on a boolean field that has no binding', a
       requestId: 'boolean',
       pressure: 'final',
       expected: current.identity,
-      operation: {
-        kind: 'native-value',
-        group: 'default',
-        parameterId: `${admitted.source.revision}:/enabled`,
-        resource: 'urn:taucad:parameter-schema:root',
-        pointer: '/enabled',
-        value: true,
-      },
+      operation: { kind: 'native-value', group: 'default', pointer: '/enabled', value: true },
     },
   });
 
@@ -125,30 +118,27 @@ it('should commit a native-value edit on a boolean field that has no binding', a
   });
 });
 
-it('should refuse a binding-less native-value edit whose identity names another revision', async () => {
+it('refuses a pointer the pinned manifest declares nowhere as an unknown field', async () => {
   const admitted = await bindinglessScalarManifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const plan = planParameterChange({
     current,
     request: {
-      requestId: 'wrong-revision',
+      requestId: 'unknown',
       pressure: 'final',
       expected: current.identity,
-      operation: {
-        kind: 'native-value',
-        group: 'default',
-        parameterId: `another-revision:/enabled`,
-        resource: 'urn:taucad:parameter-schema:root',
-        pointer: '/enabled',
-        value: true,
-      },
+      operation: { kind: 'native-value', group: 'default', pointer: '/enabeld', value: true },
     },
   });
 
-  expect(plan).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  expect(plan).toMatchObject({
+    status: 'rejected',
+    code: 'UNKNOWN_FIELD',
+    message: 'main.ts declares no parameter at /enabeld. Use a pointer that get_parameters lists.',
+  });
 });
 
-it('should refuse a native-value edit that addresses an object', async () => {
+it('refuses a native-value edit that addresses an object', async () => {
   const admitted = await bindinglessScalarManifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const plan = planParameterChange({
@@ -157,18 +147,35 @@ it('should refuse a native-value edit that addresses an object', async () => {
       requestId: 'object',
       pressure: 'final',
       expected: current.identity,
-      operation: {
-        kind: 'native-value',
-        group: 'default',
-        parameterId: `${admitted.source.revision}:/settings`,
-        resource: 'urn:taucad:parameter-schema:root',
-        pointer: '/settings',
-        value: { enabled: true },
-      },
+      operation: { kind: 'native-value', group: 'default', pointer: '/settings', value: { enabled: true } },
     },
   });
 
-  expect(plan).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  expect(plan).toMatchObject({
+    status: 'rejected',
+    code: 'REPRESENTATION_UNSUPPORTED',
+    message: '/settings is an object. Edit one of its fields, or replace the group values.',
+  });
+});
+
+it('refuses a unit-value on a declared field that carries no unit', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'unit-on-unbound',
+      pressure: 'final',
+      expected: current.identity,
+      operation: { kind: 'unit-value', group: 'default', pointer: '/label', inputUnit: 'mm', value: '2' },
+    },
+  });
+
+  expect(plan).toMatchObject({
+    status: 'rejected',
+    code: 'REPRESENTATION_UNSUPPORTED',
+    message: '/label declares no unit; send native-value.',
+  });
 });
 
 it('plans one checked first write without creating a record during resolution', async () => {
@@ -184,8 +191,6 @@ it('plans one checked first write without creating a record during resolution', 
     operation: {
       kind: 'native-value',
       group: 'default',
-      parameterId: 'width',
-      resource: admitted.bindings['/width']!.schema.resource,
       pointer: '/width',
       value: 101,
     },
@@ -229,8 +234,6 @@ it('names the missing group when a value edit addresses one that does not exist'
       operation: {
         kind: 'native-value',
         group: 'metric',
-        parameterId: 'width',
-        resource: admitted.bindings['/width']!.schema.resource,
         pointer: '/width',
         value: 101,
       },
@@ -251,8 +254,6 @@ it('requires explicit source-unit confirmation before one record write', async (
       kind: 'source-unit',
       mode: 'preserve-size',
       group: 'default',
-      parameterId: 'width',
-      resource: admitted.bindings['/width']!.schema.resource,
       pointer: '/width',
       unit: 'cm',
       producerCapability: {
@@ -557,20 +558,14 @@ it('writes arbitrary JSON property names without traversing object prototypes', 
       group: 'default',
       edits: [
         {
-          parameterId: 'prototype-marker',
-          resource: 'urn:taucad:parameter-schema:root',
           pointer: '/__proto__/unitsAuditMarker',
           value: 42,
         },
         {
-          parameterId: 'constructor-value',
-          resource: 'urn:taucad:parameter-schema:root',
           pointer: '/constructor/prototype/value',
           value: 7,
         },
         {
-          parameterId: 'escaped-value',
-          resource: 'urn:taucad:parameter-schema:root',
           pointer: '/safe~1branch/~0leaf',
           value: 3,
         },
@@ -658,11 +653,9 @@ const fieldBase = (pointer: string, value: number): NonNullable<ParameterSetRequ
 });
 
 const fieldRequest = (
-  admitted: Awaited<ReturnType<typeof twoFieldManifest>>,
   input: Readonly<{
     requestId: string;
     pointer: string;
-    parameterId: string;
     value: number;
     expected: ParameterSetRequest['expected'];
     base?: ParameterSetRequest['base'];
@@ -676,8 +669,6 @@ const fieldRequest = (
   operation: {
     kind: 'native-value',
     group: 'default',
-    parameterId: input.parameterId,
-    resource: admitted.bindings[input.pointer]!.schema.resource,
     pointer: input.pointer,
     value: input.value,
   },
@@ -688,10 +679,9 @@ it('keeps another field change when this field still matches its captured base',
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:1',
       pointer: '/width',
-      parameterId: 'width',
       value: 101,
       expected: current.identity,
     }),
@@ -706,10 +696,9 @@ it('keeps another field change when this field still matches its captured base',
   // The height editor still holds the pre-edit revision and has never been refreshed.
   const second = planParameterChange({
     current: first.proposed,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'height:1',
       pointer: '/height',
-      parameterId: 'height',
       value: 15,
       expected: current.identity,
       base: fieldBase('/height', 14),
@@ -722,10 +711,9 @@ it('keeps another field change when this field still matches its captured base',
 
   const wrongBase = planParameterChange({
     current: first.proposed,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'height:wrong-base',
       pointer: '/height',
-      parameterId: 'height',
       value: 15,
       expected: current.identity,
       base: fieldBase('/height', 13),
@@ -739,10 +727,9 @@ it('refuses a rebase when the field the draft touches changed underneath it', as
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:1',
       pointer: '/width',
-      parameterId: 'width',
       value: 101,
       expected: current.identity,
     }),
@@ -752,10 +739,9 @@ it('refuses a rebase when the field the draft touches changed underneath it', as
   }
   const conflicting = planParameterChange({
     current: first.proposed,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:2',
       pointer: '/width',
-      parameterId: 'width',
       value: 102,
       expected: current.identity,
       base: fieldBase('/width', 100),
@@ -769,10 +755,9 @@ it('never rebases across a manifest revision change', async () => {
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const stale = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'height:1',
       pointer: '/height',
-      parameterId: 'height',
       value: 15,
       expected: { ...current.identity, manifestRevision: `${current.identity.manifestRevision}-old` },
       base: fieldBase('/height', 14),
@@ -786,10 +771,9 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:1',
       pointer: '/width',
-      parameterId: 'width',
       value: 101,
       expected: current.identity,
     }),
@@ -802,10 +786,9 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
   const scoped: ReadonlyArray<readonly [string, ParameterSetRequest]> = [
     [
       'another pointer',
-      fieldRequest(admitted, {
+      fieldRequest({
         requestId: 'cross',
         pointer: '/width',
-        parameterId: 'width',
         value: 5,
         expected: stale,
         base: heightBase,
@@ -821,14 +804,7 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
         operation: {
           kind: 'batch',
           group: 'default',
-          edits: [
-            {
-              parameterId: 'height',
-              resource: admitted.bindings['/height']!.schema.resource,
-              pointer: '/height',
-              value: 1,
-            },
-          ],
+          edits: [{ pointer: '/height', value: 1 }],
         },
       } as unknown as ParameterSetRequest,
     ],
@@ -853,10 +829,9 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
   const inactive = planParameterChange({
     current: first.proposed,
     request: {
-      ...fieldRequest(admitted, {
+      ...fieldRequest({
         requestId: 'inactive',
         pointer: '/height',
-        parameterId: 'height',
         value: 15,
         expected: stale,
         base: heightBase,
@@ -864,8 +839,6 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
       operation: {
         kind: 'native-value',
         group: 'other',
-        parameterId: 'height',
-        resource: admitted.bindings['/height']!.schema.resource,
         pointer: '/height',
         value: 15,
       },
@@ -888,8 +861,6 @@ it('should refuse SOURCE_UNIT_REBIND_REQUIRED at admission for a marked claim wh
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: admitted.bindings['/width']!.schema.resource,
         pointer: '/width',
         unit: 'cm',
         producerCapability: {
@@ -915,8 +886,6 @@ it('should refuse SOURCE_UNIT_REBIND_REQUIRED at admission for a marked claim wh
       operation: {
         kind: 'native-value',
         group: 'default',
-        parameterId: 'width',
-        resource: edited.bindings['/width']!.schema.resource,
         pointer: '/width',
         value: 12,
       },
@@ -937,8 +906,6 @@ it('should refuse SOURCE_UNIT_REBIND_REQUIRED at admission for a marked claim wh
         operation: {
           kind: 'native-value',
           group: 'default',
-          parameterId: 'width',
-          resource: undeclared.bindings['/width']!.schema.resource,
           pointer: '/width',
           value: 12,
         },
@@ -1043,8 +1010,6 @@ it('should remove the claim when the producer unit is chosen again', async () =>
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: admitted.bindings['/width']!.schema.resource,
         pointer: '/width',
         unit: 'cm',
         producerCapability: capability,
@@ -1064,8 +1029,6 @@ it('should remove the claim when the producer unit is chosen again', async () =>
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: admitted.bindings['/width']!.schema.resource,
         pointer: '/width',
         unit: 'mm',
         producerCapability: capability,
@@ -1118,16 +1081,12 @@ const missingGroupOperations: ReadonlyArray<ParameterSetRequest['operation']> = 
   {
     kind: 'native-value',
     group: 'missing',
-    parameterId: 'width',
-    resource: 'urn:taucad:parameter-schema:root',
     pointer: '/width',
     value: 1,
   },
   {
     kind: 'unit-value',
     group: 'missing',
-    parameterId: 'width',
-    resource: 'urn:taucad:parameter-schema:root',
     pointer: '/width',
     inputUnit: 'cm',
     value: '1',
@@ -1135,14 +1094,12 @@ const missingGroupOperations: ReadonlyArray<ParameterSetRequest['operation']> = 
   {
     kind: 'batch',
     group: 'missing',
-    edits: [{ parameterId: 'width', resource: 'urn:taucad:parameter-schema:root', pointer: '/width', value: 1 }],
+    edits: [{ pointer: '/width', value: 1 }],
   },
   {
     kind: 'source-unit',
     mode: 'preserve-size',
     group: 'missing',
-    parameterId: 'width',
-    resource: 'urn:taucad:parameter-schema:root',
     pointer: '/width',
     unit: 'cm',
     producerCapability: {

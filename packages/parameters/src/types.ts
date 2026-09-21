@@ -29,21 +29,20 @@ export type ParameterSourceUnitCapability = Readonly<{
   capability: string;
 }>;
 
-/** Supported headless parameter operation intents. @public */
+/**
+ * Supported headless parameter operation intents. A field is named by `group` plus `pointer` under
+ * the manifest revision the request declares; nothing else identifies it. @public
+ */
 export type ParameterSetOperation =
   | Readonly<{
       kind: 'native-value';
       group: string;
-      parameterId: string;
-      resource: string;
       pointer: string;
       value: JSONValue;
     }>
   | Readonly<{
       kind: 'unit-value';
       group: string;
-      parameterId: string;
-      resource: string;
       pointer: string;
       inputUnit: string;
       value: string;
@@ -53,8 +52,6 @@ export type ParameterSetOperation =
       group: string;
       edits: ReadonlyArray<
         Readonly<{
-          parameterId: string;
-          resource: string;
           pointer: string;
           value: JSONValue;
           inputUnit?: string;
@@ -79,10 +76,9 @@ export type ParameterSetOperation =
       kind: 'source-unit';
       mode: 'preserve-size';
       group: string;
-      parameterId: string;
-      resource: string;
       pointer: string;
       unit: string;
+      /** The producer and revision sanctioning the rebind; it pins the producer, not the field. */
       producerCapability: ParameterSourceUnitCapability;
     }>;
 

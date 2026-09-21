@@ -8,7 +8,12 @@ import { fileParameterEntrySchema } from '@taucad/types';
 import type { FileParameterEntry, JSONValue, ParameterGroup } from '@taucad/types';
 import { parseInput } from '@taucad/units/input';
 import { convert, createQuantity } from '@taucad/units/quantity';
-import { admitParameterValues, resolveParameterBinding, resolveParameterBindingPointer } from '#manifest.js';
+import {
+  admitParameterValues,
+  resolveParameterBinding,
+  resolveParameterBindingPointer,
+  rootResource,
+} from '#manifest.js';
 import type { ParameterBinding, ParameterManifest, ParameterProvenance } from '#manifest.js';
 
 const failure = (code: string, message: string, applicationState?: string): Error =>
@@ -237,22 +242,6 @@ export const parameterRecordInputValues = (record: FileParameterEntry): Readonly
   return values;
 };
 
-const admittedBinding = (
-  manifest: ParameterManifest,
-  input: Readonly<{ parameterId: string; resource: string; pointer: string }>,
-): ParameterBinding => {
-  const binding = resolveParameterBinding(manifest, input.pointer);
-  if (
-    binding === undefined ||
-    binding.parameter.value !== input.parameterId ||
-    binding.schema.resource !== input.resource
-  ) {
-    throw failure('STALE_MANIFEST', 'The operation does not match an admitted manifest binding.');
-  }
-  return binding;
-};
-
-const rootParameterSchemaResource = 'urn:taucad:parameter-schema:root';
 const nonScalarSchemaTypes = new Set([
   'array',
   'object',
@@ -322,8 +311,7 @@ const schemaTypesAtPointer = (manifest: ParameterManifest, pointer: string): rea
         return [];
       }
       visited.add(key);
-      const targetSchema =
-        targetResource === rootParameterSchemaResource ? manifest.schema : manifest.resources[targetResource];
+      const targetSchema = targetResource === rootResource ? manifest.schema : manifest.resources[targetResource];
       return visit(schemaValueAtPointer(targetSchema, targetPointer), targetResource, remaining);
     };
     if (typeof record['$ref'] === 'string') {
@@ -356,27 +344,53 @@ const schemaTypesAtPointer = (manifest: ParameterManifest, pointer: string): rea
     }
     return output;
   };
-  return visit(manifest.schema, rootParameterSchemaResource, parts);
+  return visit(manifest.schema, rootResource, parts);
 };
 
-const admittedNativeBinding = (
-  manifest: ParameterManifest,
-  input: Readonly<{ parameterId: string; resource: string; pointer: string }>,
-): ParameterBinding | undefined => {
-  const binding = resolveParameterBinding(manifest, input.pointer);
+/** Whatever the manifest calls the declaration, so a refusal names the file the agent is editing. */
+const sourceName = (manifest: ParameterManifest): string =>
+  manifest.scope.kind === 'source' ? manifest.scope.entry : manifest.source.id;
+
+const nonScalarRefusal = (pointer: string, types: readonly string[]): Error => {
+  const noun = types.includes('object') ? 'an object' : types.includes('array') ? 'an array' : undefined;
+  return failure(
+    'REPRESENTATION_UNSUPPORTED',
+    noun === undefined
+      ? `${pointer} declares no editable scalar value.`
+      : `${pointer} is ${noun}. Edit one of its fields, or replace the group values.`,
+  );
+};
+
+/**
+ * Resolve a field named by pointer alone under the pinned manifest. A pointer the schema declares
+ * nowhere is an unknown field; one that is not an editable scalar is unrepresentable. A declared
+ * scalar with no binding resolves to `undefined` and its value is stored as sent.
+ */
+const admittedNativeBinding = (manifest: ParameterManifest, pointer: string): ParameterBinding | undefined => {
+  const binding = resolveParameterBinding(manifest, pointer);
   if (binding !== undefined) {
-    return admittedBinding(manifest, input);
+    return binding;
   }
-  const types = schemaTypesAtPointer(manifest, input.pointer);
-  if (
-    input.parameterId !== `${manifest.source.revision}:${input.pointer}` ||
-    input.resource !== rootParameterSchemaResource ||
-    !types.some((type) => type !== 'null') ||
-    types.some((type) => nonScalarSchemaTypes.has(type))
-  ) {
-    throw failure('STALE_MANIFEST', 'The operation does not match an admitted manifest binding.');
+  const types = schemaTypesAtPointer(manifest, pointer);
+  if (types.length === 0) {
+    throw failure(
+      'UNKNOWN_FIELD',
+      `${sourceName(manifest)} declares no parameter at ${pointer}. Use a pointer that get_parameters lists.`,
+    );
+  }
+  if (!types.some((type) => type !== 'null') || types.some((type) => nonScalarSchemaTypes.has(type))) {
+    throw nonScalarRefusal(pointer, types);
   }
   return undefined;
+};
+
+/** The same resolution for an operation that can only act on a field the manifest binds. */
+const admittedBinding = (manifest: ParameterManifest, pointer: string): ParameterBinding => {
+  const binding = admittedNativeBinding(manifest, pointer);
+  if (binding === undefined) {
+    throw failure('REPRESENTATION_UNSUPPORTED', `${pointer} declares no unit; send native-value.`);
+  }
+  return binding;
 };
 
 /**
@@ -681,7 +695,7 @@ export const planParameterRecord = (
         break;
       }
       case 'native-value': {
-        const binding = admittedNativeBinding(manifest, operation);
+        const binding = admittedNativeBinding(manifest, operation.pointer);
         const group = entry.groups[operation.group]!;
         const value =
           binding === undefined
@@ -698,7 +712,7 @@ export const planParameterRecord = (
         break;
       }
       case 'unit-value': {
-        const binding = admittedBinding(manifest, operation);
+        const binding = admittedBinding(manifest, operation.pointer);
         const group = entry.groups[operation.group]!;
         const effective = resolveEffectiveParameterBinding(manifest, operation.pointer, binding, group);
         const value = nativeUnitValue(effective, operation.value, operation.inputUnit);
@@ -713,9 +727,22 @@ export const planParameterRecord = (
         const group = entry.groups[operation.group]!;
         let values = structuredClone(group.values);
         for (const edit of operation.edits) {
-          const binding = admittedBinding(manifest, edit);
-          const effective = resolveEffectiveParameterBinding(manifest, edit.pointer, binding, group);
-          values = setPointer(values, edit.pointer, nativeUnitValue(effective, edit.value, edit.inputUnit));
+          // A unit-bearing edit needs a bound field; a plain one is the native-value rule.
+          const binding =
+            edit.inputUnit === undefined
+              ? admittedNativeBinding(manifest, edit.pointer)
+              : admittedBinding(manifest, edit.pointer);
+          values = setPointer(
+            values,
+            edit.pointer,
+            binding === undefined
+              ? edit.value
+              : nativeUnitValue(
+                  resolveEffectiveParameterBinding(manifest, edit.pointer, binding, group),
+                  edit.value,
+                  edit.inputUnit,
+                ),
+          );
         }
         const next = withoutEmptyClaims({ ...group, values });
         admitGroupValues(manifest, next, values);
@@ -724,7 +751,7 @@ export const planParameterRecord = (
         break;
       }
       case 'source-unit': {
-        const binding = admittedBinding(manifest, operation);
+        const binding = admittedBinding(manifest, operation.pointer);
         if (binding.unit === undefined || binding.representation !== 'binary64' || binding.space === 'point') {
           throw failure('REPRESENTATION_UNSUPPORTED', 'Source-unit changes require finite linear binary64 semantics.');
         }

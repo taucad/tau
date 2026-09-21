@@ -19,7 +19,8 @@ expectTypeOf<ParameterGroup>().toEqualTypeOf<{
   units?: Record<string, string>;
   sourceUnits?: Record<string, string>;
 }>();
-const field = { group: 'default', parameterId: 'width', resource: 'urn:test', pointer: '/width' } as const;
+// A field is named by its group and pointer under the manifest revision the request declares.
+const field = { group: 'default', pointer: '/width' } as const;
 
 // Every operation kind is a positive fixture of the public operation union.
 const operations = [
@@ -55,6 +56,36 @@ assertType<ParameterSetOperation>({
   // @ts-expect-error -- the operation vocabulary is closed
   kind: 'set-everything',
   group: 'default',
+});
+assertType<ParameterSetOperation>({
+  kind: 'native-value',
+  ...field,
+  // @ts-expect-error -- the package derives identity from the pinned manifest
+  parameterId: `${'sha256:1'}:/width`,
+  value: 1,
+});
+assertType<ParameterSetOperation>({
+  kind: 'unit-value',
+  ...field,
+  inputUnit: 'cm',
+  // @ts-expect-error -- no caller spells the root schema resource any more
+  resource: 'urn:taucad:parameter-schema:root',
+  value: '1',
+});
+assertType<ParameterSetOperation>({
+  kind: 'batch',
+  group: 'default',
+  // @ts-expect-error -- a batch edit is a pointer and a value; it carries no identity either
+  edits: [{ pointer: '/width', parameterId: 'width', resource: 'urn:test', value: 1 }],
+});
+assertType<ParameterSetOperation>({
+  kind: 'source-unit',
+  mode: 'preserve-size',
+  ...field,
+  unit: 'cm',
+  // @ts-expect-error -- source-unit keeps its producer pin and drops the field pair like every other kind
+  parameterId: 'width',
+  producerCapability: { producer: 'fixture', sourceRevision: 'source:1', capability: 'change-source-unit:v1' },
 });
 assertType<ParameterSetOperation>({
   // @ts-expect-error -- user-authored kind, space and reference claims were retired with the record ledger

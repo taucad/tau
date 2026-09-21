@@ -19,6 +19,7 @@ describe('no-engineering-vocabulary-in-copy', () => {
         { name: 'lowercase head in prose', code: "toast.info('Jump to the head of the list');" },
         { name: 'non-toast call', code: "console.error('checkout');" },
         { name: 'dynamic message', code: 'toast.error(message);' },
+        { name: 'bare toast with a dynamic message', code: 'toast(message);' },
         { name: 'dynamic description', code: "toast.error('Could not switch', { description: reason });" },
         {
           name: 'suppressed line',
@@ -32,6 +33,11 @@ describe('no-engineering-vocabulary-in-copy', () => {
         {
           name: 'banned noun in a toast argument',
           code: "toast.error('Could not move the checkout');",
+          errors: [{ messageId: 'violation', data: { word: 'checkout' } }],
+        },
+        {
+          name: 'banned noun in a bare toast argument',
+          code: "toast('Could not move the checkout');",
           errors: [{ messageId: 'violation', data: { word: 'checkout' } }],
         },
         {

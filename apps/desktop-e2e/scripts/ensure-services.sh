@@ -2,26 +2,21 @@
 #
 # Bring up the infrastructure every `apps/desktop-e2e` tier needs, once.
 #
-# The three steps used to be repeated verbatim in five Nx targets, and the third
-# of them — `api:billing-policy:publish:development` — only ever succeeds on a
-# database that has never published a billing policy. It pins
-# `--activation-id development-bootstrap-v1 --job-key development-bootstrap-v1
-# --expected-head-revision 0 --expected-predecessor-activation-id none`, so once
-# `billing.billing_policy_head` has moved it answers either "policy publication
-# job key conflicts with prior payload" (the checked-in policy file was
-# regenerated since the bootstrap publish) or a head-revision conflict. Every
-# desktop-e2e target therefore died before vitest started, and the two-client
-# tier's recorded runs all bypassed its target (defect C65, queue ruling P70).
+# `api:db-migrate` is now the whole bootstrap: it applies the schema, installs
+# the billing protections and the runtime role, and — with
+# `TAU_CLOUD_ENABLED=true` — derives the development tariff from the code route
+# table over `infra/billing/development.commercial.json` and publishes it when
+# its content moved. It is idempotent, so the head-revision probe this script
+# used to carry is gone: a second run reports `unchanged`, and a run after a
+# catalog change supersedes the stale tariff instead of refusing to (defect C,
+# and the C65/P70 failure the probe was working around).
 #
-# The fix is to treat the publish as what its own metadata calls it —
-# *bootstrap* — and run it only when this environment has no policy head at all.
-# A published head is exactly the state the bootstrap was trying to reach, so
-# skipping it is not a workaround: it is the guard the step always needed.
+# `billing-command` runs `ensureWorktreeDatabase` for development, so this
+# checkout's own fork of `tau_dev` is the one migrated and published to.
 #
 # `TAU_CLOUD_ENABLED=true` is exported for the same reason `global-setup.ts`
-# sets it on the API child: `billing-command` refuses to start without it, and
-# no desktop-e2e target ever supplied it, so even a virgin database could not
-# bootstrap from these targets.
+# sets it on the API child: without it `migrate` still applies the schema but
+# skips the tariff, and the funded desktop turn has nothing to bill against.
 #
 # Required env vars:
 #   None
@@ -41,17 +36,4 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 docker-compose -f "${REPO_ROOT}/infra/docker-compose.yml" up -d postgres redis minio minio-bootstrap
-pnpm --dir "${REPO_ROOT}" exec nx run api:db-migrate
-
-# The same psql vocabulary `src/support/two-client/tau-cloud.ts` seeds through,
-# against this checkout's database (a linked worktree owns a fork of `tau_dev`).
-database="$(node --input-type=module -e "import { localDatabaseName } from '${REPO_ROOT}/libs/utils/src/worktree-database.utils.ts'; console.log(localDatabaseName())")"
-existing_head="$(docker exec tau-postgres psql -qtAX -v ON_ERROR_STOP=1 -U dev_user -d "${database}" \
-  -c "SELECT revision FROM billing.billing_policy_head WHERE environment = 'development';")"
-
-if [[ -n "${existing_head}" ]]; then
-  echo "Development billing policy already published at revision ${existing_head}; skipping bootstrap."
-  exit 0
-fi
-
-TAU_CLOUD_ENABLED=true pnpm --dir "${REPO_ROOT}" exec nx run api:billing-policy:publish:development
+TAU_CLOUD_ENABLED=true pnpm --dir "${REPO_ROOT}" exec nx run api:db-migrate

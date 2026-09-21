@@ -446,7 +446,7 @@ const describeModel = (modelId: string): void => {
           modelId,
           slug: `${modelId}-parameter-propose`,
           prompts: [
-            `Call ${toolName.applyParameterOperation} exactly once with these exact values: action "propose", targetFile "main.ts", requestId "${parameterRequestId}", expected {"manifestRevision": "${parameterManifestRevision}"}, pressure "final", operation {"kind": "native-value", "group": "main", "parameterId": "width", "resource": "main.ts", "pointer": "/width", "value": 42}. Then reply with the outcome status its result reports and nothing else.`,
+            `Call ${toolName.applyParameterOperation} exactly once with these exact values: action "propose", targetFile "main.ts", requestId "${parameterRequestId}", expected {"manifestRevision": "${parameterManifestRevision}"}, pressure "final", operation {"kind": "native-value", "group": "main", "pointer": "/width", "value": 42}. Then reply with the outcome status its result reports and nothing else.`,
           ],
         });
 

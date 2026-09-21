@@ -366,8 +366,6 @@ describe('Build123d native kernel', () => {
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: width.parameter.value,
-        resource: width.schema.resource,
         pointer: '/width',
         unit: 'cm',
         producerCapability: {

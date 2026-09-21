@@ -12,7 +12,7 @@
 import { vi } from 'vitest';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
-import type { RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
+import type { BranchCreated, RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 const emptyStatus = (): RevisionStatusProjection => ({
@@ -81,7 +81,12 @@ export const revisionStatusHarness = {
     confirm: vi.fn(),
     cancel: vi.fn(),
     switchTo: vi.fn<(branch: string) => void>(),
-    createBranch: vi.fn<(name: string, from?: string) => void>(),
+    /* Resolves like the real verb does (P4); a caller places a chat on it. */
+    createBranch: vi.fn<(name: string, from?: string) => Promise<BranchCreated>>(async (name) => ({
+      branch: name,
+      checkoutId: `checkout-${name}`,
+      checkoutRoot: `/checkouts/checkout-${name}`,
+    })),
     discardBranch: vi.fn<(branch: string, checkoutId?: string) => void>(),
     mergeBranch: vi.fn<(branch: string) => void>(),
     renameBranch: vi.fn<(branch: string, name: string) => void>(),

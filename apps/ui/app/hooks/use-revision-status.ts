@@ -22,6 +22,7 @@ import type {
   WorkerRevisionRequest,
   WorkerRevisionResponse,
   WorkerRevisionResult,
+  BranchCreated,
   WorkerTurnPlacement,
 } from '#machines/file-manager.worker.revisions.js';
 import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
@@ -101,6 +102,14 @@ export type RevisionClient = Readonly<{
    * rather than the previous push's pack.
    */
   saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
+  /**
+   * Make a branch and wait for the checkout it was made on (P4).
+   *
+   * The correlated form of `send({ command: 'createBranch' })`. Rejects with
+   * the refusal's `code` attached, because the caller that places a chat on the
+   * new branch has to refuse the turn rather than silently run it elsewhere.
+   */
+  createBranch: (name: string, from?: string) => Promise<BranchCreated>;
   /** Connect, or do nothing when the connection is already open. */
   open: () => void;
   /**
@@ -140,6 +149,43 @@ type ClientState = {
  * the root alive for, and a close from either would be a lie.
  */
 const clients = new Map<string, ClientState>();
+
+/**
+ * Wait for the `branch` child's settlement of one *New branch* (P4).
+ *
+ * Name-matched on the toast channel, because that is the only correlation the
+ * host leg publishes: the child runs one verb at a time and the name is what
+ * the person typed.
+ *
+ * @param toasts - The client's own toast topic.
+ * @param name - The branch being made.
+ * @param ask - Sends the verb, once the listeners are attached.
+ * @returns The checkout the registry made for it.
+ */
+const awaitBranchCreated = async (
+  toasts: Topic<RevisionToast>,
+  name: string,
+  ask: () => void,
+): Promise<BranchCreated> => {
+  const created = Promise.withResolvers<BranchCreated>();
+  const unsubscribe = toasts.subscribe((toast) => {
+    if (toast.type === 'branch' && toast.operation === 'create' && toast.branch === name) {
+      created.resolve({ branch: name, checkoutId: toast.checkoutId ?? '', checkoutRoot: toast.checkoutRoot ?? '' });
+      return;
+    }
+    if (toast.type === 'error' && toast.subject === 'branch') {
+      created.reject(
+        Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
+      );
+    }
+  });
+  try {
+    ask();
+    return await created.promise;
+  } finally {
+    unsubscribe();
+  }
+};
 
 /** Build the renderer half of a host-owned native revision root. */
 export const createHostRevisionClient = (input: {
@@ -369,6 +415,12 @@ export const createHostRevisionClient = (input: {
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
+    /* The host answers this verb with its projection, not with the checkout, so
+     * the settlement is taken off the same toast stream the pane reads (P4). */
+    createBranch: async (name, from) =>
+      awaitBranchCreated(toasts, name, () => {
+        send({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) });
+      }),
     open: () => {
       // async-iife: bootstrap -- project lifecycle owns this connection and errors surface as toasts.
       void (async (): Promise<void> => {
@@ -558,7 +610,13 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     subscribeToasts: (listener) => toasts.subscribe(listener),
     admitTurn: async (placement) => {
       const result = await ask({ command: 'admitTurn', ...placement });
-      return result.kind === 'placement' ? result.placement : { checkoutId: '', root: '', baseRevisionId: '' };
+      if (result.kind !== 'placement') {
+        /* An empty root used to be manufactured here, and a binding rooted at
+         * `''` ran the turn on the workspace's files instead of the
+         * checkout's (P2). A turn with no placement is refused. */
+        throw new Error('The revision root answered the admission without a placement.');
+      }
+      return result.placement;
     },
     log: async (request) => {
       const result = await ask({
@@ -598,6 +656,14 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     },
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+    },
+    createBranch: async (name, from) => {
+      const result = await ask({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) });
+      if (result.kind !== 'branch') {
+        throw new Error('The revision root answered the branch without the checkout it made.');
+      }
+      const { kind: _kind, ...created } = result;
+      return created;
     },
     open: () => {
       open();
@@ -896,7 +962,8 @@ export type RevisionCommands = Readonly<{
   followChat: (chatId: string) => void;
   pinTo: (checkoutId: string) => void;
   /** The *Branches* region's verbs; each one is `branch.machine`'s own event. */
-  createBranch: (name: string, from?: string) => void;
+  /** Resolves with the checkout the branch was made on; rejects with its code (P4). */
+  createBranch: (name: string, from?: string) => Promise<BranchCreated>;
   discardBranch: (branch: string, checkoutId?: string) => void;
   mergeBranch: (branch: string) => void;
   renameBranch: (branch: string, name: string) => void;
@@ -993,12 +1060,12 @@ export const useRevisionCommands = (): RevisionCommands => {
       switchTo: (branch: string) => client?.send({ command: 'switch', branch }),
       followChat: (chatId: string) => client?.send({ command: 'followChat', chatId }),
       pinTo: (checkoutId: string) => client?.send({ command: 'pinTo', checkoutId }),
-      createBranch: (name: string, from?: string) =>
-        client?.send({
-          command: 'createBranch',
-          name,
-          ...(from === undefined ? {} : { from }),
-        }),
+      createBranch: async (name: string, from?: string) => {
+        if (client === undefined) {
+          throw new Error('This project has no revision root to make a branch in.');
+        }
+        return client.createBranch(name, from);
+      },
       discardBranch: (branch: string, checkoutId?: string) =>
         client?.send({
           command: 'discardBranch',

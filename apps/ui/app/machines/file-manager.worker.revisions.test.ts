@@ -298,6 +298,93 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await checkout.readFile('main.scad', 'utf8')).toBe('cube(10);');
   });
 
+  /* The same rule where the project *has* a head: P3 says a branch starts from
+   * what the person sees, so the edits on screen are recorded first and the
+   * branch carries them — not the head they were made on top of. */
+  it('should carry unrecorded edits into a branch made from a checkout that has a head', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    alpha.send({ command: 'saveRevision' });
+    await alpha.settle();
+    const root = await fixture.root('alpha');
+    const recorded = root.status().headRevisionId;
+
+    await project.writeFile('main.scad', 'cube(20);');
+    fixture.announce('alpha', ['main.scad']);
+    await alpha.settle();
+
+    alpha.send({ command: 'createBranch', name: 'isolated-run' });
+    for (let attempt = 0; attempt < 40 && root.status().branches.length < 2; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the registry's own answer.
+      await alpha.settle();
+    }
+
+    const created = root.status().branches.find((row) => row.name === 'isolated-run');
+    const checkout = fixture.service.createRootedFileSystem(created?.checkoutRoot ?? '');
+    expect(await checkout.readFile('main.scad', 'utf8')).toBe('cube(20);');
+    /* The live checkout moved too: the edits are in a revision on it now. */
+    expect(root.status().headRevisionId).not.toBe(recorded);
+  });
+
+  it('should answer a createBranch with the checkout it made once the branch exists', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+
+    alpha.send({ command: 'createBranch', name: 'isolated-run', id: 91 });
+    const root = await fixture.root('alpha');
+    for (
+      let attempt = 0;
+      attempt < 40 && !alpha.frames.some((frame) => 'id' in frame && frame.id === 91);
+      attempt += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await alpha.settle();
+    }
+
+    const created = root.status().branches.find((row) => row.name === 'isolated-run');
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 91)).toEqual({
+      type: 'result',
+      id: 91,
+      result: {
+        kind: 'branch',
+        branch: 'isolated-run',
+        checkoutId: created?.checkoutId,
+        checkoutRoot: created?.checkoutRoot,
+      },
+    });
+  });
+
+  it('should answer a refused createBranch with its code', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    alpha.send({ command: 'saveRevision' });
+    await alpha.settle();
+
+    /* `main` already has a checkout, which the registry refuses before any port
+     * call — the refusal a person sees most often. */
+    alpha.send({ command: 'createBranch', name: 'main', id: 92 });
+    for (
+      let attempt = 0;
+      attempt < 40 && !alpha.frames.some((frame) => 'id' in frame && frame.id === 92);
+      attempt += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await alpha.settle();
+    }
+
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 92)).toMatchObject({
+      type: 'error',
+      id: 92,
+      message: 'That branch already has a checkout.',
+    });
+  });
+
   it('should adopt a daemon revision into the worker projection', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');

@@ -46,6 +46,9 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   restore: 'revision_restore_failed',
   branch: 'revision_branch_failed',
   save: 'revision_save_failed',
+  /* Not raised here: a turn announces its own failure through `turn.failed`,
+   * which `revision-outcomes.tsx` phrases from the same table (W9). */
+  turn: 'revision_turn_failed',
 };
 
 /**

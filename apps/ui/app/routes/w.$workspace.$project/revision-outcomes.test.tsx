@@ -16,6 +16,7 @@ import {
   RevisionOutcomes,
   useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
+import { revisionFailureCopy } from '#lib/revision-failure-copy.js';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
 const listeners = new Set<(event: WorkerRevisionEvent) => void>();
@@ -105,13 +106,48 @@ describe('RevisionOutcomes', () => {
       reason: 'The turn ended before it recorded a revision.',
     });
 
+    /* E5: nothing classified this one, so a person is told the one thing they
+     * can do rather than a sentence a machine wrote for a log. */
     expect(errors).toEqual([
       {
         title: 'Nothing was saved for that change',
-        description: 'The turn ended before it recorded a revision.',
+        description: revisionFailureCopy.turn.fallback,
       },
     ]);
     expect(getByTestId('latest')).toHaveTextContent('failed:turn-1');
+  });
+
+  /* P4, W4 §D: `turn.machine` authors `reason`, and two of its sentences name
+   * a checkout — Rule 1's first banned word. The code is what crosses; the
+   * table is what a person reads; the diagnostic goes to the console. */
+  it('phrases the failure from its code and never prints the machine’s sentence', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderTurnOutcomes();
+
+    publish({
+      type: 'turn.failed',
+      turnId: 'turn-4',
+      runId: 'run-4',
+      chatId: 'chat-1',
+      checkoutId: 'live',
+      reason: 'The checkout did not settle the cut in time.',
+      code: 'CUT_TIMED_OUT',
+    });
+
+    expect(errors).toEqual([
+      {
+        title: 'Nothing was saved for that change',
+        description: 'Tau took too long to record that change. Try sending it again.',
+      },
+    ]);
+    expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/checkout/iu);
+    expect(logged).toHaveBeenCalledWith(
+      '[revisions]',
+      'turn',
+      'CUT_TIMED_OUT',
+      'The checkout did not settle the cut in time.',
+    );
+    logged.mockRestore();
   });
 
   it('says so when a turn conflicts, in document words', () => {

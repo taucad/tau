@@ -58,6 +58,7 @@ import { revisionId } from '@taucad/revisions/algorithms';
 import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 
 /**
  * The versioned paths one content-change event touches inside this project.
@@ -660,7 +661,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
      * `finalized` or `conflicted` turn held its lease, so its admission was
      * already resolved at `leased` and there is nothing here to settle.
      */
-    refuseAdmission(event.runId, failure.reason);
+    console.error('[revisions] turn', failure.code, failure.reason);
+    refuseAdmission(event.runId, describeRevisionFailure('turn', failure.code).description);
   });
   /* R10: a second admission for a turn id the root still holds is answered now,
    * with its own code, instead of waiting out `admissionMilliseconds`. Edit and

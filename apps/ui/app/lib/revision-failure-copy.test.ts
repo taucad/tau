@@ -54,6 +54,22 @@ describe('describeRevisionFailure', () => {
     expect(describeRevisionFailure('restore', 'ENGINE_UNAVAILABLE').title).toBe('Restore failed');
   });
 
+  /* The fourth subject is not a toast channel at all: a turn that recorded
+   * nothing is announced by `turn.failed`, whose `reason` the machines author
+   * — "The checkout did not settle the cut in time." (P4, W4 §D). */
+  it('phrases a turn that recorded nothing, never in the machine’s own words', () => {
+    expect(describeRevisionFailure('turn', 'CUT_TIMED_OUT')).toEqual({
+      title: 'Nothing was saved for that change',
+      description: 'Tau took too long to record that change. Try sending it again.',
+    });
+    expect(describeRevisionFailure('turn', 'LEASE_UNAVAILABLE').description).toContain('Another window');
+    expect(describeRevisionFailure('turn', undefined).description).toBe(revisionFailureCopy.turn.fallback);
+    /* A release is a category of its own: the turn was let go, not broken. */
+    expect(describeRevisionFailure('turn', 'TURN_RELEASED').description).toBe(
+      'The turn ended before it recorded a revision.',
+    );
+  });
+
   /* E5: a failure with no code is the common one — an engine `Error` such as
    * `Buffer is not defined`. A person cannot act on that sentence, so they get
    * the one thing they can do and a developer reads the console. */

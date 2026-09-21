@@ -14,8 +14,11 @@
  * object property here may not be (`@typescript-eslint/naming-convention`).
  */
 
-/** The three verbs whose refusals reach the tree's one error channel. */
-export type RevisionFailureSubject = 'restore' | 'branch' | 'save';
+/**
+ * The three verbs whose refusals reach the tree's one error channel, and the
+ * turn, which announces its own (`turn.failed`).
+ */
+export type RevisionFailureSubject = 'restore' | 'branch' | 'save' | 'turn';
 
 /** Whatever the engine itself could not do, said the same way for every verb. */
 const engineCopy: ReadonlyArray<readonly [string, string]> = [
@@ -56,6 +59,21 @@ export const revisionFailureCopy: Readonly<
     codes: new Map([
       ...engineCopy,
       ['UNKNOWN_REVISION', 'The revision this change builds on is not in this project any more.'],
+    ]),
+  },
+  turn: {
+    title: 'Nothing was saved for that change',
+    fallback: 'Tau could not record what that change produced. Try sending it again.',
+    codes: new Map([
+      ...engineCopy,
+      /* Another document of this project is mid-change on the same files. */
+      ['LEASE_UNAVAILABLE', 'Another window has this project open. Wait for it to finish, then try again.'],
+      ['BASE_CUT_TIMED_OUT', 'Tau took too long to save this project’s earlier edits. Try sending that again.'],
+      ['CAS_LOST', 'Something else changed this project at the same time. Try sending that again.'],
+      ['CUT_TIMED_OUT', 'Tau took too long to record that change. Try sending it again.'],
+      ['UNKNOWN_REVISION', 'The version that change built on is not in this project any more.'],
+      /* Let go before it recorded anything — a stop, a reload, an abandonment. */
+      ['TURN_RELEASED', 'The turn ended before it recorded a revision.'],
     ]),
   },
 };

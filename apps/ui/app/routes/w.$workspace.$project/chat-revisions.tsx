@@ -24,6 +24,7 @@ import {
   useRevisionCommands,
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
@@ -206,7 +207,7 @@ function WhereYouAre({
           <span className='flex-1'>
             {outcome.kind === 'conflicted'
               ? 'This change needs your attention: two versions changed the same files.'
-              : `Nothing was saved for this change.${outcome.reason === undefined ? '' : ` ${outcome.reason}`}`}
+              : `Nothing was saved for this change. ${describeRevisionFailure('turn', outcome.code).description}`}
           </span>
           <Button
             size='xs'

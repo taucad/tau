@@ -17,6 +17,7 @@ import type { RevisionRow } from '@taucad/revisions';
 import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
 const projectRef = {
@@ -50,6 +51,13 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
 }));
 const chats = [{ id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+/* The pane is the second surface on the same notice as the toast; the store
+   behind it is written by `RevisionOutcomes`, which this pane does not mount. */
+let turnOutcomes: readonly TurnOutcomeNotice[] = [];
+vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
+  useTurnOutcomes: () => turnOutcomes,
+  clearTurnOutcome: vi.fn(),
+}));
 
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
@@ -78,6 +86,7 @@ const renderPane = (): void => {
 
 beforeEach(() => {
   revisionStatusHarness.reset();
+  turnOutcomes = [];
 });
 
 describe('Revisions pane', () => {
@@ -421,6 +430,17 @@ describe('Revisions pane', () => {
     expect(alert).toHaveTextContent('That file is no longer in this revision.');
     expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Conflict view for src/bracket.ts' })).not.toBeInTheDocument();
+  });
+
+  /* P4, W4 §D: the inline card is the toast's second surface, so it reads the
+     same table. `turn.machine`'s own sentence names a checkout (Rule 1). */
+  it('phrases a turn that saved nothing from its code, never from the machine', () => {
+    turnOutcomes = [{ projectId: 'p', kind: 'failed', turnId: 'turn-1', chatId: 'chat-1', code: 'CUT_TIMED_OUT' }];
+    renderPane();
+
+    const alert = screen.getByRole('alert', { name: 'Turn outcome' });
+    expect(alert).toHaveTextContent('Tau took too long to record that change.');
+    expect(alert.textContent).not.toMatch(/checkout/iu);
   });
 
   it('switches to a branch the person picked', async () => {

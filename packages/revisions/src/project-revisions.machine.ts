@@ -36,7 +36,7 @@ import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncFacet, SyncMachineEvent, SyncPushOutcome } from '#sync.machine.js';
 import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
-import type { TurnOutcome, TurnSettlement } from '#turn.machine.js';
+import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
 
 /** What one checkout last reported about itself. @public */
 export type CheckoutStatusEntry = Readonly<{ status: CheckoutStatus; headRevisionId: string | undefined }>;
@@ -280,6 +280,7 @@ export type ProjectRevisionsMachineEvent =
       runId: string;
       outcome: TurnOutcome;
       reason?: string;
+      code?: TurnFailureCode;
     }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
@@ -371,8 +372,10 @@ export type ProjectRevisionsMachineEmitted =
       checkoutId: string | undefined;
       runId: string;
       outcome: TurnOutcome;
-      /** Why it ended, when the machine had a reason to give. */
+      /** Why it ended, when the machine had a reason to give. A diagnostic. */
       reason?: string;
+      /** The same refusal as a category, which is what a page phrases (P4). */
+      code?: TurnFailureCode;
     }>
   | Readonly<{
       type: 'switchResolved';

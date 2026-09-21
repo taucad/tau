@@ -47,6 +47,10 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  * 21  the base mint has the same escapes as the cut it mirrors (R21): `casLost`
  *     fails it fast, the settlement bound ends it, and `release` /
  *     `turnAbandoned` end any of `preparing` with no lease to retire
+ * 22  every failure names a `code` the page can phrase (P4): the port's own on
+ *     a rejection that carried one, the turn's own for a lost CAS, a waited-out
+ *     cut or base cut and a refused lease, and none at all when nothing
+ *     classified it (E5)
  * --  start and stop leak no child, the snapshot is serializable and holds no
  *     function, and the subpath exports exactly one machine value
  */
@@ -192,11 +196,15 @@ describe('turnMachine', () => {
     const harness = start();
     const { actor, promises } = harness;
 
-    promises.settle('prepare', { error: new Error('no checkout') });
+    promises.settle('prepare', {
+      error: Object.assign(new Error('no checkout'), { code: 'ENGINE_UNAVAILABLE' }),
+    });
     await flush();
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
     expect(actor.getSnapshot().context.reason).toContain('no checkout');
+    /* P4: the port classified it, so the page never has to read the sentence. */
+    expect(actor.getSnapshot().context.code).toBe('ENGINE_UNAVAILABLE');
     expect(promises.inputsFor('retireLease')).toEqual([]);
 
     actor.stop();
@@ -212,6 +220,8 @@ describe('turnMachine', () => {
     await flush();
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
+    /* E5: nothing classified this, so the page says its own fallback. */
+    expect(actor.getSnapshot().context.code).toBeUndefined();
 
     actor.stop();
   });
@@ -244,6 +254,7 @@ describe('turnMachine', () => {
 
     expect(actor.getSnapshot().matches('retiring')).toBe(true);
     expect(actor.getSnapshot().context.reason).toContain('another document holds it');
+    expect(actor.getSnapshot().context.code).toBe('LEASE_UNAVAILABLE');
 
     actor.stop();
   });
@@ -389,6 +400,9 @@ describe('turnMachine', () => {
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
     expect(actor.getSnapshot().context.reason).toBe('cas-lost');
+    expect(actor.getSnapshot().context.code).toBe('CAS_LOST');
+    /* The code travels with the release, which is what the page reads. */
+    expect(parent.events.find((event) => event.type === 'turnReleased')).toMatchObject({ code: 'CAS_LOST' });
 
     actor.stop();
   });
@@ -404,6 +418,7 @@ describe('turnMachine', () => {
     await flush();
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(actor.getSnapshot().context.code).toBe('CUT_TIMED_OUT');
 
     actor.stop();
   });
@@ -507,11 +522,14 @@ describe('turnMachine', () => {
     second.actor.send({ type: 'turnCompleted' });
     second.promises.settle('capture', { output: { captureId: 'capture-1' } });
     await flush();
-    second.promises.settle('merge', { error: new Error('merge broke') });
+    second.promises.settle('merge', {
+      error: Object.assign(new Error('merge broke'), { code: 'MISSING_LARGE_OBJECT' }),
+    });
     await flush();
     second.promises.settle('retireLease', { output: undefined });
     await flush();
     expect(second.actor.getSnapshot().matches('failed')).toBe(true);
+    expect(second.actor.getSnapshot().context.code).toBe('MISSING_LARGE_OBJECT');
     second.actor.stop();
   });
 
@@ -642,6 +660,7 @@ describe('turnMachine', () => {
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
     expect(actor.getSnapshot().context.reason).toBe('cas-lost');
+    expect(actor.getSnapshot().context.code).toBe('CAS_LOST');
     expect(promises.inputsFor('writeLease')).toEqual([]);
 
     actor.stop();
@@ -656,6 +675,9 @@ describe('turnMachine', () => {
     clock.advance(60_000);
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
+    /* Its own code: the base cut and the turn's cut fail for different reasons
+     * and a person is told different things (P4). */
+    expect(actor.getSnapshot().context.code).toBe('BASE_CUT_TIMED_OUT');
     expect(promises.inputsFor('writeLease')).toEqual([]);
 
     actor.stop();

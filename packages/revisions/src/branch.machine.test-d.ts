@@ -11,7 +11,8 @@ expectTypeOf(branchMachine).toExtend<AnyStateMachine>();
 expectTypeOf<keyof BranchActors>().toEqualTypeOf<'checkBranch' | 'applySwitch' | 'merge' | 'rename'>();
 
 /* The five verbs of the architecture's `branch.machine` row, plus the two the
- * confirmation needs and the three the parent answers with. */
+ * confirmation needs, the three the parent answers with, and the four answers
+ * to the cut a *New branch* asks the root for (P3). */
 expectTypeOf<BranchMachineEvent['type']>().toEqualTypeOf<
   | 'switch'
   | 'merge'
@@ -23,6 +24,10 @@ expectTypeOf<BranchMachineEvent['type']>().toEqualTypeOf<
   | 'selectBranch'
   | 'branchesChanged'
   | 'operationFailed'
+  | 'revisionMinted'
+  | 'nothingToSave'
+  | 'cutFailed'
+  | 'casLost'
 >();
 
 expectTypeOf<BranchMachineEmitted['type']>().toEqualTypeOf<

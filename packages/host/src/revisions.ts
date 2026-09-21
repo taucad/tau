@@ -937,14 +937,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       value: revisionJson({ ...toast, type: 'branch' }),
     });
   });
-  branchChild?.on('toast.error', (toast) => {
+  /* Whole, like `toast.branch` above: the code phrases the refusal on the
+   * page and the verb and branch let a waiting create tell its own refusal
+   * from another verb's. */
+  branchChild?.on('toast.error', ({ type: _type, ...toast }) => {
     emitChannel({
       kind: 'toast',
-      value: revisionJson({
-        type: 'error',
-        subject: 'branch',
-        message: toast.message,
-      }),
+      value: revisionJson({ ...toast, type: 'error', subject: 'branch' }),
     });
   });
   const admit = async (input: {

@@ -7,14 +7,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  ChangeEventBus,
-  MountTable,
-  policyAtRoot,
-  ProviderRegistry,
-  ResourceQueue,
-  WorkspaceFileService,
-} from '@taucad/filesystem';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import type { PathPolicy } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -61,20 +55,25 @@ describe('exposeFileSystem masked change delivery', () => {
     readonly bus: ChangeEventBus;
     readonly ready: Promise<void>;
     readonly serverHandleCount: () => number;
+    readonly handlerPolicy: () => PathPolicy | undefined;
   } => {
     const bus = new ChangeEventBus();
+    let handlerPolicy: PathPolicy | undefined;
     const handle = exposeFileSystem(
       {},
       {
         changeEventBus: bus,
         policy: tauPathPolicy,
-        handlerForRoot: () =>
-          options?.refuse === true
+        // oxlint-disable-next-line max-params -- RootedFileSystemHandlerFactory's own arity.
+        handlerForRoot: (_root, _context, _consumer, rootPolicy) => {
+          handlerPolicy = rootPolicy;
+          return options?.refuse === true
             ? undefined
             : {
                 capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
                 readFile: async () => new Uint8Array([1]),
-              },
+              };
+        },
       },
     );
     const channel = new MessageChannel();
@@ -98,7 +97,13 @@ describe('exposeFileSystem masked change delivery', () => {
       handle.cleanup();
       channel.port1.close();
     });
-    return { received, bus, ready: proxy.ready, serverHandleCount: () => handle.serverHandles.size };
+    return {
+      received,
+      bus,
+      ready: proxy.ready,
+      serverHandleCount: () => handle.serverHandles.size,
+      handlerPolicy: () => handlerPolicy,
+    };
   };
 
   /* The visible sibling is the marker: once it has arrived, anything emitted
@@ -115,6 +120,23 @@ describe('exposeFileSystem masked change delivery', () => {
       { timeout: 5000 },
     );
   };
+
+  /*
+   * G0b-6/R2: the host used to spell the policy twice — `policyAtRoot` of its
+   * own for the view, and the bridge's for the stream — with nothing tying the
+   * two together. The bridge now hands the factory the root-rebased policy it
+   * masks the stream with, so a rooted connection's view and its stream are one
+   * object by construction.
+   */
+  it('should hand the rooted factory the policy rebased on its own root', async () => {
+    const { ready, handlerPolicy } = connect('user');
+    await ready;
+
+    const policy = handlerPolicy();
+    expect(policy).toBeDefined();
+    expect(policy!.classify('.tau/binding.json').agentAccess).toBe('hidden');
+    expect(policy!.classify('src/a.ts').agentAccess).not.toBe('hidden');
+  });
 
   it.each(['user', 'agent'] as const)('should not deliver a hidden path to the %s view', async (consumer) => {
     const { received, bus } = connect(consumer);
@@ -309,9 +331,9 @@ describe('exposeFileSystem workspace-root masking', () => {
         {
           changeEventBus: bus,
           policy: tauPathPolicy,
-          handlerForRoot: (scopeRoot, context, scopeConsumer) => {
+          // oxlint-disable-next-line max-params -- RootedFileSystemHandlerFactory's own arity.
+          handlerForRoot: (scopeRoot, context, scopeConsumer, policy) => {
             const filesystem = service.createRootedFileSystem(scopeRoot, context);
-            const policy = policyAtRoot(tauPathPolicy, scopeRoot);
             const view =
               scopeConsumer === 'working-copy'
                 ? filesystem

@@ -92,6 +92,7 @@ const createFixture = async (partSource: string) => {
   const workerScope = new EventTarget();
   vi.stubGlobal('self', workerScope);
   const exposedFileSystem = exposeFileSystem(workspaceBridgeService(fileService), {
+    policy: tauPathPolicy,
     changeEventBus: eventBus,
     /* The worker's own switch (W2): the kernel names `'agent'`, so this fixture
      * renders through the masked view it really reads, not the checkout. */

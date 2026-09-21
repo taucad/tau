@@ -14,6 +14,7 @@ import { OPFSProvider } from '#backend/opfs-provider.js';
 import { NodeFsProvider } from '#backend/node/provider.js';
 import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
 import { serveNodeFsProvider } from '#backend/node/host.js';
+import { tauPathPolicy } from '#path-registry.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,7 +72,7 @@ const providers: ReadonlyArray<{
     create: async () => {
       const { port1, port2 } = new MessageChannel();
       const root = createTemporaryRoot();
-      const stop = serveNodeFsProvider(port2, { allowRoot: (candidate) => candidate === root });
+      const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
       const channel = new NodeFsChannel(port1);
       disposers.push(() => {
         channel.close();

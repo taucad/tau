@@ -12,6 +12,7 @@ import {
   waitForWorkerReady,
   workerReadyMessageType,
 } from '@taucad/fs-bridge';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
@@ -113,7 +114,7 @@ describe('filesystem high-level wrappers', () => {
     it('should support custom messageType', async () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- filesystem paths use non-camelCase names
       const fs = makeFs({ 'custom.txt': 'custom' });
-      activeHandle = exposeFileSystem(fs, { messageType: 'myBridge' });
+      activeHandle = exposeFileSystem(fs, { policy: tauPathPolicy, messageType: 'myBridge' });
 
       const channel = new MessageChannel();
 

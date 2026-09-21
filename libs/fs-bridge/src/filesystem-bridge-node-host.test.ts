@@ -83,6 +83,7 @@ type NodeHost = {
 const hostOnNode = ({ service, bus }: Workspace): NodeHost => {
   const boundary = new MessageChannel();
   const exposed = exposeFileSystem(workspaceBridgeService(service), {
+    policy: tauPathPolicy,
     changeEventBus: bus,
     /*
      * The composition every host performs (charter D2): the connection's view,

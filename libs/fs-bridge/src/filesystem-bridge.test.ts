@@ -14,6 +14,7 @@ import {
   WorkspaceMutationError,
 } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
 import type { FileSystemBridgeHello, FileSystemBridgeProxy } from '@taucad/fs-bridge';
@@ -726,6 +727,40 @@ describe('createFileSystemBridgeProxy', () => {
       close();
     }
   });
+
+  /*
+   * G2c-2: a host that dies after its consumer is ready takes its port with it,
+   * and the channel already treats that death as the bye frame the peer never
+   * sent. `closed` is how a consumer above the transport learns of it — the
+   * Worker `error` event does not mean the proxies are dead, and this does.
+   */
+  it('should settle `closed` when the served port dies, and refuse calls afterwards', async () => {
+    const channel = new MessageChannel();
+    createBridgeServer({ exists: async () => true }, fsBridgePort(channel.port1, 'fs-bridge-port-death-server'), {
+      hello: createFileSystemBridgeHello({
+        state: 'ready',
+        capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
+        watchable: false,
+      }),
+      protocolSchemas: fileSystemBridgeSchemas,
+    });
+    const proxy = createFileSystemBridgeProxy({
+      port: fsBridgePort(channel.port2, 'fs-bridge-port-death-client'),
+      dispose: () => {
+        channel.port2.close();
+      },
+    });
+
+    await proxy.ready;
+    await expect(proxy.exists('main.ts')).resolves.toBe(true);
+
+    channel.port1.close();
+
+    await expect(proxy.closed).resolves.toBeUndefined();
+    await expect(proxy.exists('main.ts')).rejects.toThrow(/closed/i);
+
+    proxy.dispose();
+  });
 });
 
 describe('exposeFileSystem coalesced delivery', () => {
@@ -821,6 +856,7 @@ describe('exposeFileSystem coalesced delivery', () => {
     const handle = exposeFileSystem(
       {},
       {
+        policy: tauPathPolicy,
         changeEventBus: bus,
         createCoalescer: (deliver, coalescingWindow, onOverflow) =>
           new EventCoalescer(deliver, { coalescingWindow, maxQueueDepth: 2, onOverflow }),
@@ -881,6 +917,7 @@ describe('exposeFileSystem coalesced delivery', () => {
     const handle = exposeFileSystem(
       {},
       {
+        policy: tauPathPolicy,
         changeEventBus: bus,
         createCoalescer: (deliver, coalescingWindow, onOverflow) =>
           new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
@@ -945,9 +982,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
           bus.emit(event);
         },
       },
-      {
-        changeEventBus: bus,
-      },
+      { policy: tauPathPolicy, changeEventBus: bus },
     );
 
     const fireConnect = (port: MessagePort) => {
@@ -1012,7 +1047,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       crossTabCoordinator,
       mountTable,
     });
-    const handle = exposeFileSystem(service, { changeEventBus: bus });
+    const handle = exposeFileSystem(service, { policy: tauPathPolicy, changeEventBus: bus });
     const fireConnect = (port: MessagePort): void => {
       const messageHandler = messageHandlers[0];
       expect(messageHandler).toBeDefined();
@@ -1150,7 +1185,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       await handler(context, bus, userArgs);
     };
 
-    const handle = exposeFileSystem(handlers, { changeEventBus: bus });
+    const handle = exposeFileSystem(handlers, { policy: tauPathPolicy, changeEventBus: bus });
 
     const fireConnect = (port: MessagePort): void => {
       const mh = messageHandlers[0];
@@ -1316,12 +1351,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
   it('should deliver observer-sourced bus events to every connected port', async () => {
     const bus = new ChangeEventBus();
 
-    const handle = exposeFileSystem(
-      { readFile: vi.fn() },
-      {
-        changeEventBus: bus,
-      },
-    );
+    const handle = exposeFileSystem({ readFile: vi.fn() }, { policy: tauPathPolicy, changeEventBus: bus });
 
     const fireConnect = (port: MessagePort) => {
       messageHandlers[0]!(
@@ -1420,7 +1450,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       roots: [],
     });
 
-    const handle = exposeFileSystem(service, { changeEventBus: bus });
+    const handle = exposeFileSystem(service, { policy: tauPathPolicy, changeEventBus: bus });
     const channel = new MessageChannel();
     messageHandlers[0]!(
       new MessageEvent('message', {
@@ -1489,7 +1519,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     const handlerForRoot = vi.fn((root: string, context: { originClientId?: string }) =>
       service.createRootedFileSystem(root, context),
     );
-    const handle = exposeFileSystem(service, { changeEventBus: bus, handlerForRoot });
+    const handle = exposeFileSystem(service, { policy: tauPathPolicy, changeEventBus: bus, handlerForRoot });
     const connect = (port: MessagePort, root: string): void => {
       messageHandlers[0]!(
         new MessageEvent('message', {
@@ -1587,6 +1617,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       roots: [],
     });
     const handle = exposeFileSystem(service, {
+      policy: tauPathPolicy,
       changeEventBus: bus,
       handlerForRoot: (root, context) => service.createRootedFileSystem(root, context),
     });
@@ -1630,7 +1661,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
   });
 
   it('returns a typed root error over RPC instead of exposing the authority namespace', async () => {
-    const handle = exposeFileSystem({}, { handlerForRoot: () => undefined });
+    const handle = exposeFileSystem({}, { policy: tauPathPolicy, handlerForRoot: () => undefined });
     const channel = new MessageChannel();
     messageHandlers[0]!(
       new MessageEvent('message', {
@@ -1681,7 +1712,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' } as const,
       readFile: async () => new Uint8Array([1]),
     }));
-    const handle = exposeFileSystem({}, { handlerForRoot });
+    const handle = exposeFileSystem({}, { policy: tauPathPolicy, handlerForRoot });
     const channel = new MessageChannel();
     messageHandlers.at(-1)!(
       new MessageEvent('message', {
@@ -1768,6 +1799,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     const handle = exposeFileSystem(
       {},
       {
+        policy: tauPathPolicy,
         handlerForRoot: () => {
           throw error;
         },

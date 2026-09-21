@@ -12,18 +12,22 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { WorkspaceFileService, WorkspaceMutationContext, WorkspaceScope } from '@taucad/filesystem';
-import { bindMutationContextForPort, openFileSystemBridge } from '@taucad/fs-bridge';
+import type { PathPolicy, WorkspaceFileService, WorkspaceMutationContext, WorkspaceScope } from '@taucad/filesystem';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { bindMutationContextForPort, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 import type {
   FileSystemBridgeHello,
   FileSystemBridgeRootedProxy,
   FileSystemBridgeWorkspaceProxy,
+  FileSystemBridgeWorkspaceService,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
   RootedBridgeConsumer,
   RootedFileSystemHandlerFactory,
 } from '@taucad/fs-bridge';
 import type { createBridgeServer } from '@taucad/rpc/bridge';
+
+declare const workspaceService: FileSystemBridgeWorkspaceService;
 
 /**
  * Strict equality check: `true` only when `A` and `B` are mutually
@@ -211,6 +215,20 @@ describe('rooted connect options — type guarantees', () => {
 
   it('hands the rooted handler the literal consumer, never an absent one', () => {
     expectTypeOf<Parameters<RootedFileSystemHandlerFactory>[2]>().toEqualTypeOf<RootedBridgeConsumer>();
+  });
+
+  /*
+   * G0b-6: the policy that masks the change stream sits beside a root gate that
+   * is not optional, and a host used to be able to omit it — silently serving a
+   * masked consumer the stream whole (CI1). It is now required, and the bridge
+   * hands the factory the root-rebased policy so the view and the stream are
+   * masked by one object rather than by two spellings that may disagree.
+   */
+  it('requires a policy beside the rooted factory and hands it to the factory', () => {
+    // @ts-expect-error A host that serves a rooted connection states the layout it masks.
+    exposeFileSystem(workspaceService, { handlerForRoot: () => undefined });
+    exposeFileSystem(workspaceService, { handlerForRoot: () => undefined, policy: tauPathPolicy });
+    expectTypeOf<Parameters<RootedFileSystemHandlerFactory>[3]>().toEqualTypeOf<PathPolicy>();
   });
 });
 

@@ -33,6 +33,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 
 import * as filesystemBarrel from '#filesystem/index.js';
@@ -295,6 +296,7 @@ const rows: readonly AdapterRow[] = [
       // guard accepts genuine `MessagePort`s only, deliberately (X7's cut).
       const boundary = new MessageChannel();
       const exposed = exposeFileSystem(inlineBase(_fromMemoryFsHandle()), {
+        policy: tauPathPolicy,
         messageSource: boundary.port2,
       });
       const connection = openFileSystemBridge(boundary.port1);

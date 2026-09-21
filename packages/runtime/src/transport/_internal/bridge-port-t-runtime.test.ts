@@ -6,6 +6,7 @@ import {
   fileSystemBridgeProtocolVersion,
   openFileSystemBridge,
 } from '@taucad/fs-bridge';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 
 import { _fromMemoryFsHandle as fromMemoryFS } from '#transport/_internal/from-memory-fs-handle.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
@@ -107,7 +108,7 @@ describe('bridge Port<T> round-trip', () => {
     const fs = makeFs({ [helloPath]: 'from-structural-port' });
     // Node global `MessageChannel`, standing in for the worker boundary.
     const boundary = new MessageChannel();
-    const exposed = exposeFileSystem(fs, { messageSource: boundary.port2 });
+    const exposed = exposeFileSystem(fs, { policy: tauPathPolicy, messageSource: boundary.port2 });
     const connection = openFileSystemBridge(boundary.port1);
 
     // Hide the real port behind an object carrying only the four members

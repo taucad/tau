@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { MessageChannel } from 'node:worker_threads';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { ImmutableRevisionTree, mergeRevisionTrees, revisionId } from '#algorithms/index.js';
 import { revisionBranchName } from '#revision-authority.js';
 import type { RevisionId } from '#algorithms/index.js';
@@ -97,6 +98,7 @@ nativeGitIntegration('native Git adapter integration', () => {
     const { port1, port2 } = new MessageChannel();
     const admittedRoots = new Set<string>();
     const stopServer = serveNodeFsProvider(toNodeFsPort(port1), {
+      policy: tauPathPolicy,
       authority,
       allowRoot: (root) => admittedRoots.has(root),
     });

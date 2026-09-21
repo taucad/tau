@@ -98,9 +98,16 @@ const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) =
  */
 export type WorkspaceUnavailableReason = 'missing' | 'disconnected' | 'permission';
 
+/** The worker connection this machine holds: the authority's surface, its change stream, and its death. */
+type FileManagerWorkerProxy = FileManagerProxy & {
+  listen?: (event: string, handler: (data: unknown) => void) => () => void;
+  /** Settles when the bridge channel closes, which is what a dead worker looks like (G2c-2). */
+  closed: Promise<void>;
+};
+
 type FileManagerContext = {
   worker: Worker | undefined;
-  proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
+  proxy: FileManagerWorkerProxy | undefined;
   bridgeDispose?: () => void;
   openFileSystemBridge?: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
   openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
@@ -154,7 +161,7 @@ type FileManagerContext = {
 type WorkerConnectedEvent = {
   type: 'workerConnected';
   worker: Worker;
-  proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
+  proxy: FileManagerWorkerProxy;
   bridgeDispose: () => void;
   openFileSystemBridge: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
   openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
@@ -252,6 +259,14 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     // least visible in the console (the `crashSignal` Promise is only racy
     // during the connect phase — `armed` is flipped to `false` afterwards
     // so its callback no longer rejects).
+    //
+    // After readiness they stay logging, deliberately: a Worker `error` event
+    // is an uncaught exception inside a worker that is still running, and
+    // `messageerror` is one message that failed structured clone — neither
+    // means the proxies are dead, and nested file managers share this worker
+    // (`context.sharedWorker`), so treating one as fatal would tear down every
+    // project view at once. Death arrives on `proxy.closed` instead, which
+    // `ready` watches (G2c-2).
     let armed = true;
     let rejectOnCrash!: (error: Error) => void;
     const crashSignal = new Promise<never>((_resolve, reject) => {
@@ -585,9 +600,24 @@ const initializeServicesActor = fromSafeAsync<
 });
 // oxlint-enable complexity
 
+/**
+ * Fails when the worker behind this connection dies (G2c-2).
+ *
+ * The bridge channel treats a dead port as the bye frame the peer never sent,
+ * so `closed` is the one signal that means the proxies `ready` published are
+ * gone. Invoked by `ready`, which means XState cancels it — and any transition
+ * it would have caused — the moment the machine leaves that state for another
+ * reason.
+ */
+const watchProxyClosedActor = fromSafeAsync<void, { proxy: FileManagerContext['proxy'] }>(async ({ input }) => {
+  await input.proxy?.closed;
+  throw new Error('The file service for this project stopped.');
+});
+
 const fileManagerActors = {
   connectWorkerActor,
   initializeServicesActor,
+  watchProxyClosedActor,
 } as const;
 
 // ============ Events ============
@@ -966,6 +996,16 @@ export const fileManagerMachine = setup({
     ready: {
       entry: ['startPolling'],
       exit: ['stopPolling'],
+      invoke: {
+        src: 'watchProxyClosedActor',
+        input({ context }) {
+          return { proxy: context.proxy };
+        },
+        onError: {
+          target: 'error',
+          actions: ['setError', 'destroyWorkerAndServices'],
+        },
+      },
       on: {
         setRoot: {
           target: 'connectingWorker',

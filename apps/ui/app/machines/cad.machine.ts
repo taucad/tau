@@ -109,6 +109,8 @@ type CadEvent =
   | { type: 'setRenderTimeout'; renderTimeout: number }
   | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
+  | { type: 'parkRuntime' }
+  | { type: 'resumeRuntime' }
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
@@ -476,6 +478,25 @@ export const cadMachine = setup({
         available,
       });
     }),
+    /*
+     * R4: why this unit has no kernel, told to the project that owns it.
+     *
+     * A refusal — the desktop's fork guard, a resolver saying no — rejects the
+     * connect and leaves nothing on screen to explain it. The project machine
+     * keeps the last word so the sidebar row can say it without reaching into
+     * the units; `undefined` on every fresh attempt, because a unit that is
+     * trying again is not refused.
+     */
+    notifyKernelRefusal: enqueueActions(({ enqueue, context, self }, params: { reason: string | undefined }): void => {
+      if (!context.parentRef) {
+        return;
+      }
+      enqueue.sendTo(context.parentRef, {
+        type: 'geometryUnit.kernelRefused',
+        actorId: self.id,
+        reason: params.reason,
+      });
+    }),
     trackProgress: assign({
       renderPhase({ event }) {
         assertEvent(event, 'kernelProgress');
@@ -689,6 +710,8 @@ export const cadMachine = setup({
   states: {
     connecting: {
       tags: 'cad-loading',
+      /* R4: a unit that is trying again is not refused. */
+      entry: { type: 'notifyKernelRefusal', params: { reason: undefined } },
       invoke: {
         id: 'connectKernelActor',
         src: 'connectKernelActor',
@@ -722,6 +745,7 @@ export const cadMachine = setup({
                 return newMap;
               },
             });
+            enqueue({ type: 'notifyKernelRefusal', params: { reason: errorMessage } });
           }),
         },
       },
@@ -757,6 +781,14 @@ export const cadMachine = setup({
 
     idle: {
       on: {
+        /* R3: a hidden, idle project releases its kernel process — on the desktop an
+         * Electron utility — and keeps its session, editor and files. Only a settled
+         * unit parks: `connecting`, `buffering` and `rendering` do not handle this, so
+         * a render in flight is never lost. The refused park is re-offered when the
+         * session re-enters `live.idle`, which for a project that stays hidden is
+         * EQ15's 30-minute window — so such a unit can hold its utility for ~32
+         * minutes (V1-5). Bounding the common case is what R3 is for. */
+        parkRuntime: { target: 'parked', actions: ['destroyKernel', 'notifyExportAvailability'] },
         initializeModel: {
           target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability'],
@@ -974,9 +1006,39 @@ export const cadMachine = setup({
       },
     },
 
+    /**
+     * No kernel client, everything else intact (R3).
+     *
+     * The kernel process is gone; the entry path, geometry, issues and telemetry
+     * this unit already has stay, so returning is a reconnect and not a reload.
+     * `connecting` adopts the desktop's warm spare, and compute reuse (`durable`)
+     * renders the first frame from cache.
+     */
+    parked: {
+      on: {
+        resumeRuntime: 'connecting',
+        /* A rename while parked retargets the unit; the render happens on resume. */
+        setEntryPath: {
+          actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
+        },
+        /* The root's `restoreParameters` renders, and there is no client to render
+         * with: take the intent (drop the staged values) and leave the render to
+         * the reconnect, instead of failing into `error` (V1-4). */
+        restoreParameters: {
+          actions: ['bumpRequestedRenderId', 'clearParameterRender', 'notifyExportAvailability'],
+        },
+        setCodeIssues: { actions: 'setCodeIssues' },
+      },
+    },
+
     error: {
       tags: 'cad-runtime-error',
       on: {
+        parkRuntime: { target: 'parked', actions: ['destroyKernel', 'notifyExportAvailability'] },
+        /* Every way a parked unit can fall into `error` ends here, so the session's
+         * next resume has to be heard from `error` too, or the unit dead-ends
+         * until an unrelated entry change arrives (V1-4). */
+        resumeRuntime: { target: 'connecting', actions: ['destroyKernel'] },
         initializeModel: {
           target: 'connecting',
           actions: ['destroyKernel', 'bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability'],

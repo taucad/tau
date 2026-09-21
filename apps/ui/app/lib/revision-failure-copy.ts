@@ -49,6 +49,11 @@ export const revisionFailureCopy: Readonly<
       ...engineCopy,
       /* A fresh project: nothing recorded, and nothing unrecorded to record. */
       ['BRANCH_NEEDS_REVISION', 'There is nothing to branch from yet. Add a file, then try again.'],
+      /* The verb was dropped or nothing answered it inside its bound. */
+      ['BRANCH_UNANSWERED', 'This project did not answer in time. Try making that branch again.'],
+      /* Made, with nowhere for a chat to work in it. */
+      ['BRANCH_UNPLACED', 'Tau made that branch but could not open its files. Reload the page and try again.'],
+      ['CAS_LOST', 'Something else changed this project at the same time. Try again.'],
       ['CHECKOUT_CONFLICT', 'That branch already exists. Pick another name.'],
       ['UNKNOWN_REVISION', 'The revision this branch would start from is not in this project any more.'],
     ]),

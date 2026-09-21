@@ -55,6 +55,9 @@ export const revisionFailureCopy: Readonly<
       ['BRANCH_UNPLACED', 'Tau made that branch but could not open its files. Reload the page and try again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try again.'],
       ['CHECKOUT_CONFLICT', 'That branch already exists. Pick another name.'],
+      /* Asked before the project has anything selected to branch from; it used
+       * to be reported as a name collision, which is not what happened. */
+      ['CHECKOUT_UNKNOWN', 'This project has nothing open to branch from yet. Wait a moment and try again.'],
       ['UNKNOWN_REVISION', 'The revision this branch would start from is not in this project any more.'],
     ]),
   },
@@ -76,6 +79,9 @@ export const revisionFailureCopy: Readonly<
       ['BASE_CUT_TIMED_OUT', 'Tau took too long to save this project’s earlier edits. Try sending that again.'],
       ['CAS_LOST', 'Something else changed this project at the same time. Try sending that again.'],
       ['CUT_TIMED_OUT', 'Tau took too long to record that change. Try sending it again.'],
+      /* No files to run in: the worker client refuses one placement this way
+       * and the page's authority the other, from this one row. */
+      ['PLACEMENT_UNROOTED', 'This chat’s files could not be found.'],
       ['UNKNOWN_REVISION', 'The version that change built on is not in this project any more.'],
       /* Let go before it recorded anything — a stop, a reload, an abandonment. */
       ['TURN_RELEASED', 'The turn ended before it recorded a revision.'],

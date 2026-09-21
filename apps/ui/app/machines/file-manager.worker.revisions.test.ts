@@ -418,20 +418,34 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   it('should not attribute another verb’s refusal to a pending createBranch', async () => {
-    const fixture = harness(['alpha']);
-    const project = fixture.service.createRootedFileSystem('/projects/alpha');
-    await project.writeFile('main.scad', 'cube(10);');
-    const alpha = await fixture.open('alpha');
-    alpha.send({ command: 'saveRevision' });
-    await alpha.settle();
+    /* The dropped verb's own bound is a real 60 s timer, and a case that left
+       it pending kept this suite's teardown waiting on it. */
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fixture = harness(['alpha']);
+      const project = fixture.service.createRootedFileSystem('/projects/alpha');
+      await project.writeFile('main.scad', 'cube(10);');
+      const alpha = await fixture.open('alpha');
+      alpha.send({ command: 'saveRevision' });
+      await alpha.settle();
 
-    /* `main` is refused; `isolated-run` is dropped while that one runs. The
-       refusal the person sees belongs to the branch they already have. */
-    alpha.send({ command: 'createBranch', name: 'main' });
-    alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
-    await settle(40);
+      /* `main` is refused; `isolated-run` is dropped while that one runs. The
+         refusal the person sees belongs to the branch they already have. */
+      alpha.send({ command: 'createBranch', name: 'main' });
+      alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
+      await settle(40);
 
-    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toBeUndefined();
+      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toBeUndefined();
+      /* And the drop is still what the bound answers, once it comes due. */
+      await vi.advanceTimersByTimeAsync(60_000);
+      await settle(8);
+      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toMatchObject({
+        type: 'error',
+        code: 'BRANCH_UNANSWERED',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should adopt a daemon revision into the worker projection', async () => {

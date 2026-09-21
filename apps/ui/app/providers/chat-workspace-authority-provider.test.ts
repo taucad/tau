@@ -68,6 +68,8 @@ const revisionRoot = vi.hoisted(() => ({
   hold: undefined as PromiseWithResolvers<void> | undefined,
   /** Listeners the provider registered for the root's host-attested facts (W5). */
   eventListeners: new Set<(event: WorkerRevisionEvent) => void>(),
+  /** Listeners waiting on the registry's own projection; a test publishes one. */
+  statusListeners: new Set<() => void>(),
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -109,7 +111,10 @@ vi.mock('#hooks/use-revision-status.js', () => ({
         checkoutRoot: '/projects/project_test',
         branches: revisionRoot.branches,
       }),
-      subscribe: () => () => undefined,
+      subscribe: (listener: () => void) => {
+        revisionRoot.statusListeners.add(listener);
+        return () => revisionRoot.statusListeners.delete(listener);
+      },
       subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => {
         revisionRoot.eventListeners.add(listener);
         return () => revisionRoot.eventListeners.delete(listener);
@@ -274,6 +279,7 @@ beforeEach(() => {
   ];
   hookState.patchChat.mockClear();
   openedRoots.length = 0;
+  revisionRoot.statusListeners.clear();
   chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
   browserWorkspaceAuthorityTestApi.reset();
 });
@@ -949,6 +955,31 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     expect(await linked.readFile('attached.txt', 'utf8')).toBe('read before the projection caught up');
   });
 
+  /* And it is kept only until the registry has spoken for itself: a checkout
+     discarded or renamed after the branch answered is gone, and the remembered
+     root is then a path to nothing. The next projection drops it. */
+  it('should forget a placement’s root once a projection no longer names its checkout', async () => {
+    const { project, linked } = fixture();
+    bindFileManager(project, linked);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    await act(async () =>
+      result.current.placeChat(
+        'chat_1',
+        Promise.resolve({ checkoutId: 'checkout-branch', checkoutRoot: '/checkouts/checkout-branch' }),
+      ),
+    );
+    chats = [{ id: 'chat_1', checkoutId: 'checkout-branch' }];
+    /* The registry publishes, and its rows name only the project itself. */
+    await act(async () => {
+      for (const listener of revisionRoot.statusListeners) {
+        listener();
+      }
+    });
+
+    await expect(act(async () => result.current.attachment('chat_1'))).resolves.toBeUndefined();
+  });
+
   /* A discarded checkout has no files to attach to, which is the same answer
      as no checkout at all — the caller turns both into *this chat has nothing
      to run or replay a turn on*. */
@@ -973,6 +1004,9 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
 
     await expect(act(async () => result.current.prepare('chat_1', { turnId: 'turn_1' }))).rejects.toMatchObject({
       code: 'PLACEMENT_UNROOTED',
+      /* The words are the table's, not this call site's: two layers refuse an
+         unrooted placement and a person must read one sentence (P4, Rule 1). */
+      message: describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description,
     });
     expect(result.current.get('chat_1')).toBeUndefined();
     expect(openedRoots).not.toContain('');

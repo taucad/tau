@@ -680,6 +680,27 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
     }
     return unsubscribe;
   }, [projectId, revisions]);
+  /* P2: the answered root bridges one gap — from the branch verb to the
+   * projection that names its checkout — and is the registry's to end. A
+   * projection that names the checkout no longer is the discard or the rename,
+   * so the remembered root is a path to nothing and is dropped rather than
+   * handed to the next attach. Only a published projection prunes: the entry
+   * written while none has landed is the one the gap exists for. */
+  useEffect(
+    () =>
+      revisions?.subscribe(() => {
+        const status = revisions.status();
+        if (status === undefined) {
+          return;
+        }
+        for (const checkoutId of state.checkoutRoots.keys()) {
+          if (checkoutId !== status.checkoutId && !status.branches.some((row) => row.checkoutId === checkoutId)) {
+            state.checkoutRoots.delete(checkoutId);
+          }
+        }
+      }),
+    [revisions, state],
+  );
   const notify = useCallback(() => {
     for (const listener of state.listeners) {
       listener();
@@ -750,7 +771,9 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         /* A placement with no root is not a placement. `''` is not the
          * project's root either — it is the authority's own origin, every
          * project's files at once — so it is refused here rather than opened. */
-        throw Object.assign(new Error('This chat’s files could not be found.'), { code: 'PLACEMENT_UNROOTED' });
+        throw Object.assign(new Error(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description), {
+          code: 'PLACEMENT_UNROOTED',
+        });
       }
       await ensureProviderCapabilities(state.binding);
       /* The bound connection is rooted wherever the workbench stood when it

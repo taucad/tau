@@ -16,7 +16,7 @@ import { MemoryRouter } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
 import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
@@ -511,26 +511,18 @@ describe('Revisions pane', () => {
         },
       ],
     };
-    /* The rejection is observable only through the handler the call site
-       attaches: vitest's own `vi.fn` bookkeeping already settles the promise it
-       records, so nothing reaches `process.on('unhandledRejection')` here. */
-    let handled: ReturnType<typeof vi.spyOn> | undefined;
-    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- The call site must see this very promise, not an async wrapper's copy.
-    revisionStatusHarness.commands.createBranch.mockImplementationOnce(() => {
-      const refusal = Promise.reject(
-        Object.assign(new Error('Branch enclosure-v2 already exists.'), { code: 'CHECKOUT_CONFLICT' }),
-      );
-      handled = vi.spyOn(refusal, 'catch');
-      return refusal;
-    });
+    const refusing = refuseCreateBranch('enclosure-v2');
 
     renderPane();
     await user.click(screen.getByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
+    await refusing.settled();
 
-    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
-    expect(handled).toHaveBeenCalled();
+    expect(refusing.asked).toEqual(['enclosure-v2']);
+    expect(refusing.unhandled).toEqual([]);
+    /* And the pane is still here, with its *New branch* ready to try again. */
+    expect(screen.getByRole('button', { name: 'New branch' })).toBeInTheDocument();
   });
 
   it('says the checkout has changes that are not in a revision yet, and offers to drop them', async () => {

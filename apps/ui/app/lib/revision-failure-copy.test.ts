@@ -47,6 +47,23 @@ describe('describeRevisionFailure', () => {
     );
   });
 
+  /* Minted by the registry when a *New branch* arrives with nothing selected
+     to branch from — the project's rows have not settled yet. It used to be
+     reported as a name collision, which is not what happened. */
+  it('phrases a *New branch* asked of a project with nothing open yet', () => {
+    expect(describeRevisionFailure('branch', 'CHECKOUT_UNKNOWN').description).toBe(
+      'This project has nothing open to branch from yet. Wait a moment and try again.',
+    );
+  });
+
+  /* The one sentence two layers refuse an unrooted placement with: the worker
+     client one hop from the seam, and the authority above it (finding 8). */
+  it('phrases a chat placed on files that are not there', () => {
+    expect(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description).toBe(
+      'This chat’s files could not be found.',
+    );
+  });
+
   it('says the same thing about the engine whichever verb asked it', () => {
     expect(describeRevisionFailure('restore', 'ENGINE_UNAVAILABLE').description).toBe(
       describeRevisionFailure('save', 'ENGINE_UNAVAILABLE').description,

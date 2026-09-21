@@ -73,6 +73,8 @@ export type ProjectSidebarStatus = Readonly<{
   session: ProjectLivenessStatus;
   chats: ReadonlyMap<string, ChatSidebarStatus>;
   revisions: RevisionStatusProjection | undefined;
+  /** The session's runtime-region failure: why the kernel is not there (R4). */
+  runtimeFailure: string | undefined;
 }>;
 
 /** What a project row draws, aggregated from its chats and its session. @public */
@@ -98,6 +100,8 @@ export type ProjectSidebarRow = Readonly<{
   unread: number;
   /** A policy close's reason, or the closing sentence. */
   detail: string | undefined;
+  /** Why the kernel could not come up, while the project is otherwise live (R4). */
+  runtimeFailure?: string;
   /** Runs in flight, for the close dialog's question. */
   runs: number;
 }>;
@@ -321,6 +325,26 @@ const closedDetail = (
   return reason === 'budget' ? 'Closed · memory budget · reopen any time' : undefined;
 };
 
+/*
+ * R4: what the row says when a project's kernel never came up.
+ *
+ * Only the broker's own refusal is called a refusal. Its message arrives
+ * wrapped by every hop that relayed it (`Electron main refused the
+ * tau:runtime:port request: registerElectronRuntimeMain: refusing to exceed 64
+ * utility processes`), and the last clause of that known chain is the reason,
+ * so the row says it. Anything else that stops a kernel — a utility that died
+ * on boot, a worker that never opened, a WASM load that failed — is
+ * *unavailable*, and its message is said whole, because nothing here knows
+ * which of its clauses is the subject. The sentence is the only thing a screen
+ * reader gets (every mark glyph is `aria-hidden`), so it names the real cause.
+ */
+const refusalSentence = /refused the .* request:|refusing to exceed/;
+
+const kernelFailure = (reason: string): string =>
+  refusalSentence.test(reason)
+    ? `Kernel refused · ${reason.split(': ').at(-1) ?? reason}`
+    : `Kernel unavailable · ${reason}`;
+
 const projectGlyph = (session: ProjectLivenessStatus, running: number): ProjectSidebarRow['glyph'] => {
   if (session.live) {
     if (session.status?.state === 'failed') {
@@ -373,6 +397,7 @@ export const selectProjectRow = (status: ProjectSidebarStatus, idleWindowMillise
       : session.live
         ? undefined
         : closedDetail(session.closedReason, idleWindowMilliseconds),
+    runtimeFailure: status.runtimeFailure,
     runs: session.status?.runs ?? 0,
   };
 };
@@ -424,7 +449,10 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
       return { mark: 'none', sentence: row.detail ?? 'Closed' };
     }
     case 'failed': {
-      return { mark: 'failed', sentence: 'Failed to open' };
+      return {
+        mark: 'failed',
+        sentence: row.runtimeFailure === undefined ? 'Failed to open' : kernelFailure(row.runtimeFailure),
+      };
     }
     case 'opening': {
       return { mark: 'running', sentence: 'Opening…' };
@@ -438,6 +466,17 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
   }
   const liveness = row.glyph === 'busy' ? 'Live, busy' : 'Live';
   const rollup = expanded ? undefined : chatRollup(row);
+  /* R4: the kernel can go long after the project opened, and nothing else about
+   * the project is wrong. The row says so where a policy close says why. It
+   * does not take the mark off a chat that is running or waiting for the person
+   * — that turn is still doing something and its spinner must not vanish — so
+   * the chats keep the mark they had and the kernel keeps the last clause. */
+  if (row.runtimeFailure !== undefined) {
+    const kernel = kernelFailure(row.runtimeFailure);
+    return rollup === undefined
+      ? { mark: 'failed', sentence: `${liveness} · ${kernel}` }
+      : { ...rollup, sentence: `${liveness} · ${rollup.sentence ?? ''} · ${kernel}` };
+  }
   if (rollup === undefined) {
     /* An expanded conflict still names itself: no chat row can carry it. */
     return row.conflicted
@@ -472,6 +511,8 @@ export const readProjectStatus = (sessions: SessionsActorRef, projectId: string)
   const chatReferences = Object.entries(chatReferencesOf(sessions, projectId));
   return {
     session: selectProjectLiveness(sessions.getSnapshot().context, projectId),
+    /* The session's own record of a region that did not come up (R4). */
+    runtimeFailure: projectSessionOf(sessions, projectId)?.getSnapshot().context.failures['runtime'],
     chats:
       chatReferences.length === 0
         ? emptyChats

@@ -1,5 +1,5 @@
 import { assign, assertEvent, setup, emit, enqueueActions } from 'xstate';
-import type { ActorRefFrom, AnyStateMachine } from 'xstate';
+import type { ActorRefFrom, AnyStateMachine, SnapshotFrom } from 'xstate';
 import { produce } from 'immer';
 import type { ProjectManifest } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
@@ -35,6 +35,16 @@ export type ProjectContext = {
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
   /** Geometry unit file paths that currently have geometry and at least one export route. */
   exportableGeometryUnitPaths: Set<string>;
+  /**
+   * Why this project has no kernel, and which unit said so (R4).
+   *
+   * One word, because the row says one sentence — but tagged with its reporter,
+   * because the clear rides on a unit *entering* `connecting`: an untagged word
+   * would let a second view's first connect attempt erase the refusal its
+   * still-refused sibling reported (V2-3). Only the unit that reported a
+   * refusal can take it back.
+   */
+  kernelRefusal: { actorId: string; reason: string } | undefined;
   /** The main entry path from project.assets.main.entryPath. Set after project loads. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
@@ -133,7 +143,12 @@ type ProjectEventInternal =
       actorId: string;
       available: boolean;
     }
+  /* R4: a unit reporting whether its kernel was refused, and why. */
+  | { type: 'geometryUnit.kernelRefused'; actorId: string; reason: string | undefined }
   | { type: 'openInViewer'; entryPath: string }
+  /* R3: the live session's park signal, relayed to the kernels this project owns. */
+  | { type: 'parkRuntime' }
+  | { type: 'resumeRuntime' }
   | { type: 'destroyGeometryUnit'; entryPath: string }
   | {
       type: 'createViewGraphics';
@@ -282,6 +297,13 @@ export const projectMachine = setup({
       }
 
       enqueue.stopChild(context.modelInteractionRef);
+    }),
+    /* R3: the session knows hidden-and-idle, this owns the units. One loop. */
+    forwardRuntimeParking: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, ['parkRuntime', 'resumeRuntime']);
+      for (const unit of context.geometryUnits.values()) {
+        enqueue.sendTo(unit, { type: event.type });
+      }
     }),
     updateGeometryUnitExportAvailability: assign(({ context, event }) => {
       assertEvent(event, 'geometryUnit.exportAvailabilityChanged');
@@ -457,6 +479,8 @@ export const projectMachine = setup({
         return {
           geometryUnits: newUnits,
           exportableGeometryUnitPaths,
+          /* R4: a unit nobody holds cannot keep a row red. */
+          ...(context.kernelRefusal?.actorId === unit.id ? { kernelRefusal: undefined } : {}),
           ...(context.mainEntryPath === event.entryPath ? { mainEntryPath: '' } : {}),
         };
       });
@@ -723,6 +747,7 @@ export const projectMachine = setup({
       modelInteractionRef,
       geometryUnits,
       exportableGeometryUnitPaths,
+      kernelRefusal: undefined,
       mainEntryPath: '',
       logRef,
     };
@@ -732,6 +757,22 @@ export const projectMachine = setup({
     'geometryUnit.exportAvailabilityChanged': {
       actions: 'updateGeometryUnitExportAvailability',
     },
+    /* R4: the project keeps the refusal so its live session can report the
+     * runtime region failed, which is what puts the reason on the row. */
+    'geometryUnit.kernelRefused': {
+      actions: assign({
+        kernelRefusal: ({ context, event }) => {
+          assertEvent(event, 'geometryUnit.kernelRefused');
+          if (event.reason !== undefined) {
+            return { actorId: event.actorId, reason: event.reason };
+          }
+          /* Another unit trying again says nothing about this one. */
+          return context.kernelRefusal?.actorId === event.actorId ? undefined : context.kernelRefusal;
+        },
+      }),
+    },
+    parkRuntime: { actions: 'forwardRuntimeParking' },
+    resumeRuntime: { actions: 'forwardRuntimeParking' },
   },
   exit: ['stopStatefulActors'],
   initial: 'checkEnvironment',
@@ -950,3 +991,13 @@ export const projectMachine = setup({
     },
   },
 });
+
+/**
+ * Why this project has no kernel, or `undefined` when it has one (R4).
+ *
+ * @param snapshot - The project machine's snapshot.
+ * @returns The reason a unit reported, or `undefined`.
+ * @public
+ */
+export const selectProjectKernelRefusal = (snapshot: SnapshotFrom<typeof projectMachine>): string | undefined =>
+  snapshot.context.kernelRefusal?.reason;

@@ -279,12 +279,26 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       return;
     }
     const context = runtimeContexts.get(canonicalRoot(workspaceRoot));
-    if (!acceptingConnections || !context || utility !== spawned) {
-      spawned.postMessage({ type: 'runtime-port-refused', requestId });
+    /* Each refusal says which of the four it is: these are the ones a person
+     * actually meets now that the utility count is no longer a policy, and the
+     * agent's tool error is the only place they are read. */
+    const refuse = (message: string): void => {
+      spawned.postMessage({ type: 'runtime-port-refused', requestId, message });
+    };
+    if (!acceptingConnections) {
+      refuse('The desktop services broker is quiescing and connects no new runtimes.');
+      return;
+    }
+    if (utility !== spawned) {
+      refuse('A superseded services utility asked for a runtime port.');
+      return;
+    }
+    if (!context) {
+      refuse(`The desktop shell has not admitted ${workspaceRoot} as a runtime root.`);
       return;
     }
     if (runtimeLeases.has(requestId)) {
-      spawned.postMessage({ type: 'runtime-port-refused', requestId });
+      refuse('A live runtime lease already holds this request identity.');
       return;
     }
     const lease = options.connectRuntime(context);
@@ -335,7 +349,14 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         log('error', 'services.runtime-port-failed', error);
         const requestId = (message as { readonly requestId?: unknown } | undefined)?.requestId;
         if (typeof requestId === 'string') {
-          spawned.postMessage({ type: 'runtime-port-refused', requestId });
+          /* The reason travels with the refusal: without it the agent's tool
+           * error says only that main refused, and why — a utility cap, an
+           * unadmitted root — stays in main's log where no client can read it. */
+          spawned.postMessage({
+            type: 'runtime-port-refused',
+            requestId,
+            message: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     });

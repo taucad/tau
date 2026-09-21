@@ -33,6 +33,7 @@ const state = vi.hoisted(() => ({
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
   runtimePrewarm: vi.fn(),
+  runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
     async (): Promise<
       { status: 'quiesced' } | { status: 'failed'; message: string } | { status: 'timeout' } | { status: 'no-utility' }
@@ -161,8 +162,9 @@ vi.mock('electron', () => ({
 
 vi.mock('@taucad/runtime/electron/main', () => ({
   installElectronRuntimeHeaders: vi.fn(),
-  registerElectronRuntimeMain: vi.fn((options: { resolveFork?: typeof state.resolveFork }) => {
+  registerElectronRuntimeMain: vi.fn((options: { maxUtilities?: number; resolveFork?: typeof state.resolveFork }) => {
     state.resolveFork = options.resolveFork;
+    state.runtimeMaxUtilities = options.maxUtilities;
     return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
   }),
 }));
@@ -330,6 +332,10 @@ describe('desktop main compute owner', () => {
       const projectRoot = await bootstrap();
 
       expect(state.runtimePrewarm).toHaveBeenCalledOnce();
+      /* A fork-loop guard well above what the sessions registry can admit,
+       * never a live-project budget: that budget is the registry's and is
+       * memory, not a count. */
+      expect(state.runtimeMaxUtilities).toBeGreaterThanOrEqual(64);
       const home = state.resolveFork!({ projectRoot, computeMode: 'memory' });
       const checkout = state.resolveFork!({
         projectRoot: join(projectRoot, '.tau/checkouts/run'),

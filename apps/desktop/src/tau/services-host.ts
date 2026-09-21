@@ -9,7 +9,7 @@
 import { createDiagnosticsLog } from '#main/diagnostics.js';
 import { randomUUID } from 'node:crypto';
 
-import { createServicesHost } from '#tau/services-host.impl.js';
+import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
 import type { UtilityMessage } from '#tau/services-host.impl.js';
 
 type ParentPort = {
@@ -114,7 +114,7 @@ process.once('exit', () => {
 parentPort.on('message', (message) => {
   const frame = message.data;
   if (frame && typeof frame === 'object') {
-    const { requestId, type } = frame as Record<string, unknown>;
+    const { message: refusal, requestId, type } = frame as Record<string, unknown>;
     if (typeof requestId === 'string' && (type === 'runtime-port' || type === 'runtime-port-refused')) {
       const pending = pendingRuntimePorts.get(requestId);
       if (pending) {
@@ -130,7 +130,7 @@ parentPort.on('message', (message) => {
           });
         } else {
           port?.close();
-          pending.reject(new Error('Main refused the desktop runtime-port request.'));
+          pending.reject(new Error(refusedRuntimePortMessage(refusal)));
         }
       } else {
         for (const latePort of message.ports) {

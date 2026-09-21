@@ -34,13 +34,15 @@ export const branchRegistryMilliseconds = 30_000;
 /**
  * What refused a branch verb.
  *
- * A port code where the port refused, plus the one refusal a *New branch* can
+ * A port code where the port refused, plus the two refusals a *New branch* can
  * meet that no port names: the head moved under the cut it asked for (the
- * `TurnFailureCode` shape, one verb over).
+ * `TurnFailureCode` shape, one verb over), and the cut named nothing this
+ * project is standing in — which is not a name collision, so it is not
+ * `CHECKOUT_CONFLICT`.
  *
  * @public
  */
-export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST';
+export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST' | 'CHECKOUT_UNKNOWN';
 
 /** The five verbs this machine owns. @public */
 export type BranchOperation = 'switch' | 'merge' | 'discard' | 'create' | 'rename';
@@ -288,14 +290,17 @@ export const branchMachine = setup({
     needsConfirmation: ({ context }) => context.needsConfirmation,
     hasBase: ({ context }) => context.from !== undefined && context.from !== '',
     hasHead: ({ context }) => context.head !== undefined,
-    /* Trigger-only, and about the checkout this verb asked to record: a turn's
-     * cut belongs to that turn (a2 R1), and another checkout's to nobody here. */
+    /* This verb's own cut: a turn's belongs to that turn (a2 R1), another
+     * checkout's to nobody here, and an ambient `save`/`idle`/`hidden`/`close`
+     * on this same checkout carries no turn id either — so the trigger is what
+     * separates the answer asked for from the one that merely arrived. */
     answersOurCut: ({ context, event }) =>
       (event.type === 'revisionMinted' ||
         event.type === 'nothingToSave' ||
         event.type === 'cutFailed' ||
         event.type === 'casLost') &&
       event.turnId === undefined &&
+      event.trigger === 'switch' &&
       event.checkoutId === context.checkoutId,
     isOperation: ({ context }, params: Readonly<{ operation: BranchOperation }>) =>
       context.operation === params.operation,
@@ -445,7 +450,10 @@ export const branchMachine = setup({
         },
         onError: {
           target: 'failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          actions: assign({
+            reason: ({ event }) => describeFailure(event.error),
+            reasonCode: ({ event }) => describeFailureCode(event.error),
+          }),
         },
       },
     },

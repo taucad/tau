@@ -1243,11 +1243,21 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness, []);
+    /* The child's own words for this refusal, which the page keys on: a name
+     * collision it is not, so *Pick another name* would never clear it. */
+    const refusals = recordEmitted(harness.actor.getSnapshot().children.branch!);
     harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
     await flush();
 
     expect(harness.actor.getSnapshot().children.branch?.getSnapshot().matches('idle')).toBe(true);
-    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('CHECKOUT_CONFLICT');
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('CHECKOUT_UNKNOWN');
+    expect(refusals).toContainEqual({
+      type: 'toast.error',
+      operation: 'create',
+      branch: 'isolated-run',
+      message: 'This project has no checkout checkout-live.',
+      code: 'CHECKOUT_UNKNOWN',
+    });
 
     harness.actor.stop();
   });

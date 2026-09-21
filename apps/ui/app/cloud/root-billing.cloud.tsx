@@ -108,6 +108,7 @@ export const useCloudPaymentActionReturn = (): void => {
           return toast('Payment is still processing.');
         }
         case 'redirect_required': {
+          // eslint-disable-next-line tau-lint/no-engineering-vocabulary-in-copy -- Stripe Checkout is the payment product's own name, not a revision checkout.
           return toast.warning('Checkout is ready to continue.', {
             action: {
               label: 'Resume Checkout',

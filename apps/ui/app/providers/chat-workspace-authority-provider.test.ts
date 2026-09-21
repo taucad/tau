@@ -42,6 +42,7 @@ const hookState = vi.hoisted(() => ({
   invalidateProjectedChats: vi.fn(),
   refreshFromStorage: vi.fn(async () => undefined),
   getChat: vi.fn(async (_chatId: string): Promise<{ id: string; checkoutId?: string } | undefined> => undefined),
+  patchChat: vi.fn(async (_chatId: string, _key: string, _value: unknown): Promise<undefined> => undefined),
 }));
 const revisionRoot = vi.hoisted(() => ({
   commands: [] as WorkerRevisionCommand[],
@@ -49,6 +50,19 @@ const revisionRoot = vi.hoisted(() => ({
   refuse: undefined as string | undefined,
   /** Where the root places the turn; the project itself unless a test says otherwise. */
   placement: undefined as { checkoutId: string; root: string; baseRevisionId: string } | undefined,
+  /**
+   * What the checkout registry publishes — where each checkout's files are.
+   *
+   * The attach reads its root from here rather than from the workbench, so a
+   * chat on a branch has to be named here to have any files at all (P2).
+   */
+  branches: [] as Array<{
+    name: string;
+    head: string | undefined;
+    checkoutId: string | undefined;
+    checkoutRoot: string | undefined;
+    leaseChatIds: readonly string[];
+  }>,
   /** Set by a test to keep an admission in flight while the page sends. */
   hold: undefined as PromiseWithResolvers<void> | undefined,
   /** Listeners the provider registered for the root's host-attested facts (W5). */
@@ -69,6 +83,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     invalidateProjectedChats: hookState.invalidateProjectedChats,
     getChat: hookState.getChat,
+    patchChat: hookState.patchChat,
   }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
@@ -88,7 +103,11 @@ const revisionClient = vi.hoisted(() => {
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () =>
     revisionClient.stable({
-      status: () => undefined,
+      status: () => ({
+        checkoutId: 'checkout-durable',
+        checkoutRoot: '/projects/project_test',
+        branches: revisionRoot.branches,
+      }),
       subscribe: () => () => undefined,
       subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => {
         revisionRoot.eventListeners.add(listener);
@@ -129,6 +148,18 @@ type Fixture = {
 };
 
 const live: Fixture[] = [];
+
+/** The registry's row for the linked checkout the fixture mounts beside the project. */
+const branchRow = {
+  name: 'fillet',
+  head: 'rev-base',
+  checkoutId: 'checkout-branch',
+  checkoutRoot: '/checkouts/checkout-branch',
+  leaseChatIds: [] as readonly string[],
+};
+
+/** Every root the page opened a rooted bridge at, so a bind at `''` is visible. */
+const openedRoots: string[] = [];
 
 /** The revision root lives in the worker; the page needs only its handle. */
 const workerStub: Worker = { postMessage: () => undefined } as unknown as Worker;
@@ -212,8 +243,10 @@ const bindFileManager = (project: RootedFileSystem, linked?: RootedFileSystem): 
           proxy: undefined,
           worker: workerStub,
           /* The rooted bridge the authority reads capabilities and bytes over. */
-          openFileSystemBridge: (root?: string) =>
-            createBridgePort(root === '/checkouts/checkout-branch' && linked !== undefined ? linked : project),
+          openFileSystemBridge: (root?: string) => {
+            openedRoots.push(root ?? '(none)');
+            return createBridgePort(root === '/checkouts/checkout-branch' && linked !== undefined ? linked : project);
+          },
         },
       }),
       subscribe: () => ({ unsubscribe: () => undefined }),
@@ -229,6 +262,17 @@ beforeEach(() => {
   revisionRoot.admitted.length = 0;
   revisionRoot.refuse = undefined;
   revisionRoot.placement = undefined;
+  revisionRoot.branches = [
+    {
+      name: 'main',
+      head: 'rev-base',
+      checkoutId: 'checkout-durable',
+      checkoutRoot: '/projects/project_test',
+      leaseChatIds: [],
+    },
+  ];
+  hookState.patchChat.mockClear();
+  openedRoots.length = 0;
   chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
   browserWorkspaceAuthorityTestApi.reset();
 });
@@ -728,6 +772,152 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
       treeId: 'tree-daemon',
       branch: 'main',
     });
+  });
+
+  /* Q1: the attach handed every chat the workbench's own files whatever
+     checkout it named, so a chat on a branch read and wrote the project's tree
+     at open. The registry publishes each checkout's root; the attach asks it,
+     exactly as the placement does (revisions policy Rule 3). */
+  it('should attach a chat on a branch to that branch’s files, not the project’s', async () => {
+    const { project, linked } = fixture();
+    bindFileManager(project, linked);
+    chats = [{ id: 'chat_1', checkoutId: 'checkout-branch' }];
+    revisionRoot.branches.push(branchRow);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const attached = await act(async () => result.current.attachment('chat_1'));
+    if (attached === undefined) {
+      throw new Error('the attach answered no workspace');
+    }
+    const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+    const proxy = createFileSystemBridgeProxy(attached.openFileSystemBridge());
+    await proxy.ready;
+    await proxy.writeFile('attached.txt', 'read at chat open');
+    proxy.dispose();
+
+    expect(attached.execution.workspaceId).toBe('checkout-branch');
+    expect(await linked.readFile('attached.txt', 'utf8')).toBe('read at chat open');
+    expect(await project.exists('attached.txt')).toBe(false);
+  });
+
+  /* P1/Q2: the person picked the branch before they pressed send. The picker's
+     write landed an effect and a storage round-trip later, so a send fired in
+     between leased the project. The intent is the authority's now, and an
+     admission that arrives while it settles waits for it. */
+  it('should place a turn on the branch the chat is moving to, waiting for it', async () => {
+    const { project, linked } = fixture();
+    bindFileManager(project, linked);
+    revisionRoot.branches.push(branchRow);
+    revisionRoot.placement = {
+      checkoutId: 'checkout-branch',
+      root: '/checkouts/checkout-branch',
+      baseRevisionId: 'rev-base',
+    };
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const settling = Promise.withResolvers<Readonly<{ checkoutId: string }>>();
+    const placed = result.current.placeChat('chat_1', settling.promise);
+    /* A chat with nothing settling admits inside the same flush, so the wait
+       below is the placement's and not the harness's. */
+    const control = result.current.prepare('chat_control');
+    const waiting = result.current.prepare('chat_1', { turnId: 'turn_1' });
+    await act(async () => {
+      await control;
+    });
+
+    expect(revisionRoot.admitted.map((admission) => admission.chatId)).toEqual(['chat_control']);
+
+    settling.resolve({ checkoutId: 'checkout-branch' });
+    const prepared = await act(async () => {
+      await placed;
+      return waiting;
+    });
+
+    expect(revisionRoot.admitted.at(-1)).toMatchObject({ chatId: 'chat_1', checkoutId: 'checkout-branch' });
+    expect(prepared.execution.workspaceId).toBe('checkout-branch');
+    expect(hookState.patchChat.mock.calls).toEqual([['chat_1', 'checkoutId', 'checkout-branch']]);
+  });
+
+  /* E2: the turn is refused with the branch's own reason rather than quietly
+     run on the checkout the person did not choose (I-EDIT). */
+  it('should refuse the turn when the branch it was moving to was refused', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const settling = Promise.withResolvers<Readonly<{ checkoutId: string }>>();
+    const placed = result.current.placeChat('chat_1', settling.promise);
+    const turn = result.current.prepare('chat_1', { turnId: 'turn_1' });
+    settling.reject(
+      Object.assign(new Error('That branch has nothing recorded to start from.'), { code: 'BRANCH_NEEDS_REVISION' }),
+    );
+
+    await expect(act(async () => turn)).rejects.toMatchObject({ code: 'BRANCH_NEEDS_REVISION' });
+    /* The refusal is the toast channel's and the turn's; `placeChat` itself
+       settles quietly so no caller is handed a second copy to report. */
+    await expect(placed).resolves.toBeUndefined();
+    expect(revisionRoot.admitted).toEqual([]);
+    expect(hookState.patchChat).not.toHaveBeenCalled();
+  });
+
+  it('should write a chat’s checkout once when it is placed by id', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    await act(async () => result.current.placeChat('chat_1', 'checkout-branch'));
+
+    expect(hookState.patchChat.mock.calls).toEqual([['chat_1', 'checkoutId', 'checkout-branch']]);
+  });
+
+  /* Lane x1 §1: the seeded chat's checkout lived only in the in-memory
+     conflict map, so a reload dropped that chat onto the live checkout. The
+     conflict's terms ride one turn; its placement is durable. */
+  it('should persist the checkout a conflict chat is seeded onto', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    act(() => {
+      result.current.bindConflict('chat_fix', {
+        revisionId: 'rev-conflicted',
+        paths: ['src/bracket.ts'],
+        checkoutId: 'checkout-fillet',
+      });
+    });
+
+    await waitFor(() => {
+      expect(hookState.patchChat.mock.calls).toEqual([['chat_fix', 'checkoutId', 'checkout-fillet']]);
+    });
+  });
+
+  /* A discarded checkout has no files to attach to, which is the same answer
+     as no checkout at all — the caller turns both into *this chat has nothing
+     to run or replay a turn on*. */
+  it('should answer nothing for an attach whose checkout the registry no longer names', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    chats = [{ id: 'chat_1', checkoutId: 'checkout-discarded' }];
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    await expect(act(async () => result.current.attachment('chat_1'))).resolves.toBeUndefined();
+  });
+
+  /* Lane x3 §4: a non-`placement` reply degrades to `root: ''` at the
+     worker seam, and `''` is not the project's root — it is the authority's own
+     origin, which is every project's files at once. A placement with no root is
+     refused rather than opened. */
+  it('should refuse a placement with no root rather than bind the project', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    revisionRoot.placement = { checkoutId: 'checkout-branch', root: '', baseRevisionId: '' };
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    await expect(act(async () => result.current.prepare('chat_1', { turnId: 'turn_1' }))).rejects.toMatchObject({
+      code: 'PLACEMENT_UNROOTED',
+    });
+    expect(result.current.get('chat_1')).toBeUndefined();
+    expect(openedRoots).not.toContain('');
   });
 
   it('should answer nothing for a chat it never prepared', async () => {

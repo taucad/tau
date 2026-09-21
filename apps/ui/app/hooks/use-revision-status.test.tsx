@@ -16,6 +16,7 @@ import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@tauc
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import type {
   RevisionToast,
   WorkerProjectRevisions,
@@ -727,7 +728,7 @@ describe('the page client of the worker revision root', () => {
      * diagnostic used to reach the card verbatim (review finding 8). */
     await expect(admitted).rejects.toMatchObject({
       code: 'PLACEMENT_UNROOTED',
-      message: 'This chat’s files could not be found.',
+      message: describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description,
     });
   });
 
@@ -788,6 +789,36 @@ describe('the page client of the worker revision root', () => {
     }
   });
 
+  /* A refusal that names neither verb nor branch is uncorrelated: it may be a
+     discard's, a rename's, or another *New branch*'s. Reading the absent fields
+     as "mine" let it settle this create with the wrong words (finding 2). */
+  it('should not settle a pending createBranch with a refusal that names no verb', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { client, toast } = hostBranchClient();
+      client.open();
+      await vi.waitFor(() => {
+        expect(client.status()).toBeDefined();
+      });
+
+      const refused = expect(client.createBranch('isolated-run')).rejects.toMatchObject({
+        code: 'BRANCH_UNANSWERED',
+      });
+      toast({
+        type: 'error',
+        subject: 'branch',
+        message: 'That branch already has a checkout.',
+        code: 'CHECKOUT_CONFLICT',
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await refused;
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('should refuse a host createBranch the registry made no checkout for', async () => {
     const { client, toast } = hostBranchClient();
     client.open();
@@ -800,7 +831,13 @@ describe('the page client of the worker revision root', () => {
 
     /* `checkoutId: ''` used to reach `Chat.checkoutId`, and the chat then had
      * no root to run on for the rest of the session (review finding 5). */
-    await expect(created).rejects.toMatchObject({ code: 'BRANCH_UNPLACED' });
+    await expect(created).rejects.toMatchObject({
+      code: 'BRANCH_UNPLACED',
+      /* One hop from a surface, so the words are the table's rather than the
+         registry's — "the registry made x without a checkout to run on" is
+         banned vocabulary and unactionable besides (Rule 1). */
+      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', 'isolated-run').description,
+    });
     client.close();
   });
 

@@ -48,6 +48,7 @@ import { githubConnections } from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 
 /** One project's live connection to its revision root. @public */
 export type RevisionClient = Readonly<{
@@ -178,7 +179,7 @@ const awaitBranchCreated = async (
         /* A branch with no checkout named is no placement: `''` used to reach
          * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
         created.reject(
-          Object.assign(new Error(`The registry made ${name} without a checkout to run on.`), {
+          Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
             code: 'BRANCH_UNPLACED',
           }),
         );
@@ -188,13 +189,9 @@ const awaitBranchCreated = async (
       return;
     }
     /* A host that names neither verb nor branch on its refusal is uncorrelated,
-     * and the bound is what protects this wait from it. */
-    if (
-      toast.type === 'error' &&
-      toast.subject === 'branch' &&
-      (toast.operation ?? 'create') === 'create' &&
-      (toast.branch ?? name) === name
-    ) {
+     * and the bound is what protects this wait from it: reading the absent
+     * fields as this create's own settled it in another verb's words. */
+    if (toast.type === 'error' && toast.subject === 'branch' && toast.operation === 'create' && toast.branch === name) {
       created.reject(
         Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
       );
@@ -641,7 +638,9 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
          * checkout's (P2). A turn with no placement is refused — in the words
          * the authority refuses an unrooted one with, because this is the same
          * refusal one layer down (finding 8). */
-        throw Object.assign(new Error('This chat’s files could not be found.'), { code: 'PLACEMENT_UNROOTED' });
+        throw Object.assign(new Error(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description), {
+          code: 'PLACEMENT_UNROOTED',
+        });
       }
       return result.placement;
     },

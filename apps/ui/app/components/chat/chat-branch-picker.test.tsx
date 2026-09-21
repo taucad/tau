@@ -15,7 +15,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatBranchPicker } from '#components/chat/chat-branch-picker.js';
-import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let activeChatId: string | undefined = 'chat-1';
 vi.mock('#hooks/active-chat-provider.js', () => ({
@@ -113,27 +113,19 @@ describe('ChatBranchPicker', () => {
   it('handles a refused branch where there is no chat to place it on', async () => {
     const user = userEvent.setup();
     activeChatId = undefined;
-    /* The rejection is observable only through the handler the call site
-       attaches: vitest's own `vi.fn` bookkeeping already settles the promise it
-       records, so nothing reaches `process.on('unhandledRejection')` here. */
-    let handled: ReturnType<typeof vi.spyOn> | undefined;
-    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- The call site must see this very promise, not an async wrapper's copy.
-    revisionStatusHarness.commands.createBranch.mockImplementationOnce(() => {
-      const refusal = Promise.reject(
-        Object.assign(new Error('Branch bracket-fillet already exists.'), { code: 'CHECKOUT_CONFLICT' }),
-      );
-      handled = vi.spyOn(refusal, 'catch');
-      return refusal;
-    });
+    const refusing = refuseCreateBranch('bracket-fillet');
 
     render(<ChatBranchPicker />, { wrapper });
     await user.click(screen.getByRole('button', { name: 'Work in main. Choose a branch.' }));
     await user.click(screen.getByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'bracket-fillet');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
+    await refusing.settled();
 
-    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('bracket-fillet');
-    expect(handled).toHaveBeenCalled();
+    expect(refusing.asked).toEqual(['bracket-fillet']);
+    expect(refusing.unhandled).toEqual([]);
+    /* And the picker is still here to try again in. */
+    expect(screen.getByRole('button', { name: 'Work in main. Choose a branch.' })).toBeInTheDocument();
   });
 
   it('names the branch this chat works in, and switches to the one a person picks', async () => {

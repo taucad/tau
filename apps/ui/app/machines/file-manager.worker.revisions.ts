@@ -869,7 +869,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
            * `Chat.checkoutId` and leave the chat with nothing to run on (P2,
            * review finding 5). */
           created.reject(
-            Object.assign(new Error(`The registry made ${name} without a checkout to run on.`), {
+            Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
               code: 'BRANCH_UNPLACED',
             }),
           );

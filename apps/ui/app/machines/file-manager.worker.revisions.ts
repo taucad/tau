@@ -30,6 +30,7 @@ import {
   sameRevisionStatus,
   versionedChangePaths as classifiedChangePaths,
 } from '@taucad/revisions/revision-projection';
+import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
 import type { BranchOperation } from '@taucad/revisions/branch-machine';
 import type { PublishDraft } from '@taucad/revisions/publish-machine';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
@@ -307,6 +308,10 @@ export type RevisionToast =
   | Readonly<{
       type: 'error';
       subject: 'restore' | 'branch' | 'save';
+      /* Which branch verb refused, so a caller correlating one *New branch*
+       * does not take another verb's refusal for its own (finding 1). */
+      operation?: BranchOperation;
+      branch?: string;
       message: string;
       /* P4: the code is the refusal; the page turns it into product words. */
       code?: string;
@@ -767,6 +772,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     toasts.emit({
       type: 'error',
       subject: 'branch',
+      ...(toast.operation === undefined ? {} : { operation: toast.operation }),
+      ...(toast.branch === undefined ? {} : { branch: toast.branch }),
       message: toast.message,
       ...(toast.code === undefined ? {} : { code: toast.code }),
     });
@@ -839,7 +846,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * The `branch` child is the one owner of the verb, and its two settlements
    * are what a caller can act on: the branch exists on a checkout of its own,
    * or it was refused with a code. Name-matched rather than id-matched because
-   * the child runs one verb at a time and the name is what the person typed.
+   * the child runs one verb at a time and the name is what the person typed —
+   * and matched at all on the refusal too, because the child takes `create` in
+   * `idle` only, so an unrelated verb's failure used to settle this one and a
+   * dropped `create` never settled at all (review finding 1). The bound is the
+   * registry's own, doubled: this wait covers the cut *and* the registry verb,
+   * each of which is bounded by one of them inside the child.
    *
    * @param name - The branch to make.
    * @param from - The revision it starts at, when the caller has one.
@@ -849,20 +861,34 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const created = Promise.withResolvers<BranchCreated>();
     const subscriptions = [
       branchChild?.on('toast.branch', (toast) => {
-        if (toast.operation === 'create' && toast.branch === name) {
-          created.resolve({
-            branch: name,
-            checkoutId: toast.checkoutId ?? '',
-            checkoutRoot: toast.checkoutRoot ?? '',
-          });
+        if (toast.operation !== 'create' || toast.branch !== name) {
+          return;
         }
+        if (toast.checkoutId === undefined || toast.checkoutRoot === undefined) {
+          /* A branch with no checkout named is no placement: `''` used to reach
+           * `Chat.checkoutId` and leave the chat with nothing to run on (P2,
+           * review finding 5). */
+          created.reject(
+            Object.assign(new Error(`The registry made ${name} without a checkout to run on.`), {
+              code: 'BRANCH_UNPLACED',
+            }),
+          );
+          return;
+        }
+        created.resolve({ branch: name, checkoutId: toast.checkoutId, checkoutRoot: toast.checkoutRoot });
       }),
       branchChild?.on('toast.error', (toast) => {
+        if (toast.operation !== 'create' || toast.branch !== name) {
+          return;
+        }
         created.reject(
           Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
         );
       }),
     ];
+    const bound = globalThis.setTimeout(() => {
+      created.reject(Object.assign(new Error('This project did not answer in time.'), { code: 'BRANCH_UNANSWERED' }));
+    }, branchRegistryMilliseconds * 2);
     try {
       actor.send({
         type: 'branch',
@@ -870,6 +896,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       });
       return await created.promise;
     } finally {
+      globalThis.clearTimeout(bound);
       for (const subscription of subscriptions) {
         subscription?.unsubscribe();
       }
@@ -1039,20 +1066,6 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Routed by the root to its `branch` child, which owns the verb's
          * lifecycle — including the confirmation and the failure edge the
          * region used to fake with a boolean (A38). */
-        case 'createBranch': {
-          /* One implementation, awaited or not: the uncorrelated form is the
-           * same verb with nobody listening for its answer (I15). */
-          // async-iife: bootstrap -- the refusal already went out on the toast
-          // channel the `branch` child emits on.
-          void (async (): Promise<void> => {
-            try {
-              await createBranch(command.name, command.from);
-            } catch {
-              /* Reported already, on the toast channel. */
-            }
-          })();
-          return;
-        }
         case 'discardBranch': {
           actor.send({
             type: 'branch',

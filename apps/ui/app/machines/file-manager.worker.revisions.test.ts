@@ -378,11 +378,60 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       await alpha.settle();
     }
 
+    /* The commonest refusal there is; without its code the page falls back to
+       "Tau could not finish that branch change" (review finding 3). */
     expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 92)).toMatchObject({
       type: 'error',
       id: 92,
+      code: 'CHECKOUT_CONFLICT',
       message: 'That branch already has a checkout.',
     });
+  });
+
+  /*
+   * The `branch` child takes `create` in `idle` only, so a second one while the
+   * first is in flight is dropped — and the correlated wait had no bound, so
+   * the chat's send path waited on a promise nothing would ever settle (review
+   * finding 1).
+   */
+  it('should refuse a createBranch the tree never answers, on the bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fixture = harness(['alpha']);
+      await fixture.service.createRootedFileSystem('/projects/alpha').writeFile('main.scad', 'cube(10);');
+      const alpha = await fixture.open('alpha');
+
+      alpha.send({ command: 'createBranch', name: 'main' });
+      alpha.send({ command: 'createBranch', name: 'isolated-run', id: 93 });
+      await settle(20);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await settle(8);
+
+      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 93)).toMatchObject({
+        type: 'error',
+        id: 93,
+        code: 'BRANCH_UNANSWERED',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not attribute another verb’s refusal to a pending createBranch', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    alpha.send({ command: 'saveRevision' });
+    await alpha.settle();
+
+    /* `main` is refused; `isolated-run` is dropped while that one runs. The
+       refusal the person sees belongs to the branch they already have. */
+    alpha.send({ command: 'createBranch', name: 'main' });
+    alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
+    await settle(40);
+
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toBeUndefined();
   });
 
   it('should adopt a daemon revision into the worker projection', async () => {

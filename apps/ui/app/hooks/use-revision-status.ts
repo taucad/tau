@@ -14,6 +14,7 @@ import { Topic } from '@taucad/events';
 import { sessionEpoch } from '#services/sessions-store.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
 import type {
   RevisionToast,
   RevisionFileComparison,
@@ -155,7 +156,10 @@ const clients = new Map<string, ClientState>();
  *
  * Name-matched on the toast channel, because that is the only correlation the
  * host leg publishes: the child runs one verb at a time and the name is what
- * the person typed.
+ * the person typed. The refusal is matched the same way, and the whole wait is
+ * bounded, because the child takes `create` in `idle` only: a dropped one used
+ * to leave the chat's send path waiting for a settlement nothing would send,
+ * and an unrelated verb's refusal used to settle it instead (finding 1).
  *
  * @param toasts - The client's own toast topic.
  * @param name - The branch being made.
@@ -170,19 +174,40 @@ const awaitBranchCreated = async (
   const created = Promise.withResolvers<BranchCreated>();
   const unsubscribe = toasts.subscribe((toast) => {
     if (toast.type === 'branch' && toast.operation === 'create' && toast.branch === name) {
-      created.resolve({ branch: name, checkoutId: toast.checkoutId ?? '', checkoutRoot: toast.checkoutRoot ?? '' });
+      if (toast.checkoutId === undefined || toast.checkoutRoot === undefined) {
+        /* A branch with no checkout named is no placement: `''` used to reach
+         * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
+        created.reject(
+          Object.assign(new Error(`The registry made ${name} without a checkout to run on.`), {
+            code: 'BRANCH_UNPLACED',
+          }),
+        );
+        return;
+      }
+      created.resolve({ branch: name, checkoutId: toast.checkoutId, checkoutRoot: toast.checkoutRoot });
       return;
     }
-    if (toast.type === 'error' && toast.subject === 'branch') {
+    /* A host that names neither verb nor branch on its refusal is uncorrelated,
+     * and the bound is what protects this wait from it. */
+    if (
+      toast.type === 'error' &&
+      toast.subject === 'branch' &&
+      (toast.operation ?? 'create') === 'create' &&
+      (toast.branch ?? name) === name
+    ) {
       created.reject(
         Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
       );
     }
   });
+  const bound = globalThis.setTimeout(() => {
+    created.reject(Object.assign(new Error('This project did not answer in time.'), { code: 'BRANCH_UNANSWERED' }));
+  }, branchRegistryMilliseconds * 2);
   try {
     ask();
     return await created.promise;
   } finally {
+    globalThis.clearTimeout(bound);
     unsubscribe();
   }
 };
@@ -613,8 +638,10 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       if (result.kind !== 'placement') {
         /* An empty root used to be manufactured here, and a binding rooted at
          * `''` ran the turn on the workspace's files instead of the
-         * checkout's (P2). A turn with no placement is refused. */
-        throw new Error('The revision root answered the admission without a placement.');
+         * checkout's (P2). A turn with no placement is refused — in the words
+         * the authority refuses an unrooted one with, because this is the same
+         * refusal one layer down (finding 8). */
+        throw Object.assign(new Error('This chat’s files could not be found.'), { code: 'PLACEMENT_UNROOTED' });
       }
       return result.placement;
     },

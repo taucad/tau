@@ -8,7 +8,7 @@ import type { JSONValue } from '@taucad/types';
 import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
 import { parameterSetMachine, submitParameterRequest } from '@taucad/parameters/set-machine';
-import { resolveParameterBinding, serializeParameterRecord } from '@taucad/parameters';
+import { serializeParameterRecord } from '@taucad/parameters';
 import type {
   ParameterManifest,
   ParameterSetAuthoritySnapshot,
@@ -171,10 +171,6 @@ export const withPointerValue = (
         );
   return { ...values, [head]: nested };
 };
-
-// ponytail: repeats the resource @taucad/parameters gives every root-level field (it is not exported). A drift
-// fails loudly as STALE_MANIFEST and the service's real-planner test catches it; export it when a second caller needs it.
-const rootParameterSchemaResource = 'urn:taucad:parameter-schema:root';
 
 /** A person-readable field name for a pointer, such as `/dimensions/cellSize` → `Dimensions › Cell size`. */
 const draftLabel = (group: string, pointer: string): string => {
@@ -580,7 +576,6 @@ export const createParameterSetService = (
   const commitValue: ParameterSetService['commitValue'] = async (target, manifest, field) => {
     const state = stateFor(target.entry, manifest, target);
     const current = state.actor.getSnapshot().context.current ?? (await resolveState(state));
-    const binding = resolveParameterBinding(manifest, field.pointer);
     const requestId = `browser:${target.entry}:${++sequence}`;
     return submitRequest({
       filePath: target.entry,
@@ -594,8 +589,6 @@ export const createParameterSetService = (
         operation: {
           kind: 'native-value',
           group: field.group,
-          parameterId: binding?.parameter.value ?? `${manifest.source.revision}:${field.pointer}`,
-          resource: binding?.schema.resource ?? rootParameterSchemaResource,
           pointer: field.pointer,
           value: field.value,
         },

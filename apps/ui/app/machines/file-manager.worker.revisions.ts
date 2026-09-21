@@ -259,7 +259,14 @@ export type RevisionFileComparison = Readonly<{ original: string; modified: stri
 export type RevisionToast =
   | Readonly<{ type: 'restored'; revisionNumber: number; unrecoverable: readonly string[] }>
   | Readonly<{ type: 'nothingToSave' }>
-  | Readonly<{ type: 'branch'; operation: BranchOperation; branch: string }>
+  | Readonly<{
+      type: 'branch';
+      operation: BranchOperation;
+      branch: string;
+      /** What a `create` made, for a caller correlating one (P4). */
+      checkoutId?: string;
+      checkoutRoot?: string;
+    }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
   /**
@@ -296,7 +303,13 @@ export type RevisionToast =
    * W18 DEF-7). A cut a *turn* asked for is not on this channel: its chat
    * already says so, through the admission it refuses.
    */
-  | Readonly<{ type: 'error'; subject: 'restore' | 'branch' | 'save'; message: string }>;
+  | Readonly<{
+      type: 'error';
+      subject: 'restore' | 'branch' | 'save';
+      message: string;
+      /* P4: the code is the refusal; the page turns it into product words. */
+      code?: string;
+    }>;
 
 /**
  * Where this document materializes one project's linked checkouts (S4, D4, W2 review R4).
@@ -351,6 +364,15 @@ export type WorkerProjectRevisions = Readonly<{
   }) => Promise<WorkerTurnPlacement>;
   /** Every other verb: fire-and-forget into the tree. */
   send: (command: WorkerRevisionCommand) => void;
+  /**
+   * Make a branch and wait for the checkout the registry made for it.
+   *
+   * The correlated form of `send({ command: 'createBranch' })`. The `branch`
+   * child owns the verb — it records the selected tree first when there is
+   * something to record (P3) — so this resolves on its settlement and rejects
+   * on its refusal, with the port's `code` on the error (P4).
+   */
+  createBranch: (name: string, from?: string) => Promise<BranchCreated>;
   /**
    * Record what is on disk and wait for the answer (C16, contract §6).
    *
@@ -731,10 +753,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   const branchChild = actor.getSnapshot().children.branch;
   branchChild?.on('toast.branch', (toast) => {
-    toasts.emit({ type: 'branch', operation: toast.operation, branch: toast.branch });
+    toasts.emit({
+      type: 'branch',
+      operation: toast.operation,
+      branch: toast.branch,
+      ...(toast.checkoutId === undefined ? {} : { checkoutId: toast.checkoutId }),
+      ...(toast.checkoutRoot === undefined ? {} : { checkoutRoot: toast.checkoutRoot }),
+    });
   });
   branchChild?.on('toast.error', (toast) => {
-    toasts.emit({ type: 'error', subject: 'branch', message: toast.message });
+    toasts.emit({
+      type: 'error',
+      subject: 'branch',
+      message: toast.message,
+      ...(toast.code === undefined ? {} : { code: toast.code }),
+    });
   });
 
   /**
@@ -798,6 +831,49 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * @param trigger - `save`, `hidden` or `close`. Defaults to `save`.
    * @returns When the cut has settled and the scheduler has quiesced.
    */
+  /**
+   * The correlated *New branch* (P4, contract §6).
+   *
+   * The `branch` child is the one owner of the verb, and its two settlements
+   * are what a caller can act on: the branch exists on a checkout of its own,
+   * or it was refused with a code. Name-matched rather than id-matched because
+   * the child runs one verb at a time and the name is what the person typed.
+   *
+   * @param name - The branch to make.
+   * @param from - The revision it starts at, when the caller has one.
+   * @returns The checkout the registry made for it.
+   */
+  const createBranch = async (name: string, from?: string): Promise<BranchCreated> => {
+    const created = Promise.withResolvers<BranchCreated>();
+    const subscriptions = [
+      branchChild?.on('toast.branch', (toast) => {
+        if (toast.operation === 'create' && toast.branch === name) {
+          created.resolve({
+            branch: name,
+            checkoutId: toast.checkoutId ?? '',
+            checkoutRoot: toast.checkoutRoot ?? '',
+          });
+        }
+      }),
+      branchChild?.on('toast.error', (toast) => {
+        created.reject(
+          Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
+        );
+      }),
+    ];
+    try {
+      actor.send({
+        type: 'branch',
+        event: { type: 'create', name, ...(from === undefined ? {} : { from }) },
+      });
+      return await created.promise;
+    } finally {
+      for (const subscription of subscriptions) {
+        subscription?.unsubscribe();
+      }
+    }
+  };
+
   const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
     try {
       await awaitCut(trigger);
@@ -962,14 +1038,17 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          * lifecycle — including the confirmation and the failure edge the
          * region used to fake with a boolean (A38). */
         case 'createBranch': {
-          actor.send({
-            type: 'branch',
-            event: {
-              type: 'create',
-              name: command.name,
-              ...(command.from === undefined ? {} : { from: command.from }),
-            },
-          });
+          /* One implementation, awaited or not: the uncorrelated form is the
+           * same verb with nobody listening for its answer (I15). */
+          // async-iife: bootstrap -- the refusal already went out on the toast
+          // channel the `branch` child emits on.
+          void (async (): Promise<void> => {
+            try {
+              await createBranch(command.name, command.from);
+            } catch {
+              /* Reported already, on the toast channel. */
+            }
+          })();
           return;
         }
         case 'discardBranch': {
@@ -1143,6 +1222,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       };
     },
     saveRevision,
+    createBranch,
     release: async () => {
       /*
        * The scheduler first, inside its bound (W13 review 2 R2/P33).
@@ -1226,7 +1306,18 @@ export type WorkerRevisionResult =
    * head, or none) and the toast channel (a failure). What the frame *is* is
    * permission for `pagehide` to run.
    */
-  | Readonly<{ kind: 'saved' }>;
+  | Readonly<{ kind: 'saved' }>
+  /**
+   * The branch a `createBranch` asked for exists, on the checkout named here.
+   *
+   * The one fact the caller needs (interface segregation): a page placing a
+   * chat on the branch it just made would otherwise subscribe to the whole
+   * projection to infer it.
+   */
+  | (Readonly<{ kind: 'branch' }> & BranchCreated);
+
+/** A branch that now exists, and the checkout the registry made for it. @public */
+export type BranchCreated = Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>;
 
 /** One response frame on a revision port. @public */
 export type WorkerRevisionResponse =
@@ -1369,6 +1460,11 @@ const answerOf = (
      * takes the same path and its answer is simply dropped. */
     case 'saveRevision': {
       return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
+    }
+    /* A question now too: the page that made the branch places a chat on it, so
+     * it needs the checkout rather than a projection diff to guess from. */
+    case 'createBranch': {
+      return tree.createBranch(request.name, request.from).then((created) => ({ kind: 'branch', ...created }) as const);
     }
     default: {
       return undefined;

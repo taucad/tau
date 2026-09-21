@@ -15,7 +15,7 @@ import { assign, createActor, setup } from 'xstate';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
+import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
 import type { WorkerProjectRevisions, WorkerRevisionResponse } from '#machines/file-manager.worker.revisions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import {
@@ -194,6 +194,9 @@ const harness = (
           held = credential;
           const port = createIsomorphicGitRevisionPort({
             filesystem: service.createRootedFileSystem(`/projects/${id}`),
+            /* The same routes `file-manager.worker.ts` gives the real port, so
+             * a branch made here gets a checkout of its own (P24). */
+            checkouts: createCheckoutRoutes({ mountTable, fileService: service })(id),
             /* A client with no transport throws on a push, which is what an
              * unreachable remote does; the row below wants a *remote*, not a
              * working one. */
@@ -647,6 +650,45 @@ describe('the page client of the worker revision root', () => {
     await flush;
     expect(settled).toBe(true);
   });
+
+  it('should refuse a turn the worker answered with something other than a placement', async () => {
+    const { worker, ports, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    revisionClient.open();
+    messages.length = 0;
+
+    const admitted = revisionClient.admitTurn({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    await settle();
+    const frame = messages.at(-1) as { command: string; id: number };
+    ports[0]?.postMessage({ type: 'result', id: frame.id, result: { kind: 'saved' } } satisfies WorkerRevisionResponse);
+
+    /* A placement rooted at `''` is not a placement: it used to build a bridge
+     * at the workspace root and run the turn on the wrong files (P2). */
+    await expect(admitted).rejects.toThrow(/placement/iu);
+  });
+
+  it('should resolve a createBranch with the checkout the branch was made on', async () => {
+    const fixture = harness({ files: { 'bracket.scad': 'cube([1, 1, 1]);\n' } });
+    live.push(fixture);
+    const { worker, registry } = fixture.worker();
+    fileManagerRef.send({ type: 'worker', worker });
+
+    render(
+      <UnloadProvider>
+        <Owner />
+        <CommandConsumer />
+      </UnloadProvider>,
+    );
+    await settle(40);
+
+    const created = await commands?.createBranch('isolated-run');
+    const root = await fixture.root(registry);
+    expect(created).toEqual({
+      branch: 'isolated-run',
+      checkoutId: root.status().branches.find((row) => row.name === 'isolated-run')?.checkoutId,
+      checkoutRoot: root.status().branches.find((row) => row.name === 'isolated-run')?.checkoutRoot,
+    });
+  }, 20_000);
 
   it('should push what `hidden` minted, and record it when the remote cannot be reached (W13 P32/P33)', async () => {
     const fixture = harness({

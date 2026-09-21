@@ -63,6 +63,15 @@ describe('worktreeDatabaseUrl', () => {
     const remote = 'postgresql://app:secret@db.internal:5432/tau';
     expect(worktreeDatabaseUrl(remote, linked)).toBe(remote);
   });
+
+  it('never forks a local cluster that is not the compose container', () => {
+    // The billing-foundation runner's disposable cluster listens on an ephemeral local port.
+    const disposable = 'postgresql://tau:tau@127.0.0.1:54321/tau_billing_foundation';
+    expect(worktreeDatabaseUrl(disposable, linked)).toBe(disposable);
+    expect(worktreeDatabaseUrl('postgresql://dev_user:dev_password@localhost/tau_dev', linked)).toBe(
+      'postgresql://dev_user:dev_password@localhost/tau_dev_tau_chat_admission_closeout',
+    );
+  });
 });
 
 describe('localDatabaseName', () => {

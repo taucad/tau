@@ -52,6 +52,8 @@ Use each term for exactly one concept and keep engineering terms out of product 
 
 Use **Revision**, **Branch**, **Current**, **Restore**, **Switch**, **Merge**, **Discard**, **Work in**, **Sync**, **Tau Cloud**, **system**, and **Read-only** in operator-facing UI. Never expose checkout, lease, backend, worktree, ref, or HEAD as product vocabulary.
 
+Carry a refusal across the worker boundary as a `RevisionPortErrorCode`, never as a sentence: the page owns the words (`apps/ui/app/lib/revision-failure-copy.ts`) and a port or machine message is a diagnostic for logs and tests. `tau-lint/no-engineering-vocabulary-in-copy` enforces the banned vocabulary in toast copy.
+
 ### 2. Keep one immutable graph per project
 
 Store exactly one repository per project. Treat the workspace as the binding and authority unit and the project as the history and portability unit.
@@ -70,7 +72,7 @@ Issue every file-bearing pane, chat link, tool, editor, viewer, parameter surfac
 
 Keep the live checkout at the project directory. Place linked checkouts outside it: use persistent `/checkouts/<id>` routes over the same storage root in browser authorities and the host data directory on disk hosts. Never place a linked checkout inside a served project, expose it in project discovery, or exclude it by an ignore rule. Keep at most one checkout per branch.
 
-Attach chats and workbenches by checkout id. Default every chat and concurrent chat to the live checkout's current branch; that is `main` for a new project and may be another branch for an imported project. Create a branch only for an explicit user branch action. Make subagents inherit the parent chat's checkout.
+Attach chats and workbenches by checkout id. Default every chat and concurrent chat to the live checkout's current branch; that is `main` for a new project and may be another branch for an imported project. Create a branch only for an explicit user branch action, from the selected checkout's recorded tree: cut a dirty selected checkout (`switch`) first, then branch from the resulting head, and refuse a branch of a checkout that has no revision and nothing to record. Make the chat workspace authority the one writer of a chat's checkout id; a turn admitted while that id is still settling waits for it or is refused with the same reason. Make subagents inherit the parent chat's checkout.
 
 Implement **Switch** as one verb:
 

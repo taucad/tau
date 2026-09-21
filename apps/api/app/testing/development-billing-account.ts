@@ -5,7 +5,7 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from '#database/schema.js';
-import { billingBudget, billingBudgetFunding, billingOwnerBinding, user } from '#database/schema.js';
+import { billingOwnerBinding, user } from '#database/schema.js';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
@@ -20,34 +20,18 @@ import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
  *   fund (--email <address> | --user-id <id>) [--atoms <credit atoms>]
  * node --import @oxc-node/core/register apps/api/app/testing/development-billing-account.ts \
  *   close (--email <address> | --user-id <id>)
- * node --import @oxc-node/core/register apps/api/app/testing/development-billing-account.ts budgets
  * ```
  *
- * Required env: `BILLING_ENVIRONMENT=development` and `DATABASE_URL` (`BILLING_DATABASE_URL` wins when set, so the
- * publish target's budgets step lands in the same database as the tariff). Publish the
- * development policy first with `pnpm nx run api:billing-policy:publish:development`;
- * that target also installs the billing protections this path depends on.
+ * Required env: `BILLING_ENVIRONMENT=development` and `DATABASE_URL` (`BILLING_DATABASE_URL` wins when set, so
+ * funding lands in the same database as the tariff). Bootstrap the tariff, the supplier budgets and the
+ * billing protections this path depends on first with the `sync` billing command (`pnpm db:migrate`).
  *
  * `fund` grants by a paid cause through the same fixtures the billing foundation
  * suites use, never `issueCurrentPromotion`, and adds no HTTP route. `close` runs the
  * production closure so `DELETE FROM "user"` passes `billing.require_financial_closure`,
  * which those same protections install.
- *
- * `budgets` seeds the two supplier budgets every enabled policy route points at;
- * without them admission denies `budget_unavailable`. It is idempotent and runs from
- * the same publish target, so the local bootstrap stays one command.
  */
 const developmentEnvironment = 'development';
-
-/* One lifetime-funded period per budget covers local proofs; raise the cap rather than
- * adding periods or a flag. ponytail: deliberate. */
-/* $10,000 in pico USD: admission holds the whole-context supplier maximum per turn (up to ~$26 for the
- * largest route) and the API allows four pending turns per account, so a $10 cap denied a quarter of the routes. */
-const developmentBudgetCap = 10_000_000_000_000_000n;
-const developmentBudgets = [
-  { id: 'development-spend', kind: 'spend' },
-  { id: 'development-risk', kind: 'risk' },
-] as const;
 
 const closureCancellation = {
   recoverAndCancel(): never {
@@ -76,10 +60,10 @@ const main = async (): Promise<void> => {
     },
   });
   const action = positionals[0];
-  if (action !== 'fund' && action !== 'close' && action !== 'budgets') {
-    throw new Error('Expected the action fund, close or budgets');
+  if (action !== 'fund' && action !== 'close') {
+    throw new Error('Expected the action fund or close');
   }
-  if (action !== 'budgets' && (values.email === undefined) === (values['user-id'] === undefined)) {
+  if ((values.email === undefined) === (values['user-id'] === undefined)) {
     throw new Error('Pass exactly one of --email or --user-id');
   }
   if (!/^[1-9][0-9]{0,17}$/u.test(values.atoms)) {
@@ -88,38 +72,6 @@ const main = async (): Promise<void> => {
   const client = postgres(databaseUrl, { max: 1, prepare: false });
   try {
     const database = drizzle(client, { schema });
-    if (action === 'budgets') {
-      await database
-        .insert(billingBudgetFunding)
-        .values(
-          developmentBudgets.map((budget) => ({
-            id: `${budget.id}-funding`,
-            environment: developmentEnvironment,
-            kind: budget.kind,
-            scope: developmentEnvironment,
-            fundedLifetime: developmentBudgetCap,
-          })),
-        )
-        .onConflictDoNothing();
-      await database
-        .insert(billingBudget)
-        .values(
-          developmentBudgets.map((budget) => ({
-            id: budget.id,
-            environment: developmentEnvironment,
-            fundingId: `${budget.id}-funding`,
-            kind: budget.kind,
-            scope: developmentEnvironment,
-            periodStart: new Date('2020-01-01Z'),
-            periodEnd: new Date('2030-01-01Z'),
-            quantum: 'pico_usd',
-            approvedCap: developmentBudgetCap,
-          })),
-        )
-        .onConflictDoNothing();
-      console.log(JSON.stringify({ budgets: developmentBudgets.map((budget) => budget.id) }));
-      return;
-    }
     const authUserId =
       values['user-id'] ??
       (await database

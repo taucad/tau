@@ -2,9 +2,11 @@ import postgres from 'postgres';
 import { performance } from 'node:perf_hooks';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import * as schema from '#database/schema.js';
-import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
+import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy } from '#api/billing/billing-policy.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
@@ -570,5 +572,102 @@ describe.runIf(databaseUrl !== undefined)('billing policy PostgreSQL foundation'
     const [afterAmbiguity] = await clients[2]!`select observed_activation_id
       from billing.billing_policy_head where environment = 'staging'`;
     expect(afterAmbiguity).toEqual(baseline);
+  });
+
+  /*
+   * Defect A and B of the tariff sync close-out: a replica whose catalogue no longer carries a
+   * route used to fail *every* billing read, and the publication that would replace the stale
+   * document re-validated it and refused. Both are red before the lenient read path.
+   */
+  it('should degrade one retired route and still publish its successor', async () => {
+    const known = 'policy-degrade-known-v1';
+    const retired = 'policy-degrade-retired-v1';
+    const dimensions = new Set(['output:']);
+    qualifiedMeterContracts.set(known, dimensions);
+    qualifiedMeterContracts.set(retired, dimensions);
+    const withRoutes = (policyVersion: string, contracts: readonly string[]): CommercialPolicy => ({
+      ...policy(policyVersion),
+      fleet: { minimumSchemaVersion: 1, meterContractIds: [...contracts] },
+      rates: contracts.map((contract) => ({
+        rateId: `rate-${contract}`,
+        meterContractId: contract,
+        dimension: 'output',
+        tier: null,
+        unit: 'token',
+        referenceNumeratorPicoUsd: '1',
+        denominatorUnits: '1',
+        retailOverride: null,
+      })),
+      routes: contracts.map((contract) => ({
+        routeId: `route-${contract}`,
+        sku: `sku-${contract}`,
+        meterContractId: contract,
+        rateIds: [`rate-${contract}`],
+        enabled: true,
+        spendBudgetId: 'spend-budget',
+        riskBudgetId: 'risk-budget',
+      })),
+    });
+    const [start] = await clients[2]!`select revision, current_activation_id as "currentActivationId"
+      from billing.billing_policy_head where environment = 'staging'`;
+    await services[0]!.publishPolicy({
+      policyJson: JSON.stringify(withRoutes('degrade-a', [known, retired])),
+      environment: 'staging',
+      activationId: 'degrade-a',
+      jobKey: 'degrade-a',
+      expectedHeadRevision: BigInt(String(start!['revision'])),
+      expectedPredecessorActivationId: String(start!['currentActivationId']),
+      replica: { schemaVersion: 1, meterContractIds: [known, retired] },
+    });
+
+    // The catalogue retires the route; this replica keeps only the contract it can still dispatch.
+    qualifiedMeterContracts.delete(retired);
+    const replica = { schemaVersion: 1, meterContractIds: [known] };
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    try {
+      // A whole-policy read (the payments path) succeeds, and warns once for the activation.
+      for (const _ of [0, 1]) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- the second read must observe the first read's warning state
+        await expect(services[0]!.selectEffectivePolicy({ environment: 'staging', replica })).resolves.toMatchObject({
+          activationId: 'degrade-a',
+        });
+      }
+      expect(
+        warn.mock.calls.filter(([entry]) => (entry as { event?: string }).event === 'billing.policy_route_unknown'),
+      ).toEqual([
+        [expect.objectContaining({ activationId: 'degrade-a', routeIds: [`route-${retired}`] }), expect.any(String)],
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+
+    // The route this replica still knows resolves; only the retired SKU is refused.
+    await expect(
+      services[0]!.selectEffectivePolicyRoute({ environment: 'staging', replica, sku: `sku-${known}` }),
+    ).resolves.toMatchObject({ route: { routeId: `route-${known}` } });
+    await expect(
+      services[0]!.selectEffectivePolicyRoute({ environment: 'staging', replica, sku: `sku-${retired}` }),
+    ).rejects.toThrow(PolicyRouteUnavailableError);
+
+    // Defect B: the successor publishes over the now-stale predecessor.
+    const [head] = await clients[2]!`select revision from billing.billing_policy_head where environment = 'staging'`;
+    const published = await services[0]!.publishPolicy({
+      policyJson: JSON.stringify(withRoutes('degrade-b', [known])),
+      environment: 'staging',
+      activationId: 'degrade-b',
+      jobKey: 'degrade-b',
+      expectedHeadRevision: BigInt(String(head!['revision'])),
+      expectedPredecessorActivationId: 'degrade-a',
+      replica,
+    });
+    expect(published).toEqual({
+      activationId: 'degrade-b',
+      headRevision: BigInt(String(head!['revision'])) + 1n,
+      replay: false,
+    });
+    await expect(
+      services[0]!.selectEffectivePolicyRoute({ environment: 'staging', replica, sku: `sku-${retired}` }),
+    ).rejects.toThrow('billing policy route is unavailable');
+    qualifiedMeterContracts.delete(known);
   });
 });

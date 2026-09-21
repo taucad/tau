@@ -79,7 +79,7 @@ const promotionOfferSchema = z
   })
   .strict();
 
-export const commercialPolicySchema = z
+const commercialPolicyObjectSchema = z
   .object({
     schemaVersion: z.literal(1),
     environment: financialEnvironmentSchema,
@@ -114,129 +114,147 @@ export const commercialPolicySchema = z
       })
       .strict(),
   })
-  .strict()
-  .superRefine((policy, context) => {
-    requireUnique(
-      policy.rates.map(({ rateId }) => rateId),
-      'duplicate rateId',
-      context,
-    );
-    requireUnique(
-      policy.routes.map(({ routeId }) => routeId),
-      'duplicate routeId',
-      context,
-    );
-    requireUnique(
-      policy.routes.map(({ sku }) => sku),
-      'duplicate sku',
-      context,
-    );
-    requireUnique(
-      policy.offers.map(({ offerId }) => offerId),
-      'duplicate offerId',
-      context,
-    );
-    requireUnique(
-      policy.offers.map(({ kind }) => kind),
-      'missing or duplicate paid offer kind',
-      context,
-    );
-    requireUnique(policy.fleet.meterContractIds, 'duplicate fleet meter contract', context);
-    for (const offer of policy.offers) {
-      if (
-        offer.kind === 'pro_monthly' &&
-        positiveSigned64Schema.safeParse(offer.ceilingCreditAtoms).success &&
-        positiveSigned64Schema.safeParse(offer.grantCreditAtoms).success &&
-        BigInt(offer.ceilingCreditAtoms) < BigInt(offer.grantCreditAtoms)
-      ) {
-        context.addIssue({ code: 'custom', message: 'plan ceiling must cover its grant' });
-      }
-      if (
-        offer.kind === 'top_up' &&
-        positiveSigned64Schema.safeParse(offer.maximumPrincipalMinor).success &&
-        positiveSigned64Schema.safeParse(offer.minimumPrincipalMinor).success &&
-        BigInt(offer.maximumPrincipalMinor) < BigInt(offer.minimumPrincipalMinor)
-      ) {
-        context.addIssue({ code: 'custom', message: 'top-up maximum must cover its minimum' });
-      }
-      if (
-        offer.kind === 'top_up' &&
-        positiveSigned64Schema.safeParse(offer.maximumPrincipalMinor).success &&
-        positiveSigned64Schema.safeParse(offer.creditAtomsPerPrincipalMinor).success &&
-        BigInt(offer.maximumPrincipalMinor) * BigInt(offer.creditAtomsPerPrincipalMinor) > signed64Maximum
-      ) {
-        context.addIssue({ code: 'custom', message: 'top-up maximum credit grant exceeds signed 64-bit storage' });
-      }
-    }
+  .strict();
 
-    const reload = policy.autoReload;
-    const topup = policy.offers.find((offer) => offer.kind === 'top_up');
+type PolicyDocument = z.infer<typeof commercialPolicyObjectSchema>;
+
+/* Every refinement here is a property of the document alone except route qualification, which asks
+ * the *reading* replica's `qualifiedMeterContracts` whether it can dispatch the route. A reader that
+ * ran it rejected the whole tariff because of one route it happens not to know; `qualifyRoutes` is
+ * false for those readers so an unknown route degrades alone (see `parseCommercialPolicyDocument`). */
+const refineCommercialPolicy = (policy: PolicyDocument, context: z.RefinementCtx, qualifyRoutes: boolean): void => {
+  requireUnique(
+    policy.rates.map(({ rateId }) => rateId),
+    'duplicate rateId',
+    context,
+  );
+  requireUnique(
+    policy.routes.map(({ routeId }) => routeId),
+    'duplicate routeId',
+    context,
+  );
+  requireUnique(
+    policy.routes.map(({ sku }) => sku),
+    'duplicate sku',
+    context,
+  );
+  requireUnique(
+    policy.offers.map(({ offerId }) => offerId),
+    'duplicate offerId',
+    context,
+  );
+  requireUnique(
+    policy.offers.map(({ kind }) => kind),
+    'missing or duplicate paid offer kind',
+    context,
+  );
+  requireUnique(policy.fleet.meterContractIds, 'duplicate fleet meter contract', context);
+  for (const offer of policy.offers) {
     if (
-      reload !== undefined &&
-      topup?.kind === 'top_up' &&
-      [
-        reload.principalMinor,
-        reload.monthlyGrossCapMinor,
-        topup.minimumPrincipalMinor,
-        topup.maximumPrincipalMinor,
-      ].every((value) => positiveSigned64Schema.safeParse(value).success) &&
-      (BigInt(reload.principalMinor) < BigInt(topup.minimumPrincipalMinor) ||
-        BigInt(reload.principalMinor) > BigInt(topup.maximumPrincipalMinor) ||
-        BigInt(reload.principalMinor) > BigInt(reload.monthlyGrossCapMinor))
+      offer.kind === 'pro_monthly' &&
+      positiveSigned64Schema.safeParse(offer.ceilingCreditAtoms).success &&
+      positiveSigned64Schema.safeParse(offer.grantCreditAtoms).success &&
+      BigInt(offer.ceilingCreditAtoms) < BigInt(offer.grantCreditAtoms)
     ) {
-      context.addIssue({ code: 'custom', message: 'Automatic reload must fit the top-up offer and monthly gross cap' });
+      context.addIssue({ code: 'custom', message: 'plan ceiling must cover its grant' });
     }
-
-    const rates = new Map(policy.rates.map((rate) => [rate.rateId, rate]));
-    const compatibleContracts = new Set(policy.fleet.meterContractIds);
-    for (const route of policy.routes) {
-      requireUnique(route.rateIds, `duplicate rate on route ${route.routeId}`, context);
-      const routeRates = route.rateIds.map((rateId) => rates.get(rateId));
-      const coveredDimensions = routeRates
-        .map((rate) => (rate === undefined ? undefined : `${rate.dimension}:${rate.tier ?? ''}`))
-        .filter((value) => value !== undefined);
-      const requiredDimensions = qualifiedMeterContracts.get(route.meterContractId);
-      const isQualified =
-        route.enabled &&
-        route.spendBudgetId !== null &&
-        route.riskBudgetId !== null &&
-        route.spendBudgetId !== route.riskBudgetId &&
-        requiredDimensions !== undefined &&
-        compatibleContracts.has(route.meterContractId) &&
-        routeRates.every((rate) => rate?.meterContractId === route.meterContractId) &&
-        new Set(coveredDimensions).size === coveredDimensions.length &&
-        requiredDimensions.size === coveredDimensions.length &&
-        coveredDimensions.every((dimension) => requiredDimensions.has(dimension));
-      if (route.enabled && !isQualified) {
-        context.addIssue({ code: 'custom', message: `enabled route ${route.routeId} is not qualified` });
-      }
-      if (
-        routeRates.some((rate) => {
-          if (rate === undefined) {
-            return false;
-          }
-          if (!canDeriveRetailRate(policy, route, rate)) {
-            return false;
-          }
-          const retail = deriveRetailRate(policy, route, rate);
-          return retail.numeratorCreditAtoms.length > 78 || retail.publicDenominatorUnits.length > 78;
-        })
-      ) {
-        context.addIssue({ code: 'custom', message: `route ${route.routeId} retail rational exceeds 78 digits` });
-      }
-    }
-
-    const promotion = policy.promotionalIssuance;
     if (
-      (promotion.enabled && (promotion.offer === null || promotion.budgetCreditAtoms === '0')) ||
-      (!promotion.enabled && (promotion.offer !== null || promotion.budgetCreditAtoms !== '0'))
+      offer.kind === 'top_up' &&
+      positiveSigned64Schema.safeParse(offer.maximumPrincipalMinor).success &&
+      positiveSigned64Schema.safeParse(offer.minimumPrincipalMinor).success &&
+      BigInt(offer.maximumPrincipalMinor) < BigInt(offer.minimumPrincipalMinor)
     ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'promotion requires an enabled, funded offer or must be off/zero/null',
-      });
+      context.addIssue({ code: 'custom', message: 'top-up maximum must cover its minimum' });
     }
-  });
+    if (
+      offer.kind === 'top_up' &&
+      positiveSigned64Schema.safeParse(offer.maximumPrincipalMinor).success &&
+      positiveSigned64Schema.safeParse(offer.creditAtomsPerPrincipalMinor).success &&
+      BigInt(offer.maximumPrincipalMinor) * BigInt(offer.creditAtomsPerPrincipalMinor) > signed64Maximum
+    ) {
+      context.addIssue({ code: 'custom', message: 'top-up maximum credit grant exceeds signed 64-bit storage' });
+    }
+  }
+
+  const reload = policy.autoReload;
+  const topup = policy.offers.find((offer) => offer.kind === 'top_up');
+  if (
+    reload !== undefined &&
+    topup?.kind === 'top_up' &&
+    [
+      reload.principalMinor,
+      reload.monthlyGrossCapMinor,
+      topup.minimumPrincipalMinor,
+      topup.maximumPrincipalMinor,
+    ].every((value) => positiveSigned64Schema.safeParse(value).success) &&
+    (BigInt(reload.principalMinor) < BigInt(topup.minimumPrincipalMinor) ||
+      BigInt(reload.principalMinor) > BigInt(topup.maximumPrincipalMinor) ||
+      BigInt(reload.principalMinor) > BigInt(reload.monthlyGrossCapMinor))
+  ) {
+    context.addIssue({ code: 'custom', message: 'Automatic reload must fit the top-up offer and monthly gross cap' });
+  }
+
+  const rates = new Map(policy.rates.map((rate) => [rate.rateId, rate]));
+  const compatibleContracts = new Set(policy.fleet.meterContractIds);
+  for (const route of policy.routes) {
+    requireUnique(route.rateIds, `duplicate rate on route ${route.routeId}`, context);
+    const routeRates = route.rateIds.map((rateId) => rates.get(rateId));
+    const coveredDimensions = routeRates
+      .map((rate) => (rate === undefined ? undefined : `${rate.dimension}:${rate.tier ?? ''}`))
+      .filter((value) => value !== undefined);
+    const requiredDimensions = qualifyRoutes ? qualifiedMeterContracts.get(route.meterContractId) : undefined;
+    const isConsistent =
+      route.enabled &&
+      route.spendBudgetId !== null &&
+      route.riskBudgetId !== null &&
+      route.spendBudgetId !== route.riskBudgetId &&
+      compatibleContracts.has(route.meterContractId) &&
+      routeRates.every((rate) => rate?.meterContractId === route.meterContractId) &&
+      new Set(coveredDimensions).size === coveredDimensions.length;
+    const isQualified =
+      isConsistent &&
+      (!qualifyRoutes ||
+        (requiredDimensions !== undefined &&
+          requiredDimensions.size === coveredDimensions.length &&
+          coveredDimensions.every((dimension) => requiredDimensions.has(dimension))));
+    if (route.enabled && !isQualified) {
+      context.addIssue({ code: 'custom', message: `enabled route ${route.routeId} is not qualified` });
+    }
+    if (
+      routeRates.some((rate) => {
+        if (rate === undefined) {
+          return false;
+        }
+        if (!canDeriveRetailRate(policy, route, rate)) {
+          return false;
+        }
+        const retail = deriveRetailRate(policy, route, rate);
+        return retail.numeratorCreditAtoms.length > 78 || retail.publicDenominatorUnits.length > 78;
+      })
+    ) {
+      context.addIssue({ code: 'custom', message: `route ${route.routeId} retail rational exceeds 78 digits` });
+    }
+  }
+
+  const promotion = policy.promotionalIssuance;
+  if (
+    (promotion.enabled && (promotion.offer === null || promotion.budgetCreditAtoms === '0')) ||
+    (!promotion.enabled && (promotion.offer !== null || promotion.budgetCreditAtoms !== '0'))
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'promotion requires an enabled, funded offer or must be off/zero/null',
+    });
+  }
+};
+
+export const commercialPolicySchema = commercialPolicyObjectSchema.superRefine((policy, context) => {
+  refineCommercialPolicy(policy, context, true);
+});
+
+const commercialPolicyDocumentSchema = commercialPolicyObjectSchema.superRefine((policy, context) => {
+  refineCommercialPolicy(policy, context, false);
+});
 
 export type CommercialPolicy = z.infer<typeof commercialPolicySchema>;
 export type FinancialEnvironment = z.infer<typeof financialEnvironmentSchema>;
@@ -267,13 +285,25 @@ const canonicalize = (value: unknown): unknown => {
   return value;
 };
 
-export const validateCommercialPolicy = (input: unknown): ValidatedCommercialPolicy => {
-  const parsedInput: unknown = typeof input === 'string' ? (JSON.parse(input) as unknown) : input;
-  const policy = commercialPolicySchema.parse(parsedInput);
+const hashCommercialPolicy = (policy: CommercialPolicy): ValidatedCommercialPolicy => {
   const canonicalContent = JSON.stringify(canonicalize(policy));
   const contentHash = createHash('sha256').update(canonicalContent).digest('hex');
   return { policy, canonicalContent, contentHash };
 };
+
+const asPolicyInput = (input: unknown): unknown => (typeof input === 'string' ? (JSON.parse(input) as unknown) : input);
+
+/** Full validation, including whether *this* replica can dispatch every enabled route. Publication only. */
+export const validateCommercialPolicy = (input: unknown): ValidatedCommercialPolicy =>
+  hashCommercialPolicy(commercialPolicySchema.parse(asPolicyInput(input)));
+
+/**
+ * Reader's parse: identical schema, canonical form and content hash, and every document-internal
+ * refinement, but no route qualification against this replica's meter contracts. A replica that has
+ * dropped a route from its catalogue still reads the tariff and degrades that one SKU.
+ */
+export const parseCommercialPolicyDocument = (input: unknown): ValidatedCommercialPolicy =>
+  hashCommercialPolicy(commercialPolicyDocumentSchema.parse(asPolicyInput(input)));
 
 const noticeDuration = 30 * 24 * 60 * 60 * 1000;
 const picoUsdPerUsd = 1_000_000_000_000n;
@@ -394,14 +424,20 @@ export const validatePolicyActivationNotice = (input: {
   }
 };
 
+/** The read-time half: a document this replica's code cannot interpret at all is still fatal. */
+export const assertPolicySchemaCompatibility = (policy: CommercialPolicy, schemaVersion: number): void => {
+  if (schemaVersion < policy.fleet.minimumSchemaVersion) {
+    throw new Error('policy schema is incompatible with this replica');
+  }
+};
+
+/** The publish-time whole: the publisher's build must know every route the document enables. */
 export const assertPolicyFleetCompatibility = (
   policy: CommercialPolicy,
   schemaVersion: number,
   meterContractIds: readonly string[],
 ): void => {
-  if (schemaVersion < policy.fleet.minimumSchemaVersion) {
-    throw new Error('policy schema is incompatible with this replica');
-  }
+  assertPolicySchemaCompatibility(policy, schemaVersion);
   const supported = new Set(meterContractIds);
   if (policy.routes.some((route) => route.enabled && !supported.has(route.meterContractId))) {
     throw new Error('policy meter contract is incompatible with this replica');

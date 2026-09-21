@@ -851,6 +851,29 @@ describe('the browser worker command contract', () => {
     expect(agentHostWorkerCommandSchema.safeParse({ ...resolution, optionId: '' }).success).toBe(false);
   });
 
+  /* A failed turn names why with a code as well as a sentence (blueprint P4);
+     the settlement schema is strict, so a field it does not know refuses the
+     whole durable write — and a refused settlement is a turn that never
+     settles. */
+  it('accepts a failed-turn settlement that carries its code', () => {
+    const settlement = {
+      type: 'record-settlement',
+      chatId: 'chat-1',
+      requestId: 'req-1',
+      sessionId: 'session-1',
+      event: {
+        type: 'turn.failed',
+        turnId: 'turn-1',
+        runId: 'run-1',
+        chatId: 'chat-1',
+        reason: 'The checkout did not settle the cut in time.',
+        code: 'CUT_TIMED_OUT',
+      },
+    };
+
+    expect(agentHostWorkerCommandSchema.safeParse(settlement)).toMatchObject({ success: true });
+  });
+
   /* A follower's forwarding wait is bounded only by the leader's liveness, so a
    * live leader that drops a command it cannot read wedges that request for the
    * life of the tab. The return address is what makes the refusal possible. */

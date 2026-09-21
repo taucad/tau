@@ -581,6 +581,7 @@ export const projectTurnSettlement = (event: AgentLogEvent): ProjectedTurnSettle
         chatId: event.chatId,
         checkoutId: event.checkoutId,
         reason: event.reason,
+        ...(event.code === undefined ? {} : { code: event.code }),
       };
     }
     default: {

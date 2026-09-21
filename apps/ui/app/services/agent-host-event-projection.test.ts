@@ -14,6 +14,7 @@ import {
   projectAgentHostUserTurn,
   projectTurnFinalized,
   latestAcpSessionData,
+  projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
@@ -1228,6 +1229,22 @@ describe('projectTurnFinalized', () => {
     });
     expect(projectAgentHostEvent(conflicted)).toEqual([]);
     expect(projectAgentHostEvent(failed)).toEqual([]);
+  });
+
+  /* The page phrases a failed turn from its code (P4, E5); a reload that
+     rebuilt the settlement without it would show the generic sentence for a
+     failure the live page had named. */
+  it('carries a failed turn’s code through a replayed settlement', () => {
+    const failed = parseLogEvent({
+      ...base,
+      type: 'turn.failed',
+      turnId: 'user-turn-4',
+      runId: 'run-5',
+      chatId: 'chat-1',
+      reason: 'The checkout did not settle the cut in time.',
+      code: 'CUT_TIMED_OUT',
+    });
+    expect(projectTurnSettlement(failed)).toMatchObject({ type: 'turn.failed', code: 'CUT_TIMED_OUT' });
   });
 });
 

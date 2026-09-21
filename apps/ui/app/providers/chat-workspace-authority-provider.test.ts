@@ -33,6 +33,7 @@ import {
   usePreparedChatWorkspace,
   waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { WorkerRevisionCommand, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
@@ -848,11 +849,20 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     const settling = Promise.withResolvers<Readonly<{ checkoutId: string }>>();
     const placed = result.current.placeChat('chat_1', settling.promise);
     const turn = result.current.prepare('chat_1', { turnId: 'turn_1' });
+    /* The port's own diagnostic, verbatim — what the worker actually relays. */
     settling.reject(
-      Object.assign(new Error('That branch has nothing recorded to start from.'), { code: 'BRANCH_NEEDS_REVISION' }),
+      Object.assign(new Error('Branch x is unborn; a checkout of it needs an explicit base revision.'), {
+        code: 'BRANCH_NEEDS_REVISION',
+      }),
     );
 
-    await expect(act(async () => turn)).rejects.toMatchObject({ code: 'BRANCH_NEEDS_REVISION' });
+    const refusal = await act(async () => turn.catch((error: unknown) => error));
+
+    expect(refusal).toMatchObject({ code: 'BRANCH_NEEDS_REVISION' });
+    /* P4: the code crosses, the words are the page's. The card renders
+       `error.message`, so the diagnostic must not be it (review W8 finding 2). */
+    expect((refusal as Error).message).toBe(describeRevisionFailure('branch', 'BRANCH_NEEDS_REVISION').description);
+    expect((refusal as Error).message).not.toMatch(/checkout|unborn/iu);
     /* The refusal is the toast channel's and the turn's; `placeChat` itself
        settles quietly so no caller is handed a second copy to report. */
     await expect(placed).resolves.toBeUndefined();
@@ -889,6 +899,54 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     await waitFor(() => {
       expect(hookState.patchChat.mock.calls).toEqual([['chat_fix', 'checkoutId', 'checkout-fillet']]);
     });
+  });
+
+  /* Review W8 finding 7: the map entry was identity-guarded but the record
+     write was not, so a slow *New branch* settling after a quick pick wrote the
+     branch the person had already moved away from. */
+  it('should let no placement the chat has moved on from write its checkout', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const slow = Promise.withResolvers<Readonly<{ checkoutId: string }>>();
+    const stale = result.current.placeChat('chat_1', slow.promise);
+    await act(async () => result.current.placeChat('chat_1', 'checkout-quick'));
+    slow.resolve({ checkoutId: 'checkout-slow' });
+    await act(async () => stale);
+
+    expect(hookState.patchChat.mock.calls).toEqual([['chat_1', 'checkoutId', 'checkout-quick']]);
+  });
+
+  /* Review W8 finding 14: the branch verb answers with the checkout's root and
+     the projection that names it is published a beat later, so a chat opened in
+     between had no files at all. The answered root is kept and consulted after
+     the registry's own rows. */
+  it('should attach a chat to the root the branch it was placed on answered with', async () => {
+    const { project, linked } = fixture();
+    bindFileManager(project, linked);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    await act(async () =>
+      result.current.placeChat(
+        'chat_1',
+        Promise.resolve({ checkoutId: 'checkout-branch', checkoutRoot: '/checkouts/checkout-branch' }),
+      ),
+    );
+    /* The record the authority just wrote; the registry still names no branch. */
+    chats = [{ id: 'chat_1', checkoutId: 'checkout-branch' }];
+    const attached = await act(async () => result.current.attachment('chat_1'));
+    if (attached === undefined) {
+      throw new Error('the attach answered no workspace');
+    }
+    const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+    const proxy = createFileSystemBridgeProxy(attached.openFileSystemBridge());
+    await proxy.ready;
+    await proxy.writeFile('attached.txt', 'read before the projection caught up');
+    proxy.dispose();
+
+    expect(attached.execution.workspaceId).toBe('checkout-branch');
+    expect(await linked.readFile('attached.txt', 'utf8')).toBe('read before the projection caught up');
   });
 
   /* A discarded checkout has no files to attach to, which is the same answer

@@ -507,7 +507,12 @@ export function RevisionsPanelBody(): React.JSX.Element {
             onSwitch={commands.switchTo}
             onMerge={commands.mergeBranch}
             onDiscard={commands.discardBranch}
-            onCreate={commands.createBranch}
+            /* The pane ignores the answer, but the verb rejects on a refusal
+               and the toast channel already reports it. */
+            onCreate={(name) => {
+              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- the toast channel owns this refusal; only the loose rejection is ours
+              void commands.createBranch(name).catch(() => undefined);
+            }}
             onRename={commands.renameBranch}
             onKeepSide={commands.resolveFile}
             onOpenConflict={commands.openConflictInEditor}

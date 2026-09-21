@@ -17,6 +17,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
@@ -102,13 +103,18 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
    * one (*New branch*). A {@link prepare} that arrives while it settles waits
    * for it — the person chose the branch before they pressed send, and the turn
    * goes where they chose or is refused with the reason the branch was. The
-   * authority is the only writer of `Chat.checkoutId`.
+   * authority is the only writer of `Chat.checkoutId`, and it remembers the
+   * root a settling verb answered with so an attach made before the registry
+   * publishes that checkout still finds its files.
    *
    * Resolves once the placement has settled either way. A refused branch is
    * already the toast channel's to report and `prepare`'s to refuse; a caller
    * has nothing left to say about it, so it is not asked to catch anything.
    */
-  placeChat: (chatId: string, target: string | Promise<Readonly<{ checkoutId: string }>>) => Promise<void>;
+  placeChat: (
+    chatId: string,
+    target: string | Promise<Readonly<{ checkoutId: string; checkoutRoot?: string }>>,
+  ) => Promise<void>;
   /**
    * Say this chat exists to resolve one conflicted revision (S33, AC14).
    *
@@ -425,9 +431,31 @@ type ChatPlacement = Readonly<{
   conflict?: Readonly<{ revisionId: string; paths: readonly string[] }>;
 }>;
 
-/** The checkout a settling branch verb answers with. */
-const resolveCheckoutId = async (target: Promise<Readonly<{ checkoutId: string }>>): Promise<string> => {
-  const created = await target;
+/**
+ * The checkout a settling branch verb answers with, and where its files are.
+ *
+ * The root it answers with is remembered because the projection that names it
+ * is published a beat later, and an attach made in between would otherwise find
+ * no files at all. A refusal is re-thrown in the page's own words: the verb
+ * rejects with the port's diagnostic ("Branch x is unborn; a checkout of it
+ * needs an explicit base revision."), and this rejection *is* what the turn's
+ * error card renders — so the code crosses and the table chooses the sentence
+ * (P4, Rule 1).
+ */
+const settlePlacement = async (
+  target: Promise<Readonly<{ checkoutId: string; checkoutRoot?: string }>>,
+  checkoutRoots: Map<string, string>,
+): Promise<string> => {
+  let created;
+  try {
+    created = await target;
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+    throw Object.assign(new Error(describeRevisionFailure('branch', code).description), { code });
+  }
+  if (created.checkoutRoot !== undefined && created.checkoutRoot !== '') {
+    checkoutRoots.set(created.checkoutId, created.checkoutRoot);
+  }
   return created.checkoutId;
 };
 
@@ -482,6 +510,14 @@ type BrowserWorkspaceAuthorityState = {
    * arrives while it settles waits for it rather than racing it.
    */
   readonly placements: Map<string, Promise<string>>;
+  /**
+   * Where a checkout's files are, as the verb that made it answered (P2).
+   *
+   * The registry's projection is the authority on this, but it is published
+   * after the verb resolves, so a chat attached in that window had no root and
+   * no workspace. Consulted only when the projection names no such checkout.
+   */
+  readonly checkoutRoots: Map<string, string>;
   /** Chats seeded by *Ask chat to resolve*, by chat id (S33). */
   readonly conflicts: Map<
     string,
@@ -527,6 +563,7 @@ const getBrowserWorkspaceAuthority = (input: {
     placing: new Map(),
     pending: new Map(),
     placements: new Map(),
+    checkoutRoots: new Map(),
     conflicts: new Map(),
     listeners: new Set(),
     hostId: getHostId(),
@@ -756,8 +793,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   );
 
   const placeChat = useCallback(
-    async (chatId: string, target: string | Promise<Readonly<{ checkoutId: string }>>): Promise<void> => {
-      const settling = typeof target === 'string' ? Promise.resolve(target) : resolveCheckoutId(target);
+    async (
+      chatId: string,
+      target: string | Promise<Readonly<{ checkoutId: string; checkoutRoot?: string }>>,
+    ): Promise<void> => {
+      const settling =
+        typeof target === 'string' ? Promise.resolve(target) : settlePlacement(target, state.checkoutRoots);
       /* Recorded before it settles: an admission racing it has to wait for it
        * rather than lease the checkout the record still names (Q2). */
       state.placements.set(chatId, settling);
@@ -765,7 +806,10 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         /* The verb's refusal has two owners already (the toast channel and the
          * next `prepare`); only a record write that fails is this call's own. */
         const checkoutId = await settling.catch(() => undefined);
-        if (checkoutId !== undefined) {
+        /* A later `placeChat` for this chat has replaced this one: the person
+         * moved on while it settled, and writing now would put the record back
+         * on the branch they moved away from. */
+        if (checkoutId !== undefined && state.placements.get(chatId) === settling) {
           await patchChat(chatId, 'checkoutId', checkoutId);
         }
       } finally {
@@ -905,9 +949,10 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
        * checkout the registry no longer names has no files to attach to, which
        * is the same answer as no checkout at all. */
       const root =
-        checkoutId === status?.checkoutId
+        (checkoutId === status?.checkoutId
           ? status.checkoutRoot
-          : status?.branches.find((row) => row.checkoutId === checkoutId)?.checkoutRoot;
+          : status?.branches.find((row) => row.checkoutId === checkoutId)?.checkoutRoot) ??
+        state.checkoutRoots.get(checkoutId);
       if (root === undefined) {
         return undefined;
       }

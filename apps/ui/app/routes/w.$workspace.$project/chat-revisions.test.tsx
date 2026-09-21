@@ -491,6 +491,48 @@ describe('Revisions pane', () => {
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
   });
 
+  /* Review W8 finding 4: the pane consumes the verb as `(name) => void`, which
+     discards the answer but not its rejection — a duplicate name, the normal
+     refusal here, went loose. The toast channel already reports it. */
+  it('handles a refused branch rather than leaving its rejection loose', async () => {
+    const user = userEvent.setup();
+    /* The *Branches* region appears at two branches (S26). */
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+    /* The rejection is observable only through the handler the call site
+       attaches: vitest's own `vi.fn` bookkeeping already settles the promise it
+       records, so nothing reaches `process.on('unhandledRejection')` here. */
+    let handled: ReturnType<typeof vi.spyOn> | undefined;
+    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- The call site must see this very promise, not an async wrapper's copy.
+    revisionStatusHarness.commands.createBranch.mockImplementationOnce(() => {
+      const refusal = Promise.reject(
+        Object.assign(new Error('Branch enclosure-v2 already exists.'), { code: 'CHECKOUT_CONFLICT' }),
+      );
+      handled = vi.spyOn(refusal, 'catch');
+      return refusal;
+    });
+
+    renderPane();
+    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
+
+    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
+    expect(handled).toHaveBeenCalled();
+  });
+
   it('says the checkout has changes that are not in a revision yet, and offers to drop them', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];

@@ -744,7 +744,7 @@ async function renderAndSampleEdgeOcclusionFixture(
   backend: GraphicsBackend,
   camera: { readonly distance: number; readonly fov: number },
 ): Promise<EdgeOcclusionSampleStats> {
-  await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+  await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
 
   await waitForGraphicsViewer();
   await waitForGraphicsTestBridge();
@@ -777,7 +777,7 @@ function expectRearEdgesStayOccluded(stats: EdgeOcclusionSampleStats, context: s
 test.describe('Graphics backend regression guard', () => {
   for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
     test(`FOV changes preserve projected size through CameraControls on ${backend}`, async () => {
-      await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+      await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
 
       await waitForGraphicsViewer();
 
@@ -815,7 +815,7 @@ test.describe('Graphics backend regression guard', () => {
     });
 
     test(`render-frame rebase and rescale are pixel-invariant on ${backend}`, async () => {
-      await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+      await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
@@ -902,7 +902,7 @@ test.describe('Graphics backend regression guard', () => {
     });
 
     test(`framed GLTF grid fade distinguishes near and far clipping controls on ${backend}`, async () => {
-      await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+      await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
@@ -1013,7 +1013,7 @@ test.describe('Graphics backend regression guard', () => {
       { label: 'orthographic-shallow-below', fov: 0, position: [1, -1, -0.01], crossesPlane: true },
     ] as const) {
       test(`framed GLTF keeps the complete radial grid fade for ${cameraCase.label} on ${backend}`, async () => {
-        await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+        await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
         await waitForGraphicsViewer();
         await waitForGraphicsTestBridge();
         await target.evaluate(({ fov, position }) => {
@@ -1123,7 +1123,7 @@ test.describe('Graphics backend regression guard', () => {
     }
 
     test(`zero-FOV crossings render continuously without stale camera frames on ${backend}`, async () => {
-      await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+      await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
@@ -1168,7 +1168,7 @@ test.describe('Graphics backend regression guard', () => {
     });
 
     test(`post-processing keeps one live render owner across zero-FOV crossings on ${backend}`, async () => {
-      await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+      await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
@@ -1198,7 +1198,7 @@ test.describe('Graphics backend regression guard', () => {
     });
 
     test(`viewport gizmo animation progresses smoothly through Tau CameraControls on ${backend}`, async () => {
-      await target.navigate(`${edgeOcclusionFixturePath}?graphicsBackend=${backend}`);
+      await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
 
       await waitForGraphicsViewer();
 

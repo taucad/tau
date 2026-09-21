@@ -34,6 +34,7 @@ import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
 import { toast } from '#components/ui/sonner.js';
+import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
@@ -773,9 +774,15 @@ export default function FilesRoute(): React.JSX.Element {
           toast.error('Workspace is not connected.');
           return;
         }
-        const blob = await scopedStorage.getZippedDirectory(path, { scope });
         const folderName = path.split('/').pop() ?? 'folder';
-        downloadBlob(blob, `${folderName}.zip`);
+        toast.promise(async () => scopedStorage.getZippedDirectory(path, { scope }), {
+          loading: `Downloading ${folderName}...`,
+          success(blob) {
+            downloadBlob(blob, `${folderName}.zip`);
+            return `Downloaded ${folderName}.zip`;
+          },
+          error: getFileTreeDownloadErrorMessage,
+        });
       },
     }),
     [projects, resolveScope, scopedStorage],

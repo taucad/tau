@@ -22,11 +22,27 @@
  * currently hand-rolls over the `restore` child.
  */
 
-import { assign, emit, enqueueActions, fromPromise, setup } from 'xstate';
+import { and, assign, emit, enqueueActions, fromPromise, setup } from 'xstate';
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
+
+import type { CheckoutCutTrigger } from '#checkout.machine.js';
+import type { RevisionPortErrorCode } from '#revision-port.js';
 
 /** How long a delegated registry verb waits for the registry's answer. @public */
 export const branchRegistryMilliseconds = 30_000;
+
+/**
+ * What refused a branch verb.
+ *
+ * A port code where the port refused, plus the two refusals a *New branch* can
+ * meet that no port names: the head moved under the cut it asked for (the
+ * `TurnFailureCode` shape, one verb over), and the cut named nothing this
+ * project is standing in — which is not a name collision, so it is not
+ * `CHECKOUT_CONFLICT`.
+ *
+ * @public
+ */
+export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST' | 'CHECKOUT_UNKNOWN';
 
 /** The five verbs this machine owns. @public */
 export type BranchOperation = 'switch' | 'merge' | 'discard' | 'create' | 'rename';
@@ -49,17 +65,29 @@ export type BranchMachineContext = Readonly<{
   branch: string | undefined;
   /** The new name a `rename` writes. */
   name: string | undefined;
-  /** Where a created branch starts, when the caller named a revision. */
+  /** Where a created branch starts, once the caller or a recorded cut named it. */
   from: string | undefined;
+  /** The selected checkout's head, which a `create` falls back to (P3). */
+  head: string | undefined;
   /** How the root resolved a *Switch* (D10). */
   mode: 'reroot' | 'applyToLive' | undefined;
-  /** The checkout a *Switch* or *Discard* acts on, once known. */
+  /**
+   * The checkout the verb acts on, once known.
+   *
+   * For a *Switch* or *Discard* it is the one being moved or dropped; for a
+   * *New branch* it is the selected checkout whose tree is recorded first, and
+   * then the one the registry made (P3, P4).
+   */
   checkoutId: string | undefined;
+  /** Where that checkout's files are, once the registry named it. */
+  checkoutRoot: string | undefined;
   /** Whether the checked verb needs a person before it runs. */
   needsConfirmation: boolean;
   /** What the confirmation says, in the words `checkBranch` chose. */
   question: string | undefined;
   reason: string | undefined;
+  /** The refusal's stable category, when the thing that refused named one (P4). */
+  reasonCode: BranchFailureCode | undefined;
   /** Paths a merge could not settle; W10's resolution reads them. */
   conflicts: readonly string[];
   parentRef: AnyActorRef | undefined;
@@ -71,16 +99,46 @@ export type BranchMachineEvent =
   | Readonly<{ type: 'switch'; branch: string; mode?: 'reroot' | 'applyToLive'; checkoutId?: string }>
   | Readonly<{ type: 'merge'; branch: string }>
   | Readonly<{ type: 'discard'; branch: string; checkoutId?: string }>
-  | Readonly<{ type: 'create'; name: string; from?: string }>
+  /* `checkoutId` and `head` are the root's: only it knows where the person is
+   * standing, and P3 makes a branch start from what they see. */
+  | Readonly<{ type: 'create'; name: string; from?: string; checkoutId?: string; head?: string }>
   | Readonly<{ type: 'rename'; branch: string; name: string }>
   | Readonly<{ type: 'confirm' }>
   | Readonly<{ type: 'cancel' }>
   /** The workbench moved; *Merge into `<current>`* follows it. */
   | Readonly<{ type: 'selectBranch'; branch: string | undefined }>
   /** The registry answered a delegated verb: the branch set as it now stands. */
-  | Readonly<{ type: 'branchesChanged'; branches: readonly string[] }>
+  | Readonly<{
+      type: 'branchesChanged';
+      branches: readonly string[];
+      /** The same set as records, so a settled `create` knows what it made. */
+      checkouts?: readonly BranchCheckoutRecord[];
+    }>
   /** The registry refused a delegated verb. */
-  | Readonly<{ type: 'operationFailed'; reason: string }>;
+  | Readonly<{ type: 'operationFailed'; reason: string; code?: RevisionPortErrorCode }>
+  /* The root's answers to the cut a `create` asks for. Only the trigger-only
+   * ones reach here — a turn's cut is that turn's (a2 R1). */
+  | Readonly<{
+      type: 'revisionMinted';
+      checkoutId: string;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      revisionId: string;
+    }>
+  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{
+      type: 'cutFailed';
+      /** Undefined when the cut named a checkout this project does not have. */
+      checkoutId: string | undefined;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      reason: string;
+      code?: BranchFailureCode;
+    }>
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>;
+
+/** One checkout as the registry names it, beside the branch it tracks. @public */
+export type BranchCheckoutRecord = Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>;
 
 /** Facts branchMachine emits, and sends to its parent when they move a checkout. @public */
 export type BranchMachineEmitted =
@@ -93,8 +151,24 @@ export type BranchMachineEmitted =
     }>
   | Readonly<{ type: 'branchMerged'; branch: string; into: string; revisionId: string }>
   | Readonly<{ type: 'mergeConflicted'; branch: string; into: string; paths: readonly string[] }>
-  | Readonly<{ type: 'toast.branch'; operation: BranchOperation; branch: string }>
-  | Readonly<{ type: 'toast.error'; message: string }>;
+  | Readonly<{
+      type: 'toast.branch';
+      operation: BranchOperation;
+      branch: string;
+      /** What a `create` made, so a correlated caller needs no projection scrape. */
+      checkoutId?: string;
+      checkoutRoot?: string;
+    }>
+  /* P4: a refusal crosses as a code; the page owns the words. The verb and its
+   * branch ride along, because a caller correlating one *New branch* must not
+   * take an unrelated verb's refusal for its own (review finding 1). */
+  | Readonly<{
+      type: 'toast.error';
+      operation?: BranchOperation;
+      branch?: string;
+      message: string;
+      code?: BranchFailureCode;
+    }>;
 
 /**
  * What `checkBranch` answers before a verb runs.
@@ -151,6 +225,23 @@ export type BranchRenameActorOutput = Readonly<{ branch: string }>;
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'That branch change failed.';
 
+/*
+ * The port's own category, read structurally (P4).
+ *
+ * A machine may import only *types* from this package's contracts (I20, AC22),
+ * so `instanceof RevisionPortError` is not available here; `sync.machine` reads
+ * the same field the same way.
+ */
+const describeFailureCode = (error: unknown): RevisionPortErrorCode | undefined => {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a rejection is `unknown` until read.
+  const { code } = error as Readonly<{ code?: unknown }>;
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowed to the port's own union.
+  return typeof code === 'string' ? (code as RevisionPortErrorCode) : undefined;
+};
+
 /**
  * Headless branch verbs for one project.
  *
@@ -197,6 +288,20 @@ export const branchMachine = setup({
   },
   guards: {
     needsConfirmation: ({ context }) => context.needsConfirmation,
+    hasBase: ({ context }) => context.from !== undefined && context.from !== '',
+    hasHead: ({ context }) => context.head !== undefined,
+    /* This verb's own cut: a turn's belongs to that turn (a2 R1), another
+     * checkout's to nobody here, and an ambient `save`/`idle`/`hidden`/`close`
+     * on this same checkout carries no turn id either — so the trigger is what
+     * separates the answer asked for from the one that merely arrived. */
+    answersOurCut: ({ context, event }) =>
+      (event.type === 'revisionMinted' ||
+        event.type === 'nothingToSave' ||
+        event.type === 'cutFailed' ||
+        event.type === 'casLost') &&
+      event.turnId === undefined &&
+      event.trigger === 'switch' &&
+      event.checkoutId === context.checkoutId,
     isOperation: ({ context }, params: Readonly<{ operation: BranchOperation }>) =>
       context.operation === params.operation,
   },
@@ -206,27 +311,43 @@ export const branchMachine = setup({
       branch: undefined,
       name: undefined,
       from: undefined,
+      head: undefined,
       mode: undefined,
       checkoutId: undefined,
+      checkoutRoot: undefined,
       needsConfirmation: false,
       question: undefined,
       conflicts: [],
     }),
     /* The registry is one writer (`checkouts.machine`); this asks it through the
      * parent rather than opening a second path to the same records (A38). */
-    delegate: enqueueActions(({ context, enqueue }, params: Readonly<{ type: 'addCheckout' | 'removeCheckout' }>) => {
-      if (context.parentRef === undefined) {
-        enqueue.raise({ type: 'operationFailed', reason: 'This project has no registry to ask.' });
-        return;
-      }
-      enqueue.sendTo(
-        context.parentRef,
-        params.type === 'addCheckout'
-          ? { type: 'addCheckout', branch: context.branch ?? '', from: context.from ?? '' }
-          : { type: 'removeCheckout', id: context.checkoutId ?? '' },
-      );
+    delegate: enqueueActions(
+      ({ context, enqueue }, params: Readonly<{ type: 'addCheckout' | 'removeCheckout' | 'cut' }>) => {
+        if (context.parentRef === undefined) {
+          enqueue.raise({ type: 'operationFailed', reason: 'This project has no registry to ask.' });
+          return;
+        }
+        /* `cut` is the same delegation one level over: the checkout is the sole
+         * minter (F2), so a *New branch* asks the root to record rather than
+         * minting a revision of its own (P3). */
+        enqueue.sendTo(
+          context.parentRef,
+          params.type === 'addCheckout'
+            ? { type: 'addCheckout', branch: context.branch ?? '', from: context.from ?? '' }
+            : params.type === 'removeCheckout'
+              ? { type: 'removeCheckout', id: context.checkoutId ?? '' }
+              : { type: 'cut', trigger: 'switch', checkoutId: context.checkoutId, leaseIds: [] },
+        );
+      },
+    ),
+    failFromRegistry: assign({
+      reason: ({ event }) => (event.type === 'operationFailed' ? event.reason : 'That branch change failed.'),
+      reasonCode: ({ event }) => (event.type === 'operationFailed' ? event.code : undefined),
     }),
-    failWith: assign({ reason: (_, params: Readonly<{ reason: string }>) => params.reason }),
+    failWith: assign({
+      reason: (_, params: Readonly<{ reason: string; code?: BranchFailureCode }>) => params.reason,
+      reasonCode: (_, params: Readonly<{ reason: string; code?: BranchFailureCode }>) => params.code,
+    }),
   },
 }).createMachine({
   id: 'branch',
@@ -237,11 +358,14 @@ export const branchMachine = setup({
     branch: undefined,
     name: undefined,
     from: undefined,
+    head: undefined,
     mode: undefined,
     checkoutId: undefined,
+    checkoutRoot: undefined,
     needsConfirmation: false,
     question: undefined,
     reason: undefined,
+    reasonCode: undefined,
     conflicts: [],
     parentRef: input.parentRef,
   }),
@@ -260,11 +384,17 @@ export const branchMachine = setup({
             mode: ({ event }) => event.mode,
             checkoutId: ({ event }) => event.checkoutId,
             reason: undefined,
+            reasonCode: undefined,
           }),
         },
         merge: {
           target: 'checking',
-          actions: assign({ operation: 'merge', branch: ({ event }) => event.branch, reason: undefined }),
+          actions: assign({
+            operation: 'merge',
+            branch: ({ event }) => event.branch,
+            reason: undefined,
+            reasonCode: undefined,
+          }),
         },
         discard: {
           target: 'checking',
@@ -273,6 +403,7 @@ export const branchMachine = setup({
             branch: ({ event }) => event.branch,
             checkoutId: ({ event }) => event.checkoutId,
             reason: undefined,
+            reasonCode: undefined,
           }),
         },
         create: {
@@ -281,7 +412,10 @@ export const branchMachine = setup({
             operation: 'create',
             branch: ({ event }) => event.name,
             from: ({ event }) => event.from,
+            checkoutId: ({ event }) => event.checkoutId,
+            head: ({ event }) => event.head,
             reason: undefined,
+            reasonCode: undefined,
           }),
         },
         rename: {
@@ -291,6 +425,7 @@ export const branchMachine = setup({
             branch: ({ event }) => event.branch,
             name: ({ event }) => event.name,
             reason: undefined,
+            reasonCode: undefined,
           }),
         },
       },
@@ -315,7 +450,10 @@ export const branchMachine = setup({
         },
         onError: {
           target: 'failed',
-          actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+          actions: assign({
+            reason: ({ event }) => describeFailure(event.error),
+            reasonCode: ({ event }) => describeFailureCode(event.error),
+          }),
         },
       },
     },
@@ -366,7 +504,10 @@ export const branchMachine = setup({
             },
             onError: {
               target: '#branch.failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+              actions: assign({
+                reason: ({ event }) => describeFailure(event.error),
+                reasonCode: ({ event }) => describeFailureCode(event.error),
+              }),
             },
           },
         },
@@ -406,29 +547,115 @@ export const branchMachine = setup({
             ],
             onError: {
               target: '#branch.failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+              actions: assign({
+                reason: ({ event }) => describeFailure(event.error),
+                reasonCode: ({ event }) => describeFailureCode(event.error),
+              }),
             },
           },
         },
         /* The registry's own verbs, asked through the parent. The bound is the
          * failure edge every invoked effect has — a registry that never answers
          * must not leave the pane's verbs disabled forever. */
+        /*
+         * P3: a branch starts from what the person sees.
+         *
+         * `recording` asks the root to cut the selected checkout, so unsaved
+         * edits are in the tree the branch starts from; `adding` is the
+         * delegated registry verb. A caller that named a base has already
+         * chosen one and skips straight to `adding`.
+         */
         creating: {
-          entry: { type: 'delegate', params: { type: 'addCheckout' } },
-          after: {
-            [branchRegistryMilliseconds]: {
-              target: '#branch.failed',
-              actions: { type: 'failWith', params: { reason: 'This project did not answer in time.' } },
+          initial: 'routing',
+          states: {
+            routing: {
+              always: [{ guard: 'hasBase', target: 'adding' }, { target: 'recording' }],
             },
-          },
-          on: {
-            branchesChanged: {
-              guard: ({ context, event }) => event.branches.includes(context.branch ?? ''),
-              target: '#branch.applied',
+            recording: {
+              entry: { type: 'delegate', params: { type: 'cut' } },
+              after: {
+                [branchRegistryMilliseconds]: {
+                  target: '#branch.failed',
+                  actions: { type: 'failWith', params: { reason: 'This project did not answer in time.' } },
+                },
+              },
+              on: {
+                revisionMinted: {
+                  guard: { type: 'answersOurCut' },
+                  target: 'adding',
+                  actions: assign({ from: ({ event }) => event.revisionId }),
+                },
+                nothingToSave: [
+                  {
+                    /* Nothing to record, but a head to stand on — which is also
+                     * the answer a checkout an agent holds gives (a2 R1). */
+                    guard: and(['answersOurCut', 'hasHead']),
+                    target: 'adding',
+                    actions: assign({ from: ({ context }) => context.head }),
+                  },
+                  {
+                    guard: { type: 'answersOurCut' },
+                    target: '#branch.failed',
+                    actions: {
+                      type: 'failWith',
+                      params: {
+                        reason: 'This project has nothing to branch from yet.',
+                        code: 'BRANCH_NEEDS_REVISION',
+                      },
+                    },
+                  },
+                ],
+                cutFailed: {
+                  guard: { type: 'answersOurCut' },
+                  target: '#branch.failed',
+                  actions: assign({
+                    reason: ({ event }) => event.reason,
+                    /* Whatever refused the cut named this; the page turns it
+                       into words rather than falling back (P4). */
+                    reasonCode: ({ event }) => event.code,
+                  }),
+                },
+                casLost: {
+                  guard: { type: 'answersOurCut' },
+                  target: '#branch.failed',
+                  actions: {
+                    type: 'failWith',
+                    params: { reason: 'Something else changed this project first. Try again.', code: 'CAS_LOST' },
+                  },
+                },
+                operationFailed: {
+                  target: '#branch.failed',
+                  actions: 'failFromRegistry',
+                },
+              },
             },
-            operationFailed: {
-              target: '#branch.failed',
-              actions: assign({ reason: ({ event }) => event.reason }),
+            adding: {
+              entry: { type: 'delegate', params: { type: 'addCheckout' } },
+              after: {
+                [branchRegistryMilliseconds]: {
+                  target: '#branch.failed',
+                  actions: { type: 'failWith', params: { reason: 'This project did not answer in time.' } },
+                },
+              },
+              on: {
+                branchesChanged: {
+                  guard: ({ context, event }) => event.branches.includes(context.branch ?? ''),
+                  target: '#branch.applied',
+                  /* The registry named the checkout it made; for a `create`
+                   * that is what `toast.branch` carries out (P4). */
+                  actions: assign({
+                    checkoutId: ({ context, event }) =>
+                      event.checkouts?.find((record) => record.branch === context.branch)?.checkoutId ??
+                      context.checkoutId,
+                    checkoutRoot: ({ context, event }) =>
+                      event.checkouts?.find((record) => record.branch === context.branch)?.checkoutRoot,
+                  }),
+                },
+                operationFailed: {
+                  target: '#branch.failed',
+                  actions: 'failFromRegistry',
+                },
+              },
             },
           },
         },
@@ -447,7 +674,7 @@ export const branchMachine = setup({
             },
             operationFailed: {
               target: '#branch.failed',
-              actions: assign({ reason: ({ event }) => event.reason }),
+              actions: 'failFromRegistry',
             },
           },
         },
@@ -465,7 +692,10 @@ export const branchMachine = setup({
             },
             onError: {
               target: '#branch.failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error) }),
+              actions: assign({
+                reason: ({ event }) => describeFailure(event.error),
+                reasonCode: ({ event }) => describeFailureCode(event.error),
+              }),
             },
           },
         },
@@ -477,6 +707,9 @@ export const branchMachine = setup({
           type: 'toast.branch',
           operation: context.operation ?? 'switch',
           branch: context.branch ?? '',
+          ...(context.checkoutRoot === undefined
+            ? {}
+            : { checkoutId: context.checkoutId, checkoutRoot: context.checkoutRoot }),
         }),
       ),
       always: { target: 'idle', actions: 'clearTransient' },
@@ -505,7 +738,10 @@ export const branchMachine = setup({
       entry: emit(
         ({ context }): BranchMachineEmitted => ({
           type: 'toast.error',
+          ...(context.operation === undefined ? {} : { operation: context.operation }),
+          ...(context.branch === undefined ? {} : { branch: context.branch }),
           message: context.reason ?? 'That branch change failed.',
+          ...(context.reasonCode === undefined ? {} : { code: context.reasonCode }),
         }),
       ),
       always: { target: 'idle', actions: 'clearTransient' },

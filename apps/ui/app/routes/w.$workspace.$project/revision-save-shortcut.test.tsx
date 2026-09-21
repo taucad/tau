@@ -121,7 +121,11 @@ describe('the workbench save shortcut', () => {
     expect(saveRevision).not.toHaveBeenCalled();
   });
 
-  it('records nothing when either file flush fails', async () => {
+  /* E5: the caught error is a diagnostic — a flush that timed out is not
+     something a person acts on, and the sentence they get says what did not
+     happen and what to do about it. The diagnostic goes to the console. */
+  it('records nothing when either file flush fails, and says so without quoting the failure', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     waitForStore.mockRejectedValueOnce(new Error('Editor flush timed out'));
     render(
       <KeyboardProvider>
@@ -132,8 +136,12 @@ describe('the workbench save shortcut', () => {
     await userEvent.keyboard('{Control>}s{/Control}');
 
     await waitFor(() => {
-      expect(toastError).toHaveBeenCalledWith('Revision not saved', { description: 'Editor flush timed out' });
+      expect(toastError).toHaveBeenCalledWith('Revision not saved', {
+        description: 'The editor could not finish saving its files.',
+      });
     });
+    expect(consoleError).toHaveBeenCalledWith('[revisions]', 'save', expect.any(Error));
     expect(saveRevision).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

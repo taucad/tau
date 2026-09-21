@@ -9,10 +9,10 @@
  * @see apps/ui/app/hooks/use-revision-status.ts
  */
 
-import { vi } from 'vitest';
+import { onTestFinished, vi } from 'vitest';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
-import type { RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
+import type { BranchCreated, RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 const emptyStatus = (): RevisionStatusProjection => ({
@@ -81,7 +81,12 @@ export const revisionStatusHarness = {
     confirm: vi.fn(),
     cancel: vi.fn(),
     switchTo: vi.fn<(branch: string) => void>(),
-    createBranch: vi.fn<(name: string, from?: string) => void>(),
+    /* Resolves like the real verb does (P4); a caller places a chat on it. */
+    createBranch: vi.fn<(name: string, from?: string) => Promise<BranchCreated>>(async (name) => ({
+      branch: name,
+      checkoutId: `checkout-${name}`,
+      checkoutRoot: `/checkouts/checkout-${name}`,
+    })),
     discardBranch: vi.fn<(branch: string, checkoutId?: string) => void>(),
     mergeBranch: vi.fn<(branch: string) => void>(),
     renameBranch: vi.fn<(branch: string, name: string) => void>(),
@@ -123,6 +128,48 @@ export const revisionStatusHarness = {
       command.mockClear();
     }
   },
+};
+
+/**
+ * Make *New branch* refuse, where a loose rejection is still observable.
+ *
+ * Not through `vi.fn`: the spy attaches its own settlement handler to every
+ * promise it records, so a rejection that went through one can never reach
+ * `process.on('unhandledRejection')` — which is the one thing a surface's
+ * `.catch` on this verb exists to prevent. The plain stand-in and the listener
+ * are both taken back when the case ends, since `reset()` clears spies only.
+ *
+ * @param name - The branch the surface is expected to ask for.
+ * @returns What it asked for, what went unhandled, and a flush to await.
+ */
+export const refuseCreateBranch = (
+  name: string,
+): Readonly<{ asked: string[]; unhandled: unknown[]; settled: () => Promise<void> }> => {
+  const asked: string[] = [];
+  const unhandled: unknown[] = [];
+  const note = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  const spy = revisionStatusHarness.commands.createBranch;
+  process.on('unhandledRejection', note);
+  revisionStatusHarness.commands.createBranch = (async (branch: string) => {
+    asked.push(branch);
+    throw Object.assign(new Error(`Branch ${name} already exists.`), { code: 'CHECKOUT_CONFLICT' });
+  }) as unknown as typeof spy;
+  onTestFinished(() => {
+    process.off('unhandledRejection', note);
+    revisionStatusHarness.commands.createBranch = spy;
+  });
+  return {
+    asked,
+    unhandled,
+    /* Node raises an unhandled rejection at the end of the tick that left one
+     * unhandled, so one macrotask after the click is when it is knowable. */
+    settled: async () =>
+      new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 0);
+      }),
+  };
 };
 
 /**

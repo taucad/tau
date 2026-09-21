@@ -4,15 +4,25 @@ import { Topic } from '@taucad/events';
 import { toast } from '#components/ui/sonner.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
-/** A turn that ended without recording a revision, as a surface reads it. @public */
+/**
+ * A turn that ended without recording a revision, as a surface reads it.
+ *
+ * It carries the refusal's `code` and not the machine's `reason`: the sentences
+ * `turn.machine` authors are diagnostics — two of them name a checkout, which
+ * is Rule 1's first banned word — so the notice holds the category and every
+ * surface phrases it through `describeRevisionFailure` (P4, W4 §D).
+ *
+ * @public
+ */
 export type TurnOutcomeNotice = Readonly<{
   projectId: string;
   kind: 'conflicted' | 'failed';
   turnId: string;
   chatId: string;
-  reason: string | undefined;
+  code: string | undefined;
 }>;
 
 const topic = new Topic<void>({ name: 'revision-turn-outcomes' });
@@ -54,7 +64,7 @@ const noticeOf = (projectId: string, event: WorkerRevisionEvent): TurnOutcomeNot
     kind: event.type === 'turn.conflicted' ? 'conflicted' : 'failed',
     turnId: event.turnId,
     chatId: event.chatId,
-    reason: event.type === 'turn.failed' ? event.reason : undefined,
+    code: event.type === 'turn.failed' ? event.code : undefined,
   };
 };
 
@@ -104,9 +114,13 @@ export function RevisionOutcomes(): undefined {
         });
         return;
       }
-      toast.error('Nothing was saved for that change', {
-        description: notice.reason,
-      });
+      /* The diagnostic goes where someone can act on it, which is not a toast
+       * (E5); the code becomes the words. */
+      if (event.type === 'turn.failed') {
+        console.error('[revisions]', 'turn', event.code, event.reason);
+      }
+      const copy = describeRevisionFailure('turn', notice.code);
+      toast.error(copy.title, { description: copy.description });
     });
   }, [client, projectId, queryClient]);
 

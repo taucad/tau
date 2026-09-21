@@ -15,8 +15,13 @@ import { assign, createActor, setup } from 'xstate';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
-import type { WorkerProjectRevisions, WorkerRevisionResponse } from '#machines/file-manager.worker.revisions.js';
+import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import type {
+  RevisionToast,
+  WorkerProjectRevisions,
+  WorkerRevisionResponse,
+} from '#machines/file-manager.worker.revisions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import {
   createHostRevisionClient,
@@ -27,7 +32,7 @@ import {
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
 import type { GitRemoteCredential } from '@taucad/revisions';
-import type { AgentChannelClient, AgentChannelRequest, AgentChannelResponse } from '@taucad/agent-host';
+import type { AgentChannelClient, AgentChannelRequest, AgentChannelResponse, JsonValue } from '@taucad/agent-host';
 
 const projectId = 'alpha';
 
@@ -194,6 +199,9 @@ const harness = (
           held = credential;
           const port = createIsomorphicGitRevisionPort({
             filesystem: service.createRootedFileSystem(`/projects/${id}`),
+            /* The same routes `file-manager.worker.ts` gives the real port, so
+             * a branch made here gets a checkout of its own (P24). */
+            checkouts: createCheckoutRoutes({ mountTable, fileService: service })(id),
             /* A client with no transport throws on a push, which is what an
              * unreachable remote does; the row below wants a *remote*, not a
              * working one. */
@@ -277,6 +285,62 @@ const mount = (): ReturnType<typeof render> =>
   );
 
 describe('the page client of the worker revision root', () => {
+  /**
+   * A host-owned client whose revision stream the case itself feeds.
+   *
+   * The toast channel is the host leg's only correlation for a branch verb, so
+   * a case about *when* one settles has to be able to withhold a toast as well
+   * as send one.
+   *
+   * @returns The client and the pump that puts one toast on its stream.
+   */
+  const hostBranchClient = (): Readonly<{
+    client: ReturnType<typeof createHostRevisionClient>;
+    toast: (value: RevisionToast) => void;
+  }> => {
+    const pending: RevisionToast[] = [];
+    let wake: (() => void) | undefined;
+    /** Whatever the case has queued, then whatever it queues next. */
+    const nextToast = async (): Promise<RevisionToast> => {
+      const held = pending.shift();
+      if (held !== undefined) {
+        return held;
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      return nextToast();
+    };
+    const channel = {
+      execute: async (): Promise<AgentChannelResponse> => ({
+        type: 'revision',
+        result: null,
+        status: { projectId, branch: 'main', headRevisionId: 'revision-1' },
+      }),
+      async *events() {
+        yield* [];
+      },
+      async *liveEvents() {
+        yield* [];
+      },
+      async *revisionEvents() {
+        for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- a stream is sequential by definition.
+          yield { kind: 'toast', value: (await nextToast()) as unknown as JsonValue };
+        }
+      },
+      onClose: () => () => undefined,
+      close: () => undefined,
+    } satisfies AgentChannelClient;
+    return {
+      client: createHostRevisionClient({ projectId, connect: async () => channel }),
+      toast: (value) => {
+        pending.push(value);
+        wake?.();
+      },
+    };
+  };
+
   it('projects and drives a host-owned revision root without opening a worker store', async () => {
     const seen: AgentChannelRequest[] = [];
     const execute = vi.fn(async (request: AgentChannelRequest): Promise<AgentChannelResponse> => {
@@ -647,6 +711,158 @@ describe('the page client of the worker revision root', () => {
     await flush;
     expect(settled).toBe(true);
   });
+
+  it('should refuse a turn the worker answered with something other than a placement', async () => {
+    const { worker, ports, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    revisionClient.open();
+    messages.length = 0;
+
+    const admitted = revisionClient.admitTurn({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    await settle();
+    const frame = messages.at(-1) as { command: string; id: number };
+    ports[0]?.postMessage({ type: 'result', id: frame.id, result: { kind: 'saved' } } satisfies WorkerRevisionResponse);
+
+    /* A placement rooted at `''` is not a placement: it used to build a bridge
+     * at the workspace root and run the turn on the wrong files (P2). The
+     * diagnostic used to reach the card verbatim (review finding 8). */
+    await expect(admitted).rejects.toMatchObject({
+      code: 'PLACEMENT_UNROOTED',
+      message: describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description,
+    });
+  });
+
+  /*
+   * The host leg's correlated *New branch* (review findings 1 and 5): it waits
+   * on a toast stream nothing guarantees will carry its settlement, so without
+   * a bound a dropped `create` wedges the chat's send path for the session, and
+   * an unrelated branch verb's refusal used to settle it with the wrong words.
+   */
+  it('should refuse a host createBranch the tree never answers, on the bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { client } = hostBranchClient();
+      client.open();
+      await vi.waitFor(() => {
+        expect(client.status()).toBeDefined();
+      });
+
+      /* Asserted before the clock moves: the rejection lands inside the tick,
+         and a handler attached after it is an unhandled rejection first. */
+      const refused = expect(client.createBranch('isolated-run')).rejects.toMatchObject({
+        code: 'BRANCH_UNANSWERED',
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await refused;
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not attribute another host verb’s refusal to a pending createBranch', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { client, toast } = hostBranchClient();
+      client.open();
+      await vi.waitFor(() => {
+        expect(client.status()).toBeDefined();
+      });
+
+      const refused = expect(client.createBranch('isolated-run')).rejects.toMatchObject({
+        code: 'BRANCH_UNANSWERED',
+      });
+      toast({
+        type: 'error',
+        subject: 'branch',
+        operation: 'discard',
+        branch: 'spike',
+        message: 'An agent is working in spike.',
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await refused;
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /* A refusal that names neither verb nor branch is uncorrelated: it may be a
+     discard's, a rename's, or another *New branch*'s. Reading the absent fields
+     as "mine" let it settle this create with the wrong words (finding 2). */
+  it('should not settle a pending createBranch with a refusal that names no verb', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { client, toast } = hostBranchClient();
+      client.open();
+      await vi.waitFor(() => {
+        expect(client.status()).toBeDefined();
+      });
+
+      const refused = expect(client.createBranch('isolated-run')).rejects.toMatchObject({
+        code: 'BRANCH_UNANSWERED',
+      });
+      toast({
+        type: 'error',
+        subject: 'branch',
+        message: 'That branch already has a checkout.',
+        code: 'CHECKOUT_CONFLICT',
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await refused;
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should refuse a host createBranch the registry made no checkout for', async () => {
+    const { client, toast } = hostBranchClient();
+    client.open();
+    await waitFor(() => {
+      expect(client.status()).toBeDefined();
+    });
+
+    const created = client.createBranch('isolated-run');
+    toast({ type: 'branch', operation: 'create', branch: 'isolated-run' });
+
+    /* `checkoutId: ''` used to reach `Chat.checkoutId`, and the chat then had
+     * no root to run on for the rest of the session (review finding 5). */
+    await expect(created).rejects.toMatchObject({
+      code: 'BRANCH_UNPLACED',
+      /* One hop from a surface, so the words are the table's rather than the
+         registry's — "the registry made x without a checkout to run on" is
+         banned vocabulary and unactionable besides (Rule 1). */
+      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', 'isolated-run').description,
+    });
+    client.close();
+  });
+
+  it('should resolve a createBranch with the checkout the branch was made on', async () => {
+    const fixture = harness({ files: { 'bracket.scad': 'cube([1, 1, 1]);\n' } });
+    live.push(fixture);
+    const { worker, registry } = fixture.worker();
+    fileManagerRef.send({ type: 'worker', worker });
+
+    render(
+      <UnloadProvider>
+        <Owner />
+        <CommandConsumer />
+      </UnloadProvider>,
+    );
+    await settle(40);
+
+    const created = await commands?.createBranch('isolated-run');
+    const root = await fixture.root(registry);
+    expect(created).toEqual({
+      branch: 'isolated-run',
+      checkoutId: root.status().branches.find((row) => row.name === 'isolated-run')?.checkoutId,
+      checkoutRoot: root.status().branches.find((row) => row.name === 'isolated-run')?.checkoutRoot,
+    });
+  }, 20_000);
 
   it('should push what `hidden` minted, and record it when the remote cannot be reached (W13 P32/P33)', async () => {
     const fixture = harness({

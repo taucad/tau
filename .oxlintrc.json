@@ -1653,6 +1653,15 @@
       }
     },
     {
+      // Revisions-policy Rule 1: engineering vocabulary never reaches product copy.
+      // Scoped to the UI app, the only place that authors words a person reads.
+      // See docs/policy/revisions-policy.md Rule 1.
+      "files": ["apps/ui/app/**/*.{ts,tsx}"],
+      "rules": {
+        "tau-lint/no-engineering-vocabulary-in-copy": "error"
+      }
+    },
+    {
       // Static `new URL(literal, import.meta.url)` invariant for the runtime.
       // Computed first arguments silently opt out of
       // bundler asset emission and break downstream consumers.

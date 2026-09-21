@@ -310,6 +310,8 @@ export type TurnFailedLogEvent = LogEventBase & {
   readonly chatId: string;
   readonly checkoutId?: string | undefined;
   readonly reason: string;
+  /** Why, as a code the page phrases; `reason` is the diagnostic. */
+  readonly code?: string | undefined;
 };
 
 /** A durable run lifecycle state. @public */

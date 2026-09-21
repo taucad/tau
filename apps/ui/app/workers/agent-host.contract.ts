@@ -441,6 +441,8 @@ const commandSchemas = [
         chatId: nonEmptyString,
         checkoutId: nonEmptyString.optional(),
         reason: z.string(),
+        /* Why, as the page phrases it (P4); `reason` stays the diagnostic. */
+        code: nonEmptyString.optional(),
       }),
     ]),
   }),

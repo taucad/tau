@@ -22,6 +22,14 @@ vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ createChat }) }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   useChatWorkspaceAuthority: () => ({ bindConflict }),
 }));
+const errors: Array<{ title: string; description?: string }> = [];
+vi.mock('#components/ui/sonner.js', () => ({
+  toast: {
+    error: (title: string, options?: { description?: string }) => {
+      errors.push({ title, ...(options?.description === undefined ? {} : { description: options.description }) });
+    },
+  },
+}));
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
@@ -29,6 +37,7 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 
 beforeEach(() => {
   revisionStatusHarness.reset();
+  errors.length = 0;
   vi.clearAllMocks();
 });
 
@@ -65,6 +74,33 @@ describe('RevisionConflictChat', () => {
       });
     });
     expect(setFocusedChatId).toHaveBeenCalledWith('chat_seeded');
+  });
+
+  /* Rule 1: whatever threw here is an engine sentence — the page owns the
+     words and the console owns the diagnostic (P4, E5). */
+  it('says a seed failed in its own words, never in the error’s', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    createChat.mockRejectedValueOnce(new Error('checkout co-2 has no lease'));
+    render(<RevisionConflictChat />);
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({
+        type: 'resolveWithChat',
+        revisionId: 'rev-conflicted',
+        checkoutId: 'checkout-fillet',
+        paths: ['src/bracket.ts'],
+      });
+    }
+
+    await waitFor(() => {
+      expect(errors).toHaveLength(1);
+    });
+    expect(errors[0]).toEqual({
+      title: 'Could not start a chat to resolve this',
+      description: 'Tau could not start that chat. Try again.',
+    });
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   it('ignores every other fact on the channel', async () => {

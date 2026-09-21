@@ -904,15 +904,17 @@ describe('branch revision mode', () => {
     await target.click(selectors.getByText('New branch', { exact: true }));
     await target.fill(selectors.getByLabelText('Name for the new branch'), 'isolated-run');
     await target.click(selectors.getByRole('button', { name: 'Create' }));
-    /* The chip names the branch of the chat's own `checkoutId`, which the picker
-       writes only once the branch exists. A send before it reads so leases the
-       project itself — and a fresh project records its files first, so the
-       branch is not instant. */
+    /* Sent the instant the branch is asked for, on purpose (P1): the branch is
+       not instant — a fresh project records its files first — and the
+       admission is what waits for it. A send that landed on the project here
+       would be the race this row exists to catch. */
+    await submitAndWaitForPartial();
+    /* The chip reads the chat's own `checkoutId`, which only the workspace
+       authority writes, once the branch exists. */
     await target.expectVisible(
       selectors.getByCss('[data-slot="chat-branch-picker"][aria-label^="Work in isolated-run."]'),
       60_000,
     );
-    await submitAndWaitForPartial();
 
     await expect
       .poll(async () => Object.keys(await readActiveCheckoutTree('home')).length, { timeout: 60_000 })

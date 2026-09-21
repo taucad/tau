@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#checkouts.machine.js';
 import { checkoutsMachine, selectLeaseSet } from '#checkouts.machine.js';
+import { RevisionPortError } from '#revision-port.js';
 import type { CheckoutRecord } from '#revision-port.js';
 import { createFakeParent, createFakePromiseActors, recordEmitted } from '#test/fake-actors.js';
 import type { FakePromiseActors } from '#test/fake-actors.js';
@@ -215,7 +216,11 @@ describe('checkoutsMachine', () => {
 
     await toReady(harness);
     actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
-    promises.settle('addCheckout', { error: new Error('cannot nest a worktree') });
+    /* P4: the refusal crosses as a code as well as a diagnostic, so the page
+     * that shows it chooses the words. */
+    promises.settle('addCheckout', {
+      error: new RevisionPortError('UNKNOWN_REVISION', 'cannot nest a worktree'),
+    });
     await flush();
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
@@ -223,6 +228,7 @@ describe('checkoutsMachine', () => {
     expect(emitted.find((event) => event.type === 'checkoutFailed')).toMatchObject({
       operation: 'add',
       reason: 'cannot nest a worktree',
+      code: 'UNKNOWN_REVISION',
     });
 
     actor.stop();

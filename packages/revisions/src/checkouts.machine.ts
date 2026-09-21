@@ -12,7 +12,7 @@
 import { assign, enqueueActions, fromPromise, setup } from 'xstate';
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
-import type { CheckoutRecord } from '#revision-port.js';
+import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
 import type { TurnSettlement } from '#turn.machine.js';
 
 /** What a registry operation was doing when it failed or was refused. @public */
@@ -35,6 +35,8 @@ export type CheckoutsMachineContext = Readonly<{
   /** The checkout `removing` is dropping. */
   removingId: string | undefined;
   reason: string | undefined;
+  /** The refusal's stable category, when the port named one (P4). */
+  reasonCode: RevisionPortErrorCode | undefined;
   parentRef: AnyActorRef | undefined;
 }>;
 
@@ -54,7 +56,8 @@ export type CheckoutsMachineEmitted =
   | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
-  | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string }>;
+  /* P4: a refusal crosses as a code; the page that shows it owns the words. */
+  | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>;
 
 /** Output of the injected `sweepLeases` actor: the epoch comparison (F13). @public */
 export type SweepLeasesActorOutput = Readonly<{ retiredRunIds: readonly string[] }>;
@@ -67,6 +70,23 @@ export type AddCheckoutActorOutput = Readonly<{ checkout: CheckoutRecord }>;
 
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'The checkout operation failed.';
+
+/*
+ * The port's own category, read structurally (P4).
+ *
+ * A machine may import only *types* from this package's contracts (I20, AC22),
+ * so `instanceof RevisionPortError` is not available here; `sync.machine` reads
+ * the same field the same way.
+ */
+const describeFailureCode = (error: unknown): RevisionPortErrorCode | undefined => {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a rejection is `unknown` until read.
+  const { code } = error as Readonly<{ code?: unknown }>;
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowed to the port's own union.
+  return typeof code === 'string' ? (code as RevisionPortErrorCode) : undefined;
+};
 
 /**
  * Headless checkout registry for one project.
@@ -151,11 +171,24 @@ export const checkoutsMachine = setup({
       }
     }),
     announceFailure: enqueueActions(
-      ({ context, enqueue }, params: Readonly<{ operation: CheckoutOperation; reason?: string }>) => {
+      (
+        { context, enqueue },
+        params: Readonly<{ operation: CheckoutOperation; reason?: string; code?: RevisionPortErrorCode }>,
+      ) => {
         const fact: CheckoutsMachineEmitted = {
           type: 'checkoutFailed',
           operation: params.operation,
           reason: params.reason ?? context.reason ?? 'The checkout operation failed.',
+          /* A reason this call authored is the guard's own sentence, not the
+             port's, so it never carries the last port code (P4) — it names its
+             own, or the page has nothing to phrase it from (review finding 3). */
+          ...(params.reason === undefined
+            ? context.reasonCode === undefined
+              ? {}
+              : { code: context.reasonCode }
+            : params.code === undefined
+              ? {}
+              : { code: params.code }),
         };
         enqueue.emit(fact);
         /* R11: the root routes this to the workbench; an emit alone never
@@ -250,6 +283,7 @@ export const checkoutsMachine = setup({
     pendingLeases: [],
     removingId: undefined,
     reason: undefined,
+    reasonCode: undefined,
     parentRef: input.parentRef,
   }),
   initial: 'idle',
@@ -288,7 +322,10 @@ export const checkoutsMachine = setup({
         onError: {
           target: 'failed',
           actions: [
-            assign({ reason: ({ event }) => describeFailure(event.error) }),
+            assign({
+              reason: ({ event }) => describeFailure(event.error),
+              reasonCode: ({ event }) => describeFailureCode(event.error),
+            }),
             { type: 'announceFailure', params: { operation: 'open' } },
           ],
         },
@@ -309,7 +346,10 @@ export const checkoutsMachine = setup({
         onError: {
           target: 'failed',
           actions: [
-            assign({ reason: ({ event }) => describeFailure(event.error) }),
+            assign({
+              reason: ({ event }) => describeFailure(event.error),
+              reasonCode: ({ event }) => describeFailureCode(event.error),
+            }),
             { type: 'announceFailure', params: { operation: 'open' } },
           ],
         },
@@ -343,7 +383,11 @@ export const checkoutsMachine = setup({
               {
                 actions: {
                   type: 'announceFailure',
-                  params: { operation: 'add', reason: 'That branch already has a checkout.' },
+                  params: {
+                    operation: 'add',
+                    reason: 'That branch already has a checkout.',
+                    code: 'CHECKOUT_CONFLICT',
+                  },
                 },
               },
             ],
@@ -388,7 +432,10 @@ export const checkoutsMachine = setup({
             onError: {
               target: 'idle',
               actions: [
-                assign({ reason: ({ event }) => describeFailure(event.error) }),
+                assign({
+                  reason: ({ event }) => describeFailure(event.error),
+                  reasonCode: ({ event }) => describeFailureCode(event.error),
+                }),
                 { type: 'announceFailure', params: { operation: 'add' } },
               ],
             },
@@ -412,7 +459,10 @@ export const checkoutsMachine = setup({
             onError: {
               target: 'idle',
               actions: [
-                assign({ reason: ({ event }) => describeFailure(event.error) }),
+                assign({
+                  reason: ({ event }) => describeFailure(event.error),
+                  reasonCode: ({ event }) => describeFailureCode(event.error),
+                }),
                 { type: 'announceFailure', params: { operation: 'remove' } },
               ],
             },
@@ -434,6 +484,7 @@ export const checkoutsMachine = setup({
               actions: [
                 assign({
                   reason: ({ event }) => describeFailure(event.error),
+                  reasonCode: ({ event }) => describeFailureCode(event.error),
                   pendingRetirements: ({ context }) => context.pendingRetirements.slice(1),
                 }),
                 { type: 'announceFailure', params: { operation: 'retire' } },

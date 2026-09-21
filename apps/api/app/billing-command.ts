@@ -24,7 +24,7 @@ import {
 import { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
 import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
-import { runBillingPolicyCommand } from '#api/billing/billing-policy.command.js';
+import { runBillingPolicyCommand, runBillingPolicySyncCommand } from '#api/billing/billing-policy.command.js';
 import { installBillingProtections } from '#database/billing-protections.js';
 import { runMigrationJob } from '#database/database-migration.js';
 import * as schema from '#database/schema.js';
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   };
   const command = args[0] ?? '';
   const role =
-    command === 'protect' || command === 'migrate' || command === 'provision-budgets'
+    command === 'protect' || command === 'migrate' || command === 'provision-budgets' || command === 'sync'
       ? undefined
       : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
   const client = postgres(databaseUrl, {
@@ -107,6 +107,13 @@ async function main(): Promise<void> {
     backoff: () => 1,
     ...(role === undefined ? {} : { connection: { role } }),
   });
+  /* One routine for `sync` and for the tariff half of `migrate`, so local and cloud bootstraps
+   * derive and publish the same way. */
+  const syncTariff = async (): Promise<string> => {
+    const database = drizzle(client, { schema });
+    const result = await runBillingPolicySyncCommand(new BillingPolicyService({ database }), database, args);
+    return JSON.stringify(result, (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value));
+  };
   try {
     switch (args[0]) {
       case 'lifecycle': {
@@ -172,12 +179,26 @@ async function main(): Promise<void> {
         break;
       }
       case 'migrate': {
-        if (args.length !== 3 || args[1] !== '--environment') {
-          throw new Error('Usage: migrate --environment ENVIRONMENT');
+        if (
+          args[1] !== '--environment' ||
+          (args.length !== 3 && (args.length !== 5 || args[3] !== '--commercial-file' || !args[4]))
+        ) {
+          throw new Error('Usage: migrate --environment ENVIRONMENT [--commercial-file JSON_FILE]');
         }
         // Protected one-shot DDL identity on its own `max: 1` connection; API replicas never migrate.
         const migration = await runMigrationJob(databaseUrl);
         console.log(JSON.stringify(migration));
+        /* The release job owns the tariff the way it owns the schema. A cloud-off deployment still
+         * migrates; it just has no tariff to derive. */
+        if (String(process.env.TAU_CLOUD_ENABLED) === 'true') {
+          console.log(await syncTariff());
+        }
+        break;
+      }
+      case 'sync': {
+        // `sync` seeds development budgets and publishes, so it needs the owner identity and the protections.
+        await installBillingProtections(client);
+        console.log(await syncTariff());
         break;
       }
       case 'provision-budgets': {

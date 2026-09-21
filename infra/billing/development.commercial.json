@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "environment": "development",
+  "series": "development",
+  "markupBps": 3000,
+  "budgets": {
+    "spendBudgetId": "development-spend",
+    "riskBudgetId": "development-risk"
+  },
+  "offers": [
+    {
+      "offerId": "pro-monthly-v1",
+      "kind": "pro_monthly",
+      "currency": "usd",
+      "principalMinor": "2000",
+      "grantCreditAtoms": "20000000",
+      "ceilingCreditAtoms": "40000000"
+    },
+    {
+      "offerId": "top-up-v1",
+      "kind": "top_up",
+      "currency": "usd",
+      "minimumPrincipalMinor": "500",
+      "maximumPrincipalMinor": "500000",
+      "creditAtomsPerPrincipalMinor": "10000"
+    }
+  ],
+  "promotionalIssuance": {
+    "enabled": false,
+    "budgetCreditAtoms": "0",
+    "offer": null
+  }
+}

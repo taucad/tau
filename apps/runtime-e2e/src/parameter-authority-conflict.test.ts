@@ -100,8 +100,6 @@ it('admits one writer across two actual Node transport clients and refreshes the
           operation: {
             kind: 'native-value',
             group: 'default',
-            parameterId: snapshots[index]!.context.current!.manifest.bindings['/width']!.parameter.value,
-            resource: snapshots[index]!.context.current!.manifest.bindings['/width']!.schema.resource,
             pointer: '/width',
             value: 20 + index,
           },

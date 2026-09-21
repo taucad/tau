@@ -16,8 +16,6 @@ const proposal = {
   operation: {
     kind: 'unit-value',
     group: 'default',
-    parameterId: 'width',
-    resource: 'urn:test',
     pointer: '/width',
     inputUnit: 'cm',
     value: '2.5',
@@ -40,8 +38,6 @@ describe('parameter tool schemas', () => {
       parameterSetOperationSchema.safeParse({
         kind: 'native-value',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:test',
         pointer: '/width',
         value: Number.POSITIVE_INFINITY,
       }),
@@ -50,8 +46,6 @@ describe('parameter tool schemas', () => {
       parameterSetOperationSchema.safeParse({
         kind: 'native-value',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:test',
         pointer: '/width',
         value: { nested: [1, null, { deep: 'ok' }] },
       }),
@@ -62,6 +56,34 @@ describe('parameter tool schemas', () => {
         unknown: true,
       }),
     ).toMatchObject({ success: false });
+  });
+
+  const retired = { parameterId: 'width', resource: 'urn:test' };
+
+  it.each([
+    ['native-value', { kind: 'native-value', group: 'default', pointer: '/width', value: 5 }, retired],
+    ['unit-value', { kind: 'unit-value', group: 'default', pointer: '/width', inputUnit: 'cm', value: '2.5' }, retired],
+    [
+      'a batch edit',
+      { kind: 'batch', group: 'default', edits: [{ pointer: '/width', value: 5 }] },
+      { edits: [{ pointer: '/width', value: 5, ...retired }] },
+    ],
+    [
+      'source-unit',
+      {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: { producer: 'build123d', sourceRevision: 'source', capability: 'literal-v1' },
+      },
+      retired,
+    ],
+    // A field is group plus pointer under the manifest revision the request declares; .strict() refuses the retired pair.
+  ])('names %s by group and pointer alone and refuses the retired pair', (_case, operation, pair) => {
+    expect(parameterSetOperationSchema.safeParse(operation)).toMatchObject({ success: true });
+    expect(parameterSetOperationSchema.safeParse({ ...operation, ...pair })).toMatchObject({ success: false });
   });
 
   it.each([
@@ -97,8 +119,6 @@ describe('parameter tool schemas', () => {
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:test',
         pointer: '/width',
         unit: 'cm',
         producerCapability: {
@@ -114,8 +134,6 @@ describe('parameter tool schemas', () => {
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:test',
         pointer: '/width',
         unit: 'cm',
         producerCapability: { producer: 'build123d', sourceRevision: 'source', capability: 'literal-v1' },
@@ -133,8 +151,6 @@ describe('parameter tool schemas', () => {
         kind: 'source-unit',
         mode: 'reinterpret',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:test',
         pointer: '/width',
         unit: 'cm',
         producerCapability: {

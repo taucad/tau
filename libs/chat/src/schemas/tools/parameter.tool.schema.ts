@@ -50,8 +50,6 @@ const parameterSourceUnitCapabilitySchema = z
 
 const parameterEditSchema = z
   .object({
-    parameterId: tokenSchema,
-    resource: tokenSchema,
     pointer: z.string(),
     value: wireJsonValueSchema,
     inputUnit: tokenSchema.optional(),
@@ -64,8 +62,6 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.enum(['native-value']),
       group: tokenSchema,
-      parameterId: tokenSchema,
-      resource: tokenSchema,
       pointer: z.string(),
       value: wireJsonValueSchema,
     })
@@ -74,8 +70,6 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.enum(['unit-value']),
       group: tokenSchema,
-      parameterId: tokenSchema,
-      resource: tokenSchema,
       pointer: z.string(),
       inputUnit: tokenSchema,
       value: z.string(),
@@ -117,8 +111,6 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
       kind: z.enum(['source-unit']),
       mode: z.enum(['preserve-size']),
       group: tokenSchema,
-      parameterId: tokenSchema,
-      resource: tokenSchema,
       pointer: z.string(),
       unit: tokenSchema,
       producerCapability: parameterSourceUnitCapabilitySchema,

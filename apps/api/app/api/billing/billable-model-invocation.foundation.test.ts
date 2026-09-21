@@ -402,6 +402,8 @@ describe('BillableModelInvocationService process recovery', () => {
     let requests = 0;
     let rejectProvider = false;
     let delayProvider = false;
+    let holdTail = false;
+    let releaseTail: (() => void) | undefined;
     const server = createServer((_request, response) => {
       requests += 1;
       if (delayProvider) {
@@ -417,9 +419,18 @@ describe('BillableModelInvocationService process recovery', () => {
         return;
       }
       response.writeHead(200, { 'content-type': 'text/event-stream' });
-      response.end(
-        'data: {"type":"response.completed","response":{"id":"provider-request","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\ndata: [DONE]\n\n',
-      );
+      const tail =
+        'data: {"type":"response.completed","response":{"id":"provider-request","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\ndata: [DONE]\n\n';
+      if (holdTail) {
+        // The answer is on the wire; the usage frame waits for the test to end the generation.
+        response.write('data: {"type":"response.output_text.delta","delta":"answer"}\n\n');
+        releaseTail = () => {
+          releaseTail = undefined;
+          response.end(tail);
+        };
+        return;
+      }
+      response.end(tail);
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -468,9 +479,11 @@ describe('BillableModelInvocationService process recovery', () => {
       expect(requests).toBe(0);
 
       const attemptKey = `funded-${randomUUID()}`;
+      holdTail = true;
       const first = await invoke({ owner, authUserId: funded.authUserId, attemptKey });
       expect(first.state).toBe('streaming');
       expect(requests).toBe(1);
+      // The supplier is still generating: the attempt replays as pending.
       await expect(invoke({ owner, authUserId: funded.authUserId, attemptKey })).resolves.toEqual({
         state: 'pending',
         operationId: first.operationId,
@@ -479,12 +492,16 @@ describe('BillableModelInvocationService process recovery', () => {
       if (first.state !== 'streaming') {
         throw new Error('Funded invocation did not stream');
       }
-      await first.response.arrayBuffer();
+      /* The supplier finishes while the client has read nothing. Settlement follows the
+       * supplier, so the turn is terminal before a byte of it is consumed. */
+      releaseTail!();
+      holdTail = false;
       await first.completion;
       await expect(invoke({ owner, authUserId: funded.authUserId, attemptKey })).resolves.toEqual({
         state: 'terminal',
         operationId: first.operationId,
       });
+      await first.response.arrayBuffer();
       await expect(invoke({ owner, authUserId: funded.authUserId, attemptKey, body: 'altered' })).rejects.toThrow(
         'Attempt key replayed with a different request digest',
       );
@@ -1503,6 +1520,8 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
   let countBody = '{"object":"response.input_tokens","input_tokens":1}';
   let countDelay = 0;
   let generationDelay = 0;
+  let holdTail = false;
+  let releaseTail: (() => void) | undefined;
   let actualInput = 1;
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const server = createServer((request, response) => {
@@ -1525,9 +1544,17 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
           return;
         }
         response.writeHead(200, { 'content-type': 'text/event-stream' });
-        response.end(
-          `data: {"type":"response.completed","response":{"id":"c05-request","status":"completed","usage":{"input_tokens":${actualInput},"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\ndata: [DONE]\n\n`,
-        );
+        const tail = `data: {"type":"response.completed","response":{"id":"c05-request","status":"completed","usage":{"input_tokens":${actualInput},"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\ndata: [DONE]\n\n`;
+        if (holdTail) {
+          // The answer is on the wire; the usage frame waits for the test to end the generation.
+          response.write('data: {"type":"response.output_text.delta","delta":"answer"}\n\n');
+          releaseTail = () => {
+            releaseTail = undefined;
+            response.end(tail);
+          };
+          return;
+        }
+        response.end(tail);
       },
       counting ? countDelay : generationDelay,
     );
@@ -1639,6 +1666,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
     expect(generations).toBe(0);
     countBody = '{"object":"response.input_tokens","input_tokens":1}';
     countDelay = 150;
+    holdTail = true;
     const attempt = randomUUID();
     const countBefore = counts;
     const first = call(attempt);
@@ -1651,13 +1679,20 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
       throw new Error('Counted invocation did not stream');
     }
     expect(concurrent.find((candidate) => candidate !== result)).toMatchObject({ operationId: result.operationId });
+    // The supplier is still generating: the attempt replays as pending.
     expect(await call(attempt)).toEqual({ state: 'pending', operationId: result.operationId });
-    await result.response.text();
+    /* The supplier finishes while the client has read nothing. Settlement follows the
+     * supplier, so the turn is terminal and charged before a byte of it is consumed. */
+    releaseTail!();
+    holdTail = false;
     await result.completion;
     expect(await call(attempt)).toEqual({ state: 'terminal', operationId: result.operationId });
+    await result.response.text();
     expect(counts).toBe(countBefore + 2);
     expect(generations).toBe(1);
     const operation = await lookup(attempt);
+    expect(operation?.customerState).toBe('settled');
+    expect(operation?.chargedAtoms).toBeGreaterThan(0n);
     expect(operation?.authorizedAtoms).toBe(2n);
     expect(operation?.dueAt.getTime()).toBeLessThan(operation!.admittedAt!.getTime() + 59_950);
     // Count-selected failure has no full-context fallback.

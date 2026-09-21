@@ -1,41 +1,41 @@
 /**
- * A sidebar row's one status mark (S46, sidebar v2 D2, D9, D16).
+ * A sidebar row's one status mark (S46, sidebar v2 D2, D16, D20).
  *
  * Five marks for every project and chat state: none, in flight, needs you (with
- * its count), finished while away, failed. Shape carries each one, never hue
- * alone — a hollow ring, a centred disc with a hanging numeral, a filled dot,
- * an alert — and every mark is `aria-hidden`, because the sentence a screen
- * reader reads is the row's description, not the icon.
+ * its count), finished while away, failed. The three chat-state marks are one
+ * filled-dot family and hue carries the state (D20): a breathing muted disc, an
+ * amber disc with a hanging numeral, a blue disc. Failed is the one non-dot, an
+ * alert. Every mark is `aria-hidden`, because the sentence a screen reader
+ * reads is the row's description, not the icon.
  *
  * Which mark a row shows, and the words it goes with, are decided in
  * `use-sidebar-status.ts` (`selectChatFacts`, `selectProjectFacts`).
  */
 
-import { Circle, CircleAlert, CircleDot } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { Loader } from '#components/ui/loader.js';
 
+const Dot = ({ tone }: { readonly tone: string }): React.JSX.Element => (
+  <span aria-hidden className={cn('size-2 shrink-0 rounded-full', tone)} />
+);
+
 const markGlyph = ({ mark, count }: SidebarFacts): React.JSX.Element | undefined => {
   switch (mark) {
     case 'running': {
-      /* D9: a pulsing muted ring, not a spinner and not a disc. The ring is
-       * permanent, so shape — not motion — separates it from the finished
-       * dot; the reduced-motion opt-out is explicit because the app's reset
-       * does not reach `animate-pulse`. */
-      return (
-        <span
-          aria-hidden
-          className='size-2 shrink-0 animate-pulse rounded-full ring-1 ring-muted-foreground motion-reduce:animate-none'
-        />
-      );
+      /* D20: a muted disc breathing between dark and light grey — never a
+       * spinner. Frozen under reduced motion it is a solid grey disc, and hue
+       * alone separates it from the blue unread disc; the opt-out is explicit
+       * because the app's reset does not reach `animate-pulse`. */
+      return <Dot tone='animate-pulse bg-muted-foreground/70 motion-reduce:animate-none' />;
     }
     case 'attention': {
       /* D16: the disc stays dead centre; the count hangs off its lower right
        * so a number never bends the column. */
       return (
         <>
-          <CircleDot aria-hidden className='size-3 shrink-0' />
+          <Dot tone='bg-warning/80' />
           {count === undefined ? null : (
             <span aria-hidden className='absolute right-0 bottom-0 text-[10px] leading-none font-medium tabular-nums'>
               {count > 9 ? '9+' : count}
@@ -45,7 +45,7 @@ const markGlyph = ({ mark, count }: SidebarFacts): React.JSX.Element | undefined
       );
     }
     case 'unread': {
-      return <Circle aria-hidden className='size-2 shrink-0 fill-current' />;
+      return <Dot tone='bg-information/80' />;
     }
     case 'failed': {
       return <CircleAlert aria-hidden className='size-3.5 shrink-0' />;
@@ -59,9 +59,9 @@ const markGlyph = ({ mark, count }: SidebarFacts): React.JSX.Element | undefined
 const markTone: Record<SidebarFacts['mark'], string> = {
   none: '',
   running: '',
-  attention: 'text-warning',
-  unread: 'text-foreground',
-  failed: 'text-destructive',
+  attention: 'text-warning/80',
+  unread: '',
+  failed: 'text-destructive/80',
 };
 
 /**

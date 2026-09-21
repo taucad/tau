@@ -10,13 +10,12 @@ import { Loader } from '#components/ui/loader.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useProjects } from '#hooks/use-projects.js';
+import { resolveProjectRoute } from '#hooks/use-project-slug-route.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PreviewDesktop } from '#routes/w.$workspace.$project_.preview/preview-desktop.js';
 import { PreviewMobile } from '#routes/w.$workspace.$project_.preview/preview-mobile.js';
-import {
-  PreviewProjectContext,
-  usePreviewProject,
-} from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
+import { PreviewProjectContext } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import type { PreviewProjectContextValue } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 
 /**
@@ -153,9 +152,22 @@ export function PreviewSession({
   );
 }
 
-function ProjectNameBreadcrumb({ to }: { readonly to: string }): React.JSX.Element {
-  const { project } = usePreviewProject();
-  const name = project?.name ?? 'Project';
+/*
+ * The shell renders breadcrumbs above every route provider, so this one reads the project
+ * listing the root layout already holds instead of the preview's own context.
+ */
+function ProjectNameBreadcrumb({
+  to,
+  workspace,
+  project,
+}: {
+  readonly to: string;
+  readonly workspace: string;
+  readonly project: string;
+}): React.JSX.Element {
+  const { projects } = useProjects({ includeDeleted: true });
+  const projectId = resolveProjectRoute(projects, workspace, project);
+  const name = projects.find((candidate) => candidate.id === projectId)?.name ?? 'Project';
 
   return (
     <Button asChild variant='ghost'>
@@ -165,9 +177,17 @@ function ProjectNameBreadcrumb({ to }: { readonly to: string }): React.JSX.Eleme
 }
 
 /** Breadcrumb trail for a preview route, linking back to its own URL. */
-export const previewBreadcrumb = (key: string, to: string): React.ReactNode[] => [
-  <ProjectNameBreadcrumb key={`${key}-project-name`} to={to} />,
-  <span key={`${key}-preview`} className='flex h-8 items-center px-3 text-sm font-medium'>
+export const previewBreadcrumb = (
+  slugs: { readonly workspace: string; readonly project: string },
+  to: string,
+): React.ReactNode[] => [
+  <ProjectNameBreadcrumb
+    key={`${slugs.project}-project-name`}
+    to={to}
+    workspace={slugs.workspace}
+    project={slugs.project}
+  />,
+  <span key={`${slugs.project}-preview`} className='flex h-8 items-center px-3 text-sm font-medium'>
     Preview
   </span>,
 ];

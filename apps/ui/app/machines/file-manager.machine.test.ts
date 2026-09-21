@@ -18,7 +18,9 @@ const workerTestState = vi.hoisted(() => {
     options: { name?: string } | undefined;
   }> = [];
   const rootedProxyDisposals: Array<ReturnType<typeof vi.fn>> = [];
-  return { instances, rootedProxyDisposals };
+  /** One per constructed proxy, in construction order; index 0 is the machine's. */
+  const proxyDeaths: Array<() => void> = [];
+  return { instances, rootedProxyDisposals, proxyDeaths };
 });
 
 vi.mock('#machines/file-manager.worker.js?worker', () => ({
@@ -82,7 +84,14 @@ vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridgeProxy: vi.fn(() => {
     const dispose = vi.fn();
     workerTestState.rootedProxyDisposals.push(dispose);
+    /* Pending unless a test kills the port: a live worker never settles it. */
+    let die!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      die = resolve;
+    });
+    workerTestState.proxyDeaths.push(die);
     return {
+      closed,
       configureProjectRoots: mockConfigureProjectRoots,
       mount: mockMount,
       unmount: mockUnmount,
@@ -151,6 +160,7 @@ describe('fileManagerMachine', () => {
     vi.clearAllMocks();
     workerTestState.instances.length = 0;
     workerTestState.rootedProxyDisposals.length = 0;
+    workerTestState.proxyDeaths.length = 0;
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockGetWorkspace.mockResolvedValue(undefined);
@@ -1728,6 +1738,64 @@ describe('fileManagerMachine', () => {
       // Still waiting on `waitForWorkerReady` (which never resolves) — must
       // not have fallen into the error state from an unrelated message.
       expect(actor.getSnapshot().value).toBe('connectingWorker');
+
+      actor.stop();
+    });
+  });
+
+  /*
+   * G2c-2: a worker that dies after `ready` used to leave the machine sitting
+   * in `ready` with dead proxies, because a Worker `error` event is not a death
+   * and the one signal that is — the bridge port closing — never reached the
+   * machine.
+   */
+  describe('worker death after ready', () => {
+    it('should leave ready for error when the bridge port closes', async () => {
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true },
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      workerTestState.proxyDeaths[0]!();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('error');
+      });
+      expect(actor.getSnapshot().context.error).toBeInstanceOf(Error);
+      expect(workerTestState.instances[0]?.terminate).toHaveBeenCalled();
+
+      actor.stop();
+    });
+
+    it('should not terminate a worker it does not own', async () => {
+      const sharedWorker = {
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        postMessage: vi.fn(),
+      } as unknown as Worker;
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/shared-proj',
+          shouldInitializeOnStart: true,
+          projectId: 'shared-proj',
+          sharedWorker,
+        },
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      workerTestState.proxyDeaths[0]!();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('error');
+      });
+      expect(sharedWorker.terminate).not.toHaveBeenCalled();
 
       actor.stop();
     });

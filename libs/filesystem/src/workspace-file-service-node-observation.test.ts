@@ -16,6 +16,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { serveNodeFsProvider } from '#backend/node/host.js';
+import { tauPathPolicy } from '#path-registry.js';
 import type { ProjectRootConfiguration } from '#mount-table.js';
 import type { WatchEvent } from '#types.js';
 
@@ -50,7 +51,7 @@ const createNodeService = async (): Promise<{
   );
 
   const { port1, port2 } = new MessageChannel();
-  const stopHost = serveNodeFsProvider(port2, { allowRoot: (candidate) => candidate === root });
+  const stopHost = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
   const providerRegistry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
   const mountTable = new MountTable();
   const eventBus = new ChangeEventBus();

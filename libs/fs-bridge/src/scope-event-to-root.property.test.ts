@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fc from 'fast-check';
 import { ChangeEventBus } from '@taucad/filesystem';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ChangeEvent } from '@taucad/types';
 import { fileSystemBridgeProtocolVersion, filesystemBridgeConnectMessageType } from '@taucad/fs-bridge';
 import { exposeFileSystemForTesting as exposeFileSystem } from '#filesystem-bridge.js';
@@ -37,6 +38,7 @@ describe('scopeEventToRoot', () => {
     const handle = exposeFileSystem(
       {},
       {
+        policy: tauPathPolicy,
         changeEventBus: bus,
         handlerForRoot: () => ({
           capabilities: { persistent: false, writable: true, quotaBased: false },

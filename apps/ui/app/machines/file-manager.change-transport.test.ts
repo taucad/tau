@@ -99,6 +99,7 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
 
   const messageSource = new EventTarget();
   const exposed = exposeFileSystem(workspaceBridgeService(fileService), {
+    policy: tauPathPolicy,
     changeEventBus: eventBus,
     messageSource,
     handlerForRoot: (root, context, consumer) => {

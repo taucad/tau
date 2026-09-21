@@ -270,10 +270,11 @@ export type NodeFsHostOptions = {
   authority?: NodeFsAuthorityHost;
   /**
    * The reserved layout an ordinary name may not resolve into, forwarded to
-   * every provider this host opens (G0-6). A host that serves a checkout which
-   * can hold symlinks passes its policy; see {@link NodeFsProvider}.
+   * every provider this host opens (G0-6). Required beside `allowRoot`: a root
+   * admitted without it is served with its symlink check skipped, so a checkout
+   * symlink reaches `.git` / `.tau` through an ordinary name.
    */
-  policy?: PathPolicy;
+  policy: PathPolicy;
   /**
    * Admission decision for a requested root. Required: it is the only thing
    * standing between a renderer-supplied string and the whole host filesystem.

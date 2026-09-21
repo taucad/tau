@@ -29,7 +29,6 @@ import {
   ChangeEventBus,
   EventCoalescer,
   MountTable,
-  policyAtRoot,
   ProviderRegistry,
   ResourceQueue,
   WorkspaceFileService,
@@ -288,9 +287,9 @@ exposeFileSystem(workspaceBridgeService(fileService), {
    * planes must read the working copy and never the overlays composed above it
    * (V6). A connection that names neither never reaches here (CI2).
    */
-  handlerForRoot: (root, context, consumer) => {
+  // oxlint-disable-next-line max-params -- RootedFileSystemHandlerFactory's own arity.
+  handlerForRoot: (root, context, consumer, policy) => {
     const filesystem = fileService.createRootedFileSystem(root, context);
-    const policy = policyAtRoot(tauPathPolicy, root);
     /* A skill bundle belongs to a checkout, not to the dependency mount: the
      * mount is opened as its own root since W11, and composing the overlay there
      * would grow an `.agents` row inside `node_modules`. */

@@ -89,6 +89,12 @@ export type FileSystemBridgePort = MessagePort & { readonly [fileSystemBridgePor
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- proxy target types may be class/interface services without string index signatures.
 export type FileSystemBridgeProxyTransport = {
   readonly ready: Promise<void>;
+  /**
+   * Settles when this connection's channel closes — including when the peer's
+   * port dies with it. A host that dies after `ready` leaves this proxy's calls
+   * with nowhere to go, and this is the only signal that says so (G2c-2).
+   */
+  readonly closed: Promise<void>;
   readonly hello: { readonly payload: FileSystemBridgeHello };
   dispose(): void;
   listen(event: string, handler: (data: unknown) => void): () => void;
@@ -743,11 +749,18 @@ export type ExposeFileSystemHandle = {
  * Creates the filesystem handler captured by one rooted bridge connection.
  * @public
  */
+// oxlint-disable-next-line max-params -- the connection's four facts, each already named on the wire.
 export type RootedFileSystemHandlerFactory = (
   root: string,
   context: WorkspaceMutationContext,
   /** The surface the connection named; an unrecognised one never reaches here. */
   consumer: RootedBridgeConsumer,
+  /**
+   * The server's own policy rebased on this root — the same object the change
+   * stream is masked with, so a host cannot mask its view with one layout and
+   * its stream with another (G0b-6).
+   */
+  policy: PathPolicy,
 ) => FileSystemBridgeRuntimeService | undefined;
 
 type FileSystemBridgeConnectEnvelope = {
@@ -814,12 +827,14 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
  * @public
  */
 type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
+  // oxlint-disable-next-line max-params -- mirrors RootedFileSystemHandlerFactory.
   handlerForRoot?: (
     root: string,
     context: WorkspaceMutationContext,
     consumer: RootedBridgeConsumer,
+    policy: PathPolicy,
   ) => StringKeyedObject | undefined;
-  policy?: PathPolicy;
+  policy: PathPolicy;
   changeEventBus?: BridgeChangeEventBus;
   /* Inline `Pick`, no named alias.
    * ponytail: one more port-like type declaration is exactly the failure mode
@@ -840,29 +855,34 @@ function exposeFileSystemHandlers(
   /** Every served scoped port, with the authority root and the surface it asked for. */
   const scopedPorts = new Map<MessagePort, { readonly root: string; readonly consumer: RootedBridgeConsumer }>();
 
+  /* `policy` is required beside `handlerForRoot`; a host that passes no options
+   * at all serves no rooted connection, so nothing below ever asks for it. */
   const policy = options?.policy;
+  /** The server's layout rebased on one root, once per root: the handler a
+   * connection is served composes its view with the same object this masks the
+   * stream with (G0b-6). */
+  const policyByRoot = new Map<string, PathPolicy>();
+  const policyForRoot = (root: string): PathPolicy => {
+    const rootPolicy = policyByRoot.get(root) ?? policyAtRoot(policy!, root);
+    policyByRoot.set(root, rootPolicy);
+    return rootPolicy;
+  };
   /**
    * Whether a root-relative path is hidden, answered once per spelling per
    * dispatch rather than once per handle: delivery is a hot path (event-fanout
    * policy) and ports on one root all ask the same question.
    */
   const hiddenByPath = new Map<string, boolean>();
-  const policyByRoot = new Map<string, PathPolicy>();
-  const hidden =
-    policy === undefined
-      ? undefined
-      : (root: string, relativePath: string): boolean => {
-          const key = `${root}\0${relativePath}`;
-          const memoized = hiddenByPath.get(key);
-          if (memoized !== undefined) {
-            return memoized;
-          }
-          const rootPolicy = policyByRoot.get(root) ?? policyAtRoot(policy, root);
-          policyByRoot.set(root, rootPolicy);
-          const answer = rootPolicy.classify(relativePath).agentAccess === 'hidden';
-          hiddenByPath.set(key, answer);
-          return answer;
-        };
+  const hidden = (root: string, relativePath: string): boolean => {
+    const key = `${root}\0${relativePath}`;
+    const memoized = hiddenByPath.get(key);
+    if (memoized !== undefined) {
+      return memoized;
+    }
+    const answer = policyForRoot(root).classify(relativePath).agentAccess === 'hidden';
+    hiddenByPath.set(key, answer);
+    return answer;
+  };
 
   /*
    * Events ride the view (architecture L4, A11). A scoped port is one consumer
@@ -901,7 +921,7 @@ function exposeFileSystemHandlers(
             scopeEventToRoot(
               event,
               scope.root,
-              masked && hidden !== undefined ? (relativePath) => hidden(scope.root, relativePath) : undefined,
+              masked ? (relativePath) => hidden(scope.root, relativePath) : undefined,
             ),
           );
         }
@@ -960,7 +980,7 @@ function exposeFileSystemHandlers(
     const rooted = rootedConnectSchema.safeParse(envelope);
     try {
       const rootedHandlers = rooted.success
-        ? options?.handlerForRoot?.(rooted.data.root, context, rooted.data.consumer)
+        ? options?.handlerForRoot?.(rooted.data.root, context, rooted.data.consumer, policyForRoot(rooted.data.root))
         : undefined;
       if (!rooted.success || rootedHandlers === undefined) {
         const unavailableError = new RootedFileSystemError('ROOT_UNAVAILABLE');
@@ -1187,9 +1207,10 @@ export function exposeFileSystem(
      * its own view hides, so an agent cannot learn the names or the timing of
      * control-plane writes it may not read (CI1). Any host that serves a masked
      * consumer passes its policy here; a `'working-copy'` connection receives the
-     * stream whole either way.
+     * stream whole either way. It is also what {@link RootedFileSystemHandlerFactory}
+     * is handed, rebased on the connection's root.
      */
-    policy?: PathPolicy;
+    policy: PathPolicy;
     changeEventBus?: BridgeChangeEventBus;
     /**
      * Where to listen for connect envelopes. Defaults to the worker global,
@@ -1380,7 +1401,7 @@ export function createFileSystemBridgeProxy(
     resolvedBridge.port.start();
   }
 
-  const { call, listen, watch, watchReady, ready, hello, dispose } = createBridgeCall<
+  const { call, listen, watch, watchReady, ready, closed, hello, dispose } = createBridgeCall<
     WatchRequest,
     WatchEvent,
     FileSystemBridgeHello
@@ -1419,6 +1440,9 @@ export function createFileSystemBridgeProxy(
       }
       if (property === 'ready') {
         return ready;
+      }
+      if (property === 'closed') {
+        return closed;
       }
       if (property === 'hello') {
         return hello;

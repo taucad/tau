@@ -98,6 +98,9 @@ vi.mock('@taucad/fs-bridge', () => ({
   openFileSystemBridge: (worker: unknown, options: unknown) => mockOpenFileSystemBridge(worker, options),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
   createFileSystemBridgeProxy: vi.fn(() => ({
+    closed: new Promise<void>(() => {
+      /* A live worker never settles it; `ready` fails over when it does (G2c-2). */
+    }),
     configureProjectRoots: mockConfigureProjectRoots,
     mount: mockMount,
     unmount: mockUnmount,

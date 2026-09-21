@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   exposeFileSystem,
   filesystemBridgeConnectMessageType,
@@ -164,6 +165,7 @@ const createProjectWorkspace = async (
 
   const workerScope = new EventTarget();
   const exposed = exposeFileSystem(workspaceBridgeService(service), {
+    policy: tauPathPolicy,
     changeEventBus: eventBus,
     handlerForRoot: (root, context) => service.createRootedFileSystem(root, context),
     messageSource: workerScope,

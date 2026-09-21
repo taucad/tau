@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { NodeFsPort } from '@taucad/filesystem/backend';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { WatchEvent } from '@taucad/filesystem';
@@ -90,6 +91,7 @@ const createAuthorityBridge = (admitted = true) => {
   const nodeBoundary = new MessageChannel();
   const delayed = delayFirstWatchAcknowledgement(nodeBoundary.port1);
   const stopNodeServer = serveNodeFsProvider(nodeBoundary.port2, {
+    policy: tauPathPolicy,
     allowRoot: (candidate) => admitted && candidate === root,
     authority,
   });

@@ -84,6 +84,7 @@ const createBrowserHarness = async (): Promise<{
   // seam the Node and Electron authorities already use.
   const messageSource = new EventTarget();
   const exposed = exposeFileSystem(workspaceBridgeService(fileService), {
+    policy: tauPathPolicy,
     changeEventBus: eventBus,
     messageSource,
     /* The production handler: `'user'` and `'agent'` read the composed view,

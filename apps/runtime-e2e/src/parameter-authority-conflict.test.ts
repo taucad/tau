@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createActor, fromPromise, waitFor } from 'xstate';
 import { compileParameterManifest, readParameterRecord } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange, refreshParameterSnapshot } from '@taucad/parameters/authority';
@@ -23,7 +24,11 @@ it('admits one writer across two actual Node transport clients and refreshes the
   const authority = new NodeFsAuthorityHost({ authorityDirectory: () => authorityRoot, authorityIdentity: () => root });
   const ports = [new MessageChannel(), new MessageChannel()];
   const stops = ports.map(({ port2 }) =>
-    serveNodeFsProvider(toNodeFsPort(port2), { allowRoot: (candidate) => candidate === root, authority }),
+    serveNodeFsProvider(toNodeFsPort(port2), {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+      authority,
+    }),
   );
   const connections = ports.map(({ port1 }) => {
     const channel = new NodeFsChannel(toNodeFsPort(port1));

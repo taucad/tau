@@ -14,10 +14,12 @@ const COPY_PROPERTIES = new Set(['title', 'description']);
 
 const bannedWord = (text) => BANNED_PATTERN.exec(text)?.[0] ?? BANNED_HEAD_PATTERN.exec(text)?.[0];
 
+/** `toast.error(…)` and the bare `toast(…)` the repo also uses. */
 const isToastCall = (node) =>
-  node.callee.type === 'MemberExpression' &&
-  node.callee.object.type === 'Identifier' &&
-  node.callee.object.name === 'toast';
+  (node.callee.type === 'Identifier' && node.callee.name === 'toast') ||
+  (node.callee.type === 'MemberExpression' &&
+    node.callee.object.type === 'Identifier' &&
+    node.callee.object.name === 'toast');
 
 const propertyName = (node) => {
   if (node.key.type === 'Identifier' && !node.computed) {

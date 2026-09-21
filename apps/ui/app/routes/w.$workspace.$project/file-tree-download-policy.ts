@@ -1,4 +1,6 @@
+import { archiveByteCeiling, archiveTooLargeCode } from '@taucad/filesystem/content-ops';
 import type { FileProvenance } from '@taucad/types';
+import { formatBytes } from '#lib/format-bytes.js';
 
 export type FileTreeDownloadPolicy =
   | { readonly allowed: true }
@@ -67,7 +69,23 @@ export function createFileTreeDownloadError(options: {
   });
 }
 
+/**
+ * The archive's own refusal, at whichever depth it arrives.
+ *
+ * It crosses the bridge wire as a bare `Error` carrying `code`, and a file-tree
+ * download wraps that as the `cause` of a `zip-generation-failed`; both spell
+ * the ceiling as a raw byte count, which is not a message for a person.
+ */
+const isArchiveTooLarge = (error: unknown): boolean =>
+  error instanceof Error &&
+  ((error as { code?: unknown }).code === archiveTooLargeCode || isArchiveTooLarge(error.cause));
+
+const archiveTooLargeMessage = `This folder is larger than the ${formatBytes(archiveByteCeiling)} a ZIP download can hold. Download a smaller folder instead.`;
+
 export function getFileTreeDownloadErrorMessage(error: unknown): string {
+  if (isArchiveTooLarge(error)) {
+    return archiveTooLargeMessage;
+  }
   if (error instanceof FileTreeDownloadError) {
     return error.message;
   }

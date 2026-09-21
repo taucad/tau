@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { archiveTooLargeCode } from '@taucad/filesystem/content-ops';
 import {
   FileTreeDownloadError,
   createFileTreeDownloadError,
@@ -55,6 +56,24 @@ describe('file-tree-download-policy', () => {
       });
 
       expect(getFileTreeDownloadErrorMessage(error)).toBe('Read-only dependency paths cannot be downloaded.');
+    });
+
+    /* The archive's refusal crosses the bridge wire as a bare `Error` with a
+     * `code`, and its message is the byte count in decimal; the user is told
+     * the ceiling in their own units instead. */
+    it('should tell the user the archive ceiling when the archive refuses the size', () => {
+      const wire = Object.assign(new Error("Archive of '' exceeds its 268435456-byte ceiling."), {
+        code: archiveTooLargeCode,
+      });
+
+      expect(getFileTreeDownloadErrorMessage(wire)).toBe(
+        'This folder is larger than the 256.0 MB a ZIP download can hold. Download a smaller folder instead.',
+      );
+      expect(
+        getFileTreeDownloadErrorMessage(
+          createFileTreeDownloadError({ code: 'zip-generation-failed', path: 'public', cause: wire }),
+        ),
+      ).toBe('This folder is larger than the 256.0 MB a ZIP download can hold. Download a smaller folder instead.');
     });
   });
 });

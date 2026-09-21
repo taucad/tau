@@ -14,6 +14,7 @@ import type {
   MessagePortMain,
   Session,
   UtilityProcess,
+  WebFrameMain,
   WebRequestFilter,
 } from 'electron';
 import { ipcMain as defaultIpcMain, MessageChannelMain, session as defaultSession, utilityProcess } from 'electron';
@@ -131,9 +132,16 @@ export type RegisterElectronRuntimeMainOptions = {
    */
   readonly execArgv?: readonly string[];
   /**
-   * Most utility processes this broker may hold at once, spare included.
-   * The (N+1)th request is refused with an {@link ElectronRuntimeUtilityLimitError}
-   * rather than left to the operating system's memory pressure.
+   * Runaway-fork guard: most utility processes this broker may hold at once,
+   * spare included. The (N+1)th request is refused with an
+   * {@link ElectronRuntimeUtilityLimitError}. Unset, the broker forks as many
+   * as the application asks for.
+   *
+   * This is not a concurrency policy. How many projects or agents may be live
+   * at once belongs to the application that admits them — on the Tau desktop
+   * that is the sessions registry (`apps/ui/app/services/sessions-store.ts`),
+   * whose budget is memory rather than a count — so set this an order of
+   * magnitude above anything that admission can legitimately ask for.
    */
   readonly maxUtilities?: number;
   /**
@@ -292,10 +300,6 @@ const maxRuntimeRequestIdChars = 128;
  * a chatty utility cannot grow main's heap. Characters rather than bytes: the
  * difference only makes the bound slightly generous for a non-ASCII tail. */
 const maxStderrTailChars = 4096;
-/* One utility per open project plus a little slack, which is what a person can
- * have open at once; past it the honest answer is a refusal naming the cap
- * rather than an operating system that starts killing processes. */
-const defaultMaxUtilities = 8;
 /* Electron emits a utility's `'exit'` before it has delivered the piped
  * stderr, so a boot death — `ERR_MODULE_NOT_FOUND` a millisecond after the
  * fork — is reported with an empty tail unless the exit report waits for the
@@ -475,7 +479,9 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
   const targetIpcMain = options.ipcMain ?? defaultIpcMain;
   const forkEnvAllowlist: ReadonlySet<string> = new Set(options.forkEnvAllowlist ?? []);
   const liveUtilities = new Map<string, LiveUtility>();
-  const maxUtilities = options.maxUtilities ?? defaultMaxUtilities;
+  /* Unbounded unless the application sets a guard: how many utilities may live
+   * at once is its admission policy, not the broker's (see `maxUtilities`). */
+  const maxUtilities = options.maxUtilities ?? Number.POSITIVE_INFINITY;
   let spare: LiveUtility | undefined;
   /* What `prewarm` asked to keep warm, so a request that resolved to a different
    * environment — a thumbnail's ephemeral fork — does not spend the pool for good. */
@@ -751,12 +757,18 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
 
   const listener = (event: IpcMainEvent, payload?: unknown): void => {
     let hostId: string | undefined;
+    let refused: { readonly frame: WebFrameMain; readonly requestId: string } | undefined;
     try {
       const targetFrame = event.senderFrame;
       if (!targetFrame) {
         throw new Error('registerElectronRuntimeMain: IPC event did not include senderFrame');
       }
       const { context, requestId } = readRuntimePortRequest(payload);
+      /* Everything past here answers a request the renderer is awaiting, so a
+       * refusal — the cap, a resolver that rejected the context, an invalid
+       * fork context — has to reach it or `awaitElectronRuntimePort` waits out
+       * a hand-off that is never coming. */
+      refused = { frame: targetFrame, requestId };
       const spawned = spawnRuntime(
         context,
         (exit) => {
@@ -775,6 +787,9 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
        * settle `closed` with them; `WebFrameMain.postMessage` throws on a
        * destroyed frame, which must not take the bookkeeping down with it. */
       targetFrame.postMessage(`${channel}:port`, { hostId, requestId }, [spawned.port]);
+      /* The request is answered: a throw from the lifecycle wiring below is a
+       * bookkeeping failure, not a refusal, and must not answer it a second time. */
+      refused = undefined;
 
       const releaseOnce = (): void => {
         if (hostId) {
@@ -789,6 +804,13 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     } catch (error) {
       if (hostId) {
         releaseUtility(hostId);
+      }
+      if (refused) {
+        try {
+          refused.frame.postMessage(`${channel}:port`, { error: toError(error).message, requestId: refused.requestId });
+        } catch (relayError) {
+          reportError(relayError);
+        }
       }
       reportError(error);
     }

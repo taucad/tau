@@ -16,6 +16,8 @@ describe('parameter agent wire compatibility', () => {
   it('keeps the chat DTO compatible with the runtime owner', () => {
     expectTypeOf<ProposalInput['expected']>().toExtend<ParameterSetIdentity>();
     expectTypeOf<ProposalInput['operation']>().toExtend<ParameterSetOperation>();
+    // Both directions: the wire must not silently drop an operation kind the owner still accepts.
+    expectTypeOf<ParameterSetOperation['kind']>().toEqualTypeOf<ProposalInput['operation']['kind']>();
     expectTypeOf<ApplyParameterOperationOutput['outcome']>().toExtend<ParameterSetProposal>();
   });
 });

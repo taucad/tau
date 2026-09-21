@@ -38,6 +38,14 @@ const patchChat = vi.fn();
 let chats = [{ id: 'chat-1', checkoutId: 'live' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats, patchChat }) }));
 
+/* P1: the authority is the only writer of `Chat.checkoutId`. The picker says
+ * where the chat works and hands over the verb that settles it; it never
+ * writes the record itself. */
+const placeChat = vi.fn<(chatId: string, target: unknown) => Promise<void>>(async () => undefined);
+vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
+  useOptionalChatWorkspaceAuthority: () => ({ placeChat }),
+}));
+
 const twoBranches = [
   { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
   {
@@ -56,6 +64,7 @@ beforeEach(() => {
   project = { projectId: 'p' };
   chats = [{ id: 'chat-1', checkoutId: 'live' }];
   patchChat.mockReset();
+  placeChat.mockClear();
 });
 
 describe('ChatBranchPicker', () => {
@@ -74,40 +83,26 @@ describe('ChatBranchPicker', () => {
     });
   });
 
-  it('works in the branch it creates once the branch verb settles', async () => {
+  it('works in the branch it creates', async () => {
     const user = userEvent.setup();
-    const view = render(<ChatBranchPicker />, { wrapper });
+    render(<ChatBranchPicker />, { wrapper });
     await user.click(screen.getByRole('button', { name: 'Work in main. Choose a branch.' }));
     await user.click(screen.getByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'bracket-fillet');
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      branchVerb: {
-        busy: true,
-        asking: false,
-        operation: 'create',
-        branch: 'bracket-fillet',
-        question: undefined,
-      },
-    };
-    view.rerender(<ChatBranchPicker />);
-    revisionStatusHarness.status = {
-      ...revisionStatusHarness.status,
-      branchVerb: {
-        busy: false,
-        asking: false,
-        operation: undefined,
-        branch: undefined,
-        question: undefined,
-      },
-      branches: [twoBranches[0]!, { ...twoBranches[1]!, leaseChatIds: [] }],
-    };
-    view.rerender(<ChatBranchPicker />);
-
-    await waitFor(() => {
-      expect(patchChat).toHaveBeenCalledWith('chat-1', 'checkoutId', 'co-2');
+    /* The settling verb itself is the placement, so an admission racing it
+       waits for it (Q2) — there is no window in which the record still names
+       the branch the person moved away from. */
+    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('bracket-fillet');
+    expect(placeChat).toHaveBeenCalledTimes(1);
+    expect(patchChat).not.toHaveBeenCalled();
+    const [placedChatId, target] = placeChat.mock.calls[0] ?? [];
+    expect(placedChatId).toBe('chat-1');
+    await expect(Promise.resolve(target)).resolves.toEqual({
+      branch: 'bracket-fillet',
+      checkoutId: 'checkout-bracket-fillet',
+      checkoutRoot: '/checkouts/checkout-bracket-fillet',
     });
   });
 
@@ -121,7 +116,7 @@ describe('ChatBranchPicker', () => {
     await user.type(screen.getByPlaceholderText('Search branches...'), 'main');
     await user.click(screen.getByRole('option', { name: 'main' }));
 
-    expect(patchChat).toHaveBeenCalledWith('chat-1', 'checkoutId', 'live');
+    expect(placeChat).toHaveBeenCalledWith('chat-1', 'live');
   });
 
   it('falls back to the workbench branch for a chat that has not run yet', () => {
@@ -150,10 +145,10 @@ describe('ChatBranchPicker', () => {
     chats = [{ id: 'chat-1', checkoutId: 'deleted-checkout' }];
     render(<ChatBranchPicker />, { wrapper });
     expect(screen.queryByRole('button', { name: 'Work in main. Choose a branch.' })).not.toBeInTheDocument();
-    expect(patchChat).not.toHaveBeenCalled();
+    expect(placeChat).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Branch unavailable. Choose a branch.' }));
     await user.click(screen.getByRole('option', { name: 'main' }));
-    expect(patchChat).toHaveBeenCalledWith('chat-1', 'checkoutId', 'live');
+    expect(placeChat).toHaveBeenCalledWith('chat-1', 'live');
   });
 
   it('says nothing at all before the project root has answered', () => {

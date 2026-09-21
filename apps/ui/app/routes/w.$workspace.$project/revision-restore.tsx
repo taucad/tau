@@ -11,6 +11,8 @@ import {
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import type { RevisionFailureSubject } from '#lib/revision-failure-copy.js';
 import type { BranchOperation } from '@taucad/revisions/branch-machine';
 
 /** What the question above a waiting branch verb asks. Document words only (A18, I12). */
@@ -39,15 +41,8 @@ const branchSettledCopy: Readonly<Record<BranchOperation, (branch: string) => st
   rename: (branch) => `Renamed to ${branch}`,
 };
 
-/** What a failure on the tree's one error channel is called. Document words only (A18, I12). */
-const revisionFailureTitle: Readonly<Record<'restore' | 'branch' | 'save', string>> = {
-  restore: 'Restore failed',
-  branch: 'That branch change did not go through',
-  save: 'That change could not be saved',
-};
-
 /** The analytics name each of those failures is counted under. */
-const revisionFailureEvent: Readonly<Record<'restore' | 'branch' | 'save', string>> = {
+const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   restore: 'revision_restore_failed',
   branch: 'revision_branch_failed',
   save: 'revision_save_failed',
@@ -78,8 +73,14 @@ export function RevisionRestore(): React.JSX.Element {
        * `error` on this one channel; the frame names its subject so the title
        * can (W14 R2, W18 DEF-7). */
       if (entry.type === 'error') {
-        analytics.capture(revisionFailureEvent[entry.subject], { message: entry.message });
-        toast.error(revisionFailureTitle[entry.subject], { description: entry.message });
+        /* The refusal arrives as a code and a diagnostic. The code becomes the
+         * words (P4, Rule 1); the diagnostic — `Buffer is not defined`, a port
+         * sentence naming a checkout — goes where someone can act on it, which
+         * is not a toast (E5). */
+        const copy = describeRevisionFailure(entry.subject, entry.code);
+        analytics.capture(revisionFailureEvent[entry.subject], { message: entry.message, code: entry.code });
+        console.error('[revisions]', entry.subject, entry.code, entry.message);
+        toast.error(copy.title, { description: copy.description });
         return;
       }
       if (entry.type === 'nothingToSave') {

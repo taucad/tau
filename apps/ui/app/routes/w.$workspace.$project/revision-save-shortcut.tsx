@@ -48,9 +48,11 @@ export function useSaveRevisionRequest(): () => Promise<void> {
        * waiting at the keyboard (C16). */
       void saveRevision('save');
     } catch (error) {
-      toast.error('Revision not saved', {
-        description: error instanceof Error ? error.message : 'The editor could not finish saving its files.',
-      });
+      /* What failed here is a file flush, not a revision verb, so it carries no
+         code to phrase (P4) — and its own words are a diagnostic a person
+         cannot act on (E5). They get what did not happen; the console gets why. */
+      console.error('[revisions]', 'save', error);
+      toast.error('Revision not saved', { description: 'The editor could not finish saving its files.' });
     }
   }, [editorRef, projectRef, saveRevision]);
 }

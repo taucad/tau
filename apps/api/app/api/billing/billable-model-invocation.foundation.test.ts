@@ -2038,7 +2038,8 @@ it('pauses only the route an open supplier case names', async () => {
         activity: 'agent',
         signal: new AbortController().signal,
       }),
-    ).rejects.toThrow('billing policy route is unavailable for SKU model:openai-gpt-5.5');
+      // The policy funds no such route, so admission denies that SKU alone (W1: per-route degradation).
+    ).rejects.toThrow('Model admission failed: policy_unavailable.');
 
     await database
       .update(billingFinancialCase)

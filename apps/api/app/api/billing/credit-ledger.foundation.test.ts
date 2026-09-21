@@ -2530,3 +2530,194 @@ it.each([
     expect(holds.every((hold) => hold.remainingHeld === 201n && hold.consumed === 0n)).toBe(true);
   },
 );
+
+/*
+ * Defect A of the tariff sync close-out: a route whose meter contract this replica has retired is
+ * unreachable anyway, so it denies its own SKU rather than failing every billing read.
+ */
+it('should deny only the SKU whose meter contract this replica retired', async () => {
+  const fixture = await createFixture();
+  const suffix = randomUUID();
+  const retiredContract = `retired-meter-${suffix}`;
+  const retiredSku = `retired-sku-${suffix}`;
+  const retiredRateId = `retired-rate-${suffix}`;
+  ledgerMeterContracts.push(retiredContract);
+  qualifiedMeterContracts.set(retiredContract, new Set(['uncached_input:']));
+  const base = fixture.canonicalPolicy;
+  await publishFixturePolicy(fixture, {
+    ...base,
+    policyVersion: `${base.policyVersion}-retired`,
+    fleet: { minimumSchemaVersion: 1, meterContractIds: [...base.fleet.meterContractIds, retiredContract] },
+    rates: [
+      ...base.rates,
+      {
+        rateId: retiredRateId,
+        meterContractId: retiredContract,
+        dimension: 'uncached_input',
+        tier: null,
+        unit: 'token',
+        referenceNumeratorPicoUsd: '1',
+        denominatorUnits: '1',
+        retailOverride: { numeratorCreditAtoms: '1', denominatorUnits: '1' },
+      },
+    ],
+    routes: [
+      ...base.routes,
+      {
+        routeId: `retired-route-${suffix}`,
+        sku: retiredSku,
+        meterContractId: retiredContract,
+        rateIds: [retiredRateId],
+        enabled: true,
+        spendBudgetId: fixture.spendBudgetId,
+        riskBudgetId: fixture.riskBudgetId,
+      },
+    ],
+  });
+
+  const request = admission(fixture, `retired-${suffix}`, 10n);
+  // The catalogue drops the route after publication; the policy document keeps it.
+  qualifiedMeterContracts.delete(retiredContract);
+  const eligibility = {
+    environment: fixture.environment,
+    authUserId: fixture.userId,
+    replica: request.replica,
+    activity: 'agent',
+    executionTimeout: 300_000,
+    minimumOutput: 10n,
+    minimumSupplierPicoUsd: 10n,
+  };
+  await expect(firstLedger.inputCountEligibility({ ...eligibility, sku: retiredSku })).resolves.toEqual({
+    status: 'denied',
+    reason: 'policy_unavailable',
+  });
+  expect(await firstLedger.admitOperation({ ...request, sku: retiredSku })).toEqual({
+    status: 'denied',
+    reason: 'policy_unavailable',
+  });
+  expect(
+    await firstDatabase.select().from(creditOperation).where(eq(creditOperation.accountId, fixture.accountId)),
+  ).toEqual([]);
+
+  // The route this replica still knows is admitted from the very same policy document.
+  await expect(firstLedger.inputCountEligibility({ ...eligibility, sku: fixture.sku })).resolves.toMatchObject({
+    status: 'eligible',
+  });
+  expect(await firstLedger.admitOperation(admission(fixture, `known-${suffix}`, 10n))).toMatchObject({
+    status: 'admitted',
+  });
+});
+
+/*
+ * Defect A on the settlement path: `settlementTariff` re-reads the operation's own pinned policy
+ * inside the terminalising transaction to price a long-context turn down to its base sku. That
+ * document is older than the replica reading it, so a route retired since must not strand the
+ * settlement of an unrelated turn.
+ */
+it('should settle a long-context downgrade from a pinned policy naming a route this replica retired', async () => {
+  // The base sku starts at the premium rate, so the tier split below buys no notice: Q3 judges a
+  // new sku against its parent, and only the base's own decrease and the retired route are new.
+  const fixture = await createFixture(undefined, { numerator: '2', denominator: '1' });
+  const suffix = randomUUID();
+  const longContextSku = `${fixture.sku}:long-context`;
+  const retiredContract = `settle-retired-meter-${suffix}`;
+  ledgerMeterContracts.push(retiredContract);
+  qualifiedMeterContracts.set(retiredContract, new Set(['uncached_input:']));
+  const base = fixture.canonicalPolicy;
+  const rate = (
+    rateId: string,
+    meterContractId: string,
+    numeratorCreditAtoms: string,
+  ): CommercialPolicy['rates'][number] => ({
+    rateId,
+    meterContractId,
+    dimension: 'uncached_input',
+    tier: null,
+    unit: 'token',
+    referenceNumeratorPicoUsd: '1',
+    denominatorUnits: '1',
+    retailOverride: { numeratorCreditAtoms, denominatorUnits: '1' },
+  });
+  await publishFixturePolicy(fixture, {
+    ...base,
+    policyVersion: `${base.policyVersion}-tiered`,
+    fleet: { minimumSchemaVersion: 1, meterContractIds: [...base.fleet.meterContractIds, retiredContract] },
+    rates: [
+      ...base.rates.map((existing) => ({
+        ...existing,
+        retailOverride: { numeratorCreditAtoms: '1', denominatorUnits: '1' },
+      })),
+      rate(`long-rate-${suffix}`, fixture.meterContractId, '2'),
+      rate(`retired-rate-${suffix}`, retiredContract, '1'),
+    ],
+    routes: [
+      ...base.routes,
+      {
+        routeId: `long-route-${suffix}`,
+        sku: longContextSku,
+        meterContractId: fixture.meterContractId,
+        rateIds: [`long-rate-${suffix}`],
+        enabled: true,
+        spendBudgetId: fixture.spendBudgetId,
+        riskBudgetId: fixture.riskBudgetId,
+      },
+      {
+        routeId: `settle-retired-route-${suffix}`,
+        sku: `settle-retired-sku-${suffix}`,
+        meterContractId: retiredContract,
+        rateIds: [`retired-rate-${suffix}`],
+        enabled: true,
+        spendBudgetId: fixture.spendBudgetId,
+        riskBudgetId: fixture.riskBudgetId,
+      },
+    ],
+  });
+
+  // The turn is admitted on the premium tier, so its pin is the long-context rate.
+  const request = { ...fundedInvocation(fixture, `tiered-${suffix}`), sku: longContextSku };
+  if (!request.invocation) {
+    throw new Error('Missing invocation');
+  }
+  request.supplierMaximumPicoUsd = 20n;
+  request.invocation.supplierRates = [
+    { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2', denominatorUnits: '1' },
+  ];
+  request.invocation.supplierValuation = {
+    version: 'supplier-valuation-v1',
+    sourceRevision: `controlled-context-${suffix}`,
+    longContextMinimumInputTokens: '5',
+    baseRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' }],
+    longContextRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2', denominatorUnits: '1' }],
+  };
+  const admitted = await firstLedger.admitOperation(request);
+  if (admitted.status !== 'admitted') {
+    throw new Error('Invocation was not admitted');
+  }
+  await firstLedger.markDispatchIntent(admitted.operationId, admitted.generation);
+
+  // Only now does the catalogue retire the unrelated route the pinned document still enables.
+  qualifiedMeterContracts.delete(retiredContract);
+  const identity = {
+    operationId: admitted.operationId,
+    accountId: fixture.accountId,
+    requestDigest: request.requestDigest,
+  };
+  const evidence: TerminalEvidence = {
+    kind: 'final_usage',
+    usageOccurredAt: new Date(),
+    meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 3n }],
+  };
+  await firstLedger.recordInvocationEvidence({ ...identity, evidence });
+  await firstLedger.terminalizeOperation({
+    ...identity,
+    expectedGeneration: admitted.generation,
+    evidence,
+    resolvedAt: new Date(),
+  });
+
+  // The observed input never reached the tier, so the charge is the base sku's 1/1, not the 2/1 pin.
+  expect(await readInvocationOperation(admitted.operationId)).toMatchObject({
+    customerState: 'settled',
+    chargedAtoms: 3n,
+  });
+});

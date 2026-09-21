@@ -1,12 +1,19 @@
 import { readFile } from 'node:fs/promises';
+import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { financialEnvironmentSchema } from '@taucad/billing';
+import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
 import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
+import { parseCommercialOverlay, syncPolicy } from '#api/billing/billing-policy.sync.js';
+import type { PolicySyncResult } from '#api/billing/billing-policy.sync.js';
 import type { BillingPolicyService, PolicyPublicationResult } from '#api/billing/billing-policy.service.js';
+import type { DatabaseType } from '#database/database.service.js';
 
 const commandInstantSchema = z.iso.datetime({ offset: true });
+
+const loadPolicyFile = async (path: string): Promise<string> => readFile(path, 'utf8');
 
 const requiredValue = (value: string | undefined, name: string): string => {
   if (value === undefined || value === '') {
@@ -26,7 +33,7 @@ const parseRevision = (value: string | undefined): bigint => {
 export const runBillingPolicyCommand = async (
   service: BillingPolicyService,
   argv: readonly string[],
-  loadFile: (path: string) => Promise<string> = async (path) => readFile(path, 'utf8'),
+  loadFile: (path: string) => Promise<string> = loadPolicyFile,
 ): Promise<PolicyPublicationResult> => {
   const { positionals, values } = parseArgs({
     args: [...argv],
@@ -76,6 +83,39 @@ export const runBillingPolicyCommand = async (
     expectedHeadRevision,
     expectedPredecessorActivationId: predecessor === 'none' ? undefined : predecessor,
     effectiveAt,
+    replica: { schemaVersion: 1, meterContractIds: [...qualifiedMeterContracts.keys()] },
+  });
+};
+
+/**
+ * `sync --environment ENVIRONMENT [--commercial-file PATH]`: derives the tariff from the code route
+ * table over the commercial overlay and publishes it only when the content changed. The overlay comes
+ * from the file or, absent one, the `BILLING_COMMERCIAL_POLICY` secret; `migrate` runs the same routine.
+ */
+export const runBillingPolicySyncCommand = async (
+  service: BillingPolicyService,
+  database: Pick<DatabaseType, 'execute' | 'insert'>,
+  argv: readonly string[],
+): Promise<PolicySyncResult> => {
+  const { values } = parseArgs({
+    args: [...argv],
+    allowPositionals: true,
+    strict: true,
+    options: { environment: { type: 'string' }, 'commercial-file': { type: 'string' } },
+  });
+  const environment: FinancialEnvironment = financialEnvironmentSchema.parse(
+    requiredValue(values.environment, 'environment'),
+  );
+  const path = values['commercial-file'];
+  const document =
+    path === undefined || path === '' ? process.env['BILLING_COMMERCIAL_POLICY'] : await loadPolicyFile(path);
+  if (document === undefined || document === '') {
+    throw new Error('sync needs --commercial-file or the BILLING_COMMERCIAL_POLICY secret');
+  }
+  registerBillableModelMeterContracts();
+  return syncPolicy(service, database, {
+    environment,
+    overlay: parseCommercialOverlay(document, environment),
     replica: { schemaVersion: 1, meterContractIds: [...qualifiedMeterContracts.keys()] },
   });
 };

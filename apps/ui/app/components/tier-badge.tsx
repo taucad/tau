@@ -6,7 +6,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 const proBadgeClassName =
-  'h-4 border-blue/30 bg-blue/10 px-1 text-[10px] leading-none font-medium tracking-wide text-blue uppercase dark:text-blue/70';
+  'h-4 border-blue/30 bg-blue/10 px-1 text-[10px] leading-none font-medium tracking-wide uppercase';
 
 type ProBadgeProps = {
   readonly className?: string;

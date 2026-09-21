@@ -539,6 +539,89 @@ describe('BillableModelInvocationService', () => {
     );
   });
 
+  it('settles a turn the supplier finished at its final usage when the client leaves before reading it', async () => {
+    const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
+    qualified.adapter.createEvidenceCollector = () =>
+      createBillableModelEvidenceCollector('openai-responses', new Set(['uncached_input']), 'openai');
+    const encoder = new TextEncoder();
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array<ArrayBuffer>>({
+            start(controller) {
+              // The whole generation is on the wire before the client reads a byte of it.
+              controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"answer"}\n\n'));
+              controller.enqueue(
+                encoder.encode(
+                  'data: {"type":"response.completed","response":{"id":"provider-request","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}\n\ndata: [DONE]\n\n',
+                ),
+              );
+              controller.close();
+            },
+          }),
+        ),
+    );
+    const row = {
+      ...qualified,
+      id: 'operation',
+      accountId: 'account',
+      environment: 'development',
+      activity: 'agent',
+      requestDigest: '',
+      customerState: 'pending',
+      dueAt: new Date(Date.now() + 30_000),
+    };
+    const ledger = {
+      getOperationForAttempt: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockImplementation(async () => row),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'admitted', operationId: 'operation', generation: 0n })),
+      markDispatchIntent: vi.fn(async () => true),
+      markDispatchAccepted: vi.fn(async () => true),
+      getDispatchTimeRemaining: vi.fn(async () => 30_000),
+      recordInvocationEvidence: vi.fn(),
+      recordCancellation: vi.fn(),
+      terminalizeOperation: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+    row.requestDigest = (
+      service as unknown as {
+        requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+      }
+    ).requestDigest(intent(), qualified);
+
+    const result = await service.invoke(intent());
+    if (result.state !== 'streaming') {
+      throw new Error('Finished invocation did not stream');
+    }
+    const reader = result.response.body!.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toContain('response.output_text.delta');
+    // The client has the answer; it leaves without pulling the usage frame behind it.
+    await reader.cancel();
+    await result.completion;
+
+    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: 'operation',
+        evidence: expect.objectContaining({
+          kind: 'final_usage',
+          meterItems: expect.arrayContaining([expect.objectContaining({ dimension: 'output', quantity: 1n })]),
+        }),
+      }),
+    );
+    expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
+    // A turn the supplier finished has settled; the late cancel neither absorbs nor flags it.
+    expect(ledger.recordCancellation).not.toHaveBeenCalled();
+  });
+
   it('admits at the byte bound when the input counter fails instead of refusing the call', async () => {
     // A capability no qualification admits: the same shape a schema drift, a revoked
     // credential or a counter outage presents at the boundary.

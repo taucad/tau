@@ -494,74 +494,101 @@ export class BillableModelInvocationService {
         rejectCompletion(error);
       }
     };
-    const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
-      pull: async (controller) => {
-        try {
-          const part = await reader.read();
-          if (part.done) {
-            for (const projected of projection?.complete() ?? []) {
-              projectedBytes += projected.byteLength;
-              if (projectedBytes > qualification.maximumResponseBytes) {
-                throw new Error('Projected response exceeded its qualified byte limit');
-              }
-              controller.enqueue(projected);
-            }
-            controller.close();
-            await finish(collector.complete());
-            return;
-          }
-          bytes += part.value.byteLength;
-          if (bytes > qualification.maximumResponseBytes) {
-            /* The authorized ceiling, measured in response bytes (R8). An output token can never
-             * be carried in fewer bytes than it costs, and the qualification sizes this limit from
-             * the same authorized output maximum the supplier tariff is priced over, so a stream
-             * past it can no longer be priced inside its authorization: cut it upstream and settle
-             * at the authorization rather than absorbing a real supplier spend at zero charge.
-             * Ponytail: one integer compare per chunk. A per-chunk cost projection over the pinned
-             * rates is the same test — the input term is identical on both sides and cancels — and
-             * no byte-derived token bound is tighter without decoding every chunk. */
-            await reader.cancel('authorized_exhausted');
-            controller.error(new Error('Provider response reached its authorized ceiling'));
-            // The bytes the cut observed are the only measurement of the ceiling's own
-            // bytes-per-output-token constant; the ledger reads them onto the operator's case.
-            const exhausted = collector.failed('authorized_exhausted');
-            await finish(
-              exhausted.normalizationEvidence === undefined
-                ? exhausted
-                : {
-                    ...exhausted,
-                    normalizationEvidence: {
-                      ...exhausted.normalizationEvidence,
-                      fields: { ...exhausted.normalizationEvidence.fields, responseBytes: bytes.toString() },
-                    },
-                  },
-            );
-            return;
-          }
-          collector.accept(part.value);
-          for (const projected of projection?.accept(part.value) ?? [part.value]) {
-            projectedBytes += projected.byteLength;
-            if (projectedBytes > qualification.maximumResponseBytes) {
-              throw new Error('Projected response exceeded its qualified byte limit');
-            }
-            controller.enqueue(projected);
-          }
-        } catch (error) {
-          controller.error(error);
-          await finish(
-            collector.failed(
-              intent.signal.aborted ? 'client_abort' : signal.aborted ? 'deadline' : 'malformed_response',
-            ),
-          );
+    let cancelled = false;
+    type Controller = ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>;
+    const relay = (controller: Controller, parts: Iterable<Uint8Array<ArrayBuffer>>): void => {
+      for (const projected of parts) {
+        projectedBytes += projected.byteLength;
+        if (projectedBytes > qualification.maximumResponseBytes) {
+          throw new Error('Projected response exceeded its qualified byte limit');
         }
+        controller.enqueue(projected);
+      }
+    };
+    /** Observes one supplier read; resolves false once the stream has nothing more to observe. */
+    const observeNext = async (controller: Controller): Promise<boolean> => {
+      const part = await reader.read();
+      if (cancelled) {
+        // The client's cancel owns this stream's settlement now.
+        return false;
+      }
+      if (part.done) {
+        relay(controller, projection?.complete() ?? []);
+        controller.close();
+        await finish(collector.complete());
+        return false;
+      }
+      bytes += part.value.byteLength;
+      if (bytes > qualification.maximumResponseBytes) {
+        /* The authorized ceiling, measured in response bytes (R8). An output token can never
+         * be carried in fewer bytes than it costs, and the qualification sizes this limit from
+         * the same authorized output maximum the supplier tariff is priced over, so a stream
+         * past it can no longer be priced inside its authorization: cut it upstream and settle
+         * at the authorization rather than absorbing a real supplier spend at zero charge.
+         * Ponytail: one integer compare per chunk. A per-chunk cost projection over the pinned
+         * rates is the same test — the input term is identical on both sides and cancels — and
+         * no byte-derived token bound is tighter without decoding every chunk. */
+        await reader.cancel('authorized_exhausted');
+        controller.error(new Error('Provider response reached its authorized ceiling'));
+        // The bytes the cut observed are the only measurement of the ceiling's own
+        // bytes-per-output-token constant; the ledger reads them onto the operator's case.
+        const exhausted = collector.failed('authorized_exhausted');
+        await finish(
+          exhausted.normalizationEvidence === undefined
+            ? exhausted
+            : {
+                ...exhausted,
+                normalizationEvidence: {
+                  ...exhausted.normalizationEvidence,
+                  fields: { ...exhausted.normalizationEvidence.fields, responseBytes: bytes.toString() },
+                },
+              },
+        );
+        return false;
+      }
+      collector.accept(part.value);
+      relay(controller, projection?.accept(part.value) ?? [part.value]);
+      return true;
+    };
+    /* Observation follows the supplier's stream, not the client's demand. A pull-driven relay
+     * only sees what the client reads, so a client that took every answer frame and left before
+     * the usage frame was pulled settled as a cancelled turn at zero charge while the supplier
+     * had already been paid for the whole generation. Reading ahead of the client is bounded by
+     * the same maximumResponseBytes the ceiling above enforces, and the client's own cancel still
+     * cuts the supplier connection; the relay's queue merely holds what the client has not yet
+     * read. Settlement therefore trails supplier completion, never client consumption. */
+    const observe = async (controller: Controller): Promise<void> => {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one supplier chunk at a time, in arrival order
+        while (await observeNext(controller)) {
+          // Each step either relays one chunk or ends the observation.
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        controller.error(error);
+        await finish(
+          collector.failed(intent.signal.aborted ? 'client_abort' : signal.aborted ? 'deadline' : 'malformed_response'),
+        );
+      }
+    };
+    const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+      start: (controller) => {
+        // Detached on purpose: awaiting it here would hold every read until the supplier finished.
+        void observe(controller);
       },
       cancel: async () => {
+        cancelled = true;
         await reader.cancel('client_abort');
-        await this.ledger.recordCancellation({
-          operationId: row.id,
-          accountId: row.accountId,
-          requestDigest: row.requestDigest,
-        });
+        if (!done) {
+          // A turn the supplier already finished has settled; a late cancel is not a cancellation.
+          await this.ledger.recordCancellation({
+            operationId: row.id,
+            accountId: row.accountId,
+            requestDigest: row.requestDigest,
+          });
+        }
         await finish(collector.failed('client_abort'));
       },
     });

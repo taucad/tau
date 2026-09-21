@@ -6,6 +6,7 @@ import { projectRevisionsMachine, selectRevisionStatus } from '#project-revision
 import { checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
+import { RevisionPortError } from '#revision-port.js';
 import type { CheckoutRecord } from '#revision-port.js';
 import { remoteMachine } from '#remote.machine.js';
 import { resolutionMachine } from '#resolution.machine.js';
@@ -1183,7 +1184,9 @@ describe('projectRevisionsMachine', () => {
 
   /* A fresh project has files and no revision. *New branch* there used to reach
    * the registry with no base, which the port refuses as unborn — so the
-   * composer's picker made no checkout and the turn leased the project itself. */
+   * composer's picker made no checkout and the turn leased the project itself.
+   * The sequence moved to the `branch` child (P3); the root names the selection
+   * and forwards the cut's trigger-only answers. */
   it('records the files first when a branch is made on a project that has no revision yet', async () => {
     const harness = start();
 
@@ -1191,9 +1194,37 @@ describe('projectRevisionsMachine', () => {
     harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
     await flush();
 
-    /* The checkout is the sole minter (F2), so the root asks it and waits. */
+    /* The root names where the person is standing; only it knows. */
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context).toMatchObject({
+      checkoutId: 'checkout-live',
+      head: undefined,
+    });
+    /* The checkout is the sole minter (F2), so the verb asks it and waits. */
     expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+    expect(harness.actor.getSnapshot().children['checkout:checkout-live']?.getSnapshot().matches('minting')).toBe(true);
+
     harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
+    await flush();
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'isolated-run', from: 'rev-1' },
+    ]);
+
+    harness.actor.stop();
+  });
+
+  it('names the selected head on a branch verb, so a clean tree branches from it', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    await flush();
+
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context).toMatchObject({
+      checkoutId: 'checkout-live',
+      head: 'rev-1',
+    });
+    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
     await flush();
 
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
@@ -1206,18 +1237,26 @@ describe('projectRevisionsMachine', () => {
   it('tells the branch child when the registry refuses its delegated verb', async () => {
     const harness = start();
 
-    /* A head to branch from: with none, the root records the files first. */
+    /* A head to branch from: with none, the verb records the files first. The
+     * cut's answer is what takes it to the registry now (P3). */
     await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
     harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2' } });
     await flush();
-    harness.promises.settle('addCheckout', { error: new Error('That branch already has a checkout.') });
+    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    await flush();
+    harness.promises.settle('addCheckout', {
+      error: new RevisionPortError('CHECKOUT_CONFLICT', 'That branch already has a checkout.'),
+    });
     await flush();
 
+    /* P4: the code rides out with the refusal, so the page can choose words. */
     expect(harness.emitted).toContainEqual({
       type: 'checkoutFailed',
       operation: 'add',
       reason: 'That branch already has a checkout.',
+      code: 'CHECKOUT_CONFLICT',
     });
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('CHECKOUT_CONFLICT');
     expect(harness.actor.getSnapshot().children.branch?.getSnapshot().matches('idle')).toBe(true);
 
     harness.actor.stop();

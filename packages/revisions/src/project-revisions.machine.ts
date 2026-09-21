@@ -34,7 +34,7 @@ import type { ResolutionMachineEvent, ResolutionSide } from '#resolution.machine
 import { restoreMachine, selectRestoreBusy, selectRestoreNeedsConfirmation } from '#restore.machine.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncFacet, SyncMachineEvent, SyncPushOutcome } from '#sync.machine.js';
-import type { CheckoutRecord } from '#revision-port.js';
+import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnOutcome, TurnSettlement } from '#turn.machine.js';
 
@@ -198,14 +198,6 @@ export type ProjectRevisionsMachineContext = Readonly<{
    */
   pendingAdmissions: ReadonlyArray<Readonly<{ turnId: string; chatId: string; runId: string; checkoutId?: string }>>;
   /**
-   * A *New branch* waiting for the selected checkout to record its files.
-   *
-   * A project with no revision yet has nothing to branch from, and the checkout
-   * is the sole minter (F2) — so the root asks it to cut and holds the branch
-   * name here until that cut answers.
-   */
-  pendingBranch: string | undefined;
-  /**
    * Whether the registry has answered at all — announced, or failed.
    *
    * Not `checkouts.length > 0`: a registry that *failed* has no records and
@@ -291,7 +283,7 @@ export type ProjectRevisionsMachineEvent =
     }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
-  | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string }>
+  | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>
   | Readonly<{ type: 'addCheckout'; branch: string; from: string }>
   | Readonly<{ type: 'removeCheckout'; id: string }>
   | Readonly<{ type: 'switch'; branch: string }>
@@ -409,7 +401,8 @@ export type ProjectRevisionsMachineEmitted =
     }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
-  | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string }>
+  /* P4: a refusal crosses as a code; the page that shows it owns the words. */
+  | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>
   /**
    * A conflict was resolved, or a chat was asked to resolve one (S33, W10).
    *
@@ -544,21 +537,6 @@ export const projectRevisionsMachine = setup({
         }
       }
     }),
-    /* The cut a held *New branch* asked for has answered. With nothing minted
-     * the branch still has no base, and the registry's own refusal says so. */
-    settlePendingBranch: enqueueActions(
-      ({ context, enqueue }, params: Readonly<{ checkoutId: string; turnId: string | undefined; from: string }>) => {
-        if (
-          context.pendingBranch === undefined ||
-          params.turnId !== undefined ||
-          params.checkoutId !== context.selectedCheckoutId
-        ) {
-          return;
-        }
-        enqueue.sendTo('checkouts', { type: 'addCheckout', branch: context.pendingBranch, from: params.from });
-        enqueue.assign({ pendingBranch: undefined });
-      },
-    ),
     /*
      * One `resolution` child per conflicted branch head (S33, A38).
      *
@@ -593,6 +571,27 @@ export const projectRevisionsMachine = setup({
         return { resolutionRefs: kept };
       });
     }),
+    /*
+     * A cut's answer goes to the turn that asked for it, or — when no turn
+     * did — to the `branch` child, which may be recording the selected tree
+     * before it makes a branch (P3). The child ignores what it did not ask for.
+     */
+    answerCut: enqueueActions(({ context, enqueue, event }) => {
+      if (
+        event.type !== 'revisionMinted' &&
+        event.type !== 'nothingToSave' &&
+        event.type !== 'cutFailed' &&
+        event.type !== 'casLost'
+      ) {
+        return;
+      }
+      const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
+      if (ref === undefined) {
+        enqueue.sendTo('branch', event);
+        return;
+      }
+      enqueue.sendTo(ref, event);
+    }),
     /* Tell `restore` which checkout the workbench is rooted at now, and
      * `branch` which branch *Merge into `<current>`* means. */
     announceSelection: enqueueActions(({ context, enqueue }) => {
@@ -620,7 +619,6 @@ export const projectRevisionsMachine = setup({
     resolutionRefs: {},
     chatCheckouts: {},
     pendingAdmissions: [],
-    pendingBranch: undefined,
     registrySettled: false,
   }),
   invoke: [
@@ -785,6 +783,13 @@ export const projectRevisionsMachine = setup({
             enqueue.sendTo('branch', {
               type: 'branchesChanged',
               branches: event.checkouts.flatMap((checkout) => (checkout.branch === undefined ? [] : [checkout.branch])),
+              /* The records too, so a settled `create` knows which checkout it
+                 made without scraping the projection (P4). */
+              checkouts: event.checkouts.flatMap((checkout) =>
+                checkout.branch === undefined
+                  ? []
+                  : [{ branch: checkout.branch, checkoutId: checkout.id, checkoutRoot: checkout.root }],
+              ),
             });
             enqueue.assign({ registrySettled: true });
             /* The registry has answered, so the turns that arrived before it
@@ -916,16 +921,7 @@ export const projectRevisionsMachine = setup({
         },
         revisionMinted: {
           actions: [
-            {
-              type: 'settlePendingBranch',
-              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: event.revisionId }),
-            },
-            enqueueActions(({ context, enqueue, event }) => {
-              const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
-              if (ref !== undefined) {
-                enqueue.sendTo(ref, event);
-              }
-            }),
+            'answerCut',
             /* The scheduler hears about every revision this project mints, and
                nothing else decides when a push happens (D28, W13). A cut the
                root declined above never reaches here, so the durable queue can
@@ -939,49 +935,13 @@ export const projectRevisionsMachine = setup({
          * exactly what *Nothing changed since Rev N* renders and what a host
          * quitting on a `close` flush waits for. */
         nothingToSave: {
-          actions: [
-            {
-              type: 'settlePendingBranch',
-              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: '' }),
-            },
-            enqueueActions(({ context, enqueue, event }) => {
-              const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
-              if (ref !== undefined) {
-                enqueue.sendTo(ref, event);
-              }
-            }),
-            emit(({ event }) => event),
-          ],
+          actions: ['answerCut', emit(({ event }) => event)],
         },
         cutFailed: {
-          actions: [
-            {
-              type: 'settlePendingBranch',
-              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: '' }),
-            },
-            enqueueActions(({ context, enqueue, event }) => {
-              const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
-              if (ref !== undefined) {
-                enqueue.sendTo(ref, event);
-              }
-            }),
-            emit(({ event }) => event),
-          ],
+          actions: ['answerCut', emit(({ event }) => event)],
         },
         casLost: {
-          actions: [
-            {
-              type: 'settlePendingBranch',
-              params: ({ event }) => ({ checkoutId: event.checkoutId, turnId: event.turnId, from: '' }),
-            },
-            enqueueActions(({ context, enqueue, event }) => {
-              const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
-              if (ref !== undefined) {
-                enqueue.sendTo(ref, event);
-              }
-            }),
-            emit(({ event }) => event),
-          ],
+          actions: ['answerCut', emit(({ event }) => event)],
         },
         turnFinalized: {
           actions: [
@@ -1070,7 +1030,11 @@ export const projectRevisionsMachine = setup({
         checkoutFailed: {
           actions: [
             emit(({ event }) => event),
-            sendTo('branch', ({ event }) => ({ type: 'operationFailed', reason: event.reason })),
+            sendTo('branch', ({ event }) => ({
+              type: 'operationFailed',
+              reason: event.reason,
+              ...(event.code === undefined ? {} : { code: event.code }),
+            })),
             /* A registry that failed will never announce, so an admission held
              * for it would wait out its host's whole bound. Release the buffer
              * instead: the turn's own `prepare` is what refuses it, with the
@@ -1133,7 +1097,24 @@ export const projectRevisionsMachine = setup({
             enqueue.sendTo('remote', event.event);
           }),
         },
-        branch: { actions: sendTo('branch', ({ event }) => event.event) },
+        branch: {
+          actions: sendTo('branch', ({ context, event }) => {
+            if (event.event.type !== 'create') {
+              return event.event;
+            }
+            /* P3: a branch starts from what the person sees, and only the root
+             * knows where they are standing. The sequence — record, then add —
+             * is the child's; this names the selection it works from. */
+            const selected = selectedRecord(context);
+            const head =
+              context.checkoutStatus[context.selectedCheckoutId ?? '']?.headRevisionId ?? selected?.headRevisionId;
+            return {
+              ...event.event,
+              ...(context.selectedCheckoutId === undefined ? {} : { checkoutId: context.selectedCheckoutId }),
+              ...(head === undefined ? {} : { head }),
+            };
+          }),
+        },
         publish: { actions: sendTo('publish', ({ event }) => event.event) },
         sync: { actions: sendTo('sync', ({ event }) => event.event) },
         /*
@@ -1219,31 +1200,10 @@ export const projectRevisionsMachine = setup({
           })),
         },
         /* The registry's two verbs, which `branch` asks for through here
-         * rather than opening a second writer of the same records. */
-        /* A new branch with no base named starts where the person is standing:
-           the head of the checkout they have selected. Only the root knows
-           that, so it fills it here rather than making every caller — the
-           picker, the region, `branch.machine` — carry a revision id. */
-        addCheckout: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            if (event.from !== '') {
-              enqueue.sendTo('checkouts', event);
-              return;
-            }
-            const selected = context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
-            const head =
-              context.checkoutStatus[context.selectedCheckoutId ?? '']?.headRevisionId ?? selected?.headRevisionId;
-            if (head !== undefined || selected === undefined) {
-              enqueue.sendTo('checkouts', head === undefined ? event : { ...event, from: head });
-              return;
-            }
-            /* No revision yet: a fresh project, which is exactly where the
-               composer's *New branch* is the only way out. Record the files as
-               they stand, then branch from that (`settlePendingBranch`). */
-            enqueue.assign({ pendingBranch: event.branch });
-            enqueue.raise({ type: 'cut', trigger: 'switch', checkoutId: selected.id, leaseIds: [] });
-          }),
-        },
+         * rather than opening a second writer of the same records. A router,
+         * not a sequencer: what a new branch starts from is the `branch`
+         * child's, which is the state machine that has the waits for it (P3). */
+        addCheckout: { actions: sendTo('checkouts', ({ event }) => event) },
         removeCheckout: { actions: sendTo('checkouts', ({ event }) => event) },
         followChat: {
           actions: [

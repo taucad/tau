@@ -31,6 +31,12 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  * 16  `selectBranch` moves the branch a merge lands on
  * 17  a second verb while one is in flight is ignored
  * 18  with no host check provided, a verb still reaches its effect
+ * 19  `create` with no base records the selected tree first and branches from
+ *     the revision that cut minted (P3)
+ * 20  `create` with nothing to record branches from the selected head, and is
+ *     refused `BRANCH_NEEDS_REVISION` when there is no head either (P3)
+ * 21  a refusal carries the port's code out on `toast.error` (P4)
+ * 22  `toast.branch` for a `create` names the checkout the registry made
  * --  start and stop with no child left running, serializable snapshot, no
  *     function in context, one exported machine value
  */
@@ -183,8 +189,10 @@ describe('branchMachine', () => {
     actor.send({ type: 'create', name: 'enclosure-v2', from: 'rev-12' });
     await flush();
 
+    /* A caller that named a base has already chosen one, so nothing is cut (P3). */
     expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'enclosure-v2', from: 'rev-12' });
-    expect(actor.getSnapshot().matches({ applying: 'creating' })).toBe(true);
+    expect(types(parent.events)).not.toContain('cut');
+    expect(actor.getSnapshot().matches({ applying: { creating: 'adding' } })).toBe(true);
 
     actor.send({ type: 'branchesChanged', branches: ['main', 'enclosure-v2'] });
     expect(emitted).toEqual([{ type: 'toast.branch', operation: 'create', branch: 'enclosure-v2' }]);
@@ -197,12 +205,122 @@ describe('branchMachine', () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', cleanCheck);
 
-    actor.send({ type: 'create', name: 'main' });
+    /* With a base named the verb goes straight to the registry; without one it
+     * records the selected tree first, which rows 19-20 cover. */
+    actor.send({ type: 'create', name: 'main', from: 'rev-12' });
     await flush();
     actor.send({ type: 'operationFailed', reason: 'That branch already has a checkout.' });
 
     expect(emitted).toEqual([{ type: 'toast.error', message: 'That branch already has a checkout.' }]);
     actor.stop();
+  });
+
+  it('records the selected tree before adding, and branches from what it minted', async () => {
+    const { actor, promises, parent, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    await flush();
+
+    /* The checkout is the sole minter (F2), so the verb asks the root to cut
+     * and nothing reaches the registry until that answers. */
+    expect(parent.events).toContainEqual({
+      type: 'cut',
+      trigger: 'switch',
+      checkoutId: 'checkout-live',
+      leaseIds: [],
+    });
+    expect(types(parent.events)).not.toContain('addCheckout');
+    expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
+
+    actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-2' });
+
+    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-2' });
+    actor.send({ type: 'branchesChanged', branches: ['main', 'isolated-run'] });
+    expect(emitted).toEqual([{ type: 'toast.branch', operation: 'create', branch: 'isolated-run' }]);
+    actor.stop();
+    parent.stop();
+  });
+
+  it('branches from the head when the selected tree has nothing to record', async () => {
+    const { actor, promises, parent } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live', head: 'rev-1' });
+    await flush();
+    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+
+    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-1' });
+    actor.stop();
+    parent.stop();
+  });
+
+  it('refuses a branch when there is no head and nothing to record', async () => {
+    const { actor, promises, parent, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    await flush();
+    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+
+    expect(types(parent.events)).not.toContain('addCheckout');
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        message: 'This project has nothing to branch from yet.',
+        code: 'BRANCH_NEEDS_REVISION',
+      },
+    ]);
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
+    actor.stop();
+    parent.stop();
+  });
+
+  it('carries the port code out with the refusal it came from', async () => {
+    const { actor, promises, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'main', from: 'rev-12' });
+    await flush();
+    actor.send({
+      type: 'operationFailed',
+      reason: 'That branch already has a checkout.',
+      code: 'CHECKOUT_CONFLICT',
+    });
+
+    /* P4: the page turns the code into words; the sentence here is a diagnostic. */
+    expect(emitted).toEqual([
+      { type: 'toast.error', message: 'That branch already has a checkout.', code: 'CHECKOUT_CONFLICT' },
+    ]);
+    actor.stop();
+  });
+
+  it('names the checkout the registry made when a create settles', async () => {
+    const { actor, promises, parent, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'enclosure-v2', from: 'rev-12' });
+    await flush();
+    actor.send({
+      type: 'branchesChanged',
+      branches: ['main', 'enclosure-v2'],
+      checkouts: [
+        { branch: 'main', checkoutId: 'checkout-live', checkoutRoot: '/projects/project-1' },
+        { branch: 'enclosure-v2', checkoutId: 'checkout-c', checkoutRoot: '/checkouts/checkout-c' },
+      ],
+    });
+
+    expect(emitted).toEqual([
+      {
+        type: 'toast.branch',
+        operation: 'create',
+        branch: 'enclosure-v2',
+        checkoutId: 'checkout-c',
+        checkoutRoot: '/checkouts/checkout-c',
+      },
+    ]);
+    actor.stop();
+    parent.stop();
   });
 
   it('fails a create the registry never answers, on the bound', async () => {
@@ -362,10 +480,12 @@ describe('branchMachine', () => {
     const actor = createActor(branchMachine, { input: { projectId: 'project-1', parentRef: parent.ref } });
     actor.start();
 
-    actor.send({ type: 'create', name: 'enclosure-v2' });
+    actor.send({ type: 'create', name: 'enclosure-v2', from: 'rev-12' });
     await flush();
 
-    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'enclosure-v2', from: '' });
+    /* With a base named the effect is still the registry verb; a base-less
+     * create now records first, which rows 19-20 cover. */
+    expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'enclosure-v2', from: 'rev-12' });
     actor.stop();
     parent.stop();
   });

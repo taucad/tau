@@ -547,6 +547,8 @@ export type RemoteStorageRefusal = Readonly<{
 
 /** Stable failure categories every adapter shares. @public */
 export type RevisionPortErrorCode =
+  /** A branch was asked of a checkout that has no revision and nothing to record. */
+  | 'BRANCH_NEEDS_REVISION'
   /** The requested branch already has a checkout, or the id names no checkout. */
   | 'CHECKOUT_CONFLICT'
   | 'ENGINE_FAILED'

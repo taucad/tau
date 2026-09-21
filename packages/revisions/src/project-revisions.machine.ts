@@ -588,12 +588,16 @@ export const projectRevisionsMachine = setup({
       ) {
         return;
       }
-      const ref = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
-      if (ref === undefined) {
+      if (event.turnId === undefined) {
         enqueue.sendTo('branch', event);
         return;
       }
-      enqueue.sendTo(ref, event);
+      /* A turn whose ref has already gone is not the `branch` child's answer:
+         the cut it asked for was that turn's (review finding 9). */
+      const ref = context.turnRefs[event.turnId];
+      if (ref !== undefined) {
+        enqueue.sendTo(ref, event);
+      }
     }),
     /* Tell `restore` which checkout the workbench is rooted at now, and
      * `branch` which branch *Merge into `<current>`* means. */
@@ -884,13 +888,27 @@ export const projectRevisionsMachine = setup({
             if (ref === undefined) {
               /* R5: a dropped request is a turn that waits out its whole bound
                * and then fails with a timeout nobody can act on. */
-              const turnRef = event.turnId === undefined ? undefined : context.turnRefs[event.turnId];
+              const reason = `This project has no checkout ${event.checkoutId ?? '(none named)'}.`;
+              if (event.turnId === undefined) {
+                /* The `branch` child asks for this cut before it branches, and
+                   waited out its whole bound when nobody answered — a *New
+                   branch* on a project with nothing selected (finding 10). */
+                enqueue.sendTo('branch', {
+                  type: 'cutFailed',
+                  checkoutId: event.checkoutId,
+                  trigger: event.trigger,
+                  reason,
+                  code: 'CHECKOUT_CONFLICT',
+                });
+                return;
+              }
+              const turnRef = context.turnRefs[event.turnId];
               if (turnRef !== undefined) {
                 enqueue.sendTo(turnRef, {
                   type: 'cutFailed',
                   trigger: event.trigger,
                   turnId: event.turnId,
-                  reason: `This project has no checkout ${event.checkoutId ?? '(none named)'}.`,
+                  reason,
                 });
               }
               return;
@@ -1245,8 +1263,8 @@ export const projectRevisionsMachine = setup({
                 branch: event.branch,
                 reason:
                   liveRecord === undefined
-                    ? 'This project has no live checkout.'
-                    : 'An agent is working in the live checkout.',
+                    ? 'This project has no files open to move.'
+                    : 'An agent is working in this project’s files.',
               });
               return;
             }

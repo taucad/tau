@@ -31,6 +31,17 @@ import type { RevisionPortErrorCode } from '#revision-port.js';
 /** How long a delegated registry verb waits for the registry's answer. @public */
 export const branchRegistryMilliseconds = 30_000;
 
+/**
+ * What refused a branch verb.
+ *
+ * A port code where the port refused, plus the one refusal a *New branch* can
+ * meet that no port names: the head moved under the cut it asked for (the
+ * `TurnFailureCode` shape, one verb over).
+ *
+ * @public
+ */
+export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST';
+
 /** The five verbs this machine owns. @public */
 export type BranchOperation = 'switch' | 'merge' | 'discard' | 'create' | 'rename';
 
@@ -74,7 +85,7 @@ export type BranchMachineContext = Readonly<{
   question: string | undefined;
   reason: string | undefined;
   /** The refusal's stable category, when the thing that refused named one (P4). */
-  reasonCode: RevisionPortErrorCode | undefined;
+  reasonCode: BranchFailureCode | undefined;
   /** Paths a merge could not settle; W10's resolution reads them. */
   conflicts: readonly string[];
   parentRef: AnyActorRef | undefined;
@@ -113,7 +124,15 @@ export type BranchMachineEvent =
       revisionId: string;
     }>
   | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
-  | Readonly<{ type: 'cutFailed'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; reason: string }>
+  | Readonly<{
+      type: 'cutFailed';
+      /** Undefined when the cut named a checkout this project does not have. */
+      checkoutId: string | undefined;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      reason: string;
+      code?: BranchFailureCode;
+    }>
   | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>;
 
 /** One checkout as the registry names it, beside the branch it tracks. @public */
@@ -138,8 +157,16 @@ export type BranchMachineEmitted =
       checkoutId?: string;
       checkoutRoot?: string;
     }>
-  /* P4: a refusal crosses as a code; the page owns the words. */
-  | Readonly<{ type: 'toast.error'; message: string; code?: RevisionPortErrorCode }>;
+  /* P4: a refusal crosses as a code; the page owns the words. The verb and its
+   * branch ride along, because a caller correlating one *New branch* must not
+   * take an unrelated verb's refusal for its own (review finding 1). */
+  | Readonly<{
+      type: 'toast.error';
+      operation?: BranchOperation;
+      branch?: string;
+      message: string;
+      code?: BranchFailureCode;
+    }>;
 
 /**
  * What `checkBranch` answers before a verb runs.
@@ -313,8 +340,8 @@ export const branchMachine = setup({
       reasonCode: ({ event }) => (event.type === 'operationFailed' ? event.code : undefined),
     }),
     failWith: assign({
-      reason: (_, params: Readonly<{ reason: string; code?: RevisionPortErrorCode }>) => params.reason,
-      reasonCode: (_, params: Readonly<{ reason: string; code?: RevisionPortErrorCode }>) => params.code,
+      reason: (_, params: Readonly<{ reason: string; code?: BranchFailureCode }>) => params.reason,
+      reasonCode: (_, params: Readonly<{ reason: string; code?: BranchFailureCode }>) => params.code,
     }),
   },
 }).createMachine({
@@ -573,14 +600,19 @@ export const branchMachine = setup({
                 cutFailed: {
                   guard: { type: 'answersOurCut' },
                   target: '#branch.failed',
-                  actions: assign({ reason: ({ event }) => event.reason }),
+                  actions: assign({
+                    reason: ({ event }) => event.reason,
+                    /* Whatever refused the cut named this; the page turns it
+                       into words rather than falling back (P4). */
+                    reasonCode: ({ event }) => event.code,
+                  }),
                 },
                 casLost: {
                   guard: { type: 'answersOurCut' },
                   target: '#branch.failed',
                   actions: {
                     type: 'failWith',
-                    params: { reason: 'Something else changed this project first. Try again.' },
+                    params: { reason: 'Something else changed this project first. Try again.', code: 'CAS_LOST' },
                   },
                 },
                 operationFailed: {
@@ -698,6 +730,8 @@ export const branchMachine = setup({
       entry: emit(
         ({ context }): BranchMachineEmitted => ({
           type: 'toast.error',
+          ...(context.operation === undefined ? {} : { operation: context.operation }),
+          ...(context.branch === undefined ? {} : { branch: context.branch }),
           message: context.reason ?? 'That branch change failed.',
           ...(context.reasonCode === undefined ? {} : { code: context.reasonCode }),
         }),

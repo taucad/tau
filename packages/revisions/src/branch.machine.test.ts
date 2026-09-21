@@ -37,6 +37,8 @@ import type { FakePromiseActors, ManualClock } from '#test/fake-actors.js';
  *     refused `BRANCH_NEEDS_REVISION` when there is no head either (P3)
  * 21  a refusal carries the port's code out on `toast.error` (P4)
  * 22  `toast.branch` for a `create` names the checkout the registry made
+ * 23  a recording cut that failed carries its own code out
+ * 24  a recording cut the head moved under is `CAS_LOST`
  * --  start and stop with no child left running, serializable snapshot, no
  *     function in context, one exported machine value
  */
@@ -164,7 +166,9 @@ describe('branchMachine', () => {
     actor.send({ type: 'switch', branch: 'ghost' });
     await flush();
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'That branch has no revisions yet.' }]);
+    expect(emitted).toEqual([
+      { type: 'toast.error', operation: 'switch', branch: 'ghost', message: 'That branch has no revisions yet.' },
+    ]);
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
   });
@@ -177,7 +181,14 @@ describe('branchMachine', () => {
     actor.send({ type: 'switch', branch: 'bracket-fillet' });
     await flush();
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'The store holds no tree for that revision.' }]);
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        operation: 'switch',
+        branch: 'bracket-fillet',
+        message: 'The store holds no tree for that revision.',
+      },
+    ]);
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
   });
@@ -211,7 +222,9 @@ describe('branchMachine', () => {
     await flush();
     actor.send({ type: 'operationFailed', reason: 'That branch already has a checkout.' });
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'That branch already has a checkout.' }]);
+    expect(emitted).toEqual([
+      { type: 'toast.error', operation: 'create', branch: 'main', message: 'That branch already has a checkout.' },
+    ]);
     actor.stop();
   });
 
@@ -267,6 +280,8 @@ describe('branchMachine', () => {
     expect(emitted).toEqual([
       {
         type: 'toast.error',
+        operation: 'create',
+        branch: 'isolated-run',
         message: 'This project has nothing to branch from yet.',
         code: 'BRANCH_NEEDS_REVISION',
       },
@@ -290,7 +305,64 @@ describe('branchMachine', () => {
 
     /* P4: the page turns the code into words; the sentence here is a diagnostic. */
     expect(emitted).toEqual([
-      { type: 'toast.error', message: 'That branch already has a checkout.', code: 'CHECKOUT_CONFLICT' },
+      {
+        type: 'toast.error',
+        operation: 'create',
+        branch: 'main',
+        message: 'That branch already has a checkout.',
+        code: 'CHECKOUT_CONFLICT',
+      },
+    ]);
+    actor.stop();
+  });
+
+  /*
+   * Rows 23-24: `recording`'s two failure edges carried no code, so the page
+   * fell back to "Tau could not finish that branch change" for a cut that
+   * named exactly why it did not happen (review finding 11).
+   */
+  it('carries a failed recording cut out with its own code', async () => {
+    const { actor, promises, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    await flush();
+    actor.send({
+      type: 'cutFailed',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      reason: 'This project has no files open to record.',
+      code: 'CHECKOUT_CONFLICT',
+    });
+
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        operation: 'create',
+        branch: 'isolated-run',
+        message: 'This project has no files open to record.',
+        code: 'CHECKOUT_CONFLICT',
+      },
+    ]);
+    actor.stop();
+  });
+
+  it('names a contended recording cut CAS_LOST', async () => {
+    const { actor, promises, emitted } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    await flush();
+    actor.send({ type: 'casLost', checkoutId: 'checkout-live', trigger: 'switch' });
+
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        operation: 'create',
+        branch: 'isolated-run',
+        message: 'Something else changed this project first. Try again.',
+        code: 'CAS_LOST',
+      },
     ]);
     actor.stop();
   });
@@ -333,7 +405,14 @@ describe('branchMachine', () => {
 
     clock.advance(branchRegistryMilliseconds);
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'This project did not answer in time.' }]);
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        operation: 'create',
+        branch: 'enclosure-v2',
+        message: 'This project did not answer in time.',
+      },
+    ]);
     expect(actor.getSnapshot().matches('idle')).toBe(true);
     actor.stop();
   });
@@ -365,7 +444,14 @@ describe('branchMachine', () => {
     await flush();
     actor.send({ type: 'operationFailed', reason: 'An agent is working in feature.' });
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'An agent is working in feature.' }]);
+    expect(emitted).toEqual([
+      {
+        type: 'toast.error',
+        operation: 'discard',
+        branch: 'bracket-fillet',
+        message: 'An agent is working in feature.',
+      },
+    ]);
     actor.stop();
   });
 
@@ -416,7 +502,9 @@ describe('branchMachine', () => {
     actor.send({ type: 'merge', branch: 'bracket-fillet' });
     await flush();
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'This project cannot merge yet.' }]);
+    expect(emitted).toEqual([
+      { type: 'toast.error', operation: 'merge', branch: 'bracket-fillet', message: 'This project cannot merge yet.' },
+    ]);
     actor.stop();
   });
 
@@ -443,7 +531,9 @@ describe('branchMachine', () => {
     actor.send({ type: 'rename', branch: 'bracket-fillet', name: 'main' });
     await flush();
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'That name is already taken.' }]);
+    expect(emitted).toEqual([
+      { type: 'toast.error', operation: 'rename', branch: 'bracket-fillet', message: 'That name is already taken.' },
+    ]);
     actor.stop();
   });
 

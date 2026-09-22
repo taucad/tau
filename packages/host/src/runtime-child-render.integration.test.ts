@@ -34,6 +34,12 @@ const tsxCliPath = fileURLToPath(import.meta.resolve('tsx/cli'));
 /** The `main.scad` the live daemon refused to render. */
 const hexNut = 'difference(){ cylinder(d=34,h=14,$fn=6); cylinder(d=8,h=16,$fn=32); }\n';
 
+/* A bundled TypeScript entry, because the reported stale verdicts were served from a retained
+ * *bundle*: a kernel that re-reads its own entry (OpenSCAD) cannot show the defect. */
+const brokenModel =
+  "import { makeCylinder } from 'replicad';\nexport default () => makeCylinder(5, 20).notAMethod();\n";
+const repairedModel = "import { makeCylinder } from 'replicad';\nexport default () => makeCylinder(5, 20);\n";
+
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -42,8 +48,22 @@ afterEach(async () => {
 
 type ProbeOutcome = { readonly isError: boolean; readonly content: unknown };
 
-const probe = async (workspaceRoot: string, targetFile: string): Promise<ProbeOutcome> => {
-  const child = spawn(process.execPath, [tsxCliPath, probePath, workspaceRoot, targetFile], {
+const probe = async (workspaceRoot: string, targetFile: string, repairedSource?: string): Promise<ProbeOutcome> => {
+  const answers = await probeSequence(workspaceRoot, targetFile, repairedSource);
+  return answers[0]!;
+};
+
+/** Every `PROBE`/`PROBE2` answer the driver printed, in order. */
+const probeSequence = async (
+  workspaceRoot: string,
+  targetFile: string,
+  repairedSource?: string,
+): Promise<ProbeOutcome[]> => {
+  const argv = [tsxCliPath, probePath, workspaceRoot, targetFile];
+  if (repairedSource !== undefined) {
+    argv.push(repairedSource);
+  }
+  const child = spawn(process.execPath, argv, {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -58,11 +78,14 @@ const probe = async (workspaceRoot: string, targetFile: string): Promise<ProbeOu
     });
   });
   const output = chunks.join('');
-  const line = output.split('\n').find((entry) => entry.startsWith('PROBE '));
-  if (!line) {
+  const answers = output
+    .split('\n')
+    .filter((entry) => entry.startsWith('PROBE ') || entry.startsWith('PROBE2 '))
+    .map((entry) => JSON.parse(entry.slice(entry.indexOf(' ') + 1)) as ProbeOutcome);
+  if (answers.length === 0) {
     throw new Error(`render probe produced no answer (exit ${String(exitCode)}):\n${output}`);
   }
-  return JSON.parse(line.slice('PROBE '.length)) as ProbeOutcome;
+  return answers;
 };
 
 describe('runtime child render (from source)', () => {
@@ -90,5 +113,21 @@ describe('runtime child render (from source)', () => {
      * `runtime-client-core` invents when a terminal error state arrives with
      * nothing to say. */
     expect(JSON.stringify(outcome.content)).not.toContain('Runtime render failed');
+  });
+
+  it('answers the repaired source, not the failure it already reported', { timeout: 120_000 }, async () => {
+    /* The reported desktop sequence, on the daemon's own vertical: one
+     * `get_kernel_result` on a broken model, an edit that fixes it, and a
+     * second `get_kernel_result` on the same registry and runtime client. */
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-render-'));
+    roots.push(workspaceRoot);
+    await writeFile(join(workspaceRoot, 'main.ts'), brokenModel, 'utf8');
+
+    const [broken, repaired] = await probeSequence(workspaceRoot, 'main.ts', repairedModel);
+
+    expect(JSON.stringify(broken?.content)).not.toContain('"status":"ready"');
+    expect(repaired, 'the driver printed no second answer').toBeDefined();
+    expect(repaired?.isError, JSON.stringify(repaired?.content)).toBe(false);
+    expect(JSON.stringify(repaired?.content)).toContain('"status":"ready"');
   });
 });

@@ -1307,6 +1307,133 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.pushState('error', record, issueDetail(issues));
   }
 
+  /**
+   * Every path a volatile cache is currently standing behind.
+   *
+   * The same union `reconcileObservedPaths` arms, minus the preview's own
+   * paths: what is retained is what has to be proven current.
+   *
+   * @returns Retained rooted paths, deduplicated.
+   */
+  private retainedObservedPaths(): string[] {
+    const paths = new Set<string>(this.fileHashCache.keys());
+    for (const result of this.bundleResultCache.values()) {
+      for (const dependency of result.dependencies) {
+        paths.add(assertRootedPath(dependency));
+      }
+      for (const dependency of result.unresolvedPaths) {
+        paths.add(assertRootedPath(dependency));
+      }
+    }
+    return [...paths];
+  }
+
+  /**
+   * The retained paths whose bytes no longer hash to what was retained for them.
+   *
+   * Absence is an observation like any other: a path retained as `'missing'` diverges by
+   * appearing, and a retained hash diverges by the file vanishing.
+   *
+   * @param paths - Paths to compare against what is retained for them.
+   * @returns The subset that no longer agrees with the filesystem.
+   */
+  private async findDivergentPaths(paths: readonly string[]): Promise<string[]> {
+    const outcomes = await Promise.all(
+      paths.map(async (path) => {
+        const expected = this.fileHashCache.get(path);
+        if (expected === undefined) {
+          return undefined;
+        }
+        try {
+          const bytes = await this.filesystem.readFile(path);
+          return expected !== 'missing' && (await this.hashContent(bytes)) === expected ? undefined : path;
+        } catch (error) {
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+          return expected === 'missing' ? undefined : path;
+        }
+      }),
+    );
+    return outcomes.filter((path): path is string => path !== undefined);
+  }
+
+  /**
+   * Prove the retained closure is current, and invalidate whatever is not (I1/I3).
+   *
+   * This is the freshness evidence a request-scoped operation answers from, and it is the
+   * same on every adapter (EQ7): a watch is an optimisation for the preview loop, never the
+   * thing correctness rides on. Before this, `evaluateModel`, `getParameters`,
+   * `snapshotSource` and `exportModel` kept whatever the first call read for as long as the
+   * filesystem merely *could* watch, so the agent's kernel answered every later tool call
+   * with the verdict for bytes the person had already replaced
+   * (`docs/research/agent-stale-kernel-result-elimination-blueprint.md`).
+   *
+   * Absence counts: a path retained as `'missing'` diverges by appearing.
+   *
+   * ponytail: re-reads the retained closure once per request-scoped operation instead of
+   * stat-and-rehash. `readFiles` is one call over the same path that produced the hashes,
+   * a `stat` over the daemon bridge costs the same round trips and only saves payload, and
+   * a stat comparison would need a `(size, mtimeMs)` stamp recorded beside every hash —
+   * with mtime granularity deciding correctness. If a closure ever grows past a few hundred
+   * project files, record that stamp at hash time and stat first, reading only what moved.
+   */
+  private async revalidateRetainedFiles(): Promise<void> {
+    /* CDN package artifacts are content-addressed and can be megabytes; `fileContentCache`
+     * already draws this boundary for the same reason. */
+    const retained = this.retainedObservedPaths().filter((path) => !path.startsWith('node_modules/'));
+    const expectedPresent: string[] = [];
+    const expectedMissing: string[] = [];
+    for (const path of retained) {
+      const expected = this.fileHashCache.get(path);
+      if (expected === 'missing') {
+        expectedMissing.push(path);
+      } else if (expected !== undefined) {
+        expectedPresent.push(path);
+      }
+    }
+    const divergent: string[] = [];
+    if (expectedPresent.length > 0) {
+      let contents: Record<string, Uint8Array<ArrayBuffer>> | undefined;
+      try {
+        contents = await this.filesystem.readFiles(expectedPresent);
+      } catch (error) {
+        if (!isNotFoundError(error)) {
+          throw error;
+        }
+        /* One of them is gone, and the batch cannot say which. */
+        divergent.push(...(await this.findDivergentPaths(expectedPresent)));
+      }
+      if (contents) {
+        const current = contents;
+        const hashes = await Promise.all(
+          expectedPresent.map(async (path) => {
+            const bytes = current[path];
+            return bytes === undefined ? undefined : this.hashContent(bytes);
+          }),
+        );
+        for (const [index, path] of expectedPresent.entries()) {
+          if (hashes[index] !== this.fileHashCache.get(path)) {
+            divergent.push(path);
+          }
+        }
+      }
+    }
+    if (expectedMissing.length > 0) {
+      const present = await Promise.all(expectedMissing.map(async (path) => this.filesystem.exists(path)));
+      for (const [index, path] of expectedMissing.entries()) {
+        if (present[index]) {
+          divergent.push(path);
+        }
+      }
+    }
+    if (divergent.length === 0) {
+      return;
+    }
+    this._invalidateCachesForPaths(divergent);
+    this.onFileChanged(divergent);
+  }
+
   private prepareUnobservedFileSystem(invalidatePublishedArtifact: boolean): void {
     if (this.fileSystem?.watch) {
       return;
@@ -1422,7 +1549,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         await this.writeFilesAndInvalidate(operation.stage);
         this.operationSignal?.throwIfAborted();
       }
-      return this.getParametersInLane(file, { resolution });
+      await this.revalidateRetainedFiles();
+      const result = await this.getParametersInLane(file, { resolution });
+      // I4: leave the watch covering whatever this operation retained.
+      await this.reconcileObservedPaths();
+      return result;
     }, operation?.signal);
   }
 
@@ -1860,7 +1991,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     request: RuntimeSourceSnapshotArgs,
     signal?: AbortSignal,
   ): Promise<RuntimeSourceSnapshotResult> {
-    return this.enqueueOperation(async () => this.snapshotSourceInLane(request), signal);
+    return this.enqueueOperation(async () => {
+      const result = await this.snapshotSourceInLane(request);
+      // I4: leave the watch covering whatever this operation retained.
+      await this.reconcileObservedPaths();
+      return result;
+    }, signal);
   }
 
   private async snapshotSourceInLane(request: RuntimeSourceSnapshotArgs): Promise<RuntimeSourceSnapshotResult> {
@@ -1870,6 +2006,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (request.stage) {
       await this.writeFilesAndInvalidate(request.stage);
     }
+    await this.revalidateRetainedFiles();
     const owner = await this.createOperationOwner(request.file, 'request');
     const entryPath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
     const discover = async (): Promise<{
@@ -2087,6 +2224,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (request.stage) {
             await this.writeFilesAndInvalidate(request.stage);
           }
+          await this.revalidateRetainedFiles();
 
           const owner = await this.createOperationOwner(request.file, 'request');
 
@@ -2331,7 +2469,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public async evaluateModel(input: RuntimeEvaluateModelArgs, signal?: AbortSignal): Promise<HashedGeometryResult> {
     const file = this.canonicalGeometryFile(input.file);
-    return this.enqueueOperation(async () => this.evaluateModelInLane({ ...input, file }), signal);
+    return this.enqueueOperation(async () => {
+      const result = await this.evaluateModelInLane({ ...input, file });
+      /* I4, R8 parity with the export lane: an operation that kept volatile entries leaves
+       * the watch covering them. A lane that threw kept nothing worth watching, and the
+       * preview watch set is not the place to record its failure. */
+      await this.reconcileObservedPaths();
+      return result;
+    }, signal);
   }
 
   private async evaluateModelInLane(input: RuntimeEvaluateModelArgs): Promise<HashedGeometryResult> {
@@ -2345,6 +2490,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (input.stage) {
         await this.writeFilesAndInvalidate(input.stage);
       }
+      await this.revalidateRetainedFiles();
       const owner = await this.createOperationOwner(input.file, 'request');
       const parametersResult = await this.getParametersInLane(input.file, { dependencyContext, owner });
       if (!parametersResult.success) {
@@ -2491,27 +2637,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       do {
         validationRevision = armingEvents.addedPathRevision;
         // oxlint-disable-next-line no-await-in-loop -- an event during validation requires a fresh coherent snapshot
-        const validations = await Promise.all(
-          addedPaths.map(async (path) => {
-            const expected = this.fileHashCache.get(path);
-            if (expected === undefined) {
-              return true;
-            }
-            try {
-              const bytes = await this.filesystem.readFile(path);
-              return expected !== 'missing' && (await this.hashContent(bytes)) === expected;
-            } catch (error) {
-              if (!isNotFoundError(error)) {
-                throw error;
-              }
-              return expected === 'missing';
-            }
-          }),
-        );
+        const divergent = await this.findDivergentPaths(addedPaths);
+        /* I3 is served at the start of the next request-scoped operation instead of here:
+         * invalidating a mismatched arm also drops the render-cycle caches two preview tests
+         * require it to keep (`kernel-worker.test.ts`, "does not publish when an added
+         * dependency changes during acknowledged watch replacement" and "reuses dependency
+         * discovery ... across parameter-only renders"). Nothing is served from the retained
+         * entry in the meantime: `revalidateRetainedFiles` re-reads it before the next
+         * request-scoped lane resolves anything. See the T1 lane report under
+         * `docs/research/artifacts/agent-stale-kernel-result-elimination-blueprint/runs/`. */
         if (
           !this.operationAdmissionOpen ||
           armingEvents.resetObserved ||
-          validations.some((valid) => !valid) ||
+          divergent.length > 0 ||
           (candidate && candidate.generation !== this.currentRenderGeneration())
         ) {
           replacement.unsubscribe();
@@ -5810,8 +5948,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
       for (const path of unresolvedPaths) {
         previewCandidate?.paths.set(path, fileChangeDebounce);
-        this.fileHashCache.set(path, 'missing');
       }
+    }
+    /* Absence is an observation: a request-scoped operation that retained "this import does
+     * not resolve" has to notice the file appearing, exactly as a preview does. */
+    for (const path of unresolvedPaths) {
+      this.fileHashCache.set(path, 'missing');
     }
     discoverSpan.end();
 

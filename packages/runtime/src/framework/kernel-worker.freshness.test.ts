@@ -246,3 +246,127 @@ describe('request-scoped freshness on a watchable filesystem', () => {
     await worker.cleanup();
   });
 });
+
+describe('request-scoped freshness on a watcherless filesystem', () => {
+  it('(h) resolves an unchanged closure once and resolves again after an edit', async () => {
+    const { worker, files } = createHarness({ 'main.ts': 'v1' }, { watchable: false });
+
+    const first = await evaluationHash(worker, 'main.ts');
+    expect(worker.getDependencyCalls).toBe(1);
+
+    /* Q5/EQ7: revalidation is the freshness evidence on every adapter, so a watcherless
+     * adapter no longer pays a re-bundle per call for bytes that did not move. */
+    const second = await evaluationHash(worker, 'main.ts');
+    expect(second).toBe(first);
+    expect(worker.getDependencyCalls).toBe(1);
+
+    files.set('main.ts', 'v2');
+    const third = await evaluationHash(worker, 'main.ts');
+    expect(third).not.toBe(first);
+    expect(worker.getDependencyCalls).toBe(2);
+    await worker.cleanup();
+  });
+});
+
+describe('a refused arm leaves nothing reusable (I2, R2)', () => {
+  it('(i) does not reuse volatile caches when the arm was refused', async () => {
+    /* The watcher resyncs while the subscription is being installed, so events may have been
+     * missed and the arm is refused — with nothing to invalidate, because no path moved.
+     * `createGeometry` is the observer here: it publishes an artifact without revalidating,
+     * so its reuse has to be justified by a committed subscription, and "the filesystem can
+     * watch" is not evidence that it is watching. */
+    const harness = createHarness({ 'main.ts': 'v1' });
+    harness.watch.mockImplementation((_request, handler: (event: WatchEvent) => void) => {
+      handler({ type: 'reset' });
+      return harness.unsubscribe;
+    });
+
+    await evaluationHash(harness.worker, 'main.ts');
+    expect(harness.watch).toHaveBeenCalled();
+    expect(harness.worker.getWatchedPaths().has('main.ts')).toBe(false);
+    const callsAfterFirst = harness.worker.getDependencyCalls;
+
+    harness.files.set('main.ts', 'v2');
+    const published = await harness.worker.createGeometry({ file: createGeometryFile('main.ts'), parameters: {} });
+
+    expect(published.success).toBe(true);
+    expect(harness.worker.getDependencyCalls).toBe(callsAfterFirst + 1);
+    // @ts-expect-error - hashing through the worker keeps the digest definition in one place.
+    const rewritten = await harness.worker.hashContent(new TextEncoder().encode('v2'));
+    // @ts-expect-error - the retained hash is the private evidence the published render resolved from.
+    expect(harness.worker.fileHashCache.get('main.ts')).toBe(rewritten);
+    await harness.worker.cleanup();
+  });
+
+  it('(j) drops what a path that moved under a refused arm was resolved into (R2)', async () => {
+    /* The entry is rewritten while the subscription is being installed. The arm is refused
+     * because the render it would cover is already stale; what must not survive the refusal
+     * is anything resolved from the bytes it disagreed with. The retained *hash* does
+     * survive, on purpose: it is the last revision this worker observed, and the queued
+     * change event is reported as a change only by comparison against it. */
+    const harness = createHarness({ 'main.ts': 'v1' });
+    harness.watch.mockImplementation(() => {
+      harness.files.set('main.ts', 'v2');
+      return harness.unsubscribe;
+    });
+
+    await evaluationHash(harness.worker, 'main.ts');
+
+    expect(harness.worker.getWatchedPaths().has('main.ts')).toBe(false);
+    // @ts-expect-error - the bundle is what a later operation could otherwise have been answered from.
+    expect(harness.worker.bundleResultCache.has('main.ts')).toBe(false);
+    // @ts-expect-error - the parameter cache is the other reusable product of those bytes.
+    expect(harness.worker.parameterResultCache).toBeUndefined();
+    // @ts-expect-error - hashing through the worker keeps the digest definition in one place.
+    const observed = await harness.worker.hashContent(new TextEncoder().encode('v1'));
+    // @ts-expect-error - the ledger keeps the last observed revision so the queued event still reads as a change.
+    expect(harness.worker.fileHashCache.get('main.ts')).toBe(observed);
+    await harness.worker.cleanup();
+  });
+});
+
+describe('revalidation keeps the observation ledger coherent', () => {
+  it("(k) does not swallow the preview's next watch event for a path it revalidated", async () => {
+    /* A request-scoped operation revalidates the whole retained closure, including paths its
+     * own lane never re-reads — here the preview's entry while the agent evaluates a
+     * different one. `readChangedObservedRevisions` reads a path with no retained hash as one
+     * no render has looked at yet and records its event as a baseline, so a revalidation that
+     * *deleted* the entry made the preview spend its next change event re-establishing a
+     * baseline, and that edit never reached the screen. The ledger has to keep saying which
+     * revision this worker last observed. */
+    const harness = createHarness({ 'main.ts': 'v1', 'other.ts': 'o1' });
+    const published: string[] = [];
+    harness.worker.onGeometryComputed = ({ renderId }) => {
+      published.push(renderId);
+    };
+    const settled = Promise.withResolvers<void>();
+    harness.worker.onStateChanged = ({ state }) => {
+      if (state === 'idle' || state === 'error') {
+        settled.resolve();
+      }
+    };
+
+    harness.worker.handleOpenFile({
+      renderId: '550e8400-e29b-41d4-a716-000000000401',
+      file: createGeometryFile('main.ts'),
+      parameters: {},
+    });
+    await settled.promise;
+    expect(published).toHaveLength(1);
+    expect(harness.worker.getWatchedPaths().has('main.ts')).toBe(true);
+
+    /* The preview's entry moves without an event — a staged agent write, or one the watcher
+     * coalesced — and the agent's next tool call is about a different entry. */
+    harness.files.set('main.ts', 'v2');
+    await evaluationHash(harness.worker, 'other.ts');
+
+    /* A later edit, announced normally. The preview owes the screen a render for it. */
+    harness.files.set('main.ts', 'v3');
+    harness.deliver({ type: 'change', path: 'main.ts' });
+
+    await vi.waitFor(() => {
+      expect(published.length).toBeGreaterThan(1);
+    });
+    await harness.worker.cleanup();
+  });
+});

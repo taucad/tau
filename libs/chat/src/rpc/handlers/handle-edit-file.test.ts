@@ -70,6 +70,27 @@ describe('handleEditFile', () => {
     });
   });
 
+  it('prefers the digest of the committed bytes over a hash of the decoded text (R4, BOM files)', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    /* The adapter proved these bytes committed: a UTF-8 BOM the decoded `modifiedContent` no longer carries. */
+    const committed = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('const a = 1;\n', 'utf8')]);
+    const digest = `sha256:${createHash('sha256').update(committed).digest('hex')}`;
+    fileSystem.editFile.mockResolvedValue({
+      occurrences: 1,
+      diffStats: {
+        linesAdded: 1,
+        linesRemoved: 1,
+        originalContent: 'const a = 0;\n',
+        modifiedContent: 'const a = 1;\n',
+      },
+      digest,
+    });
+
+    const result = await handleEditFile({ targetFile: 'main.ts', oldString: '0', newString: '1' }, fileSystem);
+
+    expect(result).toMatchObject({ revision: { path: 'main.ts', digest } });
+  });
+
   it('should return FILE_NOT_FOUND when file does not exist', async () => {
     const fileSystem = mock<RpcFileSystem>();
     const error = new Error('ENOENT: no such file');

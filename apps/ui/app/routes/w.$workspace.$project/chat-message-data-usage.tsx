@@ -235,7 +235,7 @@ export function ChatMessageDataUsage({
         <Badge
           variant='outline'
           aria-label={tauBilled ? `Tau credits: ${summary}` : 'Not billed by Tau'}
-          className='h-7 cursor-help gap-1 border-none font-medium text-inherit outline-none hover:bg-neutral/20'
+          className='h-7 cursor-help gap-1 border-none font-normal text-inherit outline-none hover:bg-neutral/20'
         >
           <Coins aria-hidden='true' className='size-3.5! stroke-2' />
           {showCredits ? <span>{summary}</span> : undefined}

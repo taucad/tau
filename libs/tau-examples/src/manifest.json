@@ -256,7 +256,7 @@
     "kernel": "replicad",
     "name": "helical-gear",
     "mainFile": "main.ts",
-    "files": ["main.ts", "main.usdz"]
+    "files": ["main.ts"]
   },
   {
     "kind": "model",
@@ -516,5 +516,13 @@
     "name": "wedge-door-stopper",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "worm-gear-system",
+    "mainFile": "main.ts",
+    "files": ["MANUFACTURING.md", "main.geospec.ts", "main.ts", "tau.json", "tooth-profile.ts"]
   }
 ]

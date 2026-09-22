@@ -62,7 +62,8 @@ export type ExampleManifest = {
     | 'v8-engine-rev2'
     | 'vase'
     | 'wavy-vase'
-    | 'wedge-door-stopper';
+    | 'wedge-door-stopper'
+    | 'worm-gear-system';
 };
 
 /** Available kernel names. */

@@ -24,6 +24,8 @@ import {
 import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import {
   applyFatLineSegments,
+  collectGltfFatLineMaterials,
+  setGltfFatLineEmphasis,
   updateGltfEdgeColor,
   updateLineMaterialResolution,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
@@ -224,7 +226,7 @@ function createGltfResourceDisposer(
           resources.add(geometry);
         }
       }
-      for (const material of getObjectMaterials(child)) {
+      for (const material of [...getObjectMaterials(child), ...collectGltfFatLineMaterials(child)]) {
         resources.add(material);
         if (includeSceneTextures) {
           collectMaterialTextures(material, resources);
@@ -995,12 +997,20 @@ export function applyModelComponentVisualStateToScene({
     });
     object.visible = globallyVisible && visualState.visible;
 
+    const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
+    if (isLine) {
+      // Edges share one base material per presentation, so emphasis is a per-object material
+      // swap rather than a tint on the shared material (which would let the last-visited
+      // component win). Edge opacity is not per-component; see the edge emphasis blueprint.
+      setGltfFatLineEmphasis(object, emphasis);
+      return;
+    }
+
     const materials = getObjectMaterials(object);
     if (materials.length === 0) {
       return;
     }
 
-    const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
     for (const material of materials) {
       const snapshot = getOrCaptureModelMaterialAppearance(material);
       applyModelMaterialAppearance(material, snapshot, {

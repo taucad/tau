@@ -19,12 +19,28 @@ describe('file-tree-download-policy', () => {
       expect(getFileTreeDownloadPolicy(undefined)).toEqual({ allowed: true });
     });
 
+    it('should block a system-skills overlay row', () => {
+      expect(
+        getFileTreeDownloadPolicy({ source: 'system-skills', versioned: false, agentAccess: 'read-only' }),
+      ).toEqual({
+        allowed: false,
+        code: 'not-project-content',
+        message: 'System skill files are read-only and cannot be downloaded.',
+      });
+    });
+
+    it('should allow a records row the project owns', () => {
+      expect(getFileTreeDownloadPolicy({ source: 'project', versioned: false, agentAccess: 'read-only' })).toEqual({
+        allowed: true,
+      });
+    });
+
     it('should block dependency-backed read-only paths', () => {
       expect(getFileTreeDownloadPolicy({ source: 'dependencies', versioned: false, agentAccess: 'read-only' })).toEqual(
         {
           allowed: false,
-          code: 'dependency-read-only',
-          message: 'Read-only dependency paths cannot be downloaded.',
+          code: 'not-project-content',
+          message: 'Dependency files are read-only and cannot be downloaded.',
         },
       );
     });

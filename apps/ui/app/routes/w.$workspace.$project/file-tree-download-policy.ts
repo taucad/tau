@@ -1,12 +1,12 @@
 import { archiveByteCeiling, archiveTooLargeCode } from '@taucad/filesystem/content-ops';
-import type { FileProvenance } from '@taucad/types';
+import type { FileProvenance, FileProvenanceSource } from '@taucad/types';
 import { formatBytes } from '#lib/format-bytes.js';
 
 export type FileTreeDownloadPolicy =
   | { readonly allowed: true }
   | {
       readonly allowed: false;
-      readonly code: 'dependency-read-only';
+      readonly code: 'not-project-content';
       readonly message: string;
     };
 
@@ -34,22 +34,29 @@ export class FileTreeDownloadError extends Error {
   }
 }
 
+/** How the refusal names the source it refused; the row's own badge copy is the label catalog's. */
+const sourceName: Record<Exclude<FileProvenanceSource, 'project'>, string> = {
+  dependencies: 'Dependency',
+  'system-skills': 'System skill',
+};
+
 /**
  * Whether a row may be downloaded.
  *
- * Dependency bytes are the application's own build output, not the user's, and
- * have never been downloadable; the rule now reads the row's provenance instead
- * of its spelling.
+ * Anything a view composes above the checkout — a dependency mount's build
+ * output, a bundled skill — is Tau's own bytes rather than the user's, so the
+ * user's access is `source === 'project'` (ruling P10) and never the spelling.
+ * Records rows the project owns stay downloadable.
  *
  * @param provenance - What the composed view (or the dependency mount) says about the row.
  * @returns Allowed, or the refusal with its user-facing message.
  */
 export function getFileTreeDownloadPolicy(provenance: FileProvenance | undefined): FileTreeDownloadPolicy {
-  if (provenance?.source === 'dependencies') {
+  if (provenance !== undefined && provenance.source !== 'project') {
     return {
       allowed: false,
-      code: 'dependency-read-only',
-      message: 'Read-only dependency paths cannot be downloaded.',
+      code: 'not-project-content',
+      message: `${sourceName[provenance.source]} files are read-only and cannot be downloaded.`,
     };
   }
 

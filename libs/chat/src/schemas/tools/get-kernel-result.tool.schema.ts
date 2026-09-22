@@ -1,6 +1,7 @@
 import type { KernelIssue } from '@taucad/runtime';
 import { z } from 'zod';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
+import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
@@ -12,6 +13,9 @@ export const getKernelResultInputSchema = z.object({
 export const getKernelResultOutputSchema = z.object({
   status: z.enum(['ready', 'error', 'pending']).describe('The current status of the kernel.'),
   kernelIssues: z.array(kernelIssueSchema).optional().describe('Any kernel issues encountered during compilation.'),
+  sourceRevision: sourceRevisionSchema
+    .optional()
+    .describe('Digests of the source this verdict was computed from (R4).'),
 });
 
 /** @public */
@@ -22,4 +26,5 @@ export type GetKernelResultInput = z.infer<typeof getKernelResultInputSchema>;
 export type GetKernelResultOutput = {
   status: 'ready' | 'error' | 'pending';
   kernelIssues?: KernelIssue[];
+  sourceRevision?: { entry: string; files: Record<string, string> };
 };

@@ -408,8 +408,15 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
   if (!zodUtility.isObject(value)) {
     return value;
   }
+  /* R4/I5: provenance survives trimming. A result stripped of the revision it was computed from
+   * is exactly the unfalsifiable answer the trim is not allowed to produce. */
+  const provenance = {
+    ...(value['sourceRevision'] === undefined ? {} : { sourceRevision: value['sourceRevision'] }),
+    ...(value['sourceRevisions'] === undefined ? {} : { sourceRevisions: value['sourceRevisions'] }),
+    ...(value['revision'] === undefined ? {} : { revision: value['revision'] }),
+  };
   if (toolName === 'test_model' && Array.isArray(value['failures']) && typeof value['total'] === 'number') {
-    return { failures: value['failures'], total: value['total'] };
+    return { failures: value['failures'], total: value['total'], ...provenance };
   }
   if (
     (toolName === 'create_file' || toolName === 'edit_file' || toolName === 'delete_file') &&
@@ -419,6 +426,7 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
     return {
       ...(toolName !== 'edit_file' && typeof value['message'] === 'string' ? { message: value['message'] } : {}),
       diffStats: { linesAdded: diff['linesAdded'], linesRemoved: diff['linesRemoved'] },
+      ...provenance,
     };
   }
   if (toolName === 'screenshot' && Array.isArray(value['images'])) {
@@ -426,6 +434,7 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
     return {
       images: images.map((image) => (zodUtility.isObject(image) ? { view: image['view'] } : image)),
       _trimmed: true,
+      ...provenance,
     };
   }
   if (toolName === 'get_kernel_result' && typeof value['status'] === 'string') {
@@ -434,6 +443,7 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
       : undefined;
     return {
       status: value['status'],
+      ...provenance,
       ...(kernelIssues
         ? {
             kernelIssues: kernelIssues.map((issue) => {

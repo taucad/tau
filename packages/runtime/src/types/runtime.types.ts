@@ -8,6 +8,7 @@
  * see runtime-kernel.types.ts.
  */
 
+import type { ContentDigest } from '@taucad/cache-core';
 import type { backendProviders, kernelProviders } from '@taucad/types/constants';
 import type { ExportFidelity, ExportFile, Geometry, GeometryResponse } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -112,6 +113,26 @@ export type KernelIssue = {
 // =============================================================================
 
 /**
+ * The exact source a request-scoped kernel operation read, in the digest vocabulary that
+ * `ParameterManifest.identity.sourceFiles` already uses.
+ *
+ * `files` covers the entry **and** its resolved dependency closure: one entry per project source
+ * file the operation resolved, keyed by rooted path, valued with the SHA-256 digest of the bytes
+ * this operation read, or `'missing'` for an import that resolved to no file. It is the closure the
+ * operation actually hashed, so it excludes `node_modules` and anything the kernel never read.
+ *
+ * Comparing it with the digest a write reported for the same path is what makes a stale answer
+ * self-diagnosing (blueprint R4, invariant I5).
+ * @public
+ */
+export type SourceRevision = Readonly<{
+  /** Rooted path of the entry file the operation evaluated. */
+  entry: string;
+  /** Content digest per rooted source path; `'missing'` where the import resolved to no file. */
+  files: Readonly<Record<string, ContentDigest | 'missing'>>;
+}>;
+
+/**
  * Successful kernel operation outcome. Non-fatal warnings are preserved in `issues` alongside the operation data.
  * @public
  */
@@ -120,6 +141,14 @@ export type KernelSuccessResult<T> = {
   data: T;
   issues: KernelIssue[];
   serializedNativeHandle?: unknown;
+  /**
+   * The source revision this result was computed from.
+   *
+   * Populated by the request-scoped operations (`evaluateModel`, `getParameters`, `exportModel`,
+   * `snapshotSource`); absent on autonomous preview results and on results produced before any
+   * closure was resolved.
+   */
+  sourceRevision?: SourceRevision;
   /**
    * Produce the durable native-handle snapshot on demand (D12).
    *
@@ -138,6 +167,13 @@ export type KernelSuccessResult<T> = {
 export type KernelErrorResult = {
   success: false;
   issues: KernelIssue[];
+  /**
+   * The source revision the failing operation had already resolved, when it got that far.
+   *
+   * A failure is the case provenance matters most for — "render failed" against bytes the caller
+   * has since replaced reads exactly like a failure against the current ones.
+   */
+  sourceRevision?: SourceRevision;
 };
 
 /**

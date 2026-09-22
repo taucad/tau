@@ -60,8 +60,10 @@ const innerTimeoutSlop = 1000;
  * machine settled on an older render after the agent issued a new request.
  *
  * Resolves when:
- * 1. `lastSettledRenderId >= baselineRenderId`, AND
- * 2. machine is in a settled state (`idle` or `error`).
+ * 1. the machine is `idle` and `lastSettledRenderId >= baselineRenderId`, or
+ * 2. the machine is in `error` and no render newer than the baseline was
+ *    requested while the wait was open — an error that a newer request has
+ *    already overtaken is the previous render's verdict, not this one's.
  *
  * Timeout is owned locally via `Promise.race` against an explicit `setTimeout`
  * — the helper never depends on XState's rejection wording. Any future XState
@@ -88,11 +90,21 @@ export async function awaitFreshRender(
   const waitForPromise = waitFor(
     cadActor,
     (state) => {
-      // Error is terminal for the current render — surface it immediately so
-      // the RPC handler can report the kernel issues rather than waiting for
-      // a fresh render that will never arrive.
+      // Error is terminal for the current render — surface it so the RPC
+      // handler can report the kernel issues rather than waiting for a fresh
+      // render that will never arrive. But an error that landed while a newer
+      // render was already requested belongs to the render before it, and
+      // answering with it is the stale verdict this oracle exists to prevent.
+      //
+      // ponytail: the watermark alone cannot gate this — `error` is the
+      // runtime-death state and never advances `lastSettledRenderId`, so
+      // requiring it would turn every dead kernel into a RENDER_TIMEOUT.
+      // Provenance in the result (blueprint R4) is the upgrade path.
       if (state.value === 'error') {
-        return true;
+        return (
+          state.context.lastRequestedRenderId <= baselineRenderId ||
+          state.context.lastSettledRenderId >= baselineRenderId
+        );
       }
       return state.value === 'idle' && state.context.lastSettledRenderId >= baselineRenderId;
     },

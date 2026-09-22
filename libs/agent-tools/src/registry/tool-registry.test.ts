@@ -357,6 +357,47 @@ describe('createChatToolRegistry invocation', () => {
     ).resolves.toMatchObject({ isError: false, content: { outcome: { status: 'committed' } } });
   });
 
+  /* The dead-client class (blueprint R9): once the kernel client behind a live
+   * answer dies, the next call must report the death. A registry that cached
+   * or replayed the previous verdict would tell the agent its rewritten model
+   * still fails, which is the loop this programme exists to end. */
+  it('names the kernel death instead of repeating the verdict it answered before it', async () => {
+    let answered = false;
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => {
+      if (answered) {
+        throw Object.assign(new Error('RuntimeClient has been terminated.'), {
+          code: 'RUNTIME_UNAVAILABLE',
+        });
+      }
+      answered = true;
+      return {
+        success: true,
+        status: 'error',
+        kernelIssues: [
+          {
+            message: 'You need a previous curve to sketch a tangent arc',
+            code: 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+          },
+        ],
+      };
+    });
+    const registry = build({ kernelClient: { getKernelResult } });
+
+    await expect(invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } })).resolves.toMatchObject({
+      isError: false,
+      content: { status: 'error' },
+    });
+    const afterDeath = await invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } });
+
+    expect(afterDeath).toMatchObject({
+      isError: true,
+      content: { errorCode: 'RUNTIME_UNAVAILABLE', message: 'RuntimeClient has been terminated.' },
+    });
+    expect(JSON.stringify(afterDeath.content)).not.toContain('tangent arc');
+  });
+
   it('forwards local cancellation context without serializing it into RPC input', async () => {
     const controller = new AbortController();
     const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => ({

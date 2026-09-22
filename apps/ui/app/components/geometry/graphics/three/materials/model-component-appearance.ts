@@ -1,19 +1,26 @@
 import { Color } from 'three';
 import type { Material } from 'three';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import { gltfEdgeHoverColor } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 
+/**
+ * Selected/focused surface wash. Same yellow as the emphasised edges so wash and silhouette read
+ * as one highlight. The base colour is lerped toward yellow (not only emissive-added) so a
+ * saturated base such as `#000eff` reads yellow rather than lavender (operator ruling 2026-09-22).
+ */
 export const modelHighlightAppearance = {
-  color: 0x9b_e7_ff,
-  emissiveIntensity: 0.16,
-  colorMix: 0.12,
-  capTintMix: 0.4,
+  color: gltfEdgeHoverColor,
+  emissiveIntensity: 0.06,
+  colorMix: 0.7,
+  capTintMix: 0.7,
 } as const;
 
+/** Hover wash: lighter than selected, still visible on components that carry no edges. */
 export const modelHoverAppearance = {
   color: modelHighlightAppearance.color,
-  emissiveIntensity: 0.045,
-  colorMix: 0.035,
-  capTintMix: 0.16,
+  emissiveIntensity: 0.03,
+  colorMix: 0.35,
+  capTintMix: 0.35,
 } as const;
 
 export type ModelMaterialAppearanceSnapshot = Readonly<{
@@ -162,13 +169,14 @@ export function applyModelMaterialAppearance(
 
   const appearance = getAppearanceForEmphasis(state.emphasis);
   if (appearance) {
+    if (hasColor(material)) {
+      material.color.lerp(highlightedColor, appearance.colorMix);
+    }
     if (hasEmissive(material)) {
       material.emissive.copy(highlightedColor);
       if (hasEmissiveIntensity(material)) {
         material.emissiveIntensity = appearance.emissiveIntensity;
       }
-    } else if (hasColor(material)) {
-      material.color.lerp(highlightedColor, appearance.colorMix);
     }
   }
 

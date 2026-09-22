@@ -289,10 +289,13 @@ describe('composeView optional provider members', () => {
   it('should answer readdirEntries from the merged listing', async () => {
     const { view } = streaming();
 
+    /* Each row keeps the provenance the merge computed, so a walk over the view
+     * can filter on it without asking again. */
+    const provenance = { source: 'system-skills', versioned: false, agentAccess: 'read-only', identity: demoIdentity };
     expect(await view.readdirEntries!(`${skillsRoot}/demo`)).toStrictEqual([
-      { name: 'SKILL.md', kind: 'file' },
-      { name: 'api-index.md', kind: 'file' },
-      { name: 'references', kind: 'dir' },
+      { name: 'SKILL.md', kind: 'file', provenance },
+      { name: 'api-index.md', kind: 'file', provenance },
+      { name: 'references', kind: 'dir', provenance },
     ]);
   });
 

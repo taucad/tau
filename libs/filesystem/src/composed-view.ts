@@ -900,10 +900,11 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       ? {}
       : {
           /* Present when the base can answer kinds cheaply; the rows are the
-           * view's merged ones, never the base's raw listing. */
+           * view's merged ones, never the base's raw listing, and each keeps the
+           * provenance the merge already computed for it. */
           readdirEntries: async (path: string): Promise<DirectoryEntry[]> => {
             const rows = await readdirWithStats(path);
-            return rows.map(({ name, type }) => ({ name, kind: type }));
+            return rows.map(({ name, type, provenance }) => ({ name, kind: type, provenance }));
           },
         }),
     ...(base.refresh === undefined

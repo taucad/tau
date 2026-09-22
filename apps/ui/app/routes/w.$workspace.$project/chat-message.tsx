@@ -457,6 +457,10 @@ function renderAssistantPart(
   }
 }
 
+/** A trailing thought still open in the active group: its spinner is the group's only motion once collapsed (resting block R3). */
+const isStreamingThought = (part: MyMessagePart | undefined): boolean =>
+  part?.type === 'reasoning' && part.state === 'streaming' && part.text.trim() !== '';
+
 function renderActivityGroup(
   group: ActivityGroup,
   groupIndex: number,
@@ -486,7 +490,10 @@ function renderActivityGroup(
       summary={group.summary}
       icon={activityIcons[group.families[0] ?? 'other']}
       isActive={context.isActiveGroup}
-      hasActiveRows={context.isMessageActive && group.parts.some((part) => isActivityPartActive(part))}
+      hasActiveRows={
+        (context.isMessageActive && group.parts.some((part) => isActivityPartActive(part))) ||
+        (context.isActiveGroup && isStreamingThought(group.parts.at(-1)))
+      }
     >
       {renderActivityRows(group, context)}
     </ChatActivityGroup>

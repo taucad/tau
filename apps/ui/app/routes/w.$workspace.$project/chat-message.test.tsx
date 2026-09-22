@@ -182,8 +182,16 @@ vi.mock('#components/chat/context-chip.js', () => ({
 }));
 
 vi.mock('#components/chat/chat-activity-group.js', () => ({
-  ChatActivityGroup: ({ children, summary }: { readonly children: React.ReactNode; readonly summary: string }) => (
-    <div data-testid='chat-activity-group' data-summary={summary}>
+  ChatActivityGroup: ({
+    children,
+    summary,
+    hasActiveRows,
+  }: {
+    readonly children: React.ReactNode;
+    readonly summary: string;
+    readonly hasActiveRows?: boolean;
+  }) => (
+    <div data-testid='chat-activity-group' data-summary={summary} data-active-rows={String(hasActiveRows ?? false)}>
       {children}
     </div>
   ),
@@ -414,6 +422,50 @@ describe('ChatMessage activity composition', () => {
     expect(reasoningBlocks[0]).toHaveTextContent('Inspecting the model|Confirming dimensions');
     expect(reasoningBlocks[1]).toHaveTextContent('Preparing the answer');
     expect(group).toHaveAttribute('data-summary', 'Reading files');
+  });
+
+  it('marks the trailing group busy while its last thought still streams behind settled tools (resting block R3)', () => {
+    const message: MyUIMessage = {
+      id: 'msg-resting-thought',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-read_file',
+          toolCallId: 'read-1',
+          state: 'output-available',
+          input: { targetFile: 'main.scad' },
+          output: { content: '', size: 0, contentKind: 'text', totalLines: 0 },
+        },
+        { type: 'reasoning', text: '**Refining blade geometry**', state: 'streaming' },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-active-rows', 'true');
+  });
+
+  it('does not mark a group busy for a streaming thought once the message has settled', () => {
+    const message: MyUIMessage = {
+      id: 'msg-stale-thought',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-read_file',
+          toolCallId: 'read-1',
+          state: 'output-available',
+          input: { targetFile: 'main.scad' },
+          output: { content: '', size: 0, contentKind: 'text', totalLines: 0 },
+        },
+        { type: 'reasoning', text: 'Left open by a failed run', state: 'streaming' },
+      ],
+    };
+    setMessages([message], 'ready');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-active-rows', 'false');
   });
 });
 

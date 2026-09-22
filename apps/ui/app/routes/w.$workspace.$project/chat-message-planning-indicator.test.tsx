@@ -132,6 +132,22 @@ describe('ChatMessagePlanning', () => {
     expect(indicator()).toBeNull();
   });
 
+  it('S22: shows under a resting ACP text checkpoint while the run keeps working', () => {
+    setChat('streaming', [
+      assistant('a1', [
+        { type: 'step-start' },
+        {
+          type: 'text',
+          text: 'The reference shows two broad finger scallops.',
+          state: 'streaming',
+          providerMetadata: { common: { streamState: 'checkpoint' } },
+        },
+      ]),
+    ]);
+    render(<ChatMessagePlanning messageId='a1' />);
+    expect(indicator()).toHaveTextContent('Planning next moves…');
+  });
+
   it('S14: shows after an approval is answered and the paused run has not resumed', () => {
     setRun('question');
     setChat('streaming', [assistant('a1', [tool('approval-responded')])]);

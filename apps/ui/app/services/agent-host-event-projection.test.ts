@@ -1779,3 +1779,186 @@ describe('chat activity indicator closeout: projection seams', () => {
     expect(text?.type === 'text' ? [text.text, text.state] : undefined).toEqual(['Hello world', 'done']);
   });
 });
+
+describe('chat activity indicator resting block: text rest on the part', () => {
+  type AnyEvent = AgentLogEvent | AgentLiveEvent;
+  const external = { origin: 'external', agentId: 'codex' } as const;
+  const block = { messageId: 'text-1', contentIndex: 0 };
+
+  const live = (event: Record<string, unknown>): AgentLiveEvent =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- compact live-event fixtures
+    ({ chatId: 'chat', runId: base.runId, ...block, ...event }) as AgentLiveEvent;
+  const acpText = (
+    text: string,
+    streamState: 'checkpoint' | 'final',
+    type: 'message.appended' | 'message.envelope-replaced' = 'message.appended',
+  ): AgentLogEvent => {
+    const message = {
+      id: 'text-1',
+      role: 'assistant',
+      content: [{ type: 'text', text }],
+      metadata: { tauInternal: { ...external, streamState } },
+    } as const;
+    return type === 'message.appended'
+      ? { ...base, type, message }
+      : { ...base, type, messageId: 'text-1', replacement: message };
+  };
+  const acpThought = (thinking: string): AgentLogEvent => ({
+    ...base,
+    type: 'message.appended',
+    message: {
+      id: 'thought-1',
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking }],
+      metadata: { tauInternal: { ...external, streamState: 'checkpoint' } },
+    },
+  });
+
+  const reduce = async (events: readonly AnyEvent[]): Promise<{ message?: MyUIMessage; error?: unknown }> => {
+    const blocks = new Map();
+    const chunks = events.flatMap((event) =>
+      'leaderEpoch' in event ? projectAgentHostEvent(event, blocks) : projectAgentHostLiveEvent(event, blocks),
+    );
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    let message: MyUIMessage | undefined;
+    let error: unknown;
+    for await (const next of readUIMessageStream<MyUIMessage>({
+      stream,
+      onError: (reason) => {
+        error ??= reason;
+      },
+    })) {
+      message = next;
+    }
+    return { message, error };
+  };
+
+  const textFacts = (message: MyUIMessage | undefined): unknown =>
+    message?.parts.flatMap((part) =>
+      part.type === 'text' ? [[part.text, part.state, part.providerMetadata?.['common']?.['streamState']]] : [],
+    );
+
+  const paragraph = 'The reference shows two broad finger scallops.';
+  const opening: AnyEvent[] = [
+    { ...base, type: 'run.lifecycle', state: 'admitted' },
+    { ...base, type: 'run.lifecycle', state: 'running' },
+    live({ type: 'text-start' }),
+    live({ type: 'text-delta', delta: paragraph, offset: 0 }),
+  ];
+
+  it('marks a text block resting when its checkpoint row lands and nothing follows (timeline rows 80–81)', async () => {
+    const result = await reduce([
+      ...opening,
+      acpText(paragraph, 'checkpoint'),
+      acpText(paragraph, 'checkpoint', 'message.envelope-replaced'),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    expect(textFacts(result.message)).toEqual([[paragraph, 'streaming', 'checkpoint']]);
+  });
+
+  it('marks the block live again on the next delta that adds bytes', async () => {
+    const result = await reduce([
+      ...opening,
+      acpText(paragraph, 'checkpoint'),
+      live({ type: 'text-delta', delta: ' More.', offset: paragraph.length }),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    expect(textFacts(result.message)).toEqual([[`${paragraph} More.`, 'streaming', 'live']]);
+  });
+
+  it('leaves a resting block resting when a stale live frame repeats covered bytes (G06)', () => {
+    const blocks = new Map();
+    for (const event of [...opening, acpText(paragraph, 'checkpoint')]) {
+      if ('leaderEpoch' in event) {
+        projectAgentHostEvent(event, blocks);
+      } else {
+        projectAgentHostLiveEvent(event, blocks);
+      }
+    }
+
+    expect(projectAgentHostLiveEvent(live({ type: 'text-delta', delta: paragraph, offset: 0 }), blocks)).toEqual([]);
+  });
+
+  it('flips to resting for one gap when a checkpoint row lands after a resumed delta, then back to live (G07)', async () => {
+    const result = await reduce([
+      ...opening,
+      live({ type: 'text-delta', delta: ' More.', offset: paragraph.length }),
+      acpText(paragraph, 'checkpoint'),
+    ]);
+    expect(result.error).toBeUndefined();
+    expect(textFacts(result.message)).toEqual([[`${paragraph} More.`, 'streaming', 'checkpoint']]);
+
+    const resumed = await reduce([
+      ...opening,
+      live({ type: 'text-delta', delta: ' More.', offset: paragraph.length }),
+      acpText(paragraph, 'checkpoint'),
+      live({ type: 'text-delta', delta: ' Again.', offset: paragraph.length + 6 }),
+    ]);
+    expect(resumed.error).toBeUndefined();
+    expect(textFacts(resumed.message)).toEqual([[`${paragraph} More. Again.`, 'streaming', 'live']]);
+  });
+
+  it('opens a replayed checkpoint row as resting when no live frame preceded it (F4 reload)', async () => {
+    const result = await reduce([
+      { ...base, type: 'run.lifecycle', state: 'admitted' },
+      { ...base, type: 'run.lifecycle', state: 'running' },
+      acpText(paragraph, 'checkpoint'),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    expect(textFacts(result.message)).toEqual([[paragraph, 'streaming', 'checkpoint']]);
+  });
+
+  it('stamps nothing on a thought checkpoint and nothing on a final text row', async () => {
+    const result = await reduce([
+      ...opening,
+      acpThought('**Refining blade geometry**'),
+      acpText(paragraph, 'final', 'message.envelope-replaced'),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    const reasoning = result.message?.parts.find((part) => part.type === 'reasoning');
+    expect(reasoning?.providerMetadata?.['common']?.['streamState']).toBeUndefined();
+    expect(textFacts(result.message)).toEqual([[paragraph, 'done', undefined]]);
+  });
+
+  it('guard: a native prestart checkpoint row on a block its live end already closed emits nothing', () => {
+    const blocks = new Map();
+    const native = { messageId: 'run-1', contentIndex: 0 };
+    for (const event of [
+      live({ ...native, type: 'text-start' }),
+      live({ ...native, type: 'text-delta', delta: 'Hello', offset: 0 }),
+      live({ ...native, type: 'text-end', content: 'Hello' }),
+    ]) {
+      projectAgentHostLiveEvent(event, blocks);
+    }
+
+    expect(
+      projectAgentHostEvent(
+        {
+          ...base,
+          type: 'message.appended',
+          message: {
+            id: 'run-1',
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'Hello' },
+              { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { path: 'a.ts' } },
+            ],
+            metadata: { tauInternal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } },
+          },
+        },
+        blocks,
+      ),
+    ).toEqual([]);
+  });
+});

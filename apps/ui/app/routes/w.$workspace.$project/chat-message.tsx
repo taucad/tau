@@ -879,7 +879,14 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
         {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
         {isUser ? <ChatMessagePlanning messageId={messageId} className='-mt-1 ml-0' /> : null}
         <When shouldRender={!isUser}>
-          <div className='mt-1 flex flex-row items-start justify-start text-muted-foreground'>
+          <div
+            className={cn(
+              '-mt-2 flex flex-row items-start justify-start text-muted-foreground transition-opacity duration-150',
+              'opacity-0',
+              'group-hover/chat-message:opacity-100',
+              'group-focus-within/chat-message:opacity-100',
+            )}
+          >
             <CopyButton
               tooltipContentProperties={{ side: 'bottom' }}
               size='icon'

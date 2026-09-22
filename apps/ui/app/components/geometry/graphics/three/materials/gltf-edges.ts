@@ -10,7 +10,6 @@ import {
   gltfEdgeHoverColor,
   gltfEdgeSelectedColor,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
-import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 
 /**
@@ -350,9 +349,9 @@ function createEdgeEmphasisMaterial(base: GltfFatLineMaterial, edgeColor: number
     base instanceof LineMaterial
       ? createWebGlGltfFatLineMaterial(base.resolution, edgeColor)
       : createWebGpuGltfFatLineMaterial(edgeColor);
-  // Emphasised edges are an overlay: the whole silhouette shows through occluding surfaces
-  // (graphics-backend-policy rule 4 — depth behaviour declared, never biased).
-  material.depthTest = false;
+  // Only visible edges carry the emphasis colour; the through-occluder shape is the silhouette
+  // overlay's job (see viewer-emphasis-silhouette-outline-blueprint). Depth stays geometric.
+  material.depthTest = true;
   material.depthWrite = false;
   return material;
 }
@@ -381,12 +380,10 @@ export function setGltfFatLineEmphasis(object: Object3D, emphasis: ModelComponen
   const line = object as LineSegments2;
   if (emphasis === 'none') {
     line.material = base as LineMaterial;
-    line.renderOrder = viewportRenderTiers.model;
     return;
   }
   const materials = getOrCreateEdgeEmphasisMaterials(base);
   line.material = (emphasis === 'hover' ? materials.hover : materials.selected) as LineMaterial;
-  line.renderOrder = viewportRenderTiers.modelEdgeEmphasis;
 }
 
 /** Every material `object` can wear (base + any built emphasis variants), for disposal. */

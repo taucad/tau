@@ -476,7 +476,7 @@ describe('applyGltfEdgeThemeColor', () => {
 
     applyGltfEdgeThemeColor(scene, gltfEdgeColorDarkMode);
     const updatedSnapshot = getOrCaptureModelMaterialAppearance(material);
-    applyModelMaterialAppearance(material, updatedSnapshot, { opacity: 1, emphasis: 'none' });
+    applyModelMaterialAppearance(material, updatedSnapshot, 1);
 
     expect(initialSnapshot.color?.getHex()).toBe(gltfEdgeColorLightMode);
     expect(updatedSnapshot).not.toBe(initialSnapshot);

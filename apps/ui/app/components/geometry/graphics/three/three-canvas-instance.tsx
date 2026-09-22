@@ -8,6 +8,7 @@ import { GraphicsContextLostFallback } from '#components/geometry/graphics/three
 import { Grid } from '#components/geometry/graphics/three/grid.js';
 import { PostProcessing } from '#components/geometry/graphics/three/post-processing.js';
 import { OverlayDepthProvider, SceneOverlay } from '#components/geometry/graphics/three/scene-overlay.js';
+import { ModelEmphasisOverlay } from '#components/geometry/graphics/three/react/model-emphasis-overlay.js';
 import { Scene } from '#components/geometry/graphics/three/scene.js';
 import { AxesHelper } from '#components/geometry/graphics/three/react/axes-helper.js';
 import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
@@ -129,6 +130,7 @@ export function ThreeCanvasInstance({
         <OverlayDepthProvider>
           <PostProcessing />
           {isTauDebugEnabled ? <WebGpuInspectorOverlay /> : null}
+          <ModelEmphasisOverlay />
           <SceneOverlay overlayActive={enableAxes || enableGrid}>
             {enableAxes ? <AxesHelper /> : null}
             {enableGrid ? <Grid /> : null}

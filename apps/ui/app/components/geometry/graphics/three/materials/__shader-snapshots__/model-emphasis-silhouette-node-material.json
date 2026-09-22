@@ -1,0 +1,69 @@
+{
+  "blendColor": 0,
+  "color": 16777215,
+  "depthTest": false,
+  "depthWrite": false,
+  "envMapRotation": [0, 0, 0, "XYZ"],
+  "inputNodes": {
+    "colorNode": "<nodeRef>",
+    "silhouetteTexelSize": "<nodeRef>",
+    "vertexNode": "<nodeRef>"
+  },
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "nodes": [
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "groupNode": "<nodeRef>"
+      },
+      "nodeType": null,
+      "precision": null,
+      "type": "UniformNode",
+      "value": [1, 1],
+      "valueType": "vec2"
+    },
+    {
+      "name": "object",
+      "shared": false,
+      "type": "UniformGroupNode",
+      "version": 0
+    }
+  ],
+  "reflectivity": 1,
+  "refractionRatio": 0.98,
+  "transparent": true,
+  "type": "MeshBasicNodeMaterial"
+}

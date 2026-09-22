@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MeshBasicMaterial, MeshStandardMaterial, Color } from 'three';
+import { MeshBasicMaterial, MeshStandardMaterial } from 'three';
 import {
   applyModelMaterialAppearance,
   applyModelMaterialOpacityOverride,
@@ -21,13 +21,10 @@ import {
 const componentId = 'component:main';
 
 describe('model component appearance', () => {
-  it('washes selected surfaces prominently yellow and hovered surfaces lighter', () => {
+  it('keeps only the cap tint contract on the appearance constants', () => {
     expect(modelHighlightAppearance.color).toBe(gltfEdgeHoverColor);
-    expect(modelHighlightAppearance.colorMix).toBeGreaterThanOrEqual(0.5);
     expect(modelHighlightAppearance.capTintMix).toBe(0.7);
     expect(modelHoverAppearance.color).toBe(modelHighlightAppearance.color);
-    expect(modelHoverAppearance.emissiveIntensity).toBeLessThan(modelHighlightAppearance.emissiveIntensity);
-    expect(modelHoverAppearance.colorMix).toBeLessThan(modelHighlightAppearance.colorMix);
     expect(modelHoverAppearance.capTintMix).toBeLessThan(modelHighlightAppearance.capTintMix);
   });
 
@@ -58,7 +55,7 @@ describe('model component appearance', () => {
 
     material.color.setHex(gltfEdgeColorDarkMode);
     const updatedSnapshot = updateCapturedModelMaterialBaseColor(material, gltfEdgeColorDarkMode);
-    applyModelMaterialAppearance(material, updatedSnapshot, { opacity: 1, emphasis: 'none' });
+    applyModelMaterialAppearance(material, updatedSnapshot, 1);
 
     expect(updatedSnapshot).not.toBe(initialSnapshot);
     expect(updatedSnapshot.opacity).toBe(initialSnapshot.opacity);
@@ -69,23 +66,20 @@ describe('model component appearance', () => {
     expect(material.color.getHex()).toBe(gltfEdgeColorDarkMode);
   });
 
-  it('applies reduced blue emissive highlight and restores the original material state', () => {
+  it('never tints a component material for emphasis; the overlay owns hover and selection', () => {
     const material = new MeshStandardMaterial({
       color: 0x33_44_55,
       emissive: 0x11_22_33,
       emissiveIntensity: 0.7,
+      metalness: 0.7,
       opacity: 0.8,
       transparent: true,
     });
     const snapshot = captureModelMaterialAppearance(material);
 
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'selected' });
+    applyModelMaterialAppearance(material, snapshot, 1);
 
-    expect(material.emissive.getHex()).toBe(modelHighlightAppearance.color);
-    expect(material.emissiveIntensity).toBe(modelHighlightAppearance.emissiveIntensity);
-
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'none' });
-
+    expect(material.color.getHex()).toBe(0x33_44_55);
     expect(material.emissive.getHex()).toBe(0x11_22_33);
     expect(material.emissiveIntensity).toBe(0.7);
     expect(material.opacity).toBe(0.8);
@@ -93,56 +87,17 @@ describe('model component appearance', () => {
     expect(material.depthWrite).toBe(true);
   });
 
-  it('mixes color-only materials toward blue rather than white', () => {
-    const material = new MeshBasicMaterial({ color: 0x20_40_60 });
-    const snapshot = captureModelMaterialAppearance(material);
-    const expectedBlueMix = new Color(0x20_40_60)
-      .lerp(new Color(modelHighlightAppearance.color), modelHighlightAppearance.colorMix)
-      .getHex();
-    const legacyWhiteMix = new Color(0x20_40_60).lerp(new Color(0xff_ff_ff), 0.25).getHex();
-
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'selected' });
-
-    expect(material.color.getHex()).toBe(expectedBlueMix);
-    expect(material.color.getHex()).not.toBe(legacyWhiteMix);
-
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'none' });
-
-    expect(material.color.getHex()).toBe(0x20_40_60);
-  });
-
-  it('applies weaker hover material emphasis than selected emphasis, lerping colour and emissive', () => {
-    const material = new MeshStandardMaterial({
-      color: 0x00_00_ff,
-      emissive: 0x00_00_00,
-      emissiveIntensity: 0,
-    });
-    const snapshot = captureModelMaterialAppearance(material);
-
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'hover' });
-    expect(material.emissive.getHex()).toBe(modelHighlightAppearance.color);
-    expect(material.emissiveIntensity).toBe(modelHoverAppearance.emissiveIntensity);
-    const hoverColor = material.color.getHex();
-    expect(hoverColor).not.toBe(0x00_00_ff);
-
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'selected' });
-    expect(material.emissiveIntensity).toBe(modelHighlightAppearance.emissiveIntensity);
-    // A saturated blue base must land closer to yellow than blue when selected (red > blue channel).
-    expect(material.color.r).toBeGreaterThan(material.color.b);
-    expect(material.color.getHex()).not.toBe(hoverColor);
-  });
-
   it('preserves opacity semantics independently from highlight strength', () => {
     const material = new MeshBasicMaterial({ color: 0x80_80_80 });
     const snapshot = captureModelMaterialAppearance(material);
 
-    applyModelMaterialAppearance(material, snapshot, { opacity: 0.5, emphasis: 'selected' });
+    applyModelMaterialAppearance(material, snapshot, 0.5);
 
     expect(material.transparent).toBe(true);
     expect(material.opacity).toBe(0.5);
     expect(material.depthWrite).toBe(false);
 
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'none' });
+    applyModelMaterialAppearance(material, snapshot, 1);
 
     expect(material.transparent).toBe(false);
     expect(material.opacity).toBe(1);
@@ -154,12 +109,12 @@ describe('model component appearance', () => {
     material.depthWrite = false;
     const snapshot = captureModelMaterialAppearance(material);
 
-    applyModelMaterialAppearance(material, snapshot, { opacity: 0.25, emphasis: 'none' });
+    applyModelMaterialAppearance(material, snapshot, 0.25);
     expect(material.transparent).toBe(true);
     expect(material.opacity).toBe(0.25);
     expect(material.depthWrite).toBe(false);
 
-    applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'none' });
+    applyModelMaterialAppearance(material, snapshot, 1);
 
     expect(material.transparent).toBe(true);
     expect(material.opacity).toBe(0.75);

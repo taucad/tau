@@ -91,6 +91,10 @@ vi.mock('#components/geometry/graphics/three/post-processing.js', () => ({
   PostProcessing: () => null,
 }));
 
+vi.mock('#components/geometry/graphics/three/react/model-emphasis-overlay.js', () => ({
+  ModelEmphasisOverlay: () => null,
+}));
+
 vi.mock('#components/geometry/graphics/three/scene-overlay.js', () => ({
   OverlayDepthProvider: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   SceneOverlay: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,

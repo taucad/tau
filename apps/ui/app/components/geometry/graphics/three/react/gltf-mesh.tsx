@@ -23,6 +23,11 @@ import {
 } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import {
+  emptyModelEmphasisSet,
+  setModelEmphasisSet,
+} from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
+import type { ModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
+import {
   applyFatLineSegments,
   collectGltfFatLineMaterials,
   setGltfFatLineEmphasis,
@@ -967,15 +972,23 @@ export type ApplyModelComponentVisualStateToSceneOptions = Readonly<{
   enableLines: boolean;
 }>;
 
+/**
+ * Apply visibility, dimming and emphasis to every component object. Returns the emphasised
+ * surface meshes so the owner can publish them to the silhouette/wash overlay; edges receive
+ * their emphasis material here because they are the only per-component objects the overlay
+ * does not proxy.
+ */
 export function applyModelComponentVisualStateToScene({
   scene,
   componentManifest,
   modelVisualState,
   enableSurfaces,
   enableLines,
-}: ApplyModelComponentVisualStateToSceneOptions): void {
+}: ApplyModelComponentVisualStateToSceneOptions): ModelEmphasisSet {
   const hidden = new Set(modelVisualState.hiddenComponentIds);
   const isolated = new Set(modelVisualState.isolatedComponentIds);
+  const hover: Mesh[] = [];
+  const selected: Mesh[] = [];
 
   scene.traverse((object) => {
     const componentId = getObjectComponentId(object);
@@ -1006,19 +1019,17 @@ export function applyModelComponentVisualStateToScene({
       return;
     }
 
-    const materials = getObjectMaterials(object);
-    if (materials.length === 0) {
-      return;
+    if (isSurface && object.visible && emphasis !== 'none') {
+      (emphasis === 'hover' ? hover : selected).push(object);
     }
 
-    for (const material of materials) {
+    for (const material of getObjectMaterials(object)) {
       const snapshot = getOrCaptureModelMaterialAppearance(material);
-      applyModelMaterialAppearance(material, snapshot, {
-        opacity: visualState.opacity,
-        emphasis,
-      });
+      applyModelMaterialAppearance(material, snapshot, visualState.opacity);
     }
   });
+
+  return { hover, selected };
 }
 
 export function applyGltfEdgeThemeColor(scene: Group, edgeColor: number): void {
@@ -1071,7 +1082,7 @@ export function GltfMesh({
   const retiredPresentationsRef = useRef<PreparedGltfPresentation[]>([]);
   const frameProbeRef = useRef<{ revision: number; modelEmptyFrames: number } | undefined>(undefined);
   const [topologyScheduler] = useState(createSectionTopologyScheduler);
-  const { size, invalidate, gl, camera } = useThree();
+  const { size, invalidate, gl, camera, scene: rootScene } = useThree();
   const { theme } = useTheme();
   const activeEdgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
@@ -1666,7 +1677,7 @@ export function GltfMesh({
       return;
     }
 
-    applyModelComponentVisualStateToScene({
+    const emphasised = applyModelComponentVisualStateToScene({
       scene,
       componentManifest,
       modelVisualState,
@@ -1674,8 +1685,21 @@ export function GltfMesh({
       enableLines,
     });
     applyGltfSurfaceDepthBiasToScene(scene, graphicsBackendThree);
+    setModelEmphasisSet(rootScene, emphasised);
     invalidate();
-  }, [scene, componentManifest, modelVisualState, enableSurfaces, enableLines, graphicsBackendThree, invalidate]);
+    return () => {
+      setModelEmphasisSet(rootScene, emptyModelEmphasisSet);
+    };
+  }, [
+    scene,
+    componentManifest,
+    modelVisualState,
+    enableSurfaces,
+    enableLines,
+    graphicsBackendThree,
+    invalidate,
+    rootScene,
+  ]);
 
   useEffect(() => {
     lastHoveredComponentIdRef.current = modelVisualState.isViewerHoverSuppressed

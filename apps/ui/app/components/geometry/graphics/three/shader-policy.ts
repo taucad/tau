@@ -82,6 +82,15 @@ export const shaderSites = [
     risks: ['camera', 'depth', 'lifecycle', 'hot-path'],
   },
   {
+    id: 'model-emphasis-silhouette',
+    modules: [
+      '#components/geometry/graphics/three/materials/model-emphasis-silhouette.material.ts',
+      '#components/geometry/graphics/three/materials/model-emphasis-silhouette.node.ts',
+    ],
+    backends: ['webgl', 'webgpu'],
+    risks: ['transparency', 'depth', 'lifecycle', 'hot-path'],
+  },
+  {
     id: 'metal-morph-loader',
     modules: [
       '#components/geometry/loader/metal-morph-material.node.ts',
@@ -166,6 +175,11 @@ export const shaderEvidence = {
   'webgpu-post': evidence(
     'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx',
     'restores the selected scene-pass depth with one direct fullscreen draw',
+  ),
+  'model-emphasis-silhouette': evidence(
+    'apps/ui/app/components/geometry/graphics/three/materials/model-emphasis-silhouette.test.ts',
+    'draws the outline only where mask coverage changes',
+    'apps/ui/app/components/geometry/graphics/three/materials/model-emphasis-silhouette.test.ts::matches stable stripped silhouette node material JSON snapshot',
   ),
   'metal-morph-loader': {
     reference: [

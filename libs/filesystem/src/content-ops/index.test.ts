@@ -3,9 +3,10 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { composeView } from '#composed-view.js';
-import { archive, contents, walk } from '#content-ops/index.js';
+import { archive, contents, walk, withReadContentOps } from '#content-ops/index.js';
 import { classify, tauPathPolicy } from '#path-registry.js';
-import type { WalkEntry } from '#content-ops/index.js';
+import type { ComposedOverlayNode, ComposedViewOverlay } from '#composed-view.js';
+import type { ReadContentOps, WalkEntry } from '#content-ops/index.js';
 
 const decoder = new TextDecoder();
 
@@ -201,5 +202,99 @@ describe('a caller-built versionedOnly admits', () => {
     });
 
     expect(Object.keys(files).sort()).toEqual(['.gitignore', '.tau/parameters/size.json', 'main.ts', 'tau.json']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// withReadContentOps — "the project" is the view's provenance, not a spelling
+// ---------------------------------------------------------------------------
+
+describe('withReadContentOps over a view carrying a system-skills overlay', () => {
+  const skillsRoot = '.agents/skills';
+  const unitRoot = `${skillsRoot}/demo`;
+  const bundled = '# Bundled skill\n';
+
+  /** The overlay's own tree, shaped as the skill-bundle producer builds it. */
+  const overlayNodes = new Map<string, ComposedOverlayNode>([
+    ['', { type: 'dir', children: ['.agents'] }],
+    ['.agents', { type: 'dir', children: ['skills'] }],
+    [skillsRoot, { type: 'dir', children: ['demo'] }],
+    [unitRoot, { type: 'dir', children: ['SKILL.md'] }],
+    [`${unitRoot}/SKILL.md`, { type: 'file', size: bundled.length, contentKind: 'text', lineCount: 2 }],
+  ]);
+
+  const project = {
+    'main.ts': 'export const part = 1;',
+    'tau.json': '{}',
+    '.agents/skills/mine/SKILL.md': '# My own skill\n',
+    'exports/part.stl': 'solid part',
+  } as const;
+
+  /** The whole-project export surface: a `'user'` view with the bundle overlay above it. */
+  const exportView = async (): Promise<{
+    view: ReturnType<typeof composeView> & ReadContentOps;
+    read: ReturnType<typeof vi.fn<ComposedViewOverlay['read']>>;
+  }> => {
+    const read = vi.fn<ComposedViewOverlay['read']>(async () => new TextEncoder().encode(bundled));
+    const overlay: ComposedViewOverlay = {
+      root: skillsRoot,
+      source: 'system-skills',
+      unit: (path) =>
+        path === unitRoot || path.startsWith(`${unitRoot}/`) ? { root: unitRoot, identity: 'skill:demo@1' } : undefined,
+      node: (path) => overlayNodes.get(path),
+      read,
+    };
+    const view = composeView(
+      { filesystem: await seeded(project) },
+      { consumer: 'user', policy: tauPathPolicy, overlays: [overlay] },
+    );
+    return { view: withReadContentOps(view, tauPathPolicy), read };
+  };
+
+  it('should omit every overlay entry from contents and archive', async () => {
+    const { view } = await exportView();
+
+    expect(Object.keys(await view.contents('')).sort()).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'exports/part.stl',
+      'main.ts',
+      'tau.json',
+    ]);
+    expect(Object.keys(await archived(await view.archive('')))).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'exports/part.stl',
+      'main.ts',
+      'tau.json',
+    ]);
+  });
+
+  it('should export exactly the versioned project files when versionedOnly is set', async () => {
+    const { view } = await exportView();
+
+    expect(Object.keys(await view.contents('', { versionedOnly: true })).sort()).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'main.ts',
+      'tau.json',
+    ]);
+    expect(Object.keys(await archived(await view.archive('', { versionedOnly: true })))).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'main.ts',
+      'tau.json',
+    ]);
+  });
+
+  it('should keep a project-authored skill the checkout holds beside the overlay', async () => {
+    const { view } = await exportView();
+    const files = await view.contents('', { versionedOnly: true });
+
+    expect(decoder.decode(files['.agents/skills/mine/SKILL.md'])).toBe(project['.agents/skills/mine/SKILL.md']);
+  });
+
+  it('should prune an overlay unit at its root without reading its bytes', async () => {
+    const { view, read } = await exportView();
+
+    await view.archive('', { versionedOnly: true });
+
+    expect(read).not.toHaveBeenCalled();
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import { joinRelativePath } from '@taucad/utils/path';
+import type { FileProvenance } from '@taucad/types';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import type { FileSystemProvider } from '#types.js';
 
@@ -13,6 +14,8 @@ export type WalkEntry = {
   /** POSIX path relative to the walked root; never `''` and never leading-slashed. */
   readonly relativePath: string;
   readonly kind: 'file' | 'dir';
+  /** What the enumerated surface says about the entry; absent over a raw provider. */
+  readonly provenance?: FileProvenance;
 };
 
 /**
@@ -21,10 +24,14 @@ export type WalkEntry = {
  *
  * @example <caption>A whole-project export carries only the bytes that are the project</caption>
  * ```typescript
+ * import type { FileProvenance } from '@taucad/types';
  * import { classify } from '@taucad/filesystem/path-registry';
  *
- * const versionedOnly = (relativePath: string, kind: 'file' | 'dir'): boolean =>
- *   kind === 'dir' || classify(relativePath).versioned;
+ * const versionedOnly = (
+ *   relativePath: string,
+ *   kind: 'file' | 'dir',
+ *   provenance?: FileProvenance,
+ * ): boolean => kind === 'dir' || (provenance?.versioned ?? classify(relativePath).versioned);
  * ```
  */
 export type WalkOptions = {
@@ -32,8 +39,12 @@ export type WalkOptions = {
    * Which entries to keep, asked before the read and before the descent, so a
    * refused directory costs one `readdir` at its parent and nothing else.
    * Every entry is kept when omitted.
+   *
+   * `provenance` is whatever the enumerated surface stamped on the row — a
+   * composed view stamps every row, a raw provider none — so a filter that asks
+   * about the project boundary reads it instead of recomputing it.
    */
-  readonly admits?: (relativePath: string, kind: 'file' | 'dir') => boolean;
+  readonly admits?: (relativePath: string, kind: 'file' | 'dir', provenance?: FileProvenance) => boolean;
   readonly signal?: AbortSignal;
 };
 
@@ -61,10 +72,10 @@ export function walk(filesystem: WalkFileSystem, path: string, options?: WalkOpt
     }
     for (const entry of await readDirectoryEntries(filesystem, joinRelativePath(path, relative))) {
       const relativePath = joinRelativePath(relative, entry.name);
-      if (options?.admits?.(relativePath, entry.kind) === false) {
+      if (options?.admits?.(relativePath, entry.kind, entry.provenance) === false) {
         continue;
       }
-      yield { relativePath, kind: entry.kind };
+      yield { relativePath, kind: entry.kind, provenance: entry.provenance };
       if (entry.kind === 'dir') {
         yield* from(relativePath);
       }

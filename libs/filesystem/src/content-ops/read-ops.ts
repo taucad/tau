@@ -5,7 +5,9 @@
  * two suites — so the composition lives here instead of four times: the view
  * plus `archive` and `contents` over it, with the caller's own export filter
  * built from the injected policy. The mask is the view's and is never
- * re-declared; `versionedOnly` is the whole-project export's own choice.
+ * re-declared; the *project boundary* is the view's provenance, so bytes an
+ * overlay composes above the checkout are never exported whatever the filter
+ * says; `versionedOnly` is the whole-project export's own choice.
  *
  * `search` and `statTree` are deliberately *not* here. They are not functions
  * of the port: they read the root's `TreeIndex`, which only the rooted
@@ -64,13 +66,21 @@ export const withReadContentOps = <View extends ContentFileSystem>(
    * can be any directory of the project. The join assumes the view is rooted at
    * the project root, as the file manager's is; a view rooted below it would
    * need its own root joined first (charter W12). */
-  const options = (path: string, filter?: ContentExportFilter): WalkOptions =>
-    filter?.versionedOnly === true
-      ? {
-          admits: (relativePath, kind) =>
-            kind === 'dir' || policy.classify(joinRelativePath(path, relativePath)).versioned,
-        }
-      : {};
+  const options = (path: string, filter?: ContentExportFilter): WalkOptions => ({
+    admits: (relativePath, kind, provenance) => {
+      if (provenance !== undefined && provenance.source !== 'project') {
+        /* An overlay is composed above the project; its bytes are never the
+         * project's, so a refusal at the unit root prunes the whole subtree. */
+        return false;
+      }
+      if (filter?.versionedOnly !== true || kind === 'dir') {
+        /* Directories stay open: `.tau/skills` is versioned under a `.tau` that
+         * is not. */
+        return true;
+      }
+      return provenance?.versioned ?? policy.classify(joinRelativePath(path, relativePath)).versioned;
+    },
+  });
 
   return Object.assign(view, {
     archive: async (path: string, filter?: ContentExportFilter): Promise<Blob> =>

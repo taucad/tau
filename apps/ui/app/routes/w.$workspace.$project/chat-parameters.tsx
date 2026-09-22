@@ -812,14 +812,17 @@ function ParametersPanelHeader({
       <ContextMenuTrigger asChild>
         <div className='contents'>
           <PaneviewHeader api={api} title={params.entryPath}>
-            <PaneviewHeaderControls data-testid='paneview-header-controls'>
-              {hasModifiedParameters ? (
+            {hasModifiedParameters ? (
+              /* Status sits beside the file name, as a parameter's mark sits beside its label. */
+              <PaneviewHeaderControls className='ml-0'>
                 <ModifiedIndicator
                   onReset={handleReset}
                   tooltip='Reset parameters'
-                  className='size-6 [.dv-pane:hover_&]:**:data-[slot=dot]:opacity-0 [.dv-pane:hover_&]:**:data-[slot=icon]:opacity-100'
+                  className='size-6 group-hover/paneview-header:**:data-[slot=dot]:opacity-0 group-hover/paneview-header:**:data-[slot=icon]:opacity-100'
                 />
-              ) : null}
+              </PaneviewHeaderControls>
+            ) : null}
+            <PaneviewHeaderControls data-testid='paneview-header-controls'>
               <PaneviewHeaderActionGroup
                 data-testid='paneview-header-actions'
                 className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'

@@ -11,7 +11,7 @@ export const getKernelResultInputSchema = z.object({
 
 /** @public */
 export const getKernelResultOutputSchema = z.object({
-  status: z.enum(['ready', 'error', 'pending']).describe('The current status of the kernel.'),
+  status: z.enum(['ready', 'error']).describe('The current status of the kernel.'),
   kernelIssues: z.array(kernelIssueSchema).optional().describe('Any kernel issues encountered during compilation.'),
   sourceRevision: sourceRevisionSchema
     .optional()
@@ -24,7 +24,7 @@ export type GetKernelResultInput = z.infer<typeof getKernelResultInputSchema>;
 // Explicitly defined to avoid TS2742 with tsgo compiler
 /** @public */
 export type GetKernelResultOutput = {
-  status: 'ready' | 'error' | 'pending';
+  status: 'ready' | 'error';
   kernelIssues?: KernelIssue[];
   sourceRevision?: { entry: string; files: Record<string, string> };
 };

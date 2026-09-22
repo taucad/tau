@@ -271,7 +271,7 @@ describe('ProjectChatList', () => {
     expect(slot?.dataset['glyph']).toBe('running');
     expect(slot?.querySelector('svg')).toBeNull();
     const disc = slot?.firstElementChild;
-    expect(disc).toHaveClass('bg-muted-foreground/70', 'animate-pulse', 'motion-reduce:animate-none', 'rounded-full');
+    expect(disc).toHaveClass('bg-muted-foreground/80', 'animate-breathe', 'motion-reduce:animate-none', 'rounded-full');
     expect(disc?.className).not.toMatch(/\bring-/u);
   });
 

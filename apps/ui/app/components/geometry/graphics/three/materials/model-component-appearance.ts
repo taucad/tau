@@ -4,22 +4,18 @@ import type { ModelInteractionUnitState } from '#machines/model-interaction.mach
 import { gltfEdgeHoverColor } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 
 /**
- * Selected/focused surface wash. Same yellow as the emphasised edges so wash and silhouette read
- * as one highlight. The base colour is lerped toward yellow (not only emissive-added) so a
- * saturated base such as `#000eff` reads yellow rather than lavender (operator ruling 2026-09-22).
+ * Emphasis tint used where a component is represented by generated geometry that the overlay
+ * cannot proxy (section caps via {@link mixModelEmphasisTint}). Live surfaces are never tinted
+ * through their own material any more: `react/model-emphasis-overlay.tsx` draws a wash and a
+ * silhouette that are independent of the material's properties (metalness, maps, vertex colours).
  */
 export const modelHighlightAppearance = {
   color: gltfEdgeHoverColor,
-  emissiveIntensity: 0.06,
-  colorMix: 0.7,
   capTintMix: 0.7,
 } as const;
 
-/** Hover wash: lighter than selected, still visible on components that carry no edges. */
 export const modelHoverAppearance = {
   color: modelHighlightAppearance.color,
-  emissiveIntensity: 0.03,
-  colorMix: 0.35,
   capTintMix: 0.35,
 } as const;
 
@@ -34,16 +30,10 @@ export type ModelMaterialAppearanceSnapshot = Readonly<{
 
 export type ModelComponentEmphasis = 'none' | 'hover' | 'selected' | 'focused';
 
-export type ModelMaterialAppearanceState = Readonly<{
-  opacity: number;
-  emphasis: ModelComponentEmphasis;
-}>;
-
 type MaterialWithColor = Material & { color: Color };
 type MaterialWithEmissive = Material & { emissive: Color };
 type MaterialWithEmissiveIntensity = Material & { emissiveIntensity: number };
 
-const highlightedColor = new Color(modelHighlightAppearance.color);
 const materialAppearanceSnapshots = new WeakMap<Material, ModelMaterialAppearanceSnapshot>();
 const hexColorSpace = 16_777_216;
 const redChannelDivisor = 65_536;
@@ -156,28 +146,16 @@ export function applyModelMaterialOpacityOverride(material: Material, opacity: n
   }
 }
 
+/** Restore the captured look, then apply the component's dimming opacity (never emphasis). */
 export function applyModelMaterialAppearance(
   material: Material,
   snapshot: ModelMaterialAppearanceSnapshot,
-  state: ModelMaterialAppearanceState,
+  opacity: number,
 ): void {
   restoreModelMaterialAppearance(material, snapshot);
 
-  if (state.opacity < 1) {
-    applyModelMaterialOpacityOverride(material, state.opacity);
-  }
-
-  const appearance = getAppearanceForEmphasis(state.emphasis);
-  if (appearance) {
-    if (hasColor(material)) {
-      material.color.lerp(highlightedColor, appearance.colorMix);
-    }
-    if (hasEmissive(material)) {
-      material.emissive.copy(highlightedColor);
-      if (hasEmissiveIntensity(material)) {
-        material.emissiveIntensity = appearance.emissiveIntensity;
-      }
-    }
+  if (opacity < 1) {
+    applyModelMaterialOpacityOverride(material, opacity);
   }
 
   material.needsUpdate = true;

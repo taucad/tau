@@ -17,7 +17,6 @@ import {
   gltfEdgeHoverColor,
   gltfEdgeSelectedColor,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
-import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
 function makeScene(): { scene: Group; lines: LineSegments2[] } {
   const scene = new Group();
@@ -39,18 +38,16 @@ function makeScene(): { scene: Group; lines: LineSegments2[] } {
 const colorOf = (material: unknown): number => (material as GltfFatLineMaterial).color.getHex();
 
 describe('setGltfFatLineEmphasis', () => {
-  it('swaps only the emphasised line to a shared yellow overlay material and restores the base', () => {
+  it('swaps only the emphasised line to a shared depth-tested yellow material and restores the base', () => {
     const { lines } = makeScene();
     const [first, second] = lines as [LineSegments2, LineSegments2];
     const base = first.material;
 
     setGltfFatLineEmphasis(first, 'hover');
     expect(colorOf(first.material)).toBe(gltfEdgeHoverColor);
-    expect(first.material.depthTest).toBe(false);
+    expect(first.material.depthTest).toBe(true);
     expect(first.material.depthWrite).toBe(false);
-    expect(first.renderOrder).toBe(viewportRenderTiers.modelEdgeEmphasis);
     expect(second.material).toBe(base);
-    expect(second.renderOrder).toBe(viewportRenderTiers.model);
 
     setGltfFatLineEmphasis(second, 'selected');
     setGltfFatLineEmphasis(first, 'focused');
@@ -59,7 +56,6 @@ describe('setGltfFatLineEmphasis', () => {
 
     setGltfFatLineEmphasis(first, 'none');
     expect(first.material).toBe(base);
-    expect(first.renderOrder).toBe(viewportRenderTiers.model);
     expect(collectGltfFatLineMaterials(first)).toHaveLength(3);
   });
 

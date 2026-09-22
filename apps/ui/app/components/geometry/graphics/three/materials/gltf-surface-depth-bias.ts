@@ -42,9 +42,22 @@ const restoreSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasStat
 };
 
 /** Keep GLTF lines at geometric depth and separate only coplanar opaque triangles. */
-export const applyGltfSurfaceDepthBias = (material: Material, backend: ResolvedGraphicsBackend): void => {
+export type ApplyGltfSurfaceDepthBiasOptions = Readonly<{
+  /**
+   * Bias a transparent, non-depth-writing material too. Reserved for overlays that must land on
+   * exactly the biased surface depth (the emphasis wash proxies), so they neither z-fight the
+   * surface nor sit in front of its characteristic edges.
+   */
+  allowTransparent?: boolean;
+}>;
+
+export const applyGltfSurfaceDepthBias = (
+  material: Material,
+  backend: ResolvedGraphicsBackend,
+  options: ApplyGltfSurfaceDepthBiasOptions = {},
+): void => {
   const existingState = states.get(material);
-  if (!isOpaqueDepthWriter(material)) {
+  if (!isOpaqueDepthWriter(material) && !options.allowTransparent) {
     if (existingState) {
       restoreSurfaceDepthBias(material, existingState);
     }

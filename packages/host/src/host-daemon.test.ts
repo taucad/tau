@@ -849,6 +849,15 @@ describe('startHostDaemon', () => {
 
       expect(replacement).not.toBe(client);
       expect(replacement.lifecycleState).not.toBe('terminated');
+
+      /* Two tool calls waking from the same corpse share one reconnect: the
+       * loser of that race would otherwise hold a live client no map can
+       * reach, and nothing would ever terminate it. */
+      replacement.terminate();
+      const [first, second] = await Promise.all([runtimeClient(root), runtimeClient(root)]);
+
+      expect(first).toBe(second);
+      expect(requireTerminableRuntimeClient(first).lifecycleState).not.toBe('terminated');
     } finally {
       await daemon.close();
     }

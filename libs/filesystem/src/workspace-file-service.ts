@@ -11,6 +11,7 @@ import type {
   FileTreeNode,
   FileReadStreamOptions,
   MkdirOptions,
+  PathPolicy,
   TreeEntry,
   WatchRequest,
   WatchEvent,
@@ -148,6 +149,7 @@ export class WorkspaceFileService {
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private _filePool: SharedPool | undefined;
   private readonly _mountTable: MountTable;
+  private readonly _policy: PathPolicy | undefined;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
   private readonly _treeIndexes = new TreeIndexes(() => this._mountTable.prefixes);
   private readonly _projectRoutes = new Set<string>();
@@ -174,6 +176,12 @@ export class WorkspaceFileService {
     filePool?: SharedPool;
     /** Mount table for multi-backend path routing. */
     mountTable: MountTable;
+    /**
+     * The reserved layout an unrouted archive masks with, injected by the host
+     * and never imported here (D6). Without one nothing is masked, which is what
+     * a workspace with no reserved layout means.
+     */
+    policy?: PathPolicy;
   }) {
     this._registry = options.providerRegistry;
     this._resourceQueue = options.resourceQueue;
@@ -182,6 +190,7 @@ export class WorkspaceFileService {
     this._crossTabCoordinator = options.crossTabCoordinator ?? new CrossTabCoordinator();
     this._filePool = options.filePool;
     this._mountTable = options.mountTable;
+    this._policy = options.policy;
     this._pipeline = new MutationPipeline({
       mountTable: this._mountTable,
       resourceQueue: this._resourceQueue,
@@ -797,13 +806,23 @@ export class WorkspaceFileService {
    * Files pane's folder download — is served by `archive` on the rooted surface
    * instead, where the mask comes with the view (charter D2, W12).
    *
+   * With no view, the registry supplies the mask directly, and it reaches
+   * exactly as far as PP3 does: a control-plane row matches its folded segment
+   * at any depth, so a workspace folder holding a project packs neither its
+   * `.git` nor its `.tau/binding.json`. Root-matched rows (`.tau/chats`,
+   * `exports`, `thumbnail.webp`) are PP4's and stay in the archive — the browser
+   * does not know where each nested project's root sits, so it cannot rebase
+   * them.
+   *
    * @param path    - Absolute directory path.
    * @param options - The `{ scope }` discriminator; a routed path has a view to serve it instead.
    * @returns ZIP archive as a `Blob`.
    */
   public async getZippedDirectory(path: string, options: { scope: WorkspaceScope }): Promise<Blob> {
     const { provider, path: resolvedPath } = await this._resolve(path, options);
-    return archive(provider, resolvedPath);
+    return archive(provider, resolvedPath, {
+      admits: (relativePath) => this._policy?.classify(relativePath).agentAccess !== 'hidden',
+    });
   }
 
   // --- Tree operations ---

@@ -18,6 +18,7 @@ import {
   waitFor,
 } from '#testing/workspace-service-harness.js';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { tauPathPolicy } from '#path-registry.js';
 
 describe('WorkspaceFileService', () => {
   let service: WorkspaceFileService;
@@ -1075,6 +1076,29 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
 
       expect(blob).toBeInstanceOf(Blob);
       expect(blob.size).toBeGreaterThan(0);
+    });
+
+    /* PP3: a control-plane row is hidden wherever its segment sits, so a
+     * workspace folder that happens to hold a project packs the project's files
+     * and not its repository. */
+    it('should omit control-plane rows at any depth while keeping the project files', async () => {
+      /* The memory harness mounts `memory:0` at `/`, so that is the scope the archive resolves. */
+      const { service: masked } = await createWorkspaceFileService({ policy: tauPathPolicy });
+      await masked.writeFile('/ziptest/sub/.git/HEAD', 'ref: refs/heads/main');
+      await masked.writeFile('/ziptest/sub/main.ts', 'export const part = 1;');
+
+      const blob = await masked.getZippedDirectory('/ziptest', {
+        scope: { backend: 'memory', storageRootKey: 'memory:0' },
+      });
+      const jszipModule = await import('jszip');
+      const jszip = jszipModule.default;
+      const zip = await jszip.loadAsync(await blob.arrayBuffer());
+
+      expect(
+        Object.values(zip.files)
+          .filter((file) => !file.dir)
+          .map((file) => file.name),
+      ).toEqual(['sub/main.ts']);
     });
 
     it('rejects missing and file paths instead of returning plausible empty archives', async () => {

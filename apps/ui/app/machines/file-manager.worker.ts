@@ -209,6 +209,7 @@ const fileService = new WorkspaceFileService({
   resourceQueue,
   eventBus,
   mountTable,
+  policy: tauPathPolicy,
 });
 
 const t0 = performance.now();

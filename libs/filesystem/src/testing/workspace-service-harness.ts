@@ -20,7 +20,7 @@ import type { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import { MountTable } from '#mount-table.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
-import type { FileSystemProvider } from '#types.js';
+import type { FileSystemProvider, PathPolicy } from '#types.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 
 /** What a memory-root harness hands its spec. */
@@ -74,6 +74,7 @@ export async function waitFor(predicate: () => boolean, waitTimeout = 2000, poll
 /** One service over a single memory root mounted at `/`. */
 export async function createWorkspaceFileService(options?: {
   crossTabCoordinator?: CrossTabCoordinator;
+  policy?: PathPolicy;
 }): Promise<WorkspaceHarness> {
   const providerRegistry = new ProviderRegistry({ databasePrefix: `tau-workspace-test-${databaseSequence++}` });
   const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:0' });
@@ -90,6 +91,7 @@ export async function createWorkspaceFileService(options?: {
     eventBus,
     crossTabCoordinator: options?.crossTabCoordinator,
     mountTable,
+    policy: options?.policy,
   });
 
   return { service, eventBus, providerRegistry, resourceQueue, mountTable, provider };

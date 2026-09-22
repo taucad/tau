@@ -15,16 +15,16 @@ import {
 import {
   gltfEdgeColorDarkMode,
   gltfEdgeColorLightMode,
+  gltfEdgeHoverColor,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 
 const componentId = 'component:main';
 
 describe('model component appearance', () => {
-  it('uses reduced highlight strength constants', () => {
-    expect(modelHighlightAppearance.color).toBe(0x9b_e7_ff);
-    expect(modelHighlightAppearance.emissiveIntensity).toBeLessThanOrEqual(0.175);
-    expect(modelHighlightAppearance.colorMix).toBeLessThanOrEqual(0.125);
-    expect(modelHighlightAppearance.capTintMix).toBe(0.4);
+  it('washes selected surfaces prominently yellow and hovered surfaces lighter', () => {
+    expect(modelHighlightAppearance.color).toBe(gltfEdgeHoverColor);
+    expect(modelHighlightAppearance.colorMix).toBeGreaterThanOrEqual(0.5);
+    expect(modelHighlightAppearance.capTintMix).toBe(0.7);
     expect(modelHoverAppearance.color).toBe(modelHighlightAppearance.color);
     expect(modelHoverAppearance.emissiveIntensity).toBeLessThan(modelHighlightAppearance.emissiveIntensity);
     expect(modelHoverAppearance.colorMix).toBeLessThan(modelHighlightAppearance.colorMix);
@@ -33,9 +33,9 @@ describe('model component appearance', () => {
 
   it('mixes cap tint by emphasis while preserving selected highlight strength', () => {
     expect(mixModelEmphasisTint(0x00_00_00, 'none')).toBe(0x00_00_00);
-    expect(mixModelEmphasisTint(0x00_00_00, 'hover')).toBe(0x19_25_29);
-    expect(mixModelEmphasisTint(0x00_00_00, 'selected')).toBe(0x3e_5c_66);
-    expect(mixModelEmphasisTint(0xdd_dd_dd, 'selected')).toBe(0xc3_e1_eb);
+    expect(mixModelEmphasisTint(0x00_00_00, 'hover')).toBe(0x59_4b_1a);
+    expect(mixModelEmphasisTint(0x00_00_00, 'selected')).toBe(0xb3_95_34);
+    expect(mixModelEmphasisTint(0xdd_dd_dd, 'selected')).toBe(0xf5_d7_76);
     expect(mixModelEmphasisTint(0xdd_dd_dd, 'focused')).toBe(mixModelEmphasisTint(0xdd_dd_dd, 'selected'));
     expect(mixModelEmphasisTint(0xff_ff_ff, 'hover')).not.toBe(0xff_ff_ff);
     expect(mixModelEmphasisTint(0x20_40_60, 'hover')).not.toBe(mixModelEmphasisTint(0x20_40_60, 'selected'));
@@ -111,9 +111,9 @@ describe('model component appearance', () => {
     expect(material.color.getHex()).toBe(0x20_40_60);
   });
 
-  it('applies weaker hover material emphasis than selected emphasis', () => {
+  it('applies weaker hover material emphasis than selected emphasis, lerping colour and emissive', () => {
     const material = new MeshStandardMaterial({
-      color: 0x33_44_55,
+      color: 0x00_00_ff,
       emissive: 0x00_00_00,
       emissiveIntensity: 0,
     });
@@ -122,11 +122,14 @@ describe('model component appearance', () => {
     applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'hover' });
     expect(material.emissive.getHex()).toBe(modelHighlightAppearance.color);
     expect(material.emissiveIntensity).toBe(modelHoverAppearance.emissiveIntensity);
+    const hoverColor = material.color.getHex();
+    expect(hoverColor).not.toBe(0x00_00_ff);
 
     applyModelMaterialAppearance(material, snapshot, { opacity: 1, emphasis: 'selected' });
-    expect(material.emissive.getHex()).toBe(modelHighlightAppearance.color);
     expect(material.emissiveIntensity).toBe(modelHighlightAppearance.emissiveIntensity);
-    expect(modelHoverAppearance.emissiveIntensity).toBeLessThan(modelHighlightAppearance.emissiveIntensity);
+    // A saturated blue base must land closer to yellow than blue when selected (red > blue channel).
+    expect(material.color.r).toBeGreaterThan(material.color.b);
+    expect(material.color.getHex()).not.toBe(hoverColor);
   });
 
   it('preserves opacity semantics independently from highlight strength', () => {

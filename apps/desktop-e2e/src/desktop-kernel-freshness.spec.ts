@@ -123,7 +123,7 @@ test('answers the repaired source after reporting the broken one', async () => {
     /* Red half: the broken model really did fail, so the green half below is a
      * transition and not a model that never broke. */
     expect(verdicts[0]!.text, `the first verdict did not report the broken model: ${seen}`).toContain('notAMethod');
-    /* Green half. The status enum is `ready | error | pending`
+    /* Green half. The status enum is `ready | error`
      * (`libs/chat/src/schemas/tools/get-kernel-result.tool.schema.ts`); the
      * sentinel check is what separates "fresh" from "stale", because a stale
      * answer repeats the first error verbatim. */
@@ -131,6 +131,15 @@ test('answers the repaired source after reporting the broken one', async () => {
       /"status"\s*:\s*"ready"/u,
     );
     expect(verdicts[1]!.text, `the second verdict repeated the first error: ${seen}`).not.toContain('notAMethod');
+    /* Provenance (R4): the repaired verdict names the digest `edit_file` left at
+     * the path, so "fresh" is a digest equality and not only the sentinel's
+     * absence. */
+    const repair = gatewayToolResults(fixture.gatewayRequests.slice(-1)).find((result) => result.name === 'edit_file');
+    expect(repair, 'the scripted turn produced no edit_file result').toBeDefined();
+    const { revision } = JSON.parse(repair!.text) as { revision: { path: string; digest: string } };
+    const verdict = JSON.parse(verdicts[1]!.text) as { sourceRevision?: { files: Record<string, string> } };
+    const named = verdict.sourceRevision?.files[revision.path];
+    expect(named, `the repaired verdict does not name the written digest: ${seen}`).toBe(revision.digest);
   } catch (error) {
     await session.capture('kernel-freshness-failure');
     throw error;

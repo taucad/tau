@@ -165,6 +165,20 @@ describe('PaneviewHeader', () => {
     expect(disclosure).toHaveAttribute('draggable', 'true');
   });
 
+  it('toggles from blank header space but not from bubbled child clicks', () => {
+    render(
+      <PaneviewHeader api={mockApi} title='main.ts'>
+        <span data-testid='status'>status</span>
+      </PaneviewHeader>,
+    );
+
+    fireEvent.click(screen.getByTestId('status'));
+    expect(mockApi.setExpanded).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'main.ts' }).closest('[data-slot="paneview-header"]')!);
+    expect(mockApi.setExpanded).toHaveBeenCalledOnce();
+  });
+
   it('keeps interactive children outside the disclosure button', () => {
     render(
       <PaneviewHeader api={mockApi} title='main.ts'>

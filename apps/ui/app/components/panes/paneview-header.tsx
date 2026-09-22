@@ -59,6 +59,11 @@ function usePaneviewHeaderContext(): PaneviewHeaderContextValue {
  *
  * Provides expansion state via context for compound child components.
  * When `title` is provided, renders a `PaneviewHeaderTitle` before children.
+ *
+ * The disclosure button wraps only the chevron and title, so a child rendered
+ * right after it (a status mark) sits beside the name rather than at the
+ * trailing edge. Blank header space still toggles through the root's click,
+ * which ignores bubbled clicks from children.
  */
 export function PaneviewHeader({
   api,
@@ -110,6 +115,15 @@ export function PaneviewHeader({
     }
   }, [api, expanded]);
 
+  const handleRootClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.target === event.currentTarget) {
+        handleClick();
+      }
+    },
+    [handleClick],
+  );
+
   const contextValue = useMemo<PaneviewHeaderContextValue>(() => ({ expanded }), [expanded]);
 
   return (
@@ -128,13 +142,14 @@ export function PaneviewHeader({
           'hover:bg-sidebar-accent focus-within:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
           'data-[state=open]:border-border data-[state=open]:bg-card data-[state=open]:hover:bg-sidebar-accent data-[state=open]:focus-within:bg-sidebar-accent data-[state=open]:has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
         )}
+        onClick={handleRootClick}
       >
         <button
           type='button'
           aria-expanded={expanded}
           aria-label={title === undefined ? 'Toggle panel' : undefined}
           draggable
-          className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:focus-outline'
+          className='flex h-full min-w-0 items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:focus-outline'
           onClick={handleClick}
         >
           <ChevronDown

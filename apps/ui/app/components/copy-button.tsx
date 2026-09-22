@@ -63,7 +63,13 @@ export function CopyButton({
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button size={size} variant='ghost' onClick={handleCopy} {...properties}>
+          <Button
+            size={size}
+            variant='ghost'
+            aria-label={size === 'icon' ? tooltip : undefined}
+            onClick={handleCopy}
+            {...properties}
+          >
             {size !== 'icon' && (
               <span data-slot='label'>{failed ? copyFailedLabel : copied ? copiedText : readyToCopyText}</span>
             )}

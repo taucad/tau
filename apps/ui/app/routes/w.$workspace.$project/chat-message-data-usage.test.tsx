@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UsageData } from '@taucad/chat';
@@ -9,17 +9,23 @@ import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message
 const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('#components/icons/svg-icon.js', () => ({
+  unknownIconId: 'unknown',
   SvgIcon: ({ id }: { readonly id: string }) => <span data-testid={`model-icon-${id}`} />,
 }));
 
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
-    resolveModel: (id: string) => ({ id, name: id, family: 'openai', provider: { name: 'OpenAI' } }),
+    // The catalog knows the Tau model; an external agent's model resolves to no family.
+    resolveModel: (id: string) =>
+      id === 'openai-gpt-5.5'
+        ? { id, name: id, family: 'openai', provider: { name: 'OpenAI' }, isResolved: true }
+        : { id, name: id, family: 'unknown', provider: { id: 'unknown', name: 'Unknown' }, isResolved: false },
   }),
 }));
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: (_name: string, fallback: boolean) => [fallback, vi.fn()] }));
 vi.mock('#db/billing-snapshot-store.js', () => ({ recordBillingRevisionMinimum }));
+vi.mock('#lib/agent-host-placement.js', () => ({ externalAgentDisplayName: (id: string) => id }));
 
 const identity = { schemaVersion: 1, environment: 'development', ownerId: 'user', subjectId: 'account' };
 const activity = { kind: 'agent', projectHint: null, chatHint: null, parentAttemptKey: null };
@@ -129,7 +135,7 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart({ operationId: 'op1', attemptId: 'att_1', billingStatus: 'terminal' })]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Tau credits: 1.23')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tau credits: 1\.23$/)).toBeInTheDocument();
     });
     expect(recordBillingRevisionMinimum).toHaveBeenCalledWith({
       environment: 'development',
@@ -145,7 +151,7 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart({ operationId: 'op1', billingStatus: 'pending' })]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Tau credits: Pending')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tau credits: Pending/)).toBeInTheDocument();
     });
   });
 
@@ -154,7 +160,7 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart({ operationId: 'op1' }), usagePart({ id: 'dat_2', operationId: 'op2' })]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Tau credits: 1.23 · 1 pending')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tau credits: 1\.23 · 1 pending/)).toBeInTheDocument();
     });
   });
 
@@ -170,18 +176,39 @@ describe('ChatMessageDataUsage', () => {
     renderUsage([usagePart({ operationId: 'op1' })]);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Tau credits: Pending')).toBeInTheDocument();
+      expect(screen.getByLabelText(/Tau credits: Pending/)).toBeInTheDocument();
     });
     expect(screen.queryByLabelText(/1\.23/)).not.toBeInTheDocument();
   });
 
-  it('shows no Tau credits for an external-provider turn and never calls the receipt API', () => {
+  /* V6: the transcript is history. An external agent's turn names that agent
+   * and the model its own usage recorded, whatever the composer selects now. */
+  it('names the external agent, reads not billed and never calls the receipt API', async () => {
     stubReceipts({});
     renderUsage([usagePart({ agent: 'codex', model: 'gpt-5.3-codex' })]);
 
-    expect(screen.getByLabelText('Not billed by Tau')).toBeInTheDocument();
-    expect(screen.getByText('Not billed')).toBeInTheDocument();
+    const trigger = screen.getByRole('button', {
+      name: 'Usage: codex · gpt-5.3-codex, 14 tokens, Tau credits: Not billed',
+    });
     expect(fetch).not.toHaveBeenCalled();
+
+    act(() => {
+      trigger.focus();
+    });
+    expect(await screen.findByText('via codex')).toBeInTheDocument();
+    expect(screen.getByText('Not billed')).toBeInTheDocument();
+    // No catalog entry → no brand sprite; the button and card still carry a visible glyph.
+    expect(screen.queryByTestId(/model-icon-/)).toBeNull();
+    expect(trigger.querySelector('svg')).not.toBeNull();
+  });
+
+  it('keeps the button glyph monochrome and sizes it like Copy', () => {
+    stubReceipts({});
+    renderUsage([usagePart()]);
+
+    const trigger = screen.getByRole('button', { name: /^Usage: openai-gpt-5\.5, 14 tokens/ });
+    expect(trigger.className).toContain('size-7');
+    expect(trigger.querySelector('[data-testid="model-icon-openai"]')).not.toBeNull();
   });
 
   it('renders nothing without usage parts', () => {

@@ -18,6 +18,14 @@ export const formatExportDate = (date: Date): string => {
   return `${format(date, 'M/d/yyyy')} at ${format(date, 'HH:mm:ss')} ${timezone}`;
 };
 
+/**
+ * The exact moment behind a relative label, e.g. `Sep 22, 2026, 4:41 PM`.
+ * @param date The date to format
+ * @returns Locale-medium date with a short time
+ */
+export const formatAbsoluteTime = (date: Date | number): string =>
+  new Date(date).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+
 type FormatRelativeTimeOptions = {
   /**
    * If true, returns a shortened format (e.g., "2m" instead of "2 minutes ago")

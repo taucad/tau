@@ -743,11 +743,11 @@ it('shows generic diagnostics for an unsupported historical static tool', () => 
 });
 
 /*
- * V6. The transcript is history: a message an external agent produced says so,
- * from its own durable usage record, whatever the composer is selected on now.
- * A Tau turn shows nothing — the model selector already names its model.
+ * The action row under an assistant message: Copy, the usage button (its card
+ * carries the model and any external agent — V6 lives there now) and the
+ * message's timestamp. A user message has none of it.
  */
-describe('external attribution badge', () => {
+describe('assistant action row', () => {
   const usagePart = (data: Record<string, unknown>): MyUIMessage['parts'][number] =>
     ({
       type: 'data-usage',
@@ -760,28 +760,29 @@ describe('external attribution badge', () => {
         reasoningTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        inputTokensCost: 0,
-        outputTokensCost: 0,
-        cacheReadTokensCost: 0,
-        cacheWriteTokensCost: 0,
-        totalCost: 0,
         ...data,
       },
     }) as unknown as MyUIMessage['parts'][number];
 
-  it('names the external agent and the model its usage recorded', () => {
-    setMessages([{ id: 'msg-external', role: 'assistant', parts: [usagePart({ agent: 'codex' })] }]);
+  it('shows Copy, usage and a relative timestamp whose tooltip is the exact time', () => {
+    const createdAt = Date.now() - 3 * 60_000;
+    setMessages([{ id: 'msg-a', role: 'assistant', parts: [usagePart({ agent: 'codex' })], metadata: { createdAt } }]);
 
-    render(<ChatMessage messageId='msg-external' />);
+    render(<ChatMessage messageId='msg-a' />);
 
-    expect(screen.getByText('codex · gpt-5.3-codex')).toBeInTheDocument();
+    expect(screen.getByTestId('copy-button')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-message-data-usage')).toBeInTheDocument();
+    const time = screen.getByText('3 minutes ago');
+    expect(time.tagName).toBe('TIME');
+    expect(time.getAttribute('datetime')).toBe(new Date(createdAt).toISOString());
   });
 
-  it('shows no badge on a Tau turn', () => {
-    setMessages([{ id: 'msg-tau', role: 'assistant', parts: [usagePart({ model: 'openai-gpt-5.5' })] }]);
+  it('omits the usage button without usage parts and the timestamp without a stamp', () => {
+    setMessages([{ id: 'msg-b', role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }]);
 
-    render(<ChatMessage messageId='msg-tau' />);
+    render(<ChatMessage messageId='msg-b' />);
 
-    expect(screen.queryByText(/openai-gpt-5\.5/u)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-message-data-usage')).not.toBeInTheDocument();
+    expect(document.querySelector('time')).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { UIMessageChunk } from 'ai';
+import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
 import { externalAgentStopSchema } from '@taucad/agent-host';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
@@ -90,9 +90,28 @@ const blockId = (type: 'text' | 'thinking', messageId: string, contentIndex: num
 /** Run-scoped blocks, including closed identities to fence late live frames. */
 export type AgentHostLiveBlocks = Map<
   string,
-  | { readonly type: 'text' | 'thinking'; content: string; closed: boolean; startedAtMs?: number | undefined }
+  | {
+      readonly type: 'text' | 'thinking';
+      content: string;
+      closed: boolean;
+      startedAtMs?: number | undefined;
+      /** A text block whose last applied frame was a durable checkpoint: open, but nothing is arriving. */
+      resting?: boolean;
+    }
   | { readonly type: 'tool'; content: ''; closed: true }
 >;
+
+/**
+ * The rest fact a text part carries (chat activity indicator resting block R1).
+ *
+ * `streaming` is block identity, not motion: an ACP host keeps a named text
+ * block open across the whole turn, so the reducer's state cannot say whether
+ * bytes are still arriving. The checkpoint row is the host's own signal that
+ * they stopped; the next live delta with bytes is the signal that they resumed.
+ */
+const textStreamState = (streamState: 'checkpoint' | 'live'): { providerMetadata: ProviderMetadata } => ({
+  providerMetadata: { common: { streamState } },
+});
 
 /**
  * The key a settled tool call is fenced under. Durable and live rows travel on
@@ -209,7 +228,11 @@ const assistantChunks = (
       if (streamed?.type === 'text') {
         if (!streamed.closed) {
           const suffix = value['text'].startsWith(streamed.content) ? value['text'].slice(streamed.content.length) : '';
-          if (suffix) {
+          if (streamCheckpoint) {
+            // An empty delta still carries the rest fact: the reducer appends '' and assigns the metadata.
+            chunks.push({ type: 'text-delta', id, delta: suffix, ...textStreamState('checkpoint') });
+            streamed.resting = true;
+          } else if (suffix) {
             chunks.push({ type: 'text-delta', id, delta: suffix });
           }
           if (value['text'].startsWith(streamed.content)) {
@@ -223,9 +246,13 @@ const assistantChunks = (
           streamed.closed = true;
         }
       } else {
-        chunks.push({ type: 'text-start', id }, { type: 'text-delta', id, delta: value['text'] });
-        streamedBlocks?.set(key, { type: 'text', content: value['text'], closed: !streamCheckpoint });
-        if (!streamCheckpoint || !streamedBlocks) {
+        const resting = streamCheckpoint && streamedBlocks !== undefined;
+        chunks.push(
+          { type: 'text-start', id },
+          { type: 'text-delta', id, delta: value['text'], ...(resting ? textStreamState('checkpoint') : {}) },
+        );
+        streamedBlocks?.set(key, { type: 'text', content: value['text'], closed: !streamCheckpoint, resting });
+        if (!resting) {
           chunks.push({ type: 'text-end', id });
         }
       }
@@ -685,8 +712,17 @@ export const projectAgentHostLiveEvent = (
     }
     const delta = event.delta.slice(block.content.length - offset);
     block.content += delta;
+    const resumed = delta !== '' && block.resting === true;
+    if (resumed) {
+      block.resting = false;
+    }
     streamedBlocks.set(key, block);
-    return delta ? [...start, { type: type === 'text' ? 'text-delta' : 'reasoning-delta', id, delta }] : start;
+    return delta
+      ? [
+          ...start,
+          { type: type === 'text' ? 'text-delta' : 'reasoning-delta', id, delta, ...(resumed ? textStreamState('live') : {}) },
+        ]
+      : start;
   }
   const { content } = event;
   const suffix = content.startsWith(block.content) ? content.slice(block.content.length) : '';

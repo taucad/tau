@@ -253,7 +253,12 @@ describe('projectAgentHostEvent', () => {
 
     expect(projectAgentHostEvent(checkpoint, streamedBlocks)).toEqual([
       { type: 'text-start', id: 'assistant-acp:text:0' },
-      { type: 'text-delta', id: 'assistant-acp:text:0', delta: 'prefix ' },
+      {
+        type: 'text-delta',
+        id: 'assistant-acp:text:0',
+        delta: 'prefix ',
+        providerMetadata: { common: { streamState: 'checkpoint' } },
+      },
     ]);
     expect(
       projectAgentHostLiveEvent(
@@ -267,7 +272,14 @@ describe('projectAgentHostEvent', () => {
         },
         streamedBlocks,
       ),
-    ).toEqual([{ type: 'text-delta', id: 'assistant-acp:text:0', delta: 'suffix' }]);
+    ).toEqual([
+      {
+        type: 'text-delta',
+        id: 'assistant-acp:text:0',
+        delta: 'suffix',
+        providerMetadata: { common: { streamState: 'live' } },
+      },
+    ]);
   });
 
   it('projects explicit reasoning, text, and partial tool lifecycle events', () => {

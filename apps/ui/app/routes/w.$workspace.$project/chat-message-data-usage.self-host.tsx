@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
 import type { UsageData } from '@taucad/chat';
-import { Badge } from '@taucad/ui/components/badge';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { useModels } from '#hooks/use-models.js';
+import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { ChatMessageUsage, sumUsageTokens } from '#routes/w.$workspace.$project/chat-message-usage.js';
 
 export const usageOperationIds = (): string[] => [];
 export type ReceiptCredit = { readonly status: 'unavailable' };
@@ -10,19 +10,24 @@ export const useReceiptCredits = (): ReadonlyMap<string, ReceiptCredit> => new M
 export const sumReceiptCredits = (): ReceiptTotal => ({ creditAtoms: 0n, pending: 0 });
 export const formatReceiptTotal = (): string => '';
 
-export function ChatMessageDataUsage({ usageParts }: { readonly usageParts: readonly UsageData[] }): React.JSX.Element {
-  const total = useMemo(
-    () =>
-      usageParts.reduce(
-        (sum, usage) => sum + usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens,
-        0,
-      ),
-    [usageParts],
-  );
-  // Ghost, and as tall as the copy button beside it, like the billed badge.
+/** Self-host has no receipts: the same button and card, without a credits line. */
+export function ChatMessageDataUsage({
+  usageParts,
+}: {
+  readonly usageParts: readonly UsageData[];
+}): React.JSX.Element | undefined {
+  const { resolveModel } = useModels();
+  const lastUsage = usageParts.at(-1);
+  if (lastUsage === undefined) {
+    return undefined;
+  }
   return (
-    <Badge variant='outline' className='h-7 border-none font-normal text-inherit'>
-      {formatNumberAbbreviation(total)} tokens
-    </Badge>
+    <ChatMessageUsage
+      model={resolveModel(lastUsage.model)}
+      agent={lastUsage.agent === undefined ? undefined : externalAgentDisplayName(lastUsage.agent)}
+      totals={sumUsageTokens(usageParts)}
+      turns={usageParts.length}
+      reference={lastUsage.attemptId}
+    />
   );
 }

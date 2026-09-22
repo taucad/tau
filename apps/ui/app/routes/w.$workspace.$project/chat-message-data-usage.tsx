@@ -1,24 +1,11 @@
 import { useQueries } from '@tanstack/react-query';
-import { Coins } from 'lucide-react';
 import type { UsageData } from '@taucad/chat';
-import { formatCreditAtoms, formatCreditAtomsDisplay, wireOperationReceiptSchema } from '@taucad/billing';
+import { formatCreditAtomsDisplay, wireOperationReceiptSchema } from '@taucad/billing';
 import type { WireOperationReceipt } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
-import { SvgIcon } from '#components/icons/svg-icon.js';
-import { InfoTooltip } from '#components/ui/info-tooltip.js';
-import { Badge } from '@taucad/ui/components/badge';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import {
-  TableHeader,
-  TableRow,
-  TableHead,
-  TableBody,
-  TableCell,
-  TableFooter,
-  Table,
-} from '@taucad/ui/components/table';
 import { useModels } from '#hooks/use-models.js';
-import { formatNumberAbbreviation } from '#utils/number.utils.js';
+import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { ChatMessageUsage, sumUsageTokens } from '#routes/w.$workspace.$project/chat-message-usage.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
@@ -162,32 +149,12 @@ export const formatReceiptTotal = ({ creditAtoms, pending }: ReceiptTotal): stri
   return `${formatCreditAtomsDisplay(creditAtoms)} · ${String(pending)} pending`;
 };
 
-const tokenCell = (tokens: number | undefined): string =>
-  tokens === undefined ? 'Not reported' : formatNumberAbbreviation(tokens);
-
-const creditCell = (credit: ReceiptCredit | undefined): string => {
-  switch (credit?.status) {
-    case 'settled': {
-      return formatCreditAtoms(credit.chargedCreditAtoms);
-    }
-    case 'unavailable': {
-      return 'Unavailable';
-    }
-    default: {
-      return 'Pending';
-    }
-  }
-};
-
-const turnTokens = (usage: UsageData): number =>
-  usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
-
 /**
  * Per-turn usage beside a chat message: Tau credits from the operation's own
  * receipt, with the provider's token counts as the explanation.
  *
  * @param props - The turn's usage parts, in order.
- * @returns The usage badge and its detail card, or nothing when there is no usage.
+ * @returns The usage button and its hover card, or nothing when there is no usage.
  */
 export function ChatMessageDataUsage({
   usageParts,
@@ -199,158 +166,21 @@ export function ChatMessageDataUsage({
   const operationIds = usageOperationIds(usageParts);
   const credits = useReceiptCredits(operationIds);
 
-  if (usageParts.length === 0) {
+  const lastUsage = usageParts.at(-1);
+  if (lastUsage === undefined) {
     return undefined;
   }
 
-  const total = sumReceiptCredits(operationIds, credits);
-  const hasMultipleTurns = usageParts.length > 1;
-  const lastUsage = usageParts.at(-1);
-  const modelId = lastUsage?.model;
-  const model = modelId === undefined ? undefined : resolveModel(modelId);
-  const { agent } = lastUsage ?? {};
   const tauBilled = operationIds.length > 0;
-  const totals = {
-    inputTokens: 0,
-    outputTokens: 0,
-    reasoningTokens: undefined as number | undefined,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-  };
-  for (const usage of usageParts) {
-    totals.inputTokens += usage.inputTokens;
-    totals.outputTokens += usage.outputTokens;
-    totals.cacheReadTokens += usage.cacheReadTokens;
-    totals.cacheWriteTokens += usage.cacheWriteTokens;
-    if (usage.reasoningTokens !== undefined) {
-      totals.reasoningTokens = (totals.reasoningTokens ?? 0) + usage.reasoningTokens;
-    }
-  }
-  const totalTokens = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens;
-  const summary = tauBilled ? formatReceiptTotal(total) : 'Not billed';
-
+  const summary = tauBilled ? formatReceiptTotal(sumReceiptCredits(operationIds, credits)) : 'Not billed';
   return (
-    <HoverCard openDelay={100} closeDelay={100}>
-      <HoverCardTrigger asChild className='flex flex-row items-center' tabIndex={0}>
-        <Badge
-          variant='outline'
-          aria-label={tauBilled ? `Tau credits: ${summary}` : 'Not billed by Tau'}
-          className='h-7 cursor-help gap-1 border-none font-normal text-inherit outline-none hover:bg-neutral/20'
-        >
-          <Coins aria-hidden='true' className='size-3.5! stroke-2' />
-          {showCredits ? <span>{summary}</span> : undefined}
-        </Badge>
-      </HoverCardTrigger>
-      <HoverCardContent className='w-auto overflow-hidden p-2 pt-1'>
-        <div className='flex flex-col space-y-1'>
-          <div className='flex flex-row items-baseline justify-between gap-4 p-2 pb-0'>
-            <h4 className='font-medium'>Usage Details</h4>
-            {model ? (
-              <div className='flex items-baseline gap-2 text-xs'>
-                <SvgIcon id={model.family} className='size-4 translate-y-[0.25em] text-muted-foreground' />
-                <span className='font-mono'>{model.name}</span>
-              </div>
-            ) : undefined}
-          </div>
-          <Table className='h-full overflow-clip rounded-md [&_tbody]:block [&_tbody]:max-h-[300px] [&_tbody]:scroll-shadows-y [&_tfoot]:block [&_thead]:block [&_tr]:grid [&_tr]:grid-cols-[1fr_auto_auto]'>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Metric</TableHead>
-                <TableHead className='text-right'>Tokens</TableHead>
-                <TableHead className='text-right'>Credits</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {hasMultipleTurns
-                ? usageParts.map((usage, index) => (
-                    <TableRow key={usage.id}>
-                      <TableCell className='flex flex-row items-center gap-1'>
-                        <span>Turn {index + 1}</span>
-                        <InfoTooltip>
-                          <div className='space-y-1 text-xs'>
-                            <div>Input: {formatNumberAbbreviation(usage.inputTokens)} tokens</div>
-                            <div>Output: {formatNumberAbbreviation(usage.outputTokens)} tokens</div>
-                            <div>Reasoning: {tokenCell(usage.reasoningTokens)}</div>
-                            {usage.cacheReadTokens > 0 && (
-                              <div>Cache Read: {formatNumberAbbreviation(usage.cacheReadTokens)} tokens</div>
-                            )}
-                            {usage.cacheWriteTokens > 0 && (
-                              <div>Cache Write: {formatNumberAbbreviation(usage.cacheWriteTokens)} tokens</div>
-                            )}
-                          </div>
-                        </InfoTooltip>
-                      </TableCell>
-                      <TableCell className='text-right font-mono'>
-                        {formatNumberAbbreviation(turnTokens(usage))}
-                      </TableCell>
-                      <TableCell className='text-right font-mono'>
-                        {usage.operationId === undefined ? '—' : creditCell(credits.get(usage.operationId))}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                : (
-                    [
-                      {
-                        label: 'Input',
-                        tokens: totals.inputTokens as number | undefined,
-                        hint: 'The number of tokens in the input prompt. This includes the user prompt, system message, and any previous messages.',
-                      },
-                      {
-                        label: 'Output',
-                        tokens: totals.outputTokens as number | undefined,
-                        hint: 'The number of tokens in the output response.',
-                      },
-                      {
-                        label: 'Reasoning',
-                        tokens: totals.reasoningTokens,
-                        hint: 'Thinking tokens, already counted inside output. Reads "Not reported" when the provider did not report them.',
-                      },
-                      {
-                        label: 'Cache Read',
-                        tokens: totals.cacheReadTokens as number | undefined,
-                        hint: 'The number of tokens read from the prompt cache. This improves performance by avoiding re-processing the same prompt.',
-                      },
-                      {
-                        label: 'Cache Write',
-                        tokens: totals.cacheWriteTokens as number | undefined,
-                        hint: 'The number of tokens written to the prompt cache. This improves performance by avoiding re-processing the same prompt.',
-                      },
-                    ] as const
-                  ).map((row) => (
-                    <TableRow key={row.label}>
-                      <TableCell className='flex flex-row items-center gap-1'>
-                        <span>{row.label}</span>
-                        <InfoTooltip>{row.hint}</InfoTooltip>
-                      </TableCell>
-                      <TableCell className='text-right font-mono'>{tokenCell(row.tokens)}</TableCell>
-                      <TableCell className='text-right font-mono'>—</TableCell>
-                    </TableRow>
-                  ))}
-            </TableBody>
-            <TableFooter className='overflow-clip rounded-b-md'>
-              <TableRow>
-                <TableCell>Total</TableCell>
-                <TableCell className='text-right font-mono'>{formatNumberAbbreviation(totalTokens)}</TableCell>
-                <TableCell className='text-right font-mono'>
-                  {tauBilled ? formatCreditAtoms(total.creditAtoms) : 'Not billed'}
-                </TableCell>
-              </TableRow>
-            </TableFooter>
-          </Table>
-          <p className='px-2 pb-1 text-[11px] text-muted-foreground'>
-            {tauBilled
-              ? total.pending > 0
-                ? `${String(total.pending)} charge${total.pending === 1 ? '' : 's'} pending. Credits come from your Tau receipts.`
-                : 'Credits come from your Tau receipts.'
-              : agent === undefined
-                ? 'This turn was not funded by Tau, so it has no Tau credits.'
-                : `Reported by ${agent}. Tau did not fund this turn, so it has no Tau credits.`}
-          </p>
-          {lastUsage?.attemptId === undefined ? undefined : (
-            <p className='px-2 pb-1 font-mono text-[11px] text-muted-foreground'>Reference {lastUsage.attemptId}</p>
-          )}
-        </div>
-      </HoverCardContent>
-    </HoverCard>
+    <ChatMessageUsage
+      model={resolveModel(lastUsage.model)}
+      agent={lastUsage.agent === undefined ? undefined : externalAgentDisplayName(lastUsage.agent)}
+      totals={sumUsageTokens(usageParts)}
+      turns={usageParts.length}
+      credits={showCredits ? summary : undefined}
+      reference={lastUsage.attemptId}
+    />
   );
 }

@@ -15,7 +15,6 @@ import { memo, useCallback, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
 import type { DynamicToolUIPart } from 'ai';
-import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
@@ -38,6 +37,8 @@ import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
 import { CopyButton } from '#components/copy-button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -588,27 +589,35 @@ type ChatMessageProperties = {
 };
 
 /**
- * Who produced this message, when it was not Tau.
+ * When the message was created, as a relative label whose tooltip is the exact
+ * time. ponytail: computed at render, so "just now" ages only when the message
+ * re-renders; a shared minute ticker is the upgrade if that ever shows.
  *
- * Read from the durable usage record rather than from the composer's current
- * selection (V6): a transcript is history, and a chat whose selector has since
- * moved to another agent must still say which one actually answered. A Tau turn
- * shows nothing — the model selector above already names its model, and a
- * second badge on every message would be noise.
- *
- * @param properties - The message's projected usage parts.
- * @returns The badge, or nothing for a Tau turn.
+ * @param properties - The message's `metadata.createdAt`, epoch milliseconds.
+ * @returns The timestamp, or nothing for an unstamped message.
  */
-function ChatMessageAttribution({ usageParts }: { readonly usageParts: UsageData[] }): React.JSX.Element | undefined {
-  const attributed = usageParts.findLast((usage) => usage.agent !== undefined);
-  if (!attributed?.agent) {
+function ChatMessageTimestamp({
+  createdAt,
+}: {
+  readonly createdAt: number | undefined;
+}): React.JSX.Element | undefined {
+  if (createdAt === undefined) {
     return undefined;
   }
-  const name = externalAgentDisplayName(attributed.agent);
+  const date = new Date(createdAt);
   return (
-    <span className='px-1 text-xs text-muted-foreground'>
-      {attributed.model === 'unknown' ? name : `${name} · ${attributed.model}`}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <time
+          dateTime={date.toISOString()}
+          tabIndex={0}
+          className='ml-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
+        >
+          {formatRelativeTime(date)}
+        </time>
+      </TooltipTrigger>
+      <TooltipContent side='bottom'>{formatAbsoluteTime(date)}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -887,10 +896,8 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               tooltip='Copy message'
               className='size-7'
             />
-            <div className='flex flex-row items-center justify-end gap-1'>
-              <ChatMessageAttribution usageParts={usageParts} />
-              {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
-            </div>
+            {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
+            <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
           </div>
         </When>
       </div>

@@ -1901,7 +1901,10 @@ describe('KernelWorker lifecycle', () => {
     }
 
     const createPreparationWorker = (): PreparationCountingWorker => {
-      const filesystem = Object.assign(createMockFileSystem(), {
+      /* `readFile` and `readFiles` have to answer the same bytes for the same path: the hash
+       * cache is filled from one and arm-time validation reads the other, so a fixture where
+       * they disagree never commits a watch. */
+      const filesystem = Object.assign(createMockFileSystem({ readFileResult: new Uint8Array([1, 2, 3]) }), {
         watch: vi.fn(() => vi.fn()),
       });
       filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
@@ -3588,7 +3591,13 @@ describe('preview admission invariants', () => {
     await observed.waitForState((event) => event.renderId === initialId && event.state === 'idle');
 
     worker.exportInProgress = true;
-    const exported = worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+    /* A different entry from the preview's, so the export genuinely extracts parameters and
+     * reaches the gate. Request-scoped lanes stopped clearing the preview's volatile caches
+     * when revalidation took over freshness (Q5/EQ7), and an export of the entry the preview
+     * just rendered now legitimately reuses its parameters. What this test pins — a preview
+     * timeout must not abort in-flight export work — rides on the shared abort context and
+     * SAB generation, not on which entry the export names. */
+    const exported = worker.exportModel({ file: createGeometryFile('export.ts'), parameters: {}, format: 'gltf' });
     await exportEntered.promise;
 
     const timedOutId = previewId(2902);

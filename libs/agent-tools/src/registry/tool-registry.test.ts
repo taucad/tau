@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
   RpcFileSystem,
+  RpcGeoSpecClient,
   RpcGraphicsClient,
   RpcInvocationContext,
   RpcParameterClient,
@@ -450,5 +453,138 @@ describe('createChatToolRegistry invocation', () => {
     await expect(sibling).resolves.toMatchObject({ isError: false });
     expect(seenSignals).toEqual([first.signal, second.signal]);
     expect(second.signal.aborted).toBe(false);
+  });
+});
+
+/* The freshness gate (blueprint R5, charter Q2/Q3). A verdict that names a
+ * source revision the run has already replaced is not a geometry answer; it is
+ * the host telling the agent about bytes that no longer exist. The registry is
+ * the one seam every host and the MCP server share, so the comparison lives
+ * here. */
+describe('createChatToolRegistry freshness gate', () => {
+  const digestOf = (content: string): string => `sha256:${createHash('sha256').update(content).digest('hex')}`;
+
+  const closure = (digest: string) => ({ entry: 'main.ts', files: { 'main.ts': digest } });
+
+  const kernelVerdict = (sourceRevision?: unknown) =>
+    ({
+      success: true,
+      status: 'error',
+      kernelIssues: [
+        {
+          message: 'You need a previous curve to sketch a tangent arc',
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ],
+      ...(sourceRevision === undefined ? {} : { sourceRevision }),
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a hand-built RPC result stands in for the runtime's.
+    }) as unknown as Awaited<ReturnType<RpcRuntimeClient['getKernelResult']>>;
+
+  const writeThenAsk = async (
+    getKernelResult: RpcRuntimeClient['getKernelResult'],
+    content = 'repaired',
+  ): Promise<Awaited<ReturnType<ReturnType<typeof build>['invoke']>>> => {
+    const registry = build({ kernelClient: { getKernelResult } });
+    await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content } });
+    return invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } });
+  };
+
+  it('refuses a verdict that still answers for replaced bytes after one re-invocation', async () => {
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+      kernelVerdict(closure(digestOf('broken'))),
+    );
+
+    const verdict = await writeThenAsk(getKernelResult);
+
+    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(verdict).toMatchObject({
+      isError: true,
+      content: {
+        errorCode: 'STALE_EVALUATION',
+        expected: { path: 'main.ts', digest: digestOf('repaired') },
+        actual: { path: 'main.ts', digest: digestOf('broken') },
+      },
+    });
+    expect(JSON.stringify(verdict.content)).not.toContain('tangent arc');
+  });
+
+  it('returns the fresh verdict when the re-invocation answers for the written bytes', async () => {
+    let asked = 0;
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => {
+      asked += 1;
+      return asked === 1
+        ? kernelVerdict(closure(digestOf('broken')))
+        : // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a hand-built RPC result stands in for the runtime's.
+          ({
+            success: true,
+            status: 'ready',
+            kernelIssues: [],
+            sourceRevision: closure(digestOf('repaired')),
+          } as unknown as Awaited<ReturnType<RpcRuntimeClient['getKernelResult']>>);
+    });
+
+    const verdict = await writeThenAsk(getKernelResult);
+
+    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(verdict).toMatchObject({ isError: false, content: { status: 'ready' } });
+  });
+
+  it('passes an unproven verdict through untouched rather than calling it fresh', async () => {
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => kernelVerdict());
+
+    const verdict = await writeThenAsk(getKernelResult);
+
+    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
+  });
+
+  it('invokes once when the verdict names the digest the write left', async () => {
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+      kernelVerdict(closure(digestOf('repaired'))),
+    );
+
+    const verdict = await writeThenAsk(getKernelResult);
+
+    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
+  });
+
+  it('ignores a closure that never read the written path', async () => {
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+      kernelVerdict({ entry: 'other.ts', files: { 'other.ts': digestOf('unrelated') } }),
+    );
+
+    const verdict = await writeThenAsk(getKernelResult);
+
+    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(verdict).toMatchObject({ isError: false });
+  });
+
+  it('refuses a test_model run whose loaded models answer for replaced bytes', async () => {
+    const runTests = vi.fn<RpcGeoSpecClient['runTests']>(
+      async () =>
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a hand-built RPC result stands in for the runner's.
+        ({
+          success: true,
+          summary: { total: 1, passed: 0, failed: 1 },
+          sourceRevisions: [closure(digestOf('broken'))],
+        }) as unknown as Awaited<ReturnType<RpcGeoSpecClient['runTests']>>,
+    );
+    const registry = build({ geospec: { runTests } });
+    await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
+
+    const verdict = await invoke(registry, 'test_model', { input: {} });
+
+    expect(runTests).toHaveBeenCalledTimes(2);
+    expect(verdict).toMatchObject({
+      isError: true,
+      content: {
+        errorCode: 'STALE_EVALUATION',
+        expected: { path: 'main.ts', digest: digestOf('repaired') },
+        actual: { path: 'main.ts', digest: digestOf('broken') },
+      },
+    });
   });
 });

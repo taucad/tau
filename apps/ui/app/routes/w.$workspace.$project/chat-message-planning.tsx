@@ -23,10 +23,11 @@ const stateOf = (part: MyMessagePart): unknown => Reflect.get(part, 'state');
  *
  * Only the last meaningful part can be streaming visibly: an earlier part left
  * `streaming` behind later tools is history, which is the shape an ACP
- * checkpoint leaves. A blank thought shows nothing. A running tool shows its
- * own loading card, or the spinner on its collapsed group; a pending approval
- * has its banner. An answered approval has no cue of its own until the run
- * resumes.
+ * checkpoint leaves, and a trailing text the host has checkpointed is at rest
+ * until its next delta. A blank thought shows nothing. A running tool shows
+ * its own loading card, or the spinner on its collapsed group; a pending
+ * approval has its banner. An answered approval has no cue of its own until
+ * the run resumes.
  *
  * @param parts - The trailing assistant message's parts.
  * @returns `true` when something on screen already moves.
@@ -35,7 +36,10 @@ const stateOf = (part: MyMessagePart): unknown => Reflect.get(part, 'state');
 export const hasLiveSurface = (parts: readonly MyMessagePart[]): boolean => {
   const tail = parts[findLastMeaningfulPartIndex(parts)];
   if ((tail?.type === 'text' || tail?.type === 'reasoning') && tail.state === 'streaming' && tail.text.trim() !== '') {
-    return true;
+    /* `streaming` is block identity, not motion. A text block an ACP host has
+       checkpointed is open but at rest: nothing arrives and nothing fades, so
+       it shows no work (resting block R2). A thought keeps its own spinner. */
+    return tail.type === 'reasoning' || tail.providerMetadata?.['common']?.['streamState'] !== 'checkpoint';
   }
   return parts.some(
     (part) =>

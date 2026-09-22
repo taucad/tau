@@ -1315,6 +1315,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * The same union `reconcileObservedPaths` arms, minus the preview's own
    * paths: what is retained is what has to be proven current.
    *
+   * The union with the bundle results is load-bearing only for
+   * `hasCommittedObservation`, which asks whether a subscription covers
+   * everything reuse would ride on. `revalidateRetainedFiles` skips every path
+   * with no `fileHashCache` entry, so for that caller the extra dependencies
+   * and unresolved paths are inert.
+   *
    * @returns Retained rooted paths, deduplicated.
    */
   private retainedObservedPaths(): string[] {
@@ -1373,12 +1379,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * Absence counts: a path retained as `'missing'` diverges by appearing.
    *
-   * ponytail: re-reads the retained closure once per request-scoped operation instead of
-   * stat-and-rehash. `readFiles` is one call over the same path that produced the hashes,
-   * a `stat` over the daemon bridge costs the same round trips and only saves payload, and
-   * a stat comparison would need a `(size, mtimeMs)` stamp recorded beside every hash —
-   * with mtime granularity deciding correctness. If a closure ever grows past a few hundred
-   * project files, record that stamp at hash time and stat first, reading only what moved.
+   * ponytail: re-reads the whole retained closure once per request-scoped operation
+   * instead of stat-and-rehash, and the cost is not one call. `readFiles` is
+   * `Promise.all(readFile)` (`packages/runtime/src/filesystem/create-runtime-filesystem.ts`),
+   * so over the daemon bridge a 300-file closure is 300 concurrent round trips carrying
+   * every body, per operation — and `test_model` pays it once per model it loads. Nothing
+   * caps the size of a retained entry either: `node_modules/` is excluded below, but a
+   * middleware-declared binary asset enters `fileHashCache` at whatever size it is and is
+   * re-read here every time.
+   *
+   * Residual, deliberately: the cheap version stamps `(size, mtimeMs)` beside each hash and
+   * stats before reading, which lets mtime granularity decide correctness — a rewrite of
+   * equal length inside one filesystem tick would read as unchanged, and answering for
+   * replaced bytes is the exact defect this method exists to close. Bytes stay the
+   * evidence. Bound the cost instead if it bites: batch the reads, or teach the filesystem
+   * a real `hashFiles` the bridge can answer without shipping bodies.
    */
   private async revalidateRetainedFiles(): Promise<void> {
     /* CDN package artifacts are content-addressed and can be megabytes; `fileContentCache`
@@ -1441,6 +1456,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (revisions.size === 0) {
       return;
     }
+    /* This records the new hash, so the OS watch event racing the same edit arrives with
+     * nothing to say and `_applyObservedRevisions` drops it. A preview sharing this runtime
+     * would therefore keep its pre-edit geometry until the *next* edit, since the event that
+     * would have re-rendered it was spent here. Out of scope: no host today shares one
+     * runtime between the preview loop and the agent. Give this lane a render trigger, not a
+     * second observation, if one ever does. */
     const divergent = [...revisions.keys()];
     this._applyObservedRevisions(divergent, revisions);
     this.onFileChanged(divergent);

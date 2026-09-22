@@ -21,7 +21,10 @@ export async function handleEditFile(input: EditFileRpcInput, fileSystem: RpcFil
       ...(result.staleRecovered ? { staleRecovered: true } : {}),
       diffStats,
       // R4: the digest of the bytes this edit left at the path, not of the replacement text.
-      revision: { path: targetFile, digest: `sha256:${await sha256String(diffStats.modifiedContent)}` },
+      revision: {
+        path: targetFile,
+        digest: result.digest ?? `sha256:${await sha256String(diffStats.modifiedContent)}`,
+      },
     };
   } catch (error) {
     return { ...toRpcError(error), retryable: true };

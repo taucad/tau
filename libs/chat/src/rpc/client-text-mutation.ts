@@ -5,6 +5,7 @@ import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { editFileMaxBytes } from '#schemas/tools/edit-file.tool.schema.js';
 import type { RpcFileStat } from '#rpc/rpc-dependencies.js';
 import { assertRootedPath } from '@taucad/utils/path';
+import { sha256Bytes } from '@taucad/utils/hash';
 
 const utf8Bom = new Uint8Array([0xef, 0xbb, 0xbf]);
 
@@ -49,6 +50,16 @@ export type ClientTextMutationResult =
       occurrences: number;
       staleRecovered?: true;
       diffStats: DiffStatsWithContent;
+      /**
+       * R4 digest of the bytes now at the path, `sha256:`-prefixed.
+       *
+       * Over the committed bytes, never over {@link DiffStatsWithContent.modifiedContent}:
+       * that is the decode, which has had any UTF-8 BOM stripped, while the
+       * kernel's `sourceRevision` hashes what is on disk. Hashing the text
+       * would make every edit to a BOM file look like a different revision to
+       * the freshness gate.
+       */
+      digest: string;
     }>
   | Readonly<{ ok: false; errorCode: RpcClientErrorCode; message: string }>;
 
@@ -167,14 +178,18 @@ const planSnapshot = (
   return { ok: true, snapshot: decoded.snapshot, replacementBytes, plan: planned };
 };
 
-const success = (
+/* Every success below either wrote `replacementBytes` and verified the commit
+ * byte-for-byte, or found them already at the path, so they are the bytes on
+ * disk in all three arms. */
+const success = async (
   planned: Extract<ReturnType<typeof planSnapshot>, { ok: true }>,
   staleRecovered: boolean,
-): ClientTextMutationResult => ({
+): Promise<ClientTextMutationResult> => ({
   ok: true,
   occurrences: planned.plan.occurrences,
   ...(staleRecovered ? { staleRecovered: true } : {}),
   diffStats: createFileEditDiffStats(planned.snapshot.content, planned.plan.content),
+  digest: `sha256:${await sha256Bytes(planned.replacementBytes)}`,
 });
 
 const verifyCommit = (

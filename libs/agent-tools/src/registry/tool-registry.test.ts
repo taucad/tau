@@ -466,6 +466,23 @@ describe('createChatToolRegistry freshness gate', () => {
 
   const closure = (digest: string) => ({ entry: 'main.ts', files: { 'main.ts': digest } });
 
+  /* The gate checks a disagreeing verdict against the bytes on disk, so the
+   * tests need a filesystem that actually holds what the write tools leave. */
+  const storedFileSystem = (store: Map<string, string>): RpcFileSystem => ({
+    ...emptyFileSystem(),
+    readFile: async (path) => {
+      const content = store.get(path);
+      if (content === undefined) {
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      }
+      return content;
+    },
+    writeFile: async (path, content) => {
+      store.set(path, content);
+    },
+    exists: async (path) => store.has(path),
+  });
+
   const kernelVerdict = (sourceRevision?: unknown) =>
     ({
       success: true,
@@ -485,11 +502,43 @@ describe('createChatToolRegistry freshness gate', () => {
   const writeThenAsk = async (
     getKernelResult: RpcRuntimeClient['getKernelResult'],
     content = 'repaired',
+    outOfBand?: (store: Map<string, string>) => void,
   ): Promise<Awaited<ReturnType<ReturnType<typeof build>['invoke']>>> => {
-    const registry = build({ kernelClient: { getKernelResult } });
+    const store = new Map<string, string>();
+    const registry = build({ kernelClient: { getKernelResult }, fileSystemFor: () => storedFileSystem(store) });
     await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content } });
+    outOfBand?.(store);
     return invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } });
   };
+
+  /* F1: the write memory is per registry, so a person editing in the editor, a
+   * peer run or a `git checkout` makes it name bytes nobody has. The verdict
+   * that reads what is actually there is the fresh one. */
+  it('accepts a verdict for bytes edited outside the tools, without asking twice', async () => {
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+      kernelVerdict(closure(digestOf('edited in the editor'))),
+    );
+
+    const verdict = await writeThenAsk(getKernelResult, 'repaired', (store) => {
+      store.set('main.ts', 'edited in the editor');
+    });
+
+    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
+  });
+
+  it('still refuses when the path the verdict answered for is gone', async () => {
+    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+      kernelVerdict(closure(digestOf('broken'))),
+    );
+
+    const verdict = await writeThenAsk(getKernelResult, 'repaired', (store) => {
+      store.delete('main.ts');
+    });
+
+    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(verdict).toMatchObject({ isError: true, content: { errorCode: 'STALE_EVALUATION' } });
+  });
 
   it('refuses a verdict that still answers for replaced bytes after one re-invocation', async () => {
     const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
@@ -572,7 +621,8 @@ describe('createChatToolRegistry freshness gate', () => {
           sourceRevisions: [closure(digestOf('broken'))],
         }) as unknown as Awaited<ReturnType<RpcGeoSpecClient['runTests']>>,
     );
-    const registry = build({ geospec: { runTests } });
+    const store = new Map<string, string>();
+    const registry = build({ geospec: { runTests }, fileSystemFor: () => storedFileSystem(store) });
     await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
 
     const verdict = await invoke(registry, 'test_model', { input: {} });

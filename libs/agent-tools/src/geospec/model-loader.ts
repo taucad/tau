@@ -16,11 +16,27 @@
 
 import { GeoSpecModelLoadError, loadModel } from 'geospec/model';
 import type { GeoSpecModelLoader, GeoSpecRuntimeClient } from 'geospec/model';
+import type { SourceRevision } from '@taucad/runtime';
 import { assertRootedPath } from '@taucad/utils/path';
 
 const isFatalRuntimeBootError = (error: unknown): boolean =>
   error instanceof GeoSpecModelLoadError &&
   error.diagnostics.some((diagnostic) => diagnostic.code === 'RUNTIME_UNAVAILABLE');
+
+/** What {@link createProjectModelLoader} hands a host: one loader plus the per-run state it owns. @public */
+export type ProjectModelLoader = {
+  /** The loader to give the GeoSpec runner. */
+  readonly modelLoader: GeoSpecModelLoader;
+  /**
+   * The source revision of every model loaded through the runtime since the last reset (R4).
+   *
+   * Pass it to `runGeoSpecTests` so the verdict names the sources it was computed from; a run
+   * whose models all came from direct geometry reports none.
+   */
+  readonly sourceRevisions: () => readonly SourceRevision[];
+  /** Drop the latched boot failure and the recorded revisions at a run boundary. */
+  readonly resetFatalError: () => void;
+};
 
 /** Options for {@link createProjectModelLoader}. @public */
 export type ProjectModelLoaderOptions = {
@@ -49,10 +65,28 @@ export type ProjectModelLoaderOptions = {
  * const runner = createGeoSpecWebRunner({ filesystem, modelLoader });
  * ```
  */
-export const createProjectModelLoader = (
-  options: ProjectModelLoaderOptions,
-): { readonly modelLoader: GeoSpecModelLoader; readonly resetFatalError: () => void } => {
+export const createProjectModelLoader = (options: ProjectModelLoaderOptions): ProjectModelLoader => {
   let fatalModelLoadError: Error | undefined;
+  const revisions = new Map<string, SourceRevision>();
+
+  /* R4/I5: every model this loader produces came out of one `runtime.export`, and that result
+   * names the source it was computed from. Recording it here — rather than threading provenance
+   * through GeoSpec's subject vocabulary — keeps the digests in the layer that owns the runtime.
+   * A proxy, not a rebuilt object: `export` is generic, and the rest of the client is the host's. */
+  const runtime = new Proxy(options.runtime, {
+    get(target, property, receiver: unknown): unknown {
+      if (property !== 'export') {
+        return Reflect.get(target, property, receiver) as unknown;
+      }
+      return async (...args: Parameters<GeoSpecRuntimeClient['export']>) => {
+        const result = await target.export(...args);
+        if (result.sourceRevision) {
+          revisions.set(result.sourceRevision.entry, result.sourceRevision);
+        }
+        return result;
+      };
+    },
+  });
 
   const modelLoader: GeoSpecModelLoader = async (input) => {
     if (fatalModelLoadError) {
@@ -71,10 +105,10 @@ export const createProjectModelLoader = (
           code,
           file: assertRootedPath(input.file),
           projectPath: '',
-          runtime: options.runtime,
+          runtime,
         });
       }
-      return loadModel({ ...input, file: assertRootedPath(input.file), projectPath: '', runtime: options.runtime });
+      return loadModel({ ...input, file: assertRootedPath(input.file), projectPath: '', runtime });
     };
 
     // A direct geometry source never touches the runtime, so it cannot latch.
@@ -93,8 +127,10 @@ export const createProjectModelLoader = (
 
   return {
     modelLoader,
+    sourceRevisions: () => [...revisions.values()],
     resetFatalError: () => {
       fatalModelLoadError = undefined;
+      revisions.clear();
     },
   };
 };

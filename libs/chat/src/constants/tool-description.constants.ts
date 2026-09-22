@@ -3,6 +3,14 @@ import { toolName } from '#constants/tool.constants.js';
 const parameterUnitRule =
   'When current.entry.groups[g].units[pointer] exists, it is the unit of the stored number and of native-value writes; use unit-value with inputUnit to be explicit.';
 
+/** R8/I5/I9: what every kernel-backed read promises about the bytes it answered for. */
+const sourceRevisionRule =
+  'Computed from the bytes on disk at call time; `sourceRevision` names the digests it read. Compare it with the `revision.digest` of your last write; a result answering for superseded bytes returns as a `STALE_EVALUATION` error naming both digests, never as a result.';
+
+/** R8/I5: what every write promises about the bytes it left behind. */
+const writeRevisionRule =
+  'Returns `revision`: the path and the digest now at it (`"missing"` once deleted), comparable with the `sourceRevision` of any later kernel result.';
+
 /** Canonical provider-facing descriptions shared by API and portable browser hosts. @public */
 export const toolDescriptions = {
   [toolName.testModel]: `Run GeoSpec tests against the current 3D model(s).
@@ -16,24 +24,15 @@ Filter examples:
 - Skip one known failing check: { testNamePattern: '^(?!.*no meshing interference).*' }
 - Skip slow files: { exclude: ['**/*.slow.geospec.ts'] }
 
-Returns compact pass/fail rows tagged by targetFile. Empty failures with total > 0 means all selected tests passed.
+Returns compact pass/fail rows tagged by targetFile, plus \`sourceRevisions\` — one per model the run loaded. Empty failures with total > 0 means all selected tests passed. ${sourceRevisionRule}
 
 When NOT to use:
 - NOT as a substitute for \`get_kernel_result\` when you only need compile status; \`test_model\` measures geometry against requirements.`,
-  [toolName.getKernelResult]: `Check the status of the CAD kernel and retrieve any compilation errors for a specific file.
+  [toolName.getKernelResult]: `Check one file for CAD kernel compile and runtime errors.
 
-Parameters:
-- targetFile: The file to check kernel results for (relative to project root)
+Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. Returns \`status\` — 'ready' or 'error' — with any \`kernelIssues\`. ${sourceRevisionRule}
 
-Use this tool AFTER using \`edit_file\` or \`create_file\` to verify that your code changes compiled successfully.
-
-Returns:
-- status: 'ready' if compilation succeeded, 'error' if there were errors, 'pending' if still processing
-- kernelIssues: Array of compilation/runtime errors if any occurred
-
-Best Practice: Always call this tool after making file changes to ensure the model renders correctly before proceeding.
-
-After compilation succeeds, use \`test_model\` to run GeoSpec geometry tests.`,
+Once 'ready', use \`test_model\` to measure the geometry against requirements.`,
   [toolName.exportGeometry]: `Produce a persisted interchange/mesh artifact for one geometry unit and write it under \`.tau/artifacts/\` in the active project workspace.
 
 Give explicit \`targetFile\` and \`format\` (extension only, matching the Tau MIME/extension registry — include the leading dot nowhere).
@@ -45,7 +44,7 @@ Returns an ordered \`files\` array with each producer name, persisted \`artifact
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
   [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.
 
-Use resolutionMode "declared-only" when inferred semantics are not acceptable. The result includes stored values, semantic bindings, provenance, diagnostics, and the exact identity required by apply_parameter_operation. ${parameterUnitRule} Reading in the same mode never disturbs a pending source-unit plan; reading in a different mode rejects it. An "unresolved" result carries a diagnostic code: INVALID_RECORD means the saved values cannot be read and are preserved untouched, and RESOLUTION_SUPERSEDED means a concurrent read changed the mode.`,
+Use resolutionMode "declared-only" when inferred semantics are not acceptable. The result includes stored values, semantic bindings, provenance, diagnostics, and the exact identity required by apply_parameter_operation. ${sourceRevisionRule} ${parameterUnitRule} Reading in the same mode never disturbs a pending source-unit plan; reading in a different mode rejects it. An "unresolved" result carries a diagnostic code: INVALID_RECORD means the saved values cannot be read and are preserved untouched, and RESOLUTION_SUPERSEDED means a concurrent read changed the mode.`,
   [toolName.applyParameterOperation]: `Propose one checked parameter operation, or confirm/cancel a plan a previous propose returned.
 
 Every call names an action:
@@ -62,7 +61,7 @@ A value operation names its field by group and pointer, exactly as get_parameter
 A source-unit operation changes the unit the source interprets a value in, and is the operation that asks for confirmation. Only a binding with sourceUnitCapability admits it. Build it from get_parameters, with binding = manifest.bindings[pointer]: producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }.`,
   [toolName.screenshot]: `Capture a screenshot of a specific geometry unit's 3D model for visual inspection.
 
-You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no project-level fallback. The requested geometry unit is resolved or created, then its render is awaited before headless capture. The call fails for a missing source file, render failure or render timeout, an unavailable renderer, or invalid image artifacts.
+You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no project-level fallback. The call fails for a missing source file, render failure or render timeout, an unavailable renderer, or invalid image artifacts. ${sourceRevisionRule}
 
 Modes:
 - single: Captures one deterministic perspective isometric image
@@ -74,8 +73,7 @@ Every image includes:
 - a physical scale bar; orthographic scale is depth-invariant, while perspective scale is measured at the subject-center plane and marked @ center
 
 Use these annotations when reasoning about orientation, handedness, opposite faces, and size.`,
-  [toolName.editFile]:
-    'Replace text in one existing file. Read the file first and copy oldString with enough context to be unique. The edit tolerates only trailing whitespace and common Unicode punctuation differences. Set replaceAll only when every match should change. When NOT to use: use create_file or delete_file for file lifecycle operations.',
+  [toolName.editFile]: `Replace text in one existing file. Read the file first and copy oldString with enough context to be unique. The edit tolerates only trailing whitespace and common Unicode punctuation differences. Set replaceAll only when every match should change. ${writeRevisionRule} Use create_file or delete_file for file lifecycle operations.`,
   [toolName.useSkill]: `Activate one available workspace skill by name and read its full SKILL.md instructions.
 
 Use this tool when the user's task matches a skill listed in the system prompt or selected by the user. The tool resolves the selected skill through the client skill resolver, reads only that skill's instructions, records skill usage through the use_skill tool call, and returns raw markdown for you to follow.
@@ -102,27 +100,12 @@ Use this tool to:
 - Understand the organization of the codebase
 
 Omit the path to list the project root.`,
-  [toolName.createFile]: `Create a new file with the specified content in the project filesystem.
+  [toolName.createFile]: `Create a file in the project filesystem, with the path relative to the project root.
 
-Use this tool to:
-- Create new source files (e.g., new modules, libraries)
-- Create configuration files
-- Add new assets or resources
-
-The file path should be relative to the project root. Parent directories will be created automatically if they don't exist.
-
-Note: This tool will overwrite an existing file if one exists at the specified path. Use read_file first to check if a file exists if you want to avoid overwriting.`,
+Missing parent directories are created. An existing file at the path is overwritten without warning — read_file first when that matters. ${writeRevisionRule}`,
   [toolName.deleteFile]: `Delete a file from the project filesystem.
 
-Use this tool to:
-- Remove unused or obsolete files
-- Clean up temporary files
-- Remove files that are no longer needed
-
-The operation will fail gracefully if:
-- The file doesn't exist
-- The operation is rejected for security reasons
-- The file cannot be deleted`,
+Fails gracefully when the file does not exist, when the operation is rejected for security reasons, or when the file cannot be deleted. ${writeRevisionRule}`,
   [toolName.grep]: `Search for text patterns in files using regular expressions.
 
 This is a powerful search tool for finding exact matches in file contents.

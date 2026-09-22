@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-09-13'
+updated: '2026-09-22'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -616,14 +616,18 @@ A warm exact-match export reuses the artifact's live native slot, restores its s
 
 ### File-Level Caches
 
-| Cache               | Invalidation                                                                                | Purpose                                             |
-| ------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `fileHashCache`     | Concrete exact-path event, filesystem reset, or next source-bearing watcherless operation   | Avoid re-hashing unchanged observed files           |
-| `fileContentCache`  | Concrete exact-path event, filesystem reset, or next source-bearing watcherless operation   | Avoid re-reading unchanged observed files           |
-| `bundleResultCache` | Dependency-aware exact event; broadly on reset or next source-bearing watcherless operation | Avoid re-bundling when deps haven't changed         |
-| `selectionCache`    | Cleared on relevant exact change, reset, or next source-bearing watcherless operation       | Ensure kernel detection re-runs when imports change |
+| Cache               | Invalidation                                                                                                                    | Purpose                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `fileHashCache`     | Concrete exact-path event, filesystem reset, request-scoped revalidation finding divergence, or an unobserved preview operation | Avoid re-hashing unchanged observed files           |
+| `fileContentCache`  | Concrete exact-path event, filesystem reset, request-scoped revalidation finding divergence, or an unobserved preview operation | Avoid re-reading unchanged observed files           |
+| `bundleResultCache` | Dependency-aware exact event; broadly on reset, on a divergent revalidation, or on an unobserved preview operation              | Avoid re-bundling when deps haven't changed         |
+| `selectionCache`    | Cleared on relevant exact change, reset, divergent revalidation, or an unobserved preview operation                             | Ensure kernel detection re-runs when imports change |
 
-Watched filesystems retain volatile entries only while the complete cache-observation subscription keeps them coherent. A watcherless filesystem has no evidence that retained bytes are current, so serialized `render()`, autonomous preview execution, and exact `exportModel()` clear volatile file-derived caches before dependency resolution. Kernel/WASM state and durable content-addressed `.tau/cache/**` entries remain reusable.
+Reuse a volatile entry only when it is proven current: either a committed cache-observation subscription covers every retained path (preview reuse), or the operation has revalidated it. Treat "the filesystem can watch" as no evidence at all.
+
+Compute every request-scoped answer — `evaluateModel()`, `getParameters()`, `snapshotSource()`, `exportModel()` — from a filesystem snapshot taken no earlier than that operation's admission. Re-read the retained closure once per operation, invalidate every divergent entry and its dependents before dependency resolution, and keep the hash ledger so the change is still recorded as observed. A preview-owning lane that does not revalidate reuses nothing unless a committed subscription covers every retained path. An operation that leaves volatile entries behind leaves the watch set covering them, or leaves nothing.
+
+Name the source in every request-scoped result. A kernel result carries the entry path and the content digest of each file in its resolved closure, so its caller can prove which bytes it answered for. Kernel/WASM state and durable content-addressed `.tau/cache/**` entries remain reusable.
 
 ### Per-Render Caches (cleared each render cycle)
 

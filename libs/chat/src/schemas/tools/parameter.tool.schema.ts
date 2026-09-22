@@ -1,6 +1,7 @@
 import { fileParameterEntrySchema } from '@taucad/types';
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 const tokenSchema = z
   .string()
@@ -160,6 +161,9 @@ export const getParametersOutputSchema = z
     manifest: parameterManifestWireSchema.optional(),
     current: parameterAuthoritySnapshotSchema.optional(),
     diagnostics: z.array(parameterDiagnosticSchema).optional(),
+    sourceRevision: sourceRevisionSchema
+      .optional()
+      .describe('Digests of the source this manifest was compiled from (R4).'),
   })
   .strict()
   .superRefine((output, context) => {

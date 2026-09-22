@@ -119,6 +119,21 @@ const directExportFilesSchema = z
     }
   });
 
+const isSha256Digest = (value: unknown): value is `sha256:${string}` =>
+  typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
+const contentDigestSchema = z.custom<ContentDigest>(isSha256Digest, 'Expected a lowercase SHA-256 digest');
+
+/** The source closure a request-scoped operation read, carried on the result it produced (R4). */
+const sourceRevisionSchema = z
+  .object({
+    entry: rootedFilePathSchema,
+    files: z.record(rootedFilePathSchema, z.union([contentDigestSchema, z.literal('missing')])),
+  })
+  .strict();
+
+/** Provenance is optional on every result branch: only request-scoped operations resolve a closure. */
+const sourceRevisionShape = { sourceRevision: sourceRevisionSchema.optional() };
+
 const exportGeometryResultSchema = z.discriminatedUnion('success', [
   z
     .object({
@@ -126,12 +141,14 @@ const exportGeometryResultSchema = z.discriminatedUnion('success', [
       data: z.array(exportFileSchema).min(1),
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
   z
     .object({
       success: z.literal(false),
       issues: z.array(kernelIssueSchema),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
 ]);
@@ -144,20 +161,19 @@ export const getParametersResultSchema = z.union([
       data: z.custom<ParameterManifest>(isParameterManifestShape, 'Expected a parameter manifest wire shape'),
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
   z
     .object({
       success: z.literal(false),
       issues: z.array(kernelIssueSchema),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
 ]);
 
 const renderIdSchema = z.uuid();
-const isSha256Digest = (value: unknown): value is `sha256:${string}` =>
-  typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
-const contentDigestSchema = z.custom<ContentDigest>(isSha256Digest, 'Expected a lowercase SHA-256 digest');
 const geometryTransportSchema = z.discriminatedUnion('format', [
   z.object({ format: z.literal('gltf'), content: binaryContentDeliverySchema, hash: z.string() }).strict(),
   z
@@ -184,12 +200,14 @@ const hashedGeometryResultTransportSchema = z.discriminatedUnion('success', [
       data: geometryTransportSchema,
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
   z
     .object({
       success: z.literal(false),
       issues: z.array(kernelIssueSchema),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
 ]);
@@ -420,12 +438,14 @@ export const runtimeSourceSnapshotResultSchema = z.discriminatedUnion('success',
         })
         .strict(),
       issues: z.array(kernelIssueSchema),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
   z
     .object({
       success: z.literal(false),
       issues: z.array(kernelIssueSchema),
+      ...sourceRevisionShape,
     })
     .catchall(z.unknown()),
 ]);

@@ -20,6 +20,7 @@ import type {
   CapabilitiesManifest,
   ExportRoute,
   RuntimeCapabilityRegistration,
+  SourceRevision,
 } from '#types/runtime.types.js';
 import type { ComputeBinding, KernelComputeCapability } from '#types/runtime-compute.types.js';
 import type {
@@ -105,6 +106,7 @@ import { cooperativeYield, scheduleMacrotask } from '#framework/async-polyfills.
 import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { contentDigest } from '@taucad/cache-core';
+import type { ContentDigest } from '@taucad/cache-core';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
@@ -1307,14 +1309,220 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.pushState('error', record, issueDetail(issues));
   }
 
-  private prepareUnobservedFileSystem(invalidatePublishedArtifact: boolean): void {
-    if (this.fileSystem?.watch) {
+  /**
+   * Every path a volatile cache is currently standing behind.
+   *
+   * The same union `reconcileObservedPaths` arms, minus the preview's own
+   * paths: what is retained is what has to be proven current.
+   *
+   * The union with the bundle results is load-bearing only for
+   * `hasCommittedObservation`, which asks whether a subscription covers
+   * everything reuse would ride on. `revalidateRetainedFiles` skips every path
+   * with no `fileHashCache` entry, so for that caller the extra dependencies
+   * and unresolved paths are inert.
+   *
+   * @returns Retained rooted paths, deduplicated.
+   */
+  private retainedObservedPaths(): string[] {
+    const paths = new Set<string>(this.fileHashCache.keys());
+    for (const result of this.bundleResultCache.values()) {
+      for (const dependency of result.dependencies) {
+        paths.add(assertRootedPath(dependency));
+      }
+      for (const dependency of result.unresolvedPaths) {
+        paths.add(assertRootedPath(dependency));
+      }
+    }
+    return [...paths];
+  }
+
+  /**
+   * The retained paths whose bytes no longer hash to what was retained for them.
+   *
+   * Absence is an observation like any other: a path retained as `'missing'` diverges by
+   * appearing, and a retained hash diverges by the file vanishing.
+   *
+   * @param paths - Paths to compare against what is retained for them.
+   * @returns The subset that no longer agrees with the filesystem.
+   */
+  private async findDivergentPaths(paths: readonly string[]): Promise<string[]> {
+    const outcomes = await Promise.all(
+      paths.map(async (path) => {
+        const expected = this.fileHashCache.get(path);
+        if (expected === undefined) {
+          return undefined;
+        }
+        try {
+          const bytes = await this.filesystem.readFile(path);
+          return expected !== 'missing' && (await this.hashContent(bytes)) === expected ? undefined : path;
+        } catch (error) {
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+          return expected === 'missing' ? undefined : path;
+        }
+      }),
+    );
+    return outcomes.filter((path): path is string => path !== undefined);
+  }
+
+  /**
+   * Prove the retained closure is current, and invalidate whatever is not (I1/I3).
+   *
+   * This is the freshness evidence a request-scoped operation answers from, and it is the
+   * same on every adapter (EQ7): a watch is an optimisation for the preview loop, never the
+   * thing correctness rides on. Before this, `evaluateModel`, `getParameters`,
+   * `snapshotSource` and `exportModel` kept whatever the first call read for as long as the
+   * filesystem merely *could* watch, so the agent's kernel answered every later tool call
+   * with the verdict for bytes the person had already replaced
+   * (`docs/research/agent-stale-kernel-result-elimination-blueprint.md`).
+   *
+   * Absence counts: a path retained as `'missing'` diverges by appearing.
+   *
+   * ponytail: re-reads the whole retained closure once per request-scoped operation
+   * instead of stat-and-rehash, and the cost is not one call. `readFiles` is
+   * `Promise.all(readFile)` (`packages/runtime/src/filesystem/create-runtime-filesystem.ts`),
+   * so over the daemon bridge a 300-file closure is 300 concurrent round trips carrying
+   * every body, per operation — and `test_model` pays it once per model it loads. Nothing
+   * caps the size of a retained entry either: `node_modules/` is excluded below, but a
+   * middleware-declared binary asset enters `fileHashCache` at whatever size it is and is
+   * re-read here every time.
+   *
+   * Residual, deliberately: the cheap version stamps `(size, mtimeMs)` beside each hash and
+   * stats before reading, which lets mtime granularity decide correctness — a rewrite of
+   * equal length inside one filesystem tick would read as unchanged, and answering for
+   * replaced bytes is the exact defect this method exists to close. Bytes stay the
+   * evidence. Bound the cost instead if it bites: batch the reads, or teach the filesystem
+   * a real `hashFiles` the bridge can answer without shipping bodies.
+   */
+  private async revalidateRetainedFiles(): Promise<void> {
+    /* CDN package artifacts are content-addressed and can be megabytes; `fileContentCache`
+     * already draws this boundary for the same reason. */
+    const retained = this.retainedObservedPaths().filter((path) => !path.startsWith('node_modules/'));
+    const expectedPresent: string[] = [];
+    const expectedMissing: string[] = [];
+    for (const path of retained) {
+      const expected = this.fileHashCache.get(path);
+      if (expected === 'missing') {
+        expectedMissing.push(path);
+      } else if (expected !== undefined) {
+        expectedPresent.push(path);
+      }
+    }
+    /* The revision each divergent path moved to, not merely the fact that it moved: the
+     * ledger has to keep saying which revision this worker last observed.
+     * `readChangedObservedRevisions` reads a path with no retained hash as one no render has
+     * looked at yet and records its event as a baseline, so dropping the entry here would
+     * spend the preview's next change event re-establishing that baseline and lose the edit
+     * behind it — this lane revalidates the whole retained closure, including paths it never
+     * re-reads itself. Same reasoning as the refused-arm branch of `reconcileWatchSet`. */
+    const revisions = new Map<string, ObservedFileRevision>();
+    const noteIfMoved = (path: string, revision: ObservedFileRevision): void => {
+      if (revision.hash !== this.fileHashCache.get(path)) {
+        revisions.set(path, revision);
+      }
+    };
+    if (expectedPresent.length > 0) {
+      let contents: Record<string, Uint8Array<ArrayBuffer>> | undefined;
+      try {
+        contents = await this.filesystem.readFiles(expectedPresent);
+      } catch (error) {
+        if (!isNotFoundError(error)) {
+          throw error;
+        }
+        /* One of them is gone, and the batch cannot say which. */
+      }
+      const current = contents;
+      const observed = await Promise.all(
+        expectedPresent.map(async (path): Promise<ObservedFileRevision> => {
+          const bytes = current?.[path];
+          return bytes === undefined
+            ? this.readObservedRevision(path)
+            : { hash: await this.hashContent(bytes), content: bytes };
+        }),
+      );
+      for (const [index, path] of expectedPresent.entries()) {
+        noteIfMoved(path, observed[index]!);
+      }
+    }
+    if (expectedMissing.length > 0) {
+      const present = await Promise.all(expectedMissing.map(async (path) => this.filesystem.exists(path)));
+      const appeared = expectedMissing.filter((_, index) => present[index] === true);
+      const observed = await Promise.all(appeared.map(async (path) => this.readObservedRevision(path)));
+      for (const [index, path] of appeared.entries()) {
+        noteIfMoved(path, observed[index]!);
+      }
+    }
+    if (revisions.size === 0) {
+      return;
+    }
+    /* This records the new hash, so the OS watch event racing the same edit arrives with
+     * nothing to say and `_applyObservedRevisions` drops it. A preview sharing this runtime
+     * would therefore keep its pre-edit geometry until the *next* edit, since the event that
+     * would have re-rendered it was spent here. Out of scope: no host today shares one
+     * runtime between the preview loop and the agent. Give this lane a render trigger, not a
+     * second observation, if one ever does. */
+    const divergent = [...revisions.keys()];
+    this._applyObservedRevisions(divergent, revisions);
+    this.onFileChanged(divergent);
+  }
+
+  /**
+   * What is at one path now, absence included.
+   *
+   * @param path - The rooted path to observe.
+   * @returns The revision to record for it, `'missing'` when it is not there.
+   */
+  private async readObservedRevision(path: string): Promise<ObservedFileRevision> {
+    try {
+      const content = await this.filesystem.readFile(path);
+      return { hash: await this.hashContent(content), content };
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+      return { hash: 'missing' };
+    }
+  }
+
+  /**
+   * Whether a live subscription is currently committed over everything retained (I2).
+   *
+   * "The filesystem can watch" was the old evidence, and it is not evidence at all: a
+   * rejected or never-installed arm leaves `watchUnsubscribe` undefined while the volatile
+   * caches keep standing behind bytes nobody observes. `reconcileWatchSet` drops
+   * `.tau/cache` from everything it arms, so a retained entry there is never covered and is
+   * excluded here for the same reason.
+   *
+   * Request-scoped lanes do not consult this: they revalidate the retained closure instead,
+   * which is stronger evidence than a subscription — bytes, not delivery.
+   *
+   * @returns True when every retained path is covered by a committed subscription.
+   */
+  private hasCommittedObservation(): boolean {
+    if (this.watchUnsubscribe === undefined) {
+      return false;
+    }
+    return this.retainedObservedPaths().every(
+      (path) => path === '.tau/cache' || path.startsWith('.tau/cache/') || this.watchedPaths.has(path),
+    );
+  }
+
+  /**
+   * Drop everything the preview loop would otherwise reuse without an observation (I2).
+   *
+   * Only the preview-owning lanes (`executeRender`, `createGeometry`) call this: they
+   * publish an artifact and do not revalidate, so reuse has to be justified by a committed
+   * subscription. Request-scoped lanes took the same clear until Q5/EQ7 collapsed the dual
+   * path — they revalidate instead, which both proves freshness on a watcherless adapter and
+   * stops the browser re-bundling on every call.
+   */
+  private prepareUnobservedFileSystem(): void {
+    if (this.hasCommittedObservation()) {
       return;
     }
     this.clearVolatileFileCaches();
-    if (invalidatePublishedArtifact) {
-      this.invalidatePublishedArtifactState();
-    }
+    this.invalidatePublishedArtifactState();
   }
 
   private clearVolatileFileCaches(): void {
@@ -1417,12 +1625,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): Promise<GetParametersResult> {
     return this.enqueueOperation(async () => {
       this.operationSignal?.throwIfAborted();
-      this.prepareUnobservedFileSystem(false);
       if (operation?.stage) {
         await this.writeFilesAndInvalidate(operation.stage);
         this.operationSignal?.throwIfAborted();
       }
-      return this.getParametersInLane(file, { resolution });
+      await this.revalidateRetainedFiles();
+      const result = await this.getParametersInLane(file, { resolution });
+      // I4: leave the watch covering whatever this operation retained.
+      await this.reconcileObservedPaths();
+      return result;
     }, operation?.signal);
   }
 
@@ -1672,6 +1883,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
     if (result.success) {
+      /* R4/I5: the manifest identity already names every source file this lane hashed, so the
+       * result's provenance is that identity, not a second digest scheme. Attached before the
+       * cache is written, so a cache hit replays the revision it was computed from. */
+      result = { ...result, sourceRevision: { entry: entryPath, files: parameterSourceFiles } };
       this.parameterResultCache = { key: parameterCacheKey, result: structuredClone(result) };
     }
 
@@ -1704,7 +1919,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     content?: RuntimeContentInput;
   }): Promise<HashedGeometryResult> {
     return this.enqueueOperation(async () => {
-      this.prepareUnobservedFileSystem(true);
+      this.prepareUnobservedFileSystem();
       const dependencyContext: DependencyResolutionContext = {};
       const owner = await this.createOperationOwner(entry.file, 'render-artifact');
       const parametersResult = await this.getParametersInLane(entry.file, { dependencyContext, owner });
@@ -1860,16 +2075,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     request: RuntimeSourceSnapshotArgs,
     signal?: AbortSignal,
   ): Promise<RuntimeSourceSnapshotResult> {
-    return this.enqueueOperation(async () => this.snapshotSourceInLane(request), signal);
+    return this.enqueueOperation(async () => {
+      const result = await this.snapshotSourceInLane(request);
+      // I4: leave the watch covering whatever this operation retained.
+      await this.reconcileObservedPaths();
+      return result;
+    }, signal);
   }
 
   private async snapshotSourceInLane(request: RuntimeSourceSnapshotArgs): Promise<RuntimeSourceSnapshotResult> {
     const signal = this.operationSignal ?? neverAbortedSignal;
     signal.throwIfAborted();
-    this.prepareUnobservedFileSystem(false);
     if (request.stage) {
       await this.writeFilesAndInvalidate(request.stage);
     }
+    await this.revalidateRetainedFiles();
     const owner = await this.createOperationOwner(request.file, 'request');
     const entryPath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
     const discover = async (): Promise<{
@@ -2031,6 +2251,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         kernelId: owner.binding?.kernelId ?? 'unknown',
       },
       issues,
+      /* R4/I5: this lane hashed the closure itself, so the revision is those hashes, in the same
+       * digest vocabulary the parameter manifest and the write tools use. */
+      sourceRevision: {
+        entry: entryPath,
+        files: Object.fromEntries<ContentDigest | 'missing'>([
+          ...[...hashesByPath].map(
+            ([path, sha256]) =>
+              [path, contentDigest({ value: `sha256:${sha256}`, name: `source snapshot ${path}` })] as const,
+          ),
+          ...unresolvedPaths.map((path) => [path, 'missing'] as const),
+        ]),
+      },
     };
   }
 
@@ -2074,19 +2306,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private async exportModelInLane(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {
-    this.prepareUnobservedFileSystem(false);
     const exportSpan = this.tracer.startSpan('kernel.export-model', {
       format: request.format,
       file: request.file.filename,
     });
 
     try {
-      return finalizeExportArtifactSet(
+      /* R4/I5: the lane's provenance is fixed once parameters resolve, and is carried onto the
+       * artifact set — success or failure — rather than onto one branch of it. */
+      let sourceRevision: SourceRevision | undefined;
+      const exported = finalizeExportArtifactSet(
         await (async (): Promise<ExportGeometryResult> => {
           const dependencyContext: DependencyResolutionContext = {};
           if (request.stage) {
             await this.writeFilesAndInvalidate(request.stage);
           }
+          await this.revalidateRetainedFiles();
 
           const owner = await this.createOperationOwner(request.file, 'request');
 
@@ -2103,6 +2338,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (!parametersResult.success) {
             return parametersResult;
           }
+          sourceRevision = parametersResult.sourceRevision;
           const extracted = parametersResult.data;
           if (extracted.legacyProjection.status !== 'usable') {
             return createKernelError([
@@ -2203,6 +2439,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           });
         })(),
       );
+      return sourceRevision === undefined ? exported : { ...exported, sourceRevision };
     } finally {
       await this.reconcileObservedPaths();
       exportSpan.end();
@@ -2331,11 +2568,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public async evaluateModel(input: RuntimeEvaluateModelArgs, signal?: AbortSignal): Promise<HashedGeometryResult> {
     const file = this.canonicalGeometryFile(input.file);
-    return this.enqueueOperation(async () => this.evaluateModelInLane({ ...input, file }), signal);
+    return this.enqueueOperation(async () => {
+      const result = await this.evaluateModelInLane({ ...input, file });
+      /* I4, R8 parity with the export lane: an operation that kept volatile entries leaves
+       * the watch covering them. A lane that threw kept nothing worth watching, and the
+       * preview watch set is not the place to record its failure. */
+      await this.reconcileObservedPaths();
+      return result;
+    }, signal);
   }
 
   private async evaluateModelInLane(input: RuntimeEvaluateModelArgs): Promise<HashedGeometryResult> {
-    this.prepareUnobservedFileSystem(false);
     const renderSpan = this.tracer.startSpan('kernel.evaluate-model', {
       file: input.file.filename,
     });
@@ -2345,6 +2588,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (input.stage) {
         await this.writeFilesAndInvalidate(input.stage);
       }
+      await this.revalidateRetainedFiles();
       const owner = await this.createOperationOwner(input.file, 'request');
       const parametersResult = await this.getParametersInLane(input.file, { dependencyContext, owner });
       if (!parametersResult.success) {
@@ -2352,16 +2596,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
 
       const extracted = parametersResult.data;
+      // R4/I5: everything this lane returns from here on was computed from that source revision,
+      // failures included — a render that failed against replaced bytes must not read as current.
+      const { sourceRevision } = parametersResult;
       if (extracted.legacyProjection.status !== 'usable') {
-        return createKernelError([
-          {
-            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
-            code: 'RUNTIME',
-            type: 'kernel',
-            severity: 'error',
-            details: extracted.legacyProjection.diagnostics,
-          },
-        ]);
+        return {
+          ...createKernelError([
+            {
+              message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+              code: 'RUNTIME',
+              type: 'kernel',
+              severity: 'error',
+              details: extracted.legacyProjection.diagnostics,
+            },
+          ]),
+          sourceRevision,
+        };
       }
       const callerParameters = mergeParameterDefaults({}, input.parameters, extracted.legacyProjection.schema);
 
@@ -2379,19 +2629,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       );
       const { result } = artifact;
       if (!result.success) {
-        return result;
+        return { ...result, sourceRevision };
       }
       if (result.data === undefined) {
-        return createKernelError([
-          {
-            message: 'Kernel produced no display artifact for model evaluation.',
-            code: 'KERNEL_CAPABILITY_MISSING',
-            type: 'kernel',
-            severity: 'error',
-          },
-        ]);
+        return {
+          ...createKernelError([
+            {
+              message: 'Kernel produced no display artifact for model evaluation.',
+              code: 'KERNEL_CAPABILITY_MISSING',
+              type: 'kernel',
+              severity: 'error',
+            },
+          ]),
+          sourceRevision,
+        };
       }
-      return { ...result, data: result.data };
+      return { ...result, data: result.data, sourceRevision };
     } finally {
       renderSpan.end();
     }
@@ -2491,27 +2744,32 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       do {
         validationRevision = armingEvents.addedPathRevision;
         // oxlint-disable-next-line no-await-in-loop -- an event during validation requires a fresh coherent snapshot
-        const validations = await Promise.all(
-          addedPaths.map(async (path) => {
-            const expected = this.fileHashCache.get(path);
-            if (expected === undefined) {
-              return true;
-            }
-            try {
-              const bytes = await this.filesystem.readFile(path);
-              return expected !== 'missing' && (await this.hashContent(bytes)) === expected;
-            } catch (error) {
-              if (!isNotFoundError(error)) {
-                throw error;
-              }
-              return expected === 'missing';
-            }
-          }),
-        );
+        const divergent = await this.findDivergentPaths(addedPaths);
+        /* R2/I3: nothing resolved from a path the arm just contradicted may stay reusable.
+         * Exactly the divergent paths and their dependents go, so whatever did not move is
+         * still there for the render the queued change event is about to drive.
+         *
+         * Their `fileHashCache` entries deliberately stay, holding the revision this worker
+         * last *observed* rather than the one this comparison just read:
+         * `readChangedObservedRevisions` treats a path with no retained hash as never
+         * observed and swallows its event as a baseline read, so deleting the hash here
+         * would drop the very change event that refused this arm and leave the preview on
+         * the superseded geometry. The next reader — that event, or
+         * `revalidateRetainedFiles` — compares against the stale hash, finds the same
+         * divergence, and records the new revision then. */
+        if (divergent.length > 0) {
+          this.commonDependencyCache.clear();
+          this.middlewareDependencyCache.clear();
+          this.parameterResultCache = undefined;
+          for (const path of divergent) {
+            this.fileContentCache.delete(path);
+          }
+          this._invalidateBundleCachesForPaths(divergent);
+        }
         if (
           !this.operationAdmissionOpen ||
           armingEvents.resetObserved ||
-          validations.some((valid) => !valid) ||
+          divergent.length > 0 ||
           (candidate && candidate.generation !== this.currentRenderGeneration())
         ) {
           replacement.unsubscribe();
@@ -4549,7 +4807,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const { generation } = record;
     record.executing = true;
 
-    this.prepareUnobservedFileSystem(true);
+    this.prepareUnobservedFileSystem();
 
     setAbortContext({
       signal: record.controller.signal,
@@ -5810,8 +6068,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
       for (const path of unresolvedPaths) {
         previewCandidate?.paths.set(path, fileChangeDebounce);
-        this.fileHashCache.set(path, 'missing');
       }
+    }
+    /* Absence is an observation: a request-scoped operation that retained "this import does
+     * not resolve" has to notice the file appearing, exactly as a preview does. */
+    for (const path of unresolvedPaths) {
+      this.fileHashCache.set(path, 'missing');
     }
     discoverSpan.end();
 

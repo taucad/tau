@@ -52,6 +52,8 @@ describe('handleDeleteFile', () => {
         originalContent: 'line1\nline2\nline3',
         modifiedContent: '',
       },
+      // R4: a delete produces absence, in the sentinel a source closure uses for a missing path.
+      revision: { path: 'src/old.ts', digest: 'missing' },
     });
     // Content is read inside the handler, so there is no separate read_file RPC.
     expect(fileSystem.readFile).toHaveBeenCalledTimes(1);
@@ -67,7 +69,12 @@ describe('handleDeleteFile', () => {
 
     const result = await handleDeleteFile({ targetFile: 'gone.ts' }, fileSystem);
 
-    expect(result).toEqual({ success: true, message: 'File deleted: gone.ts', diffStats: undefined });
+    expect(result).toEqual({
+      success: true,
+      message: 'File deleted: gone.ts',
+      diffStats: undefined,
+      revision: { path: 'gone.ts', digest: 'missing' },
+    });
     expect(fileSystem.deleteFile).toHaveBeenCalledTimes(1);
     expect(fileSystem.deleteFile).toHaveBeenCalledWith('gone.ts');
   });

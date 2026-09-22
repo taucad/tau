@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
 import type { GeoSpecRunnerResult, GeoSpecRunnerRunOptions } from 'geospec/runner/worker';
 
+import type { SourceRevision } from '@taucad/runtime';
+
 import { hasGeoSpecSelectionFilters, runGeoSpecTests } from '#geospec/run-tests.js';
 
 const discoveryOver = (tree: Record<string, readonly string[]>): GeoSpecDiscoveryFileSystem => ({
@@ -43,6 +45,34 @@ describe('runGeoSpecTests', () => {
     expect(runner.run).toHaveBeenCalledWith({ files: ['cube.geospec.ts'] });
     expect(output).toMatchObject({ passed: 1, total: 1, failures: [] });
     expect(output.passes[0]).toMatchObject({ requirement: 'cube > is watertight', targetFile: 'cube.geospec.ts' });
+  });
+
+  it('names the source revision of every model the run loaded (R4)', async () => {
+    // The digest is branded by `@taucad/cache-core`; a fixture asserts the shape, not the brand.
+    const revision = {
+      entry: 'cube.ts',
+      files: { 'cube.ts': `sha256:${'a'.repeat(64)}` },
+    } as unknown as SourceRevision;
+
+    const output = await runGeoSpecTests({
+      discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
+      runner: passingRunner(),
+      args: {},
+      sourceRevisions: () => [revision],
+    });
+
+    expect(output.sourceRevisions).toEqual([revision]);
+  });
+
+  it('omits provenance entirely for a run that loaded no model through the runtime', async () => {
+    const output = await runGeoSpecTests({
+      discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
+      runner: passingRunner(),
+      args: {},
+      sourceRevisions: () => [],
+    });
+
+    expect(output).not.toHaveProperty('sourceRevisions');
   });
 
   it('never runs, and names the missing-file failure, when nothing is discovered', async () => {

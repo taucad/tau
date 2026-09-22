@@ -14,6 +14,7 @@ import type { RunGeoSpecTestsRpcInput } from '@taucad/chat';
 import { discoverGeoSpecFiles } from 'geospec/runner';
 import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
 import type { GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
+import type { SourceRevision } from '@taucad/runtime';
 
 import { runnerResultToTestModelOutput } from '#geospec/result.js';
 import type { TestModelOutput } from '#geospec/result.js';
@@ -45,6 +46,12 @@ export type RunGeoSpecTestsOptions = {
   readonly args: RunGeoSpecTestsRpcInput;
   /** Discovery root. `''` for a project-relative host such as a browser bridge. */
   readonly projectPath?: string | undefined;
+  /**
+   * The source revision of every model the run loaded (R4/I5), read after the run —
+   * `sourceRevisions` from {@link createProjectModelLoader}. A verdict that names the sources it
+   * was computed from is one a reader can tell apart from a stale one.
+   */
+  readonly sourceRevisions?: (() => readonly SourceRevision[]) | undefined;
 };
 
 /**
@@ -84,5 +91,9 @@ export const runGeoSpecTests = async (options: RunGeoSpecTestsOptions): Promise<
           ...(args.testNamePattern === undefined ? {} : { testNamePattern: args.testNamePattern }),
           ...(args.testTimeout === undefined ? {} : { testTimeout: args.testTimeout }),
         });
-  return runnerResultToTestModelOutput(result, entryPaths, { filtersApplied: hasGeoSpecSelectionFilters(args) });
+  const output = runnerResultToTestModelOutput(result, entryPaths, {
+    filtersApplied: hasGeoSpecSelectionFilters(args),
+  });
+  const sourceRevisions = options.sourceRevisions?.() ?? [];
+  return sourceRevisions.length === 0 ? output : { ...output, sourceRevisions: [...sourceRevisions] };
 };

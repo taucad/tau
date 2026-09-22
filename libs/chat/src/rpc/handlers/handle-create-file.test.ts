@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { handleCreateFile } from '#rpc/handlers/handle-create-file.js';
+
+/** `expect.stringMatching` is untyped, so the matcher is named once and typed at its declaration. */
+const anyContentDigest = expect.stringMatching(/^sha256:[0-9a-f]{64}$/u) as unknown as string;
 
 describe('handleCreateFile', () => {
   it('should pass a canonical rooted path through unchanged', async () => {
@@ -52,6 +56,7 @@ describe('handleCreateFile', () => {
         originalContent: 'old1\nold2',
         modifiedContent: 'new1\nnew2\nnew3',
       },
+      revision: { path: 'src/a.ts', digest: anyContentDigest },
     });
     expect(fileSystem.writeFile).toHaveBeenCalledWith('src/a.ts', 'new1\nnew2\nnew3');
   });
@@ -72,8 +77,23 @@ describe('handleCreateFile', () => {
         originalContent: '',
         modifiedContent: 'a\nb',
       },
+      revision: { path: 'src/new.ts', digest: anyContentDigest },
     });
     expect(fileSystem.readFile).not.toHaveBeenCalled();
+  });
+
+  it('should report the digest of the bytes it wrote (R4)', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.exists.mockResolvedValue(false);
+    fileSystem.writeFile.mockResolvedValue();
+    const content = 'export const width = 10;\n';
+
+    const result = await handleCreateFile({ targetFile: 'src/a.ts', content }, fileSystem);
+
+    // Hashed here by an independent implementation: the digest must identify the bytes, not the code path.
+    expect(result).toMatchObject({
+      revision: { path: 'src/a.ts', digest: `sha256:${createHash('sha256').update(content, 'utf8').digest('hex')}` },
+    });
   });
 
   it('should return an RPC error when the write fails', async () => {

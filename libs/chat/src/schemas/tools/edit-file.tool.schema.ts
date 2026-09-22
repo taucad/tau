@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { writeRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 /** Maximum UTF-8 bytes accepted for an edit target or replacement. @public */
 export const editFileMaxBytes = 256 * 1024;
@@ -24,6 +25,7 @@ export const editFileInputSchema = z.object({
 /** @public */
 export const editFileOutputSchema = z.object({
   diffStats: diffStatsWithContentSchema.describe('Statistics and content diff for the changes made'),
+  revision: writeRevisionSchema.optional().describe('Digest of the bytes this edit left at the path (R4).'),
 });
 
 /** @public */

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 /**
  * Input schema for screenshot tool.
@@ -41,6 +42,9 @@ export const screenshotImageSchema = z
 export const screenshotOutputSchema = z
   .object({
     images: z.array(screenshotImageSchema).min(1).describe('Array of captured screenshot images'),
+    sourceRevision: sourceRevisionSchema
+      .optional()
+      .describe('Digests of the source the captured geometry was computed from (R4).'),
   })
   .strict();
 /** @public */

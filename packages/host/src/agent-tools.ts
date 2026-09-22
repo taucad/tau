@@ -49,7 +49,7 @@ import { assertRootedPath } from '@taucad/utils/path';
  * follow, and it bundles rather than externalises. `@taucad/runtime` is a peer,
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
-import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
+import type { ExportFile, RuntimeFileSystemBase, SourceRevision } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -62,6 +62,17 @@ type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
 /** Runtime surface accepted by the host's GeoSpec model loader. @public */
 export type HostGeoSpecRuntimeClient = GeoSpecRuntimeClient;
+
+/**
+ * A GeoSpec runner that can also name the sources its models were loaded from (R4, invariant I5).
+ *
+ * Optional because a runner whose loader is the CLI's own — no Tau runtime behind it — resolves
+ * sources the runtime never hashed, and has no revision to report.
+ * @public
+ */
+export type HostGeoSpecRunner = GeoSpecRunner & {
+  readonly sourceRevisions?: () => readonly SourceRevision[];
+};
 
 /**
  * One rendered artifact returned by a runtime export route.
@@ -181,19 +192,21 @@ const geoSpecEngineResolves = (): boolean => {
 export const createHostGeoSpecRunner = async (
   workspaceRoot: string,
   runtime?: HostGeoSpecRuntimeClient,
-): Promise<GeoSpecRunner> => {
+): Promise<HostGeoSpecRunner> => {
   await import('@taucad/geospec-engine/register/node');
   const [{ createGeoSpecNodeRunner, createNodeVmFileSystem }, { createModelLoader }] = await Promise.all([
     import('geospec/runner/node'),
     import('geospec/model'),
   ]);
-  return createGeoSpecNodeRunner({
+  const loader = runtime ? createProjectModelLoader({ runtime }) : undefined;
+  const runner = createGeoSpecNodeRunner({
     projectPath: workspaceRoot,
     filesystem: createNodeVmFileSystem(workspaceRoot),
-    modelLoader: runtime
-      ? createProjectModelLoader({ runtime }).modelLoader
-      : createModelLoader({ projectPath: workspaceRoot }),
+    modelLoader: loader ? loader.modelLoader : createModelLoader({ projectPath: workspaceRoot }),
   });
+  /* R4/I5: the loader is per-runner and nothing else can reach it, so the runner is where its
+   * provenance belongs — every factory that returns this runner carries it without extra wiring. */
+  return loader ? Object.assign(runner, { sourceRevisions: loader.sourceRevisions }) : runner;
 };
 
 /** Options for {@link createHostToolRegistry}. @public */
@@ -229,7 +242,7 @@ export type HostToolRegistryOptions = {
    * `@taucad/geospec-engine` resolves; pass `false` to withhold `test_model`
    * from an installation that has the engine.
    */
-  readonly geospecRunner?: ((workspaceRoot: string) => Promise<GeoSpecRunner>) | false | undefined;
+  readonly geospecRunner?: ((workspaceRoot: string) => Promise<HostGeoSpecRunner>) | false | undefined;
   /**
    * Where each admitted run works, by run id — the map `createProjectRevisions`
    * publishes (V19).
@@ -414,6 +427,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               runner,
               projectPath: workspaceRoot,
               args,
+              // R4/I5: absent on a runner with no Tau runtime behind it — a CLI-style model loader
+              // resolves its own sources, and an unproven verdict must not claim a revision.
+              ...(runner.sourceRevisions === undefined ? {} : { sourceRevisions: runner.sourceRevisions }),
             });
             return { success: true, ...output };
           } finally {

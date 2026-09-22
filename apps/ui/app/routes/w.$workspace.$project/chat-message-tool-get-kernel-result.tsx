@@ -162,9 +162,7 @@ export function ChatMessageToolGetKernelResult({
                 tone={status === 'error' ? 'destructive' : undefined}
               />
               <ChatToolCardTitle>
-                <ChatToolLabel
-                  verb={status === 'error' ? 'Failed to render' : status === 'pending' ? 'Render pending' : 'Rendered'}
-                >
+                <ChatToolLabel verb={status === 'error' ? 'Failed to render' : 'Rendered'}>
                   <ChatToolDescription>
                     <FilenameLink targetFile={targetFile} />
                   </ChatToolDescription>

@@ -3,7 +3,7 @@ title: 'Chat RPC Error Handling Policy'
 description: "Internal reference for the Socket.IO RPC layer connecting the API's LangGraph agent to browser-side tool execution. Covers error model, abort lifecycle, timer management, and connection handling."
 status: active
 created: '2026-02-18'
-updated: '2026-06-19'
+updated: '2026-09-22'
 related:
   - docs/policy/api-error-policy.md
   - docs/policy/rpc-policy.md
@@ -65,6 +65,21 @@ All filesystem implementations must set `error.code` on thrown errors:
 - **Filesystem bridge**: preserves `error.code` across worker boundaries via `BridgeError`.
 
 When `error.code` is absent or unrecognized, `getErrorCode()` falls back to substring matching on `error.message` (e.g., `'not found'`, `'no such file'`, `'enoent'`). This fallback exists for defense-in-depth but should not be the primary classification path for any known filesystem implementation.
+
+### Freshness Errors
+
+`STALE_EVALUATION` is a typed client error raised by the shared tool registry when a kernel-backed result answers for bytes a recorded write has since replaced. Return staleness as an error; never as a success status such as `status: 'stale'`.
+
+| Field               | Value                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `isError`           | `true`                                                                              |
+| `content.errorCode` | `'STALE_EVALUATION'`                                                                |
+| `content.expected`  | `{ path, digest }` — the revision the last recorded write to that path produced     |
+| `content.actual`    | `{ path, digest }` — the revision the result's `sourceRevision` named for that path |
+
+**Why**: a verdict about superseded bytes is a host failure, not a geometry outcome; naming both digests lets the agent, the harness and a transcript reader see which bytes were answered for.
+
+Every kernel-backed read result carries `sourceRevision` (the entry path plus the content digest of each file in its closure), and every write result carries `revision` (`{ path, digest }`, with `'missing'` after a delete). Keep both through result trimming: provenance the model never sees cannot end a stale loop. Absent provenance means unproven, never fresh.
 
 ## Error Propagation Flow
 

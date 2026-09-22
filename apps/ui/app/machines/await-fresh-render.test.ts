@@ -47,6 +47,14 @@ const fakeCadMachine = setup({
     },
     rendering: {
       on: {
+        /* The real machine re-enters `rendering.submitting` on a new render
+         * intent and bumps the requested id there, so a render can be
+         * overtaken before its own outcome arrives. */
+        request: {
+          actions: assign({
+            lastRequestedRenderId: ({ context }) => context.lastRequestedRenderId + 1,
+          }),
+        },
         finishRender: {
           target: 'idle',
           actions: assign({
@@ -133,6 +141,26 @@ describe('awaitFreshRender', () => {
 
     const snapshot = await promise;
     expect(snapshot.value).toBe('error');
+    actor.stop();
+  });
+
+  /* The sibling of the stale-kernel class: an error raised for render N while
+   * render N+1 is already in flight is the *previous* render's verdict, and
+   * handing it back as this wait's answer is exactly the staleness the
+   * baseline exists to exclude. */
+  it('should not settle on an error that a newer render request has overtaken', async () => {
+    const actor = createActor(fakeCadMachine).start();
+    actor.send({ type: 'request' });
+    actor.send({ type: 'startRender' });
+
+    const promise = awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
+      awaitTimeout: 50,
+    });
+    actor.send({ type: 'request' });
+    actor.send({ type: 'fail' });
+
+    await expect(promise).rejects.toBeInstanceOf(AwaitFreshRenderTimeoutError);
+    expect(actor.getSnapshot().value).toBe('error');
     actor.stop();
   });
 

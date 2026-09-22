@@ -20,6 +20,7 @@ import type {
   CapabilitiesManifest,
   ExportRoute,
   RuntimeCapabilityRegistration,
+  SourceRevision,
 } from '#types/runtime.types.js';
 import type { ComputeBinding, KernelComputeCapability } from '#types/runtime-compute.types.js';
 import type {
@@ -105,6 +106,7 @@ import { cooperativeYield, scheduleMacrotask } from '#framework/async-polyfills.
 import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { contentDigest } from '@taucad/cache-core';
+import type { ContentDigest } from '@taucad/cache-core';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
@@ -1803,6 +1805,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
     if (result.success) {
+      /* R4/I5: the manifest identity already names every source file this lane hashed, so the
+       * result's provenance is that identity, not a second digest scheme. Attached before the
+       * cache is written, so a cache hit replays the revision it was computed from. */
+      result = { ...result, sourceRevision: { entry: entryPath, files: parameterSourceFiles } };
       this.parameterResultCache = { key: parameterCacheKey, result: structuredClone(result) };
     }
 
@@ -2168,6 +2174,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         kernelId: owner.binding?.kernelId ?? 'unknown',
       },
       issues,
+      /* R4/I5: this lane hashed the closure itself, so the revision is those hashes, in the same
+       * digest vocabulary the parameter manifest and the write tools use. */
+      sourceRevision: {
+        entry: entryPath,
+        files: Object.fromEntries<ContentDigest | 'missing'>([
+          ...[...hashesByPath].map(
+            ([path, sha256]) =>
+              [path, contentDigest({ value: `sha256:${sha256}`, name: `source snapshot ${path}` })] as const,
+          ),
+          ...unresolvedPaths.map((path) => [path, 'missing'] as const),
+        ]),
+      },
     };
   }
 
@@ -2218,7 +2236,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
 
     try {
-      return finalizeExportArtifactSet(
+      /* R4/I5: the lane's provenance is fixed once parameters resolve, and is carried onto the
+       * artifact set — success or failure — rather than onto one branch of it. */
+      let sourceRevision: SourceRevision | undefined;
+      const exported = finalizeExportArtifactSet(
         await (async (): Promise<ExportGeometryResult> => {
           const dependencyContext: DependencyResolutionContext = {};
           if (request.stage) {
@@ -2241,6 +2262,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (!parametersResult.success) {
             return parametersResult;
           }
+          sourceRevision = parametersResult.sourceRevision;
           const extracted = parametersResult.data;
           if (extracted.legacyProjection.status !== 'usable') {
             return createKernelError([
@@ -2341,6 +2363,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           });
         })(),
       );
+      return sourceRevision === undefined ? exported : { ...exported, sourceRevision };
     } finally {
       await this.reconcileObservedPaths();
       exportSpan.end();
@@ -2498,16 +2521,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
 
       const extracted = parametersResult.data;
+      // R4/I5: everything this lane returns from here on was computed from that source revision,
+      // failures included — a render that failed against replaced bytes must not read as current.
+      const { sourceRevision } = parametersResult;
       if (extracted.legacyProjection.status !== 'usable') {
-        return createKernelError([
-          {
-            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
-            code: 'RUNTIME',
-            type: 'kernel',
-            severity: 'error',
-            details: extracted.legacyProjection.diagnostics,
-          },
-        ]);
+        return {
+          ...createKernelError([
+            {
+              message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+              code: 'RUNTIME',
+              type: 'kernel',
+              severity: 'error',
+              details: extracted.legacyProjection.diagnostics,
+            },
+          ]),
+          sourceRevision,
+        };
       }
       const callerParameters = mergeParameterDefaults({}, input.parameters, extracted.legacyProjection.schema);
 
@@ -2525,19 +2554,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       );
       const { result } = artifact;
       if (!result.success) {
-        return result;
+        return { ...result, sourceRevision };
       }
       if (result.data === undefined) {
-        return createKernelError([
-          {
-            message: 'Kernel produced no display artifact for model evaluation.',
-            code: 'KERNEL_CAPABILITY_MISSING',
-            type: 'kernel',
-            severity: 'error',
-          },
-        ]);
+        return {
+          ...createKernelError([
+            {
+              message: 'Kernel produced no display artifact for model evaluation.',
+              code: 'KERNEL_CAPABILITY_MISSING',
+              type: 'kernel',
+              severity: 'error',
+            },
+          ]),
+          sourceRevision,
+        };
       }
-      return { ...result, data: result.data };
+      return { ...result, data: result.data, sourceRevision };
     } finally {
       renderSpan.end();
     }

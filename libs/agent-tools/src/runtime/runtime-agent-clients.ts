@@ -170,6 +170,9 @@ export const createRuntimeParameterAgentClient = (
           status: 'resolved',
           manifest: parameterManifestWireSchema.parse(structuredClone(manifest)),
           current: structuredClone({ entry: current.entry, identity: current.identity }),
+          /* R4/I5: the manifest's own identity already names every source file it was compiled
+           * from, so provenance is that identity lifted to the top level, not a second digest. */
+          sourceRevision: { entry: targetFile, files: { ...manifest.identity.sourceFiles } },
         }),
       };
     } catch (error) {
@@ -336,6 +339,8 @@ export const createRuntimeAgentClients = (
           success: true,
           status: result.success ? 'ready' : 'error',
           kernelIssues: [...result.issues],
+          // R4/I5: the verdict names the source it was computed from, failures included.
+          ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
         };
       } catch (error) {
         return input.mapRuntimeError(error, targetFile);
@@ -380,6 +385,8 @@ export const createRuntimeAgentClients = (
           };
         }
         const geometry = result.data;
+        // R4/I5: an image is evidence about a revision, not about "the model".
+        const provenance = result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision };
         if (geometry.format === 'webrtc') {
           return {
             success: false,
@@ -427,6 +434,7 @@ export const createRuntimeAgentClients = (
           return {
             success: true,
             images: [{ view: 'drawing', dataUrl: captureFilesToDataUrls(files)[0]! }],
+            ...provenance,
           };
         }
 
@@ -466,6 +474,7 @@ export const createRuntimeAgentClients = (
                   dataUrl: dataUrls[index]!,
                 }))
               : [{ view: 'isometric', dataUrl: dataUrls[0]! }],
+          ...provenance,
         };
       } catch (error) {
         return input.mapRuntimeError(error, captureInput.targetFile);

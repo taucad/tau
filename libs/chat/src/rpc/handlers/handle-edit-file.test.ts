@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
+
+/** `expect.stringMatching` is untyped, so the matcher is named once and typed at its declaration. */
+const anyContentDigest = expect.stringMatching(/^sha256:[0-9a-f]{64}$/u) as unknown as string;
 
 describe('handleEditFile', () => {
   it('should replace a single occurrence and return count', async () => {
@@ -19,6 +23,7 @@ describe('handleEditFile', () => {
       message: 'Replaced 1 occurrence in main.ts',
       occurrences: 1,
       diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'foo', modifiedContent: 'bar' },
+      revision: { path: 'main.ts', digest: anyContentDigest },
     });
     expect(fileSystem.editFile).toHaveBeenCalledWith('main.ts', 'foo', 'bar', undefined);
     expect(fileSystem.readFile).not.toHaveBeenCalled();
@@ -41,9 +46,28 @@ describe('handleEditFile', () => {
       message: 'Replaced 3 occurrences in main.ts',
       occurrences: 3,
       diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'xxx', modifiedContent: 'yyy' },
+      revision: { path: 'main.ts', digest: anyContentDigest },
     });
     expect(fileSystem.editFile).toHaveBeenCalledWith('main.ts', 'x', 'y', true);
     expect(fileSystem.readFile).not.toHaveBeenCalled();
+  });
+
+  it('should report the digest of the file the edit left behind, not of the replacement text (R4)', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    const modifiedContent = 'const a = 1;\nconst b = 2;\n';
+    fileSystem.editFile.mockResolvedValue({
+      occurrences: 1,
+      diffStats: { linesAdded: 1, linesRemoved: 1, originalContent: 'const a = 0;\nconst b = 2;\n', modifiedContent },
+    });
+
+    const result = await handleEditFile({ targetFile: 'main.ts', oldString: '0', newString: '1' }, fileSystem);
+
+    expect(result).toMatchObject({
+      revision: {
+        path: 'main.ts',
+        digest: `sha256:${createHash('sha256').update(modifiedContent, 'utf8').digest('hex')}`,
+      },
+    });
   });
 
   it('should return FILE_NOT_FOUND when file does not exist', async () => {

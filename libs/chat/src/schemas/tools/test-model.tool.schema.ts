@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 // =============================================================================
 // View and Observation Schemas (internal use for capturing screenshots)
@@ -148,6 +149,10 @@ export const testModelOutputSchema = z.object({
   passes: z.array(testPassSchema).describe('Array of passed tests'),
   passed: z.number().describe('Number of tests that passed'),
   total: z.number().describe('Total number of tests run'),
+  sourceRevisions: z
+    .array(sourceRevisionSchema)
+    .optional()
+    .describe('One entry per model the run loaded, naming the source it was evaluated from (R4).'),
 });
 /**
  * Inferred aggregate output from `test_model` / GeoSpec evaluation runs.

@@ -18,6 +18,7 @@
 
 import '@taucad/geospec-engine/register';
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
+import type { ProjectModelLoader } from '@taucad/agent-tools/geospec';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { FsLike } from '@taucad/runtime/filesystem';
@@ -145,6 +146,8 @@ type WorkerSession = {
   runtimeClient: ReturnType<typeof createRuntimeClient>;
   runner: ReturnType<typeof createGeoSpecWebRunner>;
   resetFatalModelLoadError: () => void;
+  /** R4/I5: the source revision of every model this session's runtime loaded since the last reset. */
+  sourceRevisions: ProjectModelLoader['sourceRevisions'];
 };
 
 type QueuedRun = {
@@ -209,7 +212,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
         runtimeConfig: runtimeConfigResult.data,
       }),
     );
-    const { modelLoader, resetFatalError } = createProjectModelLoader({ runtime: runtimeClient });
+    const { modelLoader, resetFatalError, sourceRevisions } = createProjectModelLoader({ runtime: runtimeClient });
     runner = createGeoSpecWebRunner({
       filesystem: createBridgeVmFileSystem(fileSystem),
       modelLoader,
@@ -220,6 +223,8 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runtimeClient,
       runner,
       resetFatalModelLoadError: resetFatalError,
+      // R4/I5: what this session's models were loaded from, reported with the verdict.
+      sourceRevisions,
     };
     session = activeSession;
     workerScope.postMessage({ type: 'initialized', requestId: request.requestId, sessionId: request.sessionId });
@@ -253,6 +258,7 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
       discovery: createDiscoveryFileSystem(activeSession.fileSystem),
       runner: activeSession.runner,
       args: request.args,
+      sourceRevisions: activeSession.sourceRevisions,
     });
     workerScope.postMessage({
       type: 'result',

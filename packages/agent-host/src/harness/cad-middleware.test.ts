@@ -69,6 +69,29 @@ describe('ToolResultTrimmer', () => {
     ]);
   });
 
+  it('keeps the source revision a trimmed verdict was computed from (R4)', () => {
+    const sourceRevision = { entry: 'main.ts', files: { 'main.ts': `sha256:${'a'.repeat(64)}` } };
+    const content = {
+      status: 'error',
+      kernelIssues: [{ code: 'RUNTIME', message: 'boom', severity: 'error' }],
+      sourceRevision,
+    };
+    const [trimmed] = trimToolResultContext([
+      {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: 'get_kernel_result',
+        content: [{ type: 'text', text: JSON.stringify(content) }],
+        details: { content, isError: false, substituted: false },
+        isError: false,
+        timestamp: 0,
+      },
+    ]);
+
+    const text = trimmed?.role === 'toolResult' && trimmed.content[0]?.type === 'text' ? trimmed.content[0].text : '';
+    expect(JSON.parse(text)).toMatchObject({ status: 'error', sourceRevision });
+  });
+
   it('keeps the newest capture whole and replaces older image blocks with a placeholder', () => {
     // Built the way the tool records it, so the trimmer sees what pi sees.
     const capture = (toolCallId: string, view: string): AgentMessage => {

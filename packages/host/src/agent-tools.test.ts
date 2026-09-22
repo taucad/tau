@@ -259,6 +259,40 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(result.content)).toContain('cube > is watertight');
   });
 
+  it('names the source revision of every model test_model loaded (R4)', async () => {
+    const workspaceRoot = await makeWorkspace();
+    await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
+    const sourceRevision = { entry: 'cube.ts', files: { 'cube.ts': `sha256:${'a'.repeat(64)}` } };
+    const run = vi.fn(async ({ files }: { readonly files: readonly string[] }) => ({
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: files.map(
+        (file) =>
+          ({
+            file,
+            result: {
+              success: true,
+              issues: [],
+              tests: [{ suite: ['cube'], name: 'is watertight', status: 'passed', assertions: [], diagnostics: [] }],
+            },
+          }) as const,
+      ),
+    }));
+    const registry = createHostToolRegistry({
+      workspaceRoot,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the runner slice the adapter drives, plus the provenance it reports.
+      geospecRunner: async () =>
+        ({ run, close: async () => undefined, sourceRevisions: () => [sourceRevision] }) as unknown as GeoSpecRunner,
+    });
+
+    const result = await invoke(registry, 'test_model', {});
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toMatchObject({ sourceRevisions: [sourceRevision] });
+  });
+
   it('resolves an authored workspace skill through use_skill', async () => {
     const workspaceRoot = await makeWorkspace();
     await withSkill(workspaceRoot, 'bracket-design', 'Bracket design rules');

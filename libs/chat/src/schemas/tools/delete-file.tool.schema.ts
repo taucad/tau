@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { writeRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 /** @public */
 export const deleteFileInputSchema = z.object({
@@ -15,6 +16,7 @@ export const deleteFileOutputSchema = z.object({
     .describe(
       'Pre-deletion file content, captured so the delete is invertible for restore. Absent for missing/binary/legacy deletes.',
     ),
+  revision: writeRevisionSchema.optional().describe('The deleted path, recorded as "missing" (R4).'),
 });
 
 /** @public */

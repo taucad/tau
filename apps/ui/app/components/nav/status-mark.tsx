@@ -28,7 +28,7 @@ const markGlyph = ({ mark, count }: SidebarFacts): React.JSX.Element | undefined
        * spinner. Frozen under reduced motion it is a solid grey disc, and hue
        * alone separates it from the blue unread disc; the opt-out is explicit
        * because the app's reset does not reach `animate-pulse`. */
-      return <Dot tone='animate-pulse bg-muted-foreground/70 motion-reduce:animate-none' />;
+      return <Dot tone='animate-breathe bg-muted-foreground/80 motion-reduce:animate-none' />;
     }
     case 'attention': {
       /* D16: the disc stays dead centre; the count hangs off its lower right

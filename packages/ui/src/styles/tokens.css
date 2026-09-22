@@ -479,6 +479,21 @@
 }
 
 @theme inline {
+  /* Sidebar v2 D20: an ambient status mark breathing between its full tone and a quarter of it,
+     twice the pace of `animate-pulse` and twice its depth. Opacity only, per DESIGN Motion. */
+  --animate-breathe: breathe 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.25;
+    }
+  }
+
   --shadow-*: initial;
   --shadow-xs: 0 1px 2px 0 rgba(10, 13, 20, 0.03);
   --shadow-sm: 0 1px 2px 0 #1018280f, 0 1px 3px 0 #1018281a;

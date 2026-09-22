@@ -28,7 +28,7 @@ const exposedToolNames = [
 
 /** R8/I5/I9: what every kernel-backed read promises about the bytes it answered for. */
 const sourceRevisionRule =
-  'Computed from the bytes on disk at call time; sourceRevision names the digests it read. A result Tau can prove answers for superseded bytes returns as a STALE_EVALUATION error naming both digests, never as a result.';
+  "Computed from the bytes on disk at call time; sourceRevision names the digests it read. A result answering for bytes Tau's own file tools have since replaced returns as a STALE_EVALUATION error naming both digests, never as a result; for edits you made with your own tools, compare sourceRevision yourself.";
 
 const descriptions = {
   getKernelResult: `Check one CAD source file for compile or runtime issues; status is 'ready' or 'error'. ${sourceRevisionRule} Use test_model for geometry requirements, not compile status.`,

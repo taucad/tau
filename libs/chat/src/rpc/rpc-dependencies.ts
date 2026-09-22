@@ -95,6 +95,8 @@ export type RpcFileSystem = {
     occurrences: number;
     staleRecovered?: true;
     diffStats: DiffStatsWithContent;
+    /** R4: `sha256:` digest of the bytes the edit committed, when the adapter can prove them. */
+    digest?: string;
   }>;
   stat(path: string): Promise<RpcFileStat>;
 };

@@ -27,6 +27,7 @@ import type {
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
 import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
+import { sha256String } from '@taucad/utils/hash';
 import { z } from 'zod';
 
 import type { HostToolDefinition, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
@@ -98,26 +99,27 @@ type RevisionMismatch = {
  *
  * @param result - Raw RPC result the dispatcher returned.
  * @param written - Latest digest this registry wrote per rooted path.
- * @returns The first disagreement, or `undefined` when nothing contradicts.
+ * @returns Every path they disagree on, one entry per path.
  */
-const revisionMismatch = (result: unknown, written: ReadonlyMap<string, string>): RevisionMismatch | undefined => {
+const revisionMismatches = (result: unknown, written: ReadonlyMap<string, string>): RevisionMismatch[] => {
   const provenance = provenanceSchema.safeParse(result).data;
   if (!provenance) {
-    return undefined;
+    return [];
   }
   const closures = [
     ...(provenance.sourceRevision ? [provenance.sourceRevision] : []),
     ...(provenance.sourceRevisions ?? []),
   ];
+  const mismatches = new Map<string, RevisionMismatch>();
   for (const closure of closures) {
     for (const [path, digest] of Object.entries(closure.files)) {
       const expected = written.get(path);
       if (expected !== undefined && expected !== digest) {
-        return { expected: { path, digest: expected }, actual: { path, digest } };
+        mismatches.set(path, { expected: { path, digest: expected }, actual: { path, digest } });
       }
     }
   }
-  return undefined;
+  return [...mismatches.values()];
 };
 
 const codedErrorSchema = z.object({ code: z.string() });
@@ -213,9 +215,11 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
   /* The digest this registry last wrote per rooted path, for the life of the
    * registry: one per browser worker session, one per live checkout on the
    * daemon and desktop (`createHostToolRegistry` memoizes by root), and the
-   * same instance the MCP server dispatches through. A path is re-established
-   * by the next write through these tools; an edit made outside them is not
-   * seen, so the gate can only ever be as current as the run's own writes. */
+   * same instance the MCP server dispatches through. It is a hint, not the
+   * authority: an edit made outside these tools — a person typing in the
+   * editor, a peer run, a `git checkout` — leaves an entry naming bytes that
+   * are gone, so a disagreeing verdict is checked against the bytes on disk
+   * before it is refused (`reconcile`). */
   const written = new Map<string, string>();
 
   return {
@@ -249,8 +253,9 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
           mapped.rpc === rpcName.exportGeometry && options.recordFileSystemFor !== undefined
             ? options.recordFileSystemFor
             : options.fileSystemFor;
+        const fileSystem = fileSystemFor(invocation.signal);
         const dispatcher = createRpcDispatcher({
-          fileSystem: fileSystemFor(invocation.signal),
+          fileSystem,
           kernelClient: options.kernelClient ?? unattachedKernelClient,
           ...(options.graphics === undefined ? {} : { graphics: options.graphics }),
           ...(options.images === undefined ? {} : { images: options.images }),
@@ -293,6 +298,44 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
           }
         };
         /**
+         * Drop the disagreements the bytes on disk settle.
+         *
+         * `written` remembers only this registry's own writes, so anything that
+         * edits the checkout outside the tools leaves it naming bytes that no
+         * longer exist and would wedge every later verdict. The file itself is
+         * the authority: a verdict whose closure matches what is at the path
+         * now describes current reality whatever the memory says, and the
+         * memory is corrected to it.
+         *
+         * ponytail: re-reads the disagreeing paths (only ever paths this run
+         * wrote, so text and bounded by `edit_file`'s limit) rather than
+         * stamping size/mtime beside every write. A file whose bytes the disk
+         * read cannot reproduce exactly — today, a UTF-8 BOM, which
+         * `RpcFileSystem.readFile` decodes away while the kernel hashes it —
+         * simply fails to reconcile and takes the refusing path.
+         *
+         * @param mismatches - Every path this verdict and the memory disagree on.
+         * @returns The first disagreement the disk did not settle.
+         */
+        const reconcile = async (mismatches: readonly RevisionMismatch[]): Promise<RevisionMismatch | undefined> => {
+          const onDisk = await Promise.all(
+            mismatches.map(async ({ actual }): Promise<string> => {
+              try {
+                return `sha256:${await sha256String(await fileSystem.readFile(actual.path))}`;
+              } catch {
+                /* Gone, or unreadable as text: either way not the verdict's bytes. */
+                return 'missing';
+              }
+            }),
+          );
+          for (const [index, mismatch] of mismatches.entries()) {
+            if (onDisk[index] === mismatch.actual.digest) {
+              written.set(mismatch.actual.path, mismatch.actual.digest);
+            }
+          }
+          return mismatches.find((mismatch, index) => onDisk[index] !== mismatch.actual.digest);
+        };
+        /**
          * Settle one dispatched result under the freshness gate (R5).
          *
          * A verdict that names bytes this run has replaced gets exactly one
@@ -316,10 +359,10 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
             if (revision && result.success) {
               written.set(revision.path, revision.digest);
             }
-          } else if (revisionMismatch(result, written)) {
+          } else if (await reconcile(revisionMismatches(result, written))) {
             result = await dispatchOnce();
             assertNotAborted(invocation.signal);
-            const mismatch = revisionMismatch(result, written);
+            const mismatch = await reconcile(revisionMismatches(result, written));
             if (mismatch) {
               return {
                 content: {

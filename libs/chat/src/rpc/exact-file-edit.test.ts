@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it, vi } from 'vitest';
 import type { ClientTextMutationFileSystem } from '#rpc/client-text-mutation.js';
 import { applyClientTextMutation } from '#rpc/client-text-mutation.js';
@@ -95,6 +97,21 @@ describe('deterministic exact file edit', () => {
     ).resolves.toMatchObject({ ok: true, occurrences: 1 });
     expect(state.read().slice(0, 3)).toEqual(bom);
     expect(new TextDecoder().decode(state.read().slice(3))).toBe('const label = "done";\r\nnext();\r\n');
+  });
+
+  /* R4/F2: the digest has to name the bytes the commit left, not the decoded
+   * text. A UTF-8 BOM is exactly where those two part company — the kernel
+   * hashes it, `decodeClientText` strips it. */
+  it('digests the committed bytes, BOM included', async () => {
+    const state = fileSystemFor(withBom('cube(1);\n'));
+
+    const result = await apply(state, { oldString: 'cube(1)', newString: 'cube(2)' });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(state.read().slice(0, 3)).toEqual(bom);
+    expect(result).toMatchObject({
+      digest: `sha256:${createHash('sha256').update(state.read()).digest('hex')}`,
+    });
   });
 
   it('rejects split surrogate edit text before matching or encoding', async () => {

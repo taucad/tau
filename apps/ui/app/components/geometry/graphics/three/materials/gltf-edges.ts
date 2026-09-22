@@ -5,7 +5,13 @@ import { LineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons'
 import { LineSegments2 as WebGpuFatLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
-import { gltfEdgeColorLightMode } from '#components/geometry/graphics/three/overlay-colors.constants.js';
+import {
+  gltfEdgeColorLightMode,
+  gltfEdgeHoverColor,
+  gltfEdgeSelectedColor,
+} from '#components/geometry/graphics/three/overlay-colors.constants.js';
+import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
+import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 
 /**
  * Default line width in pixels for edge rendering.
@@ -328,6 +334,71 @@ export function getFatLineSourceIndices(object: Object3D): Uint32Array | Uint16A
   return fatLineSourceIndices.get(object);
 }
 
+/** The shared theme-coloured material each fat line wears when its component is not emphasised. */
+const fatLineBaseMaterials = new WeakMap<Object3D, GltfFatLineMaterial>();
+
+type EdgeEmphasisMaterials = Readonly<{ hover: GltfFatLineMaterial; selected: GltfFatLineMaterial }>;
+
+/**
+ * Per-base-material hover/selected variants, built lazily on first emphasis so an idle
+ * presentation still pays for exactly one edge pipeline.
+ */
+const edgeEmphasisMaterials = new WeakMap<GltfFatLineMaterial, EdgeEmphasisMaterials>();
+
+function createEdgeEmphasisMaterial(base: GltfFatLineMaterial, edgeColor: number): GltfFatLineMaterial {
+  const material =
+    base instanceof LineMaterial
+      ? createWebGlGltfFatLineMaterial(base.resolution, edgeColor)
+      : createWebGpuGltfFatLineMaterial(edgeColor);
+  // Emphasised edges are an overlay: the whole silhouette shows through occluding surfaces
+  // (graphics-backend-policy rule 4 — depth behaviour declared, never biased).
+  material.depthTest = false;
+  material.depthWrite = false;
+  return material;
+}
+
+function getOrCreateEdgeEmphasisMaterials(base: GltfFatLineMaterial): EdgeEmphasisMaterials {
+  let materials = edgeEmphasisMaterials.get(base);
+  if (!materials) {
+    materials = {
+      hover: createEdgeEmphasisMaterial(base, gltfEdgeHoverColor),
+      selected: createEdgeEmphasisMaterial(base, gltfEdgeSelectedColor),
+    };
+    edgeEmphasisMaterials.set(base, materials);
+  }
+  return materials;
+}
+
+/**
+ * Swap a fat line between its shared base material and the shared hover/selected overlay
+ * material for its component's emphasis. `focused` reads as selected, matching the surface tint.
+ */
+export function setGltfFatLineEmphasis(object: Object3D, emphasis: ModelComponentEmphasis): void {
+  const base = fatLineBaseMaterials.get(object);
+  if (!base) {
+    return;
+  }
+  const line = object as LineSegments2;
+  if (emphasis === 'none') {
+    line.material = base as LineMaterial;
+    line.renderOrder = viewportRenderTiers.model;
+    return;
+  }
+  const materials = getOrCreateEdgeEmphasisMaterials(base);
+  line.material = (emphasis === 'hover' ? materials.hover : materials.selected) as LineMaterial;
+  line.renderOrder = viewportRenderTiers.modelEdgeEmphasis;
+}
+
+/** Every material `object` can wear (base + any built emphasis variants), for disposal. */
+export function collectGltfFatLineMaterials(object: Object3D): GltfFatLineMaterial[] {
+  const base = fatLineBaseMaterials.get(object);
+  if (!base) {
+    return [];
+  }
+  const emphasis = edgeEmphasisMaterials.get(base);
+  return emphasis ? [base, emphasis.hover, emphasis.selected] : [base];
+}
+
 export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOptions): void {
   const { resolution, backend, edgeColor = gltfEdgeColorLightMode } = options;
   // Capture paths and tests hand this function a scene without a loader parser.
@@ -359,6 +430,7 @@ export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOp
 
     parent.remove(lineSegments);
     parent.add(fatLine);
+    fatLineBaseMaterials.set(fatLine, sharedMaterial);
 
     const sourceIndices = lineSegments.geometry.index?.array;
     if (sourceIndices instanceof Uint32Array || sourceIndices instanceof Uint16Array) {
@@ -396,9 +468,12 @@ export function updateLineMaterialResolution(scene: Group, resolution: Vector2):
       return;
     }
 
-    const { material } = object as LineSegments2;
-    if ('resolution' in material) {
-      (material as { resolution: Vector2 }).resolution.copy(resolution);
+    const worn = (object as LineSegments2).material as GltfFatLineMaterial;
+    const materials = fatLineBaseMaterials.has(object) ? collectGltfFatLineMaterials(object) : [worn];
+    for (const material of materials) {
+      if ('resolution' in material) {
+        material.resolution.copy(resolution);
+      }
     }
   });
 }
@@ -406,7 +481,8 @@ export function updateLineMaterialResolution(scene: Group, resolution: Vector2):
 /**
  * Update the edge tint on every `LineSegments2` in a scene.
  *
- * Shared materials mean one `setHex` updates all edge meshes.
+ * Shared materials mean one `setHex` updates all edge meshes. The tint lands on the base
+ * material even while a line wears an emphasis overlay, so the overlay keeps its yellow.
  *
  * @param scene - Scene group containing fat-line edge meshes.
  * @param edgeColor - sRGB hex edge tint.
@@ -420,8 +496,8 @@ export function updateGltfEdgeColor(scene: Group, edgeColor: number): Set<GltfFa
       return;
     }
 
-    const { material } = object as LineSegments2;
-    const edgeMaterial = material as GltfFatLineMaterial;
+    const edgeMaterial =
+      fatLineBaseMaterials.get(object) ?? ((object as LineSegments2).material as GltfFatLineMaterial);
     setGltfFatLineMaterialColor(edgeMaterial, edgeColor);
     updatedMaterials.add(edgeMaterial);
   });

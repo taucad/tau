@@ -10,6 +10,8 @@
  */
 export const viewportRenderTiers = {
   model: 0,
+  /** Hovered/selected component edges drawn through occluders (`depthTest: false`), under section caps. */
+  modelEdgeEmphasis: 1000,
   sectionCapFill: 10_000,
   sectionContourOutline: 10_010,
   sectionControlBody: 20_000,

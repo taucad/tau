@@ -184,11 +184,6 @@ export const idPrefix = {
    */
   workspace: 'wsp',
   /**
-   * A subscription record ID (`subscription.id`, mirrored from Stripe by
-   * the `@better-auth/stripe` plugin).
-   */
-  subscription: 'sub',
-  /**
    * A credit-ledger transaction ID (`credit_transaction.id`, append-only journal).
    */
   creditTx: 'ctx',

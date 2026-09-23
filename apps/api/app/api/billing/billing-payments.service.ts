@@ -1230,7 +1230,6 @@ export class BillingPaymentsService {
         .values({
           id: actionId,
           plan: 'pro',
-          referenceId: `financial:${actionId}`,
           accountId: owner.accountId,
           environment: this.config.environment,
           customerBindingId: binding.id,

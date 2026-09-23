@@ -22,7 +22,6 @@ const row = (fields: Partial<SubscriptionRow> = {}): SubscriptionRow => ({
   plan: 'pro',
   status: 'active',
   paidThrough: new Date('2026-10-01T00:00:00Z'),
-  periodEnd: new Date('2026-10-01T00:00:00Z'),
   failedRenewalInvoiceId: null,
   graceEndsAt: null,
   cancelAtPeriodEnd: false,
@@ -67,7 +66,7 @@ afterEach(() => {
 });
 
 describe('owned paid access deadlines', () => {
-  it('does not use legacy identity or an active label without an earned deadline', async () => {
+  it('grants nothing to an unbound user or to an active label without an earned deadline', async () => {
     const unbound = createService([row()], false);
     expect(await unbound.service.getEntitlements('user-a')).toMatchObject({ tier: 'free' });
     expect(unbound.database.database.query.subscription.findMany).not.toHaveBeenCalled();
@@ -86,14 +85,13 @@ describe('owned paid access deadlines', () => {
     });
   });
 
-  it('uses fixed grace even if Stripe has advanced the next period end', async () => {
+  it('uses fixed grace once the paid-through deadline has passed', async () => {
     const expired = createService([
       row({
         status: 'past_due',
         paidThrough: new Date('2026-08-01T00:00:00Z'),
         failedRenewalInvoiceId: 'in_failed',
         graceEndsAt: new Date('2026-08-08T00:00:00Z'),
-        periodEnd: new Date('2026-11-01T00:00:00Z'),
       }),
     ]);
     expect(await expired.service.getEntitlements('user-a')).toMatchObject({ tier: 'free', status: 'past_due' });

@@ -31,9 +31,8 @@ import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
-
-/** Which side of a conflict one file takes. @public */
-export type ResolutionSide = 'mine' | 'theirs' | 'editor';
+import type { ResolutionSide } from '#resolution.types.js';
+export type { ResolutionSide } from '#resolution.types.js';
 
 /** One conflicted path, and whether it can be opened as text. @public */
 export type ResolutionPath = Readonly<{

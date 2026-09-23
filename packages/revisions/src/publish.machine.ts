@@ -33,30 +33,14 @@ import type { MachineActors } from '#machine-schemas.js';
 
 import type { RevisionTag } from '#revision-port.js';
 import type { SyncPushOutcome } from '#sync.machine.js';
+import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
+import type { PublishDraft, PublishFacet } from '#publish.types.js';
+export type { PublishVisibility } from '#publish.types.js';
+export type { PublishDraft, PublishFacet } from '#publish.types.js';
+export type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 
 /** How long `pushing` waits for the settlement that names its push. @public */
 export const publishPushMilliseconds = 60_000;
-
-/** Who may see a publication, in the API's own words. @public */
-export type PublishVisibility = 'private' | 'public';
-
-/** What the dialog and `tau publish` collect before anything is written. @public */
-export type PublishDraft = Readonly<{
-  /** The named version. Existing name re-points it; a new one creates it. */
-  tag: string;
-  /** Why this version has a name (the annotated tag's message). */
-  note?: string;
-  /** The project's own name, which the publication's project mirror records. */
-  projectName: string;
-  /** The file a viewer opens with. Must be in the named version's tree. */
-  entryPath: string;
-  visibility: PublishVisibility;
-  title: string;
-  description?: string;
-  /** Private publications only. */
-  sharedEmails?: readonly string[];
-  notifyRecipients?: boolean;
-}>;
 
 /** Input accepted when creating the publishMachine actor. @public */
 export type PublishMachineInput = Readonly<{
@@ -153,17 +137,6 @@ export type PublishPushActorInput = Readonly<{
 
 /** What `push` answers: the id the settlement will name and the remote that accepted it. @public */
 export type PublishPushActorOutput = Readonly<{ pushId: string; remote: string }>;
-
-/** What `createPublication` is asked to record. @public */
-export type PublishPublicationActorInput = Readonly<{
-  projectId: string;
-  tag: string;
-  revisionId: string;
-}> &
-  PublishDraft;
-
-/** What `createPublication` answers: the row, and the link to copy. @public */
-export type PublishPublicationActorOutput = Readonly<{ publicationId: string; url: string }>;
 
 const defaultBranch = 'main';
 
@@ -483,16 +456,6 @@ export const publishMachine: PublishMachine = publishMachineDefinition;
 
 /** The actor set `publishMachine.provide` needs. @public */
 export type PublishActors = MachineActors<typeof publishMachine>;
-
-/** Where a publication is, for the dialog and the projection. @public */
-export type PublishFacet = Readonly<{
-  phase: 'idle' | 'choosingVersion' | 'working' | 'success' | 'error';
-  /** Names this project already has, newest first as the port answers. */
-  tags: readonly RevisionTag[];
-  publicationId: string | undefined;
-  shareUrl: string | undefined;
-  error: string | undefined;
-}>;
 
 const phaseOf = (value: unknown): PublishFacet['phase'] => {
   /* `choosingVersion` has children, so the snapshot value is an object there. */

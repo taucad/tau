@@ -296,23 +296,7 @@ const announceConnected = (context: RemoteMachineContext, enq: RemoteEnqueue): v
   }
 };
 
-/**
- * Headless remote connection for one project.
- *
- * @public
- * @example <caption>Connect a project to Tau Cloud</caption>
- * ```typescript
- * import { createActor } from 'xstate';
- * import { remoteMachine } from '@taucad/revisions/remote-machine';
- * import type { RemoteActors } from '@taucad/revisions/remote-machine';
- *
- * declare const hostActors: RemoteActors;
- * const actor = createActor(remoteMachine.provide({ actors: hostActors }), { input: { projectId: 'p1' } });
- * actor.start();
- * actor.send({ type: 'connect', kind: 'tau' });
- * ```
- */
-export const remoteMachine = setup({
+const remoteMachineDefinition = setup({
   schemas: {
     context: types<RemoteMachineContext>(),
     events: eventSchemas<RemoteMachineEvent>(),
@@ -585,6 +569,34 @@ export const remoteMachine = setup({
     },
   },
 });
+
+type RemoteMachineDefinition = typeof remoteMachineDefinition;
+
+/**
+ * The type of {@link remoteMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface RemoteMachine extends RemoteMachineDefinition {}
+
+/**
+ * Headless remote connection for one project.
+ *
+ * @public
+ * @example <caption>Connect a project to Tau Cloud</caption>
+ * ```typescript
+ * import { createActor } from 'xstate';
+ * import { remoteMachine } from '@taucad/revisions/remote-machine';
+ * import type { RemoteActors } from '@taucad/revisions/remote-machine';
+ *
+ * declare const hostActors: RemoteActors;
+ * const actor = createActor(remoteMachine.provide({ actors: hostActors }), { input: { projectId: 'p1' } });
+ * actor.start();
+ * actor.send({ type: 'connect', kind: 'tau' });
+ * ```
+ */
+export const remoteMachine: RemoteMachine = remoteMachineDefinition;
 
 /** The actor set `remoteMachine.provide` needs. @public */
 export type RemoteActors = MachineActors<typeof remoteMachine>;

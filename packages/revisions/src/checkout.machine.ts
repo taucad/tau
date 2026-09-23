@@ -320,12 +320,7 @@ const reportStatus = (context: CheckoutMachineContext, enq: CheckoutEnqueue, sta
   enq.sendTo(context.parentRef, fact);
 };
 
-/**
- * Headless minting core for one checkout.
- *
- * @public
- */
-export const checkoutMachine = setup({
+const checkoutMachineDefinition = setup({
   schemas: {
     context: types<CheckoutMachineContext>(),
     events: eventSchemas<CheckoutMachineEvent>(),
@@ -576,6 +571,23 @@ export const checkoutMachine = setup({
     },
   },
 });
+
+type CheckoutMachineDefinition = typeof checkoutMachineDefinition;
+
+/**
+ * The type of {@link checkoutMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface CheckoutMachine extends CheckoutMachineDefinition {}
+
+/**
+ * Headless minting core for one checkout.
+ *
+ * @public
+ */
+export const checkoutMachine: CheckoutMachine = checkoutMachineDefinition;
 
 /**
  * Selects whether this checkout has edits its head does not carry.

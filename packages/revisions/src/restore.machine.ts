@@ -117,12 +117,7 @@ const clearTransient = {
   unrecoverable: [],
 } satisfies Partial<RestoreMachineContext>;
 
-/**
- * Headless restore lifecycle for one project's selected checkout.
- *
- * @public
- */
-export const restoreMachine = setup({
+const restoreMachineDefinition = setup({
   schemas: {
     context: types<RestoreMachineContext>(),
     events: eventSchemas<RestoreMachineEvent>(),
@@ -270,6 +265,23 @@ export const restoreMachine = setup({
     },
   },
 });
+
+type RestoreMachineDefinition = typeof restoreMachineDefinition;
+
+/**
+ * The type of {@link restoreMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface RestoreMachine extends RestoreMachineDefinition {}
+
+/**
+ * Headless restore lifecycle for one project's selected checkout.
+ *
+ * @public
+ */
+export const restoreMachine: RestoreMachine = restoreMachineDefinition;
 
 /**
  * Selects whether a restore is waiting for the user to confirm it.

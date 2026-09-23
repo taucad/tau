@@ -196,27 +196,7 @@ const failWith = (enq: PublishEnqueue, error: string): Partial<PublishMachineCon
 
 const noRevisionsYet = 'This project has no revisions yet, so there is nothing to publish.';
 
-/**
- * Headless publication of one project's named version.
- *
- * @public
- * @example <caption>Publish the head of `main` as `v1`</caption>
- * ```typescript
- * import { createActor } from 'xstate';
- * import { publishMachine } from '@taucad/revisions/publish-machine';
- * import type { PublishActors } from '@taucad/revisions/publish-machine';
- *
- * declare const hostActors: PublishActors;
- * const actor = createActor(publishMachine.provide({ actors: hostActors }), { input: { projectId: 'p1' } });
- * actor.start();
- * actor.send({ type: 'publish' });
- * actor.send({
- *   type: 'confirm',
- *   draft: { tag: 'v1', projectName: 'bracket', entryPath: 'main.ts', visibility: 'public', title: 'Bracket' },
- * });
- * ```
- */
-export const publishMachine = setup({
+const publishMachineDefinition = setup({
   schemas: {
     context: types<PublishMachineContext>(),
     events: eventSchemas<PublishMachineEvent>(),
@@ -468,6 +448,38 @@ export const publishMachine = setup({
     },
   },
 });
+
+type PublishMachineDefinition = typeof publishMachineDefinition;
+
+/**
+ * The type of {@link publishMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface PublishMachine extends PublishMachineDefinition {}
+
+/**
+ * Headless publication of one project's named version.
+ *
+ * @public
+ * @example <caption>Publish the head of `main` as `v1`</caption>
+ * ```typescript
+ * import { createActor } from 'xstate';
+ * import { publishMachine } from '@taucad/revisions/publish-machine';
+ * import type { PublishActors } from '@taucad/revisions/publish-machine';
+ *
+ * declare const hostActors: PublishActors;
+ * const actor = createActor(publishMachine.provide({ actors: hostActors }), { input: { projectId: 'p1' } });
+ * actor.start();
+ * actor.send({ type: 'publish' });
+ * actor.send({
+ *   type: 'confirm',
+ *   draft: { tag: 'v1', projectName: 'bracket', entryPath: 'main.ts', visibility: 'public', title: 'Bracket' },
+ * });
+ * ```
+ */
+export const publishMachine: PublishMachine = publishMachineDefinition;
 
 /** The actor set `publishMachine.provide` needs. @public */
 export type PublishActors = MachineActors<typeof publishMachine>;

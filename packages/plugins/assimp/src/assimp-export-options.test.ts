@@ -1,9 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import { assimpCapabilities } from 'libassimp';
 import type { OptionDescriptor } from 'libassimp';
+import { toJSONSchema } from 'zod';
+import { quantityKinds } from '@taucad/runtime/transcoder';
 import { assimpEdgeSchemas } from '#assimp-export-options.js';
 
 describe('assimp export option schemas', () => {
+  it('declares the glTF identity-matrix epsilon as a dimensionless ratio', () => {
+    for (const format of ['glb', 'gltf'] as const) {
+      expect(toJSONSchema(assimpEdgeSchemas[format], { target: 'draft-7', io: 'input' })).toMatchObject({
+        properties: {
+          identityMatrixEpsilon: {
+            'x-tau-unit': '1',
+            'x-tau-quantity-kind': quantityKinds.dimensionlessRatio,
+            'x-tau-space': 'linear',
+          },
+        },
+      });
+    }
+  });
+
   it('covers every canonical target from the generated registry', () => {
     expect(Object.keys(assimpEdgeSchemas)).toEqual(Object.keys(assimpCapabilities.export));
   });

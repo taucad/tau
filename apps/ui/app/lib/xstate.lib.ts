@@ -224,3 +224,22 @@ export type MachineActors<TMachine extends AnyStateMachine> =
     ? { [K in keyof TActorMap]: TActorMap[K] }
     : never;
 /* oxlint-enable typescript/no-explicit-any */
+
+/**
+ * The id an actor was spawned or invoked under.
+ *
+ * XState v6 moved `id` from `ActorRef` to the runtime half of an actor
+ * (`ActorRuntime`), so `ActorRefFrom<…>`, `AnyActorRef` and the `self` a
+ * state-level transition receives no longer declare it, though every running
+ * actor carries one.
+ *
+ * @param ref - A spawned, invoked or self actor reference.
+ * @returns The actor's id relative to its parent.
+ */
+export const actorIdOf = (ref: Subscribable<unknown>): string => {
+  const id: unknown = Reflect.get(ref, 'id');
+  if (typeof id !== 'string') {
+    throw new TypeError('Expected an actor reference with an id');
+  }
+  return id;
+};

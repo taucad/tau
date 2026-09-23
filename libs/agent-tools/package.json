@@ -46,11 +46,16 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/utils": "workspace:*",
     "geospec": "workspace:*",
-    "xstate": "catalog:",
     "zod": "catalog:"
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "xstate": "^6.0.0-alpha.59"
+  },
+  "devDependencies": {
+    "xstate": "catalog:"
   }
 }

@@ -143,10 +143,15 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "xstate": "^5.0.0"
+    "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
     "@taucad/utils": "workspace:*",
     "xstate": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "xstate": {
+      "optional": true
+    }
   }
 }

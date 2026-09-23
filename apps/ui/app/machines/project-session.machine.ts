@@ -1,6 +1,6 @@
-import { assign, emit, enqueueActions, fromCallback, not, setup } from 'xstate';
-import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { createCallbackLogic, setup, types } from 'xstate';
+import type { ActorRefFrom, AnyActorRef, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
 
@@ -180,14 +180,128 @@ const releaseAgentHost = fromSafeAsync<void, { projectId: string }>(async () => 
  * neither, so an unprovided child fails its region at the start bound rather
  * than pretending to be up.
  */
-const fileManager = fromCallback<EventObject, { projectId: string }>(() => undefined);
+const fileManager = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
 /* R14: no separate `editor` child. The editor actor lives inside the runtime
  * region's subtree and comes up with it; a second child relaying the same
  * region key made one report mark two children ready and told nobody anything.
  * Add it back when the editor can fail on its own. */
-const project = fromCallback<EventObject, { projectId: string }>(() => undefined);
-const agentHost = fromCallback<EventObject, { projectId: string }>(() => undefined);
-const compute = fromCallback<EventObject, { projectId: string }>(() => undefined);
+const project = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
+const agentHost = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
+const compute = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
+
+const projectSessionActors = {
+  cancelRuns,
+  flushProducers,
+  flushSync,
+  releaseLeases,
+  releaseAgentHost,
+  fileManager,
+  project,
+  agentHost,
+  compute,
+  chatSession: chatSessionMachine,
+};
+
+type ProjectSessionEnqueue = EnqueueObject<
+  ProjectSessionMachineEvent,
+  ProjectSessionMachineEmitted,
+  SystemRegistry,
+  typeof projectSessionActors
+>;
+type ProjectSessionPatch = Partial<ProjectSessionMachineContext>;
+
+/* One place a session says where it is: an emit for local watchers and a
+ * send to the registry, which owns the live set. */
+const reportState = (
+  context: ProjectSessionMachineContext,
+  enq: ProjectSessionEnqueue,
+  state: ProjectSessionState,
+): ProjectSessionPatch => {
+  const frame = { type: 'sessionState', projectId: context.projectId, state } as const;
+  enq.emit(frame);
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, {
+      ...frame,
+      runs: context.runs.length,
+      dirty: context.dirty,
+      pushed: context.pushed,
+      pending: context.pending,
+    });
+  }
+  return { reportedState: state };
+};
+
+/* The facts moved, not the state. The registry's policy refusal (I24, I25)
+ * reads runs/dirty/pushed, so it has to hear this between state changes. */
+const reportFacts = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue): void => {
+  if (context.parentRef === undefined) {
+    return;
+  }
+  enq.sendTo(context.parentRef, {
+    type: 'sessionState',
+    projectId: context.projectId,
+    state: context.reportedState,
+    runs: context.runs.length,
+    dirty: context.dirty,
+    pushed: context.pushed,
+    pending: context.pending,
+  });
+};
+
+/* R3. Resuming a runtime that never parked is a no-op at the cad machine, so
+ * the reverse side never has to know whether the grace elapsed. */
+const signalRuntime = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue, parked: boolean): void => {
+  enq.emit({ type: 'runtimeParking', projectId: context.projectId, parked });
+};
+
+/* The event names its own region (the startup regions check it), so this
+ * records a failure whenever one is reported — at the start bound, or long
+ * after (R4: the desktop refuses a kernel utility while the project is
+ * live). The session stays where it is; only `failures` moves. */
+const recordFailure = (
+  context: ProjectSessionMachineContext,
+  event: Extract<ProjectSessionMachineEvent, { type: 'childFailed' }>,
+): ProjectSessionPatch => ({ failures: { ...context.failures, [event.region]: event.reason } });
+
+const recordCloseFailure = (context: ProjectSessionMachineContext, error: unknown): ProjectSessionPatch => ({
+  failures: { ...context.failures, close: error instanceof Error ? error.message : 'failed' },
+});
+
+const withoutRun = (context: ProjectSessionMachineContext, chatId: string): readonly string[] =>
+  context.runs.filter((id) => id !== chatId);
+
+/* I23: every project-scoped resource dies with the session. */
+const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue) => {
+  for (const ref of [
+    context.fileManagerRef,
+    context.projectRef,
+    context.agentHostRef,
+    context.computeRef,
+    ...Object.values(context.chatRefs),
+  ]) {
+    if (ref !== undefined) {
+      enq.stop(ref);
+    }
+  }
+  return {
+    context: {
+      fileManagerRef: undefined,
+      projectRef: undefined,
+      agentHostRef: undefined,
+      computeRef: undefined,
+      chatRefs: {},
+    },
+  };
+};
+
+/* A close step that failed leaves the session failed with the reason recorded. */
+const closeFailed = ({
+  context,
+  event,
+}: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>) => ({
+  target: '#project-session.failed',
+  context: recordCloseFailure(context, event.error),
+});
 
 /** One startup region: up, failed at the bound, or failed by its child. */
 const startupRegion = (region: ProjectSessionRegion) =>
@@ -196,21 +310,31 @@ const startupRegion = (region: ProjectSessionRegion) =>
     states: {
       starting: {
         on: {
-          childReady: { guard: { type: 'isRegion', params: { region } }, target: 'ready' },
-          childFailed: {
-            guard: { type: 'isRegion', params: { region } },
+          childReady: ({ event }: Readonly<{ event: Extract<ProjectSessionMachineEvent, { type: 'childReady' }> }>) =>
+            event.region === region ? { target: 'ready' } : undefined,
+          childFailed: ({
+            context,
+            event,
+          }: Readonly<{
+            context: ProjectSessionMachineContext;
+            event: Extract<ProjectSessionMachineEvent, { type: 'childFailed' }>;
+          }>) => (event.region === region ? { target: 'failed', context: recordFailure(context, event) } : undefined),
+        },
+        after: {
+          startBound: {
             target: 'failed',
-            actions: 'recordFailure',
+            context: ({ context }: Readonly<{ context: ProjectSessionMachineContext }>) => ({
+              failures: { ...context.failures, [region]: 'timeout' },
+            }),
           },
         },
-        after: { startBound: { target: 'failed', actions: { type: 'recordTimeout', params: { region } } } },
       },
       ready: { type: 'final' },
       /* R4: the admission verdict is a region ending its start bound here, not
        * the `failures` map — a kernel refused while the session is still
        * opening is recorded at the root and is not a reason to refuse the
        * project, whose views, agent host and compute all came up. */
-      failed: { type: 'final', entry: 'markOpenFailed' },
+      failed: { type: 'final', entry: () => ({ context: { openFailed: true } }) },
     },
   }) as const;
 
@@ -220,28 +344,13 @@ const startupRegion = (region: ProjectSessionRegion) =>
  * @public
  */
 export const projectSessionMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as ProjectSessionMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as ProjectSessionMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as ProjectSessionMachineInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    emitted: {} as ProjectSessionMachineEmitted,
+  schemas: {
+    context: types<ProjectSessionMachineContext>(),
+    events: eventSchemas<ProjectSessionMachineEvent>(),
+    input: types<ProjectSessionMachineInput>(),
+    emitted: eventSchemas<ProjectSessionMachineEmitted>(),
   },
-  actors: {
-    cancelRuns,
-    flushProducers,
-    flushSync,
-    releaseLeases,
-    releaseAgentHost,
-    fileManager,
-    project,
-    agentHost,
-    compute,
-    chatSession: chatSessionMachine,
-  },
+  actors: projectSessionActors,
   delays: {
     idleWindow: ({ context }) => context.idleWindowMilliseconds,
     parkWindow: ({ context }) => context.parkWindowMilliseconds,
@@ -250,128 +359,15 @@ export const projectSessionMachine = setup({
   guards: {
     /* Asking is a user verb only: a policy close never reaches a session with a
      * run (the registry refuses it first) and quit asked once, at the app. */
-    shouldAsk: ({ context }) => context.runs.length > 0 && context.closeReason === 'user',
-    /* R4: a region ended its start bound failed. Not `failures`, which now
-     * also carries what a live project's kernel said long afterwards. */
-    hasOpenFailure: ({ context }) => context.openFailed,
+    shouldAsk: (context: ProjectSessionMachineContext) => context.runs.length > 0 && context.closeReason === 'user',
     /* R4: only a session that opened clears a failure. `!== 'failed'` would be
      * true all through `opening`, so a region that timed out and then reported
      * ready before its last sibling finalised would settle `failed` with an
      * empty map and a row saying nothing (V2-9). */
-    hasOpened: ({ context }) => context.reportedState === 'live',
-    /* One guard, four regions: the event names the region it is about. */
-    isRegion: ({ event }, params: { region: ProjectSessionRegion }) =>
-      (event.type === 'childReady' || event.type === 'childFailed') && event.region === params.region,
-    isLastRun: ({ context, event }) =>
-      event.type === 'runSettled' && context.runs.filter((chatId) => chatId !== event.chatId).length === 0,
-    isHidden: ({ context }) => !context.visible,
+    hasOpened: (context: ProjectSessionMachineContext) => context.reportedState === 'live',
     /* R3: not on screen *and* not the project the person navigated to. Minimising
      * the window must not park what is still in front of them (V1-7). */
-    isParkable: ({ context }) => !context.visible && !context.focused,
-  },
-  actions: {
-    /* One place a session says where it is: an emit for local watchers and a
-     * send to the registry, which owns the live set. */
-    reportState: enqueueActions(({ enqueue, context }, params: { state: ProjectSessionState }) => {
-      const frame = { type: 'sessionState', projectId: context.projectId, state: params.state } as const;
-      enqueue.assign({ reportedState: params.state });
-      enqueue.emit(frame);
-      if (context.parentRef !== undefined) {
-        enqueue.sendTo(context.parentRef, {
-          ...frame,
-          runs: context.runs.length,
-          dirty: context.dirty,
-          pushed: context.pushed,
-          pending: context.pending,
-        });
-      }
-    }),
-    /* The facts moved, not the state. The registry's policy refusal (I24, I25)
-     * reads runs/dirty/pushed, so it has to hear this between state changes. */
-    reportFacts: enqueueActions(({ enqueue, context }) => {
-      if (context.parentRef === undefined) {
-        return;
-      }
-      enqueue.sendTo(context.parentRef, {
-        type: 'sessionState',
-        projectId: context.projectId,
-        state: context.reportedState,
-        runs: context.runs.length,
-        dirty: context.dirty,
-        pushed: context.pushed,
-        pending: context.pending,
-      });
-    }),
-    /* R3. Resuming a runtime that never parked is a no-op at the cad machine, so
-     * the reverse side never has to know whether the grace elapsed. */
-    signalRuntimeParked: emit(
-      ({ context }) => ({ type: 'runtimeParking', projectId: context.projectId, parked: true }) as const,
-    ),
-    signalRuntimeActive: emit(
-      ({ context }) => ({ type: 'runtimeParking', projectId: context.projectId, parked: false }) as const,
-    ),
-    /* The event names its own region (the startup regions guard on it), so this
-     * records a failure whenever one is reported — at the start bound, or long
-     * after (R4: the desktop refuses a kernel utility while the project is
-     * live). The session stays where it is; only `failures` moves. */
-    recordFailure: assign({
-      failures: ({ context, event }) =>
-        event.type === 'childFailed' ? { ...context.failures, [event.region]: event.reason } : context.failures,
-    }),
-    /* The region came up after all, so its reason goes: a row that stayed red
-     * after a reconnect would outlive the thing it is about. */
-    clearFailure: assign({
-      failures: ({ context, event }) =>
-        event.type === 'childReady'
-          ? Object.fromEntries(Object.entries(context.failures).filter(([name]) => name !== event.region))
-          : context.failures,
-    }),
-    markOpenFailed: assign({ openFailed: true }),
-    recordTimeout: assign({
-      failures: ({ context }, params: { region: ProjectSessionRegion }) => ({
-        ...context.failures,
-        [params.region]: 'timeout',
-      }),
-    }),
-    clearCloseFailure: assign({
-      failures: ({ context }) =>
-        Object.fromEntries(Object.entries(context.failures).filter(([name]) => name !== 'close')),
-    }),
-    recordCloseFailure: assign({
-      failures: ({ context, event }) => ({
-        ...context.failures,
-        close: 'error' in event && event.error instanceof Error ? event.error.message : 'failed',
-      }),
-    }),
-    spawnChildren: assign({
-      fileManagerRef: ({ context, spawn }) =>
-        spawn('fileManager', { id: 'fileManager', input: { projectId: context.projectId } }),
-      projectRef: ({ context, spawn }) => spawn('project', { id: 'project', input: { projectId: context.projectId } }),
-      agentHostRef: ({ context, spawn }) =>
-        spawn('agentHost', { id: 'agentHost', input: { projectId: context.projectId } }),
-      computeRef: ({ context, spawn }) => spawn('compute', { id: 'compute', input: { projectId: context.projectId } }),
-    }),
-    /* I23: every project-scoped resource dies with the session. */
-    stopChildren: enqueueActions(({ enqueue, context }) => {
-      for (const ref of [
-        context.fileManagerRef,
-        context.projectRef,
-        context.agentHostRef,
-        context.computeRef,
-        ...Object.values(context.chatRefs),
-      ]) {
-        if (ref !== undefined) {
-          enqueue.stopChild(ref);
-        }
-      }
-      enqueue.assign({
-        fileManagerRef: undefined,
-        projectRef: undefined,
-        agentHostRef: undefined,
-        computeRef: undefined,
-        chatRefs: {},
-      });
-    }),
+    isParkable: (context: ProjectSessionMachineContext) => !context.visible && !context.focused,
   },
 }).createMachine({
   id: 'project-session',
@@ -401,46 +397,33 @@ export const projectSessionMachine = setup({
   }),
   initial: 'opening',
   on: {
-    revisionState: {
-      actions: [
-        assign({
-          dirty: ({ event }) => event.dirty,
-          pushed: ({ event }) => event.pushed,
-          pending: ({ context, event }) => event.pendingCount ?? context.pending,
-        }),
-        'reportFacts',
-        enqueueActions(({ enqueue, context, event }) => {
-          const sync: ChatSyncState = event.sync ?? (event.pushed ? 'synced' : 'pending');
-          for (const ref of Object.values(context.chatRefs)) {
-            enqueue.sendTo(ref, { type: 'dirtyChanged', dirty: event.dirty });
-            enqueue.sendTo(ref, { type: 'syncState', state: sync });
-            if (event.branch !== undefined) {
-              enqueue.sendTo(ref, { type: 'turnFinalized', branch: event.branch });
-            }
-          }
-        }),
-      ],
+    revisionState: ({ context, event }, enq) => {
+      const patch = { dirty: event.dirty, pushed: event.pushed, pending: event.pendingCount ?? context.pending };
+      reportFacts({ ...context, ...patch }, enq);
+      const sync: ChatSyncState = event.sync ?? (event.pushed ? 'synced' : 'pending');
+      for (const ref of Object.values(context.chatRefs)) {
+        enq.sendTo(ref, { type: 'dirtyChanged', dirty: event.dirty });
+        enq.sendTo(ref, { type: 'syncState', state: sync });
+        if (event.branch !== undefined) {
+          enq.sendTo(ref, { type: 'turnFinalized', branch: event.branch });
+        }
+      }
+      return { context: patch };
     },
-    attention: {
-      actions: [
-        assign({ attention: ({ event }) => event.count }),
-        emit(
-          ({ context, event }) => ({ type: 'attention', projectId: context.projectId, count: event.count }) as const,
-        ),
-      ],
+    attention: ({ context, event }, enq) => {
+      enq.emit({ type: 'attention', projectId: context.projectId, count: event.count });
+      return { context: { attention: event.count } };
     },
     /* One `chat-session` per chat that is live or viewed (D32). */
-    openChat: {
-      guard: ({ context, event }) => context.chatRefs[event.chatId] === undefined,
-      actions: assign({
-        chatRefs: ({ context, event, spawn, self }) => ({
-          ...context.chatRefs,
-          [event.chatId]: spawn('chatSession', {
-            id: `chat:${event.chatId}`,
-            input: { chatId: event.chatId, projectId: context.projectId, parentRef: self },
-          }),
-        }),
-      }),
+    openChat: ({ context, event, self }, enq) => {
+      if (context.chatRefs[event.chatId] !== undefined) {
+        return undefined;
+      }
+      const ref = enq.spawn('chatSession', {
+        id: `chat:${event.chatId}`,
+        input: { chatId: event.chatId, projectId: context.projectId, parentRef: self },
+      });
+      return { context: { chatRefs: { ...context.chatRefs, [event.chatId]: ref } } };
     },
     /*
      * The store's teardown signal, and only ever that (P63).
@@ -449,20 +432,20 @@ export const projectSessionMachine = setup({
      * no durable run left; a person's *Close* does not, because a chat whose
      * machine has been stopped has no row to read `Stopped` from.
      */
-    chatClosed: {
-      actions: enqueueActions(({ enqueue, context, event }) => {
-        const ref = context.chatRefs[event.chatId];
-        if (ref === undefined) {
-          return;
-        }
-        enqueue.stopChild(ref);
-        enqueue.assign({
+    chatClosed: ({ context, event }, enq) => {
+      const ref = context.chatRefs[event.chatId];
+      if (ref === undefined) {
+        return {};
+      }
+      enq.stop(ref);
+      return {
+        context: {
           chatRefs: Object.fromEntries(Object.entries(context.chatRefs).filter(([id]) => id !== event.chatId)),
-          runs: context.runs.filter((chatId) => chatId !== event.chatId),
-        });
-      }),
+          runs: withoutRun(context, event.chatId),
+        },
+      };
     },
-    close: { target: '.closing', actions: assign({ closeReason: ({ event }) => event.reason }) },
+    close: { target: '.closing', context: ({ event }) => ({ closeReason: event.reason }) },
     /*
      * R4: a region that fails outside its start bound, at the root.
      *
@@ -476,28 +459,41 @@ export const projectSessionMachine = setup({
      * moves: the project stays live and closable, and everything that is not
      * its kernel still works.
      */
-    childFailed: { actions: 'recordFailure' },
+    childFailed: { context: ({ context, event }) => recordFailure(context, event) },
     /* A session that never opened keeps the reason it failed with: `failed` is
      * terminal for admission (the person reopens the project, which is a new
      * session), so a region coming back afterwards must not leave a red row
-     * with nothing to say. */
-    childReady: { guard: 'hasOpened', actions: 'clearFailure' },
+     * with nothing to say. The region came up after all, so its reason goes: a
+     * row that stayed red after a reconnect would outlive the thing it is about. */
+    childReady: ({ context, event, guards }) =>
+      guards.hasOpened(context)
+        ? {
+            context: {
+              failures: Object.fromEntries(Object.entries(context.failures).filter(([name]) => name !== event.region)),
+            },
+          }
+        : undefined,
     visibilityChanged: {
-      actions: assign({
-        visible: ({ event }) => event.visible,
-        focused: ({ context, event }) => event.focused ?? context.focused,
-      }),
+      context: ({ context, event }) => ({ visible: event.visible, focused: event.focused ?? context.focused }),
     },
   },
   states: {
     opening: {
-      entry: { type: 'reportState', params: { state: 'opening' } },
+      entry: ({ context }, enq) => ({ context: reportState(context, enq, 'opening') }),
       initial: 'starting',
       states: {
         starting: {
-          entry: 'spawnChildren',
+          entry: ({ context }, enq) => ({
+            context: {
+              fileManagerRef: enq.spawn('fileManager', { id: 'fileManager', input: { projectId: context.projectId } }),
+              projectRef: enq.spawn('project', { id: 'project', input: { projectId: context.projectId } }),
+              agentHostRef: enq.spawn('agentHost', { id: 'agentHost', input: { projectId: context.projectId } }),
+              computeRef: enq.spawn('compute', { id: 'compute', input: { projectId: context.projectId } }),
+            },
+          }),
           type: 'parallel',
-          onDone: [{ guard: 'hasOpenFailure', target: '#project-session.failed' }, { target: '#project-session.live' }],
+          onDone: ({ context }) =>
+            context.openFailed ? { target: '#project-session.failed' } : { target: '#project-session.live' },
           states: {
             views: startupRegion('views'),
             runtime: startupRegion('runtime'),
@@ -508,43 +504,27 @@ export const projectSessionMachine = setup({
       },
     },
     live: {
-      entry: { type: 'reportState', params: { state: 'live' } },
+      entry: ({ context }, enq) => ({ context: reportState(context, enq, 'live') }),
       initial: 'idle',
       on: {
-        runStarted: {
-          target: '.busy',
-          actions: [
-            assign({
-              runs: ({ context, event }) =>
-                context.runs.includes(event.chatId) ? context.runs : [...context.runs, event.chatId],
-            }),
-            'reportFacts',
-            /* R3: a run needs the kernel back whether or not anyone is looking. */
-            'signalRuntimeActive',
-          ],
+        runStarted: ({ context, event }, enq) => {
+          const runs = context.runs.includes(event.chatId) ? context.runs : [...context.runs, event.chatId];
+          reportFacts({ ...context, runs }, enq);
+          /* R3: a run needs the kernel back whether or not anyone is looking. */
+          signalRuntime(context, enq, false);
+          return { target: '.busy', context: { runs } };
         },
-        runSettled: [
-          {
-            guard: 'isLastRun',
-            target: '.idle',
-            actions: [
-              assign({ runs: ({ context, event }) => context.runs.filter((id) => id !== event.chatId) }),
-              'reportFacts',
-            ],
-          },
-          {
-            actions: [
-              assign({ runs: ({ context, event }) => context.runs.filter((id) => id !== event.chatId) }),
-              'reportFacts',
-            ],
-          },
-        ],
+        runSettled: ({ context, event }, enq) => {
+          const runs = withoutRun(context, event.chatId);
+          reportFacts({ ...context, runs }, enq);
+          return runs.length === 0 ? { target: '.idle', context: { runs } } : { context: { runs } };
+        },
       },
       states: {
         idle: {
           /* A session that comes back live with a run still in flight — a
            * cancelled close, for instance — is busy, not idle. */
-          always: [{ guard: ({ context }) => context.runs.length > 0, target: 'busy' }],
+          always: ({ context }) => (context.runs.length > 0 ? { target: 'busy' } : undefined),
           /* EQ15: the liveness idle-close window. The session never closes
            * itself — it tells the registry, which applies I24/I25.
            *
@@ -560,40 +540,40 @@ export const projectSessionMachine = setup({
              * that is the re-offer interval — not "the next idle re-entry" (V1-5).
              * Giving this delay a target would reset EQ15's window, which is the
              * one thing it must not touch. */
-            parkWindow: { guard: 'isParkable', actions: 'signalRuntimeParked' },
-            idleWindow: {
-              guard: 'isHidden',
-              target: 'idle',
-              reenter: true,
-              actions: enqueueActions(({ enqueue, context }) => {
-                if (context.parentRef !== undefined) {
-                  enqueue.sendTo(context.parentRef, { type: 'idleExpired', projectId: context.projectId });
-                }
-              }),
+            parkWindow: ({ context, guards }, enq) => {
+              if (!guards.isParkable(context)) {
+                return undefined;
+              }
+              signalRuntime(context, enq, true);
+              return {};
+            },
+            idleWindow: ({ context }, enq) => {
+              if (context.visible) {
+                return undefined;
+              }
+              if (context.parentRef !== undefined) {
+                enq.sendTo(context.parentRef, { type: 'idleExpired', projectId: context.projectId });
+              }
+              return { target: 'idle', reenter: true };
             },
           },
           /* Navigation and focus only, never activity streams (A35). */
           on: {
             /* No resume here: `activity` has no production sender (V1-6). */
             activity: { target: 'idle', reenter: true },
-            visibilityChanged: {
-              target: 'idle',
-              reenter: true,
-              actions: [
-                assign({
-                  visible: ({ event }) => event.visible,
-                  focused: ({ context, event }) => event.focused ?? context.focused,
-                }),
-                /* Only coming back resumes: a repeated hidden report must not re-fork
-                 * the kernel of a project nobody is looking at (Q2). Focus counts on
-                 * its own, so navigating to a project while the window is still hidden
-                 * has its kernel by the time the window returns. */
-                enqueueActions(({ enqueue, event }) => {
-                  if (event.visible || event.focused === true) {
-                    enqueue('signalRuntimeActive');
-                  }
-                }),
-              ],
+            visibilityChanged: ({ context, event }, enq) => {
+              /* Only coming back resumes: a repeated hidden report must not re-fork
+               * the kernel of a project nobody is looking at (Q2). Focus counts on
+               * its own, so navigating to a project while the window is still hidden
+               * has its kernel by the time the window returns. */
+              if (event.visible || event.focused === true) {
+                signalRuntime(context, enq, false);
+              }
+              return {
+                target: 'idle',
+                reenter: true,
+                context: { visible: event.visible, focused: event.focused ?? context.focused },
+              };
             },
           },
         },
@@ -601,22 +581,28 @@ export const projectSessionMachine = setup({
       },
     },
     closing: {
-      entry: ['clearCloseFailure', { type: 'reportState', params: { state: 'closing' } }],
+      entry: ({ context }, enq) => {
+        const cleared = {
+          ...context,
+          failures: Object.fromEntries(Object.entries(context.failures).filter(([name]) => name !== 'close')),
+        };
+        return { context: { failures: cleared.failures, ...reportState(cleared, enq, 'closing') } };
+      },
       initial: 'asking',
       states: {
         asking: {
-          always: [{ guard: not('shouldAsk'), target: 'cancellingRuns' }],
+          always: ({ context, guards }) => (guards.shouldAsk(context) ? undefined : { target: 'cancellingRuns' }),
           on: {
-            confirmClose: 'cancellingRuns',
-            cancelClose: { target: '#project-session.live', actions: assign({ closeReason: undefined }) },
+            confirmClose: { target: 'cancellingRuns' },
+            cancelClose: { target: '#project-session.live', context: { closeReason: undefined } },
           },
         },
         cancellingRuns: {
           invoke: {
             src: 'cancelRuns',
             input: ({ context }) => ({ projectId: context.projectId, runs: context.runs }),
-            onDone: 'flushingProducers',
-            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
+            onDone: { target: 'flushingProducers' },
+            onError: closeFailed,
           },
         },
         /* A producer refusal (unsaved parameter drafts, an uncertain write) leaves every resource
@@ -625,10 +611,13 @@ export const projectSessionMachine = setup({
           invoke: {
             src: 'flushProducers',
             input: ({ context }) => ({ projectId: context.projectId }),
-            onDone: 'flushing',
+            onDone: { target: 'flushing' },
             onError: {
               target: '#project-session.live',
-              actions: ['recordCloseFailure', assign({ closeReason: undefined })],
+              context: ({ context, event }) => ({
+                ...recordCloseFailure(context, event.error),
+                closeReason: undefined,
+              }),
             },
           },
         },
@@ -644,51 +633,53 @@ export const projectSessionMachine = setup({
               projectId: context.projectId,
               boundMilliseconds: context.closeFlushMilliseconds,
             }),
-            onDone: 'releasing',
-            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
+            onDone: { target: 'releasing' },
+            onError: closeFailed,
           },
         },
         releasing: {
           invoke: {
             src: 'releaseLeases',
             input: ({ context }) => ({ projectId: context.projectId }),
-            onDone: 'releasingAgentHost',
-            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
+            onDone: { target: 'releasingAgentHost' },
+            onError: closeFailed,
           },
         },
         releasingAgentHost: {
           invoke: {
             src: 'releaseAgentHost',
             input: ({ context }) => ({ projectId: context.projectId }),
-            onDone: 'stopping',
-            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
+            onDone: { target: 'stopping' },
+            onError: closeFailed,
           },
         },
-        stopping: { entry: 'stopChildren', always: '#project-session.closed' },
+        stopping: {
+          entry: ({ context }, enq) => stopChildren(context, enq),
+          always: { target: '#project-session.closed' },
+        },
       },
     },
     /*
-     * Not a root `final` state: a done actor emits `xstate.done.actor.*` at its
+     * Not a root `final` state: a done actor emits `xstate.done.actor` at its
      * parent, and the registry has already stopped this child by then. The
      * session rests here until the registry lets it go.
      */
     closed: {
-      entry: [
-        { type: 'reportState', params: { state: 'closed' } },
-        enqueueActions(({ enqueue, context }) => {
-          if (context.parentRef !== undefined) {
-            enqueue.sendTo(context.parentRef, {
-              type: 'sessionClosed',
-              projectId: context.projectId,
-              reason: context.closeReason ?? 'user',
-            });
-          }
-        }),
-      ],
+      entry: ({ context }, enq) => {
+        const patch = reportState(context, enq, 'closed');
+        if (context.parentRef !== undefined) {
+          enq.sendTo(context.parentRef, {
+            type: 'sessionClosed',
+            projectId: context.projectId,
+            reason: context.closeReason ?? 'user',
+          });
+        }
+        return { context: patch };
+      },
     },
-    failed: { entry: { type: 'reportState', params: { state: 'failed' } } },
+    failed: { entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }) },
   },
-  exit: 'stopChildren',
+  exit: ({ context }, enq) => stopChildren(context, enq),
 });
 
 /** The session's one-line answer for the registry's policies (I24, I25). @public */

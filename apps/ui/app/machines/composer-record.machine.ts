@@ -13,7 +13,8 @@
  * coalesce, fail, retry and drain on their own (`writes`).
  */
 
-import { and, assign, emit, enqueueActions, not, or, setup, stateIn } from 'xstate';
+import { matchesState, setup, types } from 'xstate';
+import type { StateValue } from 'xstate';
 import type {
   ComposerRecord,
   ComposerRecordPatch,
@@ -21,7 +22,7 @@ import type {
   ComposerRecordStore,
 } from '#db/composer-record-store.js';
 import { isComposerRecordInputError } from '#db/composer-record-store.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { getRetryDelay } from '#utils/backoff.utils.js';
 
 /** How many times a retryable write failure is retried before the patch is declared stalled. */
@@ -119,85 +120,38 @@ const withoutUnwritableFields = ({ draft, messageEdits, ...rest }: ComposerRecor
 const retainedAfterDrop = (context: ComposerRecordMachineContext): ComposerRecordPatch =>
   mergePatch(withoutUnwritableFields(context.inFlight), context.pending);
 
+/** The record still exists: nothing has asked for it to be removed. */
+const isLive = (value: StateValue): boolean =>
+  matchesState({ lifecycle: 'loading' }, value) || matchesState({ lifecycle: 'usable' }, value);
+
+/** An unrepairable failure: the fields that can never be written are dropped, not retained. */
+const dropUnwritable = (context: ComposerRecordMachineContext): Partial<ComposerRecordMachineContext> => ({
+  pending: retainedAfterDrop(context),
+  inFlight: {},
+});
+
 /**
  * Headless composer-record lifecycle with replaceable I/O actors.
  *
  * @public
  */
 export const composerRecordMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as ComposerRecordMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as ComposerRecordMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as ComposerRecordMachineInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    emitted: {} as ComposerRecordMachineEmitted,
+  schemas: {
+    context: types<ComposerRecordMachineContext>(),
+    events: eventSchemas<ComposerRecordMachineEvent>(),
+    input: types<ComposerRecordMachineInput>(),
+    emitted: eventSchemas<ComposerRecordMachineEmitted>(),
   },
   actors: {
     readRecordActor,
     writePatchActor,
     removeRecordActor,
   },
-  actions: {
-    /** Fold the event's fields into `pending`; the next write carries them. */
-    mergePending: assign({
-      pending({ context, event }) {
-        return event.type === 'patch' ? mergePatch(context.pending, event.fields) : context.pending;
-      },
-    }),
-    /** Hand `pending` to the write about to start, so later patches accumulate behind it. */
-    startWrite: assign({
-      inFlight: ({ context }) => context.pending,
-      pending: {},
-    }),
-    /** Announce the outcome of the read, whatever it was; `loading` always ends here. */
-    applyRead: enqueueActions(({ enqueue, event }) => {
-      const result: ComposerRecordReadResult = event.type === 'recordRead' ? event.result : { status: 'absent' };
-      if (result.status === 'invalid') {
-        enqueue.emit({ type: 'recordUnreadable', error: result.error });
-      }
-      if (result.status === 'valid') {
-        enqueue.assign({ record: result.record });
-      }
-      enqueue.emit({ type: 'recordLoaded', record: result.status === 'valid' ? result.record : 'absent' });
-    }),
-    /** A write landed: clear the in-flight fields and tell a failure subscriber it is over. */
-    writeSucceeded: enqueueActions(({ context, enqueue }) => {
-      if (context.attempt > 0) {
-        enqueue.emit({ type: 'writeRecovered' });
-      }
-      enqueue.assign({ inFlight: {}, attempt: 0 });
-    }),
-    /** A retryable failure: the patch goes back to `pending` and costs one attempt. */
-    retainFailed: assign({
-      pending: ({ context }) => mergePatch(context.inFlight, context.pending),
-      inFlight: {},
-      attempt: ({ context }) => context.attempt + 1,
-    }),
-    /** An unrepairable failure: the fields that can never be written are dropped, not retained. */
-    dropUnwritable: assign({
-      pending: ({ context }) => retainedAfterDrop(context),
-      inFlight: {},
-    }),
-    emitWriteStalled: emit({ type: 'writeStalled' }),
-    emitRecordRemoved: emit({ type: 'recordRemoved' }),
-  },
-  guards: {
-    hasPending: ({ context }) => hasFields(context.pending),
-    /** An empty patch changes nothing; writing it would only create an absent file. */
-    hasPatchFields: ({ event }) => event.type === 'patch' && hasFields(event.fields),
-    hasAttemptsLeft: ({ context }) => context.attempt <= context.retryMaxAttempts,
-    hasWorkAfterDrop: ({ context }) => hasFields(retainedAfterDrop(context)),
-    /** The record still exists: nothing has asked for it to be removed. */
-    isLive: or([stateIn({ lifecycle: 'loading' }), stateIn({ lifecycle: 'usable' })]),
-  },
   delays: {
     /**
      * The curve `chat-persistence.machine` already retries transport failures
      * on; see {@link getRetryDelay}. Computed at scheduling time off the
-     * post-`assign` attempt counter, so each retry advances it.
+     * post-failure attempt counter, so each retry advances it.
      */
     retryDelay: ({ context }) => getRetryDelay(context.attempt),
   },
@@ -220,21 +174,29 @@ export const composerRecordMachine = setup({
             src: 'readRecordActor',
             // A read that fails is not a record that is absent, but it is still
             // a composer the user may type into right now (D7).
-            onError: {
-              target: 'usable',
-              actions: [
-                emit(({ event }) => ({ type: 'recordUnreadable', error: asError(event.error) })),
-                emit({ type: 'recordLoaded', record: 'absent' }),
-              ],
+            onError: ({ event }, enq) => {
+              enq.emit({ type: 'recordUnreadable', error: asError(event.error) });
+              enq.emit({ type: 'recordLoaded', record: 'absent' });
+              return { target: 'usable' };
             },
           },
           on: {
-            recordRead: { target: 'usable', actions: 'applyRead' },
-            remove: 'draining',
+            /** Announce the outcome of the read, whatever it was; `loading` always ends here. */
+            recordRead: ({ event }, enq) => {
+              const { result } = event;
+              if (result.status === 'invalid') {
+                enq.emit({ type: 'recordUnreadable', error: result.error });
+              }
+              enq.emit({ type: 'recordLoaded', record: result.status === 'valid' ? result.record : 'absent' });
+              return result.status === 'valid'
+                ? { target: 'usable', context: { record: result.record } }
+                : { target: 'usable' };
+            },
+            remove: { target: 'draining' },
           },
         },
         usable: {
-          on: { remove: 'draining' },
+          on: { remove: { target: 'draining' } },
         },
         /**
          * Removal waits only for a write that is already on the wire — an
@@ -243,21 +205,23 @@ export const composerRecordMachine = setup({
          * and `writes` moves to `stopped` so nothing written later brings it back.
          */
         draining: {
-          always: { guard: not(stateIn({ writes: 'persisting' })), target: 'removing' },
+          always: ({ value }) => (matchesState({ writes: 'persisting' }, value) ? undefined : { target: 'removing' }),
         },
         removing: {
           invoke: {
             src: 'removeRecordActor',
-            onDone: 'removed',
+            onDone: { target: 'removed' },
             // Ponytail: a removal the filesystem refused is still a removal as
             // far as the caller is concerned — the chat or project it belonged
             // to is already gone, and there is nothing left to retry into.
-            onError: 'removed',
+            onError: { target: 'removed' },
           },
         },
         removed: {
           type: 'final',
-          entry: 'emitRecordRemoved',
+          entry: (_, enq) => {
+            enq.emit({ type: 'recordRemoved' });
+          },
         },
       },
     },
@@ -265,69 +229,55 @@ export const composerRecordMachine = setup({
       initial: 'idle',
       states: {
         idle: {
-          always: { guard: not('isLive'), target: 'stopped' },
+          always: ({ value }) => (isLive(value) ? undefined : { target: 'stopped' }),
           on: {
-            patch: { guard: 'hasPatchFields', target: 'persisting', actions: 'mergePending' },
-            flushNow: { guard: 'hasPending', target: 'persisting' },
+            /** An empty patch changes nothing; writing it would only create an absent file. */
+            patch: ({ context, event }) =>
+              hasFields(event.fields)
+                ? { target: 'persisting', context: { pending: mergePatch(context.pending, event.fields) } }
+                : undefined,
+            flushNow: ({ context }) => (hasFields(context.pending) ? { target: 'persisting' } : undefined),
           },
         },
         persisting: {
-          entry: 'startWrite',
+          /** Hand `pending` to the write about to start, so later patches accumulate behind it. */
+          entry: ({ context }) => ({ context: { inFlight: context.pending, pending: {} } }),
           invoke: {
             src: 'writePatchActor',
-            input: ({ context }) => context.inFlight,
-            onDone: [
+            /* A state's `invoke.input` is evaluated before its own `entry` patch,
+             * so the write carries the fields `entry` is moving into `inFlight`. */
+            input: ({ context }) => context.pending,
+            /** A write landed: clear the in-flight fields and tell a failure subscriber it is over. */
+            onDone: ({ context, value }, enq) => {
+              if (context.attempt > 0) {
+                enq.emit({ type: 'writeRecovered' });
+              }
+              const cleared = { inFlight: {}, attempt: 0 };
               // A drain lets this write land, then starts no other: the patches behind it die with the record.
-              {
-                guard: and(['hasPending', 'isLive']),
-                target: 'persisting',
-                reenter: true,
-                actions: 'writeSucceeded',
-              },
-              { target: 'idle', actions: 'writeSucceeded' },
-            ],
-            onError: [
-              {
-                guard: and([({ event }) => isComposerRecordInputError(event.error), 'hasWorkAfterDrop', 'isLive']),
-                target: 'persisting',
-                reenter: true,
-                actions: [
-                  'dropUnwritable',
-                  emit(({ context, event }) => ({
-                    type: 'writeFailed',
-                    error: asError(event.error),
-                    attempt: context.attempt,
-                  })),
-                ],
-              },
-              {
-                guard: ({ event }) => isComposerRecordInputError(event.error),
-                target: 'idle',
-                actions: [
-                  'dropUnwritable',
-                  emit(({ context, event }) => ({
-                    type: 'writeFailed',
-                    error: asError(event.error),
-                    attempt: context.attempt,
-                  })),
-                ],
-              },
-              {
+              return hasFields(context.pending) && isLive(value)
+                ? { target: 'persisting', reenter: true, context: cleared }
+                : { target: 'idle', context: cleared };
+            },
+            onError: ({ context, event, value }, enq) => {
+              const error = asError(event.error);
+              if (isComposerRecordInputError(event.error)) {
+                enq.emit({ type: 'writeFailed', error, attempt: context.attempt });
+                return hasFields(retainedAfterDrop(context)) && isLive(value)
+                  ? { target: 'persisting', reenter: true, context: dropUnwritable(context) }
+                  : { target: 'idle', context: dropUnwritable(context) };
+              }
+              /** A retryable failure: the patch goes back to `pending` and costs one attempt. */
+              const attempt = context.attempt + 1;
+              enq.emit({ type: 'writeFailed', error, attempt });
+              return {
                 target: 'retrying',
-                actions: [
-                  'retainFailed',
-                  emit(({ context, event }) => ({
-                    type: 'writeFailed',
-                    error: asError(event.error),
-                    attempt: context.attempt,
-                  })),
-                ],
-              },
-            ],
+                context: { pending: mergePatch(context.inFlight, context.pending), inFlight: {}, attempt },
+              };
+            },
           },
           on: {
             // Coalesced: this patch rides the next write, not this one.
-            patch: { actions: 'mergePending' },
+            patch: { context: ({ context, event }) => ({ pending: mergePatch(context.pending, event.fields) }) },
           },
         },
         retrying: {
@@ -335,15 +285,24 @@ export const composerRecordMachine = setup({
           // timer must die here — a retry that fired after the unlink would
           // recreate the file.
           // A spent budget is known the moment the failure lands; the stall is announced then, not after a delay.
-          always: [
-            { guard: not('isLive'), target: 'stopped' },
-            { guard: not('hasAttemptsLeft'), target: 'idle', actions: 'emitWriteStalled' },
-          ],
-          after: { retryDelay: 'persisting' },
+          always: ({ context, value }, enq) => {
+            if (!isLive(value)) {
+              return { target: 'stopped' };
+            }
+            if (context.attempt > context.retryMaxAttempts) {
+              enq.emit({ type: 'writeStalled' });
+              return { target: 'idle' };
+            }
+            return undefined;
+          },
+          after: { retryDelay: { target: 'persisting' } },
           on: {
             // A fresh edit is the user asking again; do not make them wait out the curve.
-            patch: { guard: 'hasPatchFields', target: 'persisting', actions: 'mergePending' },
-            flushNow: 'persisting',
+            patch: ({ context, event }) =>
+              hasFields(event.fields)
+                ? { target: 'persisting', context: { pending: mergePatch(context.pending, event.fields) } }
+                : undefined,
+            flushNow: { target: 'persisting' },
           },
         },
         /**

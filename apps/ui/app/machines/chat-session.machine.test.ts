@@ -1,5 +1,5 @@
 import { util as zodUtility } from 'zod';
-import { createActor, fromCallback } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
 import type { AnyActorRef, EventObject } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import { describe, expect, it, vi } from 'vitest';
@@ -23,7 +23,7 @@ const isMachine = (value: unknown): boolean =>
 const recordingParent = (): { ref: AnyActorRef; received: EventObject[] } => {
   const received: EventObject[] = [];
   const ref = createActor(
-    fromCallback<EventObject>(({ receive }) => {
+    createCallbackLogic<EventObject>(({ receive }) => {
       receive((event) => received.push(event));
     }),
   );
@@ -271,7 +271,7 @@ describe('chatSessionMachine', () => {
     });
 
     const triggers = paths.map((path) =>
-      path.steps.map((step): string => step.event.type).filter((type) => type !== 'xstate.init'),
+      path.steps.map((step): string => step.event.type).filter((type) => type !== '@xstate.init'),
     );
     expect(triggers).toEqual([[event.type]]);
   });
@@ -409,13 +409,13 @@ describe('chatSessionMachine', () => {
 describe('chatSessionMachine host region', () => {
   /** Counts binding invocations and releases, in order. */
   const countingBinding = (): {
-    readonly logic: ReturnType<typeof fromCallback<EventObject, { chatId: string; placement: string }>>;
+    readonly logic: ReturnType<typeof createCallbackLogic<EventObject, { chatId: string; placement: string }>>;
     readonly bound: string[];
     readonly released: string[];
   } => {
     const bound: string[] = [];
     const released: string[] = [];
-    const logic = fromCallback<EventObject, { chatId: string; placement: string }>(({ input }) => {
+    const logic = createCallbackLogic<EventObject, { chatId: string; placement: string }>(({ input }) => {
       bound.push(input.placement);
       return () => {
         released.push(input.placement);

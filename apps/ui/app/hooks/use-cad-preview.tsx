@@ -110,7 +110,7 @@ export const deriveCadPreviewStatus = (args: {
  *
  * Replaces the heavyweight ProjectProvider for preview-only contexts.
  * Uses cadPreviewMachine to orchestrate file preparation and kernel initialization,
- * following the same invoke+fromPromise pattern as projectMachine.
+ * following the same invoke+fromSafeAsync pattern as projectMachine.
  *
  * When `files` is supplied, each provider instance owns a distinct ephemeral
  * `/previews/<instance>` memory root. Preview setup and teardown therefore

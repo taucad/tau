@@ -1,4 +1,4 @@
-import { assign, assertEvent, setup, emit, enqueueActions, fromPromise, sendTo } from 'xstate';
+import { assign, assertEvent, setup, emit, enqueueActions, createAsyncLogic, sendTo } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
@@ -633,7 +633,7 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
  */
 export const graphicsMachine = setup({
   actors: {
-    probeWebGpu: fromPromise(async () => probeWebGpuSupport()),
+    probeWebGpu: createAsyncLogic({ run: async () => probeWebGpuSupport() }),
     modelInteraction: modelInteractionMachine,
   },
   types: {

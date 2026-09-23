@@ -1,8 +1,8 @@
-import { assign, assertEvent, setup } from 'xstate';
+import { setup, types } from 'xstate';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { hostPathName } from '#filesystem/desktop-bridge.js';
 import type { Workspace } from '#filesystem/handle-store.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 
 export type PreparedWorkspaceCatalog = {
   readonly projectCount: number;
@@ -152,12 +152,20 @@ const retryKind = (context: WorkspaceConnectionContext): 'pick-again' | 'grant-a
   return permissionDenied ? 'grant-access' : 'resume';
 };
 
-/* oxlint-disable typescript/consistent-type-assertions -- XState's setup type slots require erased value assertions. */
+/* A failed step remembers why and where, so `retry` resumes there. */
+const failedIn = (phase: WorkspaceConnectionFailedPhase) => ({
+  target: 'failed',
+  context: ({ event }: Readonly<{ event: Readonly<{ error: unknown }> }>) => ({
+    error: event.error,
+    failedPhase: phase,
+  }),
+});
+
 export const workspaceConnectionMachine = setup({
-  types: {
-    context: {} as WorkspaceConnectionContext,
-    events: {} as WorkspaceConnectionEvent,
-    input: {} as WorkspaceConnectionServices,
+  schemas: {
+    context: types<WorkspaceConnectionContext>(),
+    events: eventSchemas<WorkspaceConnectionEvent>(),
+    input: types<WorkspaceConnectionServices>(),
   },
   actors: {
     registerWorkspaceActor,
@@ -165,53 +173,6 @@ export const workspaceConnectionMachine = setup({
     yieldToBrowserActor,
     prepareWorkspaceCatalogActor,
     publishWorkspaceCatalogActor,
-  },
-  actions: {
-    beginSelection: assign({
-      operationId({ event }) {
-        assertEvent(event, 'beginSelection');
-        return event.operationId;
-      },
-      workspaceName: undefined,
-      selection: undefined,
-      workspace: undefined,
-      catalog: undefined,
-      error: undefined,
-      failedPhase: undefined,
-    }),
-    acceptSelection: assign({
-      operationId({ event }) {
-        assertEvent(event, 'workspaceSelected');
-        return event.operationId;
-      },
-      workspaceName({ event }) {
-        assertEvent(event, 'workspaceSelected');
-        return event.selection.backend === 'webaccess'
-          ? event.selection.handle.name
-          : hostPathName(event.selection.path);
-      },
-      selection({ event }) {
-        assertEvent(event, 'workspaceSelected');
-        return event.selection;
-      },
-    }),
-    acceptRegisteredWorkspace: assign({
-      workspace({ event }) {
-        assertEvent(event, 'workspaceRegistered');
-        return event.workspace;
-      },
-    }),
-    acceptPreparedCatalog: assign({
-      catalog({ event }) {
-        assertEvent(event, 'workspaceCatalogPrepared');
-        return event.catalog;
-      },
-    }),
-  },
-  guards: {
-    failedWhileMounting: ({ context }) => context.failedPhase === 'mounting',
-    failedWhileDiscovering: ({ context }) => context.failedPhase === 'discovering',
-    failedWhilePublishing: ({ context }) => context.failedPhase === 'publishing',
   },
 }).createMachine({
   id: 'workspace-connection',
@@ -227,87 +188,103 @@ export const workspaceConnectionMachine = setup({
   }),
   initial: 'idle',
   on: {
-    beginSelection: { target: '.selecting', reenter: true, actions: 'beginSelection' },
+    beginSelection: {
+      target: '.selecting',
+      reenter: true,
+      context: ({ event }) => ({
+        operationId: event.operationId,
+        workspaceName: undefined,
+        selection: undefined,
+        workspace: undefined,
+        catalog: undefined,
+        error: undefined,
+        failedPhase: undefined,
+      }),
+    },
   },
   states: {
     idle: {},
     selecting: {
       on: {
-        selectionCancelled: 'idle',
-        workspaceSelected: { target: 'registering', actions: 'acceptSelection' },
+        selectionCancelled: { target: 'idle' },
+        workspaceSelected: {
+          target: 'registering',
+          context: ({ event }) => ({
+            operationId: event.operationId,
+            workspaceName:
+              event.selection.backend === 'webaccess'
+                ? event.selection.handle.name
+                : hostPathName(event.selection.path),
+            selection: event.selection,
+          }),
+        },
       },
     },
     registering: {
       invoke: {
         src: 'registerWorkspaceActor',
         input: ({ context }) => ({ context }),
-        onDone: 'mounting',
-        onError: {
-          target: 'failed',
-          actions: assign({ error: ({ event }) => event.error, failedPhase: 'registering' }),
-        },
+        onDone: { target: 'mounting' },
+        onError: failedIn('registering'),
       },
-      on: { workspaceRegistered: { actions: 'acceptRegisteredWorkspace' } },
+      on: { workspaceRegistered: { context: ({ event }) => ({ workspace: event.workspace }) } },
     },
     mounting: {
       invoke: {
         src: 'mountWorkspaceActor',
         input: ({ context }) => ({ context }),
-        onDone: 'browsing',
-        onError: {
-          target: 'failed',
-          actions: assign({ error: ({ event }) => event.error, failedPhase: 'mounting' }),
-        },
+        onDone: { target: 'browsing' },
+        onError: failedIn('mounting'),
       },
     },
     browsing: {
       invoke: {
         src: 'yieldToBrowserActor',
         input: undefined,
-        onDone: 'discovering',
-        onError: {
-          target: 'failed',
-          actions: assign({ error: ({ event }) => event.error, failedPhase: 'discovering' }),
-        },
+        onDone: { target: 'discovering' },
+        onError: failedIn('discovering'),
       },
     },
     discovering: {
       invoke: {
         src: 'prepareWorkspaceCatalogActor',
         input: ({ context }) => ({ context }),
-        onDone: 'publishing',
-        onError: {
-          target: 'failed',
-          actions: assign({ error: ({ event }) => event.error, failedPhase: 'discovering' }),
-        },
+        onDone: { target: 'publishing' },
+        onError: failedIn('discovering'),
       },
-      on: { workspaceCatalogPrepared: { actions: 'acceptPreparedCatalog' } },
+      on: { workspaceCatalogPrepared: { context: ({ event }) => ({ catalog: event.catalog }) } },
     },
     publishing: {
       invoke: {
         src: 'publishWorkspaceCatalogActor',
         input: ({ context }) => ({ context }),
-        onDone: 'ready',
-        onError: {
-          target: 'failed',
-          actions: assign({ error: ({ event }) => event.error, failedPhase: 'publishing' }),
-        },
+        onDone: { target: 'ready' },
+        onError: failedIn('publishing'),
       },
     },
     ready: {},
     failed: {
       on: {
-        retry: [
-          { guard: 'failedWhileMounting', target: 'mounting' },
-          { guard: 'failedWhileDiscovering', target: 'discovering' },
-          { guard: 'failedWhilePublishing', target: 'publishing' },
-          { target: 'selecting' },
-        ],
+        retry: ({ context }) => {
+          switch (context.failedPhase) {
+            case 'mounting': {
+              return { target: 'mounting' };
+            }
+            case 'discovering': {
+              return { target: 'discovering' };
+            }
+            case 'publishing': {
+              return { target: 'publishing' };
+            }
+            default: {
+              return { target: 'selecting' };
+            }
+          }
+        },
       },
     },
   },
 });
-/* oxlint-enable typescript/consistent-type-assertions */
 
 export const selectWorkspaceConnectionState = (snapshot: {
   readonly value: unknown;

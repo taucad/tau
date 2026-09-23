@@ -18,7 +18,7 @@
 
 import { Topic } from '@taucad/events';
 import { randomUuid } from '@taucad/utils/id';
-import { createActor, fromCallback } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
 import type { ActorRefFrom, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
@@ -129,7 +129,7 @@ export const forgetProjectRegions = (projectId: string): void => {
  * React handle, provide a child that builds it here instead of relaying.
  */
 const relayRegion = (region: ProjectSessionRegion) =>
-  fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
+  createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
     const key = regionKey(input.projectId, region);
     const deliver = (outcome: RegionOutcome): void => {
       sendBack(
@@ -184,7 +184,7 @@ export const setSharedFileManagerWorker = (worker: Worker | undefined): void => 
  * on its own close, never on another project's open. The session is what says
  * "this project is live", so it is what admits and releases.
  */
-const computeRegion = fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
+const computeRegion = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
   sharedFileManagerWorker?.postMessage({
     type: 'computeStoreAdmission',
     projectId: input.projectId,
@@ -201,10 +201,10 @@ const computeRegion = fromCallback<EventObject, { projectId: string }>(({ input,
 const agentHostRegistrations = new Map<string, Promise<ProjectAgentHostRegistration>>();
 
 /** The real browser probe or desktop launcher attachment owned by one session. */
-const agentHostRegion = fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
+const agentHostRegion = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
   const registration = registerProjectAgentHost(input.projectId, `${sessionEpoch}:${input.projectId}`);
   agentHostRegistrations.set(input.projectId, registration);
-  // async-iife: bootstrap -- `fromCallback` is synchronous; the registration settles through `sendBack`.
+  // async-iife: bootstrap -- `createCallbackLogic` is synchronous; the registration settles through `sendBack`.
   void (async () => {
     try {
       await registration;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const actors: Array<ReturnType<typeof createActor>> = [];
@@ -14,9 +14,12 @@ describe('graphics grid scale covariance', () => {
   it.each([1e-30, 1e-24, 1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e3, 1e6, 1e12, 1e18, 1e24, 1e30])(
     'selects a finite physical grid decade for a %g metre span',
     (verticalSpan) => {
-      const actor = createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-        input: {},
-      });
+      const actor = createActor(
+        graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+        {
+          input: {},
+        },
+      );
       actor.start();
       actors.push(actor);
       actor.send({ type: 'cameraViewChanged', verticalSpan });

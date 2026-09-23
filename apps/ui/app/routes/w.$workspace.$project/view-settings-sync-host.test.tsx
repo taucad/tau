@@ -2,7 +2,7 @@
 import { useSyncExternalStore } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -41,9 +41,12 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 function createGraphicsActor(): GraphicsRef {
-  return createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-    input: {},
-  }).start();
+  return createActor(
+    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    {
+      input: {},
+    },
+  ).start();
 }
 
 /** Minimal project + editor pair: the host reads the view map, the view's entry and its CAD unit. */

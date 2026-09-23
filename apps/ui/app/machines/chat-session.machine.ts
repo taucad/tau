@@ -1,7 +1,7 @@
-import { and, assign, emit, enqueueActions, fromCallback, setup } from 'xstate';
-import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
+import { createCallbackLogic, setup, types } from 'xstate';
+import type { ActorRefFrom, AnyActorRef, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
 
 /**
@@ -233,11 +233,109 @@ export type ChatSessionMachineEmitted =
 /** A live chat session actor. @public */
 export type ChatSessionActorRef = ActorRefFrom<typeof chatSessionMachine>;
 
+const chatSessionActors = {
+  /* Replaced by `sessions-store.ts` with the real registration. The default
+   * keeps this file free of the transport, the DOM and React, which is what
+   * lets the machine's own rows run headless. */
+  hostBinding: createCallbackLogic<EventObject, { readonly chatId: string; readonly placement: string }>(
+    () => () => undefined,
+  ),
+  /* Also replaced by `sessions-store.ts`. The defaults refuse rather than
+   * pretend: a chat whose turn host has not published its services cannot
+   * admit a turn, and saying so is what puts the reason on the banner. */
+  admitTurn: fromSafeAsync<
+    { readonly type: 'turnAdmitted'; readonly turn: ChatTurn },
+    { readonly chatId: string; readonly gesture: ChatTurnGesture }
+  >(async ({ input }) => {
+    throw new Error(`This chat (${input.chatId}) has no turn host to admit a turn.`);
+  }),
+  settleTurn: fromSafeAsync<void, ChatTurnSettlementInput>(async () => undefined),
+};
+
+type ChatSessionEnqueue = EnqueueObject<
+  ChatSessionMachineEvent,
+  ChatSessionMachineEmitted,
+  SystemRegistry,
+  typeof chatSessionActors
+>;
+type ChatSessionPatch = Partial<ChatSessionMachineContext>;
+type ChatSessionArgs<TEvent> = Readonly<{ context: ChatSessionMachineContext; event: TEvent }>;
+type EventOf<TType extends ChatSessionMachineEvent['type']> = Extract<ChatSessionMachineEvent, { type: TType }>;
+
+const announce = (context: ChatSessionMachineContext, enq: ChatSessionEnqueue): void => {
+  enq.emit({ type: 'statusChanged', chatId: context.chatId });
+};
+
+/* The run is over: whatever the transport last said about tools and
+ * approvals is no longer true of this chat. */
+const clearRunDetail = { pendingApprovalCount: 0, toolsInFlight: 0, toolName: undefined } as const;
+const clearTurn = { turn: undefined, outcome: undefined, settlementRetried: false } as const;
+
+const captureRunIdentity = (context: ChatSessionMachineContext, event: EventOf<'runLifecycle'>): ChatSessionPatch => {
+  if (event.runId === undefined) {
+    return {};
+  }
+  return event.runId === context.activeRunId
+    ? { activeRunId: event.runId }
+    : { activeRunId: event.runId, pendingSettlement: undefined, failureReason: undefined };
+};
+
+/* Read before the count moves, so the check sees the old count. The `read`
+ * region cannot take `toolParts` itself: its transition would pre-empt the
+ * root's, and the count would never move. */
+const raiseApprovalPending = (
+  context: ChatSessionMachineContext,
+  requested: boolean,
+  enq: ChatSessionEnqueue,
+): void => {
+  /* The store's second unread trigger (D9): an approval that was not pending a moment ago. */
+  if (requested && context.pendingApprovalCount === 0) {
+    enq.raise({ type: 'approvalPending' });
+  }
+};
+
+/* V2: a gesture over a live turn never asks for a second lease. It is held
+ * until this turn settles, and the request it interrupts is what makes that
+ * happen. */
+const holdGesture = ({ context, event }: ChatSessionArgs<EventOf<'requestTurn'>>, enq: ChatSessionEnqueue) => {
+  enq.emit({ type: 'stopTurnRequest', chatId: context.chatId });
+  announce(context, enq);
+  return { context: { pendingGesture: event.gesture } };
+};
+
+/* Buffered until `run.lifecycle: completed` for the run this chat presents. */
+const bufferSettlement = ({ context, event }: ChatSessionArgs<ChatTurnSettlementObservation>) =>
+  event.runId === context.activeRunId ? { context: { pendingSettlement: event } } : undefined;
+
+const failureMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
+
+/* Not the actor-failure record: the lease was never released — that is what
+ * failed — so the turn is what the retry and any later reconciliation name,
+ * and the queued gesture is the person's next message (T3-D6). */
+const recordSettlementFailure = (context: ChatSessionMachineContext, error: unknown): ChatSessionPatch => ({
+  failureReason: failureMessage(error, context.failureReason ?? 'the turn could not be settled'),
+});
+
 /**
- * One chat's run, read and revision state.
- *
- * @public
+ * An adopted run's attestation ends it — and admits a gesture held over it
+ * (V2), or the turn the person asked for while the page was catching up stays
+ * queued behind a run that has already finished.
  */
+const observedSettlement =
+  (target: 'done' | 'failed', failureReason?: (event: ChatTurnSettlementObservation) => string) =>
+  ({ context, event }: ChatSessionArgs<ChatTurnSettlementObservation>, enq: ChatSessionEnqueue) => {
+    if (context.turn !== undefined || event.runId !== context.activeRunId) {
+      return undefined;
+    }
+    announce(context, enq);
+    const patch = failureReason === undefined ? {} : { failureReason: failureReason(event) };
+    return {
+      target: context.pendingGesture === undefined ? target : '#chat-session.run.queued.admitting',
+      context: patch,
+    };
+  };
+
 /**
  * Settle a terminal run of this chat that the host's log holds no settlement
  * for (C6, V10).
@@ -249,11 +347,19 @@ export type ChatSessionActorRef = ActorRefFrom<typeof chatSessionMachine>;
  * and a page that asks twice regardless is refused by the host, which is where
  * exactly-once actually lives.
  */
-const reconcileSettlementTransition = {
-  guard: 'hasNoOwnTurn',
-  target: '#chat-session.run.finishing.settling',
-  actions: ['adoptSettlementTarget', 'announce'],
-} as const;
+const reconcileSettlementTransition = (
+  { context, event }: ChatSessionArgs<EventOf<'reconcileSettlement'>>,
+  enq: ChatSessionEnqueue,
+) => {
+  if (context.turn !== undefined) {
+    return undefined;
+  }
+  announce(context, enq);
+  return {
+    target: '#chat-session.run.finishing.settling',
+    context: { activeRunId: event.runId, outcome: event.outcome },
+  };
+};
 
 /**
  * Take on a run of this chat that is live somewhere else (V5).
@@ -261,198 +367,125 @@ const reconcileSettlementTransition = {
  * Accepted from the states that are holding nothing *and* doing nothing: a
  * chat whose machine is idle, or has reached a terminal row while one of its
  * runs is still in flight elsewhere — navigate away and back mid-run (T3-D10).
- * Not from the states in between. `hasNoOwnTurn` alone does not say that: it is
- * true for the whole admission window, because the lease is taken before
+ * Not from the states in between. `turn === undefined` alone does not say that:
+ * it is true for the whole admission window, because the lease is taken before
  * `turn` exists, and true again in the `finishing.settling` a *reconciled*
  * settlement runs in. Handled at the root it was honoured in both, and
  * discovery then stopped the actor that owned the work — the admission of a
  * gesture `#bindSessionOwner` had flushed one statement earlier, or the only
  * settlement an adopted run will ever get.
  */
-const adoptRunTransition = {
-  guard: 'hasNoOwnTurn',
-  target: '#chat-session.run.running.reconnecting',
-  actions: ['adoptDiscoveredRun', 'announce'],
-} as const;
+const adoptRunTransition = ({ context, event }: ChatSessionArgs<EventOf<'adoptRun'>>, enq: ChatSessionEnqueue) => {
+  if (context.turn !== undefined) {
+    return undefined;
+  }
+  announce(context, enq);
+  return { target: '#chat-session.run.running.reconnecting', context: { activeRunId: event.runId } };
+};
 
+/* The completed run's settlement arrived first: land where it said. */
+const pendingSettlementFor = (
+  context: ChatSessionMachineContext,
+  event: EventOf<'runLifecycle'>,
+): ChatTurnSettlementObservation | undefined =>
+  event.phase === 'completed' && context.pendingSettlement?.runId === (event.runId ?? context.activeRunId)
+    ? context.pendingSettlement
+    : undefined;
+
+const runLifecycle = ({ context, event }: ChatSessionArgs<EventOf<'runLifecycle'>>, enq: ChatSessionEnqueue) => {
+  const identity = captureRunIdentity(context, event);
+  announce(context, enq);
+  if (event.phase === 'admitted') {
+    /* Our own admission's echo: the transport reporting the run this chat just
+     * leased. Re-entering `queued` here would restart the admission that
+     * produced it. */
+    return context.turn === undefined ? { target: '.queued', context: identity } : { context: identity };
+  }
+  if (event.phase === 'running') {
+    return { target: '.running', context: identity };
+  }
+  if (event.phase === 'paused') {
+    return { target: '.running.waiting.input', context: identity };
+  }
+  /* V4: every turn that took a lease passes through `finishing`. A failed or
+   * cancelled run used to reach its terminal state directly, which is why a
+   * refused turn's settlement record was a matter of whether the stream
+   * outlived the revision root (F6). */
+  if (context.turn !== undefined) {
+    return {
+      target: '.finishing',
+      context: {
+        ...identity,
+        outcome: event.phase,
+        failureReason: event.phase === 'failed' ? event.reason : context.failureReason,
+        ...clearRunDetail,
+      },
+    };
+  }
+  const settled = pendingSettlementFor(context, event);
+  if (settled !== undefined) {
+    return settled.type === 'turnFinalizedObserved'
+      ? { target: '.done', context: { ...identity, ...clearRunDetail, pendingSettlement: undefined } }
+      : {
+          target: '.failed',
+          context: {
+            ...identity,
+            failureReason: settled.type === 'turnFailedObserved' ? settled.reason : 'revision conflict',
+            ...clearRunDetail,
+            pendingSettlement: undefined,
+          },
+        };
+  }
+  if (event.phase === 'completed') {
+    return { target: '.finishing', context: { ...identity, ...clearRunDetail } };
+  }
+  if (event.phase === 'failed') {
+    return {
+      target: '.failed',
+      context: { ...identity, failureReason: event.reason, ...clearRunDetail, pendingSettlement: undefined },
+    };
+  }
+  return { target: '.stopped', context: { ...identity, ...clearRunDetail, pendingSettlement: undefined } };
+};
+
+/* Where the settled turn lands: a held gesture first, then its outcome. */
+const settledTarget = (context: ChatSessionMachineContext): string => {
+  if (context.pendingGesture !== undefined) {
+    return '#chat-session.run.queued.admitting';
+  }
+  if (context.outcome === 'cancelled') {
+    return '#chat-session.run.stopped';
+  }
+  return context.outcome === 'failed' ? '#chat-session.run.failed' : '#chat-session.run.done';
+};
+
+const settleOnDone = ({ context }: ChatSessionArgs<unknown>, enq: ChatSessionEnqueue) => {
+  announce(context, enq);
+  return { target: settledTarget(context), context: { ...clearTurn, pendingSettlement: undefined } };
+};
+
+/* A tool part in flight is what "running a tool" means; deltas never get here,
+ * so `running` with nothing in flight is generating (the table). */
+const runningRow = (context: ChatSessionMachineContext): 'approval' | 'tool' | 'generating' => {
+  if (context.pendingApprovalCount > 0) {
+    return 'approval';
+  }
+  return context.toolsInFlight > 0 ? 'tool' : 'generating';
+};
+
+/**
+ * One chat's run, read and revision state.
+ *
+ * @public
+ */
 export const chatSessionMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as ChatSessionMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as ChatSessionMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as ChatSessionMachineInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    emitted: {} as ChatSessionMachineEmitted,
+  schemas: {
+    context: types<ChatSessionMachineContext>(),
+    events: eventSchemas<ChatSessionMachineEvent>(),
+    input: types<ChatSessionMachineInput>(),
+    emitted: eventSchemas<ChatSessionMachineEmitted>(),
   },
-  actors: {
-    /* Replaced by `sessions-store.ts` with the real registration. The default
-     * keeps this file free of the transport, the DOM and React, which is what
-     * lets the machine's own rows run headless. */
-    hostBinding: fromCallback<EventObject, { readonly chatId: string; readonly placement: string }>(
-      () => () => undefined,
-    ),
-    /* Also replaced by `sessions-store.ts`. The defaults refuse rather than
-     * pretend: a chat whose turn host has not published its services cannot
-     * admit a turn, and saying so is what puts the reason on the banner. */
-    admitTurn: fromSafeAsync<
-      { readonly type: 'turnAdmitted'; readonly turn: ChatTurn },
-      { readonly chatId: string; readonly gesture: ChatTurnGesture }
-    >(async ({ input }) => {
-      throw new Error(`This chat (${input.chatId}) has no turn host to admit a turn.`);
-    }),
-    settleTurn: fromSafeAsync<void, ChatTurnSettlementInput>(async () => undefined),
-  },
-  guards: {
-    /* A turn this page admitted. The host-attested observations still settle a
-     * run it did not — an adopted one after a reload — so every branch that
-     * behaves differently for the two asks this. */
-    hasOwnTurn: ({ context }) => context.turn !== undefined,
-    hasNoOwnTurn: ({ context }) => context.turn === undefined,
-    hasPendingGesture: ({ context }) => context.pendingGesture !== undefined,
-    canRetrySettlement: ({ context }) => !context.settlementRetried,
-    settledAsFailed: ({ context }) => context.outcome === 'failed',
-    settledAsCancelled: ({ context }) => context.outcome === 'cancelled',
-    placementChanged: ({ context, event }) =>
-      event.type === 'agentConfigChanged' && event.placement !== context.placement,
-    /* A tool part in flight is what "running a tool" means; deltas never get
-     * here, so `running` with nothing in flight is generating (the table). */
-    isToolInFlight: ({ context }) => context.toolsInFlight > 0,
-    hasApprovals: ({ context }) => context.pendingApprovalCount > 0,
-    isApprovalRequested: ({ event }) => event.type === 'interruptRecorded' && event.state === 'requested',
-    isRetrying: ({ event }) => event.type === 'requestLifecycle' && event.phase === 'retrying',
-    isStopping: ({ event }) => event.type === 'requestLifecycle' && event.phase === 'stopping',
-    isReattaching: ({ event }) => event.type === 'durableRunState' && event.state === 'reattaching',
-    matchesActiveRun: ({ context, event }) =>
-      (event.type === 'turnFinalizedObserved' ||
-        event.type === 'turnFailedObserved' ||
-        event.type === 'turnConflictedObserved') &&
-      event.runId === context.activeRunId,
-    completedWithFinalizedSettlement: ({ context, event }) =>
-      event.type === 'runLifecycle' &&
-      event.phase === 'completed' &&
-      context.pendingSettlement?.type === 'turnFinalizedObserved' &&
-      context.pendingSettlement.runId === (event.runId ?? context.activeRunId),
-    completedWithFailedSettlement: ({ context, event }) =>
-      event.type === 'runLifecycle' &&
-      event.phase === 'completed' &&
-      context.pendingSettlement?.type === 'turnFailedObserved' &&
-      context.pendingSettlement.runId === (event.runId ?? context.activeRunId),
-    completedWithConflictedSettlement: ({ context, event }) =>
-      event.type === 'runLifecycle' &&
-      event.phase === 'completed' &&
-      context.pendingSettlement?.type === 'turnConflictedObserved' &&
-      context.pendingSettlement.runId === (event.runId ?? context.activeRunId),
-  },
-  actions: {
-    announce: emit(({ context }) => ({ type: 'statusChanged', chatId: context.chatId }) as const),
-    /* The run is over: whatever the transport last said about tools and
-     * approvals is no longer true of this chat. */
-    clearRunDetail: assign({ pendingApprovalCount: 0, toolsInFlight: 0, toolName: undefined }),
-    captureRunIdentity: assign(({ context, event }) => {
-      if (event.type !== 'runLifecycle' || event.runId === undefined) {
-        return {};
-      }
-      return event.runId === context.activeRunId
-        ? { activeRunId: event.runId }
-        : { activeRunId: event.runId, pendingSettlement: undefined, failureReason: undefined };
-    }),
-    bufferSettlement: assign({
-      pendingSettlement: ({ event }) =>
-        event.type === 'turnFinalizedObserved' ||
-        event.type === 'turnFailedObserved' ||
-        event.type === 'turnConflictedObserved'
-          ? event
-          : undefined,
-    }),
-    clearPendingSettlement: assign({ pendingSettlement: undefined }),
-    /* Listed before the count's `assign`, so the check reads the old count. The
-     * `read` region cannot take `toolParts` itself: its transition would
-     * pre-empt the root's, and the count would never move. */
-    raiseApprovalPending: enqueueActions(({ context, event, enqueue }) => {
-      /* The store's second unread trigger (D9): an approval that was not pending a moment ago. */
-      const requested =
-        (event.type === 'toolParts' && event.approvals > 0) ||
-        (event.type === 'interruptRecorded' && event.state === 'requested');
-      if (requested && context.pendingApprovalCount === 0) {
-        enqueue.raise({ type: 'approvalPending' });
-      }
-    }),
-    recordPlacement: assign({
-      placement: ({ context, event }) => (event.type === 'agentConfigChanged' ? event.placement : context.placement),
-    }),
-    recordGesture: assign({
-      pendingGesture: ({ context, event }) => (event.type === 'requestTurn' ? event.gesture : context.pendingGesture),
-    }),
-    adoptTurn: assign(({ context, event }) =>
-      event.type === 'turnAdmitted'
-        ? {
-            turn: event.turn,
-            pendingGesture: undefined,
-            failureReason: undefined,
-            settlementRetried: false,
-            /* A `continue` resumes the run the host already has and mints none,
-             * so its turn carries no run id. Adopting that `undefined` as the
-             * chat's run identity dropped every host-attested observation and
-             * left `settleTurn` with nothing to name (T3-D7). */
-            activeRunId: event.turn.runId ?? context.activeRunId,
-          }
-        : { turn: context.turn },
-    ),
-    clearTurn: assign({ turn: undefined, outcome: undefined, settlementRetried: false }),
-    adoptSettlementTarget: assign(({ context, event }) =>
-      event.type === 'reconcileSettlement'
-        ? { activeRunId: event.runId, outcome: event.outcome }
-        : { activeRunId: context.activeRunId },
-    ),
-    recordOutcome: assign({
-      outcome: ({ context, event }) =>
-        event.type === 'runLifecycle' && event.phase !== 'admitted' && event.phase !== 'running'
-          ? event.phase === 'paused'
-            ? context.outcome
-            : event.phase
-          : context.outcome,
-    }),
-    recordRunFailure: assign({
-      failureReason: ({ context, event }) =>
-        event.type === 'runLifecycle' && event.phase === 'failed' ? event.reason : context.failureReason,
-    }),
-    /* Not `recordActorFailure`: the lease was never released — that is what
-     * failed — so the turn is what the retry and any later reconciliation name,
-     * and the queued gesture is the person's next message (T3-D6). */
-    recordSettlementFailure: assign({
-      failureReason: ({ context, event }) => {
-        const failure: unknown = 'error' in event ? event.error : undefined;
-        return failure instanceof Error ? failure.message : (context.failureReason ?? 'the turn could not be settled');
-      },
-    }),
-    recordSettlementRetry: assign({ settlementRetried: true }),
-    recordActorFailure: assign({
-      failureReason: ({ context, event }) => {
-        const failure: unknown = 'error' in event ? event.error : undefined;
-        return failure instanceof Error ? failure.message : (context.failureReason ?? 'the turn could not start');
-      },
-      turn: undefined,
-      pendingGesture: undefined,
-      outcome: undefined,
-    }),
-    dispatchTurn: emit(({ context, event }) => ({
-      type: 'startTurnRequest',
-      chatId: context.chatId,
-      request: event.type === 'turnAdmitted' ? event.turn.request : context.turn!.request,
-    })),
-    interruptTurn: emit(({ context }) => ({ type: 'stopTurnRequest', chatId: context.chatId })),
-    adoptDiscoveredRun: assign({
-      activeRunId: ({ context, event }) => (event.type === 'adoptRun' ? event.runId : context.activeRunId),
-    }),
-    recordPendingFailure: assign({
-      failureReason: ({ context }) =>
-        context.pendingSettlement?.type === 'turnFailedObserved'
-          ? context.pendingSettlement.reason
-          : 'revision conflict',
-    }),
-  },
+  actors: chatSessionActors,
 }).createMachine({
   id: 'chat-session',
   context: ({ input }) => ({
@@ -476,26 +509,26 @@ export const chatSessionMachine = setup({
   on: {
     /* Batched per transport event (F8): one frame carries the whole tool
      * picture, so a fifty-part turn is one transition. */
-    toolParts: {
-      actions: [
-        'raiseApprovalPending',
-        assign({
-          toolsInFlight: ({ event }) => event.inFlight,
-          pendingApprovalCount: ({ event }) => event.approvals,
-          toolName: ({ event, context }) => event.toolName ?? context.toolName,
-        }),
-        'announce',
-      ],
+    toolParts: ({ context, event }, enq) => {
+      raiseApprovalPending(context, event.approvals > 0, enq);
+      announce(context, enq);
+      return {
+        context: {
+          toolsInFlight: event.inFlight,
+          pendingApprovalCount: event.approvals,
+          toolName: event.toolName ?? context.toolName,
+        },
+      };
     },
-    interruptRecorded: {
-      actions: [
-        'raiseApprovalPending',
-        assign({
-          pendingApprovalCount: ({ event, context }) =>
+    interruptRecorded: ({ context, event }, enq) => {
+      raiseApprovalPending(context, event.state === 'requested', enq);
+      announce(context, enq);
+      return {
+        context: {
+          pendingApprovalCount:
             event.count ?? (event.state === 'requested' ? Math.max(context.pendingApprovalCount, 1) : 0),
-        }),
-        'announce',
-      ],
+        },
+      };
     },
   },
   states: {
@@ -516,20 +549,47 @@ export const chatSessionMachine = setup({
              * — a reload, or another tab's. There is nothing to admit here, and
              * a gesture over it waits for it to settle like any other. */
             observing: {
-              on: { requestTurn: { actions: ['recordGesture', 'interruptTurn', 'announce'] } },
+              on: { requestTurn: holdGesture },
             },
             admitting: {
               invoke: {
                 id: 'admitTurn',
                 src: 'admitTurn',
                 input: ({ context }) => ({ chatId: context.chatId, gesture: context.pendingGesture! }),
-                onError: {
-                  target: '#chat-session.run.failed',
-                  actions: ['recordActorFailure', 'clearRunDetail', 'announce'],
+                onError: ({ context, event }, enq) => {
+                  announce(context, enq);
+                  return {
+                    target: '#chat-session.run.failed',
+                    context: {
+                      failureReason: failureMessage(event.error, context.failureReason ?? 'the turn could not start'),
+                      turn: undefined,
+                      pendingGesture: undefined,
+                      outcome: undefined,
+                      ...clearRunDetail,
+                    },
+                  };
                 },
               },
               on: {
-                turnAdmitted: { target: 'dispatched', actions: ['adoptTurn', 'dispatchTurn', 'announce'] },
+                turnAdmitted: ({ context, event }, enq) => {
+                  enq.emit({ type: 'startTurnRequest', chatId: context.chatId, request: event.turn.request });
+                  announce(context, enq);
+                  return {
+                    target: 'dispatched',
+                    context: {
+                      turn: event.turn,
+                      pendingGesture: undefined,
+                      failureReason: undefined,
+                      settlementRetried: false,
+                      /* A `continue` resumes the run the host already has and
+                       * mints none, so its turn carries no run id. Adopting that
+                       * `undefined` as the chat's run identity dropped every
+                       * host-attested observation and left `settleTurn` with
+                       * nothing to name (T3-D7). */
+                      activeRunId: event.turn.runId ?? context.activeRunId,
+                    },
+                  };
+                },
               },
             },
             /* The lease is held and the request is out; the transport's own
@@ -537,44 +597,47 @@ export const chatSessionMachine = setup({
              * is over a live turn exactly as one made in `running` is — the
              * transport reports `running` only once bytes flow. */
             dispatched: {
-              on: { requestTurn: { actions: ['recordGesture', 'interruptTurn', 'announce'] } },
+              on: { requestTurn: holdGesture },
             },
           },
           on: {
-            turnFinalizedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
-            turnFailedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
-            turnConflictedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
+            turnFinalizedObserved: bufferSettlement,
+            turnFailedObserved: bufferSettlement,
+            turnConflictedObserved: bufferSettlement,
           },
         },
         running: {
           initial: 'generating',
           states: {
             generating: {
-              always: [
-                { guard: 'hasApprovals', target: 'waiting.approval' },
-                { guard: 'isToolInFlight', target: 'tool' },
-              ],
+              always: ({ context }) => {
+                const row = runningRow(context);
+                if (row === 'approval') {
+                  return { target: 'waiting.approval' };
+                }
+                return row === 'tool' ? { target: 'tool' } : undefined;
+              },
             },
             tool: {
-              always: [
-                { guard: 'hasApprovals', target: 'waiting.approval' },
-                { guard: ({ context }) => context.toolsInFlight === 0, target: 'generating' },
-              ],
+              always: ({ context }) => {
+                const row = runningRow(context);
+                if (row === 'approval') {
+                  return { target: 'waiting.approval' };
+                }
+                return row === 'generating' ? { target: 'generating' } : undefined;
+              },
             },
             waiting: {
               initial: 'approval',
               states: {
                 approval: {
-                  always: [
-                    {
-                      guard: ({ context }) => context.pendingApprovalCount === 0 && context.toolsInFlight > 0,
-                      target: '#chat-session.run.running.tool',
-                    },
-                    {
-                      guard: ({ context }) => context.pendingApprovalCount === 0,
-                      target: '#chat-session.run.running.generating',
-                    },
-                  ],
+                  always: ({ context }) => {
+                    const row = runningRow(context);
+                    if (row === 'tool') {
+                      return { target: '#chat-session.run.running.tool' };
+                    }
+                    return row === 'generating' ? { target: '#chat-session.run.running.generating' } : undefined;
+                  },
                 },
                 input: {},
               },
@@ -582,32 +645,33 @@ export const chatSessionMachine = setup({
             reconnecting: {},
           },
           on: {
-            turnFinalizedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
-            turnFailedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
-            turnConflictedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
-            requestLifecycle: [
-              { guard: 'isRetrying', target: '.reconnecting' },
-              { guard: 'isStopping', target: 'stopped', actions: ['clearRunDetail', 'announce'] },
+            turnFinalizedObserved: bufferSettlement,
+            turnFailedObserved: bufferSettlement,
+            turnConflictedObserved: bufferSettlement,
+            requestLifecycle: ({ context, event }, enq) => {
+              if (event.phase === 'retrying') {
+                return { target: '.reconnecting' };
+              }
+              if (event.phase === 'stopping') {
+                announce(context, enq);
+                return { target: 'stopped', context: clearRunDetail };
+              }
               /* `invoking` is a request in flight; the `generating` guards route
                * it straight back to a tool or an approval when one is open. */
-              { guard: ({ event }) => event.phase === 'invoking', target: '.generating' },
-            ],
-            durableRunState: { guard: 'isReattaching', target: '.reconnecting' },
-            /* V2: a gesture over a live turn never asks for a second lease. It
-             * is held until this turn settles, and the request it interrupts
-             * is what makes that happen. */
-            requestTurn: { actions: ['recordGesture', 'interruptTurn', 'announce'] },
-            interruptRecorded: {
-              guard: 'isApprovalRequested',
-              target: '.waiting.approval',
-              actions: [
-                'raiseApprovalPending',
-                assign({
-                  pendingApprovalCount: ({ event, context }) =>
-                    event.count ?? Math.max(context.pendingApprovalCount, 1),
-                }),
-                'announce',
-              ],
+              return event.phase === 'invoking' ? { target: '.generating' } : undefined;
+            },
+            durableRunState: ({ event }) => (event.state === 'reattaching' ? { target: '.reconnecting' } : undefined),
+            requestTurn: holdGesture,
+            interruptRecorded: ({ context, event }, enq) => {
+              if (event.state !== 'requested') {
+                return undefined;
+              }
+              raiseApprovalPending(context, true, enq);
+              announce(context, enq);
+              return {
+                target: '.waiting.approval',
+                context: { pendingApprovalCount: event.count ?? Math.max(context.pendingApprovalCount, 1) },
+              };
             },
           },
         },
@@ -615,7 +679,7 @@ export const chatSessionMachine = setup({
           initial: 'deciding',
           states: {
             deciding: {
-              always: [{ guard: 'hasOwnTurn', target: 'settling' }, { target: 'observing' }],
+              always: ({ context }) => ({ target: context.turn === undefined ? 'observing' : 'settling' }),
             },
             /* The turn's end, handed to its owner. Never interrupted: a gesture
              * made while this runs is held in `pendingGesture` and admitted
@@ -633,42 +697,20 @@ export const chatSessionMachine = setup({
                   leaseTurnId: context.turn?.leaseTurnId,
                   outcome: context.outcome ?? 'completed',
                 }),
-                onDone: [
-                  {
-                    guard: 'hasPendingGesture',
-                    target: '#chat-session.run.queued.admitting',
-                    actions: ['clearTurn', 'clearPendingSettlement', 'announce'],
-                  },
-                  {
-                    guard: 'settledAsCancelled',
-                    target: '#chat-session.run.stopped',
-                    actions: ['clearTurn', 'clearPendingSettlement', 'announce'],
-                  },
-                  {
-                    guard: 'settledAsFailed',
-                    target: '#chat-session.run.failed',
-                    actions: ['clearTurn', 'clearPendingSettlement', 'announce'],
-                  },
-                  {
-                    target: '#chat-session.run.done',
-                    actions: ['clearTurn', 'clearPendingSettlement', 'announce'],
-                  },
-                ],
-                onError: [
-                  {
-                    /* One retry, in place: a settlement that rejected left the
-                     * lease held and — when the failure cleared the turn — left
-                     * nothing that could ever name the run holding it. */
-                    guard: 'canRetrySettlement',
-                    target: 'settling',
-                    reenter: true,
-                    actions: ['recordSettlementRetry', 'recordSettlementFailure', 'announce'],
-                  },
-                  {
-                    target: '#chat-session.run.failed',
-                    actions: ['recordSettlementFailure', 'announce'],
-                  },
-                ],
+                onDone: settleOnDone,
+                onError: ({ context, event }, enq) => {
+                  announce(context, enq);
+                  /* One retry, in place: a settlement that rejected left the
+                   * lease held and — when the failure cleared the turn — left
+                   * nothing that could ever name the run holding it. */
+                  return context.settlementRetried
+                    ? { target: '#chat-session.run.failed', context: recordSettlementFailure(context, event.error) }
+                    : {
+                        target: 'settling',
+                        reenter: true,
+                        context: { settlementRetried: true, ...recordSettlementFailure(context, event.error) },
+                      };
+                },
               },
             },
             /* A run this page did not admit: its outcome is the host's to
@@ -678,50 +720,16 @@ export const chatSessionMachine = setup({
           on: {
             /* Only for a run this page did not admit. `settleTurn` awaits the
              * same attestation itself, and its `onDone` is the one transition
-             * that ends an owned turn.
-             *
-             * A gesture made over an adopted run is held exactly as one made
-             * over an owned turn is (V2), so the attestation that ends the run
-             * is also what admits it — otherwise the turn the person asked for
-             * while the page was catching up stays queued behind a run that
-             * has already finished. */
-            turnFinalizedObserved: [
-              {
-                guard: and(['hasNoOwnTurn', 'matchesActiveRun', 'hasPendingGesture']),
-                target: '#chat-session.run.queued.admitting',
-                actions: 'announce',
-              },
-              {
-                guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
-                target: 'done',
-                actions: 'announce',
-              },
-            ],
-            turnFailedObserved: [
-              {
-                guard: and(['hasNoOwnTurn', 'matchesActiveRun', 'hasPendingGesture']),
-                target: '#chat-session.run.queued.admitting',
-                actions: [assign({ failureReason: ({ event }) => event.reason }), 'announce'],
-              },
-              {
-                guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
-                target: 'failed',
-                actions: [assign({ failureReason: ({ event }) => event.reason }), 'announce'],
-              },
-            ],
-            turnConflictedObserved: [
-              {
-                guard: and(['hasNoOwnTurn', 'matchesActiveRun', 'hasPendingGesture']),
-                target: '#chat-session.run.queued.admitting',
-                actions: [assign({ failureReason: 'revision conflict' }), 'announce'],
-              },
-              {
-                guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
-                target: 'failed',
-                actions: [assign({ failureReason: 'revision conflict' }), 'announce'],
-              },
-            ],
-            requestTurn: { actions: ['recordGesture', 'announce'] },
+             * that ends an owned turn. */
+            turnFinalizedObserved: observedSettlement('done'),
+            turnFailedObserved: observedSettlement('failed', (event) =>
+              event.type === 'turnFailedObserved' ? event.reason : 'failed',
+            ),
+            turnConflictedObserved: observedSettlement('failed', () => 'revision conflict'),
+            requestTurn: ({ context, event }, enq) => {
+              announce(context, enq);
+              return { context: { pendingGesture: event.gesture } };
+            },
             reconcileSettlement: reconcileSettlementTransition,
           },
         },
@@ -734,95 +742,20 @@ export const chatSessionMachine = setup({
          * `queued.admitting` is where the lease is taken (V1, V2). A second
          * gesture re-enters the state, which aborts the admission in flight —
          * that actor abandons its own lease and no other (V4). */
-        requestTurn: {
-          target: '.queued.admitting',
-          reenter: true,
-          actions: ['recordGesture', 'announce'],
+        requestTurn: ({ context, event }, enq) => {
+          announce(context, enq);
+          return { target: '.queued.admitting', reenter: true, context: { pendingGesture: event.gesture } };
         },
-        runLifecycle: [
-          {
-            /* Our own admission's echo: the transport reporting the run this
-             * chat just leased. Re-entering `queued` here would restart the
-             * admission that produced it. */
-            guard: and(['hasOwnTurn', ({ event }) => event.phase === 'admitted']),
-            actions: ['captureRunIdentity', 'announce'],
-          },
-          {
-            guard: ({ event }) => event.phase === 'admitted',
-            target: '.queued',
-            actions: ['captureRunIdentity', 'announce'],
-          },
-          {
-            guard: ({ event }) => event.phase === 'running',
-            target: '.running',
-            actions: ['captureRunIdentity', 'announce'],
-          },
-          {
-            guard: ({ event }) => event.phase === 'paused',
-            target: '.running.waiting.input',
-            actions: ['captureRunIdentity', 'announce'],
-          },
-          {
-            /* V4: every turn that took a lease passes through `finishing`.
-             * A failed or cancelled run used to reach its terminal state
-             * directly, which is why a refused turn's settlement record was a
-             * matter of whether the stream outlived the revision root (F6). */
-            guard: and(['hasOwnTurn', ({ event }) => event.phase !== 'paused']),
-            target: '.finishing',
-            actions: ['captureRunIdentity', 'recordOutcome', 'recordRunFailure', 'clearRunDetail', 'announce'],
-          },
-          {
-            guard: 'completedWithFinalizedSettlement',
-            target: '.done',
-            actions: ['captureRunIdentity', 'clearRunDetail', 'clearPendingSettlement', 'announce'],
-          },
-          {
-            guard: 'completedWithFailedSettlement',
-            target: '.failed',
-            actions: [
-              'captureRunIdentity',
-              'recordPendingFailure',
-              'clearRunDetail',
-              'clearPendingSettlement',
-              'announce',
-            ],
-          },
-          {
-            guard: 'completedWithConflictedSettlement',
-            target: '.failed',
-            actions: [
-              'captureRunIdentity',
-              'recordPendingFailure',
-              'clearRunDetail',
-              'clearPendingSettlement',
-              'announce',
-            ],
-          },
-          {
-            guard: ({ event }) => event.phase === 'completed',
-            target: '.finishing',
-            actions: ['captureRunIdentity', 'clearRunDetail', 'announce'],
-          },
-          {
-            guard: ({ event }) => event.phase === 'failed',
-            target: '.failed',
-            actions: [
-              'captureRunIdentity',
-              assign({ failureReason: ({ event }) => event.reason }),
-              'clearRunDetail',
-              'clearPendingSettlement',
-              'announce',
-            ],
-          },
-          {
-            guard: ({ event }) => event.phase === 'cancelled',
-            target: '.stopped',
-            actions: ['captureRunIdentity', 'clearRunDetail', 'clearPendingSettlement', 'announce'],
-          },
-        ],
+        runLifecycle,
         /* Reload discovery can substantiate a run for a chat that never left
          * `idle` on this page (`retainDurableRun`). */
-        durableRunState: { guard: 'isReattaching', target: '.running.reconnecting', actions: 'announce' },
+        durableRunState: ({ context, event }, enq) => {
+          if (event.state !== 'reattaching') {
+            return undefined;
+          }
+          announce(context, enq);
+          return { target: '.running.reconnecting' };
+        },
         /*
          * *Close* on a chat (A35, P63).
          *
@@ -833,7 +766,10 @@ export const chatSessionMachine = setup({
          * alive so the row reads `Stopped`: telling the project session to let
          * go would stop this actor and blank the row.
          */
-        close: { target: '.stopped', actions: ['clearRunDetail', 'announce'] },
+        close: ({ context }, enq) => {
+          announce(context, enq);
+          return { target: '.stopped', context: clearRunDetail };
+        },
       },
     },
     /*
@@ -853,10 +789,10 @@ export const chatSessionMachine = setup({
             input: ({ context }) => ({ chatId: context.chatId, placement: context.placement }),
           },
           on: {
-            agentConfigChanged: [
-              { guard: 'placementChanged', actions: 'recordPlacement', target: 'bound', reenter: true },
-              { actions: 'recordPlacement' },
-            ],
+            agentConfigChanged: ({ context, event }) =>
+              event.placement === context.placement
+                ? { context: { placement: event.placement } }
+                : { target: 'bound', reenter: true, context: { placement: event.placement } },
           },
         },
       },
@@ -866,20 +802,35 @@ export const chatSessionMachine = setup({
       states: {
         read: {
           on: {
-            runLifecycle: {
-              /* P57: a run that *failed* while the person was elsewhere is as
-               * unseen as one that finished. The architecture's project row is
-               * red for "a run failed and is unread", which this is what makes
-               * reachable. */
-              guard: ({ event }) => event.phase === 'completed' || event.phase === 'failed',
-              target: 'unread',
-              actions: 'announce',
+            /* P57: a run that *failed* while the person was elsewhere is as
+             * unseen as one that finished. The architecture's project row is
+             * red for "a run failed and is unread", which this is what makes
+             * reachable. */
+            runLifecycle: ({ context, event }, enq) => {
+              if (event.phase !== 'completed' && event.phase !== 'failed') {
+                return undefined;
+              }
+              announce(context, enq);
+              return { target: 'unread' };
             },
-            unreadRestored: { target: 'unread', actions: 'announce' },
-            approvalPending: { target: 'unread', actions: 'announce' },
+            unreadRestored: ({ context }, enq) => {
+              announce(context, enq);
+              return { target: 'unread' };
+            },
+            approvalPending: ({ context }, enq) => {
+              announce(context, enq);
+              return { target: 'unread' };
+            },
           },
         },
-        unread: { on: { viewed: { target: 'read', actions: 'announce' } } },
+        unread: {
+          on: {
+            viewed: ({ context }, enq) => {
+              announce(context, enq);
+              return { target: 'read' };
+            },
+          },
+        },
       },
     },
     revision: {
@@ -892,35 +843,30 @@ export const chatSessionMachine = setup({
             onBranch: {},
           },
           on: {
-            turnFinalized: [
-              {
-                guard: ({ event }) => event.branch !== 'main',
-                target: '.onBranch',
-                actions: [assign({ branch: ({ event }) => event.branch }), 'announce'],
-              },
-              { target: '.onMain', actions: [assign({ branch: ({ event }) => event.branch }), 'announce'] },
-            ],
+            turnFinalized: ({ context, event }, enq) => {
+              announce(context, enq);
+              return { target: event.branch === 'main' ? '.onMain' : '.onBranch', context: { branch: event.branch } };
+            },
           },
         },
         tree: {
           initial: 'clean',
           states: { clean: {}, dirty: {} },
           on: {
-            dirtyChanged: [
-              { guard: ({ event }) => event.dirty, target: '.dirty', actions: 'announce' },
-              { target: '.clean', actions: 'announce' },
-            ],
+            dirtyChanged: ({ context, event }, enq) => {
+              announce(context, enq);
+              return { target: event.dirty ? '.dirty' : '.clean' };
+            },
           },
         },
         sync: {
           initial: 'synced',
           states: { synced: {}, pending: {}, conflicted: {} },
           on: {
-            syncState: [
-              { guard: ({ event }) => event.state === 'pending', target: '.pending', actions: 'announce' },
-              { guard: ({ event }) => event.state === 'conflicted', target: '.conflicted', actions: 'announce' },
-              { target: '.synced', actions: 'announce' },
-            ],
+            syncState: ({ context, event }, enq) => {
+              announce(context, enq);
+              return { target: `.${event.state}` };
+            },
           },
         },
       },

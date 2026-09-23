@@ -1,4 +1,4 @@
-import { assign, assertEvent, setup, enqueueActions, fromCallback } from 'xstate';
+import { assign, assertEvent, setup, enqueueActions, createCallbackLogic } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { getGitHubClient } from '#lib/github-api.js';
@@ -282,54 +282,56 @@ type ImportWorkerCallbackEvents =
     }
   | { type: 'workerError'; message: string; phase: 'download' | 'extract' | 'write' };
 
-const importWorkerActor = fromCallback<ImportWorkerCallbackEvents, ImportWorkerCallbackInput>(({ sendBack, input }) => {
-  const worker = new Worker(new URL('../workers/import.worker.ts', import.meta.url), {
-    type: 'module',
-  });
+const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, ImportWorkerCallbackInput>(
+  ({ sendBack, input }) => {
+    const worker = new Worker(new URL('../workers/import.worker.ts', import.meta.url), {
+      type: 'module',
+    });
 
-  worker.addEventListener('message', (event: MessageEvent<ImportWorkerResponse>) => {
-    const message = event.data;
-    switch (message.type) {
-      case 'downloadProgress': {
-        sendBack({ type: 'updateDownloadProgress', loaded: message.loaded, total: message.total });
-        break;
+    worker.addEventListener('message', (event: MessageEvent<ImportWorkerResponse>) => {
+      const message = event.data;
+      switch (message.type) {
+        case 'downloadProgress': {
+          sendBack({ type: 'updateDownloadProgress', loaded: message.loaded, total: message.total });
+          break;
+        }
+        case 'extractProgress': {
+          sendBack({ type: 'updateExtractProgress', processed: message.processed, total: message.total });
+          break;
+        }
+        case 'extractComplete': {
+          sendBack({
+            type: 'workerExtractComplete',
+            filePaths: message.filePaths,
+            files: message.files,
+          });
+          break;
+        }
+        case 'error': {
+          sendBack({ type: 'workerError', message: message.message, phase: message.phase });
+          break;
+        }
       }
-      case 'extractProgress': {
-        sendBack({ type: 'updateExtractProgress', processed: message.processed, total: message.total });
-        break;
-      }
-      case 'extractComplete': {
-        sendBack({
-          type: 'workerExtractComplete',
-          filePaths: message.filePaths,
-          files: message.files,
-        });
-        break;
-      }
-      case 'error': {
-        sendBack({ type: 'workerError', message: message.message, phase: message.phase });
-        break;
-      }
-    }
-  });
+    });
 
-  worker.addEventListener('error', (event) => {
-    sendBack({ type: 'workerError', message: event.message, phase: 'download' });
-  });
+    worker.addEventListener('error', (event) => {
+      sendBack({ type: 'workerError', message: event.message, phase: 'download' });
+    });
 
-  const startMessage: ImportWorkerRequest = {
-    type: 'startDownload',
-    url: input.downloadUrl,
-    headers: input.headers,
-  };
-  worker.postMessage(startMessage);
+    const startMessage: ImportWorkerRequest = {
+      type: 'startDownload',
+      url: input.downloadUrl,
+      headers: input.headers,
+    };
+    worker.postMessage(startMessage);
 
-  return () => {
-    const cancelMessage: ImportWorkerRequest = { type: 'cancel' };
-    worker.postMessage(cancelMessage);
-    worker.terminate();
-  };
-});
+    return () => {
+      const cancelMessage: ImportWorkerRequest = { type: 'cancel' };
+      worker.postMessage(cancelMessage);
+      worker.terminate();
+    };
+  },
+);
 
 const importGitHubActors = {
   getRepoMetadataActor,

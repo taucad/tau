@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { assign, createActor, fromCallback, setup, waitFor } from 'xstate';
+import { assign, createActor, createCallbackLogic, setup, waitFor } from 'xstate';
 import type { EventObject } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
 import type { CapabilitiesManifest, KernelIssue, RenderOutcome, TelemetryEntry } from '@taucad/runtime';
@@ -762,7 +762,7 @@ describe('cadMachine', () => {
     it('tells its parent why the kernel was refused, after saying it was trying', async () => {
       const received: Array<{ type: string; reason?: string }> = [];
       const parentRef = createActor(
-        fromCallback<EventObject>(({ receive }) => {
+        createCallbackLogic<EventObject>(({ receive }) => {
           receive((event) => received.push(event as { type: string; reason?: string }));
         }),
       );

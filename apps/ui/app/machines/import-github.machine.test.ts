@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createActor, waitFor, fromCallback } from 'xstate';
+import { createActor, waitFor, createCallbackLogic } from 'xstate';
 import { importGitHubMachine } from '#machines/import-github.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
@@ -74,7 +74,7 @@ function createTestActor(options?: {
       getFilesActor: fromSafeAsync(async () => {
         return { type: 'filesRetrieved', files: stubFiles };
       }),
-      importWorkerActor: fromCallback(({ sendBack }) => {
+      importWorkerActor: createCallbackLogic(({ sendBack }) => {
         if (options?.downloadThrows) {
           queueMicrotask(() => {
             sendBack({ type: 'workerError', message: 'download failed', phase: 'download' });

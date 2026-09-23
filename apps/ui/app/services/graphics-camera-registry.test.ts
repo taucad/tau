@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createActor, enqueueActions, fromPromise, setup } from 'xstate';
+import { createActor, enqueueActions, createAsyncLogic, setup } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import {
   acquireViewCameraSession,
@@ -11,9 +11,12 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 const actors: Array<ActorRefFrom<typeof graphicsMachine>> = [];
 
 const createGraphicsActor = (): ActorRefFrom<typeof graphicsMachine> => {
-  const actor = createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-    input: {},
-  });
+  const actor = createActor(
+    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    {
+      input: {},
+    },
+  );
   actor.start();
   actors.push(actor);
   return actor;
@@ -112,7 +115,9 @@ describe('ViewCameraSession ownership', () => {
         context: { child: ActorRefFrom<typeof graphicsMachine> };
         events: { type: 'destroyView' };
       },
-      actors: { graphics: graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }) },
+      actors: {
+        graphics: graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      },
     }).createMachine({
       context: ({ spawn }) => ({ child: spawn('graphics', { id: 'graphics-view-child', input: {} }) }),
       on: {

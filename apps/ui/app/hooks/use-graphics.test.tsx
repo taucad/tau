@@ -3,7 +3,7 @@ import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { ThreeCameraRig } from '@taucad/three/camera';
 import type { RenderFrame } from '@taucad/spatial';
@@ -66,9 +66,12 @@ const compiledGraphics = await (async () => {
 })();
 
 const createGraphicsActor = () => {
-  const actor = createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-    input: {},
-  });
+  const actor = createActor(
+    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    {
+      input: {},
+    },
+  );
   actor.start();
   actors.push(actor);
   return actor;

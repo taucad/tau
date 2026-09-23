@@ -2,7 +2,7 @@
 import { useLayoutEffect } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentManifest } from '@taucad/types';
@@ -115,9 +115,12 @@ function markSeedConsumed(graphicsRef: ActorRefFrom<typeof graphicsMachine>): vo
 
 /** A graphics actor with the WebGPU probe stubbed out, started, ready for events. */
 function createGraphicsActor(): ActorRefFrom<typeof graphicsMachine> {
-  return createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
-    input: {},
-  }).start();
+  return createActor(
+    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    {
+      input: {},
+    },
+  ).start();
 }
 
 function SyncHarness({

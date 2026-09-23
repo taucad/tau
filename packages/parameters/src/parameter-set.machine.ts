@@ -333,12 +333,21 @@ const emitOutcome = (context: ParameterSetMachineContext, enq: ParameterSetEnque
   });
 };
 
-const refuseSubmission = (enq: ParameterSetEnqueue, event: Submit, code: string, message: string): void => {
-  enq.emit({ type: 'settled', request: event.request, outcome: rejected(submittedId(event.request), code, message) });
+const refuseSubmission = (
+  enq: ParameterSetEnqueue,
+  event: Submit,
+  refusal: Readonly<{ code: string; message: string }>,
+): void => {
+  enq.emit({
+    type: 'settled',
+    request: event.request,
+    outcome: rejected(submittedId(event.request), refusal.code, refusal.message),
+  });
 };
 
-const refuseInvalid = (enq: ParameterSetEnqueue, event: Submit): void =>
-  refuseSubmission(enq, event, 'INVALID_REQUEST', 'Invalid parameter command.');
+const refuseInvalid = (enq: ParameterSetEnqueue, event: Submit): void => {
+  refuseSubmission(enq, event, { code: 'INVALID_REQUEST', message: 'Invalid parameter command.' });
+};
 
 const blockClose = (enq: ParameterSetEnqueue, event: Close): void => {
   enq.emit({ type: 'close-blocked', invalidDrafts: event.invalidDrafts ?? [] });
@@ -395,6 +404,7 @@ const unwrittenCommandHandlers = {
     const resolved = { ...context, ...resolve(event) };
     return { target: 'settled', context: { ...resolve(event), ...staleManifest(resolved) } };
   },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
   'watch.error': ({
     context,
     event,
@@ -407,8 +417,7 @@ const unwrittenCommandHandlers = {
   }),
 };
 
-/** One native actor wraps pure planning, one checked commit, and bounded uncertain-write recovery. @public */
-export const parameterSetMachine = setup({
+const parameterSetMachineDefinition = setup({
   schemas: {
     context: types<ParameterSetMachineContext>(),
     input: types<ParameterSetMachineInput>(),
@@ -445,13 +454,16 @@ export const parameterSetMachine = setup({
             return {};
           }
           if (isCollision(context, event.request)) {
-            refuseSubmission(enq, event, 'REQUEST_ID_COLLISION', 'Request ID was reused with different content.');
+            refuseSubmission(enq, event, {
+              code: 'REQUEST_ID_COLLISION',
+              message: 'Request ID was reused with different content.',
+            });
             return {};
           }
           if (isQueueAvailable(context, event.request)) {
             return { context: queue(context, event.request, enq) };
           }
-          refuseSubmission(enq, event, 'BUSY', 'A parameter command is already pending.');
+          refuseSubmission(enq, event, { code: 'BUSY', message: 'A parameter command is already pending.' });
           return {};
         },
         resolve: ({ context, event }) =>
@@ -758,12 +770,10 @@ export const parameterSetMachine = setup({
               },
             },
             submit: ({ event }, enq) => {
-              refuseSubmission(
-                enq,
-                event,
-                'WRITE_UNCERTAIN',
-                'Resolve the previous write outcome before submitting another command.',
-              );
+              refuseSubmission(enq, event, {
+                code: 'WRITE_UNCERTAIN',
+                message: 'Resolve the previous write outcome before submitting another command.',
+              });
               return {};
             },
           },
@@ -796,6 +806,19 @@ export const parameterSetMachine = setup({
     },
   },
 });
+
+type ParameterSetMachineDefinition = typeof parameterSetMachineDefinition;
+
+/**
+ * The type of {@link parameterSetMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface ParameterSetMachine extends ParameterSetMachineDefinition {}
+
+/** One native actor wraps pure planning, one checked commit, and bounded uncertain-write recovery. @public */
+export const parameterSetMachine: ParameterSetMachine = parameterSetMachineDefinition;
 
 /**
  * Subscribe before sending one command; all sequencing and settlement belong to the actor.

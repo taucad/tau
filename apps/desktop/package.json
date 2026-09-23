@@ -47,6 +47,7 @@
     "nanoraster": "catalog:",
     "pino-pretty": "catalog:",
     "uint8array-extras": "catalog:",
+    "xstate": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

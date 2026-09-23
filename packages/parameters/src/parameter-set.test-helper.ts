@@ -1,18 +1,21 @@
 import { contentDigest, digestContent } from '@taucad/cache-core';
-import type { ActorRefFrom } from 'xstate';
+import type { CheckedFileWriteResult } from '@taucad/types';
+import type { Actor } from 'xstate';
 import type { ParameterSnapshot } from '#snapshot.js';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { compileParameterManifest } from '#manifest.js';
 import { resolveParameterSnapshot } from '#snapshot.js';
 import { sameRequestDelivery } from '#request.js';
 import { parameterSetMachine } from '#parameter-set.machine.js';
+import type { ParameterSetLoadInput } from '#parameter-set.machine.js';
+import type { ParameterChange } from '#planning.js';
 import type { ParameterSetOutcome, ParameterSetRequest } from '#types.js';
 
 export const parameterSetHarness = async (
   refuseFirst = false,
   options: Readonly<{ gate?: Promise<void>; loseReply?: boolean }> = {},
 ): Promise<{
-  actor: ActorRefFrom<typeof parameterSetMachine>;
+  actor: Actor<typeof parameterSetMachine>;
   snapshot: ParameterSnapshot;
   submit(request: ParameterSetRequest): Promise<ParameterSetOutcome>;
   counts(): { writes: number; loads: number };
@@ -52,22 +55,26 @@ export const parameterSetHarness = async (
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => {
-          loads += 1;
-          return structuredClone(current);
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => {
+            loads += 1;
+            return structuredClone(current);
+          },
         }),
-        commitParameterSet: fromPromise(async ({ input }) => {
-          if (refuse) {
-            refuse = false;
-            throw Object.assign(new Error('Controlled refusal'), { applicationState: 'known-not-applied' });
-          }
-          await options.gate;
-          writes += 1;
-          current = structuredClone(input.proposed);
-          if (options.loseReply === true) {
-            throw new Error('Reply lost after commit');
-          }
-          return { status: 'applied', content: current.bytes! };
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async ({ input }) => {
+            if (refuse) {
+              refuse = false;
+              throw Object.assign(new Error('Controlled refusal'), { applicationState: 'known-not-applied' });
+            }
+            await options.gate;
+            writes += 1;
+            current = structuredClone(input.proposed);
+            if (options.loseReply === true) {
+              throw new Error('Reply lost after commit');
+            }
+            return { status: 'applied', content: current.bytes! };
+          },
         }),
       },
     }),

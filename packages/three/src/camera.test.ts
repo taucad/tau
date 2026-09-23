@@ -1,5 +1,6 @@
 import { OrthographicCamera, PerspectiveCamera, Raycaster, Vector2, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
+import { createActor } from 'xstate';
 import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta } from '@taucad/camera';
 import type { CameraVector } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
@@ -263,19 +264,13 @@ describe('createThreeCameraRig', () => {
     rig.actorRef.start();
     rig.actorRef.send({ type: 'setViewport', viewport: { width: 900, height: 600, pixelRatio: 1 } });
     rig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
-    const rootSnapshot = rig.actorRef.getSnapshot();
-    const driver = rootSnapshot.children['cameraDriver']!;
-    const driverSnapshot = driver.getSnapshot();
-    const systemSnapshot = rig.actorRef.system.getSnapshot();
-
+    /* v7 bindings never rehydrate a stopped root in place (the v5 Strict Mode
+     * cycle this used to simulate); a restore is a fresh actor from the
+     * persisted snapshot, and its driver must start from the same revision. */
+    const persisted = rig.actorRef.getPersistedSnapshot();
     rig.actorRef.stop();
-    Reflect.set(rig.actorRef.system, '_snapshot', systemSnapshot);
-    Reflect.set(rig.actorRef, '_processingStatus', 0);
-    Reflect.set(rig.actorRef, '_snapshot', rootSnapshot);
-    Reflect.set(driver, '_processingStatus', 0);
-    Reflect.set(driver, '_snapshot', driverSnapshot);
     revisions.length = 0;
-    rig.actorRef.start();
+    const restored = createActor(rig.actorRef.logic, { snapshot: persisted }).start();
 
     expect(revisions).toEqual([2]);
     expect(rig.activeCamera).toBe(rig.orthographicCamera);
@@ -283,6 +278,7 @@ describe('createThreeCameraRig', () => {
       (rig.orthographicCamera.right - rig.orthographicCamera.left) /
         (rig.orthographicCamera.top - rig.orthographicCamera.bottom),
     ).toBeCloseTo(1.5, 12);
+    restored.stop();
     rig.dispose();
   });
 

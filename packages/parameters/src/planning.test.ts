@@ -1,4 +1,4 @@
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine, submitParameterRequest } from '#parameter-set.machine.js';
 import { commitParameterChange } from '#authority.js';
 import type { ParameterAuthority } from '#authority.js';
@@ -15,6 +15,10 @@ import {
   readParameterRecord,
 } from '@taucad/parameters';
 import type { ParameterSetTarget, ParameterSetRequest } from '#types.js';
+import type { ParameterSnapshot } from '#snapshot.js';
+import type { ParameterSetLoadInput } from '#parameter-set.machine.js';
+import type { CheckedFileWriteResult } from '@taucad/types';
+import type { ParameterChange } from '#planning.js';
 
 const target: ParameterSetTarget = {
   authority: 'memory',
@@ -285,10 +289,10 @@ it('requires explicit source-unit confirmation before one record write', async (
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => current),
-        commitParameterSet: fromPromise(async ({ input: change, signal }) =>
-          commitParameterChange({ change, signal, authority }),
-        ),
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({ run: async () => current }),
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async ({ input: change, signal }) => commitParameterChange({ change, signal, authority }),
+        }),
       },
     }),
     { input: { target } },

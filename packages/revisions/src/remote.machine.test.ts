@@ -42,8 +42,8 @@
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
 
-import { createActor, fromPromise, setup } from 'xstate';
-import type { Actor, PromiseActorLogic } from 'xstate';
+import { createActor, createAsyncLogic, setup } from 'xstate';
+import type { Actor, AsyncActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#remote.machine.js';
@@ -79,30 +79,35 @@ const isMachine = (value: unknown): boolean =>
  */
 
 /** A stub that never settles: the state under test is the one in flight. */
-const pending = <Output, Input>(): PromiseActorLogic<Output, Input> =>
-  fromPromise<Output, Input>(
-    async () =>
+const pending = <Output, Input>(): AsyncActorLogic<Output, Input> =>
+  createAsyncLogic<Output, Input>({
+    run: async () =>
       new Promise<Output>(() => {
         /* Deliberately never settles. */
       }),
-  );
+  });
 
 /** A stub that takes its slot's failure edge (I29). */
-const failing = <Output, Input>(message: string): PromiseActorLogic<Output, Input> =>
-  fromPromise<Output, Input>(async () => {
-    await Promise.resolve();
-    throw new Error(message);
+const failing = <Output, Input>(message: string): AsyncActorLogic<Output, Input> =>
+  createAsyncLogic<Output, Input>({
+    run: async () => {
+      await Promise.resolve();
+      throw new Error(message);
+    },
   });
 
 /** A stub whose failure says "grant the credential again", not "the remote is broken". */
-const reauthorizing = <Output, Input>(message: string): PromiseActorLogic<Output, Input> =>
-  fromPromise<Output, Input>(async () => {
-    await Promise.resolve();
-    throw reauthorizationRequired(message);
+const reauthorizing = <Output, Input>(message: string): AsyncActorLogic<Output, Input> =>
+  createAsyncLogic<Output, Input>({
+    run: async () => {
+      await Promise.resolve();
+      throw reauthorizationRequired(message);
+    },
   });
 
 /** `readRemote` answering with the remote git's config already holds. */
-const reads = (remote: RemoteRecord | undefined): RemoteActors['readRemote'] => fromPromise(async () => ({ remote }));
+const reads = (remote: RemoteRecord | undefined): RemoteActors['readRemote'] =>
+  createAsyncLogic({ run: async () => ({ remote }) });
 
 type Overrides = Partial<RemoteActors>;
 
@@ -111,13 +116,15 @@ const start = (
 ): Readonly<{ actor: Actor<typeof remoteMachine>; emitted: RemoteMachineEmitted[] }> => {
   const actors: RemoteActors = {
     readRemote: reads(undefined),
-    writeRemote: fromPromise(async () => ({ remote: tauRemote })),
-    removeRemote: fromPromise(async (): Promise<void> => undefined),
-    authorize: fromPromise(async (): Promise<void> => undefined),
-    validate: fromPromise(
-      async (): Promise<RemoteValidateActorOutput> => ({ storage: { used: 2_100_000_000, quota: 10_000_000_000 } }),
-    ),
-    initialSync: fromPromise(async (): Promise<RemoteInitialSyncActorOutput> => ({})),
+    writeRemote: createAsyncLogic({ run: async () => ({ remote: tauRemote }) }),
+    removeRemote: createAsyncLogic({ run: async (): Promise<void> => undefined }),
+    authorize: createAsyncLogic({ run: async (): Promise<void> => undefined }),
+    validate: createAsyncLogic({
+      run: async (): Promise<RemoteValidateActorOutput> => ({
+        storage: { used: 2_100_000_000, quota: 10_000_000_000 },
+      }),
+    }),
+    initialSync: createAsyncLogic({ run: async (): Promise<RemoteInitialSyncActorOutput> => ({}) }),
     ...overrides,
   };
   const actor = createActor(remoteMachine.provide({ actors }), { input: { projectId: 'p1' } });
@@ -341,8 +348,10 @@ describe('remoteMachine', () => {
 
   it('29 (C10): a failed attempt removes the remote it wrote, so the next open is not “connected”', async () => {
     const removals: unknown[] = [];
-    const removing: RemoteActors['removeRemote'] = fromPromise(async ({ input }): Promise<void> => {
-      removals.push(input);
+    const removing: RemoteActors['removeRemote'] = createAsyncLogic({
+      run: async ({ input }): Promise<void> => {
+        removals.push(input);
+      },
     });
 
     const stages: ReadonlyArray<Readonly<{ stage: string; overrides: Overrides }>> = [
@@ -380,12 +389,16 @@ describe('remoteMachine', () => {
     const { actor } = start({
       /* Reach `reconnectRequired` the way a rotated credential does. */
       authorize: reauthorizing('Your connection needs to be renewed.'),
-      validate: fromPromise(async (): Promise<RemoteValidateActorOutput> => {
-        validations += 1;
-        throw new Error('the remote did not answer');
+      validate: createAsyncLogic({
+        run: async (): Promise<RemoteValidateActorOutput> => {
+          validations += 1;
+          throw new Error('the remote did not answer');
+        },
       }),
-      removeRemote: fromPromise(async ({ input }): Promise<void> => {
-        removals.push(input);
+      removeRemote: createAsyncLogic({
+        run: async ({ input }): Promise<void> => {
+          removals.push(input);
+        },
       }),
     });
     await settle();
@@ -436,8 +449,10 @@ describe('remoteMachine', () => {
     const removals: unknown[] = [];
     const { actor } = start({
       authorize: pending(),
-      removeRemote: fromPromise(async ({ input }): Promise<void> => {
-        removals.push(input);
+      removeRemote: createAsyncLogic({
+        run: async ({ input }): Promise<void> => {
+          removals.push(input);
+        },
       }),
     });
     await settle();
@@ -498,8 +513,10 @@ describe('remoteMachine', () => {
     const removals: unknown[] = [];
     const { actor } = start({
       writeRemote: pending(),
-      removeRemote: fromPromise(async ({ input }): Promise<void> => {
-        removals.push(input);
+      removeRemote: createAsyncLogic({
+        run: async ({ input }): Promise<void> => {
+          removals.push(input);
+        },
       }),
     });
     await settle();
@@ -519,13 +536,13 @@ describe('remoteMachine', () => {
 
   it('20: keeps the remote and names the files when the first sync is over the plan', async () => {
     const { actor, emitted } = start({
-      initialSync: fromPromise(
-        async (): Promise<RemoteInitialSyncActorOutput> => ({
+      initialSync: createAsyncLogic({
+        run: async (): Promise<RemoteInitialSyncActorOutput> => ({
           overQuota: ['models/bracket.step'],
           message: 'This project is over its storage plan.',
           storage: { remainingBytes: 0, shortfallBytes: 5_242_880 },
         }),
-      ),
+      }),
     });
     await settle();
 
@@ -552,8 +569,10 @@ describe('remoteMachine', () => {
     const removals: unknown[] = [];
     const { actor } = start({
       validate: pending(),
-      removeRemote: fromPromise(async ({ input }): Promise<void> => {
-        removals.push(input);
+      removeRemote: createAsyncLogic({
+        run: async ({ input }): Promise<void> => {
+          removals.push(input);
+        },
       }),
     });
     await settle();
@@ -614,15 +633,19 @@ describe('remoteMachine', () => {
     let renewed = false;
     const writes: unknown[] = [];
     const { actor, emitted } = start({
-      writeRemote: fromPromise(async ({ input }) => {
-        writes.push(input);
-        return { remote: tauRemote };
+      writeRemote: createAsyncLogic({
+        run: async ({ input }) => {
+          writes.push(input);
+          return { remote: tauRemote };
+        },
       }),
-      validate: fromPromise(async (): Promise<RemoteValidateActorOutput> => {
-        if (!renewed) {
-          throw reauthorizationRequired('Your GitHub connection needs to be renewed.');
-        }
-        return {};
+      validate: createAsyncLogic({
+        run: async (): Promise<RemoteValidateActorOutput> => {
+          if (!renewed) {
+            throw reauthorizationRequired('Your GitHub connection needs to be renewed.');
+          }
+          return {};
+        },
       }),
     });
     await settle();
@@ -671,11 +694,13 @@ describe('remoteMachine', () => {
   it('26: reconnects through `connect`, which is the edge the Sync region takes', async () => {
     let renewed = false;
     const { actor } = start({
-      validate: fromPromise(async (): Promise<RemoteValidateActorOutput> => {
-        if (!renewed) {
-          throw reauthorizationRequired('Your GitHub connection needs to be renewed.');
-        }
-        return {};
+      validate: createAsyncLogic({
+        run: async (): Promise<RemoteValidateActorOutput> => {
+          if (!renewed) {
+            throw reauthorizationRequired('Your GitHub connection needs to be renewed.');
+          }
+          return {};
+        },
       }),
     });
     await settle();
@@ -697,8 +722,10 @@ describe('remoteMachine', () => {
     const removals: unknown[] = [];
     const { actor, emitted } = start({
       validate: reauthorizing('Your GitHub connection needs to be renewed.'),
-      removeRemote: fromPromise(async ({ input }): Promise<void> => {
-        removals.push(input);
+      removeRemote: createAsyncLogic({
+        run: async ({ input }): Promise<void> => {
+          removals.push(input);
+        },
       }),
     });
     await settle();
@@ -731,13 +758,15 @@ describe('remoteMachine', () => {
     ];
     for (const refusal of refusals) {
       const { actor } = start({
-        validate: fromPromise(async (): Promise<RemoteValidateActorOutput> => {
-          await Promise.resolve();
-          throw new RevisionPortError(
-            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the table names real codes.
-            refusal.code as RevisionPortErrorCode,
-            'Syncing files to Tau Cloud is a paid plan feature.',
-          );
+        validate: createAsyncLogic({
+          run: async (): Promise<RemoteValidateActorOutput> => {
+            await Promise.resolve();
+            throw new RevisionPortError(
+              // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the table names real codes.
+              refusal.code as RevisionPortErrorCode,
+              'Syncing files to Tau Cloud is a paid plan feature.',
+            );
+          },
         }),
       });
       // oxlint-disable-next-line no-await-in-loop -- one connect attempt per refusal.

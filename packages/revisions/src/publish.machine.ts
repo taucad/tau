@@ -25,8 +25,11 @@
  * has to land in `error`, never hang (A38: every effect has a failure edge).
  */
 
-import { assign, emit, enqueueActions, fromPromise, setup } from 'xstate';
-import type { AnyActorRef, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
+import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
+
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
 
 import type { RevisionTag } from '#revision-port.js';
 import type { SyncPushOutcome } from '#sync.machine.js';
@@ -172,6 +175,27 @@ const unsupported = async (): Promise<never> => {
 const reason = (error: unknown): string =>
   error instanceof Error ? error.message : 'This project could not be published.';
 
+type PublishEnqueue = EnqueueObject<PublishMachineEvent, PublishMachineEmitted>;
+
+/* Every entry into the dialog starts from nothing: a draft left over from
+ * the last publish would be applied to this one's read (row 11). */
+const startPublish = (event: Extract<PublishMachineEvent, { type: 'publish' }>): Partial<PublishMachineContext> => ({
+  tag: event.tag,
+  draft: undefined,
+  pushId: undefined,
+  publicationId: undefined,
+  shareUrl: undefined,
+  error: undefined,
+});
+
+/* A refusal is remembered for the dialog and said once as a toast. */
+const failWith = (enq: PublishEnqueue, error: string): Partial<PublishMachineContext> => {
+  enq.emit({ type: 'toast.error', message: error });
+  return { error };
+};
+
+const noRevisionsYet = 'This project has no revisions yet, so there is nothing to publish.';
+
 /**
  * Headless publication of one project's named version.
  *
@@ -193,36 +217,20 @@ const reason = (error: unknown): string =>
  * ```
  */
 export const publishMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as PublishMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as PublishMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as PublishMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as PublishMachineInput,
+  schemas: {
+    context: types<PublishMachineContext>(),
+    events: eventSchemas<PublishMachineEvent>(),
+    emitted: eventSchemas<PublishMachineEmitted>(),
+    input: types<PublishMachineInput>(),
   },
   actors: {
-    listVersions: fromPromise<PublishVersionsActorOutput, Readonly<{ projectId: string; branch: string }>>(unsupported),
-    createTag: fromPromise<RevisionTag, PublishTagActorInput>(unsupported),
-    push: fromPromise<PublishPushActorOutput, PublishPushActorInput>(unsupported),
-    createPublication: fromPromise<PublishPublicationActorOutput, PublishPublicationActorInput>(unsupported),
-  },
-  actions: {
-    /* Every entry into the dialog starts from nothing: a draft left over from
-     * the last publish would be applied to this one's read (row 11). */
-    startPublish: assign({
-      tag: ({ event }) => (event.type === 'publish' ? event.tag : undefined),
-      draft: undefined,
-      pushId: undefined,
-      publicationId: undefined,
-      shareUrl: undefined,
-      error: undefined,
+    listVersions: createAsyncLogic<PublishVersionsActorOutput, Readonly<{ projectId: string; branch: string }>>({
+      run: unsupported,
     }),
-    failWith: enqueueActions(({ enqueue }, params: Readonly<{ error: string }>) => {
-      enqueue.assign({ error: params.error });
-      enqueue.emit({ type: 'toast.error', message: params.error });
+    createTag: createAsyncLogic<RevisionTag, PublishTagActorInput>({ run: unsupported }),
+    push: createAsyncLogic<PublishPushActorOutput, PublishPushActorInput>({ run: unsupported }),
+    createPublication: createAsyncLogic<PublishPublicationActorOutput, PublishPublicationActorInput>({
+      run: unsupported,
     }),
   },
   delays: {
@@ -249,7 +257,7 @@ export const publishMachine = setup({
   states: {
     idle: {
       on: {
-        publish: { target: 'choosingVersion', actions: 'startPublish' },
+        publish: { target: 'choosingVersion', context: ({ event }) => startPublish(event) },
       },
     },
 
@@ -273,62 +281,37 @@ export const publishMachine = setup({
           invoke: {
             src: 'listVersions',
             input: ({ context }) => ({ projectId: context.projectId, branch: context.branch }),
-            onDone: [
-              {
-                guard: ({ event }) => event.output.revisionId === undefined,
-                target: '#publish.error',
-                actions: [
-                  assign({ tags: ({ event }) => event.output.tags }),
-                  {
-                    type: 'failWith',
-                    params: () => ({ error: 'This project has no revisions yet, so there is nothing to publish.' }),
-                  },
-                ],
-              },
-              {
-                /* A name was confirmed while the read was in flight. */
-                guard: ({ context }) => context.draft !== undefined,
-                target: '#publish.tagging',
-                actions: assign({
-                  tags: ({ event }) => event.output.tags,
-                  revisionId: ({ event }) => event.output.revisionId,
-                  expected: ({ event }) => event.output.expected,
-                  remoteTags: ({ event }) => event.output.remoteTags,
-                }),
-              },
-              {
-                target: 'ready',
-                actions: assign({
-                  tags: ({ event }) => event.output.tags,
-                  revisionId: ({ event }) => event.output.revisionId,
-                  expected: ({ event }) => event.output.expected,
-                  remoteTags: ({ event }) => event.output.remoteTags,
-                }),
-              },
-            ],
-            onError: {
-              target: '#publish.error',
-              actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+            onDone: ({ context, event }, enq) => {
+              if (event.output.revisionId === undefined) {
+                return {
+                  target: '#publish.error',
+                  context: { tags: event.output.tags, ...failWith(enq, noRevisionsYet) },
+                };
+              }
+              const read = {
+                tags: event.output.tags,
+                revisionId: event.output.revisionId,
+                expected: event.output.expected,
+                remoteTags: event.output.remoteTags,
+              };
+              /* A name was confirmed while the read was in flight. */
+              return context.draft === undefined
+                ? { target: 'ready', context: read }
+                : { target: '#publish.tagging', context: read };
             },
+            onError: ({ event }, enq) => ({ target: '#publish.error', context: failWith(enq, reason(event.error)) }),
           },
           on: {
             /* Held, not refused: the read decides where it goes next. */
-            confirm: { actions: assign({ draft: ({ event }) => event.draft }) },
+            confirm: { context: ({ event }) => ({ draft: event.draft }) },
           },
         },
         ready: {
           on: {
-            confirm: [
-              {
-                guard: ({ context }) => context.revisionId === undefined,
-                target: '#publish.error',
-                actions: {
-                  type: 'failWith',
-                  params: () => ({ error: 'This project has no revisions yet, so there is nothing to publish.' }),
-                },
-              },
-              { target: '#publish.tagging', actions: assign({ draft: ({ event }) => event.draft }) },
-            ],
+            confirm: ({ context, event }, enq) =>
+              context.revisionId === undefined
+                ? { target: '#publish.error', context: failWith(enq, noRevisionsYet) }
+                : { target: '#publish.tagging', context: { draft: event.draft } },
           },
         },
       },
@@ -353,10 +336,7 @@ export const publishMachine = setup({
           ...(context.draft?.note === undefined ? {} : { note: context.draft.note }),
         }),
         onDone: { target: 'pushing' },
-        onError: {
-          target: 'error',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
-        },
+        onError: ({ event }, enq) => ({ target: 'error', context: failWith(enq, reason(event.error)) }),
       },
       on: { cancel: { target: 'idle' } },
     },
@@ -392,55 +372,45 @@ export const publishMachine = setup({
          * (W22 DEF-W22-2). A dialog with no parent keeps waiting for a
          * settlement nobody will send, and `pushSettlement` is what ends it.
          */
-        onDone: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            enqueue.assign({ pushId: event.output.pushId });
-            if (context.parentRef !== undefined) {
-              enqueue.sendTo(context.parentRef, {
-                type: 'syncNow',
-                pushId: event.output.pushId,
-                remote: event.output.remote,
-              });
-            }
-          }),
+        onDone: ({ context, event }, enq) => {
+          if (context.parentRef !== undefined) {
+            enq.sendTo(context.parentRef, {
+              type: 'syncNow',
+              pushId: event.output.pushId,
+              remote: event.output.remote,
+            });
+          }
+          return { context: { pushId: event.output.pushId } };
         },
-        onError: {
-          target: 'error',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
-        },
+        onError: ({ event }, enq) => ({ target: 'error', context: failWith(enq, reason(event.error)) }),
       },
       after: {
-        pushSettlement: {
+        pushSettlement: (_, enq) => ({
           target: 'error',
-          actions: {
-            type: 'failWith',
-            params: () => ({ error: 'Tau could not confirm this project reached the cloud. Try publishing again.' }),
-          },
-        },
+          context: failWith(enq, 'Tau could not confirm this project reached the cloud. Try publishing again.'),
+        }),
       },
       on: {
-        pushSettled: [
-          {
-            guard: ({ context, event }) => context.pushId === event.pushId && event.outcome === 'backedUp',
-            target: 'publishing',
-          },
-          {
-            /* `queued`, `conflicted` and `failed` all mean the remote does not
-               have this name yet, and a row that points at a name the remote
-               does not hold is a publication whose viewer opens nothing (P39). */
-            guard: ({ context, event }) => context.pushId === event.pushId,
+        pushSettled: ({ context, event }, enq) => {
+          if (context.pushId !== event.pushId) {
+            return undefined;
+          }
+          if (event.outcome === 'backedUp') {
+            return { target: 'publishing' };
+          }
+          /* `queued`, `conflicted` and `failed` all mean the remote does not
+             have this name yet, and a row that points at a name the remote
+             does not hold is a publication whose viewer opens nothing (P39). */
+          return {
             target: 'error',
-            actions: {
-              type: 'failWith',
-              params: ({ event }) => ({
-                error:
-                  event.outcome === 'conflicted'
-                    ? 'Someone else changed this project in the cloud. Open it, resolve the conflict, then publish again.'
-                    : 'This project has not reached the cloud yet. Try publishing again when you are back online.',
-              }),
-            },
-          },
-        ],
+            context: failWith(
+              enq,
+              event.outcome === 'conflicted'
+                ? 'Someone else changed this project in the cloud. Open it, resolve the conflict, then publish again.'
+                : 'This project has not reached the cloud yet. Try publishing again when you are back online.',
+            ),
+          };
+        },
         cancel: { target: 'idle' },
       },
     },
@@ -467,49 +437,40 @@ export const publishMachine = setup({
           projectId: context.projectId,
           revisionId: context.revisionId ?? '',
         }),
-        onDone: {
-          target: 'success',
-          actions: [
-            assign({
-              publicationId: ({ event }) => event.output.publicationId,
-              shareUrl: ({ event }) => event.output.url,
-              error: undefined,
-            }),
-            emit(
-              ({ context, event }): PublishMachineEmitted => ({
-                type: 'published',
-                publicationId: event.output.publicationId,
-                url: event.output.url,
-                tag: context.draft?.tag ?? '',
-              }),
-            ),
-          ],
+        onDone: ({ context, event }, enq) => {
+          enq.emit({
+            type: 'published',
+            publicationId: event.output.publicationId,
+            url: event.output.url,
+            tag: context.draft?.tag ?? '',
+          });
+          return {
+            target: 'success',
+            context: { publicationId: event.output.publicationId, shareUrl: event.output.url, error: undefined },
+          };
         },
-        onError: {
-          target: 'error',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
-        },
+        onError: ({ event }, enq) => ({ target: 'error', context: failWith(enq, reason(event.error)) }),
       },
     },
 
     success: {
       on: {
         reset: { target: 'idle' },
-        publish: { target: 'choosingVersion', actions: 'startPublish' },
+        publish: { target: 'choosingVersion', context: ({ event }) => startPublish(event) },
       },
     },
 
     error: {
       on: {
-        reset: { target: 'idle', actions: assign({ error: undefined }) },
-        publish: { target: 'choosingVersion', actions: 'startPublish' },
+        reset: { target: 'idle', context: { error: undefined } },
+        publish: { target: 'choosingVersion', context: ({ event }) => startPublish(event) },
       },
     },
   },
 });
 
 /** The actor set `publishMachine.provide` needs. @public */
-export type PublishActors = NonNullable<Parameters<typeof publishMachine.provide>[0]['actors']>;
+export type PublishActors = MachineActors<typeof publishMachine>;
 
 /** Where a publication is, for the dialog and the projection. @public */
 export type PublishFacet = Readonly<{

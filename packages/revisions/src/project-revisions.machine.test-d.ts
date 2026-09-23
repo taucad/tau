@@ -5,5 +5,5 @@ import { projectRevisionsMachine, selectRevisionStatus } from '#project-revision
 import type { ProjectRevisionsMachineInput, RevisionStatusProjection } from '#project-revisions.machine.js';
 
 expectTypeOf(projectRevisionsMachine).toExtend<AnyStateMachine>();
-expectTypeOf<InputFrom<typeof projectRevisionsMachine>>().toEqualTypeOf<ProjectRevisionsMachineInput>();
+expectTypeOf<NonNullable<InputFrom<typeof projectRevisionsMachine>>>().toEqualTypeOf<ProjectRevisionsMachineInput>();
 expectTypeOf(selectRevisionStatus).returns.toEqualTypeOf<RevisionStatusProjection>();

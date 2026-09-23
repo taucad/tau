@@ -1,5 +1,5 @@
-import { fromEventObservable } from 'xstate';
-import type { EventObject, NonReducibleUnknown, Subscribable } from 'xstate';
+import { createEventObservableLogic } from 'xstate';
+import type { AnyStateMachine, EventObject, NonReducibleUnknown, StateMachine, Subscribable, TypeSchema } from 'xstate';
 
 // ---------------------------------------------------------------------------
 // fromSafeAsync — React Strict Mode safe alternative to fromPromise
@@ -149,11 +149,11 @@ function createSafeSubscribable<T>(
 // oxlint-disable-next-line typescript/explicit-module-boundary-types -- allowing type inference for the function return type
 export function fromSafeAsync<
   // eslint-disable-next-line @typescript-eslint/naming-convention -- following XState convention for generic type parameters
-  TReturn extends EventObject | void = void,
+  const TReturn extends EventObject | void = void,
   // eslint-disable-next-line @typescript-eslint/naming-convention -- following XState convention for generic type parameters
   TInput extends NonReducibleUnknown = NonReducibleUnknown,
 >(work: (args: { input: TInput; signal: AbortSignal }) => Promise<TReturn>) {
-  return fromEventObservable<TReturn & EventObject, TInput>(({ input }) =>
+  return createEventObservableLogic<TReturn & EventObject, TInput>(({ input }) =>
     createSafeSubscribable<TReturn & EventObject>((subscriber, signal) => {
       // async-iife: bootstrap — Observable executor cannot be async; bridge work() into subscriber
       void (async (): Promise<void> => {
@@ -173,3 +173,54 @@ export function fromSafeAsync<
     }),
   );
 }
+
+// ---------------------------------------------------------------------------
+// Machine schema helpers
+// ---------------------------------------------------------------------------
+
+/** The `schemas.events` or `schemas.emitted` map for a union of `{ type }` events. */
+export type EventSchemaMap<TEvent extends { readonly type: string }> = {
+  [K in TEvent['type']]: TypeSchema<Omit<Extract<TEvent, { readonly type: K }>, 'type'>>;
+};
+
+/**
+ * Declares a machine's events (or emitted events) from its exported union, for type inference only.
+ *
+ * The union stays the single source of truth; XState reads schema values at runtime only when a
+ * `validator` is configured or the machine is serialized, and Tau does neither.
+ *
+ * @returns An empty object typed as the schema map.
+ */
+export const eventSchemas = <TEvent extends { readonly type: string }>(): EventSchemaMap<TEvent> =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type-only schema map, never validated.
+  ({}) as EventSchemaMap<TEvent>;
+
+/**
+ * The actor source map a machine was set up with, as `machine.provide({ actors })` accepts it.
+ *
+ * `Parameters<typeof machine.provide>[0]['actors']` resolves to `undefined` slots, so composition roots
+ * read the map from the machine type instead.
+ */
+/* oxlint-disable typescript/no-explicit-any -- positional inference over StateMachine's parameters. */
+export type MachineActors<TMachine extends AnyStateMachine> =
+  TMachine extends StateMachine<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    infer TActorMap,
+    any,
+    any,
+    any,
+    any
+  >
+    ? { [K in keyof TActorMap]: TActorMap[K] }
+    : never;
+/* oxlint-enable typescript/no-explicit-any */

@@ -16,7 +16,7 @@ import { isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
 import type { LengthSymbol } from '#constants/length-units.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -422,18 +422,6 @@ type CadEnqueue = EnqueueObject<CadEvent, CadEmitted, SystemRegistry, typeof cad
 type CadPatch = Partial<CadContext>;
 type ActorIdentity = AnyActorRef;
 
-/**
- * The id the parent spawned this unit under. State-level transition arguments
- * type `self` as `AnyActorRef`, which declares no `id` (K-14), though every
- * running actor carries one.
- */
-const actorIdOf = (self: AnyActorRef): string => {
-  const id: unknown = Reflect.get(self, 'id');
-  if (typeof id !== 'string') {
-    throw new TypeError('A CAD unit reports to its parent under its actor id');
-  }
-  return id;
-};
 type CadArgs<TType extends CadEvent['type']> = Readonly<{
   context: CadContext;
   event: Extract<CadEvent, { type: TType }>;

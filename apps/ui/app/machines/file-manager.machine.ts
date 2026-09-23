@@ -1,4 +1,5 @@
-import { assign, assertEvent, setup, enqueueActions } from 'xstate';
+import { setup, types } from 'xstate';
+import type { EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
@@ -16,7 +17,7 @@ import {
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { fileManagerWorkerName } from '#machines/file-manager-worker-name.js';
 import type { WorkspaceRootSkip } from '#filesystem/handle-store.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { normalizePath } from '@taucad/utils/path';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { SharedPool } from '@taucad/memory';
@@ -662,243 +663,131 @@ type FileManagerInput = {
   onRootSkipped?: (skip: WorkspaceRootSkip) => void;
 };
 
+type FileManagerEnqueue = EnqueueObject<FileManagerEvent, EventObject, SystemRegistry, typeof fileManagerActors>;
+type FileManagerPatch = Partial<FileManagerContext>;
+
+const setError = (error: unknown, enq: FileManagerEnqueue): FileManagerPatch => {
+  if (error instanceof Error) {
+    enq(() => {
+      console.error('[FileManager] error:', error);
+    });
+    return { error };
+  }
+  return { error: undefined };
+};
+
+/** Release the service graph; the worker, proxy, bridge opener and authority are not touched. */
+const disposeServices = (context: FileManagerContext): void => {
+  context.contentService?.dispose();
+  context.treeService?.dispose();
+  context.workerChangeChannel?.dispose();
+  context.disposeComposedView?.();
+};
+
+const destroyWorkerAndServices = (context: FileManagerContext, enq: FileManagerEnqueue): FileManagerPatch => {
+  enq(() => {
+    disposeServices(context);
+    safeDispose(() => context.proxy?.dispose());
+    safeDispose(context.bridgeDispose);
+
+    if (!context.sharedWorker) {
+      safeDispose(() => context.worker?.terminate());
+    }
+  });
+
+  return {
+    proxy: undefined,
+    bridgeDispose: undefined,
+    openFileSystemBridge: undefined,
+    openComputeBinding: undefined,
+    openComputeStorePort: undefined,
+    computeControl: undefined,
+    worker: context.sharedWorker ? context.worker : undefined,
+    contentService: undefined,
+    treeService: undefined,
+    viewClient: undefined,
+    workerChangeChannel: undefined,
+    disposeComposedView: undefined,
+  };
+};
+
+/** Reads the worker the destroy step left: only a shared worker survives a root change. */
+const updateRootAndReset = (
+  context: FileManagerContext,
+  event: Extract<FileManagerEvent, { type: 'setRoot' }>,
+  enq: FileManagerEnqueue,
+): FileManagerPatch => {
+  const { worker } = context;
+  if (worker) {
+    enq(() => {
+      worker.postMessage({ type: 'computeStoreAdmission', projectId: event.projectId });
+    });
+  }
+  const openers = worker ? computeOpeners(worker, event.projectId) : undefined;
+  return {
+    rootDirectory: event.path,
+    projectId: event.projectId,
+    openComputeBinding: openers?.openComputeBinding,
+    openComputeStorePort: openers?.openComputeStorePort,
+    computeControl: openers?.computeControl,
+    error: undefined,
+    // Workspace identity is a per-init *output* of `initializeServicesActor`;
+    // it must NEVER survive a project transition. Clearing here closes the
+    // class of cross-project corruption bugs (see
+    // `docs/research/fm-workspace-binding-scope.md` Findings 1 & 3).
+    activeWorkspaceId: undefined,
+    activeWorkspaceName: undefined,
+    unavailableReason: undefined,
+  };
+};
+
+const stopPolling = (context: FileManagerContext, enq: FileManagerEnqueue): void => {
+  const { treeService } = context;
+  enq(() => {
+    treeService?.stopPolling();
+  });
+};
+
+const isRootChanged = (context: FileManagerContext, event: Extract<FileManagerEvent, { type: 'setRoot' }>): boolean =>
+  event.path !== context.rootDirectory || event.projectId !== context.projectId;
+
+/** Move to a new project root: stop, tear the worker graph down, then point at the new root. */
+const changeRoot =
+  (options: Readonly<{ whenChanged: boolean; stopPolling: boolean }>) =>
+  (
+    {
+      context,
+      event,
+    }: Readonly<{ context: FileManagerContext; event: Extract<FileManagerEvent, { type: 'setRoot' }> }>,
+    enq: FileManagerEnqueue,
+  ) => {
+    if (options.whenChanged && !isRootChanged(context, event)) {
+      return undefined;
+    }
+    if (options.stopPolling) {
+      stopPolling(context, enq);
+    }
+    const destroyed = destroyWorkerAndServices(context, enq);
+    return {
+      target: 'connectingWorker',
+      context: { ...destroyed, ...updateRootAndReset({ ...context, ...destroyed }, event, enq) },
+    };
+  };
+
 export const fileManagerMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type assertion required
-    context: {} as FileManagerContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type assertion required
-    events: {} as FileManagerEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type assertion required
-    input: {} as FileManagerInput,
+  schemas: {
+    context: types<FileManagerContext>(),
+    events: eventSchemas<FileManagerEvent>(),
+    input: types<FileManagerInput>(),
   },
   actors: fileManagerActors,
-  actions: {
-    setError: assign({
-      error({ event }) {
-        if ('error' in event && event.error instanceof Error) {
-          console.error('[FileManager] error:', event.error);
-          return event.error;
-        }
-        return undefined;
-      },
-    }),
-
-    clearError: assign({ error: undefined }),
-
-    disposeServicesForReload({ context }) {
-      // Keep the successful service identity published until its replacement
-      // succeeds, but release the old service graph before constructing the
-      // next one. The worker, proxy, bridge opener, and authority stay alive.
-      context.contentService?.dispose();
-      context.treeService?.dispose();
-      context.workerChangeChannel?.dispose();
-      context.disposeComposedView?.();
-    },
-
-    destroyWorkerAndServices: assign(({ context }) => {
-      context.contentService?.dispose();
-      context.treeService?.dispose();
-      context.workerChangeChannel?.dispose();
-      context.disposeComposedView?.();
-      safeDispose(() => context.proxy?.dispose());
-      safeDispose(context.bridgeDispose);
-
-      if (!context.sharedWorker) {
-        safeDispose(() => context.worker?.terminate());
-      }
-
-      return {
-        proxy: undefined,
-        bridgeDispose: undefined,
-        openFileSystemBridge: undefined,
-        openComputeBinding: undefined,
-        openComputeStorePort: undefined,
-        computeControl: undefined,
-        worker: context.sharedWorker ? context.worker : undefined,
-        contentService: undefined,
-        treeService: undefined,
-        viewClient: undefined,
-        workerChangeChannel: undefined,
-        disposeComposedView: undefined,
-      };
-    }),
-
-    updateRootAndReset: assign({
-      rootDirectory({ event }) {
-        assertEvent(event, 'setRoot');
-        return event.path;
-      },
-      projectId({ event }) {
-        assertEvent(event, 'setRoot');
-        return event.projectId;
-      },
-      openComputeBinding({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
-        assertEvent(event, 'setRoot');
-        context.worker?.postMessage({ type: 'computeStoreAdmission', projectId: event.projectId });
-        return context.worker ? computeOpeners(context.worker, event.projectId).openComputeBinding : undefined;
-      },
-      openComputeStorePort({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
-        assertEvent(event, 'setRoot');
-        return context.worker ? computeOpeners(context.worker, event.projectId).openComputeStorePort : undefined;
-      },
-      computeControl({ context, event }: { context: FileManagerContext; event: FileManagerEvent }) {
-        assertEvent(event, 'setRoot');
-        return context.worker ? computeOpeners(context.worker, event.projectId).computeControl : undefined;
-      },
-      error: undefined,
-      // Workspace identity is a per-init *output* of `initializeServicesActor`;
-      // it must NEVER survive a project transition. Clearing here closes the
-      // class of cross-project corruption bugs (see
-      // `docs/research/fm-workspace-binding-scope.md` Findings 1 & 3).
-      activeWorkspaceId: undefined,
-      activeWorkspaceName: undefined,
-      unavailableReason: undefined,
-    }),
-
-    updateWorkerFromConnect: assign({
-      worker({ event }) {
-        assertEvent(event, 'workerConnected');
-        return event.worker;
-      },
-      proxy({ event }) {
-        assertEvent(event, 'workerConnected');
-        return event.proxy;
-      },
-      bridgeDispose({ event }) {
-        assertEvent(event, 'workerConnected');
-        return event.bridgeDispose;
-      },
-      openFileSystemBridge({ event }: { event: FileManagerEvent }) {
-        assertEvent(event, 'workerConnected');
-        return event.openFileSystemBridge;
-      },
-      openComputeBinding({ event }: { event: FileManagerEvent }) {
-        assertEvent(event, 'workerConnected');
-        return event.openComputeBinding;
-      },
-      openComputeStorePort({ event }: { event: FileManagerEvent }) {
-        assertEvent(event, 'workerConnected');
-        return event.openComputeStorePort;
-      },
-      computeControl({ event }: { event: FileManagerEvent }) {
-        assertEvent(event, 'workerConnected');
-        return event.computeControl;
-      },
-      filePoolBuffer({ event }) {
-        assertEvent(event, 'workerConnected');
-        return event.filePoolBuffer;
-      },
-    }),
-
-    updateBackendFromInit: assign({
-      backendType({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.configuredBackend;
-      },
-      activeWorkspaceId({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.activeWorkspaceId;
-      },
-      activeWorkspaceName({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.activeWorkspaceName;
-      },
-      unavailableReason: undefined,
-      contentService({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.contentService;
-      },
-      disposeComposedView({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.disposeComposedView;
-      },
-      treeService({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.treeService;
-      },
-      viewClient({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.viewClient;
-      },
-      workerChangeChannel({ event }) {
-        assertEvent(event, 'workerInitialized');
-        return event.workerChangeChannel;
-      },
-    }),
-
-    recordWebAccessUnavailable: assign({
-      backendType: 'webaccess',
-      unavailableReason({ event }) {
-        assertEvent(event, 'webAccessUnavailable');
-        return event.reason;
-      },
-      activeWorkspaceId({ event }) {
-        assertEvent(event, 'webAccessUnavailable');
-        return event.activeWorkspaceId;
-      },
-      activeWorkspaceName({ event }) {
-        assertEvent(event, 'webAccessUnavailable');
-        return event.activeWorkspaceName;
-      },
-    }),
-
-    updateBackendType: assign({
-      backendType({ event }) {
-        assertEvent(event, 'setBackendType');
-        return event.backendType;
-      },
-    }),
-
-    startPolling({ context, self }) {
-      const { treeService } = context;
-      if (context.backendType === 'webaccess') {
-        treeService?.startPolling();
-        return;
-      }
-      // Only the root mount observes other workspaces; a nested project mount polls its own
-      // tree only when that project is itself webaccess, handled above (W21).
-      if (treeService === undefined || context.sharedWorker) {
-        return;
-      }
-      // async-iife: bootstrap — the root file manager also observes granted webaccess
-      // workspaces even when its own mounted backend is IndexedDB.
-      void (async () => {
-        try {
-          const configuration = await getProjectRootConfigs(context.onRootSkipped);
-          const snapshot = self.getSnapshot();
-          if (
-            snapshot.matches('ready') &&
-            snapshot.context.treeService === treeService &&
-            configuration.roots.some(({ backend }) => backend === 'webaccess')
-          ) {
-            treeService.startPolling();
-          }
-        } catch {
-          // Worker initialization remains usable if the handle registry cannot be enumerated.
-        }
-      })();
-    },
-
-    stopPolling({ context }) {
-      context.treeService?.stopPolling();
-    },
-  },
-  guards: {
-    isRootChanged({ context, event }) {
-      assertEvent(event, 'setRoot');
-      return event.path !== context.rootDirectory || event.projectId !== context.projectId;
-    },
-    isWebAccessUnavailable({ context }) {
-      return context.unavailableReason !== undefined;
-    },
-  },
 }).createMachine({
   id: 'fileManager',
-  entry: enqueueActions(({ enqueue, context, self }) => {
+  entry: ({ context, self }, enq) => {
     if (context.shouldInitializeOnStart) {
-      enqueue.sendTo(self, { type: 'initialize' });
+      enq.sendTo(self, { type: 'initialize' });
     }
-  }),
+  },
   context: ({ input }) => ({
     worker: undefined,
     proxy: undefined,
@@ -926,7 +815,10 @@ export const fileManagerMachine = setup({
     onRootSkipped: input.onRootSkipped,
   }),
   initial: 'initializing',
-  exit: ['stopPolling', 'destroyWorkerAndServices'],
+  exit: ({ context }, enq) => {
+    stopPolling(context, enq);
+    return { context: destroyWorkerAndServices(context, enq) };
+  },
   states: {
     initializing: {
       on: {
@@ -935,91 +827,126 @@ export const fileManagerMachine = setup({
     },
 
     connectingWorker: {
-      entry: ['clearError'],
+      entry: () => ({ context: { error: undefined } }),
       on: {
-        setRoot: {
-          target: 'connectingWorker',
-          guard: 'isRootChanged',
-          actions: ['stopPolling', 'destroyWorkerAndServices', 'updateRootAndReset'],
-        },
+        setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
         workerConnected: {
-          actions: ['updateWorkerFromConnect'],
+          context: ({ event }) => ({
+            worker: event.worker,
+            proxy: event.proxy,
+            bridgeDispose: event.bridgeDispose,
+            openFileSystemBridge: event.openFileSystemBridge,
+            openComputeBinding: event.openComputeBinding,
+            openComputeStorePort: event.openComputeStorePort,
+            computeControl: event.computeControl,
+            filePoolBuffer: event.filePoolBuffer,
+          }),
         },
       },
       invoke: {
         src: 'connectWorkerActor',
-        input({ context }) {
-          return { context };
-        },
-        onDone: 'initializingServices',
-        onError: {
-          target: 'error',
-          actions: ['setError'],
-        },
+        input: ({ context }) => ({ context }),
+        onDone: { target: 'initializingServices' },
+        onError: ({ event }, enq) => ({ target: 'error', context: setError(event.error, enq) }),
       },
     },
 
     initializingServices: {
       on: {
-        setRoot: {
-          target: 'connectingWorker',
-          guard: 'isRootChanged',
-          actions: ['stopPolling', 'destroyWorkerAndServices', 'updateRootAndReset'],
-        },
+        setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
         workerInitialized: {
-          actions: ['updateBackendFromInit'],
+          context: ({ event }) => ({
+            backendType: event.configuredBackend,
+            activeWorkspaceId: event.activeWorkspaceId,
+            activeWorkspaceName: event.activeWorkspaceName,
+            unavailableReason: undefined,
+            contentService: event.contentService,
+            disposeComposedView: event.disposeComposedView,
+            treeService: event.treeService,
+            viewClient: event.viewClient,
+            workerChangeChannel: event.workerChangeChannel,
+          }),
         },
         webAccessUnavailable: {
-          actions: ['recordWebAccessUnavailable'],
+          context: ({ event }) => ({
+            backendType: 'webaccess',
+            unavailableReason: event.reason,
+            activeWorkspaceId: event.activeWorkspaceId,
+            activeWorkspaceName: event.activeWorkspaceName,
+          }),
         },
       },
       invoke: {
         src: 'initializeServicesActor',
-        input({ context }) {
-          return { context };
-        },
-        onDone: [
-          // The actor returns either `workerInitialized` (success) or
-          // `webAccessUnavailable` (recoverable). XState fires the matching
-          // assignment action above before `onDone`, so we route by reading
-          // the freshly-stored `unavailableReason`.
-          { guard: 'isWebAccessUnavailable', target: 'webAccessUnavailable' },
-          { target: 'ready' },
-        ],
-        onError: {
-          target: 'error',
-          actions: ['setError'],
-        },
+        input: ({ context }) => ({ context }),
+        // The actor returns either `workerInitialized` (success) or
+        // `webAccessUnavailable` (recoverable). The matching assignment above
+        // runs before `onDone`, so we route by reading the freshly-stored
+        // `unavailableReason`.
+        onDone: ({ context }) => ({
+          target: context.unavailableReason === undefined ? 'ready' : 'webAccessUnavailable',
+        }),
+        onError: ({ event }, enq) => ({ target: 'error', context: setError(event.error, enq) }),
       },
     },
 
     ready: {
-      entry: ['startPolling'],
-      exit: ['stopPolling'],
+      entry: ({ context, self }, enq) => {
+        const { treeService, backendType, sharedWorker, onRootSkipped } = context;
+        enq(() => {
+          if (backendType === 'webaccess') {
+            treeService?.startPolling();
+            return;
+          }
+          // Only the root mount observes other workspaces; a nested project mount polls its own
+          // tree only when that project is itself webaccess, handled above (W21).
+          if (treeService === undefined || sharedWorker) {
+            return;
+          }
+          // async-iife: bootstrap — the root file manager also observes granted webaccess
+          // workspaces even when its own mounted backend is IndexedDB.
+          void (async () => {
+            try {
+              const configuration = await getProjectRootConfigs(onRootSkipped);
+              const snapshot = self.getSnapshot();
+              if (
+                snapshot.matches('ready') &&
+                snapshot.context.treeService === treeService &&
+                configuration.roots.some(({ backend }) => backend === 'webaccess')
+              ) {
+                treeService.startPolling();
+              }
+            } catch {
+              // Worker initialization remains usable if the handle registry cannot be enumerated.
+            }
+          })();
+        });
+      },
+      exit: ({ context }, enq) => {
+        stopPolling(context, enq);
+      },
       invoke: {
         src: 'watchProxyClosedActor',
-        input({ context }) {
-          return { proxy: context.proxy };
-        },
-        onError: {
+        input: ({ context }) => ({ proxy: context.proxy }),
+        onError: ({ context, event }, enq) => ({
           target: 'error',
-          actions: ['setError', 'destroyWorkerAndServices'],
-        },
+          context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
+        }),
       },
       on: {
-        setRoot: {
-          target: 'connectingWorker',
-          guard: 'isRootChanged',
-          actions: ['stopPolling', 'destroyWorkerAndServices', 'updateRootAndReset'],
-        },
+        setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
 
-        setBackendType: {
-          actions: ['updateBackendType'],
-        },
+        setBackendType: { context: ({ event }) => ({ backendType: event.backendType }) },
 
-        reloadWorkspace: {
-          target: 'initializingServices',
-          actions: ['stopPolling', 'disposeServicesForReload', 'clearError'],
+        reloadWorkspace: ({ context }, enq) => {
+          stopPolling(context, enq);
+          // Keep the successful service identity published until its replacement
+          // succeeds, but release the old service graph before constructing the
+          // next one. The worker, proxy, bridge opener, and authority stay alive.
+          enq(() => {
+            disposeServices(context);
+          });
+          return { target: 'initializingServices', context: { error: undefined } };
         },
       },
     },
@@ -1035,34 +962,22 @@ export const fileManagerMachine = setup({
      */
     webAccessUnavailable: {
       on: {
-        setRoot: {
-          target: 'connectingWorker',
-          guard: 'isRootChanged',
-          actions: ['stopPolling', 'destroyWorkerAndServices', 'updateRootAndReset'],
-        },
-        reloadWorkspace: {
-          target: 'initializingServices',
-          actions: ['clearError'],
-        },
+        setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
+        reloadWorkspace: { target: 'initializingServices', context: { error: undefined } },
       },
     },
 
     error: {
-      entry({ context }) {
-        console.error('[FileManager] state → error', context.error);
+      entry: ({ context }, enq) => {
+        const { error } = context;
+        enq(() => {
+          console.error('[FileManager] state → error', error);
+        });
       },
       on: {
-        setRoot: {
-          target: 'connectingWorker',
-          actions: ['destroyWorkerAndServices', 'updateRootAndReset'],
-        },
-        initialize: {
-          target: 'connectingWorker',
-        },
-        reloadWorkspace: {
-          target: 'connectingWorker',
-          actions: ['clearError'],
-        },
+        setRoot: changeRoot({ whenChanged: false, stopPolling: false }),
+        initialize: { target: 'connectingWorker' },
+        reloadWorkspace: { target: 'connectingWorker', context: { error: undefined } },
       },
     },
   },

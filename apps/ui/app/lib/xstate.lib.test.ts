@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createActor, setup, waitFor, assign } from 'xstate';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { stopRootWithRehydration } from '#lib/xstate-test.utils.js';
+import { createActor, setup, types, waitFor } from 'xstate';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { strictModeRemount, unmountAndRemount } from '#lib/xstate-test.utils.js';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -18,9 +18,8 @@ describe('fromSafeAsync', () => {
   describe('completion', () => {
     it('should transition via onDone when work completes', async () => {
       const machine = setup({
-        types: {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          context: {} as { done: boolean },
+        schemas: {
+          context: types<{ done: boolean }>(),
         },
         actors: {
           work: fromSafeAsync(async () => {
@@ -34,7 +33,7 @@ describe('fromSafeAsync', () => {
           working: {
             invoke: {
               src: 'work',
-              onDone: { target: 'finished', actions: assign({ done: true }) },
+              onDone: { target: 'finished', context: { done: true } },
             },
           },
           finished: { type: 'final' },
@@ -57,9 +56,8 @@ describe('fromSafeAsync', () => {
   describe('error', () => {
     it('should transition via onError when work throws', async () => {
       const machine = setup({
-        types: {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          context: {} as { errorMessage: string | undefined },
+        schemas: {
+          context: types<{ errorMessage: string | undefined }>(),
         },
         actors: {
           work: fromSafeAsync(async () => {
@@ -76,8 +74,8 @@ describe('fromSafeAsync', () => {
               onDone: 'finished',
               onError: {
                 target: 'failed',
-                actions: assign({
-                  errorMessage: ({ event }) => (event.error instanceof Error ? event.error.message : 'unknown'),
+                context: ({ event }) => ({
+                  errorMessage: event.error instanceof Error ? event.error.message : 'unknown',
                 }),
               },
             },
@@ -105,11 +103,9 @@ describe('fromSafeAsync', () => {
       type DataEvent = { type: 'dataReady'; value: number };
 
       const machine = setup({
-        types: {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          context: {} as { receivedValue: number | undefined },
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          events: {} as DataEvent,
+        schemas: {
+          context: types<{ receivedValue: number | undefined }>(),
+          events: eventSchemas<DataEvent>(),
         },
         actors: {
           work: fromSafeAsync<{ type: 'dataReady'; value: number }, { multiplier: number }>(async ({ input }) => {
@@ -128,7 +124,7 @@ describe('fromSafeAsync', () => {
             },
             on: {
               dataReady: {
-                actions: assign({ receivedValue: ({ event }) => event.value }),
+                context: ({ event }) => ({ receivedValue: event.value }),
               },
             },
           },
@@ -153,9 +149,8 @@ describe('fromSafeAsync', () => {
       let capturedSignal: AbortSignal | undefined;
 
       const machine = setup({
-        types: {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          events: {} as { type: 'cancel' },
+        schemas: {
+          events: eventSchemas<{ type: 'cancel' }>(),
         },
         actors: {
           work: fromSafeAsync(async ({ signal }) => {
@@ -198,94 +193,17 @@ describe('fromSafeAsync', () => {
   });
 
   // =========================================================================
-  // Zombie prevention via stopRootWithRehydration
+  // Zombie prevention across a React unmount and re-mount
   // =========================================================================
   describe('zombie prevention', () => {
-    it('should silence zombie callbacks after stopRootWithRehydration', async () => {
-      const callLog: string[] = [];
+    type TagEvent = { type: 'tagged'; invocation: number };
 
-      type DoneEvent = { type: 'workDone'; value: string };
-
-      const machine = setup({
-        types: {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          context: {} as { result: string | undefined },
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          events: {} as DoneEvent,
-        },
-        actors: {
-          work: fromSafeAsync(async () => {
-            await new Promise((resolve) => {
-              setTimeout(resolve, 100);
-            });
-            callLog.push('return');
-            return { type: 'workDone', value: 'from-zombie' };
-          }),
-        },
-      }).createMachine({
-        context: { result: undefined },
-        initial: 'working',
-        states: {
-          working: {
-            invoke: { src: 'work', onDone: 'finished' },
-            on: {
-              workDone: {
-                actions: assign({
-                  result: ({ event }) => {
-                    callLog.push(`assign:${event.value}`);
-                    return event.value;
-                  },
-                }),
-              },
-            },
-          },
-          finished: { type: 'final' },
-        },
-      });
-
-      const actor = createActor(machine);
-      actor.start();
-
-      await new Promise((resolve) => {
-        setTimeout(resolve, 20);
-      });
-
-      // Strict Mode cleanup
-      stopRootWithRehydration(actor);
-
-      // Re-mount
-      actor.start();
-
-      // Wait for the zombie's timer to fire (100ms) plus some margin
-      await new Promise((resolve) => {
-        setTimeout(resolve, 200);
-      });
-
-      // The zombie's emit should be silenced by the closed guard.
-      // Only the re-mounted invocation's events should reach the parent.
-      // Since the re-mounted invocation also runs, wait for it.
-      await waitFor(actor, (s) => s.value === 'finished', { timeout: 5000 });
-
-      // The result should be from the re-mounted invocation, not the zombie
-      expect(actor.getSnapshot().context.result).toBe('from-zombie');
-      // Both invocations emit, but only the second (non-zombie) assign should run
-      // Actually both will emit 'emit', but only the second's assign runs
-      // In this test the re-mount also takes 100ms so it also succeeds.
-      // The key is that the zombie does NOT corrupt state.
-      actor.stop();
-    });
-
-    it('should only deliver events from the NEW invocation after stopRootWithRehydration', async () => {
+    const createTaggingMachine = (onReturn: (invocation: number) => void) => {
       let invocationCount = 0;
-
-      type TagEvent = { type: 'tagged'; invocation: number };
-
-      const machine = setup({
-        types: {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          context: {} as { tags: number[] },
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          events: {} as TagEvent,
+      return setup({
+        schemas: {
+          context: types<{ tags: number[] }>(),
+          events: eventSchemas<TagEvent>(),
         },
         actors: {
           work: fromSafeAsync(async () => {
@@ -293,6 +211,7 @@ describe('fromSafeAsync', () => {
             await new Promise((resolve) => {
               setTimeout(resolve, 50);
             });
+            onReturn(myInvocation);
             return { type: 'tagged', invocation: myInvocation };
           }),
         },
@@ -303,37 +222,54 @@ describe('fromSafeAsync', () => {
           working: {
             invoke: { src: 'work', onDone: 'finished' },
             on: {
-              tagged: {
-                actions: assign({
-                  tags: ({ context, event }) => [...context.tags, event.invocation],
-                }),
-              },
+              tagged: { context: ({ context, event }) => ({ tags: [...context.tags, event.invocation] }) },
             },
           },
           finished: { type: 'final' },
         },
       });
+    };
 
-      const actor = createActor(machine);
+    it('should keep the running invocation through a Strict Mode re-mount', async () => {
+      const returned: number[] = [];
+      const actor = createActor(createTaggingMachine((invocation) => returned.push(invocation)));
       actor.start();
 
-      // Let invocation 1 start
       await new Promise((resolve) => {
         setTimeout(resolve, 10);
       });
-
-      // Strict Mode: stop + rehydrate
-      stopRootWithRehydration(actor);
-
-      // Re-mount: invocation 2 starts
-      actor.start();
+      strictModeRemount(actor);
 
       await waitFor(actor, (s) => s.value === 'finished', { timeout: 5000 });
 
-      // Only invocation 2 should have delivered its tag.
-      // Invocation 1 (zombie) was silenced by unsubscribe + closed guard.
-      expect(actor.getSnapshot().context.tags).toEqual([2]);
+      // The binding cancels its own stop, so the first invocation is the only one and it lands.
+      expect(returned).toEqual([1]);
+      expect(actor.getSnapshot().context.tags).toEqual([1]);
       actor.stop();
+    });
+
+    it('should only deliver events from the replacement invocation after an unmount and re-mount', async () => {
+      const returned: number[] = [];
+      const machine = createTaggingMachine((invocation) => returned.push(invocation));
+      const first = createActor(machine);
+      first.start();
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      const replacement = await unmountAndRemount(first, () => createActor(machine));
+
+      await waitFor(replacement, (s) => s.value === 'finished', { timeout: 5000 });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 60);
+      });
+
+      // Both invocations ran to completion; only the replacement's reached a machine.
+      expect(returned).toEqual([1, 2]);
+      expect(replacement.getSnapshot().context.tags).toEqual([2]);
+      expect(first.getSnapshot().status).toBe('stopped');
+      expect(first.getSnapshot().context.tags).toEqual([]);
+      replacement.stop();
     });
   });
 
@@ -376,11 +312,9 @@ describe('fromSafeAsync', () => {
   describe('error suppression on abort', () => {
     it('should not fire onError when work throws after signal is aborted', async () => {
       const machine = setup({
-        types: {
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          context: {} as { error: boolean },
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-          events: {} as { type: 'cancel' },
+        schemas: {
+          context: types<{ error: boolean }>(),
+          events: eventSchemas<{ type: 'cancel' }>(),
         },
         actors: {
           work: fromSafeAsync(async ({ signal }) => {
@@ -401,7 +335,7 @@ describe('fromSafeAsync', () => {
               onDone: 'finished',
               onError: {
                 target: 'failed',
-                actions: assign({ error: true }),
+                context: { error: true },
               },
             },
             on: { cancel: 'cancelled' },

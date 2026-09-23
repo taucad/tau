@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { assign, createActor, createCallbackLogic, setup, waitFor } from 'xstate';
+import { createActor, createCallbackLogic, setup, types, waitFor } from 'xstate';
 import type { EventObject } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
 import type { CapabilitiesManifest, KernelIssue, RenderOutcome, TelemetryEntry } from '@taucad/runtime';
@@ -10,7 +10,7 @@ import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
 import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
@@ -164,22 +164,15 @@ type ExportAvailabilityEvent = {
 
 function createParentActor() {
   const parentMachine = setup({
-    types: {
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-      context: {} as { events: ExportAvailabilityEvent[] },
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-      events: {} as ExportAvailabilityEvent,
-    },
-    actions: {
-      recordAvailability: assign({
-        events: ({ context, event }) => [...context.events, event],
-      }),
+    schemas: {
+      context: types<{ events: ExportAvailabilityEvent[] }>(),
+      events: eventSchemas<ExportAvailabilityEvent>(),
     },
   }).createMachine({
     context: { events: [] },
     on: {
       'geometryUnit.exportAvailabilityChanged': {
-        actions: 'recordAvailability',
+        context: ({ context, event }) => ({ events: [...context.events, event] }),
       },
     },
   });
@@ -1458,8 +1451,24 @@ describe('cadMachine', () => {
   });
 
   describe('cleanup', () => {
-    it('should wire destroyKernel as a root exit action', () => {
-      expect(cadMachine.config.exit).toContainEqual('destroyKernel');
+    /* The root exit is what releases the kernel when the unit re-enters from its root; stopping
+     * runs no exit, so the React resource boundary below owns disposal at teardown. */
+    it('should release the kernel once through the root exit and leave stop to the resource boundary', async () => {
+      const cleanup = vi.fn();
+      const mockClient = createMockAppRuntimeClient();
+      const { actor } = await startAndConnect({
+        connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [cleanup] }),
+      });
+
+      actor.send({ type: 'filesystemBindingChanged' });
+
+      expect(cleanup).toHaveBeenCalledOnce();
+      expect(mockClient.terminate).toHaveBeenCalledOnce();
+      expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
+
+      actor.stop();
+
+      expect(cleanup).toHaveBeenCalledOnce();
     });
 
     it('should expose the same runtime cleanup to its React resource boundary', async () => {

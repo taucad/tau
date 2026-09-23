@@ -2,7 +2,7 @@
  * Prepare one current installed GeoSpec test consumer; never import or probe products.
  * Usage: node scripts/src/prepare-geospec-test-consumer.ts <assembly-root> <receipt.json>
  * Inputs: completed SDK dependency builds and assemble-package.sh's root/platform TGZs.
- * Output: retained consumer, initial SDK/framework receipts and ten hash-bound harness files.
+ * Output: retained consumer, initial SDK/framework receipts and eleven hash-bound harness files.
  * Environment: existing Node/pnpm/npm/tar/git on PATH; no build or install scripts run.
  * Exit: 0 prepared and inventoried; 1 missing inputs, incomplete closure or install failure.
  */
@@ -317,6 +317,7 @@ const main = async (): Promise<void> => {
     'm3-corpus/vitest.config.mjs',
     'm3-corpus/corpus.mjs',
     'm3-corpus/profile-v3.mjs',
+    'm3-corpus/profile-v4.mjs',
     'f1-public-a1/authority.mjs',
     'f1-public-a1/f1-public.vitest.test.mjs',
     'f1-public-a1/vitest.config.mjs',

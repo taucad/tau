@@ -4903,6 +4903,143 @@ bool mapped_copy_shape(const BRepBuilderAPI_Copy& copy,
   return true;
 }
 
+// A72's qualified domain: a nonempty compound of complete, disjoint solids.
+// Different solid definitions may not share even an unlocated descendant.
+bool prototype_copy_eligible(const TopoDS_Shape& source) {
+  std::vector<TopoDS_Shape> solids;
+  if (source.ShapeType() != TopAbs_COMPOUND ||
+      !collect_validation_solids(source, solids) || solids.size() < 2 ||
+      !disjoint_validation_solids(solids)) return false;
+
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> definitions;
+  NCollection_IndexedDataMap<TopoDS_Shape, size_t, TopTools_ShapeMapHasher> owners;
+  for (const TopoDS_Shape& solid : solids) {
+    const TopoDS_Shape definition =
+        solid.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
+    if (definitions.FindIndex(definition) != 0) continue;
+    const int owner = definitions.Add(definition);
+    std::vector<TopoDS_Shape> pending{definition};
+    while (!pending.empty()) {
+      const TopoDS_Shape current = pending.back();
+      pending.pop_back();
+      const TopoDS_Shape key = current.Located(TopLoc_Location());
+      const int index = owners.FindIndex(key);
+      if (index != 0) {
+        if (owners.FindFromIndex(index) != owner) return false;
+        continue;
+      }
+      owners.Add(key, owner);
+      for (TopoDS_Iterator child(current, true, true); child.More(); child.Next())
+        pending.push_back(child.Value());
+    }
+  }
+  return true;
+}
+
+struct PrototypeReportCopy {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> definitions;
+  std::vector<std::unique_ptr<BRepBuilderAPI_Copy>> copies;
+  NCollection_IndexedDataMap<TopoDS_Shape, TopoDS_Shape, TopTools_ShapeMapHasher> history;
+  TopoDS_Shape shape;
+
+  static bool copied_history_matches(const TopoDS_Shape& source,
+                                     const TopoDS_Shape& copied,
+                                     const BRepBuilderAPI_Copy& copy) {
+    TopoDS_Shape mapped = copy.ModifiedShape(source);
+    mapped.Orientation(source.Orientation());
+    if (!mapped.IsEqual(copied) || source.IsPartner(copied)) return false;
+    TopoDS_Iterator original_child(source, true, true);
+    TopoDS_Iterator copied_child(copied, true, true);
+    for (; original_child.More() && copied_child.More();
+         original_child.Next(), copied_child.Next()) {
+      if (!copied_history_matches(original_child.Value(), copied_child.Value(), copy))
+        return false;
+    }
+    return original_child.More() == copied_child.More();
+  }
+
+  TopoDS_Shape rebuild(const TopoDS_Shape& source) {
+    if (source.ShapeType() == TopAbs_SOLID) {
+      const TopoDS_Shape definition =
+          source.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
+      int index = definitions.FindIndex(definition);
+      if (index == 0) {
+        index = definitions.Add(definition);
+        copies.emplace_back(std::make_unique<BRepBuilderAPI_Copy>(definition, false, false));
+        if (!copies.back()->IsDone() || copies.back()->Shape().IsNull() ||
+            !copied_history_matches(definition, copies.back()->Shape(), *copies.back()))
+          return {};
+      }
+      return copies[static_cast<size_t>(index - 1)]->Shape()
+          .Located(source.Location()).Oriented(source.Orientation());
+    }
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    for (TopoDS_Iterator child(source, false, false); child.More(); child.Next()) {
+      const TopoDS_Shape copied = rebuild(child.Value());
+      if (copied.IsNull()) return {};
+      builder.Add(compound, copied);
+    }
+    return compound.Located(source.Location()).Oriented(source.Orientation());
+  }
+
+  bool join(const TopoDS_Shape& source, const TopoDS_Shape& copied) {
+    if (source.ShapeType() != copied.ShapeType() ||
+        source.Orientation() != copied.Orientation() || source.IsPartner(copied))
+      return false;
+    if (source.ShapeType() == TopAbs_COMPOUND || source.ShapeType() == TopAbs_SOLID) {
+      double original_location[12], copied_location[12];
+      placement(original_location, source.Location());
+      placement(copied_location, copied.Location());
+      for (size_t i = 0; i < 12; ++i)
+        if (float_bits(original_location[i]) != float_bits(copied_location[i]))
+          return false;
+    }
+    const int index = history.FindIndex(source);
+    if (index != 0) {
+      if (!history.FindFromIndex(index).IsSame(copied)) return false;
+    } else {
+      history.Add(source, copied);
+    }
+    TopoDS_Iterator original_child(source, true, true);
+    TopoDS_Iterator copied_child(copied, true, true);
+    for (; original_child.More() && copied_child.More();
+         original_child.Next(), copied_child.Next()) {
+      if (!join(original_child.Value(), copied_child.Value())) return false;
+    }
+    return original_child.More() == copied_child.More();
+  }
+
+  bool build(const TopoDS_Shape& source) {
+    if (!prototype_copy_eligible(source)) return false;
+    shape = rebuild(source);
+    return !shape.IsNull() && join(source, shape);
+  }
+
+  TopoDS_Shape mapped(const TopoDS_Shape& source) const {
+    const int index = history.FindIndex(source);
+    if (index == 0) return {};
+    TopoDS_Shape result = history.FindFromIndex(index);
+    result.Orientation(source.Orientation());
+    return result;
+  }
+};
+
+bool mapped_prototype_shape(const PrototypeReportCopy& copy,
+                            const TopoDS_Shape& source,
+                            TopAbs_ShapeEnum expected_type,
+                            const std::string& identity,
+                            TopoDS_Shape& mapped,
+                            std::string& message) {
+  mapped = copy.mapped(source);
+  if (mapped.IsNull() || mapped.ShapeType() != expected_type) {
+    message = "Prototype copy history returned no valid " + identity + " counterpart.";
+    return false;
+  }
+  return true;
+}
+
 geospec_occt_located_face_facts reported_face(
     const TopoDS_Face& face, uint32_t index, uint32_t query_index,
     size_t edge_count) {
@@ -4925,12 +5062,38 @@ geospec_occt_located_face_facts reported_face(
 bool build_report(const geospec_occt_document& document,
                   ReportData& report,
                   std::string& message) {
-  BRepBuilderAPI_Copy copy(document.shape, false, false);
-  if (!copy.IsDone() || copy.Shape().IsNull()) {
-    message = "OCCT report shape copy failed.";
-    return false;
+  std::optional<PrototypeReportCopy> prototype(std::in_place);
+  bool use_prototype = prototype->build(document.shape);
+  if (use_prototype) {
+    // XDE report addresses must all resolve before the isolated shape is meshed.
+    for (const OccurrenceFacts& occurrence : document.occurrences) {
+      if (prototype->mapped(occurrence.shape).IsNull()) use_prototype = false;
+      for (const FaceView& face : occurrence.public_faces)
+        if (prototype->mapped(face.shape).IsNull()) use_prototype = false;
+    }
+    for (const FaceView& face : document.public_faces)
+      if (prototype->mapped(face.shape).IsNull()) use_prototype = false;
   }
-  const TopoDS_Shape isolated = copy.Shape();
+  std::unique_ptr<BRepBuilderAPI_Copy> copy;
+  if (!use_prototype) {
+    prototype.reset();
+    copy = std::make_unique<BRepBuilderAPI_Copy>(document.shape, false, false);
+    if (!copy->IsDone() || copy->Shape().IsNull()) {
+      message = "OCCT report shape copy failed.";
+      return false;
+    }
+  }
+  const TopoDS_Shape isolated = use_prototype ? prototype->shape : copy->Shape();
+  const auto map_report_shape = [&](const TopoDS_Shape& source,
+                                    TopAbs_ShapeEnum expected_type,
+                                    const std::string& identity,
+                                    TopoDS_Shape& mapped) {
+    return use_prototype
+        ? mapped_prototype_shape(*prototype, source, expected_type, identity,
+                                 mapped, message)
+        : mapped_copy_shape(*copy, source, expected_type, identity,
+                            mapped, message);
+  };
   constexpr double pi = 3.141592653589793238462643383279502884;
   mesh_shape(isolated, 0.01, 15.0 * pi / 180.0);
   report.mesh = report_triangle_soup(isolated);
@@ -4945,10 +5108,10 @@ bool build_report(const geospec_occt_document& document,
     const OccurrenceFacts& source_occurrence =
         document.occurrences[occurrence_index];
     TopoDS_Shape mapped_occurrence;
-    if (!mapped_copy_shape(
-            copy, source_occurrence.shape, source_occurrence.shape.ShapeType(),
+    if (!map_report_shape(
+            source_occurrence.shape, source_occurrence.shape.ShapeType(),
             "occurrence " + std::to_string(occurrence_index),
-            mapped_occurrence, message)) {
+            mapped_occurrence)) {
       return false;
     }
     geospec_occt_occurrence_facts occurrence = source_occurrence.facts;
@@ -4970,11 +5133,11 @@ bool build_report(const geospec_occt_document& document,
       const LocatedFaceFacts& query_face =
           source_occurrence.faces[static_cast<size_t>(source_face.query_index - 1)];
       TopoDS_Shape mapped;
-      if (!mapped_copy_shape(
-              copy, source_face.shape, TopAbs_FACE,
+      if (!map_report_shape(
+              source_face.shape, TopAbs_FACE,
               "occurrence " + std::to_string(occurrence_index) + " face " +
                   std::to_string(public_index),
-              mapped, message)) {
+              mapped)) {
         return false;
       }
       mapped_faces.push_back(reported_face(
@@ -4993,9 +5156,9 @@ bool build_report(const geospec_occt_document& document,
       return false;
     }
     TopoDS_Shape mapped;
-    if (!mapped_copy_shape(copy, source_face.shape, TopAbs_FACE,
+    if (!map_report_shape(source_face.shape, TopAbs_FACE,
                            "whole face " + std::to_string(public_index),
-                           mapped, message)) {
+                           mapped)) {
       return false;
     }
     report.whole_faces.push_back(reported_face(

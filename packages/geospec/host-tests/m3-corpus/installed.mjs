@@ -8,7 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/assertion-client';
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { loadM3CorpusProfileV3 } from './profile-v3.mjs';
-import { loadCurrentM3Campaign, requireEvaluationEnvelope } from './corpus.mjs';
+import { loadCurrentM3CampaignProfileV4 } from './profile-v4.mjs';
+import { requireEvaluationEnvelope } from './corpus.mjs';
 import { fixturePath, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
@@ -21,7 +22,7 @@ if (backend === 'mixed') {
 }
 const { canonicalize, Engine, ProtocolError } = nativeModule;
 
-const PROFILE = 'geospec-st-logical-requests-v3';
+const PROFILE = 'geospec-st-prototypes-v4';
 const CANONICAL_PROFILE = 'geospec-jcs-v1';
 const CONTINUOUS_INPUT_SHA256 = '6ccb5bd597728f65748244334c16a663c6469d18887545b7c173060e657187a6';
 const CONTINUOUS_BUDGET_SHA256 = '4709e8dda424943db7f202f2e40bbdb8e394b4ee86ef4998efdf00a955ee98c4';
@@ -223,7 +224,7 @@ export const loadProspectiveInstalledCampaign = () => {
   return {
     schemaVersion: 1,
     taskId: 'M3-INSTALLED-CORPUS-A1',
-    numericProfile: PROFILE,
+    numericProfile: 'geospec-st-logical-requests-v3',
     sourceCorpusFingerprint: profile.sourceCorpus.fingerprint,
     rows,
   };
@@ -264,7 +265,7 @@ const materializeCampaignRow = (campaignPath, row) => {
 };
 
 const loadDefaultInstalledCampaign = () => {
-  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
+  const campaign = loadCurrentM3CampaignProfileV4(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
   return {
     ...campaign,
     rows: campaign.rows.map((row) => materializeCampaignRow(campaign.sourcePath, row)),
@@ -283,6 +284,7 @@ const loadSupplementalCampaign = (inputPath) => {
   assert.equal(new Set(campaign.rows.map((row) => row.id)).size, campaign.rows.length);
   return {
     ...campaign,
+    backend,
     rows: campaign.rows.map((row) => materializeCampaignRow(campaignPath, row)),
   };
 };
@@ -343,7 +345,7 @@ const continuousRow = (source) => {
 
 const loadContinuousInputs = () => {
   const source = readBoundJson(continuousPath('inputs.json'), CONTINUOUS_INPUT_SHA256);
-  assert.equal(source.numericProfile, PROFILE);
+  assert.equal(source.numericProfile, 'geospec-st-logical-requests-v3');
   assert.equal(source.rows.length, 18);
   return source.rows.map(continuousRow);
 };
@@ -975,6 +977,14 @@ const compareRecord = (row, outcome) => {
     if (exactResultAuthority && resultEqual === false) {
       hardFailures.push('authoritative-canonical-result');
     }
+    if (row.cohort === 'F1' && row.expected.verifierSourceHash && row.expected.canonicalResultUtf8 === null) {
+      if (report?.result?.evidence?.planHash !== sha256(Buffer.from(planUtf8))) {
+        hardFailures.push('f1-plan-hash');
+      }
+      if (report?.result?.evidence?.verifierSourceHash !== row.expected.verifierSourceHash) {
+        hardFailures.push('f1-verifier-source');
+      }
+    }
     if (actualError && (!row.matcher || report?.status === 'passed')) {
       hardFailures.push('unexpected-error');
     }
@@ -1015,8 +1025,12 @@ const compareCampaigns = () => {
   const routePaths = {
     standalone: requiredEnvironment('GEOSPEC_STANDALONE_OUTPUT'),
     vitest: requiredEnvironment('GEOSPEC_VITEST_OUTPUT'),
-    python313: requiredEnvironment('GEOSPEC_PYTHON313_OUTPUT'),
-    python314: requiredEnvironment('GEOSPEC_PYTHON314_OUTPUT'),
+    ...(campaign.backend === 'mixed'
+      ? {}
+      : {
+          python313: requiredEnvironment('GEOSPEC_PYTHON313_OUTPUT'),
+          python314: requiredEnvironment('GEOSPEC_PYTHON314_OUTPUT'),
+        }),
   };
   const routeOutputs = Object.fromEntries(
     Object.entries(routePaths).map(([route, path]) => [route, JSON.parse(readFileSync(path, 'utf8'))]),
@@ -1060,6 +1074,13 @@ const compareCampaigns = () => {
   const crossHostDifferences = rows.filter(
     (row) => row.crossHost && Object.values(row.crossHost).some((value) => !value),
   );
+  for (const row of crossHostDifferences) {
+    for (const [field, equal] of Object.entries(row.crossHost)) {
+      if (!equal) {
+        hardFailures.push({ id: row.id, route: 'within-profile', failure: field });
+      }
+    }
+  }
   const openAccuracy = rows.filter((row) =>
     Object.values(row.routes).some((value) => value.comparison.resultAuthority === 'mathematical-accuracy-pending'),
   );
@@ -1081,7 +1102,7 @@ const compareCampaigns = () => {
     rows,
   };
   writeJson(requiredEnvironment('GEOSPEC_COMPARISON_OUTPUT'), output);
-  if (hardFailures.length > 0) {
+  if (hardFailures.length > 0 || openAccuracy.length > 0) {
     process.exitCode = 1;
   }
   return output;

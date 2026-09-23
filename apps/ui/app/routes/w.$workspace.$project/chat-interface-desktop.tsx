@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Allotment, LayoutPriority } from 'allotment';
 import { useSelector } from '@xstate/react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
@@ -15,6 +15,7 @@ import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import {
   resolveCompactAuxiliary,
   useProjectWorkspace,
+  WorkspaceLanesContext,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { panelMinSizeChat, panelMinSizeViewer, panelMinSizeWorkbench } from '#constants/editor.constants.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -26,10 +27,14 @@ export const compactWorkspaceWidth = 1120;
  * bar only: a group inside any non-first `.dv-view` sits below or right of
  * another one. A `::before` flex item rather than padding so the tab bar's
  * bottom border, which the children draw, continues under the controls.
+ *
+ * The inset stops one spacing step short because the chat lane toggle leads
+ * the tab bar with `pl-1`: the toggle then lands on the pixel it holds at the
+ * head of the chat pane header, which starts at the full controls width.
  */
 const topLeftTabBarInset = [
   "[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:content-['']",
-  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:w-(--titlebar-controls-width)',
+  '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:w-[calc(var(--titlebar-controls-width)-var(--spacing))]',
   '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:shrink-0',
   '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:border-b',
   '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:border-b-border',
@@ -48,6 +53,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const compactAuxiliary = isCompact ? resolveCompactAuxiliary(desktopLayout) : undefined;
   const chatVisible = desktopLayout.chatOpen && (!isCompact || compactAuxiliary === 'chat');
   const workbenchVisible = desktopLayout.workbenchOpen && (!isCompact || compactAuxiliary === 'workbench');
+  const lanes = useMemo(() => ({ chat: chatVisible, workbench: workbenchVisible }), [chatVisible, workbenchVisible]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -74,77 +80,83 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
   return (
     <ChatContextInsertionProvider>
-      <div
-        ref={containerRef}
-        className='relative size-full overflow-hidden bg-background'
-        data-project-workspace
-        data-compact={isCompact}
-      >
-        {isClient && isEditorReady ? (
-          <div className='absolute top-1 right-1 z-10 flex gap-1'>
-            <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
-          </div>
-        ) : null}
-        {/* Until the editor state has loaded and the focused chat exists, the
-            lanes stand in at their default widths rather than a blank page. */}
-        <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
+      <WorkspaceLanesContext.Provider value={lanes}>
+        <div
+          ref={containerRef}
+          className='relative size-full overflow-hidden bg-background'
+          data-project-workspace
+          data-compact={isCompact}
+        >
           {isClient && isEditorReady ? (
-            <Allotment
-              separator={false}
-              proportionalLayout={false}
-              /* The lanes land rather than snap in: the skeleton they replace holds the same
-                 background, so a short fade reads as the workspace resolving (soft land). */
-              className='size-full animate-in duration-200 fade-in-50 [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] motion-reduce:animate-none [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
-              onDragEnd={persistWidths}
-            >
-              <Allotment.Pane
-                key='chat'
-                minSize={panelMinSizeChat}
-                preferredSize={desktopLayout.chatWidth}
-                priority={LayoutPriority.Low}
-                visible={chatVisible}
+            <div className='absolute top-1 right-1 z-10 flex gap-1'>
+              <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
+            </div>
+          ) : null}
+          {/* Until the editor state has loaded and the focused chat exists, the
+              lanes stand in at their default widths rather than a blank page. */}
+          <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
+            {isClient && isEditorReady ? (
+              <Allotment
+                separator={false}
+                proportionalLayout={false}
+                /* The lanes land rather than snap in: the skeleton they replace holds the same
+                   background, so a short fade reads as the workspace resolving (soft land). */
+                className='size-full animate-in duration-200 fade-in-50 [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] motion-reduce:animate-none [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
+                onDragEnd={persistWidths}
               >
-                <ChatHistoryGate>
-                  <ChatHistory
-                    className={cn(
-                      !sidebarOpen &&
-                        '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
-                    )}
-                    isExpanded={desktopLayout.chatOpen}
-                    setIsExpanded={(value) => {
-                      setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
-                    }}
-                  />
-                </ChatHistoryGate>
-              </Allotment.Pane>
-
-              <Allotment.Pane key='viewer' minSize={panelMinSizeViewer} priority={LayoutPriority.High}>
-                <div
-                  className={cn(
-                    '@container/viewer relative size-full overflow-hidden',
-                    !sidebarOpen && !chatVisible && topLeftTabBarInset,
-                  )}
+                <Allotment.Pane
+                  key='chat'
+                  minSize={panelMinSizeChat}
+                  preferredSize={desktopLayout.chatWidth}
+                  priority={LayoutPriority.Low}
+                  visible={chatVisible}
                 >
-                  <ViewerDockview />
-                  <ProjectUnavailableOverlay />
-                </div>
-              </Allotment.Pane>
+                  <ChatHistoryGate>
+                    <ChatHistory
+                      /* The chat lane toggle leads the header on the pixel it holds at the head of the
+                         viewer's tab bar while the lane is closed: one step in from the lane's edge, or
+                         straight after the host's controls. */
+                      className={cn(
+                        sidebarOpen
+                          ? '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-1'
+                          : '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
+                      )}
+                      isExpanded={desktopLayout.chatOpen}
+                      setIsExpanded={(value) => {
+                        setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
+                      }}
+                    />
+                  </ChatHistoryGate>
+                </Allotment.Pane>
 
-              <Allotment.Pane
-                key='workbench'
-                minSize={panelMinSizeWorkbench}
-                preferredSize={desktopLayout.workbenchWidth}
-                priority={LayoutPriority.Low}
-                visible={workbenchVisible}
-              >
-                <WorkbenchDockview />
-              </Allotment.Pane>
-            </Allotment>
-          ) : (
-            <WorkspaceSkeleton />
-          )}
-        </ChatInterfaceSessionGate>
-      </div>
+                <Allotment.Pane key='viewer' minSize={panelMinSizeViewer} priority={LayoutPriority.High}>
+                  <div
+                    className={cn(
+                      '@container/viewer relative size-full overflow-hidden',
+                      !sidebarOpen && !chatVisible && topLeftTabBarInset,
+                    )}
+                  >
+                    <ViewerDockview />
+                    <ProjectUnavailableOverlay />
+                  </div>
+                </Allotment.Pane>
+
+                <Allotment.Pane
+                  key='workbench'
+                  minSize={panelMinSizeWorkbench}
+                  preferredSize={desktopLayout.workbenchWidth}
+                  priority={LayoutPriority.Low}
+                  visible={workbenchVisible}
+                >
+                  <WorkbenchDockview />
+                </Allotment.Pane>
+              </Allotment>
+            ) : (
+              <WorkspaceSkeleton />
+            )}
+          </ChatInterfaceSessionGate>
+        </div>
+      </WorkspaceLanesContext.Provider>
     </ChatContextInsertionProvider>
   );
 });

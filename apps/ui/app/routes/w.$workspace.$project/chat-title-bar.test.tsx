@@ -71,7 +71,18 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelButtonGroup: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));
 
+/* The toggle has its own suite (`chat-lane-toggle.test.tsx`); here it only has to lead the row. */
+vi.mock('#routes/w.$workspace.$project/chat-lane-toggle.js', () => ({
+  ChatLaneToggle: () => <button type='button'>Toggle Chat lane</button>,
+}));
+
 const { ChatTitleBar } = await import('#routes/w.$workspace.$project/chat-title-bar.js');
+const { WorkspaceLanesContext } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
+
+const bothLanes = { chat: true, workbench: true };
+const withChatLane = (ui: React.ReactElement): React.JSX.Element => (
+  <WorkspaceLanesContext.Provider value={bothLanes}>{ui}</WorkspaceLanesContext.Provider>
+);
 
 describe('ChatTitleBar', () => {
   beforeEach(() => {
@@ -96,8 +107,31 @@ describe('ChatTitleBar', () => {
       expect(name.parentElement).not.toHaveClass('truncate');
       expect(name).not.toHaveClass('truncate');
       expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Close chat' })).toBeInTheDocument();
       expect(screen.queryByText(/search chats/i)).not.toBeInTheDocument();
+    });
+
+    it('should lead with the chat lane toggle instead of a close control on desktop', () => {
+      sidebar.open = false;
+      render(withChatLane(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />));
+
+      const buttons = screen.getAllByRole('button');
+      expect(buttons[0]).toHaveAccessibleName('Toggle Chat lane');
+      expect(buttons[1]).toHaveAccessibleName('New chat');
+      expect(screen.queryByRole('button', { name: 'Close chat' })).not.toBeInTheDocument();
+    });
+
+    it('should leave the toggle to the viewer while the lane is hidden', () => {
+      render(<ChatTitleBar />);
+
+      expect(screen.queryByRole('button', { name: 'Toggle Chat lane' })).not.toBeInTheDocument();
+    });
+
+    it('should keep the close control on mobile, which has no lanes', () => {
+      sidebar.isMobile = true;
+      render(withChatLane(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />));
+
+      expect(screen.getByRole('button', { name: 'Close chat' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Toggle Chat lane' })).not.toBeInTheDocument();
     });
 
     it('should mark the name busy and pulse while it is being generated', () => {

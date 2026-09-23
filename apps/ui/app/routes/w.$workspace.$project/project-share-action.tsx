@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Share2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
 import { parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
-import { Button } from '@taucad/ui/components/button';
 import { ProjectSharePanel } from '#components/publish/project-share-panel.js';
 import type { ShareMethod } from '#components/publish/project-share-panel.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjects } from '#hooks/use-projects.js';
@@ -190,29 +187,5 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       initialMethod={navigationIntent.initialMethod}
       githubAuthorizationOutcome={navigationIntent.githubAuthorizationOutcome}
     />
-  );
-}
-
-export function ProjectShareAction(): React.JSX.Element {
-  const { openPanel } = useProjectWorkspace();
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant='ghost'
-          size='xs'
-          className='h-7 px-2 max-md:size-8'
-          onClick={() => {
-            openPanel('share');
-          }}
-        >
-          <Share2 className='size-3.5' aria-hidden />
-          <span className='sr-only @xl/viewer:hidden'>Share</span>
-          <span className='hidden @xl/viewer:inline'>Share</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Share project</TooltipContent>
-    </Tooltip>
   );
 }

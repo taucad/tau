@@ -1,5 +1,5 @@
 {
-  "schema": "geospec-selected-delivery-v1",
+  "schema": "geospec-selected-delivery-v2",
   "host": "aarch64-apple-darwin",
   "rust": {
     "channel": "nightly-2026-08-22",
@@ -75,9 +75,14 @@
     "-DUSE_RAPIDJSON=ON",
     "-DUSE_FREETYPE=ON",
     "-DUSE_TBB=OFF",
-    "-DCMAKE_C_FLAGS=-O2 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON",
-    "-DCMAKE_CXX_FLAGS=-O2 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON -frtti -fexceptions -DOCJS_EXCEPTIONS_ENABLED=1"
+    "-DCMAKE_C_FLAGS=-O2 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON",
+    "-DCMAKE_CXX_FLAGS=-O2 -msimd128 -DIGNORE_NO_ATOMICS=1 -DOCCT_NO_PLUGINS -DHAVE_RAPIDJSON -frtti -fexceptions -DOCJS_EXCEPTIONS_ENABLED=1"
   ],
+  "wasmSimd": {
+    "rustFlags": ["-C", "target-feature=+simd128"],
+    "cxxFlag": "-msimd128",
+    "linkFlag": "-msimd128"
+  },
   "linkOptimization": "O3",
   "diskGiB": {
     "sources": 1,

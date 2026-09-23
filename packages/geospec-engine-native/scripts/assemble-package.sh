@@ -40,6 +40,24 @@ python3 -B "$PACKAGE_ROOT/scripts/generate-delivery-materials.py" \
   --relink-output "$ASSEMBLY_ROOT/source-relink" \
   --relink-archive "$ASSEMBLY_ROOT/tarballs/geospec-engine-native-source-relink.tar.gz"
 
+python3 -B - "$ASSEMBLY_ROOT/source-relink/receipts/mixed-producer-recipe.json" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+receipt = json.loads(Path(os.environ['GEOSPEC_MIXED_RECEIPT']).read_text())
+recipe = json.loads(Path(sys.argv[1]).read_text())
+expected = receipt['buildEnvironment']
+if (recipe['recordedEnvironment'].get('CARGO_ENCODED_RUSTFLAGS') != expected['CARGO_ENCODED_RUSTFLAGS']
+        or recipe['recordedEnvironment'].get('CXXFLAGS_wasm32_unknown_emscripten') !=
+        expected['CXXFLAGS_wasm32_unknown_emscripten']
+        or recipe['recordedEnvironment'].get('GEOSPEC_WASM_SIMD_PROFILE') !=
+        expected['GEOSPEC_WASM_SIMD_PROFILE']
+        or 'occt-mixed-simd128' not in recipe['rebuildMixedPrefix']):
+    raise SystemExit('Mixed relink recipe does not reconstruct the selected SIMD producer')
+PY
+
 pnpm --dir "$PACKAGE_ROOT" pack --out "$ASSEMBLY_ROOT/source-pack.tgz"
 tar -xzf "$ASSEMBLY_ROOT/source-pack.tgz" -C "$STAGED_ROOT" --strip-components=1
 rm -rf "$STAGED_ROOT/licenses"

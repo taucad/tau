@@ -89,7 +89,10 @@
       "node": "./bindings/node/generated/index.js"
     },
     "#bench/*": "./bench/*.ts",
-    "#mixed-wasm-binding": "./bindings/emscripten/generated/geospec_engine_native.mjs"
+    "#mixed-wasm-binding": {
+      "types": "./src/mixed-wasm-binding.d.ts",
+      "default": "./bindings/emscripten/generated/geospec_engine_native.mjs"
+    }
   },
   "devDependencies": {
     "@napi-rs/cli": "catalog:",

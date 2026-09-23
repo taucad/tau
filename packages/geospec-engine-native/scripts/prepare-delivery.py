@@ -9,6 +9,8 @@ Only explicit prefixes builds OCCT; tools may install the pinned SDK/Rust.
 Optional env: GEOSPEC_DELIVERY_CACHE, GEOSPEC_DELIVERY_RUST_PREFIX,
 GEOSPEC_DELIVERY_EMSDK_PREFIX (existing tools are read-only), GEOSPEC_OCCT_JOBS.
 prefixes --reuse-prefix native|mixed verifies only that existing prefix; never builds it.
+prefixes --build-prefix native|mixed prepares only that prefix; default prepares both.
+Explicit reuse reserves mixedBuildReserve plus the source allowance if inputs are missing.
 Optional GIT_CEILING_DIRECTORIES is preserved in the selected environment and checked exactly.
 GEOSPEC_OCCT_PRODUCER_BUILDER selects preserved builder source for existing
 prefix verification only; new prefixes always execute the current builder.
@@ -43,7 +45,9 @@ CACHE = Path(os.environ.get('GEOSPEC_DELIVERY_CACHE', ROOT / 'node_modules/.cach
 RUST = Path(os.environ.get('GEOSPEC_DELIVERY_RUST_PREFIX', CACHE / 'rust')).resolve()
 SDK = Path(os.environ.get('GEOSPEC_DELIVERY_EMSDK_PREFIX', CACHE / 'sdk/install')).resolve()
 SOURCE = CACHE / 'sources/occt'
-MIXED = CACHE / 'occt-mixed/install'
+MIXED_PREFIX = 'occt-mixed-simd128'
+MIXED = CACHE / MIXED_PREFIX / 'install'
+MIXED_INPUTS = CACHE / 'mixed-inputs-simd128.json'
 PACKAGE_SKIP = {'target', 'node_modules', '.git', '__pycache__', 'out-tsc'}
 PREFIX_RECEIPT_SCHEMA = 'geospec-occt-prefix-receipt-v2'
 PREFIX_CACHE_OUTPUTS = ('build/CMakeCache.txt', 'static-toolkit-closure.txt')
@@ -177,8 +181,17 @@ def verify_tree(archive, destination):
 
 def room(stage):
     available = shutil.disk_usage(ROOT).free
-    reserve = RECIPE['diskGiB']['mixedBuildReserve'] if stage == 'prefixes' else 0
-    required = (RECIPE['diskGiB'][stage] + reserve) * 1024 ** 3
+    if stage == 'reuse-prefix':
+        # Verification does not allocate a new OCCT build tree. Missing source
+        # archives/trees still need their selected allowance before preparation.
+        sources = {'occt': SOURCE, **{name: CACHE / 'sources' / name for name in RECIPE['headers']}}
+        missing = any(not directory.is_dir() or not (CACHE / 'downloads' / f'{name}.tar.gz').is_file()
+                      for name, directory in sources.items())
+        required_gib = RECIPE['diskGiB']['mixedBuildReserve'] + (RECIPE['diskGiB']['sources'] if missing else 0)
+    else:
+        reserve = RECIPE['diskGiB']['mixedBuildReserve'] if stage == 'prefixes' else 0
+        required_gib = RECIPE['diskGiB'][stage] + reserve
+    required = required_gib * 1024 ** 3
     require(available >= required, f'{stage} requires {required} free bytes; available {available}')
 
 
@@ -357,6 +370,13 @@ def prefix_contract(kind, paths, env, context, producing_builder=None):
                f'-DCMAKE_OSX_SYSROOT={context["sdkPath"]}',
                f'-DCMAKE_OSX_DEPLOYMENT_TARGET={RECIPE["macosDeploymentTarget"]}']
     if kind == 'mixed':
+        require(RECIPE['wasmSimd'] == {'rustFlags': ['-C', 'target-feature=+simd128'],
+                                      'cxxFlag': '-msimd128', 'linkFlag': '-msimd128'},
+                'Unsupported fixed SIMD recipe')
+        require(all(any(option.startswith(flag) and '-msimd128' in option
+                        for option in RECIPE['mixedOcctOptions'])
+                    for flag in ('-DCMAKE_C_FLAGS=', '-DCMAKE_CXX_FLAGS=')),
+                'OCCT C and C++ must compile with fixed SIMD')
         options = RECIPE['mixedOcctOptions'] + [
             f'-DCMAKE_TOOLCHAIN_FILE={SDK}/emscripten/cmake/Modules/Platform/Emscripten.cmake',
             f'-DCMAKE_CROSSCOMPILING_EMULATOR={paths["node"]}',
@@ -418,7 +438,7 @@ def migrate_sdk_support(prefix, receipt, contract, evidence_input):
     else:
         evidence_path = Path(evidence_input)
         require(evidence_path.is_absolute(), 'SDK support evidence must be absolute')
-        require(evidence_path.resolve() != (CACHE / 'mixed-inputs.json').resolve(),
+        require(evidence_path.resolve() != MIXED_INPUTS.resolve(),
                 'Retain support evidence outside the current manifest')
         evidence = json.loads(evidence_path.read_text())
         require(evidence.get('schema') == 'geospec-mixed-build-inputs-v2', 'Unsupported SDK support evidence')
@@ -532,13 +552,13 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
 
 
 def prepare_prefix(kind, paths, env, context):
-    destination = CACHE / f'occt-{kind}'
+    destination = CACHE / (MIXED_PREFIX if kind == 'mixed' else 'occt-native')
     contract = prefix_contract(kind, paths, env, context)
     if destination.exists():
         verify_prefix(destination, prefix_contract(kind, paths, env, context, producer_builder()))
         print(f'✓ Reused verified OCCT {kind} prefix: {destination}')
         return
-    attempt = CACHE / f'.occt-{kind}-attempt'
+    attempt = CACHE / ('.occt-mixed-simd128-attempt' if kind == 'mixed' else '.occt-native-attempt')
     require(not attempt.exists(), f'Incomplete prefix attempt exists; inspect before removing: {attempt}')
     attempt.mkdir()
     build_env = {
@@ -557,16 +577,16 @@ def prepare_prefix(kind, paths, env, context):
     print(f'✓ Promoted verified OCCT {kind} prefix: {destination}')
 
 
-def prepare_prefixes(paths, env, reuse_prefix=None):
-    room('prefixes')
+def prepare_prefixes(paths, env, reuse_prefix=None, build_prefix=None):
+    room('reuse-prefix' if reuse_prefix is not None else 'prefixes')
     prepare_sources()
     context = prefix_context(paths, env)
     if reuse_prefix is not None:
-        prefix = CACHE / f'occt-{reuse_prefix}'
+        prefix = CACHE / (MIXED_PREFIX if reuse_prefix == 'mixed' else 'occt-native')
         verify_prefix(prefix, prefix_contract(reuse_prefix, paths, env, context, producer_builder()))
         print(f'✓ Reused verified OCCT {reuse_prefix} prefix: {prefix}')
         return
-    for kind in ['native', 'mixed']:
+    for kind in [build_prefix] if build_prefix is not None else ['native', 'mixed']:
         prepare_prefix(kind, paths, env, context)
 
 
@@ -591,7 +611,7 @@ def required_inputs(manifest):
     required.update(Path(p) for p in manifest['libraries'])
     required.add(Path(manifest['environment']['EM_CONFIG']))
     required.add(Path(manifest['prefixProducerBuilder']))
-    required.add(CACHE / 'occt-mixed/prefix-receipt.json')
+    required.add(CACHE / MIXED_PREFIX / 'prefix-receipt.json')
     required.add(Path(manifest['prefixProducerRecipe']))
     required.add(CACHE / 'tool-metadata.json')
     for name in ['config', 'config.toml']:
@@ -610,8 +630,8 @@ def prepare_inputs(paths, env):
     prepare_sources()
     context = prefix_context(paths, env)
     producing_builder = producer_builder()
-    recipe_path = producer_recipe(CACHE / 'occt-mixed')
-    receipt = verify_prefix(CACHE / 'occt-mixed',
+    recipe_path = producer_recipe(CACHE / MIXED_PREFIX)
+    receipt = verify_prefix(CACHE / MIXED_PREFIX,
                             prefix_contract('mixed', paths, env, context, producing_builder), recipe_path)
     prefix_recovery = {'mixed': receipt.get('recovery')}
     # The standalone runtime build script also reads its own locked graph for
@@ -626,8 +646,8 @@ def prepare_inputs(paths, env):
                     f'Cargo dependency outside the recorded source roots: {path}')
     # Registry source and archive checksums are verified by Cargo's locked fetch.
     manifest = {
-        'schema': 'geospec-mixed-build-inputs-v2', 'sourceRoot': str(ROOT),
-        'output': str(PACKAGE / 'bindings/emscripten/generated'), 'cache': str(CACHE / 'mixed-build'),
+        'schema': 'geospec-mixed-build-inputs-v3', 'sourceRoot': str(ROOT),
+        'output': str(PACKAGE / 'bindings/emscripten/generated'), 'cache': str(CACHE / 'mixed-build-simd128'),
         'preparationCache': str(CACHE), 'rustPrefix': str(RUST), 'sdkPrefix': str(SDK),
         'tools': {name: str(path) for name, path in paths.items()},
         **{name: str(paths[name]) for name in ['rustc', 'cargo', 'emcc', 'emxx', 'emar']},
@@ -637,12 +657,13 @@ def prepare_inputs(paths, env):
         'prefixSupportMigration': receipt.get('supportMigration'),
         'prefixProducerRecipe': str(recipe_path),
         'inputRoots': list(map(str, input_roots())), 'linkOptimization': RECIPE['linkOptimization'],
+        'wasmSimd': RECIPE['wasmSimd'],
         'recipeSha256': digest(RECIPE_PATH),
         'sourceRevision': run([paths['git'], '-C', ROOT, 'rev-parse', 'HEAD'], env, timeout=30).strip(),
         'qualification': 'Prepared build inputs only; bound prefix recovery qualifications remain applicable. Not built or runtime qualified.',
     }
     manifest['inputs'] = [{'path': str(p), 'sha256': digest(p)} for p in sorted(required_inputs(manifest))]
-    path = CACHE / 'mixed-inputs.json'
+    path = MIXED_INPUTS
     write_json(path, manifest)
     verify_manifest(path)
     print(f'GEOSPEC_MIXED_INPUTS={path}')
@@ -653,7 +674,7 @@ def verify_manifest(path):
     manifest = json.loads(path.read_text())
     paths = tool_paths()
     selected_environment = environment(paths, write_config=False)
-    require(manifest['schema'] == 'geospec-mixed-build-inputs-v2', 'Prepare v2 inputs with this checkout')
+    require(manifest['schema'] == 'geospec-mixed-build-inputs-v3', 'Prepare v3 SIMD inputs with this checkout')
     require(manifest['sourceRoot'] == str(ROOT), 'Closure sourceRoot must be this checkout')
     require(manifest['tools'] == {name: str(p) for name, p in paths.items()}, 'Selected tools differ')
     rows = manifest['inputs']
@@ -666,8 +687,9 @@ def verify_manifest(path):
     require(manifest['preparationCache'] == str(CACHE), 'Preparation cache differs; use GEOSPEC_DELIVERY_CACHE')
     require(manifest['rustPrefix'] == str(RUST) and manifest['sdkPrefix'] == str(SDK), 'Tool prefixes differ from preparation')
     require(manifest['output'] == str(PACKAGE / 'bindings/emscripten/generated'), 'Wrong current-source output')
-    require(manifest['cache'] == str(CACHE / 'mixed-build'), 'Wrong isolated build cache')
+    require(manifest['cache'] == str(CACHE / 'mixed-build-simd128'), 'Wrong isolated build cache')
     require(manifest['linkOptimization'] == RECIPE['linkOptimization'], 'Wrong selected link profile')
+    require(manifest['wasmSimd'] == RECIPE['wasmSimd'], 'Wrong fixed SIMD flags')
     require(manifest['occtPrefix'] == str(MIXED), 'Wrong mixed prefix')
     require(manifest['libraries'] == list(map(str, libraries(MIXED))), 'Selected libraries differ from installed CMake closure')
     require(manifest['inputRoots'] == list(map(str, input_roots())), 'Input roots were reduced')
@@ -683,7 +705,7 @@ def verify_manifest(path):
     context = prefix_context(paths, selected_environment)
     recipe_path = Path(manifest['prefixProducerRecipe'])
     require(recipe_path.is_absolute(), 'Prefix recipe evidence path must be absolute')
-    receipt = verify_prefix(CACHE / 'occt-mixed',
+    receipt = verify_prefix(CACHE / MIXED_PREFIX,
                             prefix_contract('mixed', paths, selected_environment, context, producing_builder), recipe_path,
                             manifest.get('prefixSupportMigration'))
     require(manifest.get('sdkSupport') == context['supportPayloads']['mixed'], 'SDK support policy or bytes changed')
@@ -697,17 +719,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('stage', nargs='?', default='check', choices=['check', 'sources', 'tools', 'prefixes', 'inputs', 'verify'])
     parser.add_argument('--manifest', type=Path)
-    parser.add_argument('--reuse-prefix', choices=['native', 'mixed'])
+    prefix_selection = parser.add_mutually_exclusive_group()
+    prefix_selection.add_argument('--reuse-prefix', choices=['native', 'mixed'])
+    prefix_selection.add_argument('--build-prefix', choices=['native', 'mixed'])
     args = parser.parse_args()
     require(args.reuse_prefix is None or args.stage == 'prefixes', '--reuse-prefix requires the prefixes stage')
+    require(args.build_prefix is None or args.stage == 'prefixes', '--build-prefix requires the prefixes stage')
     require(sys.version_info >= (3, 12), 'Python 3.12+ required for safe archive extraction')
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Selected recipe is Darwin ARM64 only')
     if args.stage == 'check':
         required = [SOURCE / 'CMakeLists.txt', RUST / 'bin/rustc', SDK / 'emscripten/emcc',
-                    MIXED / 'lib/libTKDESTEP.a', CACHE / 'mixed-inputs.json']
+                    MIXED / 'lib/libTKDESTEP.a', MIXED_INPUTS]
         missing = [str(p) for p in required if not p.is_file()]
         if not missing:
-            verify_manifest(CACHE / 'mixed-inputs.json')
+            verify_manifest(MIXED_INPUTS)
         tools_missing = not (RUST / 'bin/rustc').is_file() or not (SDK / 'emscripten/emcc').is_file()
         prefixes_missing = not (MIXED / 'lib/libTKDESTEP.a').is_file()
         remaining = RECIPE['diskGiB']['mixedBuildReserve'] + (RECIPE['diskGiB']['sources'] if not SOURCE.is_dir() else 0)
@@ -720,7 +745,7 @@ def main():
                           'note': 'Missing inputs are not ready; when present, verify enforces hashes. prefixes is an explicit heavy stage.'}, indent=2))
         return 1 if missing or shutil.disk_usage(ROOT).free < remaining * 1024 ** 3 else 0
     if args.stage == 'verify':
-        verify_manifest(args.manifest or CACHE / 'mixed-inputs.json')
+        verify_manifest(args.manifest or MIXED_INPUTS)
         return 0
     CACHE.mkdir(parents=True, exist_ok=True)
     if args.stage == 'sources':
@@ -733,7 +758,7 @@ def main():
         (CACHE / 'tmp').mkdir(exist_ok=True)
         env = environment(paths)
         if args.stage == 'prefixes':
-            prepare_prefixes(paths, env, args.reuse_prefix)
+            prepare_prefixes(paths, env, args.reuse_prefix, args.build_prefix)
         else:
             prepare_inputs(paths, env)
     return 0

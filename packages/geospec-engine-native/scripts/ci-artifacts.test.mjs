@@ -24,6 +24,15 @@ const checkTransport = (context, reusePrefixes) => {
   const bindingPath = `${packagePath}/bindings/emscripten/src/lib.rs`;
   const generatedPath = `${packagePath}/bindings/node/generated`;
   const mixedPath = `${packagePath}/bindings/emscripten/generated`;
+  const productPath = process.env.PATH;
+  const nativePrefixPath = '/inert-native-node-26.7/bin:/inert-native-tools/bin';
+  const wasmSimd = { rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' };
+  const buildEnvironment = {
+    CARGO_ENCODED_RUSTFLAGS: '-C\u001Ftarget-feature=+simd128',
+    CXXFLAGS_wasm32_unknown_emscripten:
+      '-msimd128 -fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
+    GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
+  };
   /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
   const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
   /** @type {(path: string, bytes: string | Uint8Array) => void} */
@@ -38,7 +47,6 @@ const checkTransport = (context, reusePrefixes) => {
   put(join(producer, packagePath, 'scripts/test_native_proof.py'), 'inert positive fixture source');
   put(join(producer, packagePath, 'project.json'), JSON.stringify({ targets: { 'build-node': { fixture: true } } }));
   put(join(producer, packagePath, 'rust/target/untracked-output'), 'not source');
-  put(join(producer, 'mixed-cache/attempt-0/commands.json'), 'old attempt must not be selected');
   let revision = 'a'.repeat(40);
   context.mock.method(
     childProcess,
@@ -56,6 +64,9 @@ const checkTransport = (context, reusePrefixes) => {
   /** @type {string[]} */
   const targets = [];
   const mixedCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery');
+  const buildCache = join(mixedCache, 'mixed-build-simd128');
+  put(join(buildCache, 'attempt-0/commands.json'), 'old attempt must not be selected');
+  put(join(mixedCache, 'mixed-inputs.json'), 'historical inputs must not be selected or overwritten');
   const nativeCache = reusePrefixes ? join(producer, 'retained-native-cache') : mixedCache;
   const nativeBuilder = join(
     producer,
@@ -72,12 +83,13 @@ const checkTransport = (context, reusePrefixes) => {
   context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {cwd: string, env: {CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
+    /** @type {(executable: string, args: string[], options: {cwd: string, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
       executable,
       args,
       options,
     ) => {
       if (executable === 'rustup') {
+        assert.equal(options.env.PATH, productPath);
         assert.deepEqual(args, [
           'run',
           '1.88',
@@ -95,15 +107,20 @@ const checkTransport = (context, reusePrefixes) => {
         return { status: 0 };
       }
       if (executable === 'python3') {
+        assert.equal(options.env.PATH, productPath);
         observations += 1;
         assert.equal(args[1], join(producer, packagePath, 'scripts/collect-native-proof.py'));
         /** @type {unknown} */
         const invocationData = JSON.parse(readFileSync(args[3], 'utf8'));
         const invocation =
-          /** @type {{exitCode: number, environment: {CARGO_TARGET_DIR: string, GEOSPEC_OCCT_PREFIX: string}, prefixBuilder: string, addon: {sha256: string}}} */ (
+          /** @type {{exitCode: number, environment: {PATH?: string, CARGO_TARGET_DIR: string, GEOSPEC_OCCT_PREFIX: string}, prefixBuilder: string, addon: {sha256: string}, orchestratorNode: {path: string, version: string, sha256: string}}} */ (
             invocationData
           );
         assert.equal(invocation.exitCode, 0);
+        assert.equal(invocation.environment.PATH, productPath);
+        assert.equal(invocation.orchestratorNode.path, process.execPath);
+        assert.equal(invocation.orchestratorNode.version, process.version);
+        assert.equal(invocation.orchestratorNode.sha256, digest(readFileSync(process.execPath)));
         assert.equal(invocation.prefixBuilder, nativeBuilder);
         assert.equal(invocation.environment.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
         assert.ok(invocation.environment.CARGO_TARGET_DIR.includes('/ci-node-target-'));
@@ -123,6 +140,7 @@ const checkTransport = (context, reusePrefixes) => {
       targets.push(target);
       assert.equal(options.env.GEOSPEC_OCCT_PREFIX, join(nativeCache, 'occt-native/install'));
       if (target === 'prepare-delivery:reuse-native') {
+        assert.equal(options.env.PATH, nativePrefixPath);
         assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, nativeCache);
         assert.equal(options.env.GEOSPEC_OCCT_PRODUCER_BUILDER, nativeBuilder);
         assert.equal(options.env.GEOSPEC_OCCT_PRODUCER_RECIPE, join(producer, 'native-producing-recipe.json'));
@@ -131,6 +149,7 @@ const checkTransport = (context, reusePrefixes) => {
           return { status: 1 };
         }
       } else {
+        assert.equal(options.env.PATH, productPath);
         assert.equal(options.env.GEOSPEC_DELIVERY_CACHE, mixedCache);
         assert.equal(
           options.env.GEOSPEC_OCCT_PRODUCER_BUILDER,
@@ -167,20 +186,23 @@ const checkTransport = (context, reusePrefixes) => {
         put(join(producer, generatedPath, 'index.d.ts'), readFileSync(join(producer, snapshotPath)));
       }
       if (target === 'prepare-delivery:inputs') {
-        assert.ok(typeof options.env.GEOSPEC_MIXED_INPUTS === 'string');
+        assert.equal(options.env.GEOSPEC_MIXED_INPUTS, join(mixedCache, 'mixed-inputs-simd128.json'));
         put(
           options.env.GEOSPEC_MIXED_INPUTS,
           JSON.stringify(
             {
-              schema: 'geospec-mixed-build-inputs-v2',
+              schema: 'geospec-mixed-build-inputs-v3',
               sourceRoot: producer,
               sourceRevision: revision,
-              cache: join(producer, 'mixed-cache'),
+              preparationCache: mixedCache,
+              cache: buildCache,
+              occtPrefix: join(mixedCache, 'occt-mixed-simd128/install'),
               output: join(producer, mixedPath),
               rustc: '/inert-tools/rustc',
               cargo: '/inert-tools/cargo',
               emxx: '/inert-tools/em++',
               linkOptimization: 'O3',
+              wasmSimd,
             },
             null,
             2,
@@ -197,19 +219,23 @@ const checkTransport = (context, reusePrefixes) => {
         });
         attempt += 1;
         put(
-          join(producer, `mixed-cache/attempt-${attempt}/build-receipt.json`),
+          join(buildCache, `attempt-${attempt}/build-receipt.json`),
           JSON.stringify({
+            schema: 'geospec-mixed-build-receipt-v2',
             sourceRoot: producer,
             sourceRevision: revision,
             output: join(producer, mixedPath),
             manifestSha256: digest(readFileSync(options.env.GEOSPEC_MIXED_INPUTS)),
             bindingSha256: digest(readFileSync(join(producer, bindingPath))),
             artifacts,
+            wasmSimd,
+            buildEnvironment,
+            profile: 'emscripten-6.0.5-js-exceptions-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3',
           }),
         );
         if (!omitCommands) {
           put(
-            join(producer, `mixed-cache/attempt-${attempt}/commands.json`),
+            join(buildCache, `attempt-${attempt}/commands.json`),
             JSON.stringify(
               [
                 { executable: '/inert-tools/rustc', args: ['-vV'], status: 0 },
@@ -226,13 +252,13 @@ const checkTransport = (context, reusePrefixes) => {
                     '--target',
                     'wasm32-unknown-emscripten',
                     '--target-dir',
-                    join(producer, 'mixed-cache/target'),
+                    join(buildCache, 'target'),
                   ],
                   status: 0,
                 },
                 {
                   executable: '/inert-tools/em++',
-                  args: ['-O3', '-o', join(producer, mixedPath, 'geospec_engine_native.mjs')],
+                  args: ['-O3', '-msimd128', '-o', join(producer, mixedPath, 'geospec_engine_native.mjs')],
                   status: 0,
                 },
               ],
@@ -254,6 +280,7 @@ const checkTransport = (context, reusePrefixes) => {
     ...process.env,
     GEOSPEC_DELIVERY_CACHE: undefined,
     GEOSPEC_NATIVE_DELIVERY_CACHE: reusePrefixes ? nativeCache : undefined,
+    GEOSPEC_NATIVE_PREFIX_PATH: nativePrefixPath,
     GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER: reusePrefixes ? nativeBuilder : undefined,
     GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE: reusePrefixes ? join(producer, 'native-producing-recipe.json') : undefined,
     GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES: reusePrefixes ? nativeCache : undefined,
@@ -280,14 +307,17 @@ const checkTransport = (context, reusePrefixes) => {
   ]);
   assert.equal(inventory.artifacts.length, 5);
   for (const [name, original] of [
-    ['mixed-inputs.json', 'node_modules/.cache/geospec-engine-native/delivery/mixed-inputs.json'],
-    ['mixed-commands.json', 'mixed-cache/attempt-1/commands.json'],
+    ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
+    ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
   ]) {
-    assert.deepEqual(readFileSync(join(producer, transportPath, name)), readFileSync(join(producer, original)));
+    assert.deepEqual(readFileSync(join(producer, transportPath, name)), readFileSync(original));
   }
+  assert.equal(
+    readFileSync(join(mixedCache, 'mixed-inputs.json'), 'utf8'),
+    'historical inputs must not be selected or overwritten',
+  );
   assert.ok(!inventory.source.files.some((file) => file.path.includes('/target/')));
   cpSync(producer, consumer, { recursive: true });
-  rmSync(join(consumer, 'mixed-cache'), { recursive: true });
   rmSync(join(consumer, 'node_modules'), { recursive: true });
   assert.deepEqual(verifyArtifacts(consumer), inventory);
   assert.deepEqual(verifyDelivery(consumer), inventory);
@@ -367,6 +397,65 @@ const checkTransport = (context, reusePrefixes) => {
     put(path, bytes);
     put(inventoryFile, JSON.stringify(inventory));
   }
+  /** @type {(name: string) => Record<string, unknown>} */
+  const transportedRecord = (name) => {
+    /** @type {unknown} */
+    const value = JSON.parse(readFileSync(join(consumer, transportPath, name), 'utf8'));
+    assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value));
+    return /** @type {Record<string, unknown>} */ (value);
+  };
+  const validInputs = transportedRecord('mixed-inputs.json');
+  const validReceipt = transportedRecord('mixed-build-receipt.json');
+  const validCommands = readFileSync(join(consumer, transportPath, 'mixed-commands.json'), 'utf8');
+  // Recompute all transport joins so each failure checks actual build selection, not a stale hash.
+  for (const selection of [
+    { inputChanges: { schema: 'geospec-mixed-build-inputs-v2' }, message: /Unsupported mixed input manifest/ },
+    { receiptChanges: { schema: 'geospec-mixed-build-receipt-v1' }, message: /Unsupported mixed build receipt/ },
+    { inputChanges: { wasmSimd: { ...wasmSimd, cxxFlag: '' } }, message: /inputs lack selected fixed-SIMD/ },
+    { receiptChanges: { wasmSimd: { ...wasmSimd, rustFlags: [] } }, message: /receipt fixed-SIMD flags differ/ },
+    {
+      receiptChanges: { buildEnvironment: { ...buildEnvironment, CARGO_ENCODED_RUSTFLAGS: '' } },
+      message: /compile environment differs/,
+    },
+    {
+      receiptChanges: { buildEnvironment: { ...buildEnvironment, CXXFLAGS_wasm32_unknown_emscripten: '-fexceptions' } },
+      message: /compile environment differs/,
+    },
+    { inputChanges: { occtPrefix: join(mixedCache, 'occt-mixed/install') }, message: /isolated fixed-SIMD prefix/ },
+    { inputChanges: { cache: join(mixedCache, 'mixed-build') }, message: /isolated fixed-SIMD prefix/ },
+    { commands: validCommands.replace('"-msimd128",', ''), message: /link profile\/output differs/ },
+    { commands: validCommands.replace('"-msimd128"', '"-msimd128", "-pthread"'), message: /unselected threading/ },
+    { commands: validCommands.replace('"-msimd128"', '"-msimd128", "-ffast-math"'), message: /floating-point flags/ },
+    { commands: validCommands.replace('"-msimd128"', '"-msimd128", "-mno-simd128"'), message: /floating-point flags/ },
+  ]) {
+    const { inputChanges, receiptChanges, commands, message } = {
+      inputChanges: {},
+      receiptChanges: {},
+      commands: validCommands,
+      ...selection,
+    };
+    const inputs = JSON.stringify({ ...validInputs, ...inputChanges });
+    const receipt = JSON.stringify({ ...validReceipt, ...receiptChanges, manifestSha256: digest(inputs) });
+    const changedInventory = { ...inventory };
+    for (const [key, name, bytes] of [
+      ['mixedInputs', 'mixed-inputs.json', inputs],
+      ['mixedReceipt', 'mixed-build-receipt.json', receipt],
+      ['mixedCommands', 'mixed-commands.json', commands],
+    ]) {
+      put(join(consumer, transportPath, name), bytes);
+      changedInventory[key] = {
+        path: `${transportPath}/${name}`,
+        bytes: Buffer.byteLength(bytes),
+        sha256: digest(bytes),
+      };
+    }
+    put(inventoryFile, JSON.stringify(changedInventory));
+    assert.throws(() => verifyArtifacts(consumer), message);
+  }
+  for (const name of ['mixed-inputs.json', 'mixed-build-receipt.json', 'mixed-commands.json']) {
+    cpSync(join(producer, transportPath, name), join(consumer, transportPath, name));
+  }
+  put(inventoryFile, JSON.stringify(inventory));
   put(inventoryFile, JSON.stringify({ ...inventory, artifacts: inventory.artifacts.slice(1) }));
   assert.throws(() => verifyArtifacts(consumer), /membership\/bytes\/hashes differ/);
   put(inventoryFile, JSON.stringify(inventory));

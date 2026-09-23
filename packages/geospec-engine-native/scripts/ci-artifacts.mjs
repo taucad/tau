@@ -7,6 +7,7 @@
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
  * apply only to that prefix's verification. Mixed selectors remain independent.
+ * GEOSPEC_NATIVE_PREFIX_PATH overrides PATH only for native-prefix verification.
  * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json
  * Exit: 0 complete and matching; 1 missing, changed or failed prerequisite.
  */
@@ -118,14 +119,37 @@ const payload = (root) => {
 };
 /** @type {(root: string, inventory: {source: ReturnType<typeof sourceIdentity>, artifacts: ReturnType<typeof payload>}) => void} */
 const checkReceipt = (root, inventory) => {
-  const { sourceRevision, sourceRoot, manifestSha256, bindingSha256, artifacts, output } = readJson(
-    resolve(root, receiptPath),
-  );
+  const {
+    schema,
+    sourceRevision,
+    sourceRoot,
+    manifestSha256,
+    bindingSha256,
+    artifacts,
+    output,
+    wasmSimd,
+    buildEnvironment,
+    profile,
+  } = readJson(resolve(root, receiptPath));
+  assert.ok(schema === 'geospec-mixed-build-receipt-v2', 'Unsupported mixed build receipt.');
   assert.ok(sourceRevision === inventory.source.revision, 'Mixed receipt source revision differs.');
   assert.ok(typeof sourceRoot === 'string' && posix.isAbsolute(sourceRoot), 'Mixed receipt lacks producer root.');
   assert.ok(manifestSha256 === fileRecord(root, mixedInputsPath).sha256, 'Mixed receipt/input-manifest hash differs.');
   const inputs = readJson(resolve(root, mixedInputsPath));
-  assert.ok(inputs.schema === 'geospec-mixed-build-inputs-v2', 'Unsupported mixed input manifest.');
+  assert.ok(inputs.schema === 'geospec-mixed-build-inputs-v3', 'Unsupported mixed input manifest.');
+  const fixedSimd = { rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' };
+  assert.deepEqual(inputs.wasmSimd, fixedSimd, 'Mixed inputs lack selected fixed-SIMD flags.');
+  assert.deepEqual(wasmSimd, fixedSimd, 'Mixed receipt fixed-SIMD flags differ from inputs.');
+  assert.deepEqual(
+    buildEnvironment,
+    {
+      CARGO_ENCODED_RUSTFLAGS: '-C\u001Ftarget-feature=+simd128',
+      CXXFLAGS_wasm32_unknown_emscripten:
+        '-msimd128 -fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
+      GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
+    },
+    'Mixed receipt compile environment differs from fixed-SIMD selection.',
+  );
   assert.ok(
     inputs.sourceRoot === sourceRoot && inputs.sourceRevision === sourceRevision,
     'Mixed input source differs from receipt.',
@@ -135,7 +159,19 @@ const checkReceipt = (root, inventory) => {
     'Mixed input/receipt output differs.',
   );
   assert.ok(typeof inputs.cache === 'string' && posix.isAbsolute(inputs.cache), 'Mixed inputs lack build cache.');
+  assert.ok(
+    typeof inputs.preparationCache === 'string' &&
+      posix.isAbsolute(inputs.preparationCache) &&
+      inputs.cache === posix.join(inputs.preparationCache, 'mixed-build-simd128') &&
+      inputs.occtPrefix === posix.join(inputs.preparationCache, 'occt-mixed-simd128/install'),
+    'Mixed inputs lack isolated fixed-SIMD prefix/cache.',
+  );
   assert.ok(inputs.linkOptimization === 'O3', 'Unsupported mixed link profile.');
+  assert.equal(
+    profile,
+    'emscripten-6.0.5-js-exceptions-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3',
+    'Mixed receipt compiler profile differs.',
+  );
   /** @type {unknown} */
   const commands = JSON.parse(readFileSync(resolve(root, mixedCommandsPath), 'utf8'));
   assert.ok(Array.isArray(commands) && commands.length === 4, 'Incomplete mixed commands.');
@@ -174,9 +210,18 @@ const checkReceipt = (root, inventory) => {
     'Mixed Cargo route differs from inputs.',
   );
   assert.ok(
-    commandArguments[3][0] === `-${inputs.linkOptimization}` &&
+    isDeepStrictEqual(commandArguments[3].slice(0, 2), [`-${inputs.linkOptimization}`, fixedSimd.linkFlag]) &&
       isDeepStrictEqual(commandArguments[3].slice(-2), ['-o', posix.join(output, 'geospec_engine_native.mjs')]),
     'Mixed link profile/output differs from inputs.',
+  );
+  assert.ok(
+    commandArguments[3].every(
+      (argument) =>
+        !/^(?:-pthread|-matomics|-mno-simd128|-mrelaxed-simd|-ffast-math|-funsafe-math-optimizations|-fassociative-math|-ffp-contract=fast|-Ofast|-s(?:PTHREADS|USE_PTHREADS|PTHREAD_POOL_SIZE)(?:=.*)?|-Wl,--shared-memory)$/.test(
+          argument,
+        ),
+    ),
+    'Mixed link enables unselected threading or floating-point flags.',
   );
   assert.ok(
     bindingSha256 === fileRecord(root, `${packagePath}/bindings/emscripten/src/lib.rs`).sha256,
@@ -269,6 +314,7 @@ export const prepareArtifacts = (root) => {
   const nativeTarget = mkdtempSync(join(cache, 'ci-node-target-'));
   const environment = {
     ...process.env,
+    PATH: process.env.PATH,
     CARGO_HOME: resolve(root, process.env.CARGO_HOME ?? join(homedir(), '.cargo')),
     pnpm_config_verify_deps_before_run: 'warn',
     GEOSPEC_DELIVERY_CACHE: cache,
@@ -279,7 +325,7 @@ export const prepareArtifacts = (root) => {
     GEOSPEC_MIXED_RECEIPT: resolve(root, receiptPath),
     GEOSPEC_PRODUCER_RECEIPT: resolve(root, proofPath),
   };
-  const inputsPath = join(cache, 'mixed-inputs.json');
+  const inputsPath = join(cache, 'mixed-inputs-simd128.json');
   mkdirSync(resolve(root, transportPath), { recursive: true });
   /** @type {(target: string, preparationEnvironment?: Record<string, string | undefined>) => string} */
   const run = (target, preparationEnvironment = {}) => {
@@ -319,7 +365,9 @@ export const prepareArtifacts = (root) => {
             exitCode: result.status,
             source,
             addon: fileRecord(root, outputs[2]),
+            orchestratorNode: { ...fileRecord(root, process.execPath), version: process.version },
             environment: {
+              PATH: environment.PATH,
               CARGO_TARGET_DIR: nativeTarget,
               CARGO_HOME: environment.CARGO_HOME,
               GEOSPEC_OCCT_PREFIX: environment.GEOSPEC_OCCT_PREFIX,
@@ -343,6 +391,7 @@ export const prepareArtifacts = (root) => {
   run('prepare-delivery:tools');
   if (reusePrefixes) {
     run('prepare-delivery:reuse-native', {
+      PATH: process.env.GEOSPEC_NATIVE_PREFIX_PATH ?? process.env.PATH,
       GEOSPEC_DELIVERY_CACHE: nativeCache,
       GEOSPEC_OCCT_PRODUCER_BUILDER: nativeBuilder,
       GEOSPEC_OCCT_PRODUCER_RECIPE: process.env.GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE,

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback, useReducer, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
+import type { EventManager } from '@react-three/fiber';
 import { createActor } from 'xstate';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import {
@@ -119,6 +120,11 @@ type MeasurePointerSnapshot = {
 
 export function MeasureTool(): React.JSX.Element {
   const { camera, gl, scene, invalidate } = useThree();
+  const events = useThree((state) => state.events) as EventManager<HTMLElement>;
+  // R3F binds pointer events to `eventSource` (the viewer region div), which covers the canvas.
+  // Listening on `gl.domElement` would never fire; see `tau-camera-controls.tsx` for the same
+  // resolution order.
+  const pointerTarget: HTMLElement = events.connected ?? gl.domElement;
   const graphicsActor = useGraphics();
   const renderFrame = useRenderFrame();
   const sectionView = useSectionView();
@@ -132,7 +138,8 @@ export function MeasureTool(): React.JSX.Element {
   const lengthSymbol = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
   const hoveredMeasurementId = useGraphicsSelector((state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
-  const cameraInteracting = useGraphicsSelector((state) => state.context.cameraInteracting);
+  // A press alone raises `cameraInteracting`; only actual camera movement steals a measure gesture.
+  const cameraMoving = useGraphicsSelector((state) => state.context.cameraInteractionHadMovement);
 
   const [{ hoveredSnapPoints, activeSnapPoint, mousePosition }, dispatchHoverState] = useReducer(measureHoverReducer, {
     hoveredSnapPoints: [],
@@ -154,7 +161,7 @@ export function MeasureTool(): React.JSX.Element {
     });
   }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
-  const wasCameraInteractingRef = useRef(cameraInteracting);
+  const wasCameraMovingRef = useRef(cameraMoving);
 
   // Cache mesh list to avoid expensive scene.traverse() on every mouse event.
   // Invalidated when geometry or component display changes.
@@ -285,12 +292,12 @@ export function MeasureTool(): React.JSX.Element {
   }, [isMeasureActive]);
 
   useEffect(() => {
-    if (isMeasureActive && cameraInteracting && !wasCameraInteractingRef.current) {
-      measureInputActor.send({ type: 'cameraInteractionStart' });
+    if (isMeasureActive && cameraMoving && !wasCameraMovingRef.current) {
+      measureInputActor.send({ type: 'cameraMoved' });
     }
 
-    wasCameraInteractingRef.current = cameraInteracting;
-  }, [cameraInteracting, isMeasureActive, measureInputActor]);
+    wasCameraMovingRef.current = cameraMoving;
+  }, [cameraMoving, isMeasureActive, measureInputActor]);
 
   // Handle mouse move for snapping
   useEffect(() => {
@@ -315,7 +322,7 @@ export function MeasureTool(): React.JSX.Element {
         type: 'pointerDown',
         button: event.button,
         hasTarget: pointerSnapshot.hasTarget || pointerSnapshot.hasActiveSnapTarget,
-        cameraInteracting,
+        cameraMoving,
       });
     };
 
@@ -369,20 +376,20 @@ export function MeasureTool(): React.JSX.Element {
       event.preventDefault();
     };
 
-    gl.domElement.addEventListener('mousemove', handleMouseMove);
-    gl.domElement.addEventListener('pointerdown', handlePointerDown);
-    gl.domElement.addEventListener('pointerup', handlePointerUp);
-    gl.domElement.addEventListener('contextmenu', handleContextMenu);
+    pointerTarget.addEventListener('mousemove', handleMouseMove);
+    pointerTarget.addEventListener('pointerdown', handlePointerDown);
+    pointerTarget.addEventListener('pointerup', handlePointerUp);
+    pointerTarget.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
-      gl.domElement.removeEventListener('mousemove', handleMouseMove);
-      gl.domElement.removeEventListener('pointerdown', handlePointerDown);
-      gl.domElement.removeEventListener('pointerup', handlePointerUp);
-      gl.domElement.removeEventListener('contextmenu', handleContextMenu);
+      pointerTarget.removeEventListener('mousemove', handleMouseMove);
+      pointerTarget.removeEventListener('pointerdown', handlePointerDown);
+      pointerTarget.removeEventListener('pointerup', handlePointerUp);
+      pointerTarget.removeEventListener('contextmenu', handleContextMenu);
     };
   }, [
-    cameraInteracting,
-    gl.domElement,
+    cameraMoving,
+    pointerTarget,
     isMeasureActive,
     graphicsActor,
     measureInputActor,

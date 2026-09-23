@@ -1,87 +1,99 @@
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
-import { MessageCircle, PanelLeft, PanelRight } from 'lucide-react';
+import { DownloadIcon, PanelLeft, PanelRight, Share2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import { Button } from '@taucad/ui/components/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Separator } from '@taucad/ui/components/separator';
 import { SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
+import { PaneButton } from '#components/ui/pane-button.js';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { useProject } from '#hooks/use-project.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
-import { ProjectShareAction } from '#routes/w.$workspace.$project/project-share-action.js';
-import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
-import {
-  resolveCompactAuxiliary,
-  useProjectWorkspace,
-} from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type WorkbenchToggleProperties = {
   readonly isOpen: boolean;
   readonly onOpenChange: (open: boolean) => void;
 };
 
-const WorkspacePaneToggle = ({
-  icon: Icon,
-  isOpen,
-  label,
-  tooltip,
-  onOpenChange,
-}: WorkbenchToggleProperties & {
-  readonly icon: LucideIcon;
-  readonly label: string;
-  readonly tooltip: string;
-}): React.JSX.Element => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <Button
-        variant='ghost'
-        size='icon-sm'
-        className='!size-7 rounded-sm bg-transparent text-muted-foreground hover:!bg-accent hover:text-foreground aria-pressed:bg-accent aria-pressed:text-foreground'
-        aria-label={label}
-        aria-pressed={isOpen}
-        onClick={() => {
-          onOpenChange(!isOpen);
-        }}
-      >
-        <Icon aria-hidden className='size-3.5' />
-      </Button>
-    </TooltipTrigger>
-    <TooltipContent>{tooltip}</TooltipContent>
-  </Tooltip>
-);
-
-export const WorkbenchToggle = (properties: WorkbenchToggleProperties): React.JSX.Element => (
-  <WorkspacePaneToggle {...properties} icon={PanelRight} label='Toggle Workbench lane' tooltip='Toggle Workbench' />
+export const WorkbenchToggle = ({ isOpen, onOpenChange }: WorkbenchToggleProperties): React.JSX.Element => (
+  <PaneButton
+    className='aria-pressed:text-foreground'
+    aria-label='Toggle Workbench lane'
+    aria-pressed={isOpen}
+    tooltip='Toggle Workbench'
+    onClick={() => {
+      onOpenChange(!isOpen);
+    }}
+  >
+    <PanelRight aria-hidden className='size-3.5' />
+  </PaneButton>
 );
 
 export const WorkbenchToggleSlot = (): React.JSX.Element => (
   <span aria-hidden className='size-7 shrink-0' data-testid='workbench-toggle-slot' />
 );
 
+/**
+ * Share or Export: a labelled `PaneButton` while the viewer is roomy, folding
+ * to its icon below `@xl/viewer` (Q5).
+ */
+const ProjectPaneAction = ({
+  icon: Icon,
+  label,
+  tooltip,
+  panel,
+}: {
+  readonly icon: LucideIcon;
+  readonly label: string;
+  readonly tooltip: string;
+  readonly panel: WorkbenchPanelId;
+}): React.JSX.Element => {
+  const { openPanel } = useProjectWorkspace();
+  return (
+    <PaneButton
+      size='label'
+      aria-label={label}
+      tooltip={tooltip}
+      className='@max-xl/viewer:w-7 @max-xl/viewer:px-0'
+      onClick={() => {
+        openPanel(panel);
+      }}
+    >
+      <Icon aria-hidden className='size-3.5' />
+      <span className='hidden @xl/viewer:inline'>{label}</span>
+    </PaneButton>
+  );
+};
+
+// The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height.
+const GroupSeparator = (): React.JSX.Element => (
+  <Separator orientation='vertical' className='data-[orientation=vertical]:h-4' />
+);
+
+/**
+ * The viewer's top-right cluster: the project group — the revision trigger,
+ * Share and Export — and, while the workbench lane is hidden, the slot its
+ * floating toggle lands in. One geometry (`PaneButton`, 28 px) and a hairline
+ * before every group, the first included, so the cluster reads apart from the
+ * tabs on its left. The chat lane's toggle is not here: it heads the chat pane
+ * header, or the viewer's tab bar while the lane is closed.
+ *
+ * @param properties - Dockview's header-action props for the group.
+ * @returns The cluster in the top-right group, nothing in every other.
+ */
 export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps): React.JSX.Element | undefined {
   const isTopRight = useIsTopRightGroup(properties.group, properties.containerApi);
-  const { editorRef, projectRef } = useProject();
-  const { setChatOpen } = useProjectWorkspace();
+  const { projectRef } = useProject();
+  const { workbench: workbenchVisible } = useWorkspaceLanes();
   const { isMobile, openMobile } = useSidebar();
-  const desktopLayout = useSelector(editorRef, (snapshot) => snapshot.context.panelState.desktopLayout);
   const projectName = useSelector(projectRef, (snapshot) => snapshot.context.project?.name) ?? 'Project';
 
   if (!isTopRight) {
     return undefined;
   }
 
-  const getLaneVisibility = (lane: 'chat' | 'workbench'): boolean => {
-    const workspace = properties.group.element.closest<HTMLElement>('[data-project-workspace]');
-    const compact = workspace?.dataset['compact'] === 'true';
-    const open = lane === 'chat' ? desktopLayout.chatOpen : desktopLayout.workbenchOpen;
-    return open && (!compact || resolveCompactAuxiliary(desktopLayout) === lane);
-  };
-  const chatVisible = getLaneVisibility('chat');
-  const workbenchVisible = getLaneVisibility('workbench');
   return (
-    /* One 28 px control height at `gap-1`, the same rhythm as the workbench and
-       viewer pane actions; the row used to mix 32 px (`sm`) and 24 px (`xs`)
-       buttons, which read as loose spacing next to those panes. */
     <div className='flex h-full items-center gap-1'>
       {isMobile && !openMobile ? (
         <SidebarTrigger className='h-7 w-auto max-w-44 gap-1.5 px-2'>
@@ -90,37 +102,20 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
         </SidebarTrigger>
       ) : null}
 
-      {isMobile ? null : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant='ghost'
-              size='sm'
-              className='h-7 gap-1.5 px-2'
-              aria-label='Toggle Chat lane'
-              aria-pressed={chatVisible}
-              onClick={() => {
-                setChatOpen(!chatVisible);
-              }}
-            >
-              <MessageCircle aria-hidden className='size-3.5' />
-              <span>Chat</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Toggle Chat</TooltipContent>
-        </Tooltip>
-      )}
-
-      {/* S29/A19: always on — not only while the checkout sits behind its
-          branch (the chat may be working somewhere else at any time), and not
-          only on a wide window: the chip collapses to its glyph rather than
-          disappearing, because it is the one place outside the pane that says
-          where you are (review R10). */}
+      <GroupSeparator />
+      {/* S29/A19: always on — the chat may be working somewhere else at any
+          time, and this is the one place outside the pane that says where you
+          are (review R10). */}
       <RevisionStatusAction />
+      <ProjectPaneAction icon={Share2} label='Share' tooltip='Share project' panel='share' />
+      <ProjectPaneAction icon={DownloadIcon} label='Export' tooltip='Open exporter' panel='export' />
 
-      <ProjectShareAction />
-      <ProjectExportAction />
-      {!isMobile && !workbenchVisible ? <WorkbenchToggleSlot /> : undefined}
+      {!isMobile && !workbenchVisible ? (
+        <>
+          <GroupSeparator />
+          <WorkbenchToggleSlot />
+        </>
+      ) : undefined}
     </div>
   );
 }

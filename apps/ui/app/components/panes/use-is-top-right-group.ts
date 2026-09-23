@@ -11,19 +11,20 @@ export const edgeTolerance = 2;
 const dockviewContainerSelector = '[data-slot="floating-panel"][data-state="open"], .dockview-theme-tau';
 
 /**
- * Synchronously checks whether a Dockview group occupies the top-right
- * corner of its nearest open floating panel or bare Dockview root.
+ * Synchronously checks whether a Dockview group occupies a top corner of its
+ * nearest open floating panel or bare Dockview root.
  *
- * Exported for unit testing.  The companion hook {@link useIsTopRightGroup}
- * calls this inside a `ResizeObserver` / `onDidLayoutChange` callback.
+ * Exported for unit testing.  The companion hooks {@link useIsTopRightGroup}
+ * and {@link useIsTopLeftGroup} call this inside a `ResizeObserver` /
+ * `onDidLayoutChange` callback.
  *
- * A group is considered "top-right" when:
+ * A group is considered to hold the corner when:
  * 1. It is in the grid (not floating / popout).
  * 2. It is inside an open floating panel or `.dockview-theme-tau` root.
- * 3. Its right edge aligns with that container's right edge.
+ * 3. Its `side` edge aligns with that container's `side` edge.
  * 4. Its top edge aligns with that container's top edge.
  */
-export function checkGroupIsTopRight(group: DockviewGroupPanel): boolean {
+export function checkGroupIsTopCorner(group: DockviewGroupPanel, side: 'left' | 'right'): boolean {
   if (group.api.location.type !== 'grid') {
     return false;
   }
@@ -41,22 +42,25 @@ export function checkGroupIsTopRight(group: DockviewGroupPanel): boolean {
     return false;
   }
 
-  const isAtRight = Math.abs(groupRect.right - panelRect.right) < edgeTolerance;
+  const isAtSide = Math.abs(groupRect[side] - panelRect[side]) < edgeTolerance;
   const isAtTop = Math.abs(groupRect.top - panelRect.top) < edgeTolerance;
 
-  return isAtRight && isAtTop;
+  return isAtSide && isAtTop;
 }
 
+/** {@link checkGroupIsTopCorner} for the top-right corner. */
+export const checkGroupIsTopRight = (group: DockviewGroupPanel): boolean => checkGroupIsTopCorner(group, 'right');
+
 /**
- * Determines whether a Dockview group occupies the top-right corner of its
- * nearest open floating panel or Dockview root.
+ * Determines whether a Dockview group occupies a top corner of its nearest
+ * open floating panel or Dockview root.
  *
  * The check is re-evaluated whenever the group element resizes (via
  * `ResizeObserver`) or the Dockview layout changes. `ResizeObserver` runs
  * after layout, so the group has its settled size.
  */
-export function useIsTopRightGroup(group: DockviewGroupPanel, containerApi: DockviewApi): boolean {
-  const [isTopRight, setIsTopRight] = useState(false);
+function useIsTopCornerGroup(group: DockviewGroupPanel, containerApi: DockviewApi, side: 'left' | 'right'): boolean {
+  const [isAtCorner, setIsAtCorner] = useState(false);
 
   useEffect(() => {
     let rafId: number | undefined;
@@ -71,7 +75,7 @@ export function useIsTopRightGroup(group: DockviewGroupPanel, containerApi: Dock
 
     function check(): void {
       rafId = undefined;
-      setIsTopRight(checkGroupIsTopRight(group));
+      setIsAtCorner(checkGroupIsTopCorner(group, side));
     }
 
     // Re-check when the group element resizes.  This covers:
@@ -92,10 +96,30 @@ export function useIsTopRightGroup(group: DockviewGroupPanel, containerApi: Dock
       resizeObserver.disconnect();
       disposable.dispose();
     };
-  }, [group, containerApi]);
+  }, [group, containerApi, side]);
 
-  return isTopRight;
+  return isAtCorner;
 }
+
+/**
+ * Whether a Dockview group holds the top-right corner of its container.
+ *
+ * @param group - The group.
+ * @param containerApi - Its Dockview.
+ * @returns `true` while it holds the corner.
+ */
+export const useIsTopRightGroup = (group: DockviewGroupPanel, containerApi: DockviewApi): boolean =>
+  useIsTopCornerGroup(group, containerApi, 'right');
+
+/**
+ * Whether a Dockview group holds the top-left corner of its container.
+ *
+ * @param group - The group.
+ * @param containerApi - Its Dockview.
+ * @returns `true` while it holds the corner.
+ */
+export const useIsTopLeftGroup = (group: DockviewGroupPanel, containerApi: DockviewApi): boolean =>
+  useIsTopCornerGroup(group, containerApi, 'left');
 
 /**
  * Synchronously checks whether a Dockview panel's group occupies the

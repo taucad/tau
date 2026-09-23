@@ -30,6 +30,7 @@ import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes
 import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-tab-context-menu.js';
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
+import { ViewerChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
 
 /**
  * Params passed to each viewer panel via Dockview.
@@ -833,6 +834,7 @@ export const ViewerDockview = memo(function ({
           tabLeadingIcon='viewer'
           watermarkComponent={ViewerWatermark}
           leftHeaderActionsComponent={ViewerLeftActions}
+          prefixHeaderActionsComponent={profile === 'editor' ? ViewerChatLaneToggle : undefined}
           rightHeaderActionsComponent={profile === 'editor' ? ProjectWorkspaceActions : undefined}
           onReady={onReady}
           onDidDrop={onDidDrop}

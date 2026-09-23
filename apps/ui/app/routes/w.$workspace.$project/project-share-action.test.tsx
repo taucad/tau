@@ -1,5 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectToManifest } from '@taucad/types';
@@ -7,11 +6,9 @@ import type * as XStateModule from 'xstate';
 import type { ProjectSharePanelProps } from '#components/publish/project-share-panel.js';
 import {
   parseProjectShareNavigationIntent,
-  ProjectShareAction,
   ProjectShareRouteIntent,
   ProjectShareWorkbenchPanel,
 } from '#routes/w.$workspace.$project/project-share-action.js';
-import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const openPanel = vi.hoisted(() => vi.fn());
 const snapshotSource = vi.hoisted(() => vi.fn());
@@ -90,105 +87,73 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
 
-describe('ProjectShareAction', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    capturedPanelProperties = undefined;
-    projectActivity = 10;
-    sourceContent = new TextEncoder().encode('initial source');
-    fileClient.readdir.mockResolvedValue(['README.md', '.tau']);
-    parameterService.readSettled.mockResolvedValue(
-      new TextEncoder().encode(
-        JSON.stringify({
-          activeGroup: 'alternate',
-          groups: { alternate: { values: { width: '12.5' } } },
-        }),
-      ),
-    );
-    snapshotSource.mockImplementation(async ({ signal }: { readonly signal?: AbortSignal }) => {
-      signal?.throwIfAborted();
-      return {
-        success: true,
-        data: {
-          entryPath: 'main.ts',
-          files: [
-            {
-              path: 'main.ts',
-              content: sourceContent,
-              sha256: '1'.repeat(64),
-              role: 'entry',
-            },
-            {
-              path: 'tau.json',
-              content: new TextEncoder().encode('stale'),
-              sha256: '2'.repeat(64),
-              role: 'additional',
-            },
-            {
-              path: 'package.json',
-              content: new TextEncoder().encode('{}'),
-              sha256: '3'.repeat(64),
-              role: 'additional',
-            },
-            {
-              path: 'README.md',
-              content: new TextEncoder().encode('readme'),
-              sha256: '4'.repeat(64),
-              role: 'additional',
-            },
-            {
-              path: 'thumbnail.webp',
-              content: new Uint8Array([1]),
-              sha256: '5'.repeat(64),
-              role: 'additional',
-            },
-            {
-              path: '.tau/internal',
-              content: new Uint8Array([2]),
-              sha256: '6'.repeat(64),
-              role: 'dependency',
-            },
-            {
-              path: 'node_modules/pkg.js',
-              content: new Uint8Array([3]),
-              sha256: '7'.repeat(64),
-              role: 'dependency',
-            },
-          ],
-          unresolvedPaths: ['missing.ts'],
-        },
-      };
-    });
-  });
-
-  it('keeps Share enabled without render-success gating and opens the singleton pane', async () => {
-    render(
-      <MemoryRouter>
-        <TooltipProvider>
-          <ProjectShareAction />
-        </TooltipProvider>
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole('button', { name: /share/i });
-    expect(button).not.toBeDisabled();
-    await userEvent.click(button);
-    expect(openPanel).toHaveBeenCalledExactlyOnceWith('share');
-  });
-
-  it('shows Share tooltip copy', async () => {
-    render(
-      <MemoryRouter>
-        <TooltipProvider>
-          <ProjectShareAction />
-        </TooltipProvider>
-      </MemoryRouter>,
-    );
-
-    await userEvent.hover(screen.getByRole('button', { name: /share/i }));
-    await waitFor(() => {
-      expect(screen.getAllByText('Share project').length).toBeGreaterThanOrEqual(1);
-    });
+beforeEach(() => {
+  vi.clearAllMocks();
+  capturedPanelProperties = undefined;
+  projectActivity = 10;
+  sourceContent = new TextEncoder().encode('initial source');
+  fileClient.readdir.mockResolvedValue(['README.md', '.tau']);
+  parameterService.readSettled.mockResolvedValue(
+    new TextEncoder().encode(
+      JSON.stringify({
+        activeGroup: 'alternate',
+        groups: { alternate: { values: { width: '12.5' } } },
+      }),
+    ),
+  );
+  snapshotSource.mockImplementation(async ({ signal }: { readonly signal?: AbortSignal }) => {
+    signal?.throwIfAborted();
+    return {
+      success: true,
+      data: {
+        entryPath: 'main.ts',
+        files: [
+          {
+            path: 'main.ts',
+            content: sourceContent,
+            sha256: '1'.repeat(64),
+            role: 'entry',
+          },
+          {
+            path: 'tau.json',
+            content: new TextEncoder().encode('stale'),
+            sha256: '2'.repeat(64),
+            role: 'additional',
+          },
+          {
+            path: 'package.json',
+            content: new TextEncoder().encode('{}'),
+            sha256: '3'.repeat(64),
+            role: 'additional',
+          },
+          {
+            path: 'README.md',
+            content: new TextEncoder().encode('readme'),
+            sha256: '4'.repeat(64),
+            role: 'additional',
+          },
+          {
+            path: 'thumbnail.webp',
+            content: new Uint8Array([1]),
+            sha256: '5'.repeat(64),
+            role: 'additional',
+          },
+          {
+            path: '.tau/internal',
+            content: new Uint8Array([2]),
+            sha256: '6'.repeat(64),
+            role: 'dependency',
+          },
+          {
+            path: 'node_modules/pkg.js',
+            content: new Uint8Array([3]),
+            sha256: '7'.repeat(64),
+            role: 'dependency',
+          },
+        ],
+        unresolvedPaths: ['missing.ts'],
+      },
+    };
   });
 });
 

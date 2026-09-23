@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
-import type { ModelFamily, ModelProvider } from '@taucad/chat';
+import type { CadAgentExecution, ModelFamily, ModelProvider } from '@taucad/chat';
+import { reasoningLevels } from '@taucad/chat/constants';
 /* oxlint-disable import/extensions -- TypeScript ESM resolves the authoritative source through its emitted .js path. */
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only reuse keeps the API's Zod-inferred response authoritative.
 import type { Model as ApiModel } from '../../../api/app/api/models/model.schema.js';
@@ -56,6 +57,33 @@ export const getModels = async (): Promise<Model[]> => {
 export const useModels = () => {
   const [selectedModelId, setSelectedModelId] = useCookie(cookieName.chatModel, defaultChatModel);
   const [overrides, setOverrides] = useCookie<Record<string, boolean>>(cookieName.chatModelOverrides, {});
+  const [storedEffort, setStoredEffort] = useCookie<string | undefined>(cookieName.chatEffort, undefined);
+  // Stored preferences are untrusted: a level outside the vocabulary would fail the turn wire.
+  const selectedEffort = reasoningLevels.find((level) => level === storedEffort);
+
+  /** The execution a chat with none of its own starts on: the last model and level chosen anywhere. */
+  const defaultExecution = useMemo<CadAgentExecution>(
+    () => ({
+      kind: 'tau',
+      model: selectedModelId,
+      ...(selectedEffort === undefined ? {} : { effort: selectedEffort }),
+    }),
+    [selectedModelId, selectedEffort],
+  );
+
+  /** Remember a Tau choice as the default for the next new chat; external agents leave it alone. */
+  const rememberExecution = useCallback(
+    (execution: CadAgentExecution): void => {
+      if (execution.kind !== 'tau') {
+        return;
+      }
+      setSelectedModelId(execution.model);
+      if (execution.effort !== undefined) {
+        setStoredEffort(execution.effort);
+      }
+    },
+    [setSelectedModelId, setStoredEffort],
+  );
 
   const { data, isLoading } = useQuery({
     queryKey: ['models'],
@@ -102,6 +130,8 @@ export const useModels = () => {
     selectedModel,
     selectedModelId,
     setSelectedModelId,
+    defaultExecution,
+    rememberExecution,
     resolveModel,
     overrides,
     isAvailable,

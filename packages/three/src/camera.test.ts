@@ -264,7 +264,7 @@ describe('createThreeCameraRig', () => {
     rig.actorRef.start();
     rig.actorRef.send({ type: 'setViewport', viewport: { width: 900, height: 600, pixelRatio: 1 } });
     rig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
-    /* v7 bindings never rehydrate a stopped root in place (the v5 Strict Mode
+    /* The v7 bindings never rehydrate a stopped root in place (the v5 Strict Mode
      * cycle this used to simulate); a restore is a fresh actor from the
      * persisted snapshot, and its driver must start from the same revision. */
     const persisted = rig.actorRef.getPersistedSnapshot();

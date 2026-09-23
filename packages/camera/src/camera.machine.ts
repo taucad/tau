@@ -104,7 +104,10 @@ type CameraEnqueue = EnqueueObject<
   Readonly<{ cameraDriver?: ActorRefFrom<typeof defaultCameraDriver> }>
 >;
 type CameraPatch = Partial<CameraMachineContext>;
-type CameraEvent<TType extends CameraMachineEvent['type']> = Extract<CameraMachineEvent, Readonly<{ type: TType }>>;
+type CameraEvent<EventType extends CameraMachineEvent['type']> = Extract<
+  CameraMachineEvent,
+  Readonly<{ type: EventType }>
+>;
 
 const setVerticalFieldOfView = (
   context: CameraMachineContext,
@@ -187,32 +190,7 @@ const syncDriver = (context: CameraMachineContext, patch: CameraPatch, enq: Came
   return { context: patch };
 };
 
-/**
- * Headless canonical camera state with a replaceable external driver.
- *
- * @public
- * @example <caption>Drive a headless camera to its orthographic endpoint.</caption>
- * ```typescript
- * import { createActor } from 'xstate';
- * import { createCameraView } from '@taucad/camera';
- * import { cameraMachine } from '@taucad/camera/machine';
- *
- * const initialView = createCameraView({
- *   frameId: 'tau:root',
- *   requestedVerticalFieldOfView: 60,
- *   perspectiveZoom: 1,
- *   target: [0, 0, 0],
- *   direction: [1, -1, 0.7],
- *   up: [0, 0, 1],
- *   verticalSpan: 10,
- *   viewport: { width: 1280, height: 720, pixelRatio: 1 },
- *   bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
- * });
- * const actor = createActor(cameraMachine, { input: { initialView } }).start();
- * actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
- * ```
- */
-export const cameraMachine = setup({
+const cameraMachineDefinition = setup({
   schemas: {
     context: types<CameraMachineContext>(),
     events: eventSchemas<CameraMachineEvent>(),
@@ -251,6 +229,43 @@ export const cameraMachine = setup({
     reset: ({ context }, enq) => syncDriver(context, resetView(context), enq),
   },
 });
+
+type CameraMachineDefinition = typeof cameraMachineDefinition;
+
+/**
+ * The type of {@link cameraMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface CameraMachine extends CameraMachineDefinition {}
+
+/**
+ * Headless canonical camera state with a replaceable external driver.
+ *
+ * @public
+ * @example <caption>Drive a headless camera to its orthographic endpoint.</caption>
+ * ```typescript
+ * import { createActor } from 'xstate';
+ * import { createCameraView } from '@taucad/camera';
+ * import { cameraMachine } from '@taucad/camera/machine';
+ *
+ * const initialView = createCameraView({
+ *   frameId: 'tau:root',
+ *   requestedVerticalFieldOfView: 60,
+ *   perspectiveZoom: 1,
+ *   target: [0, 0, 0],
+ *   direction: [1, -1, 0.7],
+ *   up: [0, 0, 1],
+ *   verticalSpan: 10,
+ *   viewport: { width: 1280, height: 720, pixelRatio: 1 },
+ *   bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+ * });
+ * const actor = createActor(cameraMachine, { input: { initialView } }).start();
+ * actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
+ * ```
+ */
+export const cameraMachine: CameraMachine = cameraMachineDefinition;
 
 /** Public snapshot type for {@link cameraMachine}. @public */
 export type CameraMachineSnapshot = SnapshotFrom<typeof cameraMachine>;

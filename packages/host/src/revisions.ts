@@ -16,6 +16,7 @@
  * stream alone would race the first tool write.
  */
 
+import type { SnapshotFrom } from 'xstate';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, watch as watchDirectory, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -55,18 +56,22 @@ import {
   registerProjectOverHttp,
   tauRemoteUrl,
 } from '@taucad/revisions';
+import type { branchMachine } from '@taucad/revisions/branch-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
-import type { RevisionStatusProjection } from '@taucad/revisions';
 import type {
-  RevisionActor,
   CreateRevisionTagInput,
+  PublishDraft,
+  PublishPublicationActorInput,
+  PublishPublicationActorOutput,
+  RevisionActor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
   RevisionLogRequest,
   RevisionPlace,
   RevisionPort,
   RevisionRow,
+  RevisionStatusProjection,
   RevisionTag,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
@@ -77,7 +82,6 @@ import type {
   TauApiCredential,
 } from '@taucad/revisions/node';
 import { publishPushMilliseconds } from '@taucad/revisions/publish-machine';
-import type { PublishDraft, PublishPublicationActorInput, PublishPublicationActorOutput } from '@taucad/revisions';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
@@ -1951,7 +1955,7 @@ export const openProjectRevisions = (
         });
         /* The machine parks in `confirming` when its own check says a person is
          * needed; an unconfirmed switch cancels rather than waiting. */
-        const watching = child.subscribe((snapshot) => {
+        const watching = child.subscribe((snapshot: SnapshotFrom<typeof branchMachine>) => {
           if (!snapshot.matches('confirming')) {
             return;
           }

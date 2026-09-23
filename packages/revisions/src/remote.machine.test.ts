@@ -51,7 +51,7 @@ import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
 import { reauthorizationRequired } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
-import type { SyncFailureReason } from '#sync.machine.js';
+import type { SyncFailureReason } from '#sync.types.js';
 import type {
   RemoteActors,
   RemoteInitialSyncActorOutput,

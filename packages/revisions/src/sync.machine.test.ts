@@ -61,10 +61,9 @@ import type {
   SyncMachineEmitted,
   SyncMergeActorOutput,
   SyncPushActorOutput,
-  SyncQueueRecord,
   SyncReadRemoteActorOutput,
-  SyncRefOutcome,
 } from '#sync.machine.js';
+import type { SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import {
   createFakeCallbackActors,
   createFakeParent,

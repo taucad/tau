@@ -36,7 +36,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
-import type { SyncQueueRecord } from '#sync.machine.js';
+import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { RevisionPort } from '#revision-port.js';
 

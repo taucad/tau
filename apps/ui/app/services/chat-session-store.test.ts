@@ -16,6 +16,7 @@ import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
+import { spyOnSend } from '#lib/xstate-test.utils.js';
 import {
   chatTurnAdmission,
   chatTurnSettlement,
@@ -4184,9 +4185,7 @@ describe('ChatSessionStore', () => {
       const store = createStore();
       const session = store.acquire('chat_r6');
       const fake = harness.created.find((entry) => entry.id === 'chat_r6')!;
-      // v6 exposes `send` as a bound getter: wrap what it returns and keep calling through.
-      const sendSpy = vi.fn(session.persistenceActorRef.send);
-      vi.spyOn(session.persistenceActorRef, 'send', 'get').mockReturnValue(sendSpy);
+      const sendSpy = spyOnSend(session.persistenceActorRef);
 
       const countStreamResumed = (): number =>
         sendSpy.mock.calls.filter((call) => call[0].type === 'streamResumed').length;

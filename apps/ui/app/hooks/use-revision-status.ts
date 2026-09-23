@@ -13,7 +13,7 @@ import { useSelector } from '@xstate/react';
 import { Topic } from '@taucad/events';
 import { sessionEpoch } from '#services/sessions-store.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
 import type {
   RevisionToast,
@@ -27,7 +27,7 @@ import type {
   WorkerTurnPlacement,
 } from '#machines/file-manager.worker.revisions.js';
 import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
-import type { PublishDraft } from '@taucad/revisions/publish-machine';
+import type { PublishDraft } from '@taucad/revisions';
 import type {
   GitRemoteCredential,
   RevisionDiffEntry,

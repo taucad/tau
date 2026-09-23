@@ -91,7 +91,7 @@ export const ChatErrorProviderAccount = memo(function ({
             </Button>
           )}
           {/* The composer's picker is the owner, opened here as the credits card opens it. */}
-          <ChatModelSelector enableShortcut={false} popoverProperties={{ align: 'end' }}>
+          <ChatModelSelector popoverProperties={{ align: 'end' }}>
             {() => (
               <Button variant='outline' size='sm'>
                 <Repeat className='size-3.5' />

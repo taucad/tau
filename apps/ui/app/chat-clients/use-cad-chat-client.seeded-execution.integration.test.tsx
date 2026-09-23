@@ -75,6 +75,8 @@ const harness = vi.hoisted(() => {
       selectedModel: resolveModel('openai-gpt-5.6-luna'),
       resolveModel,
       setSelectedModelId: noop,
+      defaultExecution: { kind: 'tau', model: 'openai-gpt-5.6-luna' },
+      rememberExecution: noop,
     },
     actions: { sendMessage: vi.fn(), regenerate: vi.fn(), stop: vi.fn() },
     /** An empty worker filesystem: every composer record reads as absent. */

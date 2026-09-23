@@ -3,7 +3,7 @@ title: 'Worker Lifecycle Policy'
 description: 'Standard patterns for creating, managing, and terminating Web Workers in Tau, plus worker topology: when a feature warrants its own worker, runtime-client consumers, and bridge writes. Covers lazy creation, termination, cleanup, mobile budgets, XState/React integration.'
 status: active
 created: '2026-03-04'
-updated: '2026-09-13'
+updated: '2026-09-23'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -210,12 +210,14 @@ entry: ({ context }) => {
 
 // CORRECT (XState): Invoked promise actor — cancelled on state exit
 invoke: {
-  src: fromPromise(async ({ signal }) => {
-    const worker = await createExpensiveWorker();
-    signal.throwIfAborted();
-    return worker;
+  src: createAsyncLogic({
+    run: async ({ signal }) => {
+      const worker = await createExpensiveWorker();
+      signal.throwIfAborted();
+      return worker;
+    },
   }),
-  onDone: assign({ worker: ({ event }) => event.output }),
+  onDone: { context: ({ event }) => ({ worker: event.output }) },
 }
 
 // CORRECT (React): Cancelled flag in useEffect
@@ -271,7 +273,7 @@ Check the flag at every yield point (after every `await`).
 Best for workers tied to a specific machine state. Cleanup is automatic on state exit.
 
 ```typescript
-const workerActor = fromCallback(({ sendBack }) => {
+const workerActor = createCallbackLogic(({ sendBack }) => {
   const worker = new Worker(workerUrl, { type: 'module' });
 
   worker.onmessage = (event) => {
@@ -298,24 +300,24 @@ states: {
 Best for workers whose lifecycle spans the entire machine. Let a callback child own abrupt disposal; use explicit closing states and acknowledgements before stopping when writes or other effects must drain.
 
 ```typescript
-const machineWorker = fromCallback(() => {
+const machineWorker = createCallbackLogic(() => {
   const worker = new Worker(workerUrl, { type: 'module' });
   return () => worker.terminate();
 });
 
 const machine = setup({ actors: { machineWorker } }).createMachine({
-  context: ({ spawn }) => ({ workerRef: spawn('machineWorker') }),
+  context: ({ spawn, actors }) => ({ workerRef: spawn(actors.machineWorker) }),
 });
 ```
 
-**Critical**: Abrupt root `actor.stop()` stops child actors and runs their callback cleanup; it does not run the root machine's `exit` actions. Stopping or aborting cannot undo an external effect that already escaped.
+**Critical**: Abrupt root `actor.stop()` stops child actors and runs their callback cleanup; it does not run the root machine's `exit`. Stopping or aborting cannot undo an external effect that already escaped.
 
 ### Pattern C: Async worker initialization inside a callback actor
 
 Best for workers that require async setup (WASM compilation, filesystem connection).
 
 ```typescript
-const initWorkerActor = fromCallback(({ sendBack }) => {
+const initWorkerActor = createCallbackLogic(({ sendBack }) => {
   const controller = new AbortController();
   const worker = new Worker(workerUrl, { type: 'module' });
 
@@ -348,13 +350,13 @@ states: {
     initial: 'initializing',
     states: {
       initializing: {
-        on: { workerReady: 'ready' },
+        on: { workerReady: { target: 'ready' } },
       },
       ready: {},
     },
     on: {
-      workerFailed: 'error',
-      close: 'closed',
+      workerFailed: { target: 'error' },
+      close: { target: 'closed' },
     },
   },
   error: {},
@@ -366,14 +368,14 @@ states: {
 
 ### XState cleanup guarantees
 
-| Mechanism                      | Cleanup guarantee                                 | Use case                         |
-| ------------------------------ | ------------------------------------------------- | -------------------------------- |
-| `fromCallback` return function | Called on actor stop (state exit or machine stop) | Worker lifecycle tied to a state |
-| `fromPromise` abort signal     | Aborted on actor stop                             | Async initialization             |
-| Root machine `exit` action     | Does not run on abrupt root stop                  | Never an abrupt cleanup owner    |
-| `stopChild(ref)`               | Sends `XSTATE_STOP` to the child                  | Dynamic child actor cleanup      |
+| Mechanism                             | Cleanup guarantee                                 | Use case                         |
+| ------------------------------------- | ------------------------------------------------- | -------------------------------- |
+| `createCallbackLogic` return function | Called on actor stop (state exit or machine stop) | Worker lifecycle tied to a state |
+| `createAsyncLogic` abort signal       | Aborted on actor stop                             | Async initialization             |
+| Root machine `exit`                   | Does not run on abrupt root stop                  | Never an abrupt cleanup owner    |
+| `enq.stop(ref)`                       | Stops the child and runs its cleanup              | Dynamic child actor cleanup      |
 
-**Known limitation**: The XState v5 source contains a TODO noting that if exit actions or `stopChildren` throw, child actors may be orphaned. Always use error-isolated cleanup (Rule 5).
+**Known limitation**: if an exit effect or a child's stop throws, later children may be orphaned. Always use error-isolated cleanup (Rule 5).
 
 ---
 

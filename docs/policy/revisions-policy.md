@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-20'
+updated: '2026-09-23'
 related:
   - docs/research/git-storage-substrate-charter.md
   - docs/architecture/revisions-cloud-handbook.md
@@ -133,10 +133,10 @@ Start `remote.machine` in `reading` and rehydrate it from Git's remotes list. Ac
 
 Apply these composition constraints:
 
-- Invoke always-on children for the root lifetime. Spawn variable-count children with stored typed refs; stop them with `stopChild` on removal and root exit.
+- Invoke always-on children for the root lifetime. Spawn variable-count children with stored typed refs; stop them with `enq.stop` on removal and root exit.
 - Pass `parentRef` through input and route sibling communication through the parent. Never use `systemId`; several live projects share one XState system.
 - Keep one minter per checkout and a monotonically increasing write generation so a write during minting leaves the checkout dirty.
-- Hold the checkout lease with a `fromCallback` actor. Supply all one-shot effects as abortable promise actors over `RevisionPort` or protected record writers.
+- Hold the checkout lease with a `createCallbackLogic` actor. Supply all one-shot effects as abortable promise actors over `RevisionPort` or protected record writers.
 - Give every invoked effect a failure edge. Never store functions or service callbacks in machine context.
 - Coalesce content changes at the adapter seam, debounce policy inside the owning machine, and emit only settled projection values. Never send token deltas or retry ticks through project machines.
 - Keep revision machines free of filesystem, Git, React, and DOM imports. Connect UI machines by events, not shared context.

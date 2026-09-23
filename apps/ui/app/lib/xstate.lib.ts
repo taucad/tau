@@ -178,9 +178,12 @@ export function fromSafeAsync<
 // Machine schema helpers
 // ---------------------------------------------------------------------------
 
+/** An event's payload; distributes so an event whose payload is itself a union keeps every member. */
+type EventPayload<TEvent> = TEvent extends unknown ? Omit<TEvent, 'type'> : never;
+
 /** The `schemas.events` or `schemas.emitted` map for a union of `{ type }` events. */
 export type EventSchemaMap<TEvent extends { readonly type: string }> = {
-  [K in TEvent['type']]: TypeSchema<Omit<Extract<TEvent, { readonly type: K }>, 'type'>>;
+  [K in TEvent['type']]: TypeSchema<EventPayload<Extract<TEvent, { readonly type: K }>>>;
 };
 
 /**

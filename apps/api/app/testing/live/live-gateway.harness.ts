@@ -17,6 +17,7 @@ import type {
   HostToolResult,
   ModelTransport,
   ToolRegistry,
+  UserProviderMessage,
 } from '@taucad/agent-host';
 import { createChatToolRegistry } from '@taucad/agent-tools/registry';
 import type { ChatToolRegistryOptions } from '@taucad/agent-tools/registry';
@@ -102,6 +103,18 @@ export const liveCredentialName = (modelId: string): string => {
  */
 export const hasLiveCredential = (modelId: string): boolean =>
   (process.env[liveCredentialName(modelId)] ?? '').length > 0;
+
+const configuredRepeats = Number(process.env['TAU_LIVE_REPEATS'] ?? '0');
+
+/**
+ * Extra passes of every live row, from `TAU_LIVE_REPEATS` (none by default).
+ *
+ * One pass cannot tell a stable row from one a model refuses a third of the
+ * time. Suites hand this to `describe` as Vitest's `repeats`, so
+ * `TAU_LIVE_REPEATS=9` runs each row ten times and fails it when any pass
+ * fails, reporting every failing pass.
+ */
+export const liveRepeats = Number.isInteger(configuredRepeats) && configuredRepeats > 0 ? configuredRepeats : 0;
 
 /**
  * Project a catalog row onto the session model the agent host runs a turn with.
@@ -312,10 +325,38 @@ export const createLiveGatewayTransport = (gateway: LiveGateway): ModelTransport
   createGatewayModelTransport({ baseUrl: gateway.baseUrl, auth: () => gateway.bearer });
 
 /**
+ * The word a live prompt must not ask a model to repeat.
+ *
+ * Grok 4.7 refuses "reply with the exact token … and nothing else" as a
+ * jailbreak — its own reasoning quotes "demands to repeat or output an exact
+ * phrase, token, or prefix" — and completes the run with no tool call, so a
+ * suite worded that way measures the model's safety policy instead of Tau's
+ * wire (docs/research/grok-4-7-live-suite-refusal-blueprint.md). The value a
+ * scripted result hands back is a marker.
+ */
+const refusedPromptWord = /\btokens?\b/iu;
+
+/**
+ * Refuse a live prompt that asks for a token, before it costs a provider call.
+ *
+ * @param message - The user turn a live suite is about to send.
+ * @throws Error naming the prompt when it asks for a token.
+ */
+const assertMarkerVocabulary = (message: UserProviderMessage): void => {
+  const text = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+  if (refusedPromptWord.test(text)) {
+    throw new Error(
+      `Live prompt ${message.id} asks for a token, which Grok 4.7 refuses as a jailbreak; ask for a marker instead (docs/research/grok-4-7-live-suite-refusal-blueprint.md).`,
+    );
+  }
+};
+
+/**
  * Open a session on the in-process gateway.
  *
  * Thin over `createAgentSession`: it supplies the transport, so a suite names
- * only the chat, model and tools. Pass a second call the same `eventLog` file
+ * only the chat, model and tools, and it refuses a prompt that asks for a token
+ * (see {@link refusedPromptWord}). Pass a second call the same `eventLog` file
  * to resume a chat — that is also how a provider switch replays one thread on a
  * different `model`.
  *
@@ -326,7 +367,14 @@ export const createLiveSession = async (
   options: Omit<CreateAgentSessionOptions, 'modelTransport'> & { readonly gateway: LiveGateway },
 ): Promise<AgentSession> => {
   const { gateway, ...session } = options;
-  return createAgentSession({ ...session, modelTransport: createLiveGatewayTransport(gateway) });
+  const opened = await createAgentSession({ ...session, modelTransport: createLiveGatewayTransport(gateway) });
+  return {
+    ...opened,
+    prompt: async (message, onAdmitted) => {
+      assertMarkerVocabulary(message);
+      await opened.prompt(message, onAdmitted);
+    },
+  };
 };
 
 /** Milliseconds. Waited when a rate-limited refusal carried no `retry-after`. */

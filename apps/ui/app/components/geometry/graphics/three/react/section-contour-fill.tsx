@@ -8,6 +8,7 @@ import {
   resolveModelMaterialBaseTintHex,
   resolveModelComponentEmphasis,
 } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import {
   createVertexColoredSectionCapMaterial,
   markVertexColoredSectionCapMaterialInUse,
@@ -68,6 +69,7 @@ import { createGltfFatLineSegmentsFromPositions } from '#components/geometry/gra
 import type { GltfFatLineMaterial } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import {
   createSectionContourOutlineMaterial,
+  resolveSectionContourOutlineEmphasis,
   setSectionContourOutlineMaterialColor,
 } from '#components/geometry/graphics/three/materials/section-contour-outline-material.js';
 import {
@@ -137,21 +139,28 @@ type SectionSourceCapBuild = Readonly<{
   meshWorldInverse: THREE.Matrix4;
 }>;
 
-type SectionFrameSource = Readonly<{
-  record: SectionSourceRecord;
-  helper: SectionHelperRecord;
-  geometryKey: string;
-  capBuild: SectionSourceCapBuild;
-}>;
+type SectionFrameSource = {
+  readonly record: SectionSourceRecord;
+  readonly helper: SectionHelperRecord;
+  readonly geometryKey: string;
+  readonly capBuild: SectionSourceCapBuild;
+  /** Resolved in the border pass from the owning component's emphasis. */
+  borderMaterial?: GltfFatLineMaterial;
+  borderRenderOrder?: number;
+};
 
 type SectionCapStyleSource = Readonly<{
   sourceKey: string;
   tintHex: number;
 }>;
 
+/**
+ * The cap outline materials in play this frame, one per colour the caps ask for: the theme edge
+ * colour plus, while something is emphasised, the emphasis yellow.
+ */
 type SectionBorderMaterialState = {
-  key: string;
-  material: GltfFatLineMaterial;
+  keyPrefix: string;
+  byEdgeColor: Map<number, GltfFatLineMaterial>;
 };
 
 /** R8b: reused index/position/planeUv buffers with geometric grow + `setDrawRange`. */
@@ -482,19 +491,25 @@ export function buildSectionFillGeometryKey(record: SectionSourceRecord, plane: 
   ].join('|');
 }
 
-export function resolveSectionSourceTint(
+/** The emphasis of the component a cut face belongs to, or `none` when it has no owner. */
+export function resolveSectionSourceEmphasis(
   record: SectionSourceRecord,
   modelInteractionContext: ModelInteractionContext,
-  baseTintHex = record.baseTintHex,
-): number {
-  const emphasis = record.owner
+): ModelComponentEmphasis {
+  return record.owner
     ? resolveModelComponentEmphasis(
         getModelInteractionUnitState(modelInteractionContext, record.owner.unitId),
         record.owner.componentId,
       )
     : 'none';
+}
 
-  return mixModelEmphasisTint(baseTintHex, emphasis);
+export function resolveSectionSourceTint(
+  record: SectionSourceRecord,
+  modelInteractionContext: ModelInteractionContext,
+  baseTintHex = record.baseTintHex,
+): number {
+  return mixModelEmphasisTint(baseTintHex, resolveSectionSourceEmphasis(record, modelInteractionContext));
 }
 
 type MaterialKeyOptions = Readonly<{
@@ -626,30 +641,32 @@ function resolveBorderMaterial(
   },
 ): GltfFatLineMaterial {
   const { backend, edgeColor, resolution } = parameters;
-  const key = [backend, edgeColor, resolution.x, resolution.y].join(':');
-  if (stateRef.current?.key === key) {
-    setSectionContourOutlineMaterialColor(stateRef.current.material, edgeColor);
-    return stateRef.current.material;
+  const keyPrefix = [backend, resolution.x, resolution.y].join(':');
+  if (stateRef.current?.keyPrefix !== keyPrefix) {
+    for (const material of stateRef.current?.byEdgeColor.values() ?? []) {
+      material.dispose();
+    }
+    stateRef.current = { keyPrefix, byEdgeColor: new Map() };
   }
 
-  const previous = stateRef.current;
-  const material = createSectionContourOutlineMaterial({
-    backend,
-    edgeColor,
-    resolution,
-  });
-  stateRef.current = { key, material };
-  previous?.material.dispose();
+  const existing = stateRef.current.byEdgeColor.get(edgeColor);
+  if (existing) {
+    setSectionContourOutlineMaterialColor(existing, edgeColor);
+    return existing;
+  }
+
+  const material = createSectionContourOutlineMaterial({ backend, edgeColor, resolution });
+  stateRef.current.byEdgeColor.set(edgeColor, material);
   return material;
 }
 
-function assignBorderMaterial(helper: SectionHelperRecord, material: GltfFatLineMaterial): void {
+function assignBorderMaterial(helper: SectionHelperRecord, material: GltfFatLineMaterial, renderOrder: number): void {
   if (!helper.borderSegments) {
     return;
   }
 
   (helper.borderSegments as unknown as { material: GltfFatLineMaterial }).material = material;
-  helper.borderSegments.renderOrder = viewportRenderTiers.sectionContourOutline;
+  helper.borderSegments.renderOrder = renderOrder;
 }
 
 function writeBorderSegments(
@@ -658,6 +675,7 @@ function writeBorderSegments(
   parameters: {
     backend: ResolvedGraphicsBackend;
     material: GltfFatLineMaterial;
+    renderOrder: number;
     positions: Float32Array;
   },
 ): void {
@@ -670,7 +688,7 @@ function writeBorderSegments(
   if (helper.borderSegments && helper.borderBackend === parameters.backend && existingGeometry?.setPositions) {
     existingGeometry.setPositions(parameters.positions);
     (helper.borderSegments as unknown as { material: GltfFatLineMaterial }).material = parameters.material;
-    helper.borderSegments.renderOrder = viewportRenderTiers.sectionContourOutline;
+    helper.borderSegments.renderOrder = parameters.renderOrder;
     return;
   }
 
@@ -687,7 +705,7 @@ function writeBorderSegments(
 
   borderSegments.frustumCulled = false;
   borderSegments.matrixAutoUpdate = false;
-  borderSegments.renderOrder = viewportRenderTiers.sectionContourOutline;
+  borderSegments.renderOrder = parameters.renderOrder;
   borderSegments.userData = { ...sceneTagData(sceneTag.sectionViewHelper) };
   root.add(borderSegments);
   helper.borderSegments = borderSegments;
@@ -769,7 +787,9 @@ export function SectionContourFills({
         }
       }
       helperBySourceKey.current.clear();
-      borderMaterialRef.current?.material.dispose();
+      for (const material of borderMaterialRef.current?.byEdgeColor.values() ?? []) {
+        material.dispose();
+      }
       borderMaterialRef.current = undefined;
       workerClientRef.current?.dispose();
       workerClientRef.current = undefined;
@@ -849,11 +869,6 @@ export function SectionContourFills({
     }
     const modelInteractionContext = modelInteractionRef.getSnapshot().context;
     const seen = new Set<string>();
-    const borderMaterial = resolveBorderMaterial(borderMaterialRef, {
-      backend,
-      edgeColor,
-      resolution,
-    });
     const frameSources: SectionFrameSource[] = [];
     const worldPoints: THREE.Vector3[] = [];
     const candidateBuilds = new Map<string, Readonly<{ geometryKey: string; capBuild: SectionSourceCapBuild }>>();
@@ -1206,7 +1221,18 @@ export function SectionContourFills({
       const { record, helper, capBuild } = frameSource;
       helper.capBuild = capBuild;
       helper.geometryKey = candidateBuilds.get(record.key)!.geometryKey;
-      assignBorderMaterial(helper, borderMaterial);
+      // The cut face belongs to the component, so its outline wears the component's emphasis.
+      const outline = resolveSectionContourOutlineEmphasis(
+        resolveSectionSourceEmphasis(record, modelInteractionContext),
+        edgeColor,
+      );
+      frameSource.borderMaterial = resolveBorderMaterial(borderMaterialRef, {
+        backend,
+        edgeColor: outline.edgeColor,
+        resolution,
+      });
+      frameSource.borderRenderOrder = outline.renderOrder;
+      assignBorderMaterial(helper, frameSource.borderMaterial, outline.renderOrder);
       updateHelperMatrix(helper, record.source.root);
       const boundary = buildSectionCapBoundaryPositions({
         multiPolygon: capBuildResults[index]!.polygon.multiPolygon,
@@ -1226,7 +1252,8 @@ export function SectionContourFills({
       }
       writeBorderSegments(root, helper, {
         backend,
-        material: borderMaterial,
+        material: frameSource.borderMaterial,
+        renderOrder: frameSource.borderRenderOrder,
         positions: borderPositions,
       });
       helper.borderSegments?.matrix.copy(helper.fillMesh.matrix);

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { BoxGeometry, Group, Mesh, MeshMatcapMaterial, MeshStandardMaterial, Plane } from 'three';
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, MeshMatcapMaterial, MeshStandardMaterial, Plane } from 'three';
 import type { Material, WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import {
   applyGltfSurfaceDepthBias,
@@ -29,6 +29,15 @@ describe('GLTF surface depth bias', () => {
     expect(material.polygonOffsetUnits).toBe(2);
     expect(shader.fragmentShader).toContain('tauSurfaceDepthSlope');
     expect(shader.fragmentShader).toContain('gl_FragDepth + tauSurfaceDepthOffset');
+  });
+
+  it('also separates orthographic surfaces when the renderer writes fragment depth', () => {
+    const material = new MeshStandardMaterial();
+    applyGltfSurfaceDepthBias(material, 'webgl');
+
+    // Three's log-depth chunk writes gl_FragCoord.z for orthographic cameras too,
+    // so rasterizer polygon offset cannot provide their coplanar separation.
+    expect(compile(material).fragmentShader).not.toContain('if (vIsPerspective == 1.0)');
   });
 
   it('uses reversed-depth signs for opaque WebGPU triangles', () => {
@@ -93,6 +102,22 @@ describe('GLTF surface depth bias', () => {
     expect(material.polygonOffset).toBe(false);
     expect(material.onBeforeCompile).toBe(priorHook);
     expect(material.customProgramCacheKey()).not.toContain('tau-gltf-surface-depth-bias');
+  });
+
+  it('never biases an overlay, so nothing drawn over a surface can tie its depth', () => {
+    // Only opaque depth writers are separated. An overlay that copied the surface's bias would
+    // pass the depth test on an exact `LEQUAL` tie, and a derivative-based `gl_FragDepth` is not
+    // reproducible between two draws of the same geometry — it speckles.
+    for (const overlay of [
+      new MeshBasicMaterial({ transparent: true, opacity: 0.3, depthWrite: false }),
+      new MeshBasicMaterial({ depthWrite: false }),
+    ]) {
+      const priorHook = overlay.onBeforeCompile;
+      applyGltfSurfaceDepthBias(overlay, 'webgl');
+      applyGltfSurfaceDepthBias(overlay, 'webgpu');
+      expect(overlay.polygonOffset).toBe(false);
+      expect(overlay.onBeforeCompile).toBe(priorHook);
+    }
   });
 
   it('configures loaded and matcap surface materials without changing clipping', () => {

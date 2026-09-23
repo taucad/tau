@@ -3,11 +3,13 @@
 import { Color, Vector2 } from 'three';
 import type { Texture } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { abs, float, Fn, max, positionGeometry, screenUV, texture, uniform, vec2, vec4 } from 'three/tsl';
+import { float, Fn, max, min, mix, positionGeometry, screenUV, step, texture, uniform, vec2, vec4 } from 'three/tsl';
 import type { SilhouetteMaskSize } from '#components/geometry/graphics/three/materials/model-emphasis-silhouette.js';
 import {
   silhouetteColor,
+  silhouetteHiddenAlphaScale,
   silhouetteHoverAlpha,
+  silhouetteMaskThreshold,
   silhouetteSelectedAlpha,
   silhouetteTapDistance,
   silhouetteTapOffsets,
@@ -20,14 +22,18 @@ export type SilhouetteNodeMaterial = MeshBasicNodeMaterial & {
 /**
  * WebGPU composite of the emphasis silhouette, mirroring `model-emphasis-silhouette.material.ts`:
  * a fullscreen quad (`vertexNode` bypasses the camera) that outputs the outline colour where
- * mask coverage changes toward any axis neighbour. Constants and tap layout are shared with the
- * WebGL implementation so both backends differ only at the node/GLSL seam.
+ * mask coverage spans a range across the pixel and its axis neighbours, scaled down where that boundary is hidden.
+ * Constants and tap layout are shared with the WebGL implementation so both backends differ only
+ * at the node/GLSL seam.
+ *
+ * @param maskTexture - The emphasised meshes' coverage in RG (hovered, selected) and their
+ *   visibility in BA.
  */
 export function createWebGpuSilhouetteMaterial(maskTexture: Texture): SilhouetteNodeMaterial {
   const texelSize = uniform(new Vector2(1, 1));
   const edgeColor = uniform(new Color(silhouetteColor));
-  const hoverAlpha = uniform(silhouetteHoverAlpha);
-  const selectedAlpha = uniform(silhouetteSelectedAlpha);
+  const stateAlpha = uniform(new Vector2(silhouetteHoverAlpha, silhouetteSelectedAlpha));
+  const hiddenAlphaScale = uniform(silhouetteHiddenAlphaScale);
 
   const material = new MeshBasicNodeMaterial({
     transparent: true,
@@ -39,16 +45,24 @@ export function createWebGpuSilhouetteMaterial(maskTexture: Texture): Silhouette
   material.vertexNode = Fn(() => vec4(positionGeometry.xy, float(0), float(1)))();
 
   material.colorNode = Fn(() => {
-    const center = texture(maskTexture, screenUV).rg;
-    const taps = silhouetteTapOffsets.map(([x, y]) =>
-      abs(center.sub(texture(maskTexture, screenUV.add(texelSize.mul(vec2(x, y)))).rg)),
-    );
-    let edge = taps[0]!;
-    for (const tap of taps.slice(1)) {
-      edge = max(edge, tap);
+    const center = texture(maskTexture, screenUV);
+    const taps = silhouetteTapOffsets.map(([x, y]) => texture(maskTexture, screenUV.add(texelSize.mul(vec2(x, y)))));
+    let high = center.rg;
+    let low = center.rg;
+    let visible = center.ba;
+    for (const tap of taps) {
+      high = max(high, tap.rg);
+      low = min(low, tap.rg);
+      visible = max(visible, tap.ba);
     }
-    const alpha = max(edge.r.mul(hoverAlpha), edge.g.mul(selectedAlpha));
-    return vec4(edgeColor, alpha);
+    const edge = high.sub(low);
+    // Per channel rather than vectorised: TSL types `step` on floats only.
+    const hoverStrength = mix(hiddenAlphaScale, float(1), step(silhouetteMaskThreshold, visible.r));
+    const selectedStrength = mix(hiddenAlphaScale, float(1), step(silhouetteMaskThreshold, visible.g));
+    return vec4(
+      edgeColor,
+      max(edge.r.mul(stateAlpha.x).mul(hoverStrength), edge.g.mul(stateAlpha.y).mul(selectedStrength)),
+    );
   })();
 
   return Object.assign(material, { silhouetteTexelSize: texelSize }) as SilhouetteNodeMaterial;

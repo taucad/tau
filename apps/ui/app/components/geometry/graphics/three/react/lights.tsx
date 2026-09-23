@@ -18,19 +18,12 @@ type UpDirection = 'x' | 'y' | 'z';
 /** Environment cubemap resolution (px). Higher = sharper specular reflections. */
 const envResolution = 512;
 
-// Studio preset Lightformer intensities ──────────────────────────────────────
-// Asymmetric camera-space rig matching Onshape's observed pattern.
-// Key upper-left, fill right, top overhead, ground below, back-fill behind.
-
-/** Key panel (right-upper in camera space) -- brightest light, creates NE-bright gradient. */
-const studioKeyIntensity = 4;
-/** Left-upper fill (left-upper in camera space) -- illuminates left-facing L sections (WNW/NW-left). */
+/** Narrow reflection source near the camera; the directional light owns diffuse shading. */
+const studioKeyIntensity = 64;
+/** Broad, low-energy panels keep metallic and back-facing surfaces readable. */
 const studioLeftFillIntensity = 1.2;
-/** Top panel (overhead in camera space) -- subtle overhead accent on sloped surfaces. */
 const studioTopIntensity = 0.25;
-/** Ground panel (below in camera space) -- bright for bottom-view luminosity. */
 const studioGroundIntensity = 1.5;
-/** Specular highlight panel (upper-right for bottom face) -- creates focused off-center specular on flat faces. */
 const studioBackFillIntensity = 8;
 
 type LightsProperties = {
@@ -39,31 +32,7 @@ type LightsProperties = {
   readonly upDirection?: UpDirection;
 };
 
-/**
- * Professional CAD lighting setup matching Onshape's rendering style.
- *
- * Design principles:
- * 1. **Azimuth-locked environment** — `scene.environmentRotation` is driven from
- *    only the azimuthal (yaw) component of the inverse camera quaternion each
- *    frame, so Lightformers stay stable during horizontal orbit but shift
- *    naturally when the camera tilts up/down, producing lighting variation.
- *
- * 2. **Asymmetric camera-space lightformers** — Key panel upper-left, fill right,
- *    top overhead, ground below, and back-fill behind camera. This matches Onshape's
- *    observed lighting pattern (upper-left brightest, lower-right darkest).
- *
- * 3. **FOV compensation** — As FOV decreases toward orthographic, specular highlights
- *    wash out (parallel view rays → uniform reflection). A multi-lever system scales
- *    down `scene.environmentIntensity` at low FOV while boosting headlamp and ambient
- *    to compensate diffuse loss. No material changes.
- *
- * 4. **Camera-space headlamp** — A subtle directional light offset in camera-up
- *    and camera-right directions so the highlight remains biased toward screen
- *    upper-right.
- *
- * 5. **Scale-adaptive** — All Lightformer positions and scales are expressed as
- *    multiples of `sceneRadius` so lighting adapts to model size.
- */
+/** Camera-relative PBR studio: directional key, ambient floor, and reflection panels. */
 export function Lights({
   enableMatcap = false,
   sceneRadius = 0,
@@ -84,7 +53,7 @@ export function Lights({
     radiusRef.current = clampedSceneRadius;
   }, [clampedSceneRadius]);
 
-  // Theme-based intensity factors (1.0 in light mode, reduced in dark mode)
+  // Dark mode raises the ambient floor while preserving the key and reflections.
   const themeIntensityScale = isDark ? darkModeIntensityScale : 1;
   const themeAmbientBoost = isDark ? darkModeAmbientBoost : 1;
 
@@ -115,27 +84,18 @@ export function Lights({
       {/* Base ambient fill -- always present for minimum illumination */}
       <ambientLight ref={ambientReference} intensity={ambientBaseIntensity} />
 
-      {/* Headlamp -- positioned above camera in world space for top-down gradients */}
+      {/* Key direction stays upper-right in view space. */}
       <directionalLight ref={cameraLightReference} intensity={headlampBaseIntensity} color='white' />
 
       {showEnvironment ? (
         <Environment resolution={envResolution} near={clampedSceneRadius * 0.01} far={clampedSceneRadius * 20}>
           <>
-            {/* ── Key panel (right-upper in camera space) ── */}
-            {/* Brightest side light. Positioned primarily to the right of the
-                  camera with moderate upward offset. Creates the NE-bright
-                  gradient (NNE, ENE lit) while keeping NNW dark. */}
             <Lightformer
               form='rect'
               intensity={studioKeyIntensity}
-              position={[clampedSceneRadius * 4, clampedSceneRadius * 1.5, clampedSceneRadius]}
-              rotation={[Math.PI / 8, -Math.PI / 3, 0]}
-              scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
+              position={[clampedSceneRadius, clampedSceneRadius, clampedSceneRadius]}
+              scale={[clampedSceneRadius * 1.2, clampedSceneRadius * 1.2, 1]}
             />
-            {/* ── Left-upper fill (left-upper in camera space) ── */}
-            {/* Illuminates left-facing L sections (WNW = NW-left) that the
-                  rightward key cannot reach. Env_x dominant negative with moderate
-                  +env_y so WNW (env_y=0.38) gets more than WSW (env_y=-0.38). */}
             <Lightformer
               form='rect'
               intensity={studioLeftFillIntensity}
@@ -143,9 +103,6 @@ export function Lights({
               rotation={[Math.PI / 8, Math.PI / 3, 0]}
               scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
             />
-            {/* ── Top panel (overhead in camera space) ── */}
-            {/* Reduced overhead accent — kept low to avoid over-brightening
-                  NNW (D section) which has high env_y normal component. */}
             <Lightformer
               form='rect'
               intensity={studioTopIntensity}
@@ -153,10 +110,6 @@ export function Lights({
               rotation={[Math.PI / 2, 0, 0]}
               scale={[clampedSceneRadius * 3, clampedSceneRadius * 3, 1]}
             />
-            {/* ── Ground panel (below-right in camera space) ── */}
-            {/* Bright ground for bottom-view luminosity. Offset in +X so that
-                  the bottom-face specular shifts toward the right (matching the
-                  asymmetric rig's "brighter on right" pattern). */}
             <Lightformer
               form='rect'
               intensity={studioGroundIntensity}
@@ -164,14 +117,6 @@ export function Lights({
               rotation={[-Math.PI / 2, 0, 0]}
               scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
             />
-            {/* ── Specular highlight panel (upper-right in camera space) ── */}
-            {/* Positioned in the (+X, -Y, +Z) octant to create a focused specular
-                  highlight in the upper-right area of bottom-facing surfaces when
-                  viewed from below. In Z-up screen coords for the bottom face:
-                  +X → screen right, -Y → screen top, +Z → close to the reflection
-                  pole. Equal X and -Y offsets place the specular at 45° toward the
-                  top-right corner. Negligible contribution to front/side face
-                  speculars (~61° from front reflection direction). */}
             <Lightformer
               form='rect'
               intensity={studioBackFillIntensity}

@@ -77,7 +77,7 @@ export function ThreeCanvasInstance({
 
   const onCanvasCreated = useCallback((state: RootState): void => {
     const renderer = state.gl;
-    renderer.toneMappingExposure = 1;
+    renderer.toneMappingExposure = 0.5;
 
     if ('isWebGPURenderer' in renderer && renderer.isWebGPURenderer) {
       const webGpuRenderer = renderer as unknown as InstanceType<typeof WebGPURenderer>;

@@ -50,10 +50,10 @@ export function strictModeRemount(actor: Actor<AnyActorLogic>): void {
  * The stop runs; the next mount finds the actor stopped and replaces it,
  * which is the actor the caller must use from then on.
  */
-export async function unmountAndRemount<TLogic extends AnyActorLogic>(
-  actor: Actor<TLogic>,
-  createReplacement: () => Actor<TLogic>,
-): Promise<Actor<TLogic>> {
+export async function unmountAndRemount<Logic extends AnyActorLogic>(
+  actor: Actor<Logic>,
+  createReplacement: () => Actor<Logic>,
+): Promise<Actor<Logic>> {
   scheduleStop(actor);
   await Promise.resolve();
   const replacement = createReplacement();
@@ -62,9 +62,9 @@ export async function unmountAndRemount<TLogic extends AnyActorLogic>(
 }
 
 /** What a fake actor's `subscribe` receives: `@xstate/react` 7 passes an observer, older callers a function. */
-export type SnapshotListener<TSnapshot> =
-  | ((snapshot: TSnapshot) => void)
-  | Readonly<{ next?: (snapshot: TSnapshot) => void }>;
+export type SnapshotListener<SnapshotValue> =
+  | ((snapshot: SnapshotValue) => void)
+  | Readonly<{ next?: (snapshot: SnapshotValue) => void }>;
 
 /**
  * Normalises a fake actor's subscriber to a callback, as `Actor.subscribe` does.
@@ -73,7 +73,7 @@ export type SnapshotListener<TSnapshot> =
  * @returns A callback that delivers one snapshot.
  */
 export const toSnapshotCallback =
-  <TSnapshot>(listener: SnapshotListener<TSnapshot>): ((snapshot: TSnapshot) => void) =>
+  <SnapshotValue>(listener: SnapshotListener<SnapshotValue>): ((snapshot: SnapshotValue) => void) =>
   (snapshot) => {
     if (typeof listener === 'function') {
       listener(snapshot);
@@ -92,10 +92,10 @@ export const toSnapshotCallback =
  * @param implementation - Replaces the actor's own `send` when given.
  * @returns The spy every `actor.send` now reaches.
  */
-export const spyOnSend = <TSend extends (event: never) => void>(
-  actor: { readonly send: TSend },
-  implementation?: TSend,
-): Mock<TSend> => {
+export const spyOnSend = <SendFunction extends (event: never) => void>(
+  actor: { readonly send: SendFunction },
+  implementation?: SendFunction,
+): Mock<SendFunction> => {
   const spy = vi.fn(implementation ?? actor.send);
   Object.defineProperty(actor, 'send', { configurable: true, get: () => spy });
   return spy;

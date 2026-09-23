@@ -3,7 +3,7 @@ import { Topic } from '@taucad/events';
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileOperation, PreparedFileOperation } from '@taucad/fs-client/file-content-service';
 import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { fileParameterEntrySchema, parameterEntryPath, parametersDirectory } from '@taucad/types';
 import type { JSONValue } from '@taucad/types';
 import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
@@ -319,7 +319,7 @@ export const createParameterSetService = (
     if (!matches() && !state.actor.getSnapshot().matches({ open: 'loading' })) {
       state.actor.send({ type: 'resolve', resolution: state.manifestRef.current.identity.resolution });
     }
-    const snapshot = await waitFor(
+    const snapshot: SnapshotFrom<typeof parameterSetMachine> = await waitFor(
       state.actor,
       (snapshot) =>
         snapshot.matches({ open: 'disconnected' }) ||

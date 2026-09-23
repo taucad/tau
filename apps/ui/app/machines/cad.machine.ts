@@ -422,9 +422,9 @@ type CadEnqueue = EnqueueObject<CadEvent, CadEmitted, SystemRegistry, typeof cad
 type CadPatch = Partial<CadContext>;
 type ActorIdentity = AnyActorRef;
 
-type CadArgs<TType extends CadEvent['type']> = Readonly<{
+type CadArgs<EventType extends CadEvent['type']> = Readonly<{
   context: CadContext;
-  event: Extract<CadEvent, { type: TType }>;
+  event: Extract<CadEvent, { type: EventType }>;
   self: ActorIdentity;
 }>;
 type RenderTrigger = Extract<
@@ -442,10 +442,10 @@ type RenderTrigger = Extract<
  */
 const withExportAvailability = (
   context: CadContext,
-  patch: CadPatch,
-  self: ActorIdentity,
   enq: CadEnqueue,
+  transition: Readonly<{ self: ActorIdentity; patch: CadPatch }>,
 ): CadPatch => {
+  const { self, patch } = transition;
   if (!context.parentRef) {
     return patch;
   }
@@ -472,10 +472,10 @@ const withExportAvailability = (
  */
 const notifyKernelRefusal = (
   context: CadContext,
-  self: ActorIdentity,
   enq: CadEnqueue,
-  reason: string | undefined,
+  refusal: Readonly<{ self: ActorIdentity; reason: string | undefined }>,
 ): void => {
+  const { self, reason } = refusal;
   if (context.parentRef) {
     enq.sendTo(context.parentRef, { type: 'geometryUnit.kernelRefused', actorId: actorIdOf(self), reason });
   }
@@ -544,7 +544,7 @@ const renderRequest =
     return {
       ...(target === undefined ? {} : { target }),
       ...(options.reenter === true ? { reenter: true } : {}),
-      context: withExportAvailability(context, patch, self, enq),
+      context: withExportAvailability(context, enq, { self, patch }),
     };
   };
 
@@ -593,10 +593,10 @@ const runtimeSignals = {
   kernelProgress: ({ event }: CadArgs<'kernelProgress'>) => ({ context: { renderPhase: event.phase } }),
   kernelTelemetry,
   capabilitiesUpdated: ({ context, event, self }: CadArgs<'capabilitiesUpdated'>, enq: CadEnqueue) => ({
-    context: withExportAvailability(context, { capabilities: event.capabilities }, self, enq),
+    context: withExportAvailability(context, enq, { self, patch: { capabilities: event.capabilities } }),
   }),
   activeKernelChanged: ({ context, event, self }: CadArgs<'activeKernelChanged'>, enq: CadEnqueue) => ({
-    context: withExportAvailability(context, { activeKernelId: event.kernelId }, self, enq),
+    context: withExportAvailability(context, enq, { self, patch: { activeKernelId: event.kernelId } }),
   }),
 };
 
@@ -606,9 +606,9 @@ const resultSignals = {
   setCodeIssues: ({ event }: CadArgs<'setCodeIssues'>) => ({ context: { codeIssues: event.errors } }),
   geometryComputed: ({ context, event, self }: CadArgs<'geometryComputed'>, enq: CadEnqueue) => {
     enq.emit({ type: 'geometryEvaluated', geometry: event.geometry });
-    const patch = {
+    const patch: CadPatch = {
       geometry: event.geometry,
-      latestGeometryOutcome: 'success' as const,
+      latestGeometryOutcome: 'success',
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
         if (event.issues.length > 0) {
           issues.set(entryPath, event.issues);
@@ -620,17 +620,17 @@ const resultSignals = {
       // settled watermark advances to whatever the UI has asked for.
       lastSettledRenderId: context.lastRequestedRenderId,
     };
-    return { context: withExportAvailability(context, patch, self, enq) };
+    return { context: withExportAvailability(context, enq, { self, patch }) };
   },
   geometryFailed: ({ context, event, self }: CadArgs<'geometryFailed'>, enq: CadEnqueue) => {
-    const patch = {
-      latestGeometryOutcome: 'failure' as const,
+    const patch: CadPatch = {
+      latestGeometryOutcome: 'failure',
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
         issues.set(entryPath, event.issues);
       }),
       lastSettledRenderId: context.lastRequestedRenderId,
     };
-    return { context: withExportAvailability(context, patch, self, enq) };
+    return { context: withExportAvailability(context, enq, { self, patch }) };
   },
   parametersParsed: ({ event }: CadArgs<'parametersParsed'>) => ({ context: { parameterManifest: event.manifest } }),
   kernelIssue: ({ context, event }: CadArgs<'kernelIssue'>) => ({
@@ -704,16 +704,14 @@ export const cadMachine = setup({
   on: {
     restoreParameters: ({ context, self }, enq) => ({
       target: '.rendering.submitting',
-      context: withExportAvailability(
-        context,
-        {
+      context: withExportAvailability(context, enq, {
+        self,
+        patch: {
           lastRequestedRenderId: context.lastRequestedRenderId + 1,
           parameterRender: undefined,
           latestGeometryOutcome: undefined,
         },
-        self,
-        enq,
-      ),
+      }),
     }),
     /* Re-entering from the root runs the root's `exit`, which releases the
      * kernel; releasing it here as well would dispose the same client twice,
@@ -733,7 +731,7 @@ export const cadMachine = setup({
       tags: ['cad-loading'],
       /* R4: a unit that is trying again is not refused. */
       entry: ({ context, self }, enq) => {
-        notifyKernelRefusal(context, self, enq, undefined);
+        notifyKernelRefusal(context, enq, { self, reason: undefined });
       },
       invoke: {
         id: 'connectKernelActor',
@@ -751,25 +749,23 @@ export const cadMachine = setup({
           kernelIssues.set('__connection__', [
             { message: errorMessage, code: 'RUNTIME', type: 'runtime', severity: 'error' },
           ]);
-          notifyKernelRefusal(context, self, enq, errorMessage);
+          notifyKernelRefusal(context, enq, { self, reason: errorMessage });
           return { target: 'error', context: { kernelIssues } };
         },
       },
       on: {
         kernelConnected: ({ context, event, self }, enq) => {
           const { client } = event;
-          const renderTimeout = context.renderTimeout;
+          const { renderTimeout } = context;
           enq(() => {
             client.setRenderTimeout(renderTimeout);
           });
           return {
             target: context.entryPath ? '#cad.rendering.submitting' : 'idle',
-            context: withExportAvailability(
-              context,
-              { kernelClient: event.client, eventCleanups: event.cleanups },
+            context: withExportAvailability(context, enq, {
               self,
-              enq,
-            ),
+              patch: { kernelClient: event.client, eventCleanups: event.cleanups },
+            }),
           };
         },
         initializeModel: renderRequest(),
@@ -789,7 +785,7 @@ export const cadMachine = setup({
          * minutes (V1-5). Bounding the common case is what R3 is for. */
         parkRuntime: ({ context, self }, enq) => ({
           target: 'parked',
-          context: withExportAvailability(context, destroyKernel(context, enq), self, enq),
+          context: withExportAvailability(context, enq, { self, patch: destroyKernel(context, enq) }),
         }),
         initializeModel: renderRequest('#cad.rendering.submitting'),
         setEntryPath: renderRequest('#cad.rendering.submitting'),
@@ -887,16 +883,14 @@ export const cadMachine = setup({
          * with: take the intent (drop the staged values) and leave the render to
          * the reconnect, instead of failing into `error` (V1-4). */
         restoreParameters: ({ context, self }, enq) => ({
-          context: withExportAvailability(
-            context,
-            {
+          context: withExportAvailability(context, enq, {
+            self,
+            patch: {
               lastRequestedRenderId: context.lastRequestedRenderId + 1,
               parameterRender: undefined,
               latestGeometryOutcome: undefined,
             },
-            self,
-            enq,
-          ),
+          }),
         }),
         setCodeIssues: resultSignals.setCodeIssues,
       },
@@ -907,7 +901,7 @@ export const cadMachine = setup({
       on: {
         parkRuntime: ({ context, self }, enq) => ({
           target: 'parked',
-          context: withExportAvailability(context, destroyKernel(context, enq), self, enq),
+          context: withExportAvailability(context, enq, { self, patch: destroyKernel(context, enq) }),
         }),
         /* Every way a parked unit can fall into `error` ends here, so the session's
          * next resume has to be heard from `error` too, or the unit dead-ends

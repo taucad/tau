@@ -397,9 +397,9 @@ const draftActors = {
 };
 
 type DraftEnqueue = EnqueueObject<DraftMachineEvents, DraftEmittedEvents, SystemRegistry, typeof draftActors>;
-type DraftArgs<TType extends DraftMachineEvents['type']> = Readonly<{
+type DraftArgs<EventType extends DraftMachineEvents['type']> = Readonly<{
   context: DraftMachineContext;
-  event: Extract<DraftMachineEvents, { type: TType }>;
+  event: Extract<DraftMachineEvents, { type: EventType }>;
 }>;
 
 /** Refuse, reject or enqueue one added attachment. */

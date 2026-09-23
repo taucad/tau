@@ -72,7 +72,9 @@ const clearActive = { activeHash: undefined, activeKind: undefined } satisfies P
 
 const reportManualResult = (context: ThumbnailContext, enq: ThumbnailEnqueue, result: ThumbnailResult): void => {
   if (result.kind === 'manual-thumbnail') {
-    enq(() => context.onManualResult(result));
+    enq(() => {
+      context.onManualResult(result);
+    });
   }
 };
 
@@ -185,7 +187,9 @@ export const thumbnailMachine = setup({
         },
         onError: ({ context, event }, enq) => {
           if (context.activeKind === 'manual-thumbnail') {
-            enq(() => context.onManualResult({ status: 'failed', kind: 'manual-thumbnail', error: event.error }));
+            enq(() => {
+              context.onManualResult({ status: 'failed', kind: 'manual-thumbnail', error: event.error });
+            });
           }
           return { target: 'routing', context: clearActive };
         },

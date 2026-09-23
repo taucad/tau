@@ -178,7 +178,7 @@ describe('provide() actor typing', () => {
     },
   });
 
-  /* v6 `provide()` infers its argument rather than typing it from the machine, so an inline
+  /* XState v6 `provide()` infers its argument rather than typing it from the machine, so an inline
    * logic is checked against `MachineActors` to get the slot's input and output. */
   it('should type input and return from the machine actor map', () => {
     machine.provide({
@@ -249,7 +249,7 @@ describe('on: handler event type inference', () => {
   });
 
   it('should keep every member of an event whose payload is a union', () => {
-    type AttachEvent = { type: 'attach' } & ({ dataUrl: string } | { bytes: Uint8Array });
+    type AttachEvent = { type: 'attach' } & ({ dataUrl: string } | { bytes: Uint8Array<ArrayBuffer> });
 
     setup({
       schemas: {
@@ -258,7 +258,9 @@ describe('on: handler event type inference', () => {
     }).createMachine({
       on: {
         attach: ({ event }) => {
-          expectTypeOf(event).toExtend<{ type: 'attach' } & ({ dataUrl: string } | { bytes: Uint8Array })>();
+          expectTypeOf(event).toExtend<
+            { type: 'attach' } & ({ dataUrl: string } | { bytes: Uint8Array<ArrayBuffer> })
+          >();
           return {};
         },
       },

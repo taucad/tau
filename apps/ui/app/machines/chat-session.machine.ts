@@ -259,8 +259,8 @@ type ChatSessionEnqueue = EnqueueObject<
   typeof chatSessionActors
 >;
 type ChatSessionPatch = Partial<ChatSessionMachineContext>;
-type ChatSessionArgs<TEvent> = Readonly<{ context: ChatSessionMachineContext; event: TEvent }>;
-type EventOf<TType extends ChatSessionMachineEvent['type']> = Extract<ChatSessionMachineEvent, { type: TType }>;
+type ChatSessionArgs<EventUnion> = Readonly<{ context: ChatSessionMachineContext; event: EventUnion }>;
+type EventOf<EventType extends ChatSessionMachineEvent['type']> = Extract<ChatSessionMachineEvent, { type: EventType }>;
 
 const announce = (context: ChatSessionMachineContext, enq: ChatSessionEnqueue): void => {
   enq.emit({ type: 'statusChanged', chatId: context.chatId });

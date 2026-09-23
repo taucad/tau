@@ -8,11 +8,10 @@ import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
 import { gitRemoteUrlProblem } from '@taucad/revisions';
-import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
+import type { RemoteFacet, SyncFacet, SyncFailureReason } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
    contract forbids (§3). */
-import type { SyncFailureReason } from '@taucad/revisions';
 import { CommercialUpgradeLabel } from '#cloud/commercial-features.js';
 import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';

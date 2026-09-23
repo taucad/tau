@@ -177,9 +177,9 @@ type ProjectEmitted =
 
 type ProjectEnqueue = EnqueueObject<ProjectEvent, ProjectEmitted, SystemRegistry, typeof projectActors>;
 type ProjectPatch = Partial<ProjectContext>;
-type ProjectArgs<TType extends ProjectEvent['type']> = Readonly<{
+type ProjectArgs<EventType extends ProjectEvent['type']> = Readonly<{
   context: ProjectContext;
-  event: Extract<ProjectEvent, { type: TType }>;
+  event: Extract<ProjectEvent, { type: EventType }>;
   self: AnyActorRef;
 }>;
 type CadUnitRef = ActorRefFrom<typeof cadMachine>;
@@ -204,11 +204,14 @@ const withProject = (context: ProjectContext, recipe: (project: ProjectManifest)
  */
 const spawnGeometryUnit = (
   context: ProjectContext,
-  self: AnyActorRef,
   enq: ProjectEnqueue,
-  entryPath: string,
-  options: Readonly<{ shouldInitializeKernelOnStart: boolean; renderTimeout?: number }>,
+  unit: Readonly<{
+    self: AnyActorRef;
+    entryPath: string;
+    options: Readonly<{ shouldInitializeKernelOnStart: boolean; renderTimeout?: number }>;
+  }>,
 ): CadUnitRef => {
+  const { self, entryPath, options } = unit;
   const cadUnit = enq.spawn('cad', {
     id: `cad-${context.projectId}-${entryPath.replaceAll('/', '-')}`,
     input: {
@@ -233,10 +236,10 @@ const spawnGeometryUnit = (
  */
 const loadMainModel = (
   context: ProjectContext,
-  self: AnyActorRef,
   enq: ProjectEnqueue,
-  options: Readonly<{ pointAtExistingUnit: boolean }>,
+  load: Readonly<{ self: AnyActorRef; options: Readonly<{ pointAtExistingUnit: boolean }> }>,
 ): ProjectPatch => {
+  const { self, options } = load;
   const mainAsset = context.project?.assets.main;
   if (!mainAsset) {
     return {};
@@ -250,7 +253,7 @@ const loadMainModel = (
   const geometryUnits = new Map(context.geometryUnits);
   geometryUnits.set(
     mainFile,
-    spawnGeometryUnit(context, self, enq, mainFile, { shouldInitializeKernelOnStart: false }),
+    spawnGeometryUnit(context, enq, { self, entryPath: mainFile, options: { shouldInitializeKernelOnStart: false } }),
   );
   return { geometryUnits, mainEntryPath: mainFile };
 };
@@ -496,7 +499,7 @@ export const projectMachine = setup({
         onDone: ({ context, self }, enq) => ({
           target: 'ready',
           context: context.shouldLoadModelOnStart
-            ? loadMainModel(context, self, enq, { pointAtExistingUnit: true })
+            ? loadMainModel(context, enq, { self, options: { pointAtExistingUnit: true } })
             : {},
         }),
         onError: ({ event }) => ({ target: 'error', context: setError(event.error) }),
@@ -536,7 +539,7 @@ export const projectMachine = setup({
               };
             },
             loadModel: ({ context, self }, enq) => ({
-              context: loadMainModel(context, self, enq, { pointAtExistingUnit: false }),
+              context: loadMainModel(context, enq, { self, options: { pointAtExistingUnit: false } }),
             }),
             setMainFile: ({ context, event }) => ({
               context: withProject(context, (project) => {
@@ -554,9 +557,13 @@ export const projectMachine = setup({
               const geometryUnits = new Map(context.geometryUnits);
               geometryUnits.set(
                 event.entryPath,
-                spawnGeometryUnit(context, self, enq, event.entryPath, {
-                  shouldInitializeKernelOnStart: true,
-                  ...(event.renderTimeout === undefined ? {} : { renderTimeout: event.renderTimeout }),
+                spawnGeometryUnit(context, enq, {
+                  self,
+                  entryPath: event.entryPath,
+                  options: {
+                    shouldInitializeKernelOnStart: true,
+                    ...(event.renderTimeout === undefined ? {} : { renderTimeout: event.renderTimeout }),
+                  },
                 }),
               );
               return {

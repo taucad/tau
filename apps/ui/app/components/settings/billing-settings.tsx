@@ -165,9 +165,9 @@ export function BillingSettings(): React.JSX.Element {
           Payment failed — update your card to restore Pro. Your credits are safe.
         </div>
       ) : undefined}
-      {entitlements.cancelAtPeriodEnd && entitlements.currentPeriodEnd ? (
+      {entitlements.cancelAtPeriodEnd && entitlements.paidThrough ? (
         <div className='rounded-md border border-border bg-muted/40 px-3 py-2 text-sm'>
-          Pro until {formatRenewalDate(entitlements.currentPeriodEnd)} — reactivate any time from Manage Subscription.
+          Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage Subscription.
         </div>
       ) : undefined}
 
@@ -215,8 +215,8 @@ export function BillingSettings(): React.JSX.Element {
                 </div>
               </>
             ) : undefined}
-            {isPaidTier && entitlements.currentPeriodEnd && !entitlements.cancelAtPeriodEnd ? (
-              <span>Renews on {formatRenewalDate(entitlements.currentPeriodEnd)}</span>
+            {isPaidTier && entitlements.paidThrough && !entitlements.cancelAtPeriodEnd ? (
+              <span>Renews on {formatRenewalDate(entitlements.paidThrough)}</span>
             ) : undefined}
             {isPaidTier ? <PaidTierQuotas entitlements={entitlements} /> : undefined}
             {entitlements.isResolved && entitlements.tier === 'free' ? (

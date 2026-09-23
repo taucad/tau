@@ -145,8 +145,8 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         (id,account_id,environment,stripe_account_id,livemode,stripe_customer_id)
         values (${customerBindingId},${accountId},'development',${`acct_${suffix}`},false,${`cus_${suffix}`})`;
       await client`insert into public.subscription
-        (id,plan,reference_id,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
-        values (${subscriptionId},'pro',${`ref-${suffix}`},'active',${accountId},'development',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
+        (id,plan,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
+        values (${subscriptionId},'pro','active',${accountId},'development',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
       await client`insert into billing.billing_account_closure
         (id,account_id,binding_id,environment,request_id,request_hash,state,binding_revoked_at,obligations_frozen_at,auth_deleted_at,closed_at)
         values (${closureId},${accountId},${bindingId},'development','request','hash','closed',clock_timestamp(),clock_timestamp(),clock_timestamp(),clock_timestamp())`;
@@ -286,8 +286,8 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         (id,account_id,environment,stripe_account_id,livemode,stripe_customer_id)
         values (${customerBindingId},${accountId},'staging',${`acct_${suffix}`},false,${`cus_${suffix}`})`;
       await first`insert into public.subscription
-        (id,plan,reference_id,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
-        values (${subscriptionId},'pro',${`ref-${suffix}`},'active',${accountId},'staging',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
+        (id,plan,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
+        values (${subscriptionId},'pro','active',${accountId},'staging',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
       await first`insert into billing.billing_account_closure
         (id,account_id,binding_id,environment,request_id,request_hash,state,binding_revoked_at,obligations_frozen_at)
         values (${closureId},${accountId},${bindingId},'staging','request','hash','ready_for_auth_deletion',now(),now())`;
@@ -336,8 +336,8 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         (id,account_id,environment,stripe_account_id,livemode,stripe_customer_id)
         values (${customerBindingId},${accountId},'staging',${`acct_${suffix}`},false,${`cus_${suffix}`})`;
       await first`insert into public.subscription
-        (id,plan,reference_id,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
-        values (${subscriptionId},'pro',${`ref-${suffix}`},'active',${accountId},'staging',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
+        (id,plan,status,account_id,environment,customer_binding_id,request_id,request_hash,offer_snapshot,slot_state)
+        values (${subscriptionId},'pro','active',${accountId},'staging',${customerBindingId},'request','hash','{}'::jsonb,'current')`;
       await first`insert into billing.billing_account_closure
         (id,account_id,binding_id,environment,request_id,request_hash,state,binding_revoked_at,obligations_frozen_at,auth_deleted_at)
         values (${closureId},${accountId},${bindingId},'staging','request','hash','ready_for_auth_deletion',now(),now(),clock_timestamp())`;

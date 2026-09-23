@@ -59,7 +59,6 @@ const entitlement = (tier: 'free' | 'pro' | 'enterprise') => ({
   tier,
   status: 'active',
   cancelAtPeriodEnd: false,
-  currentPeriodEnd: new Date('2026-10-01T00:00:00Z'),
   apiCadGatewayMonthlyLimit: 0,
   conversionApiMonthlyLimit: 0,
   geospecValidationMonthlyLimit: 0,
@@ -135,6 +134,19 @@ describe('BillingSettings', () => {
     expect(screen.getByText('Loading plan…')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /subscribe/i })).toBeNull();
     expect(screen.queryByText('Free')).toBeNull();
+  });
+
+  it('shows the renewal date from the paid-through deadline, and the access end once cancelled', () => {
+    const paidThrough = new Date('2026-10-23T04:21:27Z');
+    const date = paidThrough.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    useEntitlements.mockReturnValue({ ...entitlement('pro'), paidThrough });
+    const { unmount } = renderSettings();
+    expect(screen.getByText(`Renews on ${date}`)).toBeInTheDocument();
+    unmount();
+    useEntitlements.mockReturnValue({ ...entitlement('pro'), paidThrough, cancelAtPeriodEnd: true });
+    renderSettings();
+    expect(screen.getByText(new RegExp(`Pro until ${date}`, 'u'))).toBeInTheDocument();
+    expect(screen.queryByText(/Renews on/u)).toBeNull();
   });
 
   it('renders lifecycle controls in authenticated billing settings', () => {

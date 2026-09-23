@@ -197,8 +197,6 @@ async function seedEntitlement(sourceStatus: string) {
   await database.insert(schema.subscription).values({
     id: subscriptionId,
     plan: 'pro',
-    referenceId: `financial:${subscriptionId}`,
-    stripeCustomerId: customerId,
     stripeSubscriptionId,
     accountId,
     environment: 'development',
@@ -209,8 +207,6 @@ async function seedEntitlement(sourceStatus: string) {
     slotState: 'current',
     status: 'active',
     cancelAtPeriodEnd: false,
-    periodStart: new Date(paidAt.getTime() - 1000),
-    periodEnd: new Date(paidAt.getTime() + 86_400_000),
   });
   // `require_paid_receipt` is deferred: the period, its journal and the fulfilment commit together.
   await database.transaction(async (tx) => {

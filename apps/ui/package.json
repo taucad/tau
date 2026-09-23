@@ -9,7 +9,6 @@
     "@better-auth-ui/core": "1.6.15",
     "@better-auth-ui/react": "1.6.15",
     "@better-auth/api-key": "catalog:",
-    "@better-auth/stripe": "catalog:",
     "@react-router/express": "catalog:",
     "@react-router/node": "catalog:",
     "@tanstack/react-pacer": "catalog:",

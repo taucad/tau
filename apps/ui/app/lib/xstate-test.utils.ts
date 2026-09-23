@@ -58,3 +58,24 @@ export async function unmountAndRemount<TLogic extends AnyActorLogic>(
   replacement.start();
   return replacement;
 }
+
+/** What a fake actor's `subscribe` receives: `@xstate/react` 7 passes an observer, older callers a function. */
+export type SnapshotListener<TSnapshot> =
+  | ((snapshot: TSnapshot) => void)
+  | Readonly<{ next?: (snapshot: TSnapshot) => void }>;
+
+/**
+ * Normalises a fake actor's subscriber to a callback, as `Actor.subscribe` does.
+ *
+ * @param listener - The function or observer handed to `subscribe`.
+ * @returns A callback that delivers one snapshot.
+ */
+export const toSnapshotCallback =
+  <TSnapshot>(listener: SnapshotListener<TSnapshot>): ((snapshot: TSnapshot) => void) =>
+  (snapshot) => {
+    if (typeof listener === 'function') {
+      listener(snapshot);
+    } else {
+      listener.next?.(snapshot);
+    }
+  };

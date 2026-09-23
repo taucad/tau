@@ -112,8 +112,9 @@ function spyOnActorSends(session: ReturnType<InstanceType<typeof ChatSessionStor
   // Replacing `.send` with a mock is the cleanest way to assert the guard's
   // fan-out without depending on machine internals — the guard's contract
   // is that it `.send({ type: 'flushNow' })` to every actor.
-  vi.spyOn(session.persistenceActorRef, 'send').mockImplementation(persistenceSend);
-  vi.spyOn(session.draftActorRef, 'send').mockImplementation(draftSend);
+  // v6 exposes `send` as a bound getter, so the spy replaces what the getter returns.
+  vi.spyOn(session.persistenceActorRef, 'send', 'get').mockReturnValue(persistenceSend);
+  vi.spyOn(session.draftActorRef, 'send', 'get').mockReturnValue(draftSend);
   return { persistenceSend, draftSend };
 }
 

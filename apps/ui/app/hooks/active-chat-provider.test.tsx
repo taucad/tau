@@ -993,7 +993,11 @@ describe('ActiveChatProvider', () => {
       wrapper: createSessionWrapper('chat_stop'),
     });
 
-    const sendSpy = vi.spyOn(result.current.session.persistenceActorRef, 'send');
+    // v6 exposes `send` as a bound getter: wrap what it returns and keep calling through.
+
+    const sendSpy = vi.fn(result.current.session.persistenceActorRef.send);
+
+    vi.spyOn(result.current.session.persistenceActorRef, 'send', 'get').mockReturnValue(sendSpy);
 
     act(() => {
       result.current.composer.stop();

@@ -305,9 +305,8 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
             }}
           >
             <facts.icon aria-hidden data-slot='revision-icon' className={cn('size-3.5', facts.tone)} />
-            <span className={cn('max-w-40 truncate font-medium', branch === undefined ? undefined : 'text-foreground')}>
-              {label}
-            </span>
+            {/* Share and Export's weight and colour: the glyph carries the state, not the label. */}
+            <span className='max-w-40 truncate'>{label}</span>
           </PaneButton>
         </HoverCardTrigger>
         <HoverCardContent align='end' className='w-72 p-0'>

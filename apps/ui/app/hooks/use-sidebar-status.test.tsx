@@ -28,6 +28,8 @@ import {
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
+import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
+import type { SnapshotListener } from '#lib/xstate-test.utils.js';
 
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
@@ -185,11 +187,12 @@ const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
       },
     }),
     send: sessionSend,
-    subscribe: (listener: () => void) => {
-      fakeRegistry.sessionListeners.add(listener);
+    subscribe: (listener: SnapshotListener<unknown>) => {
+      const callback = toSnapshotCallback(listener);
+      fakeRegistry.sessionListeners.add(callback);
       return {
         unsubscribe: () => {
-          fakeRegistry.sessionListeners.delete(listener);
+          fakeRegistry.sessionListeners.delete(callback);
         },
       };
     },
@@ -214,11 +217,12 @@ const resetRegistry = (): void => {
         idleWindowMilliseconds,
       },
     }),
-    subscribe: (listener: () => void) => {
-      fakeRegistry.registryListeners.add(listener);
+    subscribe: (listener: SnapshotListener<unknown>) => {
+      const callback = toSnapshotCallback(listener);
+      fakeRegistry.registryListeners.add(callback);
       return {
         unsubscribe: () => {
-          fakeRegistry.registryListeners.delete(listener);
+          fakeRegistry.registryListeners.delete(callback);
         },
       };
     },
@@ -989,6 +993,7 @@ const compiledHooks = await (async () => {
     '#hooks/use-revision-status.js': await import('#hooks/use-revision-status.js'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
+    '#lib/xstate.lib.js': await import('#lib/xstate.lib.js'),
   };
   const linked = compiled.code
     .replaceAll(

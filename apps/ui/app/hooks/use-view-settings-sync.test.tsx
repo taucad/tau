@@ -18,6 +18,8 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { deriveModelInteractionUnitId } from '#machines/model-interaction.machine.js';
+import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
+import type { SnapshotListener } from '#lib/xstate-test.utils.js';
 
 const componentId = 'component:Housing';
 const unitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });
@@ -82,9 +84,10 @@ function createEntryCad(initial: { renderTimeout?: number; format?: 'gltf' | 'sv
   const listeners = new Set<(snapshot: unknown) => void>();
   const actor = {
     getSnapshot: () => ({ context: { renderTimeout, geometry } }),
-    subscribe: (listener: (snapshot: unknown) => void) => {
-      listeners.add(listener);
-      return { unsubscribe: () => listeners.delete(listener) };
+    subscribe: (listener: SnapshotListener<unknown>) => {
+      const callback = toSnapshotCallback(listener);
+      listeners.add(callback);
+      return { unsubscribe: () => listeners.delete(callback) };
     },
     send: vi.fn(),
   };

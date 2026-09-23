@@ -4184,7 +4184,9 @@ describe('ChatSessionStore', () => {
       const store = createStore();
       const session = store.acquire('chat_r6');
       const fake = harness.created.find((entry) => entry.id === 'chat_r6')!;
-      const sendSpy = vi.spyOn(session.persistenceActorRef, 'send');
+      // v6 exposes `send` as a bound getter: wrap what it returns and keep calling through.
+      const sendSpy = vi.fn(session.persistenceActorRef.send);
+      vi.spyOn(session.persistenceActorRef, 'send', 'get').mockReturnValue(sendSpy);
 
       const countStreamResumed = (): number =>
         sendSpy.mock.calls.filter((call) => call[0].type === 'streamResumed').length;

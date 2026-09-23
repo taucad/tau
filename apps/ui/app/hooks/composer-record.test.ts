@@ -45,7 +45,9 @@ describe('draftPersistenceFor', () => {
       }),
       { input: {} },
     ).start();
-    const send = vi.spyOn(record, 'send');
+    // v6 exposes `send` as a bound getter: wrap what it returns and keep calling through.
+    const send = vi.fn(record.send);
+    vi.spyOn(record, 'send', 'get').mockReturnValue(send);
 
     createActor(draftPersistenceFor(record, store).persistSelectionActor, { input: { mode: 'plan' } }).start();
     await vi.waitFor(() => {

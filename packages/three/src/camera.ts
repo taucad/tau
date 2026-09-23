@@ -1,6 +1,6 @@
 import { OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
-import type { ActorRefFrom, CallbackActorLogic } from 'xstate';
-import { createActor, fromCallback } from 'xstate';
+import type { Actor, CallbackActorLogic } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
 import { createCameraState, createCameraView, resolveCameraState } from '@taucad/camera';
 import type { CameraState, CameraVector } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
@@ -94,7 +94,7 @@ type ThreeCameraClipPlanePolicy = Readonly<{
 export type ThreeCameraRig = Readonly<{
   perspectiveCamera: PerspectiveCamera;
   orthographicCamera: OrthographicCamera;
-  actorRef: ActorRefFrom<typeof cameraMachine>;
+  actorRef: Actor<typeof cameraMachine>;
   activeCamera: ThreeCamera;
   renderFrame: RenderFrame;
   setRenderFrame: (renderFrame: RenderFrame) => void;
@@ -362,7 +362,7 @@ const createThreeCameraDriver = (
   options: ThreeCameraDriverOptions,
 ): CallbackActorLogic<CameraDriverEvent, CameraDriverInput> => {
   let latestSnapshot: CameraDriverSnapshot | undefined;
-  return fromCallback<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
+  return createCallbackLogic<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
     latestSnapshot ??= input.snapshot;
     synchronizeCameras({ options, snapshot: latestSnapshot });
     receive((event) => {

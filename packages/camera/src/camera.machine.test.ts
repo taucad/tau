@@ -1,4 +1,4 @@
-import { createActor, fromCallback } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import * as machineModule from '#camera.machine.js';
 import { cameraMachine, selectCameraDriverSnapshot, selectCameraProjection } from '#camera.machine.js';
@@ -78,7 +78,7 @@ describe('cameraMachine', () => {
     const snapshots = [] as Array<Readonly<{ projection: string; revision: number }>>;
     let driverStarts = 0;
     let driverStops = 0;
-    const driver = fromCallback<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
+    const driver = createCallbackLogic<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
       driverStarts++;
       snapshots.push({ projection: input.snapshot.projection.kind, revision: input.snapshot.revision });
       receive((event) => {

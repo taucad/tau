@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { SourceRevision } from '@taucad/runtime/types';
 import type { GeoSpecNativeRunnerOptions } from 'geospec/runner/native';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import { createHostNativeGeoSpecRunner } from '#agent-tools.js';
@@ -61,7 +62,7 @@ describe('native host GeoSpec composition', () => {
     if (trackedRuntime === undefined || typeof trackedRuntime === 'function') {
       throw new Error('Expected the borrowed project runtime.');
     }
-    const sourceRevision = { entry: 'widget.ts', files: { 'widget.ts': `sha256:${'a'.repeat(64)}` } };
+    const sourceRevision: SourceRevision = { entry: 'widget.ts', files: { 'widget.ts': 'missing' } };
     runtime.export.mockResolvedValue({ success: true, data: [], issues: [], sourceRevision });
     const exported = await trackedRuntime.export('glb', { source: { path: 'widget.ts' } });
     expect(exported.sourceRevision).toEqual(sourceRevision);

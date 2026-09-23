@@ -2,8 +2,9 @@
  * Which external ACP agents this daemon can start, and where their adapters are.
  *
  * OQ-X1 (pin-and-review): the adapters are **exact-pinned dependencies of the
- * distributed daemon** (`packages/cli`, and the desktop app), never a PATH lookup and never `npx` at
- * runtime — an agent the user has not installed is simply not advertised. The
+ * distributed daemon** (`packages/cli`, and the desktop app). Native ACP CLIs
+ * run the user's installed executable directly; neither path uses `npx` at
+ * runtime. An agent the user has not installed is refused. The
  * pins below are the reviewed set; the review cadence is quarterly, because
  * these adapters wrap vendor SDKs that move fast
  * (`docs/research/external-agent-acp-topology.md`).
@@ -14,7 +15,7 @@
  *
  * The profile array is the **only** per-agent knowledge in the tree (V14): the
  * descriptor every other tier renders is built from it here, so adding an agent
- * is one entry plus its pinned dependency.
+ * is one entry, plus a pinned dependency only when an adapter is needed.
  */
 
 import { execFile } from 'node:child_process';
@@ -58,10 +59,6 @@ export type AcpAgentProfile = {
    * else (V14).
    */
   readonly displayName: string;
-  /** Npm package holding the ACP adapter. */
-  readonly package: string;
-  /** Exact reviewed version; see the cadence note above. */
-  readonly version: string;
   /**
    * CLI whose *own* login the adapter inherits (X6). Probed once at start;
    * `undefined` skips the probe, which only a test override does.
@@ -99,7 +96,25 @@ export type AcpAgentProfile = {
    * up front (`CLI_TOO_OLD`) instead of failing mid-turn with a vendor error.
    */
   readonly minimumCliVersion?: string | undefined;
-};
+  /** Terminal command shown when the agent needs its own local login. Tau never executes it. */
+  readonly loginCommand?: string | undefined;
+} & (
+  | {
+      /** Npm package holding the ACP adapter. */
+      readonly package: string;
+      /** Exact reviewed adapter version. */
+      readonly version: string;
+      readonly args?: undefined;
+    }
+  | {
+      /** Installed CLI that implements ACP itself. */
+      readonly cli: string;
+      /** Arguments selecting the CLI's ACP stdio transport. */
+      readonly args: readonly string[];
+      readonly package?: undefined;
+      readonly version?: undefined;
+    }
+);
 
 /** The reviewed agent set. @public */
 export const acpAgentProfiles: readonly AcpAgentProfile[] = [
@@ -128,17 +143,38 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
     /* The copy codex-acp 1.7.0 bundles; an older PATH binary is refused. */
     minimumCliVersion: '0.148.0',
   },
+  {
+    id: 'grok',
+    displayName: 'Grok Build',
+    cli: 'grok',
+    args: ['--no-auto-update', 'agent', 'stdio'],
+    configEnv: ['GROK_HOME'],
+    /* Official @xai-official/grok release verified with an unauthenticated
+     * initialize; includes per-session pluginDirs for Tau's system skills. */
+    minimumCliVersion: '1.0.41',
+    loginCommand: 'grok login',
+  },
 ];
 
 /** A resolved adapter, ready to spawn. @public */
 export type AcpAdapter = AcpAgentProfile & {
-  /** Absolute entry module, run with this process's own `node`. */
-  readonly modulePath: string;
   /** Models the discovery probe read; empty when it failed (V5). */
   readonly models?: ReadonlyArray<{ readonly id: string; readonly name: string }> | undefined;
   /** The model select's `currentValue`: what a turn naming no model runs. */
   readonly defaultModel?: string | undefined;
-};
+} & (
+    | {
+        readonly package: string;
+        /** Absolute entry module, run with this process's own Node. */
+        readonly modulePath: string;
+      }
+    | {
+        /** Native ACP executable and arguments, inherited from its profile. */
+        readonly cli: string;
+        readonly args: readonly string[];
+        readonly modulePath?: undefined;
+      }
+  );
 
 /** Why one agent is not advertised. @public */
 export type AcpAdapterRefusal = {
@@ -224,7 +260,18 @@ export const resolveAcpAdapters = (options: {
     if (override) {
       /* An override replaces the adapter *and* its CLI probe: the fixture speaks
        * ACP on its own and has no vendor CLI to interrogate. */
-      agents.push({ ...pin, cli: undefined, package: `${pin.package} (override)`, modulePath: override });
+      agents.push({
+        ...pin,
+        args: undefined,
+        cli: undefined,
+        package: 'test-override',
+        version: '0.0.0',
+        modulePath: override,
+      });
+      continue;
+    }
+    if (pin.args !== undefined) {
+      agents.push(pin);
       continue;
     }
     try {
@@ -306,7 +353,7 @@ export const probeAcpAgents = async (
           return {
             id: adapter.id,
             code: 'CLI_TOO_OLD',
-            message: `The ${adapter.cli} CLI is ${installed}; ${adapter.package}@${adapter.version} needs ${adapter.minimumCliVersion} or newer.`,
+            message: `The ${adapter.cli} CLI is ${installed}; ${adapter.displayName} needs ${adapter.minimumCliVersion} or newer.`,
           };
         }
         return adapter;
@@ -320,8 +367,8 @@ export const probeAcpAgents = async (
     }),
   );
   return {
-    agents: probes.filter((probe): probe is AcpAdapter => 'modulePath' in probe),
-    refused: [...discovery.refused, ...probes.filter((probe): probe is AcpAdapterRefusal => !('modulePath' in probe))],
+    agents: probes.filter((probe): probe is AcpAdapter => !('code' in probe)),
+    refused: [...discovery.refused, ...probes.filter((probe): probe is AcpAdapterRefusal => 'code' in probe)],
   };
 };
 

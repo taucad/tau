@@ -803,15 +803,16 @@ const initializeResult = (): Record<string, unknown> => ({
   agentCapabilities: {
     loadSession: true,
     sessionCapabilities: {
-      resume: {},
+      ...(mode === 'grok-load' ? {} : { resume: {} }),
       close: {},
-      ...(mode === 'no-additional-directories' ? {} : { additionalDirectories: {} }),
+      ...(mode === 'no-additional-directories' || mode.startsWith('grok') ? {} : { additionalDirectories: {} }),
     },
     ...(mode === 'no-http' ? {} : { mcpCapabilities: { http: true } }),
     /* Both real pins advertise `image` too; the fixture withholds it unless the
      * `images` mode names it, so the refusal path has something to refuse. */
     promptCapabilities: { image: mode === 'images', embeddedContext: mode !== 'text-only' },
   },
+  ...(mode.startsWith('grok') ? { _meta: { 'x.ai/pluginDirs': true } } : {}),
   authMethods:
     mode === 'auth-required'
       ? [
@@ -824,7 +825,9 @@ const initializeResult = (): Record<string, unknown> => ({
             _meta: { 'terminal-auth': { command: 'codex', args: ['login'], label: 'Log in with Codex' } },
           },
         ]
-      : [],
+      : mode === 'grok-auth'
+        ? [{ id: 'grok.com', name: 'Grok' }]
+        : [],
 });
 
 /**
@@ -896,7 +899,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       return;
     }
     case 'session/new': {
-      if (mode === 'auth-required') {
+      if (mode === 'auth-required' || mode === 'grok-auth') {
         fail(-32_000, 'Authentication required');
         return;
       }

@@ -122,9 +122,10 @@ export type SpawnedAcpAdapter = {
 /**
  * Spawn one resolved adapter over stdio.
  *
- * Run with **this process's own `node`** rather than the package's shebang: the
+ * Run module adapters with **this process's own `node`** rather than the package's shebang: the
  * adapters ship plain ESM entry modules, and executing them through `node`
  * sidesteps exec bits, shebang resolution and Windows shims in one step.
+ * Native ACP agents run their installed CLI directly, without a shell.
  *
  * @param options - Adapter, working directory, and optional wire tap.
  * @returns The child, its ACP stream, and a stderr tail.
@@ -137,12 +138,25 @@ export const spawnAcpAdapter = (options: {
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
 }): SpawnedAcpAdapter => {
-  const child = spawn(process.execPath, [options.adapter.modulePath], {
-    cwd: options.cwd,
-    env: acpAdapterEnvironment(options.environment ?? process.env, options.adapter),
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const { adapter } = options;
+  const environment = acpAdapterEnvironment(options.environment ?? process.env, adapter);
+  if (adapter.modulePath === undefined) {
+    delete environment['ELECTRON_RUN_AS_NODE'];
+  }
+  const child = spawn(
+    adapter.modulePath === undefined ? adapter.cli : process.execPath,
+    adapter.modulePath === undefined ? [...adapter.args] : [adapter.modulePath],
+    {
+      cwd: options.cwd,
+      env: environment,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
   let stderr = '';
+  child.on('error', (error) => {
+    stderr = error.message;
+    child.stdout.destroy(error);
+  });
   child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
     stderr = (stderr + Buffer.from(chunk).toString('utf8')).slice(-stderrRetention);
   });

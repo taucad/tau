@@ -37,7 +37,7 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { acpCapabilityRenewalMargin, createAcpExternalAgentPort } from '#acp/run.js';
 import { openAcpSession, readSessionTextFile, writeSessionTextFile } from '#acp/session.js';
-import type { AcpPromptTurn } from '#acp/session.js';
+import type { AcpPromptTurn, OpenAcpSessionOptions } from '#acp/session.js';
 import { createProjectRevisions } from '#revisions.js';
 import type { TurnCheckout, TurnFinalizedEvent } from '#revisions.js';
 import { spawnAcpAdapter } from '#acp/spawn.js';
@@ -496,119 +496,138 @@ describe('the external agent run kind', () => {
     ).resolves.toBe(upgradedBody);
   }, 90_000);
 
-  it('projects a turn, confines it to a branch, calls Tau MCP, and never touches the API', async () => {
-    const { launcher, workspaceRoot, api } = await startHarness();
-    const chatId = 'chat-external-1';
-    const runId = 'run-external-1';
-    const peers: string[] = [];
-    // async-iife: bootstrap; the interval is cleared in this test's own `finally`.
-    const sample = async (): Promise<void> => {
-      const rows = await sampleTcpPeers();
-      peers.push(...rows.map((row) => row.peer));
-    };
-    const sampling = setInterval(() => {
-      void sample();
-    }, 100);
-
-    try {
-      const started = await launcher.execute({
-        type: 'start',
-        trigger: 'submit',
-        chatId,
-        runId,
-        message: { id: 'user-1', role: 'user', content: 'write the file and run mcp' },
-        config: {
-          agent: { kind: 'acp', id: 'codex' },
-          systemPrompt: '',
-          toolChoice: 'auto',
-        },
+  it.each(['codex', 'grok'])(
+    'projects a %s turn with Tau MCP and permissions, and never touches the API',
+    async (agentId) => {
+      const { launcher, workspaceRoot, api } = await startHarness({
+        agents:
+          agentId === 'codex'
+            ? [fakeAgent]
+            : [
+                {
+                  id: 'grok',
+                  displayName: 'Grok Build',
+                  cli: process.execPath,
+                  args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+                  configEnv: [],
+                  // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
+                  spawnEnv: { TAU_FAKE_AGENT_MODE: 'grok' },
+                },
+              ],
       });
-      expect(started).toMatchObject({ type: 'result', operation: 'start' });
-
-      // The approval is durable *before* anyone is attached (PH13 / OQ-X4).
-      const hasApproval = async (): Promise<boolean> => {
-        const requests = await launcher.pendingInterrupts(runId);
-        return requests.length > 0;
+      const chatId = 'chat-external-1';
+      const runId = 'run-external-1';
+      const peers: string[] = [];
+      // async-iife: bootstrap; the interval is cleared in this test's own `finally`.
+      const sample = async (): Promise<void> => {
+        const rows = await sampleTcpPeers();
+        peers.push(...rows.map((row) => row.peer));
       };
-      await until(hasApproval, 'the approval request', { dump: async () => readLog(workspaceRoot, chatId) });
-      const [pending] = await launcher.pendingInterrupts(runId);
-      await launcher.execute({
-        type: 'resolve-interrupt',
-        chatId,
-        runId,
-        interruptId: pending?.interruptId ?? '',
-        outcome: 'approved',
-      });
+      const sampling = setInterval(() => {
+        void sample();
+      }, 100);
 
-      await until(
-        async () => lifecycleOf(await readLog(workspaceRoot, chatId)).includes('completed'),
-        'the run to complete',
-        { dump: async () => readLog(workspaceRoot, chatId) },
-      );
-      const events = await readLog(workspaceRoot, chatId);
-      const messages = messagesOf(events);
-
-      /* Thin projection: current ACP session state, assistant text, then the
-       * agent's own tool call and result. The trailing assistant row carries no text at all — this turn
-       * ended on a tool call, so the vendor's own usage report has no open
-       * block to ride and gets a carrier of its own (V6). It joins the run's
-       * single UI message as a usage part, not as an empty bubble. */
-      expect(messages.map((message) => message.role)).toEqual([
-        'user',
-        'assistant',
-        'assistant',
-        'tool-input',
-        'tool-output',
-        'tool-input',
-        'tool-output',
-        'assistant',
-      ]);
-      expect(messages.at(-1)).toMatchObject({ content: [], metadata: { usage: { totalTokens: 1500 } } });
-      const external = messages.filter((message) => message.role === 'tool-input' || message.role === 'tool-output');
-      for (const message of external) {
-        expect(message.metadata?.tauInternal).toMatchObject({ origin: 'external', agentId: 'codex' });
-      }
-      expect(lifecycleOf(events)).toEqual(['admitted', 'running', 'paused', 'running', 'completed']);
-
-      /* V2: the agent works in the project's own tree, not a copy of it — so
-       * its file is *the* file, and no branch directory exists to hold one. */
-      await expect(readFile(join(workspaceRoot, 'hello.txt'), 'utf8')).resolves.toContain('write the file');
-      await expect(readdir(join(workspaceRoot, '.tau'))).resolves.not.toContain('workspaces');
-      /* The `cwd` fence is still the fence: it is the session's directory that
-       * bounds the client filesystem methods, and that is now the root. */
-      const contextMessage = messages.find((message) => textOfMessage(message).includes('"cwd"'));
-      expect(JSON.parse(contextMessage ? textOfMessage(contextMessage) : '{}')).toMatchObject({ cwd: workspaceRoot });
-
-      // GeoSpec evidence came back through the host-local MCP endpoint.
-      const evidence = messages.findLast(
-        (message) => message.role === 'tool-output' && message.toolName === 'test_model',
-      );
-      expect(JSON.stringify(evidence?.content)).toContain('is-a-cube');
-
-      // The API was absent from the data path: measured, not assumed.
-      expect(api.requests).toEqual([]);
-      await sample();
-      expect(peers.filter((peer) => peer.endsWith(`:${String(api.port)}`))).toEqual([]);
-
-      /* And the instrument works: a deliberate connection to the same stub is
-       * observed by the same sampler, so "no API peer" is a measurement rather
-       * than a sampler that never saw anything. */
-      const probe = connect(api.port, '127.0.0.1');
       try {
-        await new Promise<void>((resolve, reject) => {
-          probe.once('connect', resolve);
-          probe.once('error', reject);
+        const started = await launcher.execute({
+          type: 'start',
+          trigger: 'submit',
+          chatId,
+          runId,
+          message: { id: 'user-1', role: 'user', content: 'write the file and run mcp' },
+          config: {
+            agent: { kind: 'acp', id: agentId },
+            systemPrompt: '',
+            toolChoice: 'auto',
+          },
         });
-        const observed = await sampleTcpPeers();
-        const observedPeers = observed.map((row) => row.peer);
-        expect(observedPeers.filter((peer) => peer.endsWith(`:${String(api.port)}`))).not.toEqual([]);
+        expect(started).toMatchObject({ type: 'result', operation: 'start' });
+
+        // The approval is durable *before* anyone is attached (PH13 / OQ-X4).
+        const hasApproval = async (): Promise<boolean> => {
+          const requests = await launcher.pendingInterrupts(runId);
+          return requests.length > 0;
+        };
+        await until(hasApproval, 'the approval request', { dump: async () => readLog(workspaceRoot, chatId) });
+        const [pending] = await launcher.pendingInterrupts(runId);
+        await launcher.execute({
+          type: 'resolve-interrupt',
+          chatId,
+          runId,
+          interruptId: pending?.interruptId ?? '',
+          outcome: 'approved',
+        });
+
+        await until(
+          async () => lifecycleOf(await readLog(workspaceRoot, chatId)).includes('completed'),
+          'the run to complete',
+          { dump: async () => readLog(workspaceRoot, chatId) },
+        );
+        const events = await readLog(workspaceRoot, chatId);
+        const messages = messagesOf(events);
+
+        /* Thin projection: current ACP session state, assistant text, then the
+         * agent's own tool call and result. The trailing assistant row carries no text at all — this turn
+         * ended on a tool call, so the vendor's own usage report has no open
+         * block to ride and gets a carrier of its own (V6). It joins the run's
+         * single UI message as a usage part, not as an empty bubble. */
+        expect(messages.map((message) => message.role)).toEqual([
+          'user',
+          'assistant',
+          'assistant',
+          'tool-input',
+          'tool-output',
+          'tool-input',
+          'tool-output',
+          'assistant',
+        ]);
+        expect(messages.at(-1)).toMatchObject({ content: [], metadata: { usage: { totalTokens: 1500 } } });
+        const external = messages.filter((message) => message.role === 'tool-input' || message.role === 'tool-output');
+        for (const message of external) {
+          expect(message.metadata?.tauInternal).toMatchObject({ origin: 'external', agentId });
+        }
+        expect(lifecycleOf(events)).toEqual(['admitted', 'running', 'paused', 'running', 'completed']);
+
+        /* V2: the agent works in the project's own tree, not a copy of it — so
+         * its file is *the* file, and no branch directory exists to hold one. */
+        await expect(readFile(join(workspaceRoot, 'hello.txt'), 'utf8')).resolves.toContain('write the file');
+        await expect(readdir(join(workspaceRoot, '.tau'))).resolves.not.toContain('workspaces');
+        /* The `cwd` fence is still the fence: it is the session's directory that
+         * bounds the client filesystem methods, and that is now the root. */
+        const contextMessage = messages.find((message) => textOfMessage(message).includes('"cwd"'));
+        expect(JSON.parse(contextMessage ? textOfMessage(contextMessage) : '{}')).toMatchObject({ cwd: workspaceRoot });
+
+        // GeoSpec evidence came back through the host-local MCP endpoint.
+        const evidence = messages.findLast(
+          (message) => message.role === 'tool-output' && message.toolName === 'test_model',
+        );
+        expect(JSON.stringify(evidence?.content)).toContain('is-a-cube');
+
+        // The API was absent from the data path: measured, not assumed.
+        expect(api.requests).toEqual([]);
+        await sample();
+        expect(peers.filter((peer) => peer.endsWith(`:${String(api.port)}`))).toEqual([]);
+
+        /* And the instrument works: a deliberate connection to the same stub is
+         * observed by the same sampler, so "no API peer" is a measurement rather
+         * than a sampler that never saw anything. */
+        const probe = connect(api.port, '127.0.0.1');
+        try {
+          await new Promise<void>((resolve, reject) => {
+            probe.once('connect', resolve);
+            probe.once('error', reject);
+          });
+          const observed = await sampleTcpPeers();
+          const observedPeers = observed.map((row) => row.peer);
+          expect(observedPeers.filter((peer) => peer.endsWith(`:${String(api.port)}`))).not.toEqual([]);
+        } finally {
+          probe.destroy();
+        }
       } finally {
-        probe.destroy();
+        clearInterval(sampling);
       }
-    } finally {
-      clearInterval(sampling);
-    }
-  }, 90_000);
+    },
+    90_000,
+  );
 
   /* The decider's exact one-shot, session or durable choice crosses every Tau
    * boundary unchanged; the adapter, not Tau, owns persistence semantics. */
@@ -1548,6 +1567,95 @@ describe('the fixture agent', () => {
 });
 
 describe('one ACP session per chat', () => {
+  it.each(['new', 'resume', 'load'] as const)(
+    'passes Grok skill plugins and keeps Tau revision authority on %s',
+    async (operation) => {
+      const cwd = await mkdtemp(join(tmpdir(), 'tau-grok-session-'));
+      roots.push(cwd);
+      const frames: AcpWireFrame[] = [];
+      const adapter: AcpAdapter = {
+        id: 'grok',
+        displayName: 'Grok Build',
+        cli: process.execPath,
+        args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+        configEnv: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
+        spawnEnv: { TAU_FAKE_AGENT_MODE: operation === 'load' ? 'grok-load' : 'grok' },
+      };
+      const mcpServers: OpenAcpSessionOptions['mcpServers'] = [
+        { type: 'http', name: 'tau', url: 'http://127.0.0.1:1/mcp', headers: [] },
+      ];
+      const session = await openAcpSession({
+        adapter,
+        cwd,
+        createId: randomUUID,
+        additionalDirectories: [cwd],
+        mcpServers,
+        ...(operation === 'new' ? {} : { acpSessionId: 'previous-session' }),
+        onFrame: (frame) => frames.push(frame),
+      });
+      await session.close();
+      const request = frames.find(
+        (frame) => frame.direction === 'client->agent' && frame.frame.includes(`"session/${operation}"`),
+      );
+      expect(JSON.parse(request?.frame ?? '{}')).toMatchObject({
+        params: { cwd, mcpServers, _meta: { pluginDirs: [join(cwd, '.agents')], 'x.ai/restore_code': false } },
+      });
+      expect(request?.frame).not.toContain('additionalDirectories');
+      expect(sent(frames, 'authenticate')).toBe(0);
+    },
+    30_000,
+  );
+
+  it('surfaces Grok login without starting an interactive authentication flow', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-grok-login-'));
+    roots.push(cwd);
+    const frames: AcpWireFrame[] = [];
+    await expect(
+      openAcpSession({
+        adapter: {
+          ...fakeAgent,
+          id: 'grok',
+          displayName: 'Grok Build',
+          loginCommand: 'grok login',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
+          spawnEnv: { TAU_FAKE_AGENT_MODE: 'grok-auth' },
+        },
+        cwd,
+        createId: randomUUID,
+        onFrame: (frame) => frames.push(frame),
+      }),
+    ).rejects.toMatchObject({
+      code: 'EXTERNAL_AGENT_AUTH_REQUIRED',
+      login: {
+        agentId: 'grok',
+        authMethods: [
+          { id: 'grok.com', name: 'Grok' },
+          { id: 'cli-login', name: 'Sign in to Grok Build', terminalCommand: 'grok login' },
+        ],
+      },
+    });
+    expect(sent(frames, 'authenticate')).toBe(0);
+  }, 30_000);
+
+  it('reports a missing native executable without crashing the host', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-grok-missing-'));
+    roots.push(cwd);
+    await expect(
+      openAcpSession({
+        adapter: {
+          id: 'grok',
+          displayName: 'Grok Build',
+          cli: join(cwd, 'missing-grok'),
+          args: ['agent', 'stdio'],
+          configEnv: [],
+        },
+        cwd,
+        createId: randomUUID,
+      }),
+    ).rejects.toThrow();
+  }, 30_000);
+
   it('refuses required HTTP MCP and skill-directory capabilities before opening a session', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-capabilities-'));
     roots.push(cwd);

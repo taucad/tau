@@ -25,7 +25,7 @@ import { copyRuntimeClosure } from '../scripts/runtime-closure.mjs';
 
 const appRoot = join(import.meta.dirname, '..');
 const require = createRequire(join(appRoot, 'package.json'));
-const adapters = acpAgentProfiles.map((profile) => profile.package);
+const adapters = acpAgentProfiles.flatMap((profile) => (profile.package === undefined ? [] : [profile.package]));
 
 /**
  * The entry module the adapter's `bin` entry names, inside a staged tree.

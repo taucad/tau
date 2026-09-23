@@ -63,22 +63,24 @@ describe('acpAdapterEnvironment', () => {
         HOME: '/home/tau',
         XDG_CONFIG_HOME: '/home/tau/.config',
         CODEX_HOME: '/home/tau/.codex',
+        GROK_HOME: '/home/tau/.grok',
         CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/socket',
         ANTHROPIC_API_KEY: 'sk-should-never-travel',
         OPENAI_API_KEY: 'sk-should-never-travel',
+        XAI_API_KEY: 'sk-should-never-travel',
         TAU_HOST_AGENT_TOKEN: 'admission-secret',
         NODE_OPTIONS: '--import=./attacker.mjs',
         AI_AGENT: 'yes',
         BAGGAGE: 'trace',
       },
-      { configEnv: ['CODEX_HOME'] },
+      { configEnv: ['GROK_HOME'] },
     );
 
     expect(environment).toEqual({
       PATH: '/usr/bin',
       HOME: '/home/tau',
       XDG_CONFIG_HOME: '/home/tau/.config',
-      CODEX_HOME: '/home/tau/.codex',
+      GROK_HOME: '/home/tau/.grok',
     });
   });
 
@@ -119,56 +121,69 @@ describe('acpAdapterEnvironment', () => {
 });
 
 describe('spawnAcpAdapter', () => {
-  it('drives a full ACP turn in the branch directory with a scrubbed environment', async () => {
-    const cwd = await branch();
-    const frames: AcpWireFrame[] = [];
-    const adapter = spawnAcpAdapter({
-      adapter: fakeAgent,
-      cwd,
-      environment: { ...process.env, ANTHROPIC_API_KEY: 'sk-should-never-travel', TAU_HOST_AGENT_TOKEN: 'secret' },
-      onFrame: (frame) => frames.push(frame),
-    });
-    spawned.push(adapter);
+  it.each(['module', 'native'] as const)(
+    'drives a full ACP turn through a %s with a scrubbed environment',
+    async (transport) => {
+      const cwd = await branch();
+      const frames: AcpWireFrame[] = [];
+      const adapter = spawnAcpAdapter({
+        adapter:
+          transport === 'module'
+            ? fakeAgent
+            : {
+                id: 'grok',
+                displayName: 'Grok Build',
+                cli: process.execPath,
+                args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+                configEnv: [],
+              },
+        cwd,
+        environment: { ...process.env, ANTHROPIC_API_KEY: 'sk-should-never-travel', TAU_HOST_AGENT_TOKEN: 'secret' },
+        onFrame: (frame) => frames.push(frame),
+      });
+      spawned.push(adapter);
 
-    const chunks: string[] = [];
-    const handler: Client = {
-      sessionUpdate: (params) => {
-        const { update } = params;
-        if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
-          chunks.push(update.content.text);
-        }
-      },
-      requestPermission: () => ({ outcome: { outcome: 'selected', optionId: 'allow' } }),
-    };
-    /* oxlint-disable-next-line typescript/no-deprecated -- the long-lived
-     * connection object is the shape SP-4 proved and the shape an always-on run
-     * needs; the replacement scopes the connection to one callback. */
-    const connection = new ClientSideConnection(() => handler, adapter.stream);
+      const chunks: string[] = [];
+      const handler: Client = {
+        sessionUpdate: (params) => {
+          const { update } = params;
+          if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
+            chunks.push(update.content.text);
+          }
+        },
+        requestPermission: () => ({ outcome: { outcome: 'selected', optionId: 'allow' } }),
+      };
+      /* oxlint-disable-next-line typescript/no-deprecated -- the long-lived
+       * connection object is the shape SP-4 proved and the shape an always-on run
+       * needs; the replacement scopes the connection to one callback. */
+      const connection = new ClientSideConnection(() => handler, adapter.stream);
 
-    await connection.initialize({
-      protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-    });
-    const session = await connection.newSession({ cwd, mcpServers: [] });
-    const result = await connection.prompt({
-      sessionId: session.sessionId,
-      prompt: [{ type: 'text', text: 'write the file' }],
-    });
+      await connection.initialize({
+        protocolVersion: 1,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      });
+      const session = await connection.newSession({ cwd, mcpServers: [] });
+      const result = await connection.prompt({
+        sessionId: session.sessionId,
+        prompt: [{ type: 'text', text: 'write the file' }],
+      });
 
-    expect(result.stopReason).toBe('end_turn');
-    // Cwd confinement: the agent's own write landed in the branch, not the workspace.
-    await expect(readFile(join(cwd, 'hello.txt'), 'utf8')).resolves.toBe('write the file');
+      expect(result.stopReason).toBe('end_turn');
+      // Cwd confinement: the agent's own write landed in the branch, not the workspace.
+      await expect(readFile(join(cwd, 'hello.txt'), 'utf8')).resolves.toBe('write the file');
 
-    // Env scrub: the fake echoes the variable names it was actually handed.
-    const echoed = JSON.parse(chunks[0] ?? '{}') as { cwd?: string; env?: readonly string[] };
-    expect(echoed.cwd).toBe(cwd);
-    expect(echoed.env).not.toContain('ANTHROPIC_API_KEY');
-    expect(echoed.env).not.toContain('TAU_HOST_AGENT_TOKEN');
-    expect(echoed.env).toContain('PATH');
+      // Env scrub: the fake echoes the variable names it was actually handed.
+      const echoed = JSON.parse(chunks[0] ?? '{}') as { cwd?: string; env?: readonly string[] };
+      expect(echoed.cwd).toBe(cwd);
+      expect(echoed.env).not.toContain('ANTHROPIC_API_KEY');
+      expect(echoed.env).not.toContain('TAU_HOST_AGENT_TOKEN');
+      expect(echoed.env).toContain('PATH');
 
-    // Wire log: both directions were observed, and no credential is in them.
-    expect(frames.some((frame) => frame.direction === 'client->agent')).toBe(true);
-    expect(frames.some((frame) => frame.direction === 'agent->client')).toBe(true);
-    expect(frames.some((frame) => frame.frame.includes('sk-should-never-travel'))).toBe(false);
-  }, 30_000);
+      // Wire log: both directions were observed, and no credential is in them.
+      expect(frames.some((frame) => frame.direction === 'client->agent')).toBe(true);
+      expect(frames.some((frame) => frame.direction === 'agent->client')).toBe(true);
+      expect(frames.some((frame) => frame.frame.includes('sk-should-never-travel'))).toBe(false);
+    },
+    30_000,
+  );
 });

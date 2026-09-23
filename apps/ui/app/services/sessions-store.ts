@@ -19,7 +19,7 @@
 import { Topic } from '@taucad/events';
 import { randomUuid } from '@taucad/utils/id';
 import { createActor, createCallbackLogic } from 'xstate';
-import type { ActorRefFrom, EventObject } from 'xstate';
+import type { Actor, ActorRefFrom, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineContext, SessionsProjectStatus } from '#machines/sessions.machine.js';
@@ -283,7 +283,7 @@ const projectSession = projectSessionMachine.provide({
  * Desktop is bounded by memory rather than a count (A35): its budget is the
  * absence of one, and the idle window still applies.
  */
-export const sessionsActor: ActorRefFrom<typeof sessionsMachine> = createActor(
+export const sessionsActor: Actor<typeof sessionsMachine> = createActor(
   sessionsMachine.provide({ actors: { projectSession } }),
   {
     input: {

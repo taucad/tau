@@ -21,6 +21,7 @@ import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { selectCadEntryIssues, selectCadFailureIssues } from '#machines/cad.machine.js';
+import { actorIdOf } from '#lib/xstate.lib.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -448,7 +449,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
   // already changed to the new project. Check that the actor ID matches the
   // expected pattern "cad-{projectId}-{entryPath}" before reading its state.
   const cadRef = useCad();
-  const isCadActorStale = cadRef ? !cadRef.id.includes(projectId) : true;
+  const isCadActorStale = cadRef ? !actorIdOf(cadRef).includes(projectId) : true;
 
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
   const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);

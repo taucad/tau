@@ -16,7 +16,7 @@
 
 import { useEffect, useState } from 'react';
 import { createActor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { Actor } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import type { AttachmentStore } from '#db/attachment-store.js';
@@ -27,8 +27,8 @@ import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
 import type { Attachment } from '#utils/attachment.utils.js';
 
-/** A running record actor, as every consumer of this seam holds it. */
-export type ComposerRecordRef = ActorRefFrom<typeof composerRecordMachine>;
+/** A running record actor, as every consumer of this seam holds it; its owners start and stop it. */
+export type ComposerRecordRef = Actor<typeof composerRecordMachine>;
 
 type AttachmentStoredEvent = { type: 'attachmentStored'; attachment: Attachment };
 type StoreAttachmentInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string };

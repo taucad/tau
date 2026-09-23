@@ -24,6 +24,7 @@ import { useProject } from '#hooks/use-project.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { GeometryUnitTiming, GeometryUnitSummary } from '#routes/w.$workspace.$project/chat-kernel-timing.js';
+import { actorSessionIdOf } from '#lib/xstate.lib.js';
 import {
   usePaneviewPersistence,
   getInitialPanelOptions,
@@ -45,7 +46,7 @@ function KernelPanelBody({ params }: { readonly params: KernelPanelParams }): Re
       data-slot='telemetry-unit-surface'
       className='h-full overflow-hidden rounded-b-xl border border-border bg-card'
     >
-      <GeometryUnitTiming key={params.cadRef.sessionId} cadRef={params.cadRef} query={params.query} />
+      <GeometryUnitTiming key={actorSessionIdOf(params.cadRef)} cadRef={params.cadRef} query={params.query} />
     </div>
   );
 }

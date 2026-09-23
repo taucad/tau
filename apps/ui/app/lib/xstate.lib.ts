@@ -228,21 +228,32 @@ export type MachineActors<TMachine extends AnyStateMachine> =
     : never;
 /* oxlint-enable typescript/no-explicit-any */
 
+const runtimeString = (ref: Subscribable<unknown>, field: 'id' | 'sessionId'): string => {
+  const value: unknown = Reflect.get(ref, field);
+  if (typeof value !== 'string') {
+    throw new TypeError(`Expected an actor reference with a ${field}`);
+  }
+  return value;
+};
+
 /**
  * The id an actor was spawned or invoked under.
  *
- * XState v6 moved `id` from `ActorRef` to the runtime half of an actor
- * (`ActorRuntime`), so `ActorRefFrom<…>`, `AnyActorRef` and the `self` a
- * state-level transition receives no longer declare it, though every running
- * actor carries one.
+ * XState v6 moved `id` and `sessionId` from `ActorRef` to the runtime half of
+ * an actor (`ActorRuntime`), so `ActorRefFrom<…>`, `AnyActorRef` and the
+ * `self` a state-level transition receives no longer declare them, though
+ * every running actor carries both.
  *
  * @param ref - A spawned, invoked or self actor reference.
  * @returns The actor's id relative to its parent.
  */
-export const actorIdOf = (ref: Subscribable<unknown>): string => {
-  const id: unknown = Reflect.get(ref, 'id');
-  if (typeof id !== 'string') {
-    throw new TypeError('Expected an actor reference with an id');
-  }
-  return id;
-};
+export const actorIdOf = (ref: Subscribable<unknown>): string => runtimeString(ref, 'id');
+
+/**
+ * The globally unique id of one actor instance: a replacement actor under the
+ * same id gets a new one, which is what makes it a render key.
+ *
+ * @param ref - A spawned, invoked or created actor reference.
+ * @returns The actor's session id.
+ */
+export const actorSessionIdOf = (ref: Subscribable<unknown>): string => runtimeString(ref, 'sessionId');

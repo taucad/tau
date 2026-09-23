@@ -7,6 +7,7 @@ import type { Geometry } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { MachineActors } from '#lib/xstate.lib.js';
 import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -251,7 +252,7 @@ function CadPreviewPipeline({
           }
         }),
         /* oxlint-enable react/refs -- End XState ActorRef boundary. */
-      },
+      } satisfies Partial<MachineActors<typeof cadPreviewMachine>>,
     }),
     {
       input: {

@@ -199,12 +199,7 @@ const record = (context: ResolutionMachineContext): Partial<ResolutionMachineCon
   pending: undefined,
 });
 
-/**
- * Headless per-file resolution of one conflicted revision.
- *
- * @public
- */
-export const resolutionMachine = setup({
+const resolutionMachineDefinition = setup({
   schemas: {
     context: types<ResolutionMachineContext>(),
     events: eventSchemas<ResolutionMachineEvent>(),
@@ -473,6 +468,23 @@ export const resolutionMachine = setup({
     abandoned: { type: 'final' },
   },
 });
+
+type ResolutionMachineDefinition = typeof resolutionMachineDefinition;
+
+/**
+ * The type of {@link resolutionMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface ResolutionMachine extends ResolutionMachineDefinition {}
+
+/**
+ * Headless per-file resolution of one conflicted revision.
+ *
+ * @public
+ */
+export const resolutionMachine: ResolutionMachine = resolutionMachineDefinition;
 
 /**
  * Selects the facet the *Needs resolution* rows render.

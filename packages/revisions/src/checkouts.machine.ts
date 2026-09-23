@@ -209,12 +209,7 @@ const completeRetirement = (
   return { pendingRetirements: context.pendingRetirements.slice(1) };
 };
 
-/**
- * Headless checkout registry for one project.
- *
- * @public
- */
-export const checkoutsMachine = setup({
+const checkoutsMachineDefinition = setup({
   schemas: {
     context: types<CheckoutsMachineContext>(),
     events: eventSchemas<CheckoutsMachineEvent>(),
@@ -485,6 +480,23 @@ export const checkoutsMachine = setup({
     },
   },
 });
+
+type CheckoutsMachineDefinition = typeof checkoutsMachineDefinition;
+
+/**
+ * The type of {@link checkoutsMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface CheckoutsMachine extends CheckoutsMachineDefinition {}
+
+/**
+ * Headless checkout registry for one project.
+ *
+ * @public
+ */
+export const checkoutsMachine: CheckoutsMachine = checkoutsMachineDefinition;
 
 /**
  * Selects every checkout the registry knows, in record order.

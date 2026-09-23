@@ -291,12 +291,7 @@ const settledOutcomeTarget = (context: TurnMachineContext) => {
   }
 };
 
-/**
- * Headless lifecycle of one turn.
- *
- * @public
- */
-export const turnMachine = setup({
+const turnMachineDefinition = setup({
   schemas: {
     context: types<TurnMachineContext>(),
     events: eventSchemas<TurnMachineEvent>(),
@@ -657,6 +652,23 @@ export const turnMachine = setup({
     failed: { type: 'final', entry: ({ context }, enq) => announceRelease(context, enq) },
   },
 });
+
+type TurnMachineDefinition = typeof turnMachineDefinition;
+
+/**
+ * The type of {@link turnMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface TurnMachine extends TurnMachineDefinition {}
+
+/**
+ * Headless lifecycle of one turn.
+ *
+ * @public
+ */
+export const turnMachine: TurnMachine = turnMachineDefinition;
 
 /**
  * Selects whether this turn still holds its checkout.

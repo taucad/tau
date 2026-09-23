@@ -626,12 +626,7 @@ const bufferAdmission = (
   return { pendingAdmissions: [...context.pendingAdmissions, admission] };
 };
 
-/**
- * Headless root of one project's revision actor tree.
- *
- * @public
- */
-export const projectRevisionsMachine = setup({
+const projectRevisionsMachineDefinition = setup({
   schemas: {
     context: types<ProjectRevisionsMachineContext>(),
     events: eventSchemas<ProjectRevisionsMachineEvent>(),
@@ -1349,6 +1344,23 @@ export const projectRevisionsMachine = setup({
     },
   },
 });
+
+type ProjectRevisionsMachineDefinition = typeof projectRevisionsMachineDefinition;
+
+/**
+ * The type of {@link projectRevisionsMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface ProjectRevisionsMachine extends ProjectRevisionsMachineDefinition {}
+
+/**
+ * Headless root of one project's revision actor tree.
+ *
+ * @public
+ */
+export const projectRevisionsMachine: ProjectRevisionsMachine = projectRevisionsMachineDefinition;
 
 /**
  * Selects the coalesced status W3d publishes for this project.

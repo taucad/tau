@@ -723,7 +723,7 @@ const pullFailed = (context: SyncMachineContext, enq: SyncEnqueue, error: unknow
  * ```
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one state chart; splitting it would hide the transitions it exists to show.
-export const syncMachine = setup({
+const syncMachineDefinition = setup({
   schemas: {
     context: types<SyncMachineContext>(),
     events: eventSchemas<SyncMachineEvent>(),
@@ -1337,6 +1337,18 @@ export const syncMachine = setup({
     },
   },
 });
+
+type SyncMachineDefinition = typeof syncMachineDefinition;
+
+/**
+ * The type of {@link syncMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface SyncMachine extends SyncMachineDefinition {}
+
+export const syncMachine: SyncMachine = syncMachineDefinition;
 
 /** The actor set `syncMachine.provide` needs. @public */
 export type SyncActors = MachineActors<typeof syncMachine>;

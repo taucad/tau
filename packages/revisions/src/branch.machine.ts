@@ -298,12 +298,7 @@ const failFromError = (error: unknown) => ({
 
 const registryTimeout = { target: '#branch.failed', context: failWith('This project did not answer in time.') };
 
-/**
- * Headless branch verbs for one project.
- *
- * @public
- */
-export const branchMachine = setup({
+const branchMachineDefinition = setup({
   schemas: {
     context: types<BranchMachineContext>(),
     events: eventSchemas<BranchMachineEvent>(),
@@ -733,6 +728,23 @@ export const branchMachine = setup({
     },
   },
 });
+
+type BranchMachineDefinition = typeof branchMachineDefinition;
+
+/**
+ * The type of {@link branchMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+export interface BranchMachine extends BranchMachineDefinition {}
+
+/**
+ * Headless branch verbs for one project.
+ *
+ * @public
+ */
+export const branchMachine: BranchMachine = branchMachineDefinition;
 
 /**
  * Selects whether a branch verb is waiting for the user to confirm it.

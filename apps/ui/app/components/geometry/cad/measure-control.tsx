@@ -16,12 +16,15 @@ export function MeasureControl(): React.JSX.Element {
     });
   };
 
+  const label = `${isMeasureActive ? 'Disable' : 'Enable'} measuring tool`;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           variant='overlay'
           size='icon'
+          aria-label={label}
           data-active={isMeasureActive ? 'true' : 'false'}
           className={cn('data-[active=true]:bg-accent data-[active=true]:text-primary', is2dGeometry && 'hidden')}
           onClick={handleClick}
@@ -29,7 +32,7 @@ export function MeasureControl(): React.JSX.Element {
           <Ruler className='size-4 -rotate-45' />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{isMeasureActive ? 'Disable' : 'Enable'} measuring tool</TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }

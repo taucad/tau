@@ -10,7 +10,7 @@ export type MeasureInputContext = {
 };
 
 export type MeasureInputEvent =
-  | { type: 'pointerDown'; button: number; hasTarget: boolean; cameraInteracting: boolean }
+  | { type: 'pointerDown'; button: number; hasTarget: boolean; cameraMoving: boolean }
   | {
       type: 'pointerUp';
       button: number;
@@ -19,7 +19,7 @@ export type MeasureInputEvent =
       isZeroLength: boolean;
       hasActiveSnapTarget: boolean;
     }
-  | { type: 'cameraInteractionStart' }
+  | { type: 'cameraMoved' }
   | { type: 'cancel' }
   | { type: 'clearResult' };
 
@@ -47,11 +47,11 @@ export const measureInputMachine = setup({
       return {
         isPointerDown: true,
         pointerDownHadTarget: event.hasTarget,
-        discardGesture: event.cameraInteracting,
+        discardGesture: event.cameraMoving,
         result: undefined,
       };
     }),
-    markCameraInteraction: assign(({ context }) =>
+    markCameraMovement: assign(({ context }) =>
       context.isPointerDown
         ? {
             discardGesture: true,
@@ -104,7 +104,7 @@ export const measureInputMachine = setup({
   on: {
     pointerDown: { actions: 'recordPointerDown' },
     pointerUp: { actions: 'resolvePointerUp' },
-    cameraInteractionStart: { actions: 'markCameraInteraction' },
+    cameraMoved: { actions: 'markCameraMovement' },
     cancel: { actions: 'cancelInput' },
     clearResult: { actions: 'clearResult' },
   },

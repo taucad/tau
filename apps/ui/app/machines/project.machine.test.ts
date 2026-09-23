@@ -6,7 +6,7 @@ import type { ProjectManifest } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { actorIdOf, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 vi.mock('#constants/browser.constants.js', () => ({
@@ -49,23 +49,24 @@ function createTestActor(options?: {
   const loadResult = options?.loadResult ?? stubProject;
   const loadFunction = typeof loadResult === 'function' ? loadResult : async () => loadResult;
 
+  const loadProjectActor = fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async () => {
+    const project = await loadFunction();
+    return {
+      type: 'projectRetrieved',
+      project,
+    };
+  });
+  const { writeResult } = options ?? {};
   const machine = projectMachine.provide({
-    actors: {
-      loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async () => {
-        const project = await loadFunction();
-        return {
-          type: 'projectRetrieved',
-          project,
-        };
-      }),
-      ...(options?.writeResult
-        ? {
+    actors:
+      writeResult === undefined
+        ? { loadProjectActor }
+        : {
+            loadProjectActor,
             writeProjectActor: fromSafeAsync(async () => {
-              await options.writeResult!();
+              await writeResult();
             }),
-          }
-        : {}),
-    },
+          },
     guards: {
       isNotBrowser: () => false,
       shouldAutoLoad: () => options?.shouldAutoLoad ?? false,
@@ -588,7 +589,7 @@ describe('projectMachine', () => {
 
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: unit!.id,
+        actorId: actorIdOf(unit!),
         available: true,
       });
 
@@ -607,12 +608,12 @@ describe('projectMachine', () => {
 
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: mainUnit!.id,
+        actorId: actorIdOf(mainUnit!),
         available: false,
       });
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: helperUnit!.id,
+        actorId: actorIdOf(helperUnit!),
         available: true,
       });
 
@@ -628,12 +629,12 @@ describe('projectMachine', () => {
 
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: unit!.id,
+        actorId: actorIdOf(unit!),
         available: true,
       });
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: unit!.id,
+        actorId: actorIdOf(unit!),
         available: false,
       });
 
@@ -661,7 +662,7 @@ describe('projectMachine', () => {
       expect(unit).toBeDefined();
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: unit!.id,
+        actorId: actorIdOf(unit!),
         available: true,
       });
 
@@ -678,7 +679,7 @@ describe('projectMachine', () => {
       expect(unit).toBeDefined();
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: unit!.id,
+        actorId: actorIdOf(unit!),
         available: true,
       });
 
@@ -711,7 +712,7 @@ describe('projectMachine', () => {
       expect(unit).toBeDefined();
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: unit!.id,
+        actorId: actorIdOf(unit!),
         available: true,
       });
 
@@ -728,7 +729,7 @@ describe('projectMachine', () => {
       expect(unit).toBeDefined();
       actor.send({
         type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: unit!.id,
+        actorId: actorIdOf(unit!),
         available: true,
       });
 

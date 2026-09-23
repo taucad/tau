@@ -71,7 +71,7 @@ describe('fromSafeAsync', () => {
           working: {
             invoke: {
               src: 'work',
-              onDone: 'finished',
+              onDone: { target: 'finished' },
               onError: {
                 target: 'failed',
                 context: ({ event }) => ({
@@ -120,7 +120,7 @@ describe('fromSafeAsync', () => {
             invoke: {
               src: 'work',
               input: () => ({ multiplier: 5 }),
-              onDone: 'finished',
+              onDone: { target: 'finished' },
             },
             on: {
               dataReady: {
@@ -168,8 +168,8 @@ describe('fromSafeAsync', () => {
         initial: 'working',
         states: {
           working: {
-            invoke: { src: 'work', onDone: 'finished' },
-            on: { cancel: 'cancelled' },
+            invoke: { src: 'work', onDone: { target: 'finished' } },
+            on: { cancel: { target: 'cancelled' } },
           },
           finished: { type: 'final' },
           cancelled: { type: 'final' },
@@ -220,7 +220,7 @@ describe('fromSafeAsync', () => {
         initial: 'working',
         states: {
           working: {
-            invoke: { src: 'work', onDone: 'finished' },
+            invoke: { src: 'work', onDone: { target: 'finished' } },
             on: {
               tagged: { context: ({ context, event }) => ({ tags: [...context.tags, event.invocation] }) },
             },
@@ -290,7 +290,7 @@ describe('fromSafeAsync', () => {
         initial: 'working',
         states: {
           working: {
-            invoke: { src: 'work', onDone: 'finished' },
+            invoke: { src: 'work', onDone: { target: 'finished' } },
           },
           finished: { type: 'final' },
         },
@@ -332,13 +332,13 @@ describe('fromSafeAsync', () => {
           working: {
             invoke: {
               src: 'work',
-              onDone: 'finished',
+              onDone: { target: 'finished' },
               onError: {
                 target: 'failed',
                 context: { error: true },
               },
             },
-            on: { cancel: 'cancelled' },
+            on: { cancel: { target: 'cancelled' } },
           },
           finished: { type: 'final' },
           cancelled: { type: 'final' },

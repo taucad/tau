@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createActor, enqueueActions, createAsyncLogic, setup } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import { createActor, createAsyncLogic, setup, types } from 'xstate';
+import type { Actor, ActorRefFrom } from 'xstate';
 import {
   acquireViewCameraSession,
   getGraphicsCameraState,
   hasGraphicsCameraRig,
 } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import { eventSchemas } from '#lib/xstate.lib.js';
 
-const actors: Array<ActorRefFrom<typeof graphicsMachine>> = [];
+const actors: Array<Actor<typeof graphicsMachine>> = [];
 
-const createGraphicsActor = (): ActorRefFrom<typeof graphicsMachine> => {
+const createGraphicsActor = (): Actor<typeof graphicsMachine> => {
   const actor = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
     {
@@ -110,21 +111,19 @@ describe('ViewCameraSession ownership', () => {
    * pinned on the path production takes. */
   it('should release the session of a graphics actor stopped as a spawned child', () => {
     const parentMachine = setup({
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState's `types` slot is a phantom value; there is nothing to annotate.
-      types: {} as {
-        context: { child: ActorRefFrom<typeof graphicsMachine> };
-        events: { type: 'destroyView' };
+      schemas: {
+        context: types<{ child: ActorRefFrom<typeof graphicsMachine> }>(),
+        events: eventSchemas<{ type: 'destroyView' }>(),
       },
       actors: {
         graphics: graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       },
     }).createMachine({
-      context: ({ spawn }) => ({ child: spawn('graphics', { id: 'graphics-view-child', input: {} }) }),
+      context: ({ spawn, actors }) => ({ child: spawn(actors.graphics, { id: 'graphics-view-child', input: {} }) }),
       on: {
-        destroyView: {
-          actions: enqueueActions(({ enqueue, context }) => {
-            enqueue.stopChild(context.child);
-          }),
+        destroyView: ({ context }, enq) => {
+          enq.stop(context.child);
+          return {};
         },
       },
     });

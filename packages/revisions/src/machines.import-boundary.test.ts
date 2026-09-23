@@ -40,6 +40,14 @@ const importsPackageContract = (specifier: string): boolean =>
  */
 const importsRefusalMarkers = (specifier: string): boolean => specifier === '#refusal-markers.js';
 
+/*
+ * The machines' shared `schemas` helpers. `machine-schemas.ts` imports nothing
+ * but XState's types: `eventSchemas()` returns an empty, type-only map, so a
+ * machine that calls it is no more coupled to a host than one that calls
+ * `types()` from XState itself. The row below pins the premise.
+ */
+const importsMachineSchemas = (specifier: string): boolean => specifier === '#machine-schemas.js';
+
 describe('revision machine import boundary', () => {
   it('finds every machine subpath module', () => {
     expect(
@@ -88,6 +96,7 @@ describe('revision machine import boundary', () => {
           !importsXstate(entry.specifier) &&
           !importsSiblingMachine(entry.specifier) &&
           !importsRefusalMarkers(entry.specifier) &&
+          !importsMachineSchemas(entry.specifier) &&
           !(importsPackageContract(entry.specifier) && entry.typeOnly),
       );
 
@@ -98,6 +107,13 @@ describe('revision machine import boundary', () => {
     const leaf = readFileSync(join(sourceDirectory, 'refusal-markers.ts'), 'utf8');
 
     expect(leaf).not.toMatch(/^import\s/mu);
+  });
+
+  it('keeps the schema helpers to type-only XState imports, which is why they are allowed', () => {
+    const helpers = readFileSync(join(sourceDirectory, 'machine-schemas.ts'), 'utf8');
+    const imports = [...helpers.matchAll(/^import\s+(type\s+)?[^;]*?from\s+'([^']+)';$/gmu)];
+
+    expect(imports.map((match) => [match[1] !== undefined, match[2]])).toEqual([[true, 'xstate']]);
   });
 
   it('imports nothing from the filesystem, git, node builtins, React or the DOM', () => {

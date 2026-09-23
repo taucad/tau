@@ -6,7 +6,7 @@ import type { CheckoutCutTrigger, CheckoutMachineEmitted, CheckoutMachineInput }
 import type { RevisionTrigger } from '#revision-authority.js';
 
 expectTypeOf(checkoutMachine).toExtend<AnyStateMachine>();
-expectTypeOf<InputFrom<typeof checkoutMachine>>().toEqualTypeOf<CheckoutMachineInput>();
+expectTypeOf<NonNullable<InputFrom<typeof checkoutMachine>>>().toEqualTypeOf<CheckoutMachineInput>();
 expectTypeOf<ActorRefFrom<typeof checkoutMachine>['send']>().toBeFunction();
 expectTypeOf<CheckoutMachineEmitted['type']>().toExtend<string>();
 

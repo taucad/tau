@@ -10,6 +10,14 @@ import { createApiDevViteNodeLifecycle } from '#api-dev-vite-node-lifecycle.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const tunnelHost = (value: string | undefined): string[] | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return [URL.canParse(trimmed) ? new URL(trimmed).hostname : trimmed];
+};
+
 export default defineConfig(({ command, mode }) => {
   // Nx loads apps/api/.env before Vite evaluates this config. Force Vite's
   // documented production semantics so import.meta.env.DEV branches compile
@@ -54,9 +62,10 @@ export default defineConfig(({ command, mode }) => {
       cors: false,
       /* A webhook tunnel (ngrok) arrives with its own Host, which Vite's host
        * check rejects with a 403 before Nest sees the delivery. Opt in per
-       * shell — TAU_DEV_TUNNEL_HOST=<host> — so the default dev posture keeps
-       * the DNS-rebinding guard. */
-      allowedHosts: process.env['TAU_DEV_TUNNEL_HOST'] ? [process.env['TAU_DEV_TUNNEL_HOST']] : undefined,
+       * shell — TAU_DEV_TUNNEL_HOST=<host or URL> — so the default dev posture
+       * keeps the DNS-rebinding guard. ngrok prints the tunnel as a URL, and
+       * Vite compares bare hostnames, so a pasted URL is reduced to its host. */
+      allowedHosts: tunnelHost(process.env['TAU_DEV_TUNNEL_HOST']),
     },
     plugins: [
       oxcRuntimeEsm(),

@@ -1,55 +1,60 @@
 /**
  * Shared XState test utilities.
  *
- * `stopRootWithRehydration` mirrors the internal stop-and-rehydrate logic
- * from `@xstate/react` so that unit tests can simulate React Strict Mode
- * double-mount without pulling in the full React integration.
+ * These mirror the effect lifecycle of `@xstate/react` 7's `useActorRef`
+ * (`useActorLifecycle`) so unit tests can reproduce what React does to an
+ * actor without rendering. The binding no longer stops and rehydrates an actor
+ * across a Strict Mode double-mount: the effect cleanup queues the stop in a
+ * microtask and the re-run cancels it, so the actor never stops. A real
+ * unmount lets the stop run, and a later mount replaces the stopped actor
+ * with a fresh one because a stopped actor cannot be restarted.
  *
- * @see https://github.com/statelyai/xstate/blob/main/packages/xstate-react/src/stopRootWithRehydration.ts
+ * @see https://github.com/statelyai/xstate/blob/main/packages/xstate-react/src/useActorRef.ts
  */
-import type { AnyActorRef } from 'xstate';
+import type { Actor, AnyActorLogic } from 'xstate';
 
-export function forEachActor(actorRef: AnyActorRef, callback: (ref: AnyActorRef) => void): void {
-  callback(actorRef);
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- mirror @xstate/react internals
-  const { children } = actorRef.getSnapshot();
-  if (children) {
-    // oxlint-disable-next-line @typescript-eslint/no-unsafe-argument -- mirror @xstate/react internals
-    for (const child of Object.values(children)) {
-      forEachActor(child as AnyActorRef, callback);
+type PendingStop = { cancel(): void };
+
+/** The effect cleanup: stop the actor at the next microtask unless a re-mount cancels it first. */
+const scheduleStop = (actor: Actor<AnyActorLogic>): PendingStop => {
+  let canceled = false;
+  queueMicrotask(() => {
+    if (!canceled) {
+      actor.stop();
     }
-  }
+  });
+  return {
+    cancel() {
+      canceled = true;
+    },
+  };
+};
+
+/**
+ * React Strict Mode's synchronous unmount/re-mount of one actor's effect.
+ *
+ * The cleanup's stop is cancelled by the effect re-running before the
+ * microtask, so the actor keeps running in the state it was in.
+ */
+export function strictModeRemount(actor: Actor<AnyActorLogic>): void {
+  const pending = scheduleStop(actor);
+  pending.cancel();
+  actor.start();
 }
 
 /**
- * Stops an actor tree and rehydrates snapshots so the actors can be
- * restarted in the same state — simulating React Strict Mode unmount/remount.
+ * A real unmount followed by a later mount of the same component.
  *
- * Accesses private XState internals (`observers`, `_snapshot`,
- * `_processingStatus`) via `as unknown as Record<string, unknown>`.
- * This is intentional: the alternative is importing private symbols from
- * `@xstate/react`, which is not exported.
+ * The stop runs; the next mount finds the actor stopped and replaces it,
+ * which is the actor the caller must use from then on.
  */
-export function stopRootWithRehydration(actorRef: AnyActorRef): void {
-  const persistedSnapshots: Array<[AnyActorRef, unknown]> = [];
-  forEachActor(actorRef, (ref) => {
-    persistedSnapshots.push([ref, ref.getSnapshot()]);
-    // oxlint-disable-next-line @typescript-eslint/no-unsafe-member-access -- mirror @xstate/react internals
-    (ref as unknown as Record<string, unknown>)['observers'] = new Set();
-  });
-
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment -- mirror @xstate/react internals
-  const systemSnapshot = (
-    (actorRef.system as unknown as Record<string, unknown>)['getSnapshot'] as (() => unknown) | undefined
-  )?.();
-  actorRef.stop();
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-member-access -- mirror @xstate/react internals
-  (actorRef.system as unknown as Record<string, unknown>)['_snapshot'] = systemSnapshot;
-
-  for (const [ref, snapshot] of persistedSnapshots) {
-    // oxlint-disable-next-line @typescript-eslint/no-unsafe-member-access -- mirror @xstate/react internals
-    (ref as unknown as Record<string, unknown>)['_processingStatus'] = 0;
-    // oxlint-disable-next-line @typescript-eslint/no-unsafe-member-access -- mirror @xstate/react internals
-    (ref as unknown as Record<string, unknown>)['_snapshot'] = snapshot;
-  }
+export async function unmountAndRemount<TLogic extends AnyActorLogic>(
+  actor: Actor<TLogic>,
+  createReplacement: () => Actor<TLogic>,
+): Promise<Actor<TLogic>> {
+  scheduleStop(actor);
+  await Promise.resolve();
+  const replacement = createReplacement();
+  replacement.start();
+  return replacement;
 }

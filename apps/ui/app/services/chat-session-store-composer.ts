@@ -5,16 +5,13 @@
  * attachment references a draft still holds.
  */
 
-import type { ActorRefFrom } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
-import type { composerRecordMachine } from '#machines/composer-record.machine.js';
+import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import type { ComposerRecordStore } from '#db/composer-record-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
 import { awaitSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { attachmentUrl, isAttachmentUrl } from '#utils/attachment.utils.js';
 import type { AttachmentName } from '#utils/attachment.utils.js';
-
-type ComposerRecordRef = ActorRefFrom<typeof composerRecordMachine>;
 
 /** The parts of the draft machine's context that reference attachments. */
 type DraftReferences = {

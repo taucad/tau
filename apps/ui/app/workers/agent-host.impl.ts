@@ -1,3 +1,4 @@
+import type { MachineActors } from '#lib/xstate.lib.js';
 import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
@@ -1721,7 +1722,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
                 },
               ),
             ),
-          },
+          } satisfies Partial<MachineActors<typeof parameterSetMachine>>,
         }),
         { input: { target } },
       );

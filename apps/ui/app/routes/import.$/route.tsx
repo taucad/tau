@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { AlertCircle, X, XCircle } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { MachineActors } from '#lib/xstate.lib.js';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
@@ -159,7 +160,7 @@ export default function ImportRoute(): React.JSX.Element {
             throw error;
           }
         }),
-      },
+      } satisfies Partial<MachineActors<typeof importGitHubMachine>>,
     }),
     {
       input: {
@@ -200,7 +201,7 @@ export default function ImportRoute(): React.JSX.Element {
             throw error;
           }
         }),
-      },
+      } satisfies Partial<MachineActors<typeof importDiskMachine>>,
     }),
     {
       input: {},

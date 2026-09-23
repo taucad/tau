@@ -1,3 +1,4 @@
+import type { MachineActors } from '#lib/xstate.lib.js';
 import { Topic } from '@taucad/events';
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileOperation, PreparedFileOperation } from '@taucad/fs-client/file-content-service';
@@ -301,7 +302,7 @@ export const createParameterSetService = (
               return () => undefined;
             }
           }),
-        },
+        } satisfies Partial<MachineActors<typeof parameterSetMachine>>,
       }),
       { input: { target, resolution: manifest.identity.resolution } },
     );

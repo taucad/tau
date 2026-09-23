@@ -17,7 +17,7 @@
 import { isCeilingRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
-import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.machine.js';
+import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';

@@ -82,7 +82,7 @@ export type { LfsPointer } from '#lfs.js';
  * per machine (P8), which is why `./remote-machine` exists and why no other
  * machine is here either. Keeping them would put `xstate` in the graph of every
  * page that imports a remote *type* from this barrel. */
-export type { RemoteActors, RemoteFacet, RemoteMachineEvent } from '#remote.machine.js';
+export type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
 export { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
 export { createRevisionHttpClient, keepaliveLimitBytes } from '#http-client.js';
 export type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
@@ -93,7 +93,7 @@ export type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } fr
  * so `xstate` is not in the graph of every consumer of this barrel; these are
  * the shapes a *renderer* needs — the Sync row, the header chip and the queue.
  */
-export type { SyncFacet, SyncPushOutcome, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.machine.js';
+export type { SyncFacet, SyncPushOutcome, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 /* The close flush's last POST (W13): a browser host wraps its client with
  * `recordLastPush` and offers that recorded POST again on `pagehide`. */
 export { recordLastPush, sendKeepalivePush } from '#sync-keepalive.js';

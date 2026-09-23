@@ -48,6 +48,13 @@ const importsRefusalMarkers = (specifier: string): boolean => specifier === '#re
  */
 const importsMachineSchemas = (specifier: string): boolean => specifier === '#machine-schemas.js';
 
+/**
+ * A machine's plain data types live beside it in `<name>.types.ts`, which imports
+ * no XState, so the package root can re-export them while `xstate` stays an
+ * optional peer. Machines take them type-only.
+ */
+const importsMachineTypes = (specifier: string): boolean => /^#[a-z-]+\.types\.js$/u.test(specifier);
+
 describe('revision machine import boundary', () => {
   it('finds every machine subpath module', () => {
     expect(
@@ -97,9 +104,26 @@ describe('revision machine import boundary', () => {
           !importsSiblingMachine(entry.specifier) &&
           !importsRefusalMarkers(entry.specifier) &&
           !importsMachineSchemas(entry.specifier) &&
-          !(importsPackageContract(entry.specifier) && entry.typeOnly),
+          !(importsPackageContract(entry.specifier) && entry.typeOnly) &&
+          !(importsMachineTypes(entry.specifier) && entry.typeOnly),
       );
 
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps every machine types module free of XState and of machines', () => {
+    const typesModules = readdirSync(sourceDirectory).filter((name) => name.endsWith('.types.ts'));
+    const offenders = typesModules
+      .flatMap((name) => importsOf(join(sourceDirectory, name)))
+      .filter(
+        (entry) =>
+          !entry.typeOnly ||
+          importsXstate(entry.specifier) ||
+          importsSiblingMachine(entry.specifier) ||
+          importsMachineSchemas(entry.specifier),
+      );
+
+    expect(typesModules.length).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
 

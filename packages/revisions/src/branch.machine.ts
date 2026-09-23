@@ -29,6 +29,8 @@ import type { CheckoutCutTrigger } from '#checkout.machine.js';
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
+import type { BranchOperation } from '#branch.types.js';
+export type { BranchOperation } from '#branch.types.js';
 
 /** How long a delegated registry verb waits for the registry's answer. @public */
 export const branchRegistryMilliseconds = 30_000;
@@ -45,9 +47,6 @@ export const branchRegistryMilliseconds = 30_000;
  * @public
  */
 export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST' | 'CHECKOUT_UNKNOWN';
-
-/** The five verbs this machine owns. @public */
-export type BranchOperation = 'switch' | 'merge' | 'discard' | 'create' | 'rename';
 
 /** Input accepted when creating the branchMachine actor. @public */
 export type BranchMachineInput = Readonly<{

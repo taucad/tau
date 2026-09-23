@@ -10,7 +10,7 @@ use std::{fs, path::Path};
 
 const CORPUS_SHA256: &str = "b1b605506f72304ccec2484506a39786f203d89e793eaab5e0125d246388d5a3";
 const VERIFIER_SOURCE_HASH: &str =
-    "38922652cc624d2a6c84377bddc20e76a0361dc95b87f9c3e94463ded6610df9";
+    "79cf6bca840e45dd5703b6892e5c5a75e27e2ec67ff61d03703d602c41fb6ed4";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,7 +54,7 @@ fn current_request(value: &str) -> String {
 fn current_plan(value: &str) -> String {
     let mut value: Value = serde_json::from_str(value).unwrap();
     value["registryVersion"] = json!(5);
-    value["numericProfile"] = json!("geospec-st-logical-requests-v3");
+    value["numericProfile"] = json!("geospec-st-prototypes-v4");
     String::from_utf8(canonicalize(&serde_json::to_vec(&value).unwrap()).unwrap()).unwrap()
 }
 
@@ -65,7 +65,7 @@ fn current_result(value: &str, plan: &str) -> String {
     } else {
         &mut value
     };
-    result["numericProfile"] = json!("geospec-st-logical-requests-v3");
+    result["numericProfile"] = json!("geospec-st-prototypes-v4");
     let plan_hash = sha256(plan.as_bytes());
     let verifier_source_hash = verifier_source_hash();
     for row in result["results"].as_array_mut().unwrap() {

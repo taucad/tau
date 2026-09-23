@@ -627,7 +627,7 @@ fn sampled_proof_refuses_both_polarities_without_geometry() {
             assert_eq!(
                 result,
                 json!({
-                    "numericProfile": "geospec-st-logical-requests-v3",
+                    "numericProfile": "geospec-st-prototypes-v4",
                     "results": [{"claimId": name, "status": "refused", "diagnostics": [{
                         "code": if name == "unallowed" { "GEOSPEC_EVIDENCE_UNSUPPORTED" } else { "GEOSPEC_UNSUPPORTED_EVIDENCE" }, "severity": "error", "message": message
                     }]}]

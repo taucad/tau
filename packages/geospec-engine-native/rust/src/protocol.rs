@@ -1,4 +1,6 @@
-pub(crate) const NUMERIC_PROFILE: &str = "geospec-st-logical-requests-v3";
+// v4 admits the qualified prototype-preserving OCCT copy and fixed SIMD build.
+// Canonical equality is scoped to the certified producer/target profile.
+pub(crate) const NUMERIC_PROFILE: &str = "geospec-st-prototypes-v4";
 
 use crate::{
     backend::{brep::BrepConnector, csg::CsgConnector},

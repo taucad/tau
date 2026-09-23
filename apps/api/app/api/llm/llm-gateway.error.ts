@@ -20,6 +20,13 @@ export type LlmGatewayErrorType =
   | 'PROVIDER_ACCOUNT_EXHAUSTED'
   | 'PROVIDER_UNAVAILABLE'
   | 'RATE_LIMITED'
+  /**
+   * The serialized request is past the funded request contract's byte bound
+   * (or the object count its digest walks). A 413: resending the same history
+   * meets the same refusal, and no model choice changes it. `details` carries
+   * `maximumBytes`.
+   */
+  | 'REQUEST_TOO_LARGE'
   | 'UNAUTHENTICATED'
   /**
    * The upstream provider refused the relayed request (a non-429 4xx). Distinct

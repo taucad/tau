@@ -12,7 +12,15 @@ export type PaymentActionBinding = {
   readonly financialSession?: FinancialSessionRequest;
 };
 
-type PaymentConflictCode = 'request_payload_conflict' | 'action_already_pending' | 'subscription_already_exists';
+const paymentConflictCodes = [
+  'request_payload_conflict',
+  'action_already_pending',
+  'subscription_already_exists',
+  // A saved-card purchase needs a card and a billing address, which only Checkout collects; retrying cannot help.
+  'saved_card_not_found',
+  'customer_tax_location_invalid',
+] as const;
+type PaymentConflictCode = (typeof paymentConflictCodes)[number];
 
 /** An owned payment-action conflict returned by the first-party billing API. */
 export class BillingPaymentConflict extends Error {
@@ -75,7 +83,7 @@ const parseConflict = async (
     return undefined;
   }
   const { code, action } = body as { code?: unknown; action?: unknown };
-  if (!['request_payload_conflict', 'action_already_pending', 'subscription_already_exists'].includes(String(code))) {
+  if (!(paymentConflictCodes as readonly unknown[]).includes(code)) {
     return undefined;
   }
   const parsedAction = wirePaymentActionSchema.safeParse(action);

@@ -1014,6 +1014,7 @@ function assertMetadata(metadata: Stripe.MetadataParam): void {
   const allowed = new Set([
     'tau_account_id',
     'tau_customer_binding_id',
+    'tau_environment',
     'tau_payment_attempt_id',
     'tau_provider_leg_id',
     'tau_purchase_id',

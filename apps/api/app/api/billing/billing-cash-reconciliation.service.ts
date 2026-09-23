@@ -28,6 +28,7 @@ import {
   listStripeRefundPage,
   retrieveStripeCharge,
   retrieveStripeDispute,
+  retrieveStripeCustomer,
   retrieveStripePaymentIntent,
 } from '#api/billing/billing-cash-stripe.js';
 import { paidPaymentEvidenceSchema } from '#api/billing/billing-payment-contract.js';
@@ -465,13 +466,10 @@ export class BillingCashReconciliationService {
         if (disposition.status === 'paid_unfulfilled') {
           await this.openCase(claim, 'paid_unfulfilled_recovery', fact.sourceId, disposition.accountId, fact.evidence);
         } else if (disposition.status === 'missing') {
-          await this.openCase(
-            claim,
-            'missing_local_payment',
-            fact.sourceId,
-            await this.owningAccount(claim, fact.evidence),
-            fact.evidence,
-          );
+          const owner = await this.owningAccount(claim, fact.evidence);
+          await (owner === undefined && (await this.belongsToAnotherEnvironment(claim, fact.evidence))
+            ? this.resolveCase(claim, 'missing_local_payment', fact.sourceId)
+            : this.openCase(claim, 'missing_local_payment', fact.sourceId, owner, fact.evidence));
         } else {
           await this.resolveCase(claim, 'missing_local_payment', fact.sourceId);
           await this.resolveCase(claim, 'paid_unfulfilled_recovery', fact.sourceId);
@@ -484,13 +482,10 @@ export class BillingCashReconciliationService {
           fact.evidence['status'] === 'requires_action' ||
           (fact.evidence['status'] === 'succeeded' && !owned)
         ) {
-          await this.openCase(
-            claim,
-            'refund_unresolved',
-            fact.sourceId,
-            await this.owningAccount(claim, fact.evidence),
-            fact.evidence,
-          );
+          const owner = await this.owningAccount(claim, fact.evidence);
+          await (owner === undefined && (await this.belongsToAnotherEnvironment(claim, fact.evidence))
+            ? this.resolveCase(claim, 'refund_unresolved', fact.sourceId)
+            : this.openCase(claim, 'refund_unresolved', fact.sourceId, owner, fact.evidence));
         } else if (owned) {
           await this.resolveCase(claim, 'refund_unresolved', fact.sourceId);
         }
@@ -657,6 +652,27 @@ export class BillingCashReconciliationService {
       .where(and(scope(billingStripeCustomer), eq(billingStripeCustomer.stripeCustomerId, customer)))
       .limit(1);
     return binding?.accountId;
+  }
+
+  /**
+   * Whether an unattributed test-mode fact provably belongs to another Tau environment. Test mode
+   * shares one Stripe account between local development, the acceptance suite and staging, so
+   * their customers' cash appears in every scan; each Tau-created customer carries the
+   * environment that created it. Live mode backs exactly one environment, so a stamp there
+   * proves nothing and the case opens as before. An unstamped or unreadable customer stays
+   * unexplained cash.
+   */
+  private async belongsToAnotherEnvironment(scan: Scan, evidence: Record<string, unknown>): Promise<boolean> {
+    const customerId = evidence['customer'];
+    if (scan.livemode || typeof customerId !== 'string' || customerId.length === 0) return false;
+    try {
+      const customer = await retrieveStripeCustomer(this.sourceStripe, customerId);
+      const stamp =
+        'deleted' in customer && customer.deleted === true ? undefined : customer.metadata['tau_environment'];
+      return typeof stamp === 'string' && stamp.length > 0 && stamp !== scan.environment;
+    } catch {
+      return false;
+    }
   }
 
   /** The charge a dispute withdrew from; a failed read leaves the case unattributed rather than failing the scan. */

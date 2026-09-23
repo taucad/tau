@@ -5371,8 +5371,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): { schema: JSONSchema7; defaults: Record<string, unknown> } {
     let schema: JSONSchema7;
     try {
-      schema = toJSONSchema(zodSchema, { target: 'draft-7', io: 'input' }) as JSONSchema7 & { $schema?: unknown };
-      delete schema.$schema;
+      // Spreading drops Zod's non-enumerable `~standard` key: the manifest is wire data, so it is plain JSON here.
+      const { $schema: _dialect, ...plain } = toJSONSchema(zodSchema, {
+        target: 'draft-7',
+        io: 'input',
+      }) as JSONSchema7;
+      schema = plain;
     } catch (error) {
       throw new Error(`Failed to derive JSON Schema for ${label}.`, { cause: error });
     }
@@ -6928,13 +6932,14 @@ function omitJsonSchemaProperties(
   const properties = Object.fromEntries(
     Object.entries(input.schema.properties ?? {}).filter(([key]) => !omitted.has(key)),
   );
-  const required = (input.schema.required ?? []).filter((key) => !omitted.has(key));
+  const { required: sourceRequired = [], ...schema } = input.schema;
+  const required = sourceRequired.filter((key) => !omitted.has(key));
   const defaults = Object.fromEntries(Object.entries(input.defaults).filter(([key]) => !omitted.has(key)));
   return {
     schema: {
-      ...input.schema,
+      ...schema,
       properties,
-      ...(required.length > 0 ? { required } : { required: undefined }),
+      ...(required.length > 0 ? { required } : {}),
     },
     defaults,
   };

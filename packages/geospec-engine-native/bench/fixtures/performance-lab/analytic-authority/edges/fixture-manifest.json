@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "taskId": "M3-EDGE-TREATMENT-FIXTURES-A1",
+  "authority": "Direct hashes and identifiers for eleven ordinary default-writer AP242 fixture primaries; analytic scalar fields are imported numeric observations, not exact-real goldens.",
+  "labelTransport": {
+    "sourceAttached": true,
+    "stepTokenPresent": false,
+    "importedAssociations": [],
+    "selectorOutcome": "unavailable: no transported source label; no substitute synthesized"
+  },
+  "fixtures": [
+    {
+      "id": "planar-chamfer",
+      "path": "fixtures/01-planar-chamfer.step",
+      "sha256": "4c0618de7cce3812a9fa0704db928f0667f7655ace102c87d4f35a8a45cf706f",
+      "bytes": 20804,
+      "entityRecordCount": 451,
+      "root": "m3-edge-planar-chamfer",
+      "occurrencePaths": ["m3-edge-planar-chamfer/planar-chamfer-part"],
+      "analyticTransition": {
+        "privateUniqueMapId": 3,
+        "publicExplorerOrdinal": 2,
+        "surface": "plane",
+        "ownerSolidIds": [1],
+        "railEdgeIds": [6, 9],
+        "nominalSupportOffsetsMm": [1, 1],
+        "orientation": "REVERSED",
+        "materialSideRelativeToUnderlyingSurface": "positive-underlying-normal"
+      }
+    },
+    {
+      "id": "cylindrical-fillet",
+      "path": "fixtures/02-cylindrical-fillet.step",
+      "sha256": "7f82ffa3bf0aa990d680cc42ce85839b25876727832bfbf2e77152216913c6ed",
+      "bytes": 20930,
+      "entityRecordCount": 453,
+      "root": "m3-edge-cylindrical-fillet",
+      "occurrencePaths": ["m3-edge-cylindrical-fillet/cylindrical-fillet-part"],
+      "analyticTransition": {
+        "privateUniqueMapId": 3,
+        "publicExplorerOrdinal": 2,
+        "surface": "cylinder",
+        "ownerSolidIds": [1],
+        "railEdgeIds": [6, 9],
+        "observedRadiusMm": 2,
+        "observedAxisOriginMm": [8, 10, 0],
+        "orientation": "FORWARD",
+        "materialSideRelativeToUnderlyingSurface": "negative-underlying-normal"
+      }
+    },
+    {
+      "id": "conical-chamfer",
+      "path": "fixtures/03-conical-chamfer.step",
+      "sha256": "facad0a063b0e00ff33016862352c308b70f5d95090b57535019ba6f60bdbb31",
+      "bytes": 9629,
+      "entityRecordCount": 196,
+      "root": "m3-edge-conical-chamfer",
+      "occurrencePaths": ["m3-edge-conical-chamfer/conical-chamfer-part"],
+      "analyticTransition": {
+        "privateUniqueMapId": 3,
+        "publicExplorerOrdinal": 2,
+        "surface": "cone",
+        "ownerSolidIds": [1],
+        "railEdgeIds": [3, 5],
+        "seamEdgeId": 4,
+        "seamUseOrientations": ["FORWARD", "REVERSED"],
+        "observedReferenceRadiusMm": 5,
+        "observedSemiAngleRadians": 0.785398163397,
+        "observedAxialChangeMm": 1,
+        "observedRadialChangeMm": 1,
+        "orientation": "FORWARD",
+        "materialSideRelativeToUnderlyingSurface": "negative-underlying-normal"
+      }
+    },
+    {
+      "id": "toroidal-fillet",
+      "path": "fixtures/04-toroidal-fillet.step",
+      "sha256": "2679fd95a2e3f932eaad09204e1b0be8b272b2018ab6b5eeb8aa9a4b383298c9",
+      "bytes": 9639,
+      "entityRecordCount": 197,
+      "root": "m3-edge-toroidal-fillet",
+      "occurrencePaths": ["m3-edge-toroidal-fillet/toroidal-fillet-part"],
+      "analyticTransition": {
+        "privateUniqueMapId": 3,
+        "publicExplorerOrdinal": 2,
+        "surface": "torus",
+        "ownerSolidIds": [1],
+        "railEdgeIds": [3, 5],
+        "seamEdgeId": 4,
+        "seamUseOrientations": ["FORWARD", "REVERSED"],
+        "observedCenterMm": [0, 0, 9],
+        "observedMajorRadiusMm": 4,
+        "observedMinorRadiusMm": 1,
+        "orientation": "FORWARD",
+        "materialSideRelativeToUnderlyingSurface": "negative-underlying-normal"
+      }
+    },
+    {
+      "id": "plain-box",
+      "path": "fixtures/05-plain-box.step",
+      "sha256": "be0f54db5982c9cad24c313b71ad844a5b3de811e90af4eb04fda55b91033103",
+      "bytes": 16995,
+      "entityRecordCount": 373,
+      "root": "m3-edge-plain-box",
+      "occurrencePaths": ["m3-edge-plain-box/plain-box-part"],
+      "control": "six planar faces and no non-planar transition support"
+    },
+    {
+      "id": "full-cylinder",
+      "path": "fixtures/06-full-cylinder.step",
+      "sha256": "ff9c2453ae89ffa42f569a9057cb4756f7ceaa57d5103a3d5968d04d1baace65",
+      "bytes": 7261,
+      "entityRecordCount": 141,
+      "root": "m3-edge-full-cylinder",
+      "occurrencePaths": ["m3-edge-full-cylinder/full-cylinder-part"],
+      "control": "one full radius-5 cylinder support with two planar caps and a repeated opposite-orientation seam use; no transition band"
+    },
+    {
+      "id": "rotated-planar-chamfer",
+      "path": "fixtures/07-rotated-planar-chamfer.step",
+      "sha256": "8af9eef03f5fdac2577d2d237501988a638efe72179e9a677a3630cc984ccf6f",
+      "bytes": 20836,
+      "entityRecordCount": 451,
+      "root": "m3-edge-rotated-planar-chamfer",
+      "occurrencePaths": ["m3-edge-rotated-planar-chamfer/rotated-planar-chamfer-part"],
+      "location3x4RowMajor": [0.6, -0.8, 0, 20, 0.8, 0.6, 0, 30, 0, 0, 1, 40],
+      "control": "rigid transform of the unchanged seven-plane planar-chamfer definition"
+    },
+    {
+      "id": "rotated-plain-box",
+      "path": "fixtures/08-rotated-plain-box.step",
+      "sha256": "949e668e7fc677d25c208529d787081a17af157cf76e61533e5c6de8e28e6469",
+      "bytes": 17030,
+      "entityRecordCount": 373,
+      "root": "m3-edge-rotated-plain-box",
+      "occurrencePaths": ["m3-edge-rotated-plain-box/rotated-plain-box-part"],
+      "location3x4RowMajor": [0.6, -0.8, 0, 20, 0.8, 0.6, 0, 30, 0, 0, 1, 40],
+      "control": "same rigid transform of the untouched six-plane box"
+    },
+    {
+      "id": "unrelated-planar-assembly",
+      "path": "fixtures/09-unrelated-planar-assembly.step",
+      "sha256": "6a9fa643a3c069b621374025624100e73ee0445fe353c3d168d6bddc1018889f",
+      "bytes": 36402,
+      "entityRecordCount": 804,
+      "root": "m3-edge-unrelated-planar-assembly",
+      "occurrencePaths": ["m3-edge-unrelated-planar-assembly/planar-chamfer-part", "m3-edge-unrelated-planar-assembly/unrelated-box"],
+      "control": "the first occurrence's raw local topology equals case 1; the second is a disjoint six-plane box"
+    },
+    {
+      "id": "unrelated-cylinder-assembly",
+      "path": "fixtures/10-unrelated-cylinder-assembly.step",
+      "sha256": "c6dcdce061c3d5866d87e98b71c50a843de843f0b37ac3e11a2984165c6d25da",
+      "bytes": 22867,
+      "entityRecordCount": 494,
+      "root": "m3-edge-unrelated-cylinder-assembly",
+      "occurrencePaths": ["m3-edge-unrelated-cylinder-assembly/full-cylinder-part", "m3-edge-unrelated-cylinder-assembly/unrelated-box"],
+      "control": "the first occurrence's raw local topology equals case 6; the second is a disjoint six-plane box"
+    },
+    {
+      "id": "shared-fillet-instances",
+      "path": "fixtures/11-shared-fillet-instances.step",
+      "sha256": "54c81ecf4632560f31048dbf6fba806f54909b4d8c4ca3986262041a1d241047",
+      "bytes": 21498,
+      "entityRecordCount": 462,
+      "root": "m3-edge-shared-fillet-instances",
+      "occurrencePaths": ["m3-edge-shared-fillet-instances/fillet-instance-a", "m3-edge-shared-fillet-instances/fillet-instance-b"],
+      "sharedReferredLabelEntry": "0:1:1:2",
+      "locations3x4RowMajor": [[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], [1, 0, 0, 30, 0, 1, 0, 0, 0, 0, 1, 0]],
+      "control": "two occurrence-distinct radius-2 fillet members share one source definition"
+    }
+  ]
+}

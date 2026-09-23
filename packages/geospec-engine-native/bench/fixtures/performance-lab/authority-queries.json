@@ -1,0 +1,123 @@
+[
+  {
+    "id": "m3-query-analyzeMesh",
+    "fixtureId": "m3-control-step",
+    "capability": "analyzeMesh",
+    "claim": {
+      "capability": "analyzeMesh",
+      "claimId": "ancillary.analyzeMesh.positive",
+      "payload": null,
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "authority": {
+      "corpusSha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
+      "rowId": "ancillary/analyzeMesh/positive",
+      "jsonPointer": "/rows/115",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+    },
+    "baseline": "supported"
+  },
+  {
+    "id": "m3-query-analyzeBrep",
+    "fixtureId": "m3-control-step",
+    "capability": "analyzeBrep",
+    "claim": {
+      "capability": "analyzeBrep",
+      "claimId": "ancillary.analyzeBrep.positive",
+      "payload": null,
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "authority": {
+      "corpusSha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
+      "rowId": "ancillary/analyzeBrep/positive",
+      "jsonPointer": "/rows/116",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+    },
+    "baseline": "supported"
+  },
+  {
+    "id": "m3-query-inspectGeometry",
+    "fixtureId": "m3-control-step",
+    "capability": "inspectGeometry",
+    "claim": {
+      "capability": "inspectGeometry",
+      "claimId": "packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#selectors[0]",
+      "payload": {
+        "selectors": [
+          "housing.bore"
+        ]
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "authority": {
+      "corpusSha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
+      "rowId": "selector/packages/geospec-engine/fixtures/clearance/aabb-gap-false-positive/manifest.json#selectors[0]",
+      "jsonPointer": "/rows/28",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+    },
+    "baseline": "supported"
+  },
+  {
+    "id": "m3-query-analyzeMeshOverlap",
+    "fixtureId": "m3-control-step",
+    "capability": "analyzeMeshOverlap",
+    "claim": {
+      "capability": "analyzeMeshOverlap",
+      "claimId": "ancillary.analyzeMeshOverlap.positive",
+      "payload": {
+        "tolerance": 0.001
+      },
+      "polarity": "positive",
+      "subjectSlots": [
+        "subject"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "authority": {
+      "corpusSha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
+      "rowId": "ancillary/analyzeMeshOverlap/positive",
+      "jsonPointer": "/rows/64",
+      "subjectSha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
+    },
+    "baseline": "supported"
+  },
+  {
+    "id": "m3-query-queryPmi",
+    "fixtureId": "m3-pmi-step",
+    "capability": "queryPmi",
+    "claim": {
+      "capability": "queryPmi",
+      "claimId": "queryPmi/parallel-plane-distance-source#710",
+      "payload": null,
+      "polarity": "positive",
+      "subjectSlots": [
+        "part"
+      ],
+      "workUnitBudget": 8000000
+    },
+    "expectedStatus": "passed",
+    "authority": {
+      "corpusSha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
+      "rowId": "queryPmi/parallel-plane-distance-source#710",
+      "jsonPointer": "/rows/0",
+      "subjectSha256": "15d6e6a8ed9d2cebc43a095469651e66395586f32537d45761f002e28243f5ad"
+    },
+    "baseline": "unsupported"
+  }
+]

@@ -1,0 +1,619 @@
+/** Private browser-safe ordinary performance-lab runner. Hosts inject actual engine modules. */
+// eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Private bench-only adapter consumes the public matcher client without changing package runtime dependencies.
+import {
+  createGeoSpecAssertionClient,
+  GeoSpecAssertionError,
+  geoSpecNativeMatcherDescriptors,
+} from 'geospec/assertion-client';
+// eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Type-only public query vocabulary for the private bench adapter.
+import type { GeoSpecQueryCapability, GeoSpecCanonicalClaimReport } from 'geospec/assertion-client';
+// eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Private bench-only adapter uses the public model loader; this is not packaged runtime code.
+import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
+// eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Private bench-only adapter uses canonical protocol helpers.
+import { encodeGeoSpecCanonicalJson, toGeoSpecProtocolJson } from 'geospec/engine';
+// eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Type-only protocol contract for the bench adapter.
+import type { GeoSpecEngineImplementation } from 'geospec/engine';
+import type { HostCacheLifecycle, HostEngine, HostSubjectLifecycle } from '#host-types.js';
+
+/** One ordinary authored matcher or query call. @internal */
+export type PerformanceLabCase = {
+  id: string;
+  kind: 'matcher' | 'query';
+  matcher: string;
+  arguments: readonly unknown[];
+  payload?: unknown;
+  claimId?: string;
+  subjectSlot?: string;
+  workUnitBudget?: number;
+  polarity: 'positive' | 'negative';
+  expectedStatus: 'passed' | 'failed' | 'unverified';
+};
+
+/** Byte-only input shared by the browser and desktop benchmark hosts. @internal */
+export type PerformanceLabRunInput = {
+  engine: 'legacy-wasm' | 'combined-wasm' | 'native-desktop';
+  fixture: {
+    id: string;
+    format: 'step' | 'glb' | 'rational-plate';
+    sourceUnit: 'auto' | 'mm' | 'm';
+    bytes: Uint8Array<ArrayBuffer>;
+    sha256: string;
+  };
+  cases: readonly PerformanceLabCase[];
+  repeats: number;
+  /** Cold means a fresh module/engine; warm means module reused but subject re-admitted. */
+  cache: 'cold' | 'warm' | 'host-module-cache';
+};
+
+/** Actual engine module injected by the selected host. @internal */
+export type PerformanceLabEngineModule = {
+  Engine: new () => HostEngine & HostSubjectLifecycle & Partial<Pick<HostCacheLifecycle, 'cacheProducerIdentity'>>;
+  canonicalize: (bytes: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+  initialize?: () => Promise<void>;
+};
+
+/** Lazy imports included in startup timing. @internal */
+export type PerformanceLabModules = {
+  legacy?: () => Promise<{
+    geoSpecEngineImplementation: GeoSpecEngineImplementation;
+  }>;
+  combined?: () => Promise<PerformanceLabEngineModule>;
+  native?: () => Promise<PerformanceLabEngineModule>;
+};
+
+/** Raw result and evaluation duration in milliseconds for one ordinary call. @internal */
+export type PerformanceLabCaseResult = {
+  caseId: string;
+  matcher: string;
+  repeat: number;
+  status: string;
+  expectedStatus: PerformanceLabCase['expectedStatus'];
+  diagnostics: readonly unknown[];
+  result: unknown;
+  evaluation: number;
+  numericProfile: string | WireNull;
+  canonicalClaimUtf8: string | WireNull;
+  canonicalResultUtf8: string | WireNull;
+  canonicalResultSha256: string | WireNull;
+};
+
+/** Complete cell evidence; all timing fields are milliseconds. @internal */
+export type PerformanceLabRunResult = {
+  engine: PerformanceLabRunInput['engine'];
+  backend: string;
+  profile: string | WireNull;
+  fixtureId: string;
+  cache: 'cold-module-cold-subject' | 'warm-module-cold-subject' | 'host-module-cache/subject-cold';
+  buildIdentity: unknown;
+  engineObservations: unknown;
+  initializationTiming: 'startup' | 'lazy-in-admission-or-evaluation';
+  perCase: readonly PerformanceLabCaseResult[];
+  timing: {
+    startup: number;
+    admission: number;
+    evaluation: number;
+    cleanup: number;
+    total: number;
+  };
+};
+
+// oxlint-disable-next-line typescript/no-restricted-types -- Raw JSON evidence distinguishes explicit null from omission.
+type WireNull = null;
+const encoder = new TextEncoder();
+const queryCapabilities = new Set<GeoSpecQueryCapability>([
+  'analyzeMesh',
+  'analyzeBrep',
+  'inspectGeometry',
+  'analyzeMeshOverlap',
+  'queryPmi',
+]);
+const decoder = new TextDecoder();
+const ms = (start: number): number => performance.now() - start;
+const record = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).every((key) => keys.includes(key));
+const textId = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 160;
+const hex = (bytes: Uint8Array<ArrayBuffer>): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+const digest = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
+  hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
+const profileOf = (value: unknown): string | WireNull => {
+  if (!record(value)) {
+    return null;
+  }
+  const profile = value['numericProfile'];
+  return typeof profile === 'string' ? profile : null;
+};
+const cacheLabel = (cache: PerformanceLabRunInput['cache']): PerformanceLabRunResult['cache'] =>
+  cache === 'cold'
+    ? 'cold-module-cold-subject'
+    : cache === 'warm'
+      ? 'warm-module-cold-subject'
+      : 'host-module-cache/subject-cold';
+const decode = (bytes: Uint8Array<ArrayBuffer>): unknown => JSON.parse(decoder.decode(bytes)) as unknown;
+/**
+ * Read the root numeric profile retained by the public evaluatePlan client.
+ * @internal
+ * @param bytes - Canonical result envelope bytes.
+ * @returns The observed profile, or null for an unlabelled result.
+ */
+export const numericProfileOfCanonicalResult = (bytes: Uint8Array<ArrayBuffer>): string | WireNull =>
+  profileOf(decode(bytes));
+const canonicalFields = async (claim: Uint8Array<ArrayBuffer>, result: Uint8Array<ArrayBuffer>) => ({
+  canonicalClaimUtf8: decoder.decode(claim),
+  canonicalResultUtf8: decoder.decode(result),
+  canonicalResultSha256: await digest(result),
+});
+
+const admitRationalPlate = (engine: HostEngine & HostSubjectLifecycle, input: PerformanceLabRunInput) => {
+  const header = {
+    canonicalProfile: 'geospec-jcs-v1',
+    protocolVersion: 3,
+    registryVersion: 5,
+  };
+  const bytes = encoder.encode(
+    JSON.stringify({
+      ...header,
+      method: 'ingestSubject',
+      requestId: `lab-ingest:${input.fixture.id}`,
+      format: 'rational-plate',
+      frame: { coordinateSystem: 'z-up', sourceUnit: 'mm', outputUnit: 'mm' },
+      ingestOptions: {},
+      primaryByteLength: input.fixture.bytes.byteLength,
+      resources: [],
+    }),
+  );
+  const admission = decode(engine.ingestSubject(bytes, input.fixture.bytes, []));
+  if (
+    !record(admission) ||
+    !record(admission['result']) ||
+    !record(admission['result']['subject']) ||
+    typeof admission['result']['subject']['subjectHash'] !== 'string'
+  ) {
+    throw new TypeError('Rational plate admission returned no subject hash.');
+  }
+  const { subjectHash } = admission['result']['subject'];
+  const handle = decode(
+    engine.subjectHandle(
+      encoder.encode(
+        JSON.stringify({
+          ...header,
+          method: 'subjectHandle',
+          requestId: `lab-handle:${input.fixture.id}`,
+          subjectHash,
+        }),
+      ),
+    ),
+  );
+  if (!record(handle) || !record(handle['result']) || !record(handle['result']['subjectHandle'])) {
+    throw new TypeError('Rational plate admission returned no subject handle.');
+  }
+  const { subjectHandle } = handle['result'];
+  return {
+    subject: { subjectHash },
+    release: () => {
+      engine.releaseSubject(
+        encoder.encode(
+          JSON.stringify({
+            ...header,
+            method: 'releaseSubject',
+            requestId: `lab-release:${input.fixture.id}`,
+            subjectHandle,
+          }),
+        ),
+      );
+    },
+  };
+};
+
+/**
+ * Parse the sole byte-only worker/desktop request payload.
+ * @internal
+ * @param value - Untrusted host request input.
+ * @returns Validated ordinary benchmark input.
+ */
+export const parsePerformanceLabRunInput = async (value: unknown): Promise<PerformanceLabRunInput> => {
+  if (
+    !record(value) ||
+    !onlyKeys(value, ['engine', 'fixture', 'cases', 'repeats', 'cache']) ||
+    (value['engine'] !== 'legacy-wasm' && value['engine'] !== 'combined-wasm' && value['engine'] !== 'native-desktop')
+  ) {
+    throw new TypeError('Invalid performance-lab engine.');
+  }
+  const { fixture } = value;
+  if (
+    !record(fixture) ||
+    !onlyKeys(fixture, ['id', 'format', 'sourceUnit', 'bytes', 'sha256']) ||
+    !textId(fixture['id']) ||
+    (fixture['format'] !== 'step' && fixture['format'] !== 'glb' && fixture['format'] !== 'rational-plate') ||
+    (fixture['sourceUnit'] !== 'auto' && fixture['sourceUnit'] !== 'mm' && fixture['sourceUnit'] !== 'm') ||
+    !(fixture['bytes'] instanceof Uint8Array) ||
+    !(fixture['bytes'].buffer instanceof ArrayBuffer) ||
+    fixture['bytes'].byteLength === 0 ||
+    fixture['bytes'].byteLength > 64 * 1024 * 1024 ||
+    typeof fixture['sha256'] !== 'string' ||
+    !/^[a-f0-9]{64}$/u.test(fixture['sha256'])
+  ) {
+    throw new TypeError('Invalid performance-lab fixture.');
+  }
+  if (fixture['format'] === 'rational-plate' && fixture['sourceUnit'] !== 'mm') {
+    throw new TypeError('Rational plate requires millimetres.');
+  }
+  if (fixture['format'] === 'glb' && fixture['sourceUnit'] === 'auto') {
+    throw new TypeError('GLB fixture requires a pinned source unit.');
+  }
+  if ((await digest(fixture['bytes'] as Uint8Array<ArrayBuffer>)) !== fixture['sha256']) {
+    throw new TypeError('Performance-lab fixture SHA-256 mismatch.');
+  }
+  const { cases } = value;
+  if (!Array.isArray(cases) || cases.length === 0 || cases.length > 128) {
+    throw new TypeError('Invalid performance-lab cases.');
+  }
+  for (const entry of cases as unknown[]) {
+    if (
+      !record(entry) ||
+      !onlyKeys(entry, [
+        'id',
+        'kind',
+        'matcher',
+        'arguments',
+        'payload',
+        'claimId',
+        'subjectSlot',
+        'workUnitBudget',
+        'polarity',
+        'expectedStatus',
+      ]) ||
+      !textId(entry['id']) ||
+      (entry['kind'] !== 'matcher' && entry['kind'] !== 'query') ||
+      typeof entry['matcher'] !== 'string' ||
+      (entry['kind'] === 'matcher'
+        ? !Object.hasOwn(geoSpecNativeMatcherDescriptors, entry['matcher'])
+        : !queryCapabilities.has(entry['matcher'] as GeoSpecQueryCapability)) ||
+      !Array.isArray(entry['arguments']) ||
+      entry['arguments'].length > 16 ||
+      (entry['claimId'] !== undefined && !textId(entry['claimId'])) ||
+      (entry['subjectSlot'] !== undefined && !textId(entry['subjectSlot'])) ||
+      (entry['workUnitBudget'] !== undefined &&
+        (!Number.isSafeInteger(entry['workUnitBudget']) ||
+          (entry['workUnitBudget'] as number) < 1 ||
+          (entry['workUnitBudget'] as number) > 8_000_000)) ||
+      (entry['polarity'] !== 'positive' && entry['polarity'] !== 'negative') ||
+      (entry['expectedStatus'] !== 'passed' &&
+        entry['expectedStatus'] !== 'failed' &&
+        entry['expectedStatus'] !== 'unverified')
+    ) {
+      throw new TypeError('Invalid performance-lab matcher case.');
+    }
+    if (entry['kind'] === 'query' && (entry['polarity'] !== 'positive' || entry['arguments'].length > 0)) {
+      throw new TypeError('GeoSpec queries accept only positive payload calls.');
+    }
+    toGeoSpecProtocolJson(entry['arguments']);
+    if (entry['payload'] !== undefined) {
+      toGeoSpecProtocolJson(entry['payload']);
+    }
+  }
+  if (!Number.isInteger(value['repeats']) || (value['repeats'] as number) < 1 || (value['repeats'] as number) > 20) {
+    throw new TypeError('Performance-lab repeats must be 1–20.');
+  }
+  if (value['cache'] !== 'cold' && value['cache'] !== 'warm' && value['cache'] !== 'host-module-cache') {
+    throw new TypeError('Invalid performance-lab cache condition.');
+  }
+  return value as PerformanceLabRunInput;
+};
+
+const runNative = async (
+  input: PerformanceLabRunInput,
+  load: () => Promise<PerformanceLabEngineModule>,
+): Promise<PerformanceLabRunResult> => {
+  const totalAt = performance.now();
+  const startupAt = performance.now();
+  const module = await load();
+  await module.initialize?.();
+  const engine = new module.Engine();
+  const startup = ms(startupAt);
+  const loader = createGeoSpecNativeModelLoader({ engine });
+  let admission = 0;
+  let evaluation = 0;
+  let cleanup = 0;
+  let profile: string | WireNull = null;
+  let buildIdentity: unknown = null;
+  let engineObservations: unknown = null;
+  const perCase: PerformanceLabCaseResult[] = [];
+  let releaseRational: (() => void) | undefined;
+  try {
+    const admittedAt = performance.now();
+    const subject =
+      input.fixture.format === 'rational-plate'
+        ? (() => {
+            const admitted = admitRationalPlate(engine, input);
+            releaseRational = admitted.release;
+            return admitted.subject;
+          })()
+        : await loader({
+            source: input.fixture.bytes,
+            format: input.fixture.format,
+            ...(input.fixture.format === 'glb' ? { sourceUnit: input.fixture.sourceUnit } : {}),
+          });
+    admission = ms(admittedAt);
+    /* oxlint-disable no-await-in-loop -- Sequential calls share one admitted subject and must not contend during measurement. */
+    for (let repeat = 0; repeat < input.repeats; repeat += 1) {
+      for (const current of input.cases) {
+        const client = createGeoSpecAssertionClient({
+          engine,
+          canonicalize: module.canonicalize,
+          subjectSlot: current.subjectSlot,
+          ...(current.workUnitBudget === undefined ? {} : { workUnitLimit: current.workUnitBudget }),
+          ...(current.claimId === undefined ? {} : { claimId: () => current.claimId! }),
+        });
+        const matchers = client.expectGeo(subject);
+        const methods: Record<string, unknown> = current.polarity === 'negative' ? matchers.not : matchers;
+        const method = current.kind === 'query' ? client.query : methods[current.matcher];
+        if (typeof method !== 'function') {
+          perCase.push({
+            caseId: current.id,
+            matcher: current.matcher,
+            repeat,
+            status: 'unsupported',
+            expectedStatus: current.expectedStatus,
+            diagnostics: ['Matcher absent from native assertion client.'],
+            result: null,
+            evaluation: 0,
+            numericProfile: null,
+            canonicalClaimUtf8: null,
+            canonicalResultUtf8: null,
+            canonicalResultSha256: null,
+          });
+          continue;
+        }
+        const evaluatedAt = performance.now();
+        let report: GeoSpecCanonicalClaimReport;
+        try {
+          report =
+            current.kind === 'query'
+              ? await client.query({
+                  capability: current.matcher as GeoSpecQueryCapability,
+                  payload: current.payload,
+                  subject,
+                  claimId: current.claimId,
+                })
+              : await (method as (...args: readonly unknown[]) => Promise<GeoSpecCanonicalClaimReport>)(
+                  ...current.arguments,
+                );
+        } catch (error) {
+          if (!(error instanceof GeoSpecAssertionError)) {
+            throw error;
+          }
+          report = error.report;
+        }
+        const elapsed = ms(evaluatedAt);
+        evaluation += elapsed;
+        const numericProfile = numericProfileOfCanonicalResult(report.canonicalResult);
+        profile ??= numericProfile;
+        perCase.push({
+          caseId: current.id,
+          matcher: current.matcher,
+          repeat,
+          status: report.status,
+          expectedStatus: current.expectedStatus,
+          diagnostics: report.diagnostics,
+          result: report.result,
+          evaluation: elapsed,
+          numericProfile,
+          ...(await canonicalFields(report.canonicalClaim, report.canonicalResult)),
+        });
+      }
+    }
+    /* oxlint-enable no-await-in-loop */
+    engineObservations = engine.observations ? decode(engine.observations()) : null;
+    buildIdentity = engine.cacheProducerIdentity ? decode(engine.cacheProducerIdentity()) : null;
+  } finally {
+    const cleanupAt = performance.now();
+    try {
+      releaseRational?.();
+      await loader.releaseAll();
+    } finally {
+      engine.close();
+    }
+    cleanup = ms(cleanupAt);
+  }
+  return {
+    engine: input.engine,
+    backend: input.engine,
+    profile,
+    buildIdentity,
+    engineObservations,
+    initializationTiming: 'startup',
+    fixtureId: input.fixture.id,
+    cache: cacheLabel(input.cache),
+    perCase,
+    timing: { startup, admission, evaluation, cleanup, total: ms(totalAt) },
+  };
+};
+
+const runLegacy = async (
+  input: PerformanceLabRunInput,
+  load: NonNullable<PerformanceLabModules['legacy']>,
+): Promise<PerformanceLabRunResult> => {
+  const totalAt = performance.now();
+  const startupAt = performance.now();
+  const { geoSpecEngineImplementation: implementation } = await load();
+  const initialized = implementation.protocol.initialize({
+    protocolVersion: 2,
+    client: { name: 'simd-performance-lab', version: '1' },
+  });
+  const startup = ms(startupAt);
+  const supported = new Set(
+    input.fixture.format === 'rational-plate' ? [] : initialized.capabilities.map(({ name }) => name),
+  );
+  const perCase: PerformanceLabCaseResult[] = [];
+  if (input.cases.every(({ matcher, polarity }) => !supported.has(matcher) || polarity === 'negative')) {
+    for (let repeat = 0; repeat < input.repeats; repeat += 1) {
+      for (const current of input.cases) {
+        perCase.push({
+          caseId: current.id,
+          matcher: current.matcher,
+          repeat,
+          status: 'unsupported',
+          expectedStatus: current.expectedStatus,
+          diagnostics: [
+            current.polarity === 'negative'
+              ? 'Legacy protocol does not evaluate negated claims.'
+              : 'Capability not advertised by legacy.',
+          ],
+          result: null,
+          evaluation: 0,
+          numericProfile: null,
+          canonicalClaimUtf8: null,
+          canonicalResultUtf8: null,
+          canonicalResultSha256: null,
+        });
+      }
+    }
+    return {
+      engine: input.engine,
+      backend: initialized.engine.name,
+      profile: null,
+      buildIdentity: initialized,
+      engineObservations: null,
+      initializationTiming: 'lazy-in-admission-or-evaluation',
+      fixtureId: input.fixture.id,
+      cache: cacheLabel(input.cache),
+      perCase,
+      timing: {
+        startup,
+        admission: 0,
+        evaluation: 0,
+        cleanup: 0,
+        total: ms(totalAt),
+      },
+    };
+  }
+  const admittedAt = performance.now();
+  const admitted = await implementation.protocol.ingestSubject(
+    {
+      requestId: `lab-ingest:${input.fixture.id}`,
+      contentHash: `sha256:${input.fixture.sha256}`,
+      format: input.fixture.format === 'rational-plate' ? 'step' : input.fixture.format,
+      frame: { coordinateSystem: 'z-up', sourceUnit: input.fixture.sourceUnit, targetUnit: 'mm' },
+      provenance: { fixtureId: input.fixture.id },
+      options: {},
+    },
+    input.fixture.bytes,
+  );
+  const admission = ms(admittedAt);
+  let evaluation = 0;
+  let cleanup = 0;
+  try {
+    /* oxlint-disable no-await-in-loop -- Sequential calls share one admitted subject and must not contend during measurement. */
+    for (let repeat = 0; repeat < input.repeats; repeat += 1) {
+      for (const current of input.cases) {
+        if (
+          !supported.has(current.matcher) ||
+          current.polarity === 'negative' ||
+          (current.kind === 'matcher' && current.payload === undefined)
+        ) {
+          perCase.push({
+            caseId: current.id,
+            matcher: current.matcher,
+            repeat,
+            status: 'unsupported',
+            expectedStatus: current.expectedStatus,
+            diagnostics: [
+              current.polarity === 'negative'
+                ? 'Legacy protocol does not evaluate negated claims.'
+                : 'Capability not advertised by legacy.',
+            ],
+            result: null,
+            evaluation: 0,
+            numericProfile: null,
+            canonicalClaimUtf8: null,
+            canonicalResultUtf8: null,
+            canonicalResultSha256: null,
+          });
+          continue;
+        }
+        const payload = toGeoSpecProtocolJson(current.payload);
+        const claim = encodeGeoSpecCanonicalJson({
+          claimId: current.claimId ?? `${current.id}:${repeat}`,
+          capability: current.matcher,
+          subjectIds: [admitted.subject.subjectId],
+          payload,
+          workUnitBudget: current.workUnitBudget ?? 8_000_000,
+        });
+        const evaluatedAt = performance.now();
+        const response = await implementation.protocol.submitClaims({
+          requestId: `lab-claim:${current.id}:${repeat}`,
+          registryVersion: 3,
+          execution: { forensic: false, matcherWallBackstop: 600_000 },
+          claims: [claim],
+        });
+        const elapsed = ms(evaluatedAt);
+        evaluation += elapsed;
+        const result = response.results[0];
+        if (!result) {
+          throw new Error('Legacy GeoSpec matcher returned no report.');
+        }
+        const canonicalResult = encodeGeoSpecCanonicalJson(toGeoSpecProtocolJson(result));
+        perCase.push({
+          caseId: current.id,
+          matcher: current.matcher,
+          repeat,
+          status: result.status,
+          expectedStatus: current.expectedStatus,
+          diagnostics: result.diagnostics,
+          result,
+          evaluation: elapsed,
+          numericProfile: profileOf(result.provenance),
+          ...(await canonicalFields(claim, canonicalResult)),
+        });
+      }
+    }
+    /* oxlint-enable no-await-in-loop */
+  } finally {
+    const cleanupAt = performance.now();
+    implementation.protocol.releaseSubject({
+      requestId: `lab-release:${input.fixture.id}`,
+      subjectId: admitted.subject.subjectId,
+    });
+    cleanup = ms(cleanupAt);
+  }
+  return {
+    engine: input.engine,
+    backend: initialized.engine.name,
+    profile: null,
+    buildIdentity: initialized,
+    engineObservations: null,
+    fixtureId: input.fixture.id,
+    cache: cacheLabel(input.cache),
+    initializationTiming: 'lazy-in-admission-or-evaluation',
+    perCase,
+    timing: { startup, admission, evaluation, cleanup, total: ms(totalAt) },
+  };
+};
+
+/**
+ * Admit one fixture, then run sequential public calls on the injected engine.
+ * @internal
+ * @param input - Parsed ordinary benchmark input.
+ * @param modules - Actual lazy modules supplied by the host.
+ * @returns Raw per-case evidence and complete cell wall timing.
+ */
+export const runPerformanceLabCell = async (
+  input: PerformanceLabRunInput,
+  modules: PerformanceLabModules,
+): Promise<PerformanceLabRunResult> => {
+  if (input.engine === 'legacy-wasm') {
+    if (!modules.legacy) {
+      throw new Error('Legacy GeoSpec engine module is unavailable.');
+    }
+    return runLegacy(input, modules.legacy);
+  }
+  const load = input.engine === 'combined-wasm' ? modules.combined : modules.native;
+  if (!load) {
+    throw new Error(`${input.engine} GeoSpec engine module is unavailable.`);
+  }
+  return runNative(input, load);
+};

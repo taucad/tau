@@ -100,6 +100,8 @@ export type DesktopAgentHostConnectInput = {
 };
 
 export type DesktopBridge = {
+  /** Debug-only native GeoSpec comparisons, with byte-only inputs. */
+  readonly geoSpecPerformance: { connect(): Promise<MessagePort> };
   readonly runtimeKernelIds: readonly string[];
   readonly nodeFs: {
     /**
@@ -151,7 +153,12 @@ export type DesktopBridge = {
   };
   readonly openFiles: {
     /** Consume paths delivered by macOS Open With as bounded file payloads. */
-    consume(): Promise<ReadonlyArray<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }>>;
+    consume(): Promise<
+      ReadonlyArray<{
+        readonly bytes: Uint8Array<ArrayBuffer>;
+        readonly name: string;
+      }>
+    >;
   };
   readonly quickLook: DesktopShell['quickLook'];
   /**
@@ -210,6 +217,9 @@ export const desktopBridge = (): DesktopBridge | undefined => {
   };
 
   built ??= {
+    geoSpecPerformance: {
+      connect: async () => connectServices('geospecPerformance'),
+    },
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
     /* Parsed, not trusted: the names and model ids main put here came out of a
      * vendor adapter's own config options, and this page renders them. */

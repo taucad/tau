@@ -56,6 +56,7 @@ import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/util
 import { systemSkillBundles } from '@taucad/skills/resources';
 
 import { canonicalPath } from '#main/project-roots.js';
+import { serveGeoSpecPerformance } from '#tau/geospec-performance.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 
 /**
@@ -313,6 +314,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const trustedRoots = new Set<string>();
   const candidateRoots = new Map<string, number>();
   const nodeFileSystemDisposers = new Set<() => Promise<void>>();
+  const performanceDisposers = new Set<() => Promise<void>>();
   const runtimeFileSystemDisposers = new Set<RuntimeFileSystemDisposer>();
   /* One always-on launcher per workspace root, outliving every connection to
    * it: a run keeps executing with zero clients attached, which is the whole
@@ -1038,6 +1040,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     runtimeFileSystemDisposers.clear();
     await settleAll(
       [
+        ...[...performanceDisposers].map(async (close) => close()),
         ...runtimeDisposers.map(async (disposeFileSystem) => disposeFileSystem.drain()),
         ...fileSystemDisposers.map(async (disposeFileSystem) => disposeFileSystem()),
       ],
@@ -1096,7 +1099,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       const gracefulSettlement = quiescence;
       const runtimeDisposers = [...runtimeFileSystemDisposers];
       runtimeFileSystemDisposers.clear();
-      const closingFileSystems: Array<Promise<void>> = [];
+      const closingFileSystems: Array<Promise<void>> = [...performanceDisposers].map(async (close) => close());
       for (const disposeFileSystem of runtimeDisposers) {
         try {
           disposeFileSystem.force();
@@ -1168,6 +1171,34 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
       const context = record['context'] as Record<string, unknown> | undefined;
       switch (record['concern']) {
+        case 'geospecPerformance': {
+          if (!/^(1|true)$/iu.test(process.env['TAU_DEBUG'] ?? '')) {
+            log('geospec-performance-disabled');
+            port.close();
+            return;
+          }
+          const disposePerformance = serveGeoSpecPerformance(port);
+          const close = async (): Promise<void> => {
+            try {
+              await disposePerformance();
+            } finally {
+              performanceDisposers.delete(close);
+            }
+          };
+          performanceDisposers.add(close);
+          const disposeDisconnectedPerformance = async (): Promise<void> => {
+            try {
+              await close();
+            } catch (error) {
+              log('geospec-performance-close-failed', error instanceof Error ? error.message : String(error));
+            }
+          };
+          port.on('close', () => {
+            // async-iife: bootstrap -- the retained disposer lets quiesce await this remote-close cleanup.
+            void disposeDisconnectedPerformance();
+          });
+          return;
+        }
         case 'nodeFs': {
           const stop = serve(toNodeFsPort(port), {
             allowRoot: isTrustedRoot,

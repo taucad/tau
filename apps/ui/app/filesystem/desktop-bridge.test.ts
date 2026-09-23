@@ -136,6 +136,13 @@ describe('desktopBridge', () => {
     expect(requestId).toEqual(expect.any(String));
   });
 
+  it('should connect native GeoSpec comparisons through their dedicated concern', async () => {
+    const { port, requestServicesPort } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+    await expect(desktopBridge()?.geoSpecPerformance.connect()).resolves.toBe(port);
+    expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'geospecPerformance', undefined);
+  });
+
   it('connects the agent host by naming the workspace root main must vouch for', async () => {
     const { port, requestServicesPort } = installShellGlobal();
     const { desktopBridge } = await loadBridge();

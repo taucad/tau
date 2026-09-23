@@ -106,7 +106,7 @@ export type RevisionSyncRegionProps = {
  * @param sync - The settled sync facet.
  * @returns What the row reads, or `undefined` when there is nothing to say.
  */
-const syncCopy = (sync: SyncFacet): string | undefined => {
+export const syncCopy = (sync: SyncFacet): string | undefined => {
   switch (sync.state) {
     case 'noRemote': {
       return undefined;

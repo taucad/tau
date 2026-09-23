@@ -829,6 +829,23 @@ describe('assistant action row', () => {
     expect(time.getAttribute('datetime')).toBe(new Date(createdAt).toISOString());
   });
 
+  it('gives a user message the same copy and timestamp, and no usage button', () => {
+    const createdAt = Date.now() - 2 * 60 * 60_000;
+    setMessages([
+      { id: 'msg-u', role: 'user', parts: [{ type: 'text', text: 'make the blade longer' }], metadata: { createdAt } },
+    ]);
+
+    render(<ChatMessage messageId='msg-u' />);
+
+    const copy = screen.getByTestId('copy-button');
+    expect(screen.getByText('2 hours ago')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-message-data-usage')).not.toBeInTheDocument();
+    /* Right-aligned under the bubble, time left of the buttons: one reversed row. */
+    const row = copy.parentElement;
+    expect(row?.className).toContain('flex-row-reverse');
+    expect(row?.firstElementChild).toBe(copy);
+  });
+
   it('omits the usage button without usage parts and the timestamp without a stamp', () => {
     setMessages([{ id: 'msg-b', role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }]);
 

@@ -348,9 +348,9 @@ type ImportGitHubEnqueue = EnqueueObject<
   typeof importGitHubActors
 >;
 type ImportGitHubPatch = Partial<ImportGitHubContext>;
-type ImportGitHubArgs<TType extends ImportGitHubEvent['type']> = Readonly<{
+type ImportGitHubArgs<EventType extends ImportGitHubEvent['type']> = Readonly<{
   context: ImportGitHubContext;
-  event: Extract<ImportGitHubEvent, { type: TType }>;
+  event: Extract<ImportGitHubEvent, { type: EventType }>;
 }>;
 
 const noFetchErrors = { metadata: undefined, branches: undefined, files: undefined } as const;
@@ -512,10 +512,10 @@ const startImport = ({ context }: Readonly<{ context: ImportGitHubContext }>) =>
 
 const fetchErrorPatch = (
   context: ImportGitHubContext,
-  key: keyof ImportGitHubContext['fetchErrors'],
-  error: unknown,
-  fallback: string,
-): ImportGitHubPatch => ({ fetchErrors: { ...context.fetchErrors, [key]: errorOr(error, fallback) } });
+  failure: Readonly<{ key: keyof ImportGitHubContext['fetchErrors']; error: unknown; fallback: string }>,
+): ImportGitHubPatch => ({
+  fetchErrors: { ...context.fetchErrors, [failure.key]: errorOr(failure.error, failure.fallback) },
+});
 
 /** Prefer the file the URL asked for, else the first file with a CAD extension. */
 const initialMainFile = (context: ImportGitHubContext): string | undefined => {
@@ -677,7 +677,11 @@ export const importGitHubMachine = setup({
                 onError: ({ context, event }) => ({
                   target: 'error',
                   context: {
-                    ...fetchErrorPatch(context, 'metadata', event.error, 'Failed to fetch repository metadata'),
+                    ...fetchErrorPatch(context, {
+                      key: 'metadata',
+                      error: event.error,
+                      fallback: 'Failed to fetch repository metadata',
+                    }),
                     repoMetadata: undefined,
                     error: toMetadataFetchError(event.error),
                   },
@@ -718,7 +722,11 @@ export const importGitHubMachine = setup({
                 onError: ({ context, event }) => ({
                   target: 'error',
                   context: {
-                    ...fetchErrorPatch(context, 'branches', event.error, 'Failed to fetch branches'),
+                    ...fetchErrorPatch(context, {
+                      key: 'branches',
+                      error: event.error,
+                      fallback: 'Failed to fetch branches',
+                    }),
                     branches: [],
                     hasMoreBranches: false,
                   },
@@ -755,7 +763,11 @@ export const importGitHubMachine = setup({
                 onError: ({ context, event }) => ({
                   target: 'error',
                   context: {
-                    ...fetchErrorPatch(context, 'files', event.error, 'Failed to fetch files'),
+                    ...fetchErrorPatch(context, {
+                      key: 'files',
+                      error: event.error,
+                      fallback: 'Failed to fetch files',
+                    }),
                     isLoadingFiles: false,
                     repoFiles: [],
                   },
@@ -791,7 +803,7 @@ export const importGitHubMachine = setup({
         onError: ({ context, event }) => ({
           target: 'enteringDetails',
           context: {
-            ...fetchErrorPatch(context, 'files', event.error, 'Failed to fetch files'),
+            ...fetchErrorPatch(context, { key: 'files', error: event.error, fallback: 'Failed to fetch files' }),
             isLoadingFiles: false,
             repoFiles: [],
           },

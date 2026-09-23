@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
@@ -82,11 +82,12 @@ import {
   getInitialPanelOptions,
 } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
 const toggleParametersKeyCombination = projectWorkspaceKeyCombinations.parameters;
 
 type ParameterSetActor = NonNullable<ReturnType<ParameterSetService['actor']>>;
-type ParameterSetState = ReturnType<ParameterSetActor['getSnapshot']>;
+type ParameterSetState = SnapshotFrom<typeof parameterSetMachine>;
 type ParameterGroupState = FileParameterEntry['groups'][string] | undefined;
 
 const currentEntryOf = (state: ParameterSetState | undefined): FileParameterEntry | undefined =>

@@ -436,9 +436,9 @@ const editorActors = {
 
 type EditorEnqueue = EnqueueObject<EditorStateEvent, EditorStateEmitted, SystemRegistry, typeof editorActors>;
 type EditorPatch = Partial<EditorStateContext>;
-type EditorArgs<TType extends EditorStateEvent['type']> = Readonly<{
+type EditorArgs<EventType extends EditorStateEvent['type']> = Readonly<{
   context: EditorStateContext;
-  event: Extract<EditorStateEvent, { type: TType }>;
+  event: Extract<EditorStateEvent, { type: EventType }>;
 }>;
 
 const errorOf = (error: unknown, fallback: string): Error => (error instanceof Error ? error : new Error(fallback));
@@ -823,7 +823,7 @@ export const editorMachine = setup({
                 return {};
               }
               const openFiles = context.openFiles.filter((file) => file.paneId !== closing.paneId);
-              let activePaneId = context.activePaneId;
+              let { activePaneId } = context;
 
               if (context.activePaneId === closing.paneId) {
                 activePaneId = openFiles.at(-1)?.paneId;

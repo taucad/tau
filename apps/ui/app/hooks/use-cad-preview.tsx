@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { createContext, useContext, useEffect, useMemo, useCallback, useId, useRef } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { Geometry } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
@@ -18,6 +18,7 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import { ephemeralKernelOptions } from '#constants/ephemeral-kernel-options.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
+import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 /**
  * Status of the CAD preview.
@@ -223,7 +224,10 @@ function CadPreviewPipeline({
         /* oxlint-disable react/refs -- XState's stable ActorRef is an imperative public API, not a mutable React ref read during render. */
         prepareFiles: fromSafeAsync(async ({ input, signal }) => {
           if (input.files) {
-            const snapshot = await waitFor(fileManagerRef, (state) => state.matches('ready') || state.matches('error'));
+            const snapshot: SnapshotFrom<typeof fileManagerMachine> = await waitFor(
+              fileManagerRef,
+              (state) => state.matches('ready') || state.matches('error'),
+            );
 
             if (snapshot.matches('error')) {
               throw new Error(snapshot.context.error?.message ?? 'File manager initialization failed');

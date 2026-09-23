@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
+import type { Mock } from 'vitest';
 
 const harness = vi.hoisted(() => ({
   projectManager: {
@@ -104,9 +105,11 @@ function renderWithStore(onSessionStage: () => void = () => undefined): {
   return { store: captured, unmount: utils.unmount };
 }
 
-function spyOnActorSends(session: ReturnType<InstanceType<typeof ChatSessionStore>['acquire']>): {
-  persistenceSend: ReturnType<typeof spyOnSend>;
-  draftSend: ReturnType<typeof spyOnSend>;
+type AcquiredSession = ReturnType<InstanceType<typeof ChatSessionStore>['acquire']>;
+
+function spyOnActorSends(session: AcquiredSession): {
+  persistenceSend: Mock<AcquiredSession['persistenceActorRef']['send']>;
+  draftSend: Mock<AcquiredSession['draftActorRef']['send']>;
 } {
   // Replacing `.send` with a mock is the cleanest way to assert the guard's
   // fan-out without depending on machine internals — the guard's contract

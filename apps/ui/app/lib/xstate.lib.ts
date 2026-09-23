@@ -157,11 +157,11 @@ export function fromSafeAsync<
 // ---------------------------------------------------------------------------
 
 /** An event's payload; distributes so an event whose payload is itself a union keeps every member. */
-type EventPayload<TEvent> = TEvent extends unknown ? Omit<TEvent, 'type'> : never;
+type EventPayload<EventUnion> = EventUnion extends unknown ? Omit<EventUnion, 'type'> : never;
 
 /** The `schemas.events` or `schemas.emitted` map for a union of `{ type }` events. */
-export type EventSchemaMap<TEvent extends { readonly type: string }> = {
-  [K in TEvent['type']]: TypeSchema<EventPayload<Extract<TEvent, { readonly type: K }>>>;
+export type EventSchemaMap<EventUnion extends { readonly type: string }> = {
+  [K in EventUnion['type']]: TypeSchema<EventPayload<Extract<EventUnion, { readonly type: K }>>>;
 };
 
 /**
@@ -172,9 +172,9 @@ export type EventSchemaMap<TEvent extends { readonly type: string }> = {
  *
  * @returns An empty object typed as the schema map.
  */
-export const eventSchemas = <TEvent extends { readonly type: string }>(): EventSchemaMap<TEvent> =>
+export const eventSchemas = <EventUnion extends { readonly type: string }>(): EventSchemaMap<EventUnion> =>
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- type-only schema map, never validated.
-  ({}) as EventSchemaMap<TEvent>;
+  ({}) as EventSchemaMap<EventUnion>;
 
 /**
  * The actor source map a machine was set up with, as `machine.provide({ actors })` accepts it.
@@ -183,8 +183,8 @@ export const eventSchemas = <TEvent extends { readonly type: string }>(): EventS
  * read the map from the machine type instead.
  */
 /* oxlint-disable typescript/no-explicit-any -- positional inference over StateMachine's parameters. */
-export type MachineActors<TMachine extends AnyStateMachine> =
-  TMachine extends StateMachine<
+export type MachineActors<Machine extends AnyStateMachine> =
+  Machine extends StateMachine<
     any,
     any,
     any,

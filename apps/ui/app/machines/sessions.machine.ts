@@ -160,8 +160,8 @@ type SessionsEnqueue = EnqueueObject<
   Readonly<{ projectSession: typeof projectSessionMachine }>
 >;
 
-const announceLiveSet = (refs: SessionsMachineContext['refs'], enq: SessionsEnqueue): void => {
-  enq.emit({ type: 'liveSetChanged', projectIds: Object.keys(refs) });
+const announceLiveSet = (liveSessions: SessionsMachineContext['refs'], enq: SessionsEnqueue): void => {
+  enq.emit({ type: 'liveSetChanged', projectIds: Object.keys(liveSessions) });
 };
 
 const touchProject = (context: SessionsMachineContext, projectId: string): Partial<SessionsMachineContext> => ({
@@ -243,19 +243,19 @@ export const sessionsMachine = setup({
       if (ref !== undefined) {
         enq.stop(ref);
       }
-      const refs = withoutKey(context.refs, event.projectId);
+      const liveSessions = withoutKey(context.refs, event.projectId);
       const patch = {
-        refs,
+        refs: liveSessions,
         status: withoutKey(context.status, event.projectId),
         closed: { ...context.closed, [event.projectId]: { reason: event.reason, at: context.sequence } },
       };
       /* The slot the budget close was making room for is free now (P47). */
       if (context.pendingOpen !== undefined) {
         enq.raise({ type: 'open', projectId: context.pendingOpen });
-        announceLiveSet(refs, enq);
+        announceLiveSet(liveSessions, enq);
         return { context: { ...patch, pendingOpen: undefined } };
       }
-      announceLiveSet(refs, enq);
+      announceLiveSet(liveSessions, enq);
       return { context: patch };
     },
   },
@@ -279,12 +279,12 @@ export const sessionsMachine = setup({
                 closeFlushMilliseconds: context.closeFlushMilliseconds,
               },
             });
-            const refs = { ...context.refs, [event.projectId]: ref };
-            announceLiveSet(refs, enq);
+            const liveSessions = { ...context.refs, [event.projectId]: ref };
+            announceLiveSet(liveSessions, enq);
             return {
               context: {
                 ...touchProject(context, event.projectId),
-                refs,
+                refs: liveSessions,
                 closed: withoutKey(context.closed, event.projectId),
                 refusals: withoutKey(context.refusals, event.projectId),
               },

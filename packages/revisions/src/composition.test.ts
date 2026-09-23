@@ -162,7 +162,8 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
                 },
               }),
             }
-          : {}),
+          : /* The default children, named: v6's `provide` rejects an optional slot. */
+            { publish: publishMachine, sync: syncMachine }),
       },
     }),
     { clock, input: { projectId: 'project-1', liveCheckoutId: 'checkout-live' } },
@@ -253,9 +254,12 @@ describe('revision machine composition (S48 Node set)', () => {
     await flush();
 
     expect(names(tree.promises.calls)).toEqual([
+      /* XState v6 starts invoked children after the root's entry effects, so
+       * the registry's `open` reaches it before `remote` and `sync` start; v5
+       * started every child first. The three startup reads are independent. */
+      'sweepLeases',
       'readRemote',
       'readPending',
-      'sweepLeases',
       'listCheckouts',
       'syncReadRemote',
       'syncFetch',

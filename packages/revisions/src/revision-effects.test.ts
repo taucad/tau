@@ -1102,7 +1102,12 @@ describe('checkout fence cancellation', () => {
       createActor(
         createMachine({
           invoke: { src: fence, input: { checkoutId: 'live' } },
-          on: { fenceGranted: { actions: onGranted } },
+          on: {
+            fenceGranted: (_, enq) => {
+              enq(onGranted);
+              return {};
+            },
+          },
         }),
       );
     const firstGranted = Promise.withResolvers<void>();

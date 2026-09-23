@@ -54,8 +54,8 @@ import type {
   ResolutionSeedTurnActorOutput,
   ResolutionSide,
 } from '#resolution.machine.js';
-import { createActor, fromCallback, fromPromise } from 'xstate';
-import type { AnyEventObject } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
+import type { AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate';
 
 import { checkoutMachine } from '#checkout.machine.js';
 import type {
@@ -684,19 +684,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const swept = new Set<string>();
 
   const fromAuthorityPromise = <Output, Input>(
-    effect: Parameters<typeof fromPromise<Output, Input>>[0],
-  ): ReturnType<typeof fromPromise<Output, Input>> =>
-    fromPromise<Output, Input>(async (arguments_) => {
-      const operation = (async (): Promise<Output> => {
-        arguments_.signal.throwIfAborted();
-        return effect(arguments_);
-      })();
-      activeOperations.add(operation);
-      try {
-        return await operation;
-      } finally {
-        activeOperations.delete(operation);
-      }
+    effect: AsyncLogicFunction<Output, Input>,
+  ): AsyncActorLogic<Output, Input> =>
+    createAsyncLogic<Output, Input>({
+      run: async (arguments_, enqueue) => {
+        const operation = (async (): Promise<Output> => {
+          arguments_.signal.throwIfAborted();
+          return effect(arguments_, enqueue);
+        })();
+        activeOperations.add(operation);
+        try {
+          return await operation;
+        } finally {
+          activeOperations.delete(operation);
+        }
+      },
     });
 
   const acquireCheckoutFence = (checkoutId: string): Readonly<{ granted: Promise<void>; release: () => void }> => {
@@ -1591,7 +1593,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * inside this process, which is what keeps two chats from cutting the
        * same tree at once. The browser's is a Web Lock (W3d).
        */
-      fence: fromCallback<AnyEventObject, CheckoutFenceActorInput>(({ input, sendBack }) => {
+      fence: createCallbackLogic<AnyEventObject, CheckoutFenceActorInput>(({ input, sendBack }) => {
         let live = true;
         const fence = acquireCheckoutFence(input.checkoutId);
         const grant = async (): Promise<void> => {
@@ -1728,7 +1730,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * time, so this grants on sight. The record is `.tau/runs/<runId>.json`
        * and the only exclusion in the system is the mint fence above.
        */
-      lease: fromCallback<AnyEventObject, TurnLeaseActorInput>(({ input, sendBack }) => {
+      lease: createCallbackLogic<AnyEventObject, TurnLeaseActorInput>(({ input, sendBack }) => {
         options.onPlacement?.({ runId: input.runId, status: 'leased', checkoutId: input.checkoutId });
         sendBack({ type: 'leaseGranted' });
         return (): void => undefined;
@@ -2925,7 +2927,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           : { status: 'conflicted', branch: conflictBranch, into: input.branch, paths: outcome.paths };
       }),
 
-      connectivity: fromCallback<AnyEventObject>(({ sendBack }) => {
+      connectivity: createCallbackLogic<AnyEventObject>(({ sendBack }) => {
         const subscribe = options.connectivity;
         if (subscribe === undefined) {
           /* A host that says nothing is a host that is online: `offline` is a

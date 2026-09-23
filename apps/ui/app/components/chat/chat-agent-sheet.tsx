@@ -714,7 +714,8 @@ function ModelList({
   readonly agents: readonly SheetAgent[];
   readonly current: SheetAgent;
   readonly sheetModel: SheetModel;
-  readonly onChoose: (agent: SheetAgent, modelId: string) => void;
+  /** `modelId` is absent only for an external agent that runs on its own default. */
+  readonly onChoose: (agent: SheetAgent, modelId: string | undefined) => void;
   readonly onBack: () => void;
 }): React.JSX.Element {
   const {
@@ -746,61 +747,75 @@ function ModelList({
           onValueChange={setQuery}
         />
         <CommandList className='max-h-none min-h-0 flex-1'>
-          <CommandEmpty className='mx-2'>
-            {view.kind === 'acp' && view.models.length === 0
-              ? `${view.name} offered no models; it runs on its own default.`
-              : `No models match “${query}”.`}
-          </CommandEmpty>
-          {view.kind === 'tau'
-            ? tauGroups.map((group) => (
-                <CommandGroup key={group.name} heading={group.name}>
-                  {group.items.map((entry) => {
-                    const isInUse = current.kind === 'tau' && entry.id === modelId;
-                    return (
-                      <CommandItem
-                        key={entry.id}
-                        value={entry.id}
-                        keywords={[entry.name, entry.provider.name, group.name]}
-                        onSelect={() => {
-                          onChoose(view, entry.id);
-                        }}
-                      >
-                        <ModelRow
-                          glyph={<SvgIcon id={entry.details.family} aria-hidden='true' />}
-                          name={entry.name}
-                          isInUse={isInUse}
-                          level={isInUse ? sheetModel.level?.name : undefined}
-                        />
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-              ))
-            : view.models.length > 0 && (
-                <CommandGroup heading={view.name}>
-                  {view.models.map((entry) => {
-                    const isInUse = current.key === view.key && entry.id === (selectedAcpModel ?? view.defaultModel);
-                    return (
-                      <CommandItem
-                        key={entry.id}
-                        value={entry.id}
-                        keywords={[entry.name, view.name]}
-                        onSelect={() => {
-                          onChoose(view, entry.id);
-                        }}
-                      >
-                        {/* Agent-authored text: rendered as text, never resolved against Tau's catalog (VI3). */}
-                        <ModelRow
-                          glyph={<AgentGlyph agentId={view.agentId} className='size-4' />}
-                          name={entry.name}
-                          isInUse={isInUse}
-                          level={isInUse && sheetModel.isLevelShown ? sheetModel.level?.name : undefined}
-                        />
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-              )}
+          <CommandEmpty className='mx-2'>No models match “{query}”.</CommandEmpty>
+          {view.kind === 'tau' ? (
+            tauGroups.map((group) => (
+              <CommandGroup key={group.name} heading={group.name}>
+                {group.items.map((entry) => {
+                  const isInUse = current.kind === 'tau' && entry.id === modelId;
+                  return (
+                    <CommandItem
+                      key={entry.id}
+                      value={entry.id}
+                      keywords={[entry.name, entry.provider.name, group.name]}
+                      onSelect={() => {
+                        onChoose(view, entry.id);
+                      }}
+                    >
+                      <ModelRow
+                        glyph={<SvgIcon id={entry.details.family} aria-hidden='true' />}
+                        name={entry.name}
+                        isInUse={isInUse}
+                        level={isInUse ? sheetModel.level?.name : undefined}
+                      />
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            ))
+          ) : view.models.length === 0 ? (
+            /* A failed model probe never drops the agent (EQ1 fallback B): it still runs, on its own default. */
+            <CommandGroup heading={view.name}>
+              <CommandItem
+                value='default'
+                keywords={[view.name]}
+                onSelect={() => {
+                  onChoose(view, undefined);
+                }}
+              >
+                <ModelRow
+                  glyph={<AgentGlyph agentId={view.agentId} className='size-4' />}
+                  name='Default model'
+                  isInUse={current.key === view.key}
+                  level={undefined}
+                />
+              </CommandItem>
+            </CommandGroup>
+          ) : (
+            <CommandGroup heading={view.name}>
+              {view.models.map((entry) => {
+                const isInUse = current.key === view.key && entry.id === (selectedAcpModel ?? view.defaultModel);
+                return (
+                  <CommandItem
+                    key={entry.id}
+                    value={entry.id}
+                    keywords={[entry.name, view.name]}
+                    onSelect={() => {
+                      onChoose(view, entry.id);
+                    }}
+                  >
+                    {/* Agent-authored text: rendered as text, never resolved against Tau's catalog (VI3). */}
+                    <ModelRow
+                      glyph={<AgentGlyph agentId={view.agentId} className='size-4' />}
+                      name={entry.name}
+                      isInUse={isInUse}
+                      level={isInUse && sheetModel.isLevelShown ? sheetModel.level?.name : undefined}
+                    />
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
         </CommandList>
         {view.kind === 'tau' ? (
           <div className='border-t p-1'>
@@ -918,8 +933,11 @@ function Sheet({
     setView(next);
   };
 
-  const choose = (agent: SheetAgent, modelId: string): void => {
+  const choose = (agent: SheetAgent, modelId: string | undefined): void => {
     if (agent.kind === 'tau') {
+      if (modelId === undefined) {
+        return;
+      }
       if (execution.kind === 'tau') {
         /* Keeps the host and the chosen level; the level is clamped where it is read. */
         setActiveModel(modelId);
@@ -934,10 +952,10 @@ function Sheet({
     } else {
       const isSameAgent =
         execution.kind === 'acp' && execution.hostId === agent.hostId && execution.agentId === agent.agentId;
-      const next: AcpAgentExecution = isSameAgent
-        ? { ...execution, model: modelId }
-        : { kind: 'acp', hostId: agent.hostId, agentId: agent.agentId, model: modelId };
-      setActiveExecution(next);
+      const { model: _model, ...base }: AcpAgentExecution = isSameAgent
+        ? execution
+        : { kind: 'acp', hostId: agent.hostId, agentId: agent.agentId };
+      setActiveExecution(modelId === undefined ? base : { ...base, model: modelId });
     }
     go('settings');
   };

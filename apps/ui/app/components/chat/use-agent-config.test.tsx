@@ -75,7 +75,12 @@ describe('useAgentConfig', () => {
   });
 
   it('shows the agent-confirmed value instead of a stale requested one', () => {
-    execution.current = { ...execution.current, config: Object.fromEntries([['thought_level', 'high']]) };
+    execution.current = {
+      kind: 'acp',
+      hostId: 'origin',
+      agentId: 'codex',
+      config: Object.fromEntries([['thought_level', 'high']]),
+    };
     const { result } = renderConfig({ sessionData: session([thinking('medium')]), status: 'ready' });
 
     expect(thoughtValue(result.current)).toBe('medium');

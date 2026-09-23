@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// oxlint-disable-next-line no-restricted-imports -- type-only: the catalog row's shape, which the models hook owns
 import type { Model } from '#hooks/use-models.js';
 import {
   admittedReasoning,

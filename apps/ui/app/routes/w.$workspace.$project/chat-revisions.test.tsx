@@ -51,6 +51,10 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
 }));
 const chats = [{ id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+const placeChat = vi.fn(async () => undefined);
+vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
+  useOptionalChatWorkspaceAuthority: () => ({ placeChat }),
+}));
 /* The pane is the second surface on the same notice as the toast; the store
    behind it is written by `RevisionOutcomes`, which this pane does not mount. */
 let turnOutcomes: readonly TurnOutcomeNotice[] = [];
@@ -489,6 +493,54 @@ describe('Revisions pane', () => {
     await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
+  });
+
+  /* C3: the composer offers no branch, so a one-line project makes its second here. */
+  it('offers New branch at one line, where the Branches region does not exist yet', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main' };
+
+    renderPane();
+    expect(screen.queryByRole('list', { name: 'Branches' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'New branch' }));
+    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
+
+    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
+  });
+
+  it('places the chat in focus on a branch from that branch’s row', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+
+    render(<RevisionsPanelBody />, {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={['/w/home/p?chat=chat-1']}>{children}</MemoryRouter>
+        </QueryClientProvider>
+      ),
+    });
+    /* The chat in focus already works in bracket-fillet, so only main offers to take it. */
+    await user.click(screen.getByRole('button', { name: 'Actions for bracket-fillet' }));
+    expect(screen.queryByRole('menuitem', { name: /in this chat$/u })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Actions for main' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Use main in this chat' }));
+
+    expect(placeChat).toHaveBeenCalledWith('chat-1', 'live');
   });
 
   /* Review W8 finding 4: the pane consumes the verb as `(name) => void`, which

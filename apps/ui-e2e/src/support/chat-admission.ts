@@ -17,6 +17,7 @@ import type { ChatLogExpectation, LogRecord } from '#support/chat-admission-log.
 import { foldChatLog } from '#support/chat-admission-log.js';
 import {
   composerSelector,
+  editComposerSelector,
   dismissCookies,
   pdfModelName,
   prepareComposerPage,
@@ -208,7 +209,7 @@ export const completeFirstTurn = async (): Promise<void> => {
  */
 export const editFirstMessage = async (suffix: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: /First plain message/u }).first());
-  const editComposer = selectors.getByCss(`article ${composerSelector}`).first();
+  const editComposer = selectors.getByCss(editComposerSelector).first();
   await target.expectVisible(editComposer, 30_000);
   await target.type(editComposer, suffix);
   await target.press(editComposer, 'Enter');

@@ -100,6 +100,9 @@ export { Topic } from '@taucad/events';
 export type { TopicOptions, TopicSubscribeOptions, TopicSubscription } from '@taucad/events';
 export { coordinateSystemSchema, gltfExportConventionSchema, unitSchema } from '#types/export-option-schemas.js';
 export type { CoordinateSystemOptions, UnitOptions } from '#types/export-option-schemas.js';
+export { quantity } from '#configuration/zod.js';
+export { quantityKinds } from '@taucad/units/quantity';
+export type { QuantitySchemaOptions } from '#configuration/zod.js';
 
 export type {
   BuildReuse,

@@ -75,6 +75,21 @@ describe('quantity authoring', () => {
     expect(schema.parse({ volumes: [null, 0.2] })).toEqual({ length: 0.001, volumes: [null, 0.2] });
   });
 
+  it('should carry a display symbol through integer, bounded and defaulted refinements', () => {
+    const schema = quantity({ unit: '1', space: 'linear', symbol: 'px' }).int().min(16).max(4096).default(768);
+
+    expect(z.toJSONSchema(schema, { target: 'draft-07', io: 'input' })).toMatchObject({
+      type: 'integer',
+      'x-tau-unit': '1',
+      'x-tau-space': 'linear',
+      'x-tau-symbol': 'px',
+      minimum: 16,
+      maximum: 4096,
+      default: 768,
+    });
+    expect(() => quantity({ unit: '1', symbol: '' })).toThrow('A quantity symbol must not be empty');
+  });
+
   it('should reject unknown IDs at a JavaScript boundary', () => {
     expect(() => {
       Reflect.apply(quantity, undefined, [{ unit: 'meters' }]);

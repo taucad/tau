@@ -618,7 +618,7 @@ function ChatMessageTimestamp({
         <time
           dateTime={date.toISOString()}
           tabIndex={0}
-          className='ml-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
+          className='mx-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
         >
           {formatRelativeTime(date)}
         </time>
@@ -885,28 +885,38 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           </When>
           {footer}
         </div>
+        {/* Both roles get the same row: a request is as worth copying and dating
+            as an answer. Usage only ever exists on an answer, so it self-omits.
+            A request's row mirrors its bubble: right-aligned under it, with the
+            time to the left of the buttons — `flex-row-reverse` gives that order
+            from the same children, and the extra inset mirrors the answer row's
+            own column (the user column is mx-2 against the assistant's mx-4). */}
+        <div
+          className={cn(
+            'flex flex-row items-start justify-start text-muted-foreground transition-opacity duration-150',
+            'opacity-0',
+            'group-hover/chat-message:opacity-100',
+            'group-focus-within/chat-message:opacity-100',
+            // An answer's last paragraph carries the markdown viewer's own bottom
+            // margin, so its row cancels the column gap; a bubble has none, so a
+            // request's row keeps it above and gives it back below, where the
+            // indicator's margin and the turn-group gap already separate the
+            // request from the answer.
+            isUser ? 'mx-2 -mb-1 flex-row-reverse' : '-mt-2',
+          )}
+        >
+          <CopyButton
+            tooltipContentProperties={{ side: 'bottom' }}
+            size='icon'
+            getText={() => serializeMessage(displayMessage)}
+            tooltip='Copy message'
+            className='size-7'
+          />
+          {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
+          <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
+        </div>
         {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
         {isUser ? <ChatMessagePlanning messageId={messageId} className='-mt-1 ml-0' /> : null}
-        <When shouldRender={!isUser}>
-          <div
-            className={cn(
-              '-mt-2 flex flex-row items-start justify-start text-muted-foreground transition-opacity duration-150',
-              'opacity-0',
-              'group-hover/chat-message:opacity-100',
-              'group-focus-within/chat-message:opacity-100',
-            )}
-          >
-            <CopyButton
-              tooltipContentProperties={{ side: 'bottom' }}
-              size='icon'
-              getText={() => serializeMessage(displayMessage)}
-              tooltip='Copy message'
-              className='size-7'
-            />
-            {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
-            <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
-          </div>
-        </When>
       </div>
     </article>
   );

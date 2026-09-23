@@ -1,0 +1,468 @@
+#!/usr/bin/env node
+/**
+ * Private diagnostic n=5 driver for the shared SIMD performance lab; not Q7 qualification.
+ * Run with Node's native TypeScript support from any directory. No environment variables required.
+ * Usage: node packages/geospec-engine-native/bench/performance-lab-cli.ts --native-module=/absolute/installed/node.mjs --output-dir=out/reports/benchmarks/performance-lab
+ * Exit: 0 completed diagnostic (unsupported remains visible); 1 execution or expected-status mismatch.
+ */
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { appendFile, mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
+import process from 'node:process';
+import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
+import {
+  performanceLabCases,
+  performanceLabFixtures,
+  performanceLabNativeQueries,
+  performanceLabScaleCases,
+} from '#bench/performance-lab';
+import type { LabFixture, PerformanceLabCase, PerformanceLabQuery } from '#bench/performance-lab';
+import type { Artifact } from '#bench/lib';
+import type {
+  PerformanceLabModules,
+  PerformanceLabRunInput,
+  PerformanceLabRunResult,
+} from '#bench/performance-lab-runner';
+
+type Engine = PerformanceLabRunInput['engine'];
+type SelectedModule = { engine: Engine; path: string };
+type Options = {
+  modules: SelectedModule[];
+  outputDir: string;
+  samples: number;
+  includeScale: boolean;
+  hashManifest?: string;
+  cell?: string;
+};
+type Selection = { fixture: LabFixture; cases: ReadonlyArray<PerformanceLabCase | PerformanceLabQuery> };
+type Cell = { sequence: number; round: number; module: SelectedModule; selection: Selection };
+type ChildReport = {
+  result?: PerformanceLabRunResult;
+  error?: { message: string; stack?: string };
+  memory: { method: string; scope: string; peakBytes: number; observed: string };
+};
+// oxlint-disable-next-line typescript/no-restricted-types -- Node exit receipts preserve explicit null for an absent exit code/signal.
+type WireNull = null;
+
+const root = resolvePath(import.meta.dirname, '../../..');
+const script = resolvePath(import.meta.dirname, 'performance-lab-cli.ts');
+const moduleFlags = [
+  ['legacy-module', 'legacy-wasm'],
+  ['mixed-module', 'combined-wasm'],
+  ['native-module', 'native-desktop'],
+] as const;
+const help = `Private performance-lab diagnostic (not Q7 qualification).
+  --legacy-module=/absolute/installed/legacy.mjs
+  --mixed-module=/absolute/installed/wasm.mjs
+  --native-module=/absolute/installed/node.mjs
+Supply at least one module; only supplied engines run, with no fallback.
+  --output-dir=out/reports/benchmarks/performance-lab  Required NEW directory; relative to workspace root.
+  --samples=5                                      Fresh children per fixture/engine; default 5.
+  --include-scale                                  Opt in to large catalog controls.
+  --hash-manifest=/absolute/artifacts.json           Optional existing Artifact[]: [{path,sha256}].
+The manifest must include supplied modules and the legacy cache control module when selected.
+Include their binaries/loaders to pin that closure. Without a manifest only entries and the
+legacy cache control are pinned; no transitive closure is claimed.
+Results: run.json, artifacts.json, rows.jsonl, summary.json, cells/*/{result.json,stdout.log,stderr.log}.
+Runner repeats=1/cache=cold. Wall spans spawn through close, including Node/import startup and I/O.
+maxRSS is process.resourceUsage().maxRSS * 1024 (KiB to bytes), child process only, through cleanup.
+Unsupported and unverified cells remain raw; unexpected statuses and worker errors exit 1.
+`;
+
+/**
+ * Parse scalar CLI options without importing an engine.
+ * @internal
+ * @param args - CLI tokens excluding Node and the script path.
+ * @returns Explicit selected modules and diagnostic options.
+ */
+export const parseCliArguments = (args: string[]): Options => {
+  const { values } = parseArgs({
+    args,
+    options: {
+      'legacy-module': { type: 'string' },
+      'mixed-module': { type: 'string' },
+      'native-module': { type: 'string' },
+      'output-dir': { type: 'string' },
+      samples: { type: 'string', default: '5' },
+      'include-scale': { type: 'boolean', default: false },
+      'hash-manifest': { type: 'string' },
+      cell: { type: 'string' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  const modules = moduleFlags.flatMap(([flag, engine]) => {
+    const path = values[flag];
+    if (path === undefined) {
+      return [];
+    }
+    if (!isAbsolute(path)) {
+      throw new Error(`--${flag} must name an absolute installed module path.`);
+    }
+    return [{ engine, path: resolvePath(path) }];
+  });
+  const samples = Number(values.samples);
+  if (modules.length === 0 || !values['output-dir'] || !Number.isSafeInteger(samples) || samples < 1) {
+    throw new Error('Supply an installed module, --output-dir, and a positive integer --samples. See --help.');
+  }
+  if (values.cell !== undefined && modules.length !== 1) {
+    throw new Error('An internal child cell requires exactly one supplied module.');
+  }
+  return {
+    modules,
+    outputDir: resolvePath(root, values['output-dir']),
+    samples,
+    includeScale: values['include-scale'],
+    ...(values['hash-manifest'] === undefined ? {} : { hashManifest: resolvePath(root, values['hash-manifest']) }),
+    ...(values.cell === undefined ? {} : { cell: values.cell }),
+  };
+};
+
+/**
+ * Select the same authored claims and queries consumed by the UI.
+ * @internal
+ * @param includeScale - Whether to include the explicit scale selection.
+ * @returns Subject fixtures with their applicable authored cases.
+ */
+export const selectLabFixtures = (includeScale: boolean): Selection[] => {
+  const cases = [
+    ...performanceLabCases,
+    ...(includeScale ? performanceLabScaleCases : []),
+    ...performanceLabNativeQueries,
+  ];
+  return performanceLabFixtures.flatMap((fixture) => {
+    const selected = cases.filter((entry) => entry.fixtureId === fixture.id);
+    return fixture.role === 'subject' && selected.length > 0 && (includeScale || !fixture.scale)
+      ? [{ fixture, cases: selected }]
+      : [];
+  });
+};
+
+/**
+ * Preserve exact public authoring arguments and legacy/query payloads.
+ * @internal
+ * @param entry - One unchanged catalog matcher or query.
+ * @returns Its shared-runner input, matching the UI adapter.
+ */
+export const toRunCase = (entry: Selection['cases'][number]): PerformanceLabRunInput['cases'][number] => ({
+  id: entry.id,
+  kind: 'matcher' in entry ? 'matcher' : 'query',
+  matcher: 'matcher' in entry ? entry.matcher : entry.capability,
+  arguments: 'arguments' in entry ? entry.arguments : [],
+  payload: entry.claim.payload,
+  claimId: entry.claim.claimId,
+  subjectSlot: entry.claim.subjectSlots[0],
+  workUnitBudget: entry.claim.workUnitBudget,
+  polarity: entry.claim.polarity,
+  expectedStatus: entry.expectedStatus,
+});
+
+/**
+ * Rotate fixture and engine order deterministically, with one child per tuple.
+ * @internal
+ * @param options - Selected modules, sample count, and scale opt-in.
+ * @returns Serial dispatch order with one cell per fixture, engine, and round.
+ */
+export const planLabCells = (options: Pick<Options, 'samples' | 'modules' | 'includeScale'>): Cell[] => {
+  const selections = selectLabFixtures(options.includeScale);
+  const cells: Cell[] = [];
+  for (let round = 0; round < options.samples; round += 1) {
+    for (let index = 0; index < selections.length; index += 1) {
+      const fixtureIndex = (index + round) % selections.length;
+      const selection = selections[fixtureIndex]!;
+      for (let position = 0; position < options.modules.length; position += 1) {
+        const module = options.modules[(position + fixtureIndex + round) % options.modules.length]!;
+        cells.push({ sequence: cells.length, round: round + 1, module, selection });
+      }
+    }
+  }
+  return cells;
+};
+
+/**
+ * Verify existing Artifact descriptors, retaining exact file byte counts.
+ * @internal
+ * @param artifacts - Existing benchmark path/SHA-256 descriptors.
+ * @returns Verified descriptors with observed byte counts.
+ */
+export const verifyLabArtifacts = async (
+  artifacts: readonly Artifact[],
+): Promise<Array<Artifact & { bytes: number }>> => {
+  const verified = [];
+  for (const artifact of artifacts) {
+    if (!isAbsolute(artifact.path) || !/^[\da-f]{64}$/.test(artifact.sha256)) {
+      throw new Error('Hash manifests use existing Artifact descriptors with absolute path and SHA-256.');
+    }
+    // oxlint-disable-next-line no-await-in-loop -- Verify one binary at a time to avoid retaining every installed product in memory together.
+    const bytes = await readFile(artifact.path);
+    if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) {
+      throw new Error(`SHA-256 mismatch: ${artifact.path}`);
+    }
+    verified.push({ ...artifact, bytes: bytes.byteLength });
+  }
+  return verified;
+};
+
+const hashPath = async (path: string): Promise<Artifact> => ({
+  path,
+  sha256: createHash('sha256')
+    .update(await readFile(path))
+    .digest('hex'),
+});
+const writeJson = async (path: string, value: unknown): Promise<void> => {
+  await writeFile(path, JSON.stringify(value, undefined, 2) + '\n', { flag: 'wx' });
+};
+const errorRecord = (error: unknown): NonNullable<ChildReport['error']> =>
+  error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
+
+const legacyCacheModule = (path: string): string => resolvePath(dirname(path), 'cache/evidence-cache.mjs');
+
+/**
+ * Select the retained legacy package's existing cache-off control before loading its engine.
+ * @internal
+ * @param path - Hash-bound installed legacy entry module.
+ * @returns The unchanged legacy implementation with persistence explicitly disabled.
+ */
+export const loadLegacyWithoutPersistence = async (
+  path: string,
+): ReturnType<NonNullable<PerformanceLabModules['legacy']>> => {
+  const cache = (await import(pathToFileURL(legacyCacheModule(path)).href)) as {
+    setGeoSpecEvidenceStore(store: undefined): void;
+    getGeoSpecEvidenceStore(): unknown;
+  };
+  cache.setGeoSpecEvidenceStore(undefined);
+  if (cache.getGeoSpecEvidenceStore() !== undefined) {
+    throw new Error('Legacy persistence was not disabled; a cold-subject comparison is unavailable.');
+  }
+  return import(pathToFileURL(path).href) as ReturnType<NonNullable<PerformanceLabModules['legacy']>>;
+};
+
+const readArtifacts = async (options: Options): Promise<Artifact[]> => {
+  const required = options.modules.flatMap(({ engine, path }) =>
+    engine === 'legacy-wasm' ? [path, legacyCacheModule(path)] : [path],
+  );
+  if (options.hashManifest === undefined) {
+    return Promise.all(required.map(async (path) => hashPath(path)));
+  }
+  const artifacts = JSON.parse(await readFile(options.hashManifest, 'utf8')) as Artifact[];
+  if (!Array.isArray(artifacts) || required.some((path) => !artifacts.some((entry) => entry.path === path))) {
+    throw new Error('The hash manifest must include each supplied module and the legacy cache-control module.');
+  }
+  return artifacts;
+};
+
+const runChild = async (options: Options): Promise<void> => {
+  let result: PerformanceLabRunResult | undefined;
+  let failure: ChildReport['error'];
+  try {
+    await verifyLabArtifacts(await readArtifacts(options));
+    const selected = selectLabFixtures(options.includeScale).find(({ fixture }) => fixture.id === options.cell);
+    if (!selected) {
+      throw new Error(`No selected catalog cases for fixture ${options.cell}.`);
+    }
+    const bytes = new Uint8Array(await readFile(resolvePath(root, selected.fixture.path)));
+    if (
+      createHash('sha256').update(bytes).digest('hex') !== selected.fixture.sha256 ||
+      bytes.byteLength !== selected.fixture.bytes
+    ) {
+      throw new Error(`Pinned fixture bytes changed: ${selected.fixture.id}`);
+    }
+    const input: PerformanceLabRunInput = {
+      engine: options.modules[0]!.engine,
+      fixture: {
+        id: selected.fixture.id,
+        format: selected.fixture.format,
+        sourceUnit: selected.fixture.sourceUnit,
+        bytes,
+        sha256: selected.fixture.sha256,
+      },
+      cases: selected.cases.map((entry) => toRunCase(entry)),
+      repeats: 1,
+      cache: 'cold',
+    };
+    const url = pathToFileURL(options.modules[0]!.path).href;
+    const modules: PerformanceLabModules = {
+      ...(input.engine === 'legacy-wasm'
+        ? { legacy: async () => loadLegacyWithoutPersistence(options.modules[0]!.path) }
+        : {}),
+      ...(input.engine === 'combined-wasm'
+        ? { combined: async () => import(url) as ReturnType<NonNullable<PerformanceLabModules['combined']>> }
+        : {}),
+      ...(input.engine === 'native-desktop'
+        ? { native: async () => import(url) as ReturnType<NonNullable<PerformanceLabModules['native']>> }
+        : {}),
+    };
+    const { runPerformanceLabCell } = await import('#bench/performance-lab-runner');
+    result = await runPerformanceLabCell(input, modules);
+  } catch (error) {
+    failure = errorRecord(error);
+    process.exitCode = 1;
+  }
+  const report: ChildReport = {
+    ...(result === undefined ? {} : { result }),
+    ...(failure === undefined ? {} : { error: failure }),
+    memory: {
+      method: 'process.resourceUsage().maxRSS (KiB) * 1024',
+      scope: 'child-process-only; descendants not observed',
+      peakBytes: process.resourceUsage().maxRSS * 1024,
+      observed: 'after runner cleanup or thrown error, before result serialization; includes hashing and host setup',
+    },
+  };
+  await writeJson(resolvePath(options.outputDir, 'result.json'), report);
+};
+
+const invokeCell = async (cell: Cell, options: Options) => {
+  const outputDirectory = resolvePath(options.outputDir, 'cells', String(cell.sequence).padStart(5, '0'));
+  await mkdir(outputDirectory, { recursive: true });
+  const stdout = await open(resolvePath(outputDirectory, 'stdout.log'), 'wx');
+  const stderr = await open(resolvePath(outputDirectory, 'stderr.log'), 'wx');
+  const flag = moduleFlags.find(([, engine]) => engine === cell.module.engine)![0];
+  const args = [
+    script,
+    `--${flag}=${cell.module.path}`,
+    `--cell=${cell.selection.fixture.id}`,
+    `--output-dir=${outputDirectory}`,
+    `--hash-manifest=${resolvePath(options.outputDir, 'artifacts.json')}`,
+    ...(options.includeScale ? ['--include-scale'] : []),
+  ];
+  const started = performance.now();
+  let childExit: { code: number | WireNull; signal: NodeJS.Signals | WireNull } | undefined;
+  let failure: ChildReport['error'];
+  try {
+    childExit = await new Promise<NonNullable<typeof childExit>>((resolve, reject) => {
+      const child = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', stdout.fd, stderr.fd] });
+      child.once('error', reject);
+      child.once('close', (code, signal) => {
+        resolve({ code, signal });
+      });
+    });
+  } catch (error) {
+    failure = errorRecord(error);
+  }
+  const processWall = performance.now() - started;
+  await Promise.all([stdout.close(), stderr.close()]);
+  let report: ChildReport | undefined;
+  try {
+    report = JSON.parse(await readFile(resolvePath(outputDirectory, 'result.json'), 'utf8')) as ChildReport;
+  } catch (error) {
+    failure ??= errorRecord(error);
+  }
+  return {
+    sequence: cell.sequence,
+    round: cell.round,
+    engine: cell.module.engine,
+    modulePath: cell.module.path,
+    fixture: cell.selection.fixture,
+    cases: cell.selection.cases.map((entry) => toRunCase(entry)),
+    repeats: 1,
+    cache: 'cold-module-cold-subject',
+    ...report,
+    ...(failure === undefined ? {} : { error: failure }),
+    processWall,
+    childExit,
+    outputDir: outputDirectory,
+  };
+};
+
+const runParent = async (options: Options): Promise<void> => {
+  const artifacts = await verifyLabArtifacts(await readArtifacts(options));
+  const cells = planLabCells(options);
+  const sourcePaths = [
+    'performance-lab-cli.ts',
+    'performance-lab-runner.ts',
+    'performance-lab.ts',
+    'fixtures/performance-lab/manifest.json',
+    'fixtures/performance-lab/authority-cases.json',
+    'fixtures/performance-lab/authority-queries.json',
+    'fixtures/performance-lab/analytic-cases.json',
+  ];
+  const sources = await Promise.all(sourcePaths.map(async (path) => hashPath(resolvePath(import.meta.dirname, path))));
+  await mkdir(dirname(options.outputDir), { recursive: true });
+  await mkdir(options.outputDir);
+  await writeJson(resolvePath(options.outputDir, 'artifacts.json'), artifacts);
+  await writeJson(resolvePath(options.outputDir, 'run.json'), {
+    purpose: 'diagnostic; not Q7 promotion',
+    startedAt: new Date().toISOString(),
+    argv: process.argv,
+    node: process.version,
+    platform: process.platform,
+    architecture: process.arch,
+    samples: options.samples,
+    includeScale: options.includeScale,
+    timingUnit: 'milliseconds',
+    order: 'fixture offset = round; engine offset = round + original fixture index; zero-based, modulo counts',
+    processWall:
+      'spawn through close; includes Node startup, imports, hashing, fixture I/O, runner, serialization and exit',
+    legacyPersistence: 'disabled through the unchanged installed evidence-cache module before engine import',
+    hashCoverage:
+      options.hashManifest === undefined
+        ? 'module-entries-and-legacy-cache-control-only; transitive binaries not pinned'
+        : 'supplied-manifest-only; no inferred closure',
+    artifacts,
+    sources,
+    catalog: selectLabFixtures(options.includeScale),
+    schedule: cells.map(({ sequence, round, module, selection }) => ({
+      sequence,
+      round,
+      engine: module.engine,
+      fixtureId: selection.fixture.id,
+    })),
+  });
+  const summary = {
+    cells: 0,
+    workerErrors: 0,
+    expectedMatches: 0,
+    unexpectedStatuses: 0,
+    unsupported: 0,
+    unverifiedExpectations: 0,
+  };
+  for (const cell of cells) {
+    // oxlint-disable-next-line no-await-in-loop -- Measurements must run serially in fresh children, with no overlapping engines.
+    const row = await invokeCell(cell, options);
+    // oxlint-disable-next-line no-await-in-loop -- Retain each raw cell before starting the next one.
+    await appendFile(resolvePath(options.outputDir, 'rows.jsonl'), JSON.stringify({ ...row, artifacts }) + '\n');
+    summary.cells += 1;
+    if (row.error !== undefined || row.childExit?.code !== 0 || row.result === undefined) {
+      summary.workerErrors += 1;
+    }
+    for (const entry of row.result?.perCase ?? []) {
+      if (entry.status === 'unsupported') {
+        summary.unsupported += 1;
+      } else if (entry.expectedStatus === 'unverified') {
+        summary.unverifiedExpectations += 1;
+      } else if (entry.status === entry.expectedStatus) {
+        summary.expectedMatches += 1;
+      } else {
+        summary.unexpectedStatuses += 1;
+      }
+    }
+    console.log(
+      `${summary.cells}/${cells.length} round=${cell.round} ${cell.module.engine} ${cell.selection.fixture.id} ${row.error?.message ?? 'recorded'}`,
+    );
+  }
+  await writeJson(resolvePath(options.outputDir, 'summary.json'), summary);
+  console.log(JSON.stringify(summary));
+  if (summary.workerErrors > 0 || summary.unexpectedStatuses > 0) {
+    process.exitCode = 1;
+  }
+};
+
+const main = async (): Promise<void> => {
+  if (process.argv.includes('--help')) {
+    console.log(help);
+    return;
+  }
+  const options = parseCliArguments(process.argv.slice(2));
+  await (options.cell === undefined ? runParent(options) : runChild(options));
+};
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolvePath(process.argv[1])).href) {
+  try {
+    await main();
+  } catch (error) {
+    console.error('Performance-lab CLI failed:', error);
+    process.exitCode = 1;
+  }
+}

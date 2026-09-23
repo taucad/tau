@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "taskId": "M3-EDGE-TREATMENT-FIXTURES-A1",
+  "frozenBeforeFirstExport": true,
+  "constructionOperations": {
+    "planarChamfer": "Extrude the frozen five-edge XY profile with bevel segment (10,11)-(9,12) by +14Z; the prism's Generated(bevelEdge) is the transition face.",
+    "cylindricalFillet": "Extrude the frozen XY profile whose radius-2 quarter-circle joins (10,10) to (8,12) about center (8,10) by +14Z; Generated(arcEdge) is the transition face.",
+    "conicalChamfer": "Revolve the frozen XZ profile with bevel segment (r=5,z=9)-(r=4,z=10) through 2pi about +Z; Generated(bevelEdge) is the transition face.",
+    "toroidalFillet": "Revolve the frozen XZ profile whose radius-1 quarter-circle joins (r=5,z=9) to (r=4,z=10) about section center (r=4,z=9) through 2pi about +Z; Generated(arcEdge) is the transition face."
+  },
+  "sourceSelection": {
+    "profileEdges": "Each treatment edge is held as the exact source edge used by the prism/revolution constructor; no imported face search or numeric proximity selects it.",
+    "transitionFace": "Require exactly one expected analytic face in Generated(sourceProfileEdge). For case 1 only, attach the XDE subshape name to that exact history face before export."
+  },
+  "idealAnalyticRelations": [
+    {
+      "fixture": "planar-chamfer",
+      "supports": ["x=10", "y=12"],
+      "rails": ["x=9,y=12", "x=10,y=11"],
+      "transitionPlane": "x+y=21",
+      "railDirection": [0, 0, 1],
+      "nominalOffsets": [1, 1],
+      "metric": 1
+    },
+    {
+      "fixture": "cylindrical-fillet",
+      "supports": ["x=10", "y=12"],
+      "candidateAxis": "line x=8,y=10, parallel +Z",
+      "candidateRadius": 2,
+      "materialSide": "box material remains on the negative-x/negative-y side of the removed convex corner; the admitted quarter-cylinder must follow that oriented branch",
+      "metric": 2
+    },
+    {
+      "fixture": "conical-chamfer",
+      "supports": ["cylinder r=5", "plane z=10"],
+      "rails": ["r=5,z=9", "r=4,z=10"],
+      "axialChangeH": 1,
+      "radialChangeDr": 1,
+      "semiAngleDegrees": 45,
+      "metricRepresentative": "h",
+      "metric": 1
+    },
+    {
+      "fixture": "toroidal-fillet",
+      "supports": ["cylinder r=5", "plane z=10"],
+      "candidateAxis": "+Z",
+      "candidateMajorRadius": 4,
+      "candidateMinorRadius": 1,
+      "rails": ["r=5,z=9", "r=4,z=10"],
+      "materialSide": "cylinder material remains radially inward and below the top plane; the admitted torus must be the exterior convex quarter branch",
+      "metric": 1
+    }
+  ],
+  "rigidTransform": {
+    "rotation3x3": [["3/5", "-4/5", 0], ["4/5", "3/5", 0], [0, 0, 1]],
+    "translation": [20, 30, 40],
+    "determinant": 1,
+    "metricInvariant": true
+  },
+  "qualificationPremises": {
+    "comparison": "Analytic residuals use imported source-owned rail lengths and participating entity tolerances. No fixed angular epsilon or authored matcher tolerance establishes membership.",
+    "materialSide": "A valid owning solid's face orientation plus analytic supports and oriented edge uses must select the declared material-side branch; coincidence alone is insufficient.",
+    "trims": "Every face wire and edge use, including repeated seam uses, must be recorded. Degenerate or incomplete incidence is not silently accepted.",
+    "limits": "These ideal construction formulas justify fixture intent only. Imported numeric observations are nominal and do not prove universal STEP behavior or exact real arithmetic."
+  }
+}

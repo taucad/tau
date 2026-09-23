@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'geospecPerformance'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -28,7 +28,7 @@ export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem'] as 
 export type ServicesConcern = (typeof servicesConcerns)[number];
 
 /** Concerns a renderer may request directly. */
-export const rendererServicesConcerns: readonly ServicesConcern[] = ['nodeFs', 'agentHost'];
+export const rendererServicesConcerns: readonly ServicesConcern[] = ['nodeFs', 'agentHost', 'geospecPerformance'];
 
 /** Observable result of the bounded services-host drain. */
 export type ServicesQuiesceOutcome =

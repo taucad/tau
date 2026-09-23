@@ -102,6 +102,60 @@ describe('modelList', () => {
     }
   });
 
+  describe('reasoning levels', () => {
+    /** The effort a row sends by default, in the shared vocabulary, per the codec that forwards it. */
+    const forwardedDefault = (model: ReturnType<typeof getCloudCatalogEntries>[number]): string | undefined => {
+      const { configuration } = model;
+      switch (model.provider.id) {
+        case 'anthropic': {
+          return configuration.thinking?.type === 'adaptive' ? configuration.outputConfig?.effort : undefined;
+        }
+        case 'vertexai': {
+          return configuration.thinkingLevel?.toLowerCase();
+        }
+        case 'openai':
+        case 'xai': {
+          return configuration.reasoning?.effort;
+        }
+        default: {
+          // The completions codec forwards no effort for any other provider.
+          return undefined;
+        }
+      }
+    };
+
+    it('should offer levels on exactly the rows whose codec forwards an effort', () => {
+      for (const model of getCloudCatalogEntries()) {
+        expect(model.support?.reasoning !== undefined, model.id).toBe(forwardedDefault(model) !== undefined);
+      }
+    });
+
+    it('should include every row default in its own levels, sent at high', () => {
+      for (const model of getCloudCatalogEntries()) {
+        const levels: readonly string[] | undefined = model.support?.reasoning?.levels;
+        if (levels !== undefined) {
+          expect(levels, model.id).toContain(forwardedDefault(model));
+          expect(forwardedDefault(model), model.id).toBe('high');
+        }
+      }
+    });
+
+    it('should never offer Vertex a level past high, nor xhigh outside the models that accept it', () => {
+      const extraHigh = getCloudCatalogEntries()
+        .filter((model) => model.support?.reasoning?.levels.includes('xhigh'))
+        .map((model) => model.id);
+      expect(extraHigh).toEqual([
+        'anthropic-claude-fable-5.1',
+        'anthropic-claude-fable-5',
+        'anthropic-claude-opus-5.5',
+        'anthropic-claude-opus-5',
+        'anthropic-claude-opus-4.8',
+        'openai-gpt-6-astra',
+      ]);
+      expect(getCloudCatalogEntries().some((model) => model.support?.reasoning?.levels.includes('max'))).toBe(false);
+    });
+  });
+
   it('declares PDF input on exactly the proven Anthropic and OpenAI codec models', () => {
     const pdfModelIds = getCloudCatalogEntries()
       .filter((model) => modelSupportsInput(model.support, 'pdf'))

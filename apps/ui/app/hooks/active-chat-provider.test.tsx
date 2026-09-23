@@ -177,6 +177,12 @@ function stableResolvedModel(id: string, name: string): unknown {
 }
 const stableResolveModel = (id: string): unknown =>
   stableResolvedModel(id, id === harness.selectedModelId ? harness.selectedModelName : id);
+// The real hook's Tau branch, kept so the dual-write assertions stay on the cookie setter.
+const rememberExecution = (execution: { readonly kind: string; readonly model?: string }): void => {
+  if (execution.kind === 'tau') {
+    harness.setSelectedModelId(execution.model);
+  }
+};
 const useModelsReturnCache = new Map<string, unknown>();
 function getStableUseModelsReturn(): unknown {
   const key = `${harness.selectedModelId}|${harness.selectedModelName}`;
@@ -185,6 +191,8 @@ function getStableUseModelsReturn(): unknown {
     cached = {
       selectedModelId: harness.selectedModelId,
       setSelectedModelId: harness.setSelectedModelId,
+      defaultExecution: { kind: 'tau', model: harness.selectedModelId },
+      rememberExecution,
       selectedModel: stableResolvedModel(harness.selectedModelId, harness.selectedModelName),
       resolveModel: stableResolveModel,
       data: [],
@@ -1097,6 +1105,33 @@ describe('ActiveChatProvider', () => {
         });
       });
       expect(harness.setSelectedModelId).toHaveBeenCalledWith('new-model');
+    });
+
+    it('should persist the chosen reasoning level on the chat execution, keeping its model', async () => {
+      harness.getChat.mockResolvedValue(
+        makeChat({ id: 'chat_effort', activeExecution: { kind: 'tau', model: 'old-model', hostId: 'origin' } }),
+      );
+
+      const { result } = renderHook(() => useChatComposer(), {
+        wrapper: createSessionWrapper('chat_effort'),
+      });
+
+      await waitFor(() => {
+        expect(result.current.model.modelId).toBe('old-model');
+      });
+
+      act(() => {
+        result.current.model.setActiveEffort('low');
+      });
+
+      await waitFor(() => {
+        expect(harness.patchChat).toHaveBeenCalledWith('chat_effort', 'activeExecution', {
+          kind: 'tau',
+          model: 'old-model',
+          hostId: 'origin',
+          effort: 'low',
+        });
+      });
     });
 
     it('drops a persisted browser-host placement when the active model changes', async () => {

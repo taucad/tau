@@ -200,6 +200,18 @@ describe('ChatAgentSheet', () => {
     });
   });
 
+  it('still offers an agent whose model probe came back empty, on its own default model', async () => {
+    const placement = codex();
+    state.placements = [{ ...placement, externalAgents: [{ id: 'codex', displayName: 'Codex', models: [] }] }];
+    renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Codex' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Default model' }));
+
+    expect(setActiveExecution).toHaveBeenCalledWith({ kind: 'acp', hostId: 'desktop', agentId: 'codex' });
+  });
+
   it('lists an agent its host cannot start, with the reason, the fix and the code — never as a choice', async () => {
     state.placements = [codex('EXTERNAL_AGENT_AUTH_REQUIRED')];
     renderSheet();

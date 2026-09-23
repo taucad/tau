@@ -351,7 +351,10 @@ export const ChatTextareaDesktop = memo(function ({
     if (!editor) {
       return;
     }
-    editor.setEditable(!isSubmitting);
+    /* No update event: editability is not content, and on mount the editor is
+     * still empty until the restored draft lands (F20), so an update here
+     * would persist an empty draft over it. */
+    editor.setEditable(!isSubmitting, false);
   }, [editor, isSubmitting]);
 
   const focusEditor = useCallback(() => {

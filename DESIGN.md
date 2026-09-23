@@ -74,11 +74,13 @@ measurements remain explicit.
 - **Narrow means rearranged.** Stack, wrap or provide a visibly labelled alternate
   view. Preserve orientation and access to the same capabilities. Tooltips do
   not recover information hidden from touch users.
-  The compact composer is a specific single-row design: shorten labels, remove
-  redundant adornments and omit the agent picker when Tau is the only choice.
-  Readiness may be summarized in its accessible tooltip, never the sole approval
-  or recovery surface. Verify actual fit with all controls enabled; do not hide
-  capabilities or let controls overlap to preserve the row.
+  The composer is one ghost row on every device: one + for attachments and
+  context, and one agent control beside Send that opens the model, its reasoning
+  level and the agent's own settings. As the row narrows, measured labels give
+  way to their glyphs; the reasoning level stays. Readiness may be summarized in
+  its accessible tooltip, never the sole approval or recovery surface. Verify
+  actual fit with all controls enabled; do not hide capabilities or let controls
+  overlap to preserve the row.
 - **Deferred UI respects its activity boundary.** Inactive settings must not
   trigger protected queries and unrelated error toasts merely because every
   panel was force-mounted. Preserve drafts explicitly. Expected, recoverable
@@ -88,8 +90,9 @@ measurements remain explicit.
 ### Revisions and streamed work
 
 A fresh Revisions pane starts with visible **Where you are** and **History**.
-Branch management and the composer picker appear once additional branches are
-relevant; a discoverable New branch action enables first use. Sync configuration
+Branch management appears once additional branches are relevant; a discoverable
+New branch action in its place enables first use. A chat chooses its branch from
+that branch's row, never from the composer. Sync configuration
 appears when a remote exists or the user opens Connect, with one concise backup
 offer beforehand. First-connect
 data sharing and opt-out remain visible before commitment. Connected backup

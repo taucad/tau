@@ -1,5 +1,6 @@
 import { reasoningLevels } from '@taucad/chat/constants';
 import type { ReasoningLevel } from '@taucad/chat/constants';
+// oxlint-disable-next-line no-restricted-imports -- type-only: the catalog row's shape, which the models hook owns
 import type { Model } from '#hooks/use-models.js';
 import type { AgentHostAdmissionConfig } from '#workers/agent-host.contract.js';
 
@@ -12,6 +13,20 @@ import type { AgentHostAdmissionConfig } from '#workers/agent-host.contract.js';
 
 /** The reasoning controls one admitted Tau turn carries. @public */
 export type ModelReasoning = NonNullable<AgentHostAdmissionConfig['model']['reasoning']>;
+
+/** Anthropic's fixed budget, or its adaptive thinking with an optional effort. */
+const anthropicReasoning = (configuration: Model['configuration'] | undefined): ModelReasoning | undefined => {
+  if (configuration?.thinking?.type === 'enabled') {
+    return { budgetTokens: configuration.thinking.budget_tokens };
+  }
+  if (configuration?.thinking?.type === 'adaptive') {
+    return {
+      ...(configuration.outputConfig?.effort === undefined ? {} : { effort: configuration.outputConfig.effort }),
+      ...(configuration.thinking.display === undefined ? {} : { display: configuration.thinking.display }),
+    };
+  }
+  return undefined;
+};
 
 /**
  * The reasoning a catalog row sends by default, in the host's one shape.
@@ -29,16 +44,7 @@ export const modelReasoning = (model: Model | undefined): ModelReasoning | undef
   const configuration = model?.configuration;
   switch (model?.provider.id) {
     case 'anthropic': {
-      if (configuration?.thinking?.type === 'enabled') {
-        return { budgetTokens: configuration.thinking.budget_tokens };
-      }
-      if (configuration?.thinking?.type === 'adaptive') {
-        return {
-          ...(configuration.outputConfig?.effort === undefined ? {} : { effort: configuration.outputConfig.effort }),
-          ...(configuration.thinking.display === undefined ? {} : { display: configuration.thinking.display }),
-        };
-      }
-      return undefined;
+      return anthropicReasoning(configuration);
     }
     case 'vertexai': {
       const effort = configuration?.thinkingLevel?.toLowerCase();
@@ -91,7 +97,7 @@ export const clampEffort = (
     return effort;
   }
   const rank = reasoningLevels.indexOf(effort);
-  return offered.filter((level) => reasoningLevels.indexOf(level) <= rank).at(-1) ?? offered[0];
+  return offered.findLast((level) => reasoningLevels.indexOf(level) <= rank) ?? offered[0];
 };
 
 /**

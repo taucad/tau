@@ -30,8 +30,9 @@
  * the record merges those patches over what it read (R5).
  */
 
-import { setup, assertEvent, assign, emit, enqueueActions } from 'xstate';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { assertEvent, setup, types } from 'xstate';
+import type { EnqueueObject, SystemRegistry } from 'xstate';
+import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MyUIMessage, ModelInputModality, ModelSupport } from '@taucad/chat';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
@@ -386,118 +387,93 @@ const storeAttachmentActor = fromSafeAsync<
 const asError = (error: unknown, fallback: string): Error =>
   error instanceof Error ? error : new Error(typeof error === 'string' ? error : fallback);
 
+const draftActors = {
+  persistDraftActor,
+  persistEditDraftActor,
+  persistSelectionActor,
+  clearMessageEditActor,
+  resizeImageActor,
+  storeAttachmentActor,
+};
+
+type DraftEnqueue = EnqueueObject<DraftMachineEvents, DraftEmittedEvents, SystemRegistry, typeof draftActors>;
+type DraftArgs<TType extends DraftMachineEvents['type']> = Readonly<{
+  context: DraftMachineContext;
+  event: Extract<DraftMachineEvents, { type: TType }>;
+}>;
+
+/** Refuse, reject or enqueue one added attachment. */
+const enqueueAttachment = (
+  { context, event }: DraftArgs<'addDraftAttachment' | 'addEditDraftAttachment'>,
+  enq: DraftEnqueue,
+) => {
+  const target: DraftTarget = event.type === 'addDraftAttachment' ? 'main' : 'edit';
+  const result = queueEntryFor(event, {
+    target,
+    editMessageId: target === 'edit' ? context.activeEditMessageId : undefined,
+    filename: event.filename,
+    preserveOriginal: event.preserveOriginal ?? false,
+  });
+  if ('error' in result) {
+    enq.emit({ type: 'attachmentStoreFailed', error: result.error });
+    return {};
+  }
+  const { entry } = result;
+  const kind = attachmentKind(entry.mediaType);
+  // D20: refused before any byte is resized or written.
+  if (!modelSupportsInput(event.model.support, modalityOf(kind))) {
+    enq.emit({ type: 'attachmentRefused', kind, mediaType: entry.mediaType, modelName: event.model.name });
+    return {};
+  }
+  return { context: { attachmentQueue: [...context.attachmentQueue, entry] } };
+};
+
+/** A failed resize or store shifts the queue and says so, so it never blocks the entries behind it. */
+const dropHeadWith =
+  (fallback: string, type: 'imageResizeFailed' | 'attachmentStoreFailed') =>
+  (
+    { context, event }: Readonly<{ context: DraftMachineContext; event: Readonly<{ error: unknown }> }>,
+    enq: DraftEnqueue,
+  ) => {
+    enq.emit({ type, error: asError(event.error, fallback) });
+    return { target: 'idle', context: { attachmentQueue: context.attachmentQueue.slice(1) } };
+  };
+
+/** Clearing a draft abandons the in-flight step for its head, and only for its own target. */
+const abandonHeadFor =
+  (target: DraftTarget) =>
+  ({ context }: Readonly<{ context: DraftMachineContext }>) =>
+    context.attachmentQueue[0]?.target === target ? { target: 'idle' } : undefined;
+
+const whenDraftTextChanged =
+  (transition: Readonly<{ target: string; reenter?: boolean }>) =>
+  ({ context, event }: DraftArgs<'setDraftText'>) =>
+    event.text === context.draftText ? undefined : transition;
+
+const whenEditDraftTextChanged =
+  (transition: Readonly<{ target: string; reenter?: boolean }>) =>
+  ({ context, event }: DraftArgs<'setEditDraftText'>) =>
+    event.text === context.editDraftText ? undefined : transition;
+
+const whenStoredFor =
+  (target: DraftTarget, transition: Readonly<{ target: string; reenter?: boolean }>) =>
+  ({ context }: Readonly<{ context: DraftMachineContext }>) =>
+    headAddresses(context, target) ? transition : undefined;
+
 export const draftMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    context: {} as DraftMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    events: {} as DraftMachineEvents,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    input: {} as DraftMachineInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    emitted: {} as DraftEmittedEvents,
+  schemas: {
+    context: types<DraftMachineContext>(),
+    events: eventSchemas<DraftMachineEvents>(),
+    input: types<DraftMachineInput>(),
+    emitted: eventSchemas<DraftEmittedEvents>(),
   },
-  actors: {
-    persistDraftActor,
-    persistEditDraftActor,
-    persistSelectionActor,
-    clearMessageEditActor,
-    resizeImageActor,
-    storeAttachmentActor,
-  },
-  actions: {
-    /** Refuse, reject or enqueue one added attachment. */
-    enqueueAttachment: enqueueActions(({ context, event, enqueue }) => {
-      if (event.type !== 'addDraftAttachment' && event.type !== 'addEditDraftAttachment') {
-        return;
-      }
-      const target: DraftTarget = event.type === 'addDraftAttachment' ? 'main' : 'edit';
-      const result = queueEntryFor(event, {
-        target,
-        editMessageId: target === 'edit' ? context.activeEditMessageId : undefined,
-        filename: event.filename,
-        preserveOriginal: event.preserveOriginal ?? false,
-      });
-      if ('error' in result) {
-        enqueue.emit({ type: 'attachmentStoreFailed', error: result.error });
-        return;
-      }
-      const { entry } = result;
-      const kind = attachmentKind(entry.mediaType);
-      // D20: refused before any byte is resized or written.
-      if (!modelSupportsInput(event.model.support, modalityOf(kind))) {
-        enqueue.emit({ type: 'attachmentRefused', kind, mediaType: entry.mediaType, modelName: event.model.name });
-        return;
-      }
-      enqueue.assign({ attachmentQueue: [...context.attachmentQueue, entry] });
-    }),
-    /** Hand the resized head to `storing`, or drop it if the resized output is unusable. */
-    acceptResizedImage: enqueueActions(({ context, event, enqueue }) => {
-      if (event.type !== 'imageResized') {
-        return;
-      }
-      const [head, ...rest] = context.attachmentQueue;
-      if (!head) {
-        return;
-      }
-      const decoded = decodeDataUrl(event.resized);
-      if (!decoded) {
-        enqueue.emit({ type: 'imageResizeFailed', error: new Error('Image resize produced no usable image.') });
-        enqueue.assign({ attachmentQueue: rest });
-        return;
-      }
-      const { dataUrl: _processed, ...ready } = head;
-      enqueue.assign({
-        attachmentQueue: [{ ...ready, mediaType: decoded.mediaType, bytes: decoded.bytes }, ...rest],
-      });
-    }),
-    /** Reference the stored head from its draft; an edit that has since closed gets nothing. */
-    appendStoredAttachment: assign(({ context, event }) => {
-      if (event.type !== 'attachmentStored') {
-        return {};
-      }
-      const [, ...rest] = context.attachmentQueue;
-      // Only an attachment that lands touches its draft: a refused or failed one changes
-      // nothing, so a late hydration still applies the stored draft (D7), and one that
-      // lands after a hydration appends to the draft it brought.
-      if (headAddresses(context, 'main')) {
-        return {
-          draftAttachments: [...context.draftAttachments, event.attachment],
-          attachmentQueue: rest,
-          touched: touch(context.touched, { draft: true }),
-        };
-      }
-      if (headAddresses(context, 'edit')) {
-        return {
-          editDraftAttachments: [...context.editDraftAttachments, event.attachment],
-          attachmentQueue: rest,
-          touched: touch(context.touched, {}, context.activeEditMessageId),
-        };
-      }
-      return { attachmentQueue: rest };
-    }),
-    dropQueueHead: assign({
-      attachmentQueue: ({ context }) => context.attachmentQueue.slice(1),
-    }),
-  },
-  guards: {
-    draftTextChanged: ({ context, event }) => event.type === 'setDraftText' && event.text !== context.draftText,
-    editDraftTextChanged: ({ context, event }) =>
-      event.type === 'setEditDraftText' && event.text !== context.editDraftText,
-    headNeedsResize: ({ context }) =>
-      context.attachmentQueue.length > 0 && context.attachmentQueue[0]!.bytes === undefined,
-    hasQueuedAttachment: ({ context }) => context.attachmentQueue.length > 0,
-    headIsMain: ({ context }) => context.attachmentQueue[0]?.target === 'main',
-    headIsEdit: ({ context }) => context.attachmentQueue[0]?.target === 'edit',
-    storedForMain: ({ context }) => headAddresses(context, 'main'),
-    storedForOpenEdit: ({ context }) => headAddresses(context, 'edit'),
-  },
+  actors: draftActors,
   delays: {
     saveDebounce: 200,
   },
 }).createMachine({
   id: 'draft',
-  context({ input }) {
+  context: ({ input }) => {
     const loaded = loadMessage(input.initialDraft);
     return {
       draftText: loaded.text,
@@ -519,14 +495,10 @@ export const draftMachine = setup({
       on: {
         // A (re)loaded chat opens with no edit box; composer fields come from `hydrateDraft`.
         initializeFromChat: {
-          actions: assign({
-            activeEditMessageId: undefined,
-            editDraftText: '',
-            editDraftAttachments: [],
-          }),
+          context: { activeEditMessageId: undefined, editDraftText: '', editDraftAttachments: [] },
         },
         hydrateDraft: {
-          actions: assign(({ context, event }) => {
+          context: ({ context, event }) => {
             const { touched } = context;
             const loaded = touched.draft || event.draft === undefined ? undefined : loadMessage(event.draft);
             const storedEdits = Object.entries(event.messageEdits ?? {}).filter(
@@ -542,50 +514,44 @@ export const draftMachine = setup({
               ...(!touched.toolChoice && event.toolChoice !== undefined && { draftToolChoice: event.toolChoice }),
               ...(!touched.mode && event.mode !== undefined && { draftMode: event.mode }),
             };
-          }),
+          },
         },
-        setDraftText: {
-          guard: 'draftTextChanged',
-          actions: assign({
-            draftText: ({ event }) => event.text,
-            touched: ({ context }) => touch(context.touched, { draft: true }),
-          }),
-        },
-        addDraftAttachment: {
-          actions: 'enqueueAttachment',
-        },
+        setDraftText: ({ context, event }) =>
+          event.text === context.draftText
+            ? undefined
+            : { context: { draftText: event.text, touched: touch(context.touched, { draft: true }) } },
+        addDraftAttachment: enqueueAttachment,
         removeDraftAttachment: {
-          actions: assign({
-            draftAttachments: ({ context, event }) =>
-              context.draftAttachments.filter((_, index) => index !== event.index),
-            touched: ({ context }) => touch(context.touched, { draft: true }),
+          context: ({ context, event }) => ({
+            draftAttachments: context.draftAttachments.filter((_, index) => index !== event.index),
+            touched: touch(context.touched, { draft: true }),
           }),
         },
         setDraftToolChoice: {
-          actions: assign({
-            draftToolChoice: ({ event }) => event.toolChoice,
-            touched: ({ context }) => touch(context.touched, { toolChoice: true }),
+          context: ({ context, event }) => ({
+            draftToolChoice: event.toolChoice,
+            touched: touch(context.touched, { toolChoice: true }),
           }),
         },
         setDraftMode: {
-          actions: assign({
-            draftMode: ({ event }) => event.mode,
-            touched: ({ context }) => touch(context.touched, { mode: true }),
+          context: ({ context, event }) => ({
+            draftMode: event.mode,
+            touched: touch(context.touched, { mode: true }),
           }),
         },
         clearDraft: {
-          actions: assign({
+          context: ({ context }) => ({
             draftText: '',
             draftAttachments: [],
             draftToolChoice: 'auto',
             // Purge any pending main-target entries so a cleared composer
             // doesn't sprout attachments from in-flight uploads.
-            attachmentQueue: ({ context }) => context.attachmentQueue.filter((entry) => entry.target !== 'main'),
-            touched: ({ context }) => touch(context.touched, { draft: true, toolChoice: true }),
+            attachmentQueue: context.attachmentQueue.filter((entry) => entry.target !== 'main'),
+            touched: touch(context.touched, { draft: true, toolChoice: true }),
           }),
         },
         loadDraftFromMessageTransient: {
-          actions: assign(({ context, event }) => {
+          context: ({ context, event }) => {
             const loaded = loadMessage(event.draft);
             return {
               draftText: loaded.text,
@@ -593,10 +559,10 @@ export const draftMachine = setup({
               attachmentQueue: [...context.attachmentQueue, ...legacyEntries(loaded.legacy, 'main')],
               touched: touch(context.touched, { draft: true }),
             };
-          }),
+          },
         },
         startEditingMessage: {
-          actions: assign(({ context, event }) => {
+          context: ({ context, event }) => {
             const loaded = loadMessage(context.messageEdits[event.messageId] ?? event.originalMessage);
             const loadedEdit = {
               activeEditMessageId: event.messageId,
@@ -619,53 +585,43 @@ export const draftMachine = setup({
             }
 
             return loadedEdit;
-          }),
+          },
         },
-        exitEditMode: {
-          actions: assign(({ context }) => {
-            if (!context.activeEditMessageId) {
-              return {};
-            }
-
-            const currentEditDraft = buildDraftMessage(context.editDraftText, context.editDraftAttachments);
-
-            return {
+        exitEditMode: ({ context }) => {
+          if (!context.activeEditMessageId) {
+            return {};
+          }
+          return {
+            context: {
               messageEdits: {
                 ...context.messageEdits,
-                [context.activeEditMessageId]: currentEditDraft,
+                [context.activeEditMessageId]: buildDraftMessage(context.editDraftText, context.editDraftAttachments),
               },
               activeEditMessageId: undefined,
               editDraftText: '',
               editDraftAttachments: [],
-            };
-          }),
+            },
+          };
         },
-        setEditDraftText: {
-          actions: assign({
-            editDraftText: ({ event }) => event.text,
-          }),
-        },
-        addEditDraftAttachment: {
-          actions: 'enqueueAttachment',
-        },
+        setEditDraftText: { context: ({ event }) => ({ editDraftText: event.text }) },
+        addEditDraftAttachment: enqueueAttachment,
         removeEditDraftAttachment: {
-          actions: assign({
-            editDraftAttachments: ({ context, event }) =>
-              context.editDraftAttachments.filter((_, index) => index !== event.index),
+          context: ({ context, event }) => ({
+            editDraftAttachments: context.editDraftAttachments.filter((_, index) => index !== event.index),
           }),
         },
         clearEditDraft: {
-          actions: assign({
+          context: ({ context }) => ({
             editDraftText: '',
             editDraftAttachments: [],
-            attachmentQueue: ({ context }) => context.attachmentQueue.filter((entry) => entry.target !== 'edit'),
+            attachmentQueue: context.attachmentQueue.filter((entry) => entry.target !== 'edit'),
           }),
         },
         clearMessageEdit: {
-          actions: assign(({ context, event }) => ({
+          context: ({ context, event }) => ({
             messageEdits: withoutEdit(context.messageEdits, event.messageId),
             touched: touch(context.touched, {}, event.messageId),
-          })),
+          }),
         },
       },
     },
@@ -675,47 +631,27 @@ export const draftMachine = setup({
       states: {
         idle: {
           on: {
-            setDraftText: {
-              target: 'pending',
-              guard: 'draftTextChanged',
-            },
+            setDraftText: whenDraftTextChanged({ target: 'pending' }),
             // Persist once the attachment is stored and referenced; adding
             // only enqueues.
-            attachmentStored: { target: 'pending', guard: 'storedForMain' },
-            removeDraftAttachment: 'pending',
+            attachmentStored: whenStoredFor('main', { target: 'pending' }),
+            removeDraftAttachment: { target: 'pending' },
             // Handle draft clearing with immediate persistence
-            clearDraft: {
-              target: 'persisting',
-            },
+            clearDraft: { target: 'persisting' },
           },
         },
         pending: {
           after: {
-            saveDebounce: 'persisting',
+            saveDebounce: { target: 'persisting' },
           },
           on: {
-            setDraftText: {
-              target: 'pending',
-              reenter: true,
-              guard: 'draftTextChanged',
-            },
-            attachmentStored: {
-              target: 'pending',
-              reenter: true,
-              guard: 'storedForMain',
-            },
-            removeDraftAttachment: {
-              target: 'pending',
-              reenter: true,
-            },
+            setDraftText: whenDraftTextChanged({ target: 'pending', reenter: true }),
+            attachmentStored: whenStoredFor('main', { target: 'pending', reenter: true }),
+            removeDraftAttachment: { target: 'pending', reenter: true },
             // Immediately bypass debounce and persist
-            flushNow: {
-              target: 'persisting',
-            },
+            flushNow: { target: 'persisting' },
             // Bypass debounce — persist the (now-empty) draft immediately
-            clearDraft: {
-              target: 'persisting',
-            },
+            clearDraft: { target: 'persisting' },
           },
         },
         persisting: {
@@ -724,22 +660,16 @@ export const draftMachine = setup({
             input: ({ context }) => ({
               draft: buildDraftMessage(context.draftText, context.draftAttachments),
             }),
-            onDone: 'idle',
-            onError: 'idle',
+            onDone: { target: 'idle' },
+            onError: { target: 'idle' },
           },
           on: {
             // Queue new changes while persisting
-            setDraftText: {
-              target: 'pending',
-              guard: 'draftTextChanged',
-            },
-            attachmentStored: { target: 'pending', guard: 'storedForMain' },
-            removeDraftAttachment: 'pending',
+            setDraftText: whenDraftTextChanged({ target: 'pending' }),
+            attachmentStored: whenStoredFor('main', { target: 'pending' }),
+            removeDraftAttachment: { target: 'pending' },
             // Cancel stale in-flight persist and re-persist with empty draft
-            clearDraft: {
-              target: 'persisting',
-              reenter: true,
-            },
+            clearDraft: { target: 'persisting', reenter: true },
           },
         },
       },
@@ -750,43 +680,25 @@ export const draftMachine = setup({
       states: {
         idle: {
           on: {
-            setEditDraftText: {
-              target: 'pending',
-              guard: 'editDraftTextChanged',
-            },
+            setEditDraftText: whenEditDraftTextChanged({ target: 'pending' }),
             // Persist once the attachment is stored; adding only enqueues.
-            attachmentStored: { target: 'pending', guard: 'storedForOpenEdit' },
-            removeEditDraftAttachment: 'pending',
+            attachmentStored: whenStoredFor('edit', { target: 'pending' }),
+            removeEditDraftAttachment: { target: 'pending' },
           },
         },
         pending: {
           after: {
-            saveDebounce: 'persisting',
+            saveDebounce: { target: 'persisting' },
           },
           on: {
-            setEditDraftText: {
-              target: 'pending',
-              reenter: true,
-              guard: 'editDraftTextChanged',
-            },
-            attachmentStored: {
-              target: 'pending',
-              reenter: true,
-              guard: 'storedForOpenEdit',
-            },
-            removeEditDraftAttachment: {
-              target: 'pending',
-              reenter: true,
-            },
+            setEditDraftText: whenEditDraftTextChanged({ target: 'pending', reenter: true }),
+            attachmentStored: whenStoredFor('edit', { target: 'pending', reenter: true }),
+            removeEditDraftAttachment: { target: 'pending', reenter: true },
             // Immediately bypass debounce and persist
-            flushNow: {
-              target: 'persisting',
-            },
+            flushNow: { target: 'persisting' },
             // Closing the box mid-debounce still saves what was typed, under
             // the message the save targets rather than a cleared id.
-            exitEditMode: {
-              target: 'persisting',
-            },
+            exitEditMode: { target: 'persisting' },
           },
         },
         persisting: {
@@ -796,22 +708,16 @@ export const draftMachine = setup({
               messageId: context.savingEditMessageId!,
               draft: editDraftToPersist(context),
             }),
-            onDone: 'idle',
-            onError: 'idle',
+            onDone: { target: 'idle' },
+            onError: { target: 'idle' },
           },
           on: {
             // Queue new changes while persisting
-            setEditDraftText: {
-              target: 'pending',
-              guard: 'editDraftTextChanged',
-            },
-            attachmentStored: { target: 'pending', guard: 'storedForOpenEdit' },
-            removeEditDraftAttachment: 'pending',
+            setEditDraftText: whenEditDraftTextChanged({ target: 'pending' }),
+            attachmentStored: whenStoredFor('edit', { target: 'pending' }),
+            removeEditDraftAttachment: { target: 'pending' },
             // Re-persist the snapshot the exit took over a stale in-flight save
-            exitEditMode: {
-              target: 'persisting',
-              reenter: true,
-            },
+            exitEditMode: { target: 'persisting', reenter: true },
           },
         },
       },
@@ -826,9 +732,9 @@ export const draftMachine = setup({
       states: {
         idle: {
           on: {
-            setDraftToolChoice: 'persisting',
-            setDraftMode: 'persisting',
-            clearDraft: 'persisting',
+            setDraftToolChoice: { target: 'persisting' },
+            setDraftMode: { target: 'persisting' },
+            clearDraft: { target: 'persisting' },
           },
         },
         persisting: {
@@ -838,8 +744,8 @@ export const draftMachine = setup({
               ...(context.touched.toolChoice && { toolChoice: context.draftToolChoice }),
               ...(context.touched.mode && { mode: context.draftMode }),
             }),
-            onDone: 'idle',
-            onError: 'idle',
+            onDone: { target: 'idle' },
+            onError: { target: 'idle' },
           },
           // Leaf-level re-entry keeps the transition inside this region; a
           // region-level one would take the machine root as its domain.
@@ -870,10 +776,13 @@ export const draftMachine = setup({
       initial: 'idle',
       states: {
         idle: {
-          always: [
-            { target: 'resizing', guard: 'headNeedsResize' },
-            { target: 'storing', guard: 'hasQueuedAttachment' },
-          ],
+          always: ({ context }) => {
+            const head = context.attachmentQueue[0];
+            if (head === undefined) {
+              return undefined;
+            }
+            return { target: head.bytes === undefined ? 'resizing' : 'storing' };
+          },
         },
         resizing: {
           invoke: {
@@ -882,23 +791,30 @@ export const draftMachine = setup({
               image: context.attachmentQueue[0]!.dataUrl!,
               preserveOriginal: context.attachmentQueue[0]!.preserveOriginal,
             }),
-            onError: {
-              target: 'idle',
-              actions: [
-                emit(
-                  ({ event }): DraftEmittedEvents => ({
-                    type: 'imageResizeFailed',
-                    error: asError(event.error, 'Image resize failed'),
-                  }),
-                ),
-                'dropQueueHead',
-              ],
-            },
+            onError: dropHeadWith('Image resize failed', 'imageResizeFailed'),
           },
           on: {
-            imageResized: { target: 'idle', actions: 'acceptResizedImage' },
-            clearDraft: { target: 'idle', guard: 'headIsMain' },
-            clearEditDraft: { target: 'idle', guard: 'headIsEdit' },
+            /* Hand the resized head to `storing`, or drop it if the resized output is unusable. */
+            imageResized: ({ context, event }, enq) => {
+              const [head, ...rest] = context.attachmentQueue;
+              if (!head) {
+                return { target: 'idle' };
+              }
+              const decoded = decodeDataUrl(event.resized);
+              if (!decoded) {
+                enq.emit({ type: 'imageResizeFailed', error: new Error('Image resize produced no usable image.') });
+                return { target: 'idle', context: { attachmentQueue: rest } };
+              }
+              const { dataUrl: _processed, ...ready } = head;
+              return {
+                target: 'idle',
+                context: {
+                  attachmentQueue: [{ ...ready, mediaType: decoded.mediaType, bytes: decoded.bytes }, ...rest],
+                },
+              };
+            },
+            clearDraft: abandonHeadFor('main'),
+            clearEditDraft: abandonHeadFor('edit'),
           },
         },
         storing: {
@@ -912,23 +828,39 @@ export const draftMachine = setup({
                 ...(head.filename === undefined ? {} : { filename: head.filename }),
               };
             },
-            onError: {
-              target: 'idle',
-              actions: [
-                emit(
-                  ({ event }): DraftEmittedEvents => ({
-                    type: 'attachmentStoreFailed',
-                    error: asError(event.error, 'Attachment could not be stored'),
-                  }),
-                ),
-                'dropQueueHead',
-              ],
-            },
+            onError: dropHeadWith('Attachment could not be stored', 'attachmentStoreFailed'),
           },
           on: {
-            attachmentStored: { target: 'idle', actions: 'appendStoredAttachment' },
-            clearDraft: { target: 'idle', guard: 'headIsMain' },
-            clearEditDraft: { target: 'idle', guard: 'headIsEdit' },
+            /* Reference the stored head from its draft; an edit that has since closed gets nothing. */
+            attachmentStored: ({ context, event }) => {
+              const [, ...rest] = context.attachmentQueue;
+              // Only an attachment that lands touches its draft: a refused or failed one changes
+              // nothing, so a late hydration still applies the stored draft (D7), and one that
+              // lands after a hydration appends to the draft it brought.
+              if (headAddresses(context, 'main')) {
+                return {
+                  target: 'idle',
+                  context: {
+                    draftAttachments: [...context.draftAttachments, event.attachment],
+                    attachmentQueue: rest,
+                    touched: touch(context.touched, { draft: true }),
+                  },
+                };
+              }
+              if (headAddresses(context, 'edit')) {
+                return {
+                  target: 'idle',
+                  context: {
+                    editDraftAttachments: [...context.editDraftAttachments, event.attachment],
+                    attachmentQueue: rest,
+                    touched: touch(context.touched, {}, context.activeEditMessageId),
+                  },
+                };
+              }
+              return { target: 'idle', context: { attachmentQueue: rest } };
+            },
+            clearDraft: abandonHeadFor('main'),
+            clearEditDraft: abandonHeadFor('edit'),
           },
         },
       },
@@ -939,20 +871,18 @@ export const draftMachine = setup({
       states: {
         idle: {
           on: {
-            clearMessageEdit: {
-              target: 'clearing',
-            },
+            clearMessageEdit: { target: 'clearing' },
           },
         },
         clearing: {
           invoke: {
             src: 'clearMessageEditActor',
-            input({ event }) {
+            input: ({ event }) => {
               assertEvent(event, 'clearMessageEdit');
               return { messageId: event.messageId };
             },
-            onDone: 'idle',
-            onError: 'idle',
+            onDone: { target: 'idle' },
+            onError: { target: 'idle' },
           },
         },
       },

@@ -1,4 +1,3 @@
-import { Topic } from '@taucad/events';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type {
   AgentLiveEvent,
@@ -684,7 +683,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
     }
     disposed = true;
     worker.removeEventListener('error', onError);
-    closeHandlers.dispose();
+    closeTopic.dispose();
     channel.close();
     worker.terminate();
     bridge.dispose();

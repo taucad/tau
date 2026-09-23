@@ -201,7 +201,10 @@ describe('ChatInterfaceDesktop', () => {
     sidebar.open = false;
     renderDesktop();
     const viewer = await screen.findByTestId('viewer-lane');
-    expect(viewer.parentElement).toHaveClass('[&_.dv-tabs-and-actions-container]:pl-(--titlebar-controls-width)');
+    // One spacing step short: the chat lane toggle leads the tab bar with `pl-1`.
+    expect(viewer.parentElement).toHaveClass(
+      '[&_.dv-tabs-and-actions-container:not(.dv-view:not(:first-child)_*)]:before:w-[calc(var(--titlebar-controls-width)-var(--spacing))]',
+    );
   });
 
   it('keeps the Viewer mounted when both auxiliary lanes are closed', async () => {
@@ -223,7 +226,7 @@ describe('ChatInterfaceDesktop', () => {
     const toggle = await screen.findByRole('button', { name: 'Toggle Workbench lane' });
 
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    expect(toggle).toHaveClass('!size-7', 'rounded-sm', 'hover:!bg-accent', 'aria-pressed:bg-accent');
+    expect(toggle).toHaveAttribute('data-slot', 'pane-button');
     expect(toggle.parentElement).toHaveClass('absolute', 'top-1', 'right-1', 'z-10');
     expect(document.querySelector('[data-project-workspace]')).toHaveClass('relative');
 

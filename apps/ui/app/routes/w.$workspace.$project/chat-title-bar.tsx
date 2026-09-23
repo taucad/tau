@@ -15,6 +15,8 @@ import { sidebarRowEditorClass } from '#components/nav/sidebar-row.js';
 import { FloatingPanelButtonGroup, FloatingPanelContentHeaderActions } from '#components/ui/floating-panel.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { useSidebar } from '#components/ui/sidebar.js';
+import { ChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
+import { useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const newChatKeyCombination = {
   key: 'c',
@@ -24,12 +26,16 @@ const newChatKeyCombination = {
 
 /**
  * The chat pane's one header row: the active chat's name, renamed in place the
- * way a sidebar row is, with the chat menu and the close control at the end.
- * Chat collection navigation lives in the sidebar; with the sidebar collapsed
- * the row opens with "New chat", one row-gap after the host's own controls.
+ * way a sidebar row is, with the chat menu at the end. On desktop the row opens
+ * with the chat lane toggle, on the pixel it holds in the viewer's tab bar
+ * while the lane is closed, so it replaces a generic close control; mobile has
+ * no lanes and keeps `closeButton`. Chat collection navigation lives in the
+ * sidebar; with the sidebar collapsed "New chat" follows the toggle.
  */
 export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode }): React.JSX.Element {
   const { isMobile, open: isSidebarOpen } = useSidebar();
+  // One toggle in the document at a time: the viewer's tab bar holds it while the lane is hidden.
+  const { chat: isChatVisible } = useWorkspaceLanes();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
   const { editorRef, projectRef, projectId } = useProject();
   const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
@@ -57,6 +63,7 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
 
   return (
     <>
+      {!isMobile && isChatVisible ? <ChatLaneToggle place='lane' /> : null}
       {!isMobile && !isSidebarOpen ? (
         <PaneButton aria-label='New chat' disabled={!canOpenNewChat} tooltip='New chat' onClick={createAndOpenChat}>
           <SquarePen aria-hidden className='size-3.5 translate-y-[0.5px]' />
@@ -106,7 +113,7 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
         <FloatingPanelButtonGroup>
           <ChatHistorySettings onRename={startRename} />
         </FloatingPanelButtonGroup>
-        {closeButton}
+        {isMobile ? closeButton : null}
       </FloatingPanelContentHeaderActions>
     </>
   );

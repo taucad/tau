@@ -45,6 +45,23 @@ export function resolveCompactAuxiliary(layout: PanelState['desktopLayout']): 'c
   return layout[other === 'chat' ? 'chatOpen' : 'workbenchOpen'] ? other : undefined;
 }
 
+/** Which desktop lanes are on screen, after the compact rule has picked one auxiliary. */
+export type WorkspaceLanes = Readonly<{ chat: boolean; workbench: boolean }>;
+
+/**
+ * Lane visibility, provided by `ChatInterfaceDesktop`, the one owner that
+ * measures the width the compact rule depends on. Mobile has no lanes, so the
+ * default is none visible.
+ */
+export const WorkspaceLanesContext = createContext<WorkspaceLanes>({ chat: false, workbench: false });
+
+/**
+ * Reads which desktop lanes are on screen.
+ *
+ * @returns Whether the chat and workbench lanes are visible.
+ */
+export const useWorkspaceLanes = (): WorkspaceLanes => useContext(WorkspaceLanesContext);
+
 export function useProjectWorkspace(): ProjectWorkspaceContextValue;
 export function useProjectWorkspace(options: {
   readonly enableNoContext: true;

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DockviewGroupPanel, DockviewPanelApi } from 'dockview-react';
-import { checkGroupIsTopRight, checkPanelIsTopRight, edgeTolerance } from '#components/panes/use-is-top-right-group.js';
+import {
+  checkGroupIsTopCorner,
+  checkGroupIsTopRight,
+  checkPanelIsTopRight,
+  edgeTolerance,
+} from '#components/panes/use-is-top-right-group.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -260,6 +265,21 @@ describe('checkGroupIsTopRight', () => {
 });
 
 // ── checkPanelIsTopRight ─────────────────────────────────────────────────────
+
+describe('checkGroupIsTopCorner', () => {
+  it('finds the top-left group, where the chat lane toggle heads the tabs', () => {
+    const left = buildGroupInFloatingPanel({
+      groupRect: { top: 0, right: 250, width: 250, height: 400, left: 0, bottom: 400 },
+    });
+    const right = buildGroupInFloatingPanel({
+      groupRect: { top: 0, right: 500, width: 250, height: 400, left: 250, bottom: 400 },
+    });
+
+    expect(checkGroupIsTopCorner(left, 'left')).toBe(true);
+    expect(checkGroupIsTopCorner(right, 'left')).toBe(false);
+    expect(checkGroupIsTopCorner(right, 'right')).toBe(true);
+  });
+});
 
 describe('checkPanelIsTopRight', () => {
   describe('returns false', () => {

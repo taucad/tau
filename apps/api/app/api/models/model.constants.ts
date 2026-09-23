@@ -114,12 +114,57 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+    'claude-opus-5.5': {
+      id: 'anthropic-claude-opus-5.5',
+      providerKind: 'tau-hosted',
+      name: 'Opus 5.5',
+      slug: 'claude-opus-5.5',
+      recommended: true,
+      description:
+        'Most capable Opus model for long-horizon agentic CAD design, complex multi-part assemblies, and multi-file work.',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-opus-5-5',
+      support: {
+        toolChoice: false,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'claude',
+        families: ['claude'],
+        contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: {
+          inputTokens: 4,
+          outputTokens: 20,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 120_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 120_000,
+        thinking: {
+          type: 'adaptive',
+          display: 'summarized',
+        },
+        outputConfig: {
+          effort: 'high',
+        },
+      },
+    },
     'claude-opus-5': {
       id: 'anthropic-claude-opus-5',
       providerKind: 'tau-hosted',
       name: 'Opus 5',
       slug: 'claude-opus-5',
-      recommended: true,
+      recommended: false,
       description:
         'Strong Opus model for long-horizon agentic CAD design, complex multi-part assemblies, and multi-file work.',
       provider: {
@@ -374,13 +419,91 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+    'gpt-6-sol': {
+      enabled: true,
+      id: 'openai-gpt-6-sol',
+      providerKind: 'tau-hosted',
+      name: 'GPT-6 Sol',
+      slug: 'gpt-6-sol',
+      recommended: true,
+      description:
+        'Cost-efficient GPT-6 model for complex CAD design, strong at planning multi-part assemblies and verifying its own work.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-6-sol',
+      support: {
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-04',
+        cost: {
+          inputTokens: 2,
+          outputTokens: 10,
+          cacheReadTokens: 0.2,
+          cacheWriteTokens: 2.5,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
+    'gpt-6-luna': {
+      enabled: true,
+      id: 'openai-gpt-6-luna',
+      providerKind: 'tau-hosted',
+      name: 'GPT-6 Luna',
+      slug: 'gpt-6-luna',
+      recommended: true,
+      description: 'Fast, cost-efficient model for high-volume CAD iterations and small design changes.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-6-luna',
+      support: {
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-6'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-04',
+        cost: {
+          inputTokens: 0.1,
+          outputTokens: 0.5,
+          cacheReadTokens: 0.01,
+          cacheWriteTokens: 0.125,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
+
     'gpt-5.6-sol': {
       enabled: true,
       id: 'openai-gpt-5.6-sol',
       providerKind: 'tau-hosted',
       name: 'GPT-5.6 Sol',
       slug: 'gpt-5.6-sol',
-      recommended: true,
+      recommended: false,
       description:
         "OpenAI's frontier model for complex CAD design, strong at planning multi-part assemblies and verifying its own work.",
       provider: {
@@ -420,7 +543,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       providerKind: 'tau-hosted',
       name: 'GPT-5.6 Terra',
       slug: 'gpt-5.6-terra',
-      recommended: true,
+      recommended: false,
       description: 'Strong balance of intelligence and cost for everyday CAD design, iteration, and multi-file edits.',
       provider: {
         id: 'openai',
@@ -452,13 +575,14 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         },
       },
     },
+
     'gpt-5.6-luna': {
       enabled: true,
       id: 'openai-gpt-5.6-luna',
       providerKind: 'tau-hosted',
       name: 'GPT-5.6 Luna',
       slug: 'gpt-5.6-luna',
-      recommended: true,
+      recommended: false,
       description: 'Fast, cost-efficient model for high-volume CAD iterations and small design changes.',
       provider: {
         id: 'openai',
@@ -1047,13 +1171,54 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
   },
 
   xai: {
+    'grok-4.7': {
+      enabled: true,
+      id: 'xai-grok-4.7',
+      providerKind: 'tau-hosted',
+      name: 'Grok 4.7',
+      slug: 'grok-4.7',
+      recommended: true,
+      description:
+        'Strong xAI model for long-horizon agentic CAD design, complex geometry reasoning, and polished visual work.',
+      provider: {
+        id: 'xai',
+        name: 'xAI',
+      },
+      model: 'grok-4.7',
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: imageInputModalities,
+      },
+      details: {
+        family: 'grok',
+        families: ['grok'],
+        contextWindow: 200_000,
+        maxTokens: 64_000,
+        knowledgeCutoff: '2026-05',
+        cost: {
+          inputTokens: 2,
+          outputTokens: 6,
+          cacheReadTokens: 0.5,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxOutputTokens: 64_000,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
     'grok-4.6': {
       enabled: true,
       id: 'xai-grok-4.6',
       providerKind: 'tau-hosted',
       name: 'Grok 4.6',
       slug: 'grok-4.6',
-      recommended: true,
+      recommended: false,
       description:
         'Strong xAI model for long-horizon agentic CAD design, complex geometry reasoning, and polished visual work.',
       provider: {

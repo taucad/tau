@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
@@ -9,7 +10,8 @@ export default defineConfig({
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],
-      tsconfig: './tsconfig.spec.json',
+      // Anchored to this file: a cwd-relative path from the repo root fails TS5058 and reports "no errors".
+      tsconfig: resolve(import.meta.dirname, 'tsconfig.spec.json'),
       ignoreSourceErrors: true,
     },
     reporters: ['verbose'],

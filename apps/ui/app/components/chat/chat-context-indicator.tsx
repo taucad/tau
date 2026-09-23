@@ -3,8 +3,9 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
-const size = 28;
-const strokeWidth = 4;
+// A 16 px ring: the meter sits beside the model it measures, and reads at a glance (D6).
+const size = 16;
+const strokeWidth = 2.5;
 const radius = (size - strokeWidth) / 2;
 const circumference = 2 * Math.PI * radius;
 
@@ -73,7 +74,7 @@ export function ChatContextIndicatorDisplay({ data }: { readonly data: ContextUs
     <Tooltip>
       <TooltipTrigger asChild>
         <div
-          className='flex size-5 cursor-default items-center justify-center'
+          className='flex size-4 shrink-0 cursor-default items-center justify-center'
           role='meter'
           aria-valuenow={clamped}
           aria-valuemin={0}
@@ -126,33 +127,43 @@ function formatScheduledStatus(data: ContextUsageData): string | undefined {
 
 function formatCompactionStatus(data: ContextUsageData): string | undefined {
   switch (data.lastCompactionStatus) {
-    case 'compacted':
+    case 'compacted': {
       return 'Context summarized';
-    case 'failed':
+    }
+    case 'failed': {
       return 'Compaction blocked';
-    case 'overflow_retry_succeeded':
+    }
+    case 'overflow_retry_succeeded': {
       return 'Overflow retry trimmed context';
+    }
     case 'skipped':
-    case undefined:
+    case undefined: {
       return undefined;
-    default:
+    }
+    default: {
       return undefined;
+    }
   }
 }
 
 function formatTriggerReason(reason: ContextUsageData['triggerReason']): string | undefined {
   switch (reason) {
-    case 'estimate':
+    case 'estimate': {
       return 'estimated budget';
-    case 'previous_usage':
+    }
+    case 'previous_usage': {
       return 'previous provider usage';
-    case 'overflow':
+    }
+    case 'overflow': {
       return 'provider overflow';
+    }
     case 'none':
-    case undefined:
+    case undefined: {
       return undefined;
-    default:
+    }
+    default: {
       return undefined;
+    }
   }
 }
 

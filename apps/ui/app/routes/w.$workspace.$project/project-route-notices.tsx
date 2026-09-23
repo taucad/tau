@@ -78,12 +78,12 @@ const libraryAction: ProjectRouteNoticeAction = { label: 'Open project library',
 const closedDescription = (reason: ProjectSessionCloseReason | undefined, idleWindowMilliseconds: number): string => {
   if (reason === 'idle') {
     /* The registry's real window, as the sidebar row already states it. */
-    return `Closed to save memory after ${String(Math.round(idleWindowMilliseconds / 60_000))} min idle. Its files and chats are kept.`;
+    return `Closed to save memory after ${String(Math.round(idleWindowMilliseconds / 60_000))} min idle. Its files and chats are saved.`;
   }
   if (reason === 'budget') {
-    return 'Closed to free memory for other projects. Its files and chats are kept.';
+    return 'Closed to free memory for other projects. Its files and chats are saved.';
   }
-  return 'Its files and chats are kept. Reopen it to continue where you left off.';
+  return 'Its files and chats are saved. Reopen it to continue where you left off.';
 };
 
 const recoveryFailure: Record<

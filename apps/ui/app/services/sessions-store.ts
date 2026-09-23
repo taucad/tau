@@ -29,10 +29,8 @@ import { chatHostBinding, chatTurnAdmission, chatTurnSettlement } from '#chat-cl
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { inspect } from '#machines/inspector.js';
-import {
-  registerProjectAgentHost,
-  type ProjectAgentHostRegistration,
-} from '#services/project-agent-host-registration.js';
+import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
+import type { ProjectAgentHostRegistration } from '#services/project-agent-host-registration.js';
 
 /**
  * One project session's flush and lease work, supplied by the subtree that
@@ -206,21 +204,33 @@ const agentHostRegistrations = new Map<string, Promise<ProjectAgentHostRegistrat
 const agentHostRegion = fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
   const registration = registerProjectAgentHost(input.projectId, `${sessionEpoch}:${input.projectId}`);
   agentHostRegistrations.set(input.projectId, registration);
-  void registration.then(
-    () => sendBack({ type: 'childReady', region: 'agentHost' }),
-    (error: unknown) =>
+  // async-iife: bootstrap -- `fromCallback` is synchronous; the registration settles through `sendBack`.
+  void (async () => {
+    try {
+      await registration;
+      sendBack({ type: 'childReady', region: 'agentHost' });
+    } catch (error) {
       sendBack({
         type: 'childFailed',
         region: 'agentHost',
         reason: error instanceof Error ? error.message : String(error),
-      }),
-  );
+      });
+    }
+  })();
   return () => {
     if (agentHostRegistrations.get(input.projectId) !== registration) {
       return;
     }
     agentHostRegistrations.delete(input.projectId);
-    void registration.then(async (registered) => registered.release()).catch(() => undefined);
+    // async-iife: bootstrap -- teardown is synchronous and a failed release has nobody to report to.
+    void (async () => {
+      try {
+        const registered = await registration;
+        await registered.release();
+      } catch {
+        // The registration never came up; there is nothing left to release.
+      }
+    })();
   };
 });
 
@@ -245,7 +255,8 @@ const projectSession = projectSessionMachine.provide({
     releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
       const registration = agentHostRegistrations.get(input.projectId);
       if (registration !== undefined) {
-        await (await registration).release();
+        const registered = await registration;
+        await registered.release();
         agentHostRegistrations.delete(input.projectId);
       }
     }),

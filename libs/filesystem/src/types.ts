@@ -76,6 +76,13 @@ export type ProviderCapabilities = {
    * bridge peers and third-party providers remain wire-compatible.
    */
   readonly durability?: 'exclusive-append' | 'stream-append' | 'transactional-rewrite' | 'ephemeral';
+  /**
+   * Whether concurrent writes are coalesced into the backend's own batched
+   * commit. A provider that declares it costs no extra handle per write in
+   * flight, so a bulk batch may hand it every file at once (Rule 34); one that
+   * does not receives them one at a time.
+   */
+  readonly coalescesWrites?: boolean;
 };
 
 /**
@@ -86,6 +93,12 @@ export type ProviderCapabilities = {
 export type DirectoryEntry = {
   readonly name: string;
   readonly kind: 'file' | 'dir';
+  /**
+   * What the enumerating surface says about this row; absent on a raw provider
+   * listing. A composed view has already computed it for every row it lists, so
+   * a caller that filters on provenance reads it here instead of asking again.
+   */
+  readonly provenance?: FileProvenance;
 };
 
 /**

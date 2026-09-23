@@ -327,6 +327,18 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
     return this._channel.request({ root: this._root, op: 'readdir', path });
   }
 
+  /**
+   * One request per directory instead of one per entry: the host already has to
+   * `stat` each row, and each of those was a round trip across the seam.
+   *
+   * @param path - Absolute directory path to enumerate.
+   * @returns Each entry's name paired with its stat metadata.
+   */
+  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
+    this._assertRootedPath(path);
+    return this._channel.request({ root: this._root, op: 'readdirWithStats', path });
+  }
+
   public async stat(path: string): Promise<FileStat> {
     this._assertRootedPath(path);
     return this._channel.request({ root: this._root, op: 'stat', path });

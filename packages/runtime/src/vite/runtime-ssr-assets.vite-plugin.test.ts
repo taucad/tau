@@ -29,11 +29,22 @@ const configure = async (
     ssr,
     command = 'build',
     mode,
-  }: { readonly ssr: boolean; readonly command?: 'build' | 'serve'; readonly mode?: string },
+    browser = false,
+  }: {
+    readonly ssr: boolean;
+    readonly command?: 'build' | 'serve';
+    readonly mode?: string;
+    readonly browser?: boolean;
+  },
   context: TransformContext,
 ): Promise<void> => {
   type ConfigResolvedHook = (config: ResolvedConfig) => void;
-  (plugin.configResolved as ConfigResolvedHook)({ build: { ssr }, command, mode } as ResolvedConfig);
+  (plugin.configResolved as ConfigResolvedHook)({
+    build: { ssr },
+    command,
+    mode,
+    test: browser ? { browser: { enabled: true } } : undefined,
+  } as ResolvedConfig);
   type BuildStartHook = (this: TransformContext) => void | Promise<void>;
   await (plugin.buildStart as unknown as BuildStartHook).call(context);
 };
@@ -239,6 +250,23 @@ describe('runtimeAssetsPlugin', () => {
     });
 
     expect(result).toBeUndefined();
+    expect(context.emitFile).not.toHaveBeenCalled();
+  });
+
+  it('should serve package assets to a Vitest browser run', async () => {
+    const plugin = runtimeAssetsPlugin();
+    const context = createContext();
+    await configure(plugin, { ssr: false, command: 'serve', mode: 'test', browser: true }, context);
+
+    const result = await transform({
+      plugin,
+      code: `const wasm = new URL(import.meta.resolve('manifold-3d/manifold.wasm')).href;`,
+      id: importer,
+      context,
+    });
+
+    expect(result?.code).toContain('new URL("/@fs//');
+    expect(result?.code).toContain('manifold.wasm');
     expect(context.emitFile).not.toHaveBeenCalled();
   });
 

@@ -1006,6 +1006,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       });
     },
 
+    /*
+     * Also the open seam: `revision-effects.ensureStore` calls this once per
+     * authority, before the first question is asked of the store, and `git init`
+     * below is skipped for a store that is already here. So a project created by
+     * an older build reaches this with a stale generated block, and the merge
+     * below is its migration (G0-9) — written only when the merged bytes differ,
+     * so a current project's working copy is not touched on every open and a
+     * rewrite cannot repeat.
+     */
     init: async (input: InitRevisionStoreInput): Promise<void> => {
       /* Asked first, and it throws for a bare repository: a path this port
        * refuses is left exactly as it was, ignore file included (review 4 R40).
@@ -1015,12 +1024,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (input.createSetupFiles !== false) {
         const ignorePath = join(repositoryPath, generatedIgnorePath);
         const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
-        await writeFile(ignorePath, generatedIgnoreContent(existing, input.additionalIgnores ?? []));
+        const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
+        if (ignore !== existing) {
+          await writeFile(ignorePath, ignore);
+        }
         /* Beside the ignore file and versioned like it (D24): the two together are
          * what a stock clone needs to read this project the way Tau wrote it. */
         const attributesPath = join(repositoryPath, generatedGitattributesPath);
         const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
-        await writeFile(attributesPath, generatedGitattributesContent(attributes));
+        const merged = generatedGitattributesContent(attributes);
+        if (merged !== attributes) {
+          await writeFile(attributesPath, merged);
+        }
       }
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.

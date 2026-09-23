@@ -11,7 +11,7 @@ export type ApiKeysEmptyProps = {
   onCreatePress: () => void;
 };
 
-export function ApiKeysEmpty({ onCreatePress }: ApiKeysEmptyProps) {
+export function ApiKeysEmpty({ onCreatePress }: ApiKeysEmptyProps): React.JSX.Element {
   const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin);
 
   return (

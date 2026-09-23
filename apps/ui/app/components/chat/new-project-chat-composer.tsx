@@ -35,37 +35,23 @@ export function NewProjectChatComposer({
     consumeDraft,
   } = useChatComposer();
 
-  const finishLocationSelection = useCallback((): void => {
-    textareaRef.current?.closeOptions?.();
+  const focusComposer = useCallback((): void => {
     textareaRef.current?.focus();
   }, []);
 
-  const creationLocationControls = useMemo<ChatTextareaProperties['creationLocationControls']>(() => {
-    if (!location.shouldShowPicker) {
-      return undefined;
-    }
-    return {
-      toolbar: (
+  const creationLocationControl = useMemo(
+    () =>
+      location.shouldShowPicker ? (
         <WorkspaceSelector
           data-chat-textarea-focustrap
           state={location}
           variant='toolbar'
-          onSelectionComplete={finishLocationSelection}
-          onRequestFocus={() => textareaRef.current?.focus()}
+          onSelectionComplete={focusComposer}
+          onRequestFocus={focusComposer}
         />
-      ),
-      field: (
-        <WorkspaceSelector
-          data-chat-textarea-focustrap
-          state={location}
-          variant='field'
-          isNested
-          onSelectionComplete={finishLocationSelection}
-          onRequestFocus={() => textareaRef.current?.focus()}
-        />
-      ),
-    };
-  }, [finishLocationSelection, location]);
+      ) : undefined,
+    [focusComposer, location],
+  );
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content }) => {
@@ -131,7 +117,7 @@ export function NewProjectChatComposer({
         enableAutoFocus={enableAutoFocus}
         enableContextActions={false}
         enableKernelSelector={false}
-        creationLocationControls={creationLocationControls}
+        creationLocationControl={creationLocationControl}
         isSubmitDisabled={!location.canCreate}
         className={className}
         onSubmit={onSubmit}

@@ -26,12 +26,39 @@ describe('hasLiveSurface', () => {
       parts({ type: 'reasoning', text: 'Plan', state: 'streaming' }, tool('output-available')),
     ],
     ['an answered approval', parts(tool('approval-responded'))],
+    [
+      'a resting ACP text checkpoint (resting block R2)',
+      parts({
+        type: 'text',
+        text: 'The reference shows two broad finger scallops.',
+        state: 'streaming',
+        providerMetadata: { common: { streamState: 'checkpoint' } },
+      }),
+    ],
   ])('is false for %s', (_name, value) => {
     expect(hasLiveSurface(value)).toBe(false);
   });
 
   it.each([
     ['trailing streaming text', parts({ type: 'text', text: 'Drafting', state: 'streaming' })],
+    [
+      'text resumed after a checkpoint',
+      parts({
+        type: 'text',
+        text: 'Drafting more',
+        state: 'streaming',
+        providerMetadata: { common: { streamState: 'live' } },
+      }),
+    ],
+    [
+      'a resting thought (its own spinner is the live surface)',
+      parts({
+        type: 'reasoning',
+        text: 'Refining',
+        state: 'streaming',
+        providerMetadata: { common: { streamState: 'checkpoint' } },
+      }),
+    ],
     [
       'a trailing thought before usage data',
       parts({ type: 'reasoning', text: 'Checking', state: 'streaming' }, { type: 'data-usage', data: {} }),

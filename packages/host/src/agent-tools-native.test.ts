@@ -57,7 +57,16 @@ describe('native host GeoSpec composition', () => {
     expect(native.filesystem).toHaveBeenCalledExactlyOnceWith('/projects/widget');
     const options = native.runner.mock.calls[0]?.[0];
     expect(options?.filesystem).toBe(filesystem);
-    expect(options?.model?.runtime).toBe(runtime);
+    const trackedRuntime = options?.model?.runtime;
+    if (trackedRuntime === undefined || typeof trackedRuntime === 'function') {
+      throw new Error('Expected the borrowed project runtime.');
+    }
+    const sourceRevision = { entry: 'widget.ts', files: { 'widget.ts': `sha256:${'a'.repeat(64)}` } };
+    runtime.export.mockResolvedValue({ success: true, data: [], issues: [], sourceRevision });
+    const exported = await trackedRuntime.export('glb', { source: { path: 'widget.ts' } });
+    expect(exported.sourceRevision).toEqual(sourceRevision);
+    expect(runtime.export).toHaveBeenCalledExactlyOnceWith('glb', { source: { path: 'widget.ts' } });
+    expect(runner.sourceRevisions?.()).toEqual([sourceRevision]);
     expect(options?.model?.projectPath).toBe('/projects/widget');
     expect(options?.nativeAssertions.engine).toEqual({ close: native.close });
     expect(options?.nativeAssertions.canonicalize).toBe(native.canonicalize);

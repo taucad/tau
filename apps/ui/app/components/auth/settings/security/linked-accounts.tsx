@@ -18,7 +18,7 @@ export type LinkedAccountsProps = {
  *
  * @returns A JSX element containing the linked accounts card
  */
-export function LinkedAccounts({ className }: LinkedAccountsProps) {
+export function LinkedAccounts({ className }: LinkedAccountsProps): React.JSX.Element {
   const { authClient, localization, socialProviders } = useAuth();
 
   const { data: accounts, isPending } = useListAccounts(authClient);

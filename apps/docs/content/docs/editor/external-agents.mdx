@@ -1,6 +1,6 @@
 ---
 title: External Agents
-description: Run Codex inside a Tau project through its own CLI, its own login, and its own bill.
+description: Run Codex, Claude Code, or Grok Build inside a Tau project through its own CLI and login.
 docType: reference
 icon: 'lucide:terminal text-purple'
 wordBudgetOverride: 500
@@ -14,12 +14,15 @@ An external agent is a coding CLI you already have installed. Tau starts it, giv
 | ----------- | ---------------------------------------------- | -------- | ----------- |
 | Codex       | `@agentclientprotocol/codex-acp` 1.7.0         | `codex`  | 0.148.0     |
 | Claude Code | `@agentclientprotocol/claude-agent-acp` 0.70.0 | `claude` | none pinned |
+| Grok Build  | Native ACP (no adapter package)                | `grok`   | 1.0.41      |
 
-An older CLI is refused before the turn starts, naming the version it found. Codex is the qualified path; Claude Code is discovered and offered, and its live turns are not yet qualified.
+An older CLI is refused before the turn starts, naming the version it found. Codex is the qualified path; Claude Code and Grok Build are offered, but their authenticated live turns are not yet qualified.
+
+For Grok Build, follow the [official installation instructions](https://docs.x.ai/build/overview), then run `grok login` on the host machine. Tau starts `grok --no-auto-update agent stdio` using that local login. Its native ACP handshake has been verified without credentials.
 
 Agents run on a Tau Host: Tau Desktop, or `tau serve` paired with the browser. A browser tab with no host refuses the turn rather than quietly answering it with Tau.
 
-Each agent keeps its own configuration directory — `CODEX_HOME`, `CLAUDE_CONFIG_DIR`. Nothing else about your environment travels: no Tau credential and no provider key reaches the child process.
+Each agent keeps its own configuration directory — `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `GROK_HOME`. Tau credentials and provider API keys never reach the child process.
 
 ## Where the agent works
 

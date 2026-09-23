@@ -727,14 +727,18 @@ export function findClosestSnapPoint(
   const { mousePos, camera, canvas, snapDistancePx, snapPointBufferPx = 15 } = options;
   let closest: SnapPoint | undefined;
   let minDistance = snapDistancePx + snapPointBufferPx;
+  // The snap radius is a CSS-pixel distance the pointer covers, so project into CSS pixels.
+  // `canvas.width/height` is the drawing buffer, which a device pixel ratio above 1 inflates.
+  const cssWidth = canvas.clientWidth || canvas.width;
+  const cssHeight = canvas.clientHeight || canvas.height;
 
   for (const snapPoint of snapPoints) {
     const screenPos = snapPoint.position.clone().project(camera);
-    const canvasX = (screenPos.x + 1) * 0.5 * canvas.width;
-    const canvasY = (-screenPos.y + 1) * 0.5 * canvas.height;
+    const canvasX = (screenPos.x + 1) * 0.5 * cssWidth;
+    const canvasY = (-screenPos.y + 1) * 0.5 * cssHeight;
 
-    const mouseCanvasX = (mousePos.x + 1) * 0.5 * canvas.width;
-    const mouseCanvasY = (-mousePos.y + 1) * 0.5 * canvas.height;
+    const mouseCanvasX = (mousePos.x + 1) * 0.5 * cssWidth;
+    const mouseCanvasY = (-mousePos.y + 1) * 0.5 * cssHeight;
 
     const distance = Math.hypot(canvasX - mouseCanvasX, canvasY - mouseCanvasY);
 

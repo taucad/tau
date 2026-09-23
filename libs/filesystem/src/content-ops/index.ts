@@ -14,7 +14,8 @@
  * @module
  */
 
-export { archive } from '#content-ops/archive.js';
+export { archive, archiveByteCeiling, archiveTooLargeCode } from '#content-ops/archive.js';
+export type { ArchiveOptions } from '#content-ops/archive.js';
 export { contents } from '#content-ops/contents.js';
 export type { ContentFileSystem } from '#content-ops/contents.js';
 export { withReadContentOps } from '#content-ops/read-ops.js';

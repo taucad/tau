@@ -24,6 +24,8 @@ export type FixtureFile = Readonly<{ base64: string; mimeType: string; name: str
 export type SeededChatIds = Readonly<{ projectId: string; chatIds: readonly string[] }>;
 
 export const composerSelector = '[aria-label="Ask Tau to build anything..."]';
+/** A sent message's edit box, named by its own placeholder. */
+export const editComposerSelector = 'article [aria-label="Edit your message"]';
 export const seededIdsStorageKey = 'tau:e2e:chat-attachments';
 /** The Anthropic-wire catalog row the gateway fixture speaks; it reads images and PDFs. */
 export const pdfModelName = 'Haiku 4.5';
@@ -268,7 +270,7 @@ export const seededChatIds = async (): Promise<SeededChatIds> => {
   return ids!;
 };
 
-/** Enable the plan-mode selector and decline the consent banner before any page loads. */
+/** Enable plan mode before any page loads. */
 export const prepareComposerPage = async (): Promise<void> => {
   await target.addInitScript(() => {
     localStorage.setItem('tau:flags', JSON.stringify({ planMode: true }));
@@ -289,20 +291,41 @@ export const dismissCookies = async (): Promise<void> => {
 export const selectModel = async (name: string): Promise<void> => {
   await target.click(selectors.getByCss(composerSelector).first());
   await target.keyboardPress('ControlOrMeta+Slash');
+  await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
   await target.click(selectors.getByRole('option', { name, exact: true }).first());
+  // Choosing returns to the sheet with the model's settings; close it back to the editor.
+  await target.expectVisible(selectors.getByRole('button', { name: `Model: ${name}. Change` }));
+  await target.keyboardPress('Escape');
 };
+
+/**
+ * Choose the composer's reasoning level through the agent sheet.
+ *
+ * @param level - The level's name, as the sheet shows it.
+ * @returns Nothing.
+ */
+export const selectReasoningLevel = async (level: string): Promise<void> => {
+  await target.click(selectors.getByCss(composerSelector).first());
+  await target.keyboardPress('ControlOrMeta+Slash');
+  await target.click(selectors.getByRole('tab', { name: level, exact: true }));
+  await target.keyboardPress('Escape');
+};
+
+/** The composer's agent trigger, whose name carries the model and its reasoning level. */
+export const agentTrigger = (): Locator => selectors.getByRole('button', { name: /^Agent and model: /u }).first();
 
 /** The composer's attachment rail. */
 export const composerRail = (): Locator => selectors.getByCss(`[aria-label="Attachments"]`).first();
 
 /**
- * Choose a file through the composer's paperclip.
+ * Choose a file through the composer's + menu.
  *
  * @param file - The file.
  * @returns Nothing.
  */
 export const chooseAttachment = async (file: FixtureFile): Promise<void> => {
-  await target.chooseFile(selectors.getByRole('button', { name: 'Add image or PDF' }).first(), file);
+  await target.click(selectors.getByRole('button', { name: 'Add', exact: true }).first());
+  await target.chooseFile(selectors.getByRole('menuitem', { name: 'Attach image or PDF' }), file);
 };
 
 /**

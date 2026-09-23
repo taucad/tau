@@ -2,6 +2,7 @@ import type { EditFileRpcInput, EditFileRpcResult } from '#schemas/rpc.schema.js
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 import { assertRootedPath } from '@taucad/utils/path';
+import { sha256String } from '@taucad/utils/hash';
 
 /** @public */
 export async function handleEditFile(input: EditFileRpcInput, fileSystem: RpcFileSystem): Promise<EditFileRpcResult> {
@@ -19,6 +20,11 @@ export async function handleEditFile(input: EditFileRpcInput, fileSystem: RpcFil
       occurrences: result.occurrences,
       ...(result.staleRecovered ? { staleRecovered: true } : {}),
       diffStats,
+      // R4: the digest of the bytes this edit left at the path, not of the replacement text.
+      revision: {
+        path: targetFile,
+        digest: result.digest ?? `sha256:${await sha256String(diffStats.modifiedContent)}`,
+      },
     };
   } catch (error) {
     return { ...toRpcError(error), retryable: true };

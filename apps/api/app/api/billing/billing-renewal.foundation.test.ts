@@ -457,11 +457,9 @@ async function seedSubscription(): Promise<OwnedSubscription> {
   await database.insert(subscription).values({
     id: subscriptionId,
     plan: 'pro',
-    referenceId: `financial:${subscriptionId}`,
     accountId,
     environment: 'development',
     customerBindingId: bindingId,
-    stripeCustomerId: customerId,
     stripeSubscriptionId: remoteSubscriptionId,
     requestId: randomUUID(),
     requestHash: 'a'.repeat(64),

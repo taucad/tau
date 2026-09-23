@@ -23,9 +23,17 @@ import path from 'node:path';
 import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
-import type { FileMode, FileReadStreamOptions, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
+import type {
+  FileMode,
+  FileReadStreamOptions,
+  FileStat,
+  PathPolicy,
+  ProviderCapabilities,
+  WatchRequest,
+} from '#types.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
@@ -86,6 +94,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   };
 
   private readonly _base: string;
+  private readonly _policy: PathPolicy | undefined;
   private _realBaseCache: Promise<string> | undefined;
   // eslint-disable-next-line tau-lint/no-handrolled-fanout -- disposal registry, not pub/sub: these thunks are unsubscribes invoked once by dispose().
   private readonly _openSubscriptions = new Set<() => void>();
@@ -93,10 +102,16 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   /**
    * @param basePath - Host directory mapped to this provider's root. It must
    * already exist; the caller (the host) creates it.
+   * @param options - The reserved layout an ordinary name may not resolve into
+   * (D6, G0-6). This backend is the only one that can hold a symlink and the
+   * only layer that knows where one points, so it refuses a laundered spelling
+   * for every consumer above it; the policy is injected because the core never
+   * imports the registry.
    */
-  public constructor(basePath: string) {
+  public constructor(basePath: string, options?: { readonly policy?: PathPolicy }) {
     super();
     this._base = path.resolve(basePath);
+    this._policy = options?.policy;
     authorityCheckedWrites.set(this, async (input, assertCurrent) => this.#writeFileChecked(input, assertCurrent));
   }
 
@@ -148,13 +163,46 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   public async readdir(path_: string): Promise<string[]> {
     this._assertRootedPath(path_);
-    const entries = await fs.readdir(await this._resolve(path_));
+    const canonical = assertRootedPath(path_);
+    const entries = await fs.readdir(await this._resolve(path_), { withFileTypes: true });
     /* An in-flight `_atomicWrite` parks `.<name>.<pid>.<uuid>.tmp` beside its
      * target for a few milliseconds. It is provider bookkeeping, not content:
      * a walker that lists it and then `stat`s it after the rename loses the
      * whole snapshot to ENOENT (seen by the desktop e2e's workspace admission
      * racing a parameter write). Keep it out of every listing. */
-    return entries.filter((name) => !inFlightTemporaryName.test(name));
+    const rows = entries.filter((entry) => !inFlightTemporaryName.test(entry.name));
+    /* A link this provider will not serve is out of the listing for the same
+     * reason: `_resolve` refuses it below, and a row every walker then `stat`s
+     * would cost the caller the whole snapshot. Only link rows are probed — an
+     * ordinary directory pays one `readdir` exactly as before — and they are
+     * probed from the same bounded pool as the stats beside them: each probe is
+     * an `lstat` walk plus a `realpath`, and a pnpm `node_modules` is thousands
+     * of rows. */
+    const refused = await mapConcurrent(rows, statConcurrency, async (entry) =>
+      entry.isSymbolicLink() ? this._refusesLaunderedLink(canonical, entry.name) : false,
+    );
+    return rows.filter((_, index) => refused[index] !== true).map(({ name }) => name);
+  }
+
+  /**
+   * Batched readdir + stat, so a cold index build pays one call per directory
+   * instead of one per file — the whole saving on the port client, where each of
+   * those was a round trip.
+   *
+   * Composed from this provider's own two primitives on purpose: the listing
+   * keeps its temp-file and laundered-link refusals, each row keeps the stat
+   * `_resolve` and the content sniff would have given it, and the answer is
+   * `readdir` + `stat` by construction rather than by a second implementation.
+   *
+   * @param path_ - Absolute directory path to enumerate.
+   * @returns Each entry's name paired with its stat metadata.
+   */
+  public async readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>> {
+    const names = await this.readdir(path_);
+    return mapConcurrent(names, statConcurrency, async (name) => ({
+      name,
+      ...(await this.stat(joinRooted(path_, name))),
+    }));
   }
 
   public async stat(path_: string): Promise<FileStat> {
@@ -575,6 +623,22 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Whether this directory row resolves somewhere {@link _resolve} will not serve.
+   *
+   * Any refusal drops the row, not only the laundered-mask one: a broken link
+   * answers `ENOENT` and one pointing out of the root `PATH_OUTSIDE_ROOT`, and a
+   * row a walker cannot `stat` costs it the whole listing either way (G0b-4).
+   */
+  private async _refusesLaunderedLink(directory: string, name: string): Promise<boolean> {
+    try {
+      await this._resolve(joinRooted(directory, name));
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
   private async _resolve(rootedPath: string): Promise<string> {
     const canonical = assertRootedPath(rootedPath);
     const target = path.resolve(this._base, canonical);
@@ -582,8 +646,27 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       throw new VirtualPathError('PATH_OUTSIDE_ROOT', rootedPath);
     }
     const [realBase, existing] = await Promise.all([this._realBase, this._nearestExistingPath(target)]);
-    if (!isContained(realBase, await fs.realpath(existing))) {
+    const real = await fs.realpath(existing);
+    if (!isContained(realBase, real)) {
       throw this._enoent(rootedPath);
+    }
+    /*
+     * A link that stays inside the root but lands on a hidden path launders the
+     * mask: every layer above classifies `notes/config`, which no row can see,
+     * while the bytes are `.git/config`'s. Both spellings have to answer, and
+     * the real one is only knowable here. Free: the `realpath` above is the one
+     * the containment check already paid for, and its nearest-existing ancestor
+     * decides the whole subtree (PP2).
+     *
+     * Asymmetric on purpose. Only a *visible* name resolving into a hidden path
+     * is refused, so a consumer that reaches the control plane by its own name —
+     * the revisions engine over `'working-copy'` — is untouched.
+     */
+    if (this._policy !== undefined && this._policy.classify(canonical).agentAccess !== 'hidden') {
+      const realRelative = path.relative(realBase, real).split(path.sep).join('/');
+      if (this._policy.classify(realRelative).agentAccess === 'hidden') {
+        throw this._errno('ELOOP', 'refusing to follow a symbolic link into a hidden path', rootedPath);
+      }
     }
     return target;
   }
@@ -660,7 +743,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
     }
     if (failure !== undefined) {
-      if (replaced && (failure as NodeJS.ErrnoException).code !== 'CHECKED_WRITE_POTENTIALLY_APPLIED') {
+      if (
+        replaced &&
+        !['CHECKED_WRITE_POTENTIALLY_APPLIED', 'WRITE_VERIFICATION_FAILED'].includes(
+          (failure as NodeJS.ErrnoException).code ?? '',
+        )
+      ) {
         throw Object.assign(new Error('Checked write may have been applied.', { cause: failure }), {
           code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
         });
@@ -727,10 +815,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         throw error;
       }
       throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
-        applicationState:
-          (error as NodeJS.ErrnoException | undefined)?.code === 'CHECKED_WRITE_POTENTIALLY_APPLIED'
-            ? 'potentially-applied'
-            : 'known-not-applied',
+        applicationState: ['CHECKED_WRITE_POTENTIALLY_APPLIED', 'WRITE_VERIFICATION_FAILED'].includes(
+          (error as NodeJS.ErrnoException | undefined)?.code ?? '',
+        )
+          ? 'potentially-applied'
+          : 'known-not-applied',
       });
     }
   };

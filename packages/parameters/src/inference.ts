@@ -1,8 +1,7 @@
-import { compileParameterManifest } from '#manifest.js';
+import { compileParameterManifest, rootResource } from '#manifest.js';
 import type { JsonStructureSchema, ParameterDeclaration, ParameterManifest, ParameterProvenance } from '#manifest.js';
 import { admitUnit } from '@taucad/units/unit';
 
-const rootResource = 'urn:taucad:parameter-schema:root';
 const producer = '@taucad/middleware/parameterUnits';
 const qudt = 'http://qudt.org/vocab/quantitykind/';
 const quantityKinds = {

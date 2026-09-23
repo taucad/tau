@@ -275,6 +275,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
         occurrences: result.occurrences,
         ...(result.staleRecovered ? { staleRecovered: true } : {}),
         diffStats: result.diffStats,
+        digest: result.digest,
       };
     },
     stat,

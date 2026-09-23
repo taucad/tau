@@ -197,7 +197,11 @@ export function GithubGistManagement({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end'>
-          <DropdownMenuItem onSelect={() => void republish()}>
+          <DropdownMenuItem
+            onSelect={() => {
+              void republish();
+            }}
+          >
             <RefreshCw className='size-4' aria-hidden />
             Republish Gist
           </DropdownMenuItem>
@@ -222,7 +226,14 @@ export function GithubGistManagement({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-            <Button type='button' variant='destructive' disabled={busy} onClick={() => void unpublish()}>
+            <Button
+              type='button'
+              variant='destructive'
+              disabled={busy}
+              onClick={() => {
+                void unpublish();
+              }}
+            >
               {busy ? <Loader2 className='size-4 animate-spin' aria-hidden /> : null}
               Unpublish Gist
             </Button>

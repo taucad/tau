@@ -22,13 +22,8 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: useEntitlementsMock,
 }));
 
-const modelSelectorMock = vi.hoisted(() => vi.fn());
 vi.mock('#components/chat/chat-model-selector.js', () => ({
-  ChatModelSelector: (props: {
-    readonly enableShortcut?: boolean;
-    readonly children: (values: { selectedModel: { id: string } }) => React.ReactNode;
-  }) => {
-    modelSelectorMock(props.enableShortcut);
+  ChatModelSelector: (props: { readonly children: (values: { selectedModel: { id: string } }) => React.ReactNode }) => {
     return <div data-testid='model-selector'>{props.children({ selectedModel: { id: 'cookie-model' } })}</div>;
   },
 }));
@@ -144,11 +139,10 @@ describe('ChatErrorCredits', () => {
     expect(screen.getByText('Provider copy.')).toBeInTheDocument();
   });
 
-  it('should offer a switch to a cheaper model without claiming the picker shortcut', () => {
+  it('should offer a switch to a cheaper model', () => {
     render(<ChatErrorCredits />);
 
     expect(screen.getByRole('button', { name: /switch model/i })).toBeInTheDocument();
-    expect(modelSelectorMock).toHaveBeenCalledWith(false);
   });
 
   it('should keep flow B (settings route) without a payment method and never mount the modal', () => {

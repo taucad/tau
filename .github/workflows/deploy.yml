@@ -17,8 +17,8 @@
 #   3. Push the resulting image to `registry.fly.io/<app>:<sha>` and deploy
 #      it via `flyctl deploy --image ...` so Fly.io skips its own builder.
 #
-# UI is on Netlify (`taucad` staging from `main`; `taucad-prod-us` prod from
-# git branch `production`). See docs/architecture/ui-deployment-topology.md.
+# UI is on Netlify: staging builds from `main`, production from git branch
+# `production`. See docs/architecture/ui-deployment-topology.md.
 
 name: Deploy to Fly.io
 

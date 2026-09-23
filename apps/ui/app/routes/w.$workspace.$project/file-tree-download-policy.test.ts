@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { archiveTooLargeCode } from '@taucad/filesystem/content-ops';
 import {
   FileTreeDownloadError,
   createFileTreeDownloadError,
@@ -18,12 +19,28 @@ describe('file-tree-download-policy', () => {
       expect(getFileTreeDownloadPolicy(undefined)).toEqual({ allowed: true });
     });
 
+    it('should block a system-skills overlay row', () => {
+      expect(
+        getFileTreeDownloadPolicy({ source: 'system-skills', versioned: false, agentAccess: 'read-only' }),
+      ).toEqual({
+        allowed: false,
+        code: 'not-project-content',
+        message: 'System skill files are read-only and cannot be downloaded.',
+      });
+    });
+
+    it('should allow a records row the project owns', () => {
+      expect(getFileTreeDownloadPolicy({ source: 'project', versioned: false, agentAccess: 'read-only' })).toEqual({
+        allowed: true,
+      });
+    });
+
     it('should block dependency-backed read-only paths', () => {
       expect(getFileTreeDownloadPolicy({ source: 'dependencies', versioned: false, agentAccess: 'read-only' })).toEqual(
         {
           allowed: false,
-          code: 'dependency-read-only',
-          message: 'Read-only dependency paths cannot be downloaded.',
+          code: 'not-project-content',
+          message: 'Dependency files are read-only and cannot be downloaded.',
         },
       );
     });
@@ -55,6 +72,24 @@ describe('file-tree-download-policy', () => {
       });
 
       expect(getFileTreeDownloadErrorMessage(error)).toBe('Read-only dependency paths cannot be downloaded.');
+    });
+
+    /* The archive's refusal crosses the bridge wire as a bare `Error` with a
+     * `code`, and its message is the byte count in decimal; the user is told
+     * the ceiling in their own units instead. */
+    it('should tell the user the archive ceiling when the archive refuses the size', () => {
+      const wire = Object.assign(new Error("Archive of '' exceeds its 268435456-byte ceiling."), {
+        code: archiveTooLargeCode,
+      });
+
+      expect(getFileTreeDownloadErrorMessage(wire)).toBe(
+        'This folder is larger than the 256.0 MB a ZIP download can hold. Download a smaller folder instead.',
+      );
+      expect(
+        getFileTreeDownloadErrorMessage(
+          createFileTreeDownloadError({ code: 'zip-generation-failed', path: 'public', cause: wire }),
+        ),
+      ).toBe('This folder is larger than the 256.0 MB a ZIP download can hold. Download a smaller folder instead.');
     });
   });
 });

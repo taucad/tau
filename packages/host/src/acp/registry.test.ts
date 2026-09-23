@@ -52,6 +52,11 @@ describe('resolveAcpAdapters', () => {
     expect(refused).toEqual([]);
     expect(agents.map((agent) => agent.id)).toEqual(acpAgentProfiles.map((profile) => profile.id));
     for (const agent of agents) {
+      if (agent.modulePath === undefined) {
+        expect(agent.cli).toBe('grok');
+        expect(agent.args).toEqual(['--no-auto-update', 'agent', 'stdio']);
+        continue;
+      }
       expect(agent.modulePath.endsWith('.js')).toBe(true);
       expect(agent.modulePath.startsWith('/')).toBe(true);
     }
@@ -65,10 +70,11 @@ describe('resolveAcpAdapters', () => {
     expect(installed).toContain('sandboxPolicy: agentMode.sandboxPolicy,');
   });
 
-  it('honours an adapter override only under NODE_ENV=test', () => {
-    const environment = { ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` };
+  it.each(['codex', 'grok'])('honours a %s adapter override only under NODE_ENV=test', (id) => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+    const environment = { NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:${id}` };
     const { agents } = resolveAcpAdapters({ resolveFrom: import.meta.url, environment });
-    const codex = agents.find((agent) => agent.id === 'codex');
+    const codex = agents.find((agent) => agent.id === id);
 
     expect(codex?.modulePath).toBe(fakeAgentPath);
     // No vendor CLI stands behind a fixture, so the probe is skipped for it.
@@ -79,13 +85,23 @@ describe('resolveAcpAdapters', () => {
      * credentials, so `codex` still resolves to the pinned adapter. */
     const production = resolveAcpAdapters({
       resolveFrom: new URL('../../../cli/src/commands/serve.ts', import.meta.url).href,
-      environment: { ['NODE_ENV']: 'production', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+      environment: { NODE_ENV: 'production', [acpAdapterOverrideVariable]: `${fakeAgentPath}:${id}` },
     });
-    expect(production.agents.find((agent) => agent.id === 'codex')?.modulePath).not.toBe(fakeAgentPath);
+    expect(production.agents.find((agent) => agent.id === id)?.modulePath).not.toBe(fakeAgentPath);
   });
 });
 
 describe('probeAcpAgents', () => {
+  it('checks the version floor for native CLIs before advertising them', async () => {
+    const native = { id: 'grok', displayName: 'Grok Build', cli: process.execPath, args: [], configEnv: [] };
+    const accepted = await probeAcpAgents({ agents: [{ ...native, minimumCliVersion: '1.0.41' }], refused: [] });
+    expect(accepted.agents).toHaveLength(1);
+    const refused = await probeAcpAgents({ agents: [{ ...native, minimumCliVersion: '999.0.0' }], refused: [] });
+    expect(refused.agents).toEqual([]);
+    expect(refused.refused).toEqual([expect.objectContaining({ id: 'grok', code: 'CLI_TOO_OLD' })]);
+  });
+
   it('refuses an adapter whose CLI is absent and keeps the ones that answer', async () => {
     const probed = await probeAcpAgents(
       {
@@ -125,7 +141,8 @@ const fixtureProfile = (mode?: string) => ({
   package: 'p',
   version: '1',
   configEnv: [],
-  ...(mode === undefined ? {} : { spawnEnv: { ['TAU_FAKE_AGENT_MODE']: mode } }),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+  ...(mode === undefined ? {} : { spawnEnv: { TAU_FAKE_AGENT_MODE: mode } }),
 });
 
 const fixtureAdapter = (mode?: string) => ({ ...fixtureProfile(mode), modulePath: fakeAgentPath });
@@ -183,7 +200,8 @@ describe('discoverAcpAgents', () => {
     const discovery = await discoverAcpAgents({
       resolveFrom: import.meta.url,
       pins: [fixtureProfile('silent')],
-      environment: { ...process.env, ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+      environment: { ...process.env, NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
       probeTimeout: 1500,
       modelProbeTimeout: 750,
     });
@@ -201,7 +219,8 @@ describe('externalAgentDescriptors', () => {
     const discovery = await discoverAcpAgents({
       resolveFrom: import.meta.url,
       pins: [fixtureProfile()],
-      environment: { ...process.env, ['NODE_ENV']: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
+      environment: { ...process.env, NODE_ENV: 'test', [acpAdapterOverrideVariable]: `${fakeAgentPath}:codex` },
       modelProbeTimeout: 20_000,
     });
     const descriptors = externalAgentDescriptors(
@@ -234,6 +253,6 @@ describe('externalAgentDescriptors', () => {
     /* V5: two sources of truth disagree the day OpenAI retires a model id, and
      * a pinned default is the one Tau cannot see going stale. */
     expect(acpAgentProfiles.every((profile) => !('model' in profile))).toBe(true);
-    expect(acpAgentProfiles.map((profile) => profile.displayName)).toEqual(['Claude Code', 'Codex']);
+    expect(acpAgentProfiles.map((profile) => profile.displayName)).toEqual(['Claude Code', 'Codex', 'Grok Build']);
   });
 });

@@ -17,6 +17,7 @@
 
 import { Topic } from '@taucad/events';
 import {
+  admissionMilliseconds,
   awaitSyncSettled,
   createProjectRevisionsActor,
   describeTurnRelease,
@@ -25,15 +26,24 @@ import {
 } from '@taucad/revisions/revision-effects';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
+import {
+  sameRevisionStatus,
+  versionedChangePaths as classifiedChangePaths,
+} from '@taucad/revisions/revision-projection';
+import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
 import type { BranchOperation } from '@taucad/revisions/branch-machine';
-import type {
-  PublishDraft,
-  PublishPublicationActorInput,
-  PublishPublicationActorOutput,
-} from '@taucad/revisions/publish-machine';
+import type { PublishDraft } from '@taucad/revisions/publish-machine';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
-import { classify } from '@taucad/filesystem/path-registry';
-import { readRevisionDiff, readRevisionLog, registerProjectFailureMessage, tauRemoteUrl } from '@taucad/revisions';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import {
+  publishFailureMessage,
+  publishOverHttp,
+  readRevisionDiff,
+  readRevisionLog,
+  registerProjectFailureMessage,
+  registerProjectOverHttp,
+  tauRemoteUrl,
+} from '@taucad/revisions';
 import type {
   GitRemoteCredential,
   RevisionDiffEntry,
@@ -49,36 +59,22 @@ import { revisionId } from '@taucad/revisions/algorithms';
 import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 
 /**
- * The versioned paths one content-change event touches inside one project.
+ * The versioned paths one content-change event touches inside this project.
  *
- * One call per bus event, whatever its path count: the root mints one
- * `generation` per `changed`, and the checkout compares that counter across a
- * mint, so a seam that split an event into several would make a write that
- * landed during a mint invisible (F9, F4). Paths are returned
- * project-relative, which is the namespace the revision tree speaks.
+ * The rule itself is `@taucad/revisions`' (W10.5) and takes the classifier it
+ * reads; this worker composes Tau's own layout, so its callers pass the event
+ * and the route and nothing else.
  *
  * @param event - One authority-level change event.
  * @param projectRoot - The project's route, e.g. `/projects/p1`.
  * @returns Every versioned project-relative path the event touched.
  * @public
  */
-export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] => {
-  const absolute =
-    'path' in event
-      ? [event.path]
-      : 'oldPath' in event
-        ? [event.oldPath, event.newPath]
-        : 'sourcePath' in event
-          ? [event.sourcePath, event.targetPath]
-          : [];
-  const prefix = `${projectRoot}/`;
-  return absolute
-    .filter((path) => path.startsWith(prefix))
-    .map((path) => path.slice(prefix.length))
-    .filter((path) => path !== '' && classify(path).versioned);
-};
+export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] =>
+  classifiedChangePaths(event, projectRoot, tauPathPolicy);
 
 /**
  * A command the page sends to one project's revision root.
@@ -265,7 +261,14 @@ export type RevisionFileComparison = Readonly<{ original: string; modified: stri
 export type RevisionToast =
   | Readonly<{ type: 'restored'; revisionNumber: number; unrecoverable: readonly string[] }>
   | Readonly<{ type: 'nothingToSave' }>
-  | Readonly<{ type: 'branch'; operation: BranchOperation; branch: string }>
+  | Readonly<{
+      type: 'branch';
+      operation: BranchOperation;
+      branch: string;
+      /** What a `create` made, for a caller correlating one (P4). */
+      checkoutId?: string;
+      checkoutRoot?: string;
+    }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
   /**
@@ -302,7 +305,17 @@ export type RevisionToast =
    * W18 DEF-7). A cut a *turn* asked for is not on this channel: its chat
    * already says so, through the admission it refuses.
    */
-  | Readonly<{ type: 'error'; subject: 'restore' | 'branch' | 'save'; message: string }>;
+  | Readonly<{
+      type: 'error';
+      subject: 'restore' | 'branch' | 'save';
+      /* Which branch verb refused, so a caller correlating one *New branch*
+       * does not take another verb's refusal for its own (finding 1). */
+      operation?: BranchOperation;
+      branch?: string;
+      message: string;
+      /* P4: the code is the refusal; the page turns it into product words. */
+      code?: string;
+    }>;
 
 /**
  * Where this document materializes one project's linked checkouts (S4, D4, W2 review R4).
@@ -357,6 +370,15 @@ export type WorkerProjectRevisions = Readonly<{
   }) => Promise<WorkerTurnPlacement>;
   /** Every other verb: fire-and-forget into the tree. */
   send: (command: WorkerRevisionCommand) => void;
+  /**
+   * Make a branch and wait for the checkout the registry made for it.
+   *
+   * The correlated form of `send({ command: 'createBranch' })`. The `branch`
+   * child owns the verb — it records the selected tree first when there is
+   * something to record (P3) — so this resolves on its settlement and rejects
+   * on its refusal, with the port's `code` on the error (P4).
+   */
+  createBranch: (name: string, from?: string) => Promise<BranchCreated>;
   /**
    * Record what is on disk and wait for the answer (C16, contract §6).
    *
@@ -446,242 +468,6 @@ export type WorkerProjectRevisionsOptions = Readonly<{
    */
   apiBaseUrl?: () => string | undefined;
 }>;
-
-/** How long an admission waits for its turn to take its lease. */
-const admissionMilliseconds = 30_000;
-
-/**
- * Record one publication on Tau Cloud (S32, A21).
- *
- * The worker makes the request rather than the page, because the worker is
- * where the machine that ordered it lives; the session is a cookie, so
- * `credentials: 'include'` is the whole of the credential (I8) and nothing is
- * written under a project.
- *
- * @param apiBaseUrl - The API origin the page named, if any.
- * @param input - The pointer and the settings the dialog collected.
- * @returns The publication's id and the link to copy.
- * @throws Error When this document is not signed in, or the API refused.
- */
-const publishToTauCloud = async (
-  apiBaseUrl: string | undefined,
-  input: PublishPublicationActorInput,
-): Promise<PublishPublicationActorOutput> => {
-  if (apiBaseUrl === undefined) {
-    throw new Error('Sign in to publish this project.');
-  }
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/publications`, {
-    method: 'POST',
-    credentials: 'include',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire.
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => undefined);
-    const code =
-      typeof (body as { code?: unknown } | undefined)?.code === 'string' ? (body as { code: string }).code : undefined;
-    throw Object.assign(new Error(publishFailureMessage(response.status, code)), { code });
-  }
-  const body = (await response.json()) as Readonly<{ id?: string; urls?: Readonly<{ share?: string; view?: string }> }>;
-  const url = body.urls?.share ?? body.urls?.view;
-  if (body.id === undefined || url === undefined) {
-    throw new Error('Tau Cloud answered without a link for this publication.');
-  }
-  return { publicationId: body.id, url };
-};
-
-/**
- * Registers this project on Tau Cloud, from the page's own session (P51).
- *
- * Connecting is the verb that makes the project exist on the remote: until the
- * `project` row is written, both git advertisements answer `404`. `PUT` because
- * a retried *Connect* must be one request, not two rows (the API's insert is
- * `onConflictDoNothing`). The page's cookie is the credential, so nothing is
- * carried through the module.
- *
- * @param apiBaseUrl - The API origin the page named, if any.
- * @param projectId - The project being connected.
- * @param name - The project name from its versioned manifest, when readable.
- * @throws Error When this document is not signed in, or the API refused.
- */
-const registerOnTauCloud = async (
-  apiBaseUrl: string | undefined,
-  projectId: string,
-  name: string | undefined,
-): Promise<void> => {
-  if (apiBaseUrl === undefined) {
-    throw new Error('Sign in to back this project up to Tau Cloud.');
-  }
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}`, {
-    method: 'PUT',
-    credentials: 'include',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire.
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(name === undefined ? {} : { name }),
-  });
-  if (!response.ok) {
-    /* One owner for this copy (C6, contract §5). The hand-written ladder here
-     * mapped 403 to "belongs to another account" — which the API answers 404
-     * for — while 403 is the project ceiling, and 429/400 fell through to
-     * "Try again." */
-    const answered = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown; message?: unknown }>;
-    throw new Error(
-      registerProjectFailureMessage(
-        response.status,
-        typeof answered.code === 'string' ? answered.code : undefined,
-        typeof answered.message === 'string' ? answered.message : undefined,
-      ),
-    );
-  }
-};
-
-/**
- * What a refused publish says, in the operator's words (A18).
- *
- * @param status - The HTTP status the API answered.
- * @param code - Its error code, when it named one.
- * @returns A sentence a person can act on.
- */
-const publishFailureMessage = (status: number, code: string | undefined): string => {
-  if (status === 401) {
-    return 'Sign in to publish this project.';
-  }
-  if (code === 'ENTITLEMENT_REQUIRED') {
-    return 'Private links need the Pro plan.';
-  }
-  if (code === 'MISSING_ENTRY_PATH') {
-    return 'This version does not contain the file this project opens with.';
-  }
-  if (status === 413 || code === 'PAYLOAD_TOO_LARGE') {
-    return 'This version is larger than a shared link may be.';
-  }
-  return 'Tau Cloud could not publish this project. Try again.';
-};
-
-/**
- * One branch row as the string a reader would see.
- *
- * @param row - The facet row.
- * @returns Its visible fields, joined.
- */
-const branchKey = (row: RevisionStatusProjection['branches'][number]): string =>
-  [row.name, row.head ?? '', row.checkoutId ?? '', row.checkoutRoot ?? '', ...row.leaseChatIds].join('\u0000');
-
-/**
- * Whether two branch facets say the same thing.
- *
- * The rows are rebuilt on every transition, so identity is never the answer;
- * the pane re-renders only when a name, head, checkout or chat chip moves.
- *
- * @param left - The published rows.
- * @param right - The rows the machine would publish now.
- * @returns True when nothing a reader can see has changed.
- */
-const sameBranches = (
-  left: RevisionStatusProjection['branches'],
-  right: RevisionStatusProjection['branches'],
-): boolean => left.map((row) => branchKey(row)).join('\u0001') === right.map((row) => branchKey(row)).join('\u0001');
-
-/**
- * Whether two conflict-card sets say the same thing (W10).
- *
- * Every visible field, including each file's chosen side: the card is the one
- * surface where a person's own click is the state, so a projection that compared
- * only the revision ids would never repaint after *Keep mine*.
- *
- * @param left - The published cards.
- * @param right - The cards the machine would publish now.
- * @returns True when nothing a reader can see has changed.
- */
-/**
- * Whether two string lists say the same thing (P28: settled values only).
- *
- * @param left - The published list.
- * @param right - The candidate list.
- * @returns Whether a reader would see the same list.
- */
-const sameStrings = (left: readonly string[], right: readonly string[]): boolean =>
-  left.length === right.length && left.every((value, index) => value === right[index]);
-
-const sameConflicts = (
-  left: RevisionStatusProjection['conflicts'],
-  right: RevisionStatusProjection['conflicts'],
-): boolean => {
-  const key = (card: RevisionStatusProjection['conflicts'][number]): string =>
-    [
-      card.revisionId,
-      card.branch ?? '',
-      card.labels?.ours ?? '',
-      card.labels?.theirs ?? '',
-      String(card.busy),
-      String(card.ready),
-      ...card.paths.map((row) => `${row.path}\u0002${String(row.openable)}\u0002${row.side ?? ''}`),
-    ].join('\u0000');
-  return left.map((card) => key(card)).join('\u0001') === right.map((card) => key(card)).join('\u0001');
-};
-
-/**
- * Whether two projections say the same thing to a reader (P28, P52).
- *
- * Every settled field a surface renders, and nothing that ticks. A field left
- * out here is a surface that never repaints: `remote.*` was missing, so
- * *Connect Tau Cloud* moved `phase` none → connecting → connected and the Sync
- * region kept drawing the disconnected state (W18 DEF-6).
- *
- * @param left - The published projection.
- * @param right - The candidate projection.
- * @returns Whether the page would draw the same thing.
- * @public
- */
-export const sameRevisionStatus = (left: RevisionStatusProjection, right: RevisionStatusProjection): boolean =>
-  left.checkoutId === right.checkoutId &&
-  left.checkoutRoot === right.checkoutRoot &&
-  left.branch === right.branch &&
-  left.projectDirty === right.projectDirty &&
-  left.dirty === right.dirty &&
-  left.minting === right.minting &&
-  left.headRevisionId === right.headRevisionId &&
-  left.follow === right.follow &&
-  left.attention === right.attention &&
-  left.branchVerb.busy === right.branchVerb.busy &&
-  left.branchVerb.asking === right.branchVerb.asking &&
-  left.branchVerb.branch === right.branchVerb.branch &&
-  /* The Sync row and the header chip are settled values (A38, P28), so this is
-   * the whole of what a reader can see change about sync. */
-  left.sync.state === right.sync.state &&
-  left.sync.pendingCount === right.sync.pendingCount &&
-  left.sync.online === right.sync.online &&
-  left.sync.conflictRef === right.sync.conflictRef &&
-  /* P52/DEF-6: the Sync region renders the *connection*, not only the push
-   * queue. Without these, `Connect Tau Cloud` moved `remote.phase` from
-   * `none` to `connecting` to `connected` and the page never repainted
-   * unless some unrelated field happened to move at the same time. */
-  left.remote.phase === right.remote.phase &&
-  left.remote.kind === right.remote.kind &&
-  left.remote.url === right.remote.url &&
-  left.remote.storage?.used === right.remote.storage?.used &&
-  left.remote.storage?.quota === right.remote.storage?.quota &&
-  left.remote.error === right.remote.error &&
-  sameStrings(left.remote.overQuota, right.remote.overQuota) &&
-  /* The same gap, in the two other facets the projection carries and a
-   * surface reads: the restore confirmation (S19) and the Publish dialog
-   * (S32). One comparator, every settled facet. */
-  left.restore.asking === right.restore.asking &&
-  left.restore.busy === right.restore.busy &&
-  left.restore.removedPathCount === right.restore.removedPathCount &&
-  left.restore.dirty === right.restore.dirty &&
-  left.restore.revisionNumber === right.restore.revisionNumber &&
-  left.publish.phase === right.publish.phase &&
-  left.publish.publicationId === right.publish.publicationId &&
-  left.publish.shareUrl === right.publish.shareUrl &&
-  left.publish.error === right.publish.error &&
-  sameStrings(
-    left.publish.tags.map((tag) => tag.name),
-    right.publish.tags.map((tag) => tag.name),
-  ) &&
-  sameBranches(left.branches, right.branches) &&
-  sameConflicts(left.conflicts, right.conflicts);
 
 /**
  * Start one project's revision tree in this worker.
@@ -782,9 +568,23 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Registration still makes an empty or incomplete local project
          * recoverable; the API's fallback name is honest until tau.json exists. */
       }
-      await registerOnTauCloud(options.apiBaseUrl?.(), id, name);
+      const apiBaseUrl = options.apiBaseUrl?.();
+      if (apiBaseUrl === undefined) {
+        /* No origin means no session: the same sentence the API's own 401
+         * answers, from the one ladder both hosts read (C6). */
+        throw new Error(registerProjectFailureMessage(401));
+      }
+      await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
     },
-    publishPublication: async (input) => publishToTauCloud(options.apiBaseUrl?.(), input),
+    publishPublication: async (input) => {
+      const apiBaseUrl = options.apiBaseUrl?.();
+      if (apiBaseUrl === undefined) {
+        throw new Error(publishFailureMessage(401));
+      }
+      /* The document's session is the whole credential (I8): nothing is carried
+       * through this module and nothing is written under the project. */
+      return publishOverHttp(apiBaseUrl, { kind: 'cookie' }, input);
+    },
     onPlacement: (placement) => {
       if (placement.status === 'refused') {
         refuseAdmission(placement.runId, placement.reason);
@@ -866,7 +666,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
      * `finalized` or `conflicted` turn held its lease, so its admission was
      * already resolved at `leased` and there is nothing here to settle.
      */
-    refuseAdmission(event.runId, failure.reason);
+    console.error('[revisions] turn', failure.code, failure.reason);
+    refuseAdmission(event.runId, describeRevisionFailure('turn', failure.code).description);
   });
   /* R10: a second admission for a turn id the root still holds is answered now,
    * with its own code, instead of waiting out `admissionMilliseconds`. Edit and
@@ -959,10 +760,23 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   const branchChild = actor.getSnapshot().children.branch;
   branchChild?.on('toast.branch', (toast) => {
-    toasts.emit({ type: 'branch', operation: toast.operation, branch: toast.branch });
+    toasts.emit({
+      type: 'branch',
+      operation: toast.operation,
+      branch: toast.branch,
+      ...(toast.checkoutId === undefined ? {} : { checkoutId: toast.checkoutId }),
+      ...(toast.checkoutRoot === undefined ? {} : { checkoutRoot: toast.checkoutRoot }),
+    });
   });
   branchChild?.on('toast.error', (toast) => {
-    toasts.emit({ type: 'error', subject: 'branch', message: toast.message });
+    toasts.emit({
+      type: 'error',
+      subject: 'branch',
+      ...(toast.operation === undefined ? {} : { operation: toast.operation }),
+      ...(toast.branch === undefined ? {} : { branch: toast.branch }),
+      message: toast.message,
+      ...(toast.code === undefined ? {} : { code: toast.code }),
+    });
   });
 
   /**
@@ -977,7 +791,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * @returns When the cut has settled.
    */
   const awaitCut = async (trigger: 'save' | 'hidden' | 'close'): Promise<void> => {
-    const checkoutId = selectRevisionStatus(actor.getSnapshot()).checkoutId;
+    const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before close.');
     }
@@ -1026,6 +840,69 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * @param trigger - `save`, `hidden` or `close`. Defaults to `save`.
    * @returns When the cut has settled and the scheduler has quiesced.
    */
+  /**
+   * The correlated *New branch* (P4, contract §6).
+   *
+   * The `branch` child is the one owner of the verb, and its two settlements
+   * are what a caller can act on: the branch exists on a checkout of its own,
+   * or it was refused with a code. Name-matched rather than id-matched because
+   * the child runs one verb at a time and the name is what the person typed —
+   * and matched at all on the refusal too, because the child takes `create` in
+   * `idle` only, so an unrelated verb's failure used to settle this one and a
+   * dropped `create` never settled at all (review finding 1). The bound is the
+   * registry's own, doubled: this wait covers the cut *and* the registry verb,
+   * each of which is bounded by one of them inside the child.
+   *
+   * @param name - The branch to make.
+   * @param from - The revision it starts at, when the caller has one.
+   * @returns The checkout the registry made for it.
+   */
+  const createBranch = async (name: string, from?: string): Promise<BranchCreated> => {
+    const created = Promise.withResolvers<BranchCreated>();
+    const subscriptions = [
+      branchChild?.on('toast.branch', (toast) => {
+        if (toast.operation !== 'create' || toast.branch !== name) {
+          return;
+        }
+        if (toast.checkoutId === undefined || toast.checkoutRoot === undefined) {
+          /* A branch with no checkout named is no placement: `''` used to reach
+           * `Chat.checkoutId` and leave the chat with nothing to run on (P2,
+           * review finding 5). */
+          created.reject(
+            Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
+              code: 'BRANCH_UNPLACED',
+            }),
+          );
+          return;
+        }
+        created.resolve({ branch: name, checkoutId: toast.checkoutId, checkoutRoot: toast.checkoutRoot });
+      }),
+      branchChild?.on('toast.error', (toast) => {
+        if (toast.operation !== 'create' || toast.branch !== name) {
+          return;
+        }
+        created.reject(
+          Object.assign(new Error(toast.message), ...(toast.code === undefined ? [] : [{ code: toast.code }])),
+        );
+      }),
+    ];
+    const bound = globalThis.setTimeout(() => {
+      created.reject(Object.assign(new Error('This project did not answer in time.'), { code: 'BRANCH_UNANSWERED' }));
+    }, branchRegistryMilliseconds * 2);
+    try {
+      actor.send({
+        type: 'branch',
+        event: { type: 'create', name, ...(from === undefined ? {} : { from }) },
+      });
+      return await created.promise;
+    } finally {
+      globalThis.clearTimeout(bound);
+      for (const subscription of subscriptions) {
+        subscription?.unsubscribe();
+      }
+    }
+  };
+
   const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
     try {
       await awaitCut(trigger);
@@ -1040,6 +917,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       const pending = Promise.withResolvers<WorkerTurnPlacement>();
       admissions.set(input.runId, pending);
       const bound = globalThis.setTimeout(() => {
+        if (!admissions.has(input.runId)) {
+          return;
+        }
+        /*
+         * The root is told, not only the caller (T4-02).
+         *
+         * An admission queued behind a held turn id (V8) outlives the wait that
+         * asked for it: the root raised it when that turn retired, the turn it
+         * spawned took the checkout's lease, and nothing was left to send it
+         * `turnCompleted` — so the checkout read as held for the rest of the
+         * session and every manual save on it answered `nothingToSave`. A lease
+         * has no heartbeat by policy (§8), so this host giving up is the only
+         * liveness signal it has.
+         */
+        actor.send({ type: 'turnAbandoned', turnId: input.turnId, runId: input.runId });
         refuseAdmission(input.runId, 'it was never leased.');
       }, admissionMilliseconds);
       /* No wait for the registry: the root holds an admission that arrives
@@ -1174,17 +1066,6 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Routed by the root to its `branch` child, which owns the verb's
          * lifecycle — including the confirmation and the failure edge the
          * region used to fake with a boolean (A38). */
-        case 'createBranch': {
-          actor.send({
-            type: 'branch',
-            event: {
-              type: 'create',
-              name: command.name,
-              ...(command.from === undefined ? {} : { from: command.from }),
-            },
-          });
-          return;
-        }
         case 'discardBranch': {
           actor.send({
             type: 'branch',
@@ -1356,6 +1237,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       };
     },
     saveRevision,
+    createBranch,
     release: async () => {
       /*
        * The scheduler first, inside its bound (W13 review 2 R2/P33).
@@ -1439,7 +1321,18 @@ export type WorkerRevisionResult =
    * head, or none) and the toast channel (a failure). What the frame *is* is
    * permission for `pagehide` to run.
    */
-  | Readonly<{ kind: 'saved' }>;
+  | Readonly<{ kind: 'saved' }>
+  /**
+   * The branch a `createBranch` asked for exists, on the checkout named here.
+   *
+   * The one fact the caller needs (interface segregation): a page placing a
+   * chat on the branch it just made would otherwise subscribe to the whole
+   * projection to infer it.
+   */
+  | (Readonly<{ kind: 'branch' }> & BranchCreated);
+
+/** A branch that now exists, and the checkout the registry made for it. @public */
+export type BranchCreated = Readonly<{ branch: string; checkoutId: string; checkoutRoot: string }>;
 
 /** One response frame on a revision port. @public */
 export type WorkerRevisionResponse =
@@ -1582,6 +1475,11 @@ const answerOf = (
      * takes the same path and its answer is simply dropped. */
     case 'saveRevision': {
       return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
+    }
+    /* A question now too: the page that made the branch places a chat on it, so
+     * it needs the checkout rather than a projection diff to guess from. */
+    case 'createBranch': {
+      return tree.createBranch(request.name, request.from).then((created) => ({ kind: 'branch', ...created }) as const);
     }
     default: {
       return undefined;

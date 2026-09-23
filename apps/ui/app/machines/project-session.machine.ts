@@ -34,6 +34,8 @@ export type ProjectSessionMachineInput = Readonly<{
   parentRef?: AnyActorRef;
   /** EQ15: the liveness idle-close window, handed down by the registry. */
   idleWindowMilliseconds?: number;
+  /** R3: how long hidden and idle before this project's kernels park. */
+  parkWindowMilliseconds?: number;
   /** How long a region may take to come up before it counts as failed. */
   startBoundMilliseconds?: number;
   /** The bound on the close flush, the rule W13's `awaitSyncSettled` uses. */
@@ -45,6 +47,7 @@ export type ProjectSessionMachineContext = Readonly<{
   projectId: string;
   parentRef: AnyActorRef | undefined;
   idleWindowMilliseconds: number;
+  parkWindowMilliseconds: number;
   startBoundMilliseconds: number;
   closeFlushMilliseconds: number;
   /** Chats with a run in flight. `busy` is `runs.length > 0`. */
@@ -55,12 +58,16 @@ export type ProjectSessionMachineContext = Readonly<{
   pushed: boolean;
   /** Only hidden idle sessions are eligible for the idle-close window. */
   visible: boolean;
+  /** The project the person is on, even while the window itself is hidden (V1-7). */
+  focused: boolean;
   /** Refs this device has not had acknowledged — quit's `Backing up n`. */
   pending: number;
   /** What needs the person: approvals and failed runs, for the sidebar count. */
   attention: number;
   /** Regions that did not come up, with the reason the row shows. */
   failures: Readonly<Record<string, string>>;
+  /** A region ended its start bound failed, which is what refuses the open (R4). */
+  openFailed: boolean;
   closeReason: ProjectSessionCloseReason | undefined;
   /** The last state this session told the registry it was in. */
   reportedState: ProjectSessionState;
@@ -82,7 +89,14 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'runSettled'; readonly chatId: string }
   | { readonly type: 'chatClosed'; readonly chatId: string }
   | { readonly type: 'activity' }
-  | { readonly type: 'visibilityChanged'; readonly visible: boolean }
+  | {
+      readonly type: 'visibilityChanged';
+      readonly visible: boolean;
+      /* R3/V1-7: whether this is the project the person navigated to. `visible`
+       * is `focused && the window is on screen`, so a minimised window makes
+       * every project hidden; only a project nobody navigated to parks. */
+      readonly focused?: boolean;
+    }
   | { readonly type: 'openChat'; readonly chatId: string }
   | { readonly type: 'attention'; readonly count: number }
   | {
@@ -99,13 +113,26 @@ export type ProjectSessionMachineEvent =
 /** What a session tells its watchers. @public */
 export type ProjectSessionMachineEmitted =
   | { readonly type: 'sessionState'; readonly projectId: string; readonly state: ProjectSessionState }
-  | { readonly type: 'attention'; readonly projectId: string; readonly count: number };
+  | { readonly type: 'attention'; readonly projectId: string; readonly count: number }
+  /* R3: whether this project's runtime should hold its kernel processes. The
+   * session owns the fact (hidden and idle); the project's own route binding is
+   * what reaches the cad units, because no actor ref links the two. */
+  | { readonly type: 'runtimeParking'; readonly projectId: string; readonly parked: boolean };
 
 /** A live project session actor. @public */
 export type ProjectSessionActorRef = ActorRefFrom<typeof projectSessionMachine>;
 
 /** The liveness idle-close window (EQ15, P23 — not D8's 5 min checkpoint cut). */
 export const projectSessionIdleWindowMilliseconds = 30 * 60 * 1000;
+
+/**
+ * R3: hidden and idle for this long and the project parks its kernels.
+ *
+ * Short on purpose: it is about process memory, not session state, so it is two
+ * minutes rather than the 30 above. Shorter re-forks on every alt-tab between
+ * two projects; longer bounds nothing.
+ */
+export const projectSessionParkWindowMilliseconds = 2 * 60 * 1000;
 
 /** How long a region may take to come up before the session calls it failed. */
 export const projectSessionStartBoundMilliseconds = 30_000;
@@ -173,13 +200,17 @@ const startupRegion = (region: ProjectSessionRegion) =>
           childFailed: {
             guard: { type: 'isRegion', params: { region } },
             target: 'failed',
-            actions: { type: 'recordFailure', params: { region } },
+            actions: 'recordFailure',
           },
         },
         after: { startBound: { target: 'failed', actions: { type: 'recordTimeout', params: { region } } } },
       },
       ready: { type: 'final' },
-      failed: { type: 'final' },
+      /* R4: the admission verdict is a region ending its start bound here, not
+       * the `failures` map — a kernel refused while the session is still
+       * opening is recorded at the root and is not a reason to refuse the
+       * project, whose views, agent host and compute all came up. */
+      failed: { type: 'final', entry: 'markOpenFailed' },
     },
   }) as const;
 
@@ -213,19 +244,30 @@ export const projectSessionMachine = setup({
   },
   delays: {
     idleWindow: ({ context }) => context.idleWindowMilliseconds,
+    parkWindow: ({ context }) => context.parkWindowMilliseconds,
     startBound: ({ context }) => context.startBoundMilliseconds,
   },
   guards: {
     /* Asking is a user verb only: a policy close never reaches a session with a
      * run (the registry refuses it first) and quit asked once, at the app. */
     shouldAsk: ({ context }) => context.runs.length > 0 && context.closeReason === 'user',
-    hasFailures: ({ context }) => Object.keys(context.failures).length > 0,
+    /* R4: a region ended its start bound failed. Not `failures`, which now
+     * also carries what a live project's kernel said long afterwards. */
+    hasOpenFailure: ({ context }) => context.openFailed,
+    /* R4: only a session that opened clears a failure. `!== 'failed'` would be
+     * true all through `opening`, so a region that timed out and then reported
+     * ready before its last sibling finalised would settle `failed` with an
+     * empty map and a row saying nothing (V2-9). */
+    hasOpened: ({ context }) => context.reportedState === 'live',
     /* One guard, four regions: the event names the region it is about. */
     isRegion: ({ event }, params: { region: ProjectSessionRegion }) =>
       (event.type === 'childReady' || event.type === 'childFailed') && event.region === params.region,
     isLastRun: ({ context, event }) =>
       event.type === 'runSettled' && context.runs.filter((chatId) => chatId !== event.chatId).length === 0,
     isHidden: ({ context }) => !context.visible,
+    /* R3: not on screen *and* not the project the person navigated to. Minimising
+     * the window must not park what is still in front of them (V1-7). */
+    isParkable: ({ context }) => !context.visible && !context.focused,
   },
   actions: {
     /* One place a session says where it is: an emit for local watchers and a
@@ -260,10 +302,31 @@ export const projectSessionMachine = setup({
         pending: context.pending,
       });
     }),
+    /* R3. Resuming a runtime that never parked is a no-op at the cad machine, so
+     * the reverse side never has to know whether the grace elapsed. */
+    signalRuntimeParked: emit(
+      ({ context }) => ({ type: 'runtimeParking', projectId: context.projectId, parked: true }) as const,
+    ),
+    signalRuntimeActive: emit(
+      ({ context }) => ({ type: 'runtimeParking', projectId: context.projectId, parked: false }) as const,
+    ),
+    /* The event names its own region (the startup regions guard on it), so this
+     * records a failure whenever one is reported — at the start bound, or long
+     * after (R4: the desktop refuses a kernel utility while the project is
+     * live). The session stays where it is; only `failures` moves. */
     recordFailure: assign({
-      failures: ({ context, event }, params: { region: ProjectSessionRegion }) =>
-        event.type === 'childFailed' ? { ...context.failures, [params.region]: event.reason } : context.failures,
+      failures: ({ context, event }) =>
+        event.type === 'childFailed' ? { ...context.failures, [event.region]: event.reason } : context.failures,
     }),
+    /* The region came up after all, so its reason goes: a row that stayed red
+     * after a reconnect would outlive the thing it is about. */
+    clearFailure: assign({
+      failures: ({ context, event }) =>
+        event.type === 'childReady'
+          ? Object.fromEntries(Object.entries(context.failures).filter(([name]) => name !== event.region))
+          : context.failures,
+    }),
+    markOpenFailed: assign({ openFailed: true }),
     recordTimeout: assign({
       failures: ({ context }, params: { region: ProjectSessionRegion }) => ({
         ...context.failures,
@@ -316,15 +379,18 @@ export const projectSessionMachine = setup({
     projectId: input.projectId,
     parentRef: input.parentRef,
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? projectSessionIdleWindowMilliseconds,
+    parkWindowMilliseconds: input.parkWindowMilliseconds ?? projectSessionParkWindowMilliseconds,
     startBoundMilliseconds: input.startBoundMilliseconds ?? projectSessionStartBoundMilliseconds,
     closeFlushMilliseconds: input.closeFlushMilliseconds ?? projectSessionCloseFlushMilliseconds,
     runs: [],
     dirty: false,
     pushed: true,
     visible: false,
+    focused: false,
     pending: 0,
     attention: 0,
     failures: {},
+    openFailed: false,
     closeReason: undefined,
     reportedState: 'opening',
     fileManagerRef: undefined,
@@ -397,7 +463,31 @@ export const projectSessionMachine = setup({
       }),
     },
     close: { target: '.closing', actions: assign({ closeReason: ({ event }) => event.reason }) },
-    visibilityChanged: { actions: assign({ visible: ({ event }) => event.visible }) },
+    /*
+     * R4: a region that fails outside its start bound, at the root.
+     *
+     * A kernel refusal arrives whenever the broker's guard is hit: minutes into
+     * `live`, or — the blueprint's own case — milliseconds after the ninth
+     * project opens, while the session is still `opening` and its runtime
+     * region has *already* reported ready off the manifest load. The startup
+     * regions' handlers are nested deeper and still win while a region is
+     * `starting`, so admission is unchanged; everywhere else these record the
+     * reason the row shows and clear it when the region comes back. No state
+     * moves: the project stays live and closable, and everything that is not
+     * its kernel still works.
+     */
+    childFailed: { actions: 'recordFailure' },
+    /* A session that never opened keeps the reason it failed with: `failed` is
+     * terminal for admission (the person reopens the project, which is a new
+     * session), so a region coming back afterwards must not leave a red row
+     * with nothing to say. */
+    childReady: { guard: 'hasOpened', actions: 'clearFailure' },
+    visibilityChanged: {
+      actions: assign({
+        visible: ({ event }) => event.visible,
+        focused: ({ context, event }) => event.focused ?? context.focused,
+      }),
+    },
   },
   states: {
     opening: {
@@ -407,7 +497,7 @@ export const projectSessionMachine = setup({
         starting: {
           entry: 'spawnChildren',
           type: 'parallel',
-          onDone: [{ guard: 'hasFailures', target: '#project-session.failed' }, { target: '#project-session.live' }],
+          onDone: [{ guard: 'hasOpenFailure', target: '#project-session.failed' }, { target: '#project-session.live' }],
           states: {
             views: startupRegion('views'),
             runtime: startupRegion('runtime'),
@@ -429,6 +519,8 @@ export const projectSessionMachine = setup({
                 context.runs.includes(event.chatId) ? context.runs : [...context.runs, event.chatId],
             }),
             'reportFacts',
+            /* R3: a run needs the kernel back whether or not anyone is looking. */
+            'signalRuntimeActive',
           ],
         },
         runSettled: [
@@ -460,6 +552,15 @@ export const projectSessionMachine = setup({
            * the time; the project is still idle afterwards, so it has to be
            * offered again rather than asked once and forgotten. */
           after: {
+            /* R3: the kernel processes go, the session stays. Targetless, so the
+             * idle window above keeps counting its own 30 minutes; re-entering
+             * `idle` (activity, visibility, or that window re-arming) rearms this
+             * one, which re-offers a park a rendering unit refused. For a project
+             * that just stays hidden the only re-entry is the 30-minute window, so
+             * that is the re-offer interval — not "the next idle re-entry" (V1-5).
+             * Giving this delay a target would reset EQ15's window, which is the
+             * one thing it must not touch. */
+            parkWindow: { guard: 'isParkable', actions: 'signalRuntimeParked' },
             idleWindow: {
               guard: 'isHidden',
               target: 'idle',
@@ -473,11 +574,26 @@ export const projectSessionMachine = setup({
           },
           /* Navigation and focus only, never activity streams (A35). */
           on: {
+            /* No resume here: `activity` has no production sender (V1-6). */
             activity: { target: 'idle', reenter: true },
             visibilityChanged: {
               target: 'idle',
               reenter: true,
-              actions: assign({ visible: ({ event }) => event.visible }),
+              actions: [
+                assign({
+                  visible: ({ event }) => event.visible,
+                  focused: ({ context, event }) => event.focused ?? context.focused,
+                }),
+                /* Only coming back resumes: a repeated hidden report must not re-fork
+                 * the kernel of a project nobody is looking at (Q2). Focus counts on
+                 * its own, so navigating to a project while the window is still hidden
+                 * has its kernel by the time the window returns. */
+                enqueueActions(({ enqueue, event }) => {
+                  if (event.visible || event.focused === true) {
+                    enqueue('signalRuntimeActive');
+                  }
+                }),
+              ],
             },
           },
         },

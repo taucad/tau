@@ -7,7 +7,13 @@ import type { ParameterChange } from '#planning.js';
 import { sameRecordBytes } from '#record.js';
 import type { ParameterSnapshot } from '#snapshot.js';
 import { sameRequestDelivery, validRequestShape, validTarget } from '#request.js';
-import type { ParameterSetOutcome, ParameterSetRequest, ParameterSetTarget, ParameterSetPlanResult } from '#types.js';
+import type {
+  ParameterSetOutcome,
+  ParameterSetRequest,
+  ParameterSetRequestBase,
+  ParameterSetTarget,
+  ParameterSetPlanResult,
+} from '#types.js';
 
 /** Input for the one actor that sequences edits to a parameter target. @public */
 export type ParameterSetMachineInput = Readonly<{
@@ -21,12 +27,15 @@ export type ParameterSetMachineContext = ParameterSetMachineInput &
   Readonly<{
     current?: ParameterSnapshot;
     active?: ParameterSetRequest;
-    /** Bounded FIFO of admitted commands; only a transient for the same field is ever displaced. */
+    activeBase?: ParameterSetRequestBase;
+    /** Bounded FIFO; a final displaces any queued edit for its field, a transient only a transient. */
     pending: readonly ParameterSetRequest[];
+    carriedBases: Readonly<Record<string, ParameterSetRequestBase>>;
     change?: Extract<ParameterChange, { status: 'prepared' }>;
     outcome?: ParameterSetOutcome;
     refresh?: 'record' | 'manifest';
     closing: boolean;
+    attempts: number;
     diagnostic?: Readonly<{ code: string; message: string }>;
   }>;
 /** Commands and authority notifications for one fixed target. @public */
@@ -102,9 +111,6 @@ const pressureKey = (request: ParameterSetRequest): string => {
     case 'unit-value': {
       return JSON.stringify(['value', operation.group, operation.pointer]);
     }
-    case 'display-preference': {
-      return JSON.stringify([operation.kind, operation.parameterId]);
-    }
     default: {
       return JSON.stringify([operation.kind, operation.group]);
     }
@@ -112,9 +118,8 @@ const pressureKey = (request: ParameterSetRequest): string => {
 };
 /**
  * Index of the queued command a new one replaces, or -1 to append. A queued command has not been
- * planned or written, so a newer value for the same field supersedes it whatever its pressure: a
- * burst of slider releases collapses to the last one instead of each paying a plan and a write.
- * Every other operation still only displaces an unsettled transient.
+ * planned or written. A final supersedes any queued value edit for its field; a transient only
+ * supersedes another transient, so a drag sample never drops a queued release.
  */
 const displacedIndex = (pending: readonly ParameterSetRequest[], request: ParameterSetRequest): number => {
   const index = pending.findLastIndex((item) => pressureKey(item) === pressureKey(request));
@@ -122,7 +127,10 @@ const displacedIndex = (pending: readonly ParameterSetRequest[], request: Parame
     return -1;
   }
   const valueEdit = request.operation.kind === 'native-value' || request.operation.kind === 'unit-value';
-  return valueEdit || pending[index]!.pressure === 'transient' ? index : -1;
+  if (valueEdit && request.pressure === 'final') {
+    return index;
+  }
+  return pending[index]!.pressure === 'transient' ? index : -1;
 };
 const canonicalResolution = (resolution: ParameterResolutionOptions | undefined): string => {
   const { mode, ...rest } = resolution ?? {};
@@ -186,7 +194,8 @@ export const parameterSetMachine = setup({
   actors: { loadParameterSet, commitParameterSet, observeParameterSet, planParameterSet },
   guards: {
     closing: ({ context }) => context.closing,
-    uncertain: ({ context }) => context.outcome?.status === 'indeterminate',
+    uncertain: ({ context }) =>
+      context.outcome?.status === 'indeterminate' && context.outcome.code === 'RECOVERY_FAILED',
     invalidClose: ({ event }) => event.type === 'close' && (event.invalidDrafts?.length ?? 0) > 0,
     pending: ({ context }) => context.pending.length > 0,
     sameResolution: ({ context, event }) =>
@@ -217,7 +226,9 @@ export const parameterSetMachine = setup({
   },
   actions: {
     accept: assign(({ event }) =>
-      event.type === 'submit' ? { active: structuredClone(event.request), outcome: undefined } : {},
+      event.type === 'submit'
+        ? { active: structuredClone(event.request), activeBase: undefined, attempts: 0, outcome: undefined }
+        : {},
     ),
     queue: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'submit') {
@@ -228,19 +239,49 @@ export const parameterSetMachine = setup({
         enqueue.assign({ pending: [...context.pending, structuredClone(event.request)] });
         return;
       }
-      enqueue.emit(cancelledSettlement(context.pending[index]!));
-      enqueue.assign({ pending: context.pending.with(index, structuredClone(event.request)) });
+      const displaced = context.pending[index]!;
+      const carriedBase = context.carriedBases[displaced.requestId] ?? displaced.base ?? event.request.base;
+      const carriedBases = { ...context.carriedBases };
+      Reflect.deleteProperty(carriedBases, displaced.requestId);
+      if (carriedBase !== undefined) {
+        carriedBases[event.request.requestId] = carriedBase;
+      }
+      enqueue.emit(cancelledSettlement(displaced));
+      enqueue.assign({
+        pending: context.pending.with(index, structuredClone(event.request)),
+        carriedBases,
+      });
     }),
-    dequeue: assign(({ context }) => ({
-      active: context.pending[0],
-      pending: context.pending.slice(1),
-      outcome: undefined,
-    })),
+    dequeue: assign(({ context }) => {
+      const active = context.pending[0];
+      const carriedBases = { ...context.carriedBases };
+      const activeBase = active === undefined ? undefined : carriedBases[active.requestId];
+      if (active !== undefined) {
+        Reflect.deleteProperty(carriedBases, active.requestId);
+      }
+      return {
+        active,
+        activeBase,
+        pending: context.pending.slice(1),
+        carriedBases,
+        attempts: 0,
+        outcome: undefined,
+      };
+    }),
     clear: assign(({ context }) =>
-      context.outcome?.status === 'indeterminate' ? {} : { active: undefined, change: undefined },
+      context.outcome?.status === 'indeterminate' && context.outcome.code === 'RECOVERY_FAILED'
+        ? {}
+        : { active: undefined, activeBase: undefined, attempts: 0, change: undefined },
     ),
     /** Leave the uncertain lockout: the command already settled, so only the stale evidence goes. */
-    clearUncertain: assign({ active: undefined, change: undefined, outcome: undefined }),
+    clearUncertain: assign({
+      active: undefined,
+      activeBase: undefined,
+      attempts: 0,
+      change: undefined,
+      outcome: undefined,
+    }),
+    retryConflict: assign(({ context }) => ({ attempts: context.attempts + 1, refresh: 'record' })),
     refresh: assign(({ context }) => ({ refresh: context.refresh ?? 'record' })),
     resolve: assign(({ context, event }) => ({
       refresh: 'manifest',
@@ -250,7 +291,7 @@ export const parameterSetMachine = setup({
       for (const request of context.pending) {
         enqueue.emit(cancelledSettlement(request));
       }
-      enqueue.assign({ closing: true, pending: [] });
+      enqueue.assign({ closing: true, pending: [], carriedBases: {} });
     }),
     cancelPending: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'cancel') {
@@ -259,7 +300,9 @@ export const parameterSetMachine = setup({
       const index = context.pending.findIndex((request) => request.requestId === event.requestId);
       if (index !== -1) {
         enqueue.emit(cancelledSettlement(context.pending[index]!));
-        enqueue.assign({ pending: context.pending.toSpliced(index, 1) });
+        const carriedBases = { ...context.carriedBases };
+        Reflect.deleteProperty(carriedBases, context.pending[index]!.requestId);
+        enqueue.assign({ pending: context.pending.toSpliced(index, 1), carriedBases });
       } else if (context.active?.requestId !== event.requestId) {
         enqueue.emit({
           type: 'command-rejected',
@@ -281,7 +324,7 @@ export const parameterSetMachine = setup({
         });
       }
       if (context.pending.length > 0) {
-        enqueue.assign({ pending: [] });
+        enqueue.assign({ pending: [], carriedBases: {} });
       }
     }),
     cancelled: assign(({ context }) => ({
@@ -331,7 +374,14 @@ export const parameterSetMachine = setup({
   },
 }).createMachine({
   id: 'parameter-set',
-  context: ({ input }) => ({ ...input, pending: [], refresh: undefined, closing: false }),
+  context: ({ input }) => ({
+    ...input,
+    pending: [],
+    carriedBases: {},
+    refresh: undefined,
+    closing: false,
+    attempts: 0,
+  }),
   initial: 'validating',
   states: {
     validating: {
@@ -413,15 +463,15 @@ export const parameterSetMachine = setup({
             onDone: {
               target: 'route',
               actions: enqueueActions(({ context, event, enqueue }) => {
-                // The echo of this actor's own write re-reads the same bytes under the same
-                // manifest: adopt the snapshot, publish nothing.
-                if (
+                const changed =
                   context.current === undefined ||
                   !sameRecordBytes(event.output.bytes, context.current.bytes) ||
-                  event.output.identity.manifestRevision !== context.current.identity.manifestRevision
-                ) {
-                  enqueue.emit({ type: 'loaded', current: event.output });
+                  event.output.identity.manifestRevision !== context.current.identity.manifestRevision;
+                if (!changed) {
+                  enqueue.assign({ diagnostic: undefined });
+                  return;
                 }
+                enqueue.emit({ type: 'loaded', current: event.output });
                 enqueue.assign({ current: event.output, diagnostic: undefined });
               }),
             },
@@ -477,7 +527,11 @@ export const parameterSetMachine = setup({
         planning: {
           invoke: {
             src: 'planParameterSet',
-            input: ({ context }) => ({ current: context.current!, request: context.active! }),
+            input: ({ context }) => ({
+              current: context.current!,
+              request:
+                context.activeBase === undefined ? context.active! : { ...context.active!, base: context.activeBase },
+            }),
             onDone: [
               {
                 guard: ({ event }) => event.output.status === 'rejected',
@@ -629,18 +683,20 @@ export const parameterSetMachine = setup({
             input: ({ context }) => context.change!,
             onDone: [
               {
-                guard: ({ event }) => event.output.status === 'conflict',
+                guard: ({ context, event }) => event.output.status === 'conflict' && context.attempts >= 2,
                 target: 'settled',
-                actions: [
-                  'refresh',
-                  assign(({ context }) => ({
-                    outcome: rejected(
-                      context.active!.requestId,
-                      'STALE_MANIFEST',
-                      'A checked write precondition changed.',
-                    ),
-                  })),
-                ],
+                actions: assign(({ context }) => ({
+                  outcome: rejected(
+                    context.active!.requestId,
+                    'RECORD_CONFLICT',
+                    'The parameter record changed during three checked write attempts.',
+                  ),
+                })),
+              },
+              {
+                guard: ({ event }) => event.output.status === 'conflict',
+                target: 'route',
+                actions: 'retryConflict',
               },
               {
                 target: 'settled',

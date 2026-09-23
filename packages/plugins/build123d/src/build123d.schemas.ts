@@ -1,6 +1,6 @@
 import { isAbsolute } from 'node:path';
 
-import { gltfExportConventionSchema } from '@taucad/runtime/kernel';
+import { gltfExportConventionSchema, quantity, quantityKinds } from '@taucad/runtime/kernel';
 import { z } from 'zod';
 
 const absolutePath = z.string().min(1).refine(isAbsolute, 'Expected an absolute path');
@@ -33,8 +33,14 @@ export const build123dOptionsSchema = z.object({
 
 const tessellation = z
   .object({
-    linearTolerance: z.number().positive().default(0.05),
-    angularTolerance: z.number().positive().max(Math.PI).default(0.1),
+    linearTolerance: quantity({ unit: 'mm', quantityKind: quantityKinds.length, space: 'linear' })
+      .positive()
+      .default(0.05),
+    // BRepMesh takes radians; unlike OCCT-core's degrees this is passed through unconverted.
+    angularTolerance: quantity({ unit: 'rad', quantityKind: quantityKinds.planeAngle, space: 'linear' })
+      .positive()
+      .max(Math.PI)
+      .default(0.1),
   })
   .default({ linearTolerance: 0.05, angularTolerance: 0.1 });
 

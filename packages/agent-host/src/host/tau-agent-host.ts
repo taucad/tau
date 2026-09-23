@@ -1,10 +1,6 @@
 import { util as zodUtility } from 'zod';
 import { createAgentSession } from '#harness/session.js';
-import {
-  createPortableId,
-  transportFailureDiagnosticType,
-  transportFailureFromProviderMessages,
-} from '#harness/session-record.js';
+import { createPortableId, transportFailureDiagnosticType, transportFailureOfRun } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type {
   AgentToolChoice,
@@ -35,6 +31,7 @@ import type { EventLogBatch } from '#log/event-log-appender.js';
 import type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
 import type { ClientContext } from '#harness/cad-middleware.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { canonicalJson } from '#harness/safeguards.js';
 import { externalAgentStopCodes } from '#launchers/node/agent-wire.js';
 
 type SessionEvent = AgentLogEvent extends infer Event
@@ -476,8 +473,37 @@ export type TauAgentHost = {
   admit(request: TauAgentTurnRequest): Promise<readonly ProviderMessage[]>;
   /** Rebuild one chat from its event log and continue a non-terminal run. */
   resume(chatId: string): Promise<readonly ProviderMessage[]>;
-  /** Wait until a concurrently started admission is durable and return its current projection. */
-  waitForAdmission(chatId: string): Promise<HostRunSnapshot | undefined>;
+  /**
+   * Wait until a concurrently started admission is durable and return its projection.
+   *
+   * Name the run when the answer has to be about *that* run — acknowledging a
+   * `start`, for instance. A chat holds one reservation at a time, so asking
+   * only by chat could be answered with a different run's snapshot while this
+   * command's own rejection went unobserved. Omit it to ask the chat-level
+   * question "is an admission under way here at all?", which is what a takeover
+   * gate needs.
+   *
+   * @param chatId - The chat being asked about.
+   * @param runId - The run whose admission to wait for, when the caller has one.
+   */
+  waitForAdmission(chatId: string, runId?: string): Promise<HostRunSnapshot | undefined>;
+  /**
+   * Record a non-terminal run whose executing host is gone as abandoned (I4).
+   *
+   * What a takeover does instead of resuming: resuming re-asks the provider for
+   * a turn nobody requested — a second full-price call, whose reply the open
+   * transcript drops and whose completion mints no revision, because the lease
+   * it needed died with the document. Recording states the fact and stops;
+   * `RUN_ABANDONED` is resumable, so the person's own *Resume* continues it.
+   *
+   * A paused run is not marked: it is waiting on a person, not on a host, and
+   * its pending interrupt is what should be republished. A run this host is
+   * itself driving is not marked either.
+   *
+   * @param chatId - The chat whose current run may be abandoned.
+   * @returns The chat's run projection after the record, or `undefined` when it has no run.
+   */
+  markAbandoned(chatId: string): Promise<HostRunSnapshot | undefined>;
   /** Abort an active run, durably pause it, and wait through the W5 port. */
   interrupt(request: InterruptRequest): Promise<InterruptResolution>;
   /** Resolve a W5 request from an external presenter. */
@@ -488,8 +514,10 @@ export type TauAgentHost = {
   steer(input: { readonly runId: string; readonly message: string }): Promise<void>;
   /** Cancel an active run without creating an approval request, then wait out its settlement. */
   cancel(input: { readonly runId: string }): Promise<void>;
-  /** Rebuild the current run projection from W1. */
+  /** Rebuild the current run projection from W1, refusing `NO_RUN_ADMITTED` when there is none. */
   snapshot(chatId: string): Promise<HostRunSnapshot>;
+  /** The same projection as {@link TauAgentHost.snapshot}, answering `undefined` rather than refusing. */
+  describeRun(chatId: string): Promise<HostRunSnapshot | undefined>;
   /** Read one bounded event batch for follower projection. */
   readEvents(input: {
     readonly chatId: string;
@@ -596,8 +624,11 @@ const currentRun = (
   return lifecycle?.type === 'run.lifecycle' ? { runId: lifecycle.runId, state: lifecycle.state } : undefined;
 };
 
-/** Settlement records may never precede their run's admission; see {@link appendExternal}. */
+/** Settlement records may never precede their run's admission; see {@link runLedgerOf}. */
 const settlementTypes = new Set<AgentLogEvent['type']>(['turn.finalized', 'turn.conflicted', 'turn.failed']);
+
+/** `LogEventBase`: the position the log stamps on, which a body being appended does not carry. */
+const logEnvelopeKeys = new Set<string>(['version', 'leaderEpoch', 'sequence', 'recordedAt', 'runId']);
 
 /**
  * What one chat's run is doing, as the host decides legality by.
@@ -699,6 +730,48 @@ export const isHostRunOperationLegal = (operation: HostRunOperation, state: Host
 export const isHostSettlementLegal = (state: HostRunAppendState): boolean => runSettlementLegality.has(state);
 
 /**
+ * Whether one lifecycle record may follow what its run has already recorded (I1).
+ *
+ * Two clauses survive falsification, and both are about the *attempt*: an
+ * `admitted` row is the run's first word, and a settlement is its last. What
+ * the dropped "nothing after terminal" rule got wrong is the middle — a
+ * cancelled run's own teardown re-records `cancelled`, and a resume reopens a
+ * run the log has already ended — so everything before the settlement stays
+ * legal.
+ *
+ * A `running` row *after* a settlement is the one reopening: the same run id
+ * takes a second attempt, and only a run whose terminal failure can be
+ * continued, or one paused waiting on a person, may take it. Without this,
+ * `resume` re-ran a settled run and the page's second settlement was refused
+ * `SETTLEMENT_CONFLICT` with no way forward.
+ *
+ * @internal
+ * @param input - The row being appended, the run's append state, and whether it may reopen.
+ * @returns `true` when the ledger allows the record.
+ */
+export const isHostLifecycleLegal = (input: {
+  readonly next: RunLifecycleState;
+  readonly state: HostRunAppendState;
+  readonly lifecycle: RunLifecycleState | undefined;
+  readonly reopenable: boolean;
+}): boolean => {
+  if (input.next === 'admitted') {
+    return input.state === 'unadmitted';
+  }
+  if (input.state !== 'settled') {
+    return true;
+  }
+  /* A settlement that landed while the run was still executing closed its
+   * *lease*, not its execution: the run still owes the log the record of how it
+   * ended, and refusing that row would kill a live run outright. An attempt is
+   * closed once it has both ended and settled. */
+  if (hostRunStateOfLifecycle(input.lifecycle) !== 'terminal') {
+    return true;
+  }
+  return input.next === 'running' && input.reopenable;
+};
+
+/**
  * The state a run's durable lifecycle puts it in.
  *
  * @internal
@@ -728,7 +801,12 @@ export type HostRunLedger = Readonly<{
   runs: ReadonlyMap<string, HostRunLedgerEntry>;
 }>;
 
-/** What one run's records make it, in the append ledger's vocabulary. */
+/**
+ * What one run's records make it, in the append ledger's vocabulary.
+ *
+ * @param entry - The run's latest lifecycle and its settlement, if it has one.
+ * @returns The append state those two facts imply.
+ */
 const appendStateOf = (entry: {
   readonly lifecycle: RunLifecycleState | undefined;
   readonly settlement: AgentLogEvent | undefined;
@@ -759,6 +837,14 @@ export const runLedgerOf = (events: readonly AgentLogEvent[]): HostRunLedger => 
   for (const event of events) {
     const entry = runs.get(event.runId) ?? { lifecycle: undefined, settlement: undefined };
     if (event.type === 'run.lifecycle') {
+      /* A `running` row after a settlement reopens the run: the same run id
+       * takes a second attempt, which holds its own lease and records its own
+       * settlement (I1). Without this the first attempt's settlement stayed in
+       * the entry forever, so every row the second attempt wrote read as "a run
+       * that is already settled" and the reopened run could never end. */
+      if (event.state === 'running' && entry.settlement !== undefined) {
+        entry.settlement = undefined;
+      }
       entry.lifecycle = event.state;
       chatRunId = event.runId;
     } else if (settlementTypes.has(event.type)) {
@@ -778,25 +864,80 @@ export const runLedgerOf = (events: readonly AgentLogEvent[]): HostRunLedger => 
 };
 
 /**
- * The refusal one illegal ledger operation answers with.
+ * Every code a refusal on the admission, resume or settlement path carries (I3).
  *
- * @param input - The operation, the chat and run it named, and the state it met.
+ * One code per *recovery*, because the only question a consumer has is "what do
+ * I do now?". `RUN_ADMISSION_CONFLICT` named five conditions at once — a live
+ * run, three duplicate run ids and an external one — so the page's recovery had
+ * to match a regular expression over the message text, and still could not tell
+ * "wait for the run that is running" from "this run id is taken, never retry".
+ * `libs/chat` re-exports this union as the wire contract, so a new code cannot
+ * be added to one side of the boundary alone.
+ *
+ * @public
+ */
+export const agentHostRefusalCodes = [
+  /** The chat holds a non-terminal run, in memory or durably. Carries `state` and, when one is bound, `runId`: wait for that run, bounded, then admit once. */
+  'CHAT_RUN_LIVE',
+  /** A reservation, an active run or a durable lifecycle already holds this run id. Carries `runId`; never retry — attach, or answer with its settlement. */
+  'RUN_ID_TAKEN',
+  /** Nothing on this chat can be continued. Minted by the transport that asked for the resume, never thrown here: `resume` answers an uncontinuable chat with its history unchanged, and the caller that pressed Resume turns that into this refusal so the card says so instead of appearing to do nothing. */
+  'RESUME_UNAVAILABLE',
+  /** A non-terminal run whose executing host is gone, as {@link TauAgentHost.markAbandoned} records it. Offer Resume. */
+  'RUN_ABANDONED',
+  /** This chat admitted no run. Readers that can live without one call `describeRun`, which answers `undefined`. */
+  'NO_RUN_ADMITTED',
+  /** A rewinding trigger did not retain an unchanged strict history prefix. */
+  'HISTORY_PREFIX_INVALID',
+  /** A second, differing settlement for one run. */
+  'SETTLEMENT_CONFLICT',
+  /** A settlement for a run nothing admitted. */
+  'SETTLEMENT_WITHOUT_RUN',
+  /** The revision root refused a lease this run already holds. */
+  'TURN_ALREADY_LEASED',
+  /** Another tab or process leads this chat now. */
+  'LEADERSHIP_LOST',
+] as const;
+
+/** One member of {@link agentHostRefusalCodes}. @public */
+export type AgentHostRefusalCode = (typeof agentHostRefusalCodes)[number];
+
+/**
+ * The refusal a chat that already holds a run answers an admission with.
+ *
+ * One builder for both readings of the same fact — the in-memory reservation or
+ * active session, and the durable ledger — because a recovery that can only
+ * recognise one of them hangs on the other.
+ *
+ * @param input - The chat, the live run's id when one is bound to it, and its state.
  * @returns The coded error the caller throws.
  */
-const runOperationRefusal = (input: {
-  readonly operation: HostRunOperation;
+const chatRunLiveRefusal = (input: {
   readonly chatId: string;
   readonly runId: string | undefined;
   readonly state: HostRunState;
 }): Error =>
-  Object.assign(
-    new Error(
-      input.state === 'none'
-        ? `Chat ${input.chatId} has no run to ${input.operation}.`
-        : `Chat ${input.chatId} has a ${input.state} run; ${input.operation} is refused.`,
-    ),
-    { code: 'RUN_ADMISSION_CONFLICT' },
-  );
+  Object.assign(new Error(`Chat ${input.chatId} has a ${input.state} run; admit the next turn after it ends.`), {
+    code: 'CHAT_RUN_LIVE' satisfies AgentHostRefusalCode,
+    state: input.state,
+    ...(input.runId === undefined ? {} : { runId: input.runId }),
+  });
+
+/**
+ * The refusal a run id that is already spoken for answers with.
+ *
+ * Distinct from {@link chatRunLiveRefusal} because the recovery is the
+ * opposite: a taken run id is the idempotency key (V9), so the caller attaches
+ * or answers with the run's settlement rather than waiting and retrying.
+ *
+ * @param input - The run id, and what already holds it.
+ * @returns The coded error the caller throws.
+ */
+const runIdTakenRefusal = (input: { readonly runId: string; readonly held: string }): Error =>
+  Object.assign(new Error(`Run ${input.runId} ${input.held}.`), {
+    code: 'RUN_ID_TAKEN' satisfies AgentHostRefusalCode,
+    runId: input.runId,
+  });
 
 /**
  * The refusal an illegal settlement append answers with.
@@ -825,15 +966,25 @@ const settlementRefusal = (input: {
  * settles exactly once" reachable at all, so a repeat of the same fact has to
  * be a no-op rather than a refusal (V10).
  *
+ * Compared over the **union** of both bodies' keys, with the log's own
+ * canonical encoding. Reading only the *new* body's keys let a settlement that
+ * named no revision dedupe silently against a stored one that did — the
+ * absent keys were never compared — while `JSON.stringify` made two records
+ * carrying the same fields in a different order disagree.
+ *
  * @param stored - The settlement already in the log.
  * @param body - The settlement being appended, without its envelope.
  * @returns `true` when the append would add nothing.
  */
-const isSameSettlement = (stored: AgentLogEvent, body: SessionEvent): boolean =>
-  Object.entries(body).every(
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- index read over a closed union of record shapes.
-    ([key, value]) => JSON.stringify((stored as unknown as Record<string, unknown>)[key]) === JSON.stringify(value),
+const isSameSettlement = (stored: AgentLogEvent, body: SessionEvent): boolean => {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- index reads over a closed union of record shapes.
+  const storedFields = stored as unknown as Record<string, unknown>;
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- index reads over a closed union of record shapes.
+  const bodyFields = body as unknown as Record<string, unknown>;
+  return [...new Set([...Object.keys(storedFields), ...Object.keys(bodyFields)])].every(
+    (key) => logEnvelopeKeys.has(key) || canonicalJson(storedFields[key]) === canonicalJson(bodyFields[key]),
   );
+};
 
 const internalKind = (message: ProviderMessage): string | undefined => {
   const metadata = message.metadata?.tauInternal;
@@ -887,12 +1038,43 @@ const lastInterruptResolution = (events: readonly AgentLogEvent[], runId: string
   };
 };
 
-const pendingToolInputs = (messages: readonly ProviderMessage[]) => {
+/**
+ * Every call this history left without a result, however it was recorded.
+ *
+ * A dispatched call is durable twice — the `toolCall` block the model wrote and
+ * the `tool-input` row the dispatch adds — and a host that died between the two
+ * leaves only the block. A provider refuses an unanswered call, so a resume has
+ * to answer each pending id once, whichever row still carries it.
+ *
+ * @param messages - The reduced history the resume starts from.
+ * @returns One entry per unanswered call, in the order the history holds them.
+ */
+const pendingToolCalls = (messages: readonly ProviderMessage[]) => {
   const outputs = new Set(messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])));
-  return messages.filter(
-    (message): message is Extract<ProviderMessage, { readonly role: 'tool-input' }> =>
-      message.role === 'tool-input' && !outputs.has(message.toolCallId),
-  );
+  const pending = new Map<string, { readonly toolCallId: string; readonly toolName: string }>();
+  const callsOf = (message: ProviderMessage) => {
+    if (message.role === 'tool-input') {
+      return [{ toolCallId: message.toolCallId, toolName: message.toolName }];
+    }
+    const blocks: readonly JsonValue[] =
+      message.role === 'assistant' && Array.isArray(message.content) ? message.content : [];
+    return blocks.flatMap((block) =>
+      isJsonObject(block) &&
+      block['type'] === 'toolCall' &&
+      typeof block['id'] === 'string' &&
+      typeof block['name'] === 'string'
+        ? [{ toolCallId: block['id'], toolName: block['name'] }]
+        : [],
+    );
+  };
+  for (const message of messages) {
+    for (const call of callsOf(message)) {
+      if (!outputs.has(call.toolCallId)) {
+        pending.set(call.toolCallId, call);
+      }
+    }
+  }
+  return [...pending.values()];
 };
 
 /**
@@ -957,6 +1139,18 @@ const failureMarkerClearance = (messages: readonly ProviderMessage[]): SessionEv
   if (!marker) {
     return undefined;
   }
+  /* Only a message that is provably the failure marker may be retracted or
+   * rewritten: an assistant turn without the diagnostic is somebody's real
+   * output, wherever it sits. A resumable failure is no longer only a gateway
+   * refusal — `RUN_ABANDONED` is one too, and its tail is the agent's committed
+   * work, so retracting it loses that work and asks the provider again from the
+   * user turn. */
+  const isMarker = marker.metadata?.diagnostics?.some(
+    (diagnostic) => isJsonObject(diagnostic) && diagnostic['type'] === transportFailureDiagnosticType,
+  );
+  if (!isMarker) {
+    return undefined;
+  }
   if (messages.at(-1) === marker) {
     return {
       type: 'history.rewound',
@@ -964,13 +1158,7 @@ const failureMarkerClearance = (messages: readonly ProviderMessage[]): SessionEv
       retainedMessageIds: messages.slice(0, -1).map((message) => message.id),
     };
   }
-  /* Behind the tail, only a message that is provably the failure marker may be
-   * rewritten: an ordinary assistant turn that happens to be the last one is
-   * somebody's real output. */
-  const isMarker = marker.metadata?.diagnostics?.some(
-    (diagnostic) => isJsonObject(diagnostic) && diagnostic['type'] === transportFailureDiagnosticType,
-  );
-  const replacement = isMarker ? settledMarkerEnvelope(marker, messages) : undefined;
+  const replacement = settledMarkerEnvelope(marker, messages);
   return replacement === undefined
     ? undefined
     : { type: 'message.envelope-replaced', messageId: marker.id, replacement };
@@ -988,9 +1176,10 @@ const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cance
  * its real result before the run is marked failed, so a resume continues from
  * the work that happened rather than re-applying it. Re-issuing that one call
  * is the entire recovery — no rewind of the turn, and no second charge for tool
- * work the customer already paid for. A failure that a second attempt would
- * only meet again (no evictable history, a lost leadership, a model the catalog
- * does not carry) ends the run for good and is dispatched afresh.
+ * work the customer already paid for. Compaction failures also retain the
+ * failed turn and re-enter start-of-turn compaction after their synthesized
+ * marker is rewound. Failures that cannot improve on retry, such as lost
+ * leadership or a model absent from the catalog, are dispatched afresh.
  *
  * One set, read by the host's own `resume` and by the surfaces that decide
  * whether to offer Resume at all. The non-resumable half is ruled by
@@ -1003,9 +1192,17 @@ const resumableRunFailureCodes = new Set<string>([
   'NETWORK_ERROR',
   'PROVIDER_UNAVAILABLE',
   'RATE_LIMITED',
+  /* The run's own host died with its document: nothing about the turn failed,
+   * so continuing it at the step it stopped on is the whole recovery. Written
+   * by {@link TauAgentHost.markAbandoned}, never by a run that is still alive. */
+  'RUN_ABANDONED',
   // A session that expired mid-turn: signing in again is the whole recovery.
   'UNAUTHENTICATED',
   'UPSTREAM_REJECTED',
+  'SESSION_LOG_INTEGRITY',
+  'SUMMARY_REQUIRED',
+  'NO_EVICTABLE_HISTORY',
+  'CIRCUIT_BREAKER_OPEN',
 ]);
 
 /**
@@ -1171,13 +1368,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     return reservationsByChat.has(chatId) || externalByChat.has(chatId) ? 'reserved' : 'none';
   };
 
+  /** Serializes every writer on one chat's log; see {@link append}. */
+  const chatAppends = new Map<string, Promise<void>>();
+
   const reserve = (chatId: string, runId?: string): AdmissionReservation => {
     const state = memoryRunStateOf(chatId);
     if (!isHostRunOperationLegal('admit', state)) {
-      throw runOperationRefusal({ operation: 'admit', chatId, runId, state });
+      /* The *live* run's id, not the refused one: the caller's recovery waits
+       * for the run that is in the way. A reservation that has not bound a run
+       * id yet has none to name, and the caller falls back to its own bound. */
+      throw chatRunLiveRefusal({
+        chatId,
+        runId:
+          activeByChat.get(chatId)?.runId ?? reservationsByChat.get(chatId)?.runId ?? externalByChat.get(chatId)?.runId,
+        state,
+      });
     }
     if (runId && (reservationsByRun.has(runId) || activeByRun.has(runId))) {
-      throw Object.assign(new Error(`Run ${runId} is already admitted.`), { code: 'RUN_ADMISSION_CONFLICT' });
+      throw runIdTakenRefusal({ runId, held: 'is already admitted' });
     }
     const ready = Promise.withResolvers<ActiveRun | undefined>();
     const admitted = Promise.withResolvers<ActiveRun | undefined>();
@@ -1206,66 +1414,134 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
-   * The single choke point every durable record passes through (V12).
+   * Write one batch, with the chat's whole ledger already folded (I1).
    *
-   * Legality is decided *here*, from one fold over the log, rather than by each
-   * of the four operations reading the same facts differently — which is how a
-   * settlement came to be written under a run nothing had admitted and then
-   * read back as proof that it had been.
+   * Runs inside {@link append}'s per-chat queue, which is what makes reading
+   * the tail for the next sequence number safe and what makes the fold below
+   * describe the log this batch is actually landing on.
    *
-   * @param input - Chat, run, log handle, and the bodies to append.
+   * @param input - Chat, run, log handle, the bodies, and the epoch to write under.
    */
-  const append = async (input: {
+  const appendRecords = async (input: {
     readonly chatId: string;
     readonly log: DurableEventLog;
     readonly runId: string;
     readonly events: readonly SessionEvent[];
+    readonly leaderEpoch?: string | undefined;
   }): Promise<void> => {
-    const leaderEpoch = leaderEpochFor(input.chatId);
+    /* A caller that already bound itself to an epoch writes under *that* one:
+     * a session whose leadership was replaced mid-run must be fenced off, not
+     * quietly re-stamped with whoever leads now. */
+    const leaderEpoch = input.leaderEpoch ?? leaderEpochFor(input.chatId);
     const existing = await input.log.read();
-    const ledger = runLedgerOf(existing);
-    const entry = ledger.runs.get(input.runId);
-    /* A run the host is still admitting in memory counts as admitted: its first
-     * lifecycle row may not have landed yet, and a settlement is a fact about a
-     * turn that really ran. */
-    const reserved =
-      reservationsByRun.has(input.runId) || activeByRun.has(input.runId) || externalByRun.has(input.runId);
+    const entry = runLedgerOf(existing).runs.get(input.runId);
+    let lifecycle = entry?.lifecycle;
+    let settlement = entry?.settlement;
+    /* A run this host is *executing* counts as admitted: its first lifecycle
+     * row may not have landed yet, and a settlement is a fact about a turn that
+     * really ran. A merely *reserved* run does not, and that is the difference
+     * the original bypass missed: `reserve` registers the run at the top of
+     * `admit`, before any session exists, so a lease that failed inside that
+     * window wrote a phantom settlement the real one then conflicted with. */
+    const executing = activeByRun.has(input.runId) || externalByRun.has(input.runId);
     const tail = existing.at(-1);
     let sequence = tail?.leaderEpoch === leaderEpoch ? tail.sequence + 1 : 0;
     for (const body of input.events) {
+      /* Recomputed per body, not read once before the loop: two settlements in
+       * one batch both saw "nothing settled yet" and both landed. */
+      const state = appendStateOf({ lifecycle, settlement });
       if (settlementTypes.has(body.type)) {
-        const state = entry?.state ?? 'unadmitted';
-        if (entry?.settlement !== undefined) {
+        if (settlement !== undefined) {
           /* Exactly once: an identical repeat is the delivery guarantee doing
            * its job, a differing one is two authorities disagreeing. */
-          if (isSameSettlement(entry.settlement, body)) {
+          if (isSameSettlement(settlement, body)) {
             continue;
           }
           throw settlementRefusal({ chatId: input.chatId, runId: input.runId, state });
         }
-        if (!reserved && !isHostSettlementLegal(state)) {
+        if (!executing && !isHostSettlementLegal(state)) {
           throw settlementRefusal({ chatId: input.chatId, runId: input.runId, state });
         }
+      } else if (
+        body.type === 'run.lifecycle' &&
+        !isHostLifecycleLegal({
+          next: body.state,
+          state,
+          lifecycle,
+          reopenable: lifecycle === 'paused' || refusedResumably(existing, input.runId),
+        })
+      ) {
+        throw runIdTakenRefusal({
+          runId: input.runId,
+          held:
+            body.state === 'admitted'
+              ? 'has already been admitted'
+              : 'is settled; only a resumable or paused run reopens',
+        });
       }
-      /* Ponytail: no guard on lifecycle records after a terminal one.
-       * Written as one and falsified by two suites: a cancelled run's own
-       * teardown re-records `cancelled`, and an interrupt resolution resumes a
-       * run the log has already ended. A terminal lifecycle is not the end of
-       * what a run may say about itself, so the rule would have been a guess.
-       * The guard that matters — and that the reproduced defect needed — is the
-       * settlement one above. */
-      // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
-      const outcome = await fencedLog(input.chatId, leaderEpoch, input.log).append({
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a spread of the body union cannot narrow to one record shape.
+      const event = {
         ...body,
         version: 1,
         leaderEpoch,
         sequence,
         recordedAt: now().toISOString(),
         runId: input.runId,
-      } as AgentLogEvent);
+      } as AgentLogEvent;
+      // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
+      const outcome = await fencedLog(input.chatId, leaderEpoch, input.log).append(event);
       if (outcome.appended) {
         sequence++;
       }
+      if (event.type === 'run.lifecycle') {
+        lifecycle = event.state;
+        if (event.state === 'running') {
+          /* The reopening row starts a second attempt, which settles on its
+           * own terms; the first attempt's settlement stays in the log. */
+          settlement = undefined;
+        }
+      } else if (settlementTypes.has(event.type)) {
+        settlement = event;
+      }
+    }
+  };
+
+  /**
+   * The single choke point every durable record passes through (I2, V12).
+   *
+   * Serialized per chat, and that is load-bearing rather than defensive: the
+   * next sequence number is derived from the log's own tail, so two concurrent
+   * writers read the same tail and the second is rejected `EVENT_MUTATED`. The
+   * run's own `AgentSession` used to be one of those writers, with a private
+   * sequence counter of its own, so a settlement recorded for one run of a chat
+   * could kill another run of the same chat mid-stream — and half the records
+   * in the log never met the legality fold at all.
+   *
+   * @param input - Chat, run, log handle, the bodies, and the epoch to write under.
+   */
+  const append = async (input: {
+    readonly chatId: string;
+    readonly log: DurableEventLog;
+    readonly runId: string;
+    readonly events: readonly SessionEvent[];
+    readonly leaderEpoch?: string | undefined;
+  }): Promise<void> => {
+    const prior = chatAppends.get(input.chatId) ?? Promise.resolve();
+    let outcome: { readonly error: unknown } | undefined;
+    /* The *chain* absorbs a failure so one refused append does not wedge the
+     * chat's whole queue; the caller still sees it, re-thrown below. */
+    const chained = (async (): Promise<void> => {
+      await prior;
+      try {
+        await appendRecords(input);
+      } catch (error) {
+        outcome = { error };
+      }
+    })();
+    chatAppends.set(input.chatId, chained);
+    await chained;
+    if (outcome) {
+      throw outcome.error;
     }
   };
 
@@ -1316,6 +1592,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       snapshot: input.config?.snapshot,
       contextMessages: input.config?.contextMessages,
       eventLog: fencedLog(input.chatId, input.leaderEpoch, input.log),
+      /* I2: the session's own rows go through the host's one serialized writer,
+       * so there is one sequence counter and one legality fold for every record
+       * in the log rather than one of each per writer. */
+      appendEvent: async (event) =>
+        append({
+          chatId: input.chatId,
+          log: input.log,
+          runId: input.runId,
+          leaderEpoch: input.leaderEpoch,
+          events: [event],
+        }),
       clientContext,
       recentSkills: options.recentSkills,
       substituteToolResult: options.substituteToolResult,
@@ -1334,7 +1621,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const bindReservationRun = (reservation: AdmissionReservation, runId: string): void => {
     const existing = reservationsByRun.get(runId);
     if (existing && existing !== reservation) {
-      throw Object.assign(new Error(`Run ${runId} is already admitted.`), { code: 'RUN_ADMISSION_CONFLICT' });
+      throw runIdTakenRefusal({ runId, held: 'is already admitted' });
     }
     reservation.runId = runId;
     reservationsByRun.set(runId, reservation);
@@ -1402,8 +1689,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const externalByChat = new Map<string, { readonly runId: string; readonly controller: AbortController }>();
   /** `completion` is assigned as soon as the turn is detached; see {@link runExternal}. */
   const externalByRun = new Map<string, ExternalRun>();
-  /** Serializes each chat's external appends; see {@link appendExternal}. */
-  const externalAppends = new Map<string, Promise<void>>();
   /**
    * Chats whose runner may still hold a live session, by run kind.
    *
@@ -1412,51 +1697,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    */
   const externalChats = new Map<string, string>();
   const detached = new Set<Promise<void>>();
-
-  const appendExternalEvents = async (input: {
-    readonly chatId: string;
-    readonly runId: string;
-    readonly log: DurableEventLog;
-    readonly events: readonly ExternalAgentLogEvent[];
-  }): Promise<void> => append(input);
-
-  /**
-   * Append event bodies under this chat's leader epoch, continuing its sequence.
-   *
-   * Serialized per chat, and that is load-bearing rather than defensive: the
-   * next sequence number is derived from the log's own tail, so two concurrent
-   * appends — an agent's tool update landing while its approval resolves — both
-   * read the same tail and the second is rejected `EVENT_MUTATED`.
-   *
-   * @param input - Chat, run, log handle, and the bodies to append.
-   */
-  const appendExternal = async (input: {
-    readonly chatId: string;
-    readonly runId: string;
-    readonly log: DurableEventLog;
-    readonly events: readonly ExternalAgentLogEvent[];
-  }): Promise<void> => {
-    const prior = externalAppends.get(input.chatId) ?? Promise.resolve();
-    let outcome: { readonly error: unknown } | undefined;
-    /* The *chain* absorbs a failure so one bad append does not wedge the chat's
-     * whole queue; the caller still sees it, re-thrown below. */
-    const chained = (async (): Promise<void> => {
-      await prior;
-      try {
-        /* Legality is the append boundary's, not a second pre-check here: one
-         * fold, one place, every writer — the page's revision root, an ACP
-         * runner, the host's own session (V12). */
-        await appendExternalEvents(input);
-      } catch (error) {
-        outcome = { error };
-      }
-    })();
-    externalAppends.set(input.chatId, chained);
-    await chained;
-    if (outcome) {
-      throw outcome.error;
-    }
-  };
 
   /**
    * Tell this chat's runner to end whatever it holds open for it.
@@ -1522,14 +1762,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       });
     }
     if (externalByChat.has(input.chatId)) {
-      throw Object.assign(new Error(`Chat ${input.chatId} already has an admitted run.`), {
-        code: 'RUN_ADMISSION_CONFLICT',
+      throw chatRunLiveRefusal({
+        chatId: input.chatId,
+        runId: externalByChat.get(input.chatId)?.runId,
+        state: memoryRunStateOf(input.chatId),
       });
     }
     const log = await logFor(input.chatId);
     const controller = new AbortController();
     const appendEvents = async (events: readonly ExternalAgentLogEvent[]): Promise<void> =>
-      appendExternal({ chatId: input.chatId, runId: input.runId, log, events });
+      append({ chatId: input.chatId, runId: input.runId, log, events });
 
     /* The admission is the durable boundary the caller waits on: the marker on
      * the user message is what a later attach reads to know this run needs an
@@ -1555,7 +1797,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             },
           ] as const)
         : []),
-      { type: 'run.lifecycle', state: 'admitted' },
+      /* Only a turn that carries a message is an *admission*; a resumed
+       * external run continues the run it already has, and a second `admitted`
+       * row for one run id is what the ledger refuses (I1). */
+      ...(input.message ? ([{ type: 'run.lifecycle', state: 'admitted' }] as const) : []),
       { type: 'run.lifecycle', state: 'running' },
     ]);
     messageId ??= externalTurnOf(await log.read())?.messageId;
@@ -1816,13 +2061,27 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     return reservationsByRun.get(runId)?.ready;
   };
 
-  const snapshot = async (chatId: string): Promise<HostRunSnapshot> => {
+  /**
+   * The chat's run as its log describes it, or `undefined` when it has none.
+   *
+   * Non-throwing, because most readers can live without a run and need the
+   * transcript regardless: `attach` is how a chat is opened at all, and every
+   * command epilogue answers with the projection it just changed. A thrown
+   * `NO_RUN_ADMITTED` from there made a chat whose live run could not be
+   * resumed impossible to open ever again — the permanent wedge, re-armed from
+   * the other side. {@link TauAgentHost.snapshot} still refuses for the callers
+   * that genuinely require a run.
+   *
+   * @param chatId - The chat being described.
+   * @returns Its current run projection, or `undefined` when nothing was admitted.
+   */
+  const describeRun = async (chatId: string): Promise<HostRunSnapshot | undefined> => {
     assertOpen();
     const log = await logFor(chatId);
     const events = await log.read();
     const last = events.at(-1);
     if (!last) {
-      throw new Error(`Chat ${chatId} has no durable session log.`);
+      return undefined;
     }
     const messages = reduceEventLog(events);
     /* A log with no lifecycle record at all admits no run, and the tail is the
@@ -1833,17 +2092,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /* R2: a run with no lifecycle record is not a run. Answering `admitted`
        * for one is the same default that made an abandoned lease's settlement
        * look like a live turn. The only honest reading left is the instant
-       * between a rewinding admission's `history.rewound` and its `admitted`
-       * row, and the reservation above still holds that. */
-      throw Object.assign(new Error(`Chat ${chatId} has no admitted run to describe.`), { code: 'NO_RUN_ADMITTED' });
+       * between an admission's first record and its `admitted` row, and the
+       * reservation above still holds that. */
+      return undefined;
     }
     const runId = current?.runId ?? last.runId;
-    /* The assistant diagnostic first, because it carries the transport's own
-     * refusal fields; the lifecycle record when there is no such marker, which
+    /* This run's own assistant diagnostic first, because it carries the
+     * transport's `status` and refusal payload where the terminal row may hold
+     * only a message; the lifecycle record when that run wrote no marker, which
      * is every failure that never was a model call — an external agent's stop
      * writes no assistant message at all. Without the fallback a surface read
-     * no failure for those runs and could only rewind the turn (F1). */
-    const failure = transportFailureFromProviderMessages(messages) ?? terminalFailureOf(events, runId);
+     * no failure for those runs and could only rewind the turn (F1). Both
+     * sources are keyed on `runId`: a chat's history outlives its runs. */
+    const failure = transportFailureOfRun({ events, messages, runId }) ?? terminalFailureOf(events, runId);
     return {
       chatId,
       runId,
@@ -1852,6 +2113,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       messages,
       ...(failure ? { failure } : {}),
     };
+  };
+
+  const snapshot = async (chatId: string): Promise<HostRunSnapshot> => {
+    const described = await describeRun(chatId);
+    if (!described) {
+      throw Object.assign(new Error(`Chat ${chatId} has no admitted run to describe.`), {
+        code: 'NO_RUN_ADMITTED' satisfies AgentHostRefusalCode,
+      });
+    }
+    return described;
   };
 
   return {
@@ -1864,24 +2135,32 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         const events = await log.read();
         const ledger = runLedgerOf(events);
         if (ledger.chat !== undefined && !isHostRunOperationLegal('admit', ledger.chat.state)) {
-          throw new Error(`Chat ${request.chatId} has a non-terminal run; resume it before admitting another turn.`);
+          /* The same refusal the in-memory check raises, from the same builder:
+           * a fresh worker's host has no run in memory, so this is the only
+           * branch a reload-then-send ever reaches, and a recovery that could
+           * not recognise it waited on nothing. */
+          throw chatRunLiveRefusal({
+            chatId: request.chatId,
+            runId: ledger.chat.runId,
+            state: ledger.chat.state,
+          });
         }
         /* A *lifecycle* record is what makes this run id taken. Refusing on any
          * record at all refused every turn whose id a settlement had already
          * been written under, which is how one abandoned lease made a chat
          * single-turn for the rest of its life. */
         if (lifecycleFor(events, request.runId) !== undefined) {
-          throw Object.assign(new Error(`Run ${request.runId} has already been admitted.`), {
-            code: 'RUN_ADMISSION_CONFLICT',
-          });
+          throw runIdTakenRefusal({ runId: request.runId, held: 'has already been admitted' });
         }
-        // An empty log has nothing to rewind, so a rewinding trigger *is* a
-        // first turn and runs as one. Refusing it instead — an empty retain
-        // cannot match a prefix of nothing — permanently wedged any chat whose
-        // first turn never reached the host: every later retry was refused
-        // with `HISTORY_PREFIX_INVALID` and the chat had no way out.
-        if (request.trigger !== 'submit' && events.length > 0) {
-          const messages = reduceEventLog(events);
+        // A history with nothing in it has nothing to rewind, so a rewinding
+        // trigger *is* a first turn and runs as one. Gating on the log's
+        // *records* instead wedged the chat whose first turn was stopped inside
+        // the admission window: the log holds `admitted, cancelled`, the
+        // projection is empty, and `0 >= 0` refused every later retry and edit
+        // with `HISTORY_PREFIX_INVALID` forever.
+        const projection = request.trigger === 'submit' ? [] : reduceEventLog(events);
+        if (request.trigger !== 'submit' && projection.length > 0) {
+          const messages = projection;
           /* The rewind point is the turn the caller names, and the prefix it
            * keeps is this log's own.
            *
@@ -1900,7 +2179,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           const rewindTo = messages.findIndex((message) => message.id === request.message.id);
           if (
             rewindTo === -1 &&
-            (request.retainedMessageIds.length >= messages.length ||
+            (request.retainedMessageIds.length > messages.length ||
               request.retainedMessageIds.some((id, index) => messages[index]?.id !== id))
           ) {
             throw Object.assign(new Error('Retry/edit/regenerate must retain an unchanged strict history prefix.'), {
@@ -1989,7 +2268,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
            * lifecycle for a run that never ran. */
           return reduceEventLog(events);
         }
-        const { runId, state } = { runId: ledger.chat.runId, state: lifecycleFor(events, ledger.chat.runId)! };
+        const { runId } = ledger.chat;
+        const entry = ledger.runs.get(runId);
+        const state = entry?.lifecycle;
+        if (state === undefined) {
+          return reduceEventLog(events);
+        }
+        /* A settled attempt is closed (I1). Reopening it is legal only for a
+         * run the gateway refused resumably, or one paused waiting on a person
+         * — the fold knows, and the chat-keyed memory `resume` used to read
+         * does not survive the settlement that clears it. Without this the host
+         * re-ran a settled run and the page's second, differing settlement was
+         * refused `SETTLEMENT_CONFLICT` with no way forward. */
+        if (entry?.state === 'settled' && !(state === 'paused' || refusedResumably(events, runId))) {
+          return reduceEventLog(events);
+        }
         if (terminalStates.has(state)) {
           if (!refusedResumably(events, runId)) {
             return reduceEventLog(events);
@@ -2042,13 +2335,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
 
         const history = reduceEventLog(events);
-        const missingOutputs = pendingToolInputs(history);
+        const missingOutputs = pendingToolCalls(history);
         const disconnectedOutputs = missingOutputs.map(
-          (message): ProviderMessage => ({
+          (call): ProviderMessage => ({
             id: createId(),
             role: 'tool-output',
-            toolCallId: message.toolCallId,
-            toolName: message.toolName,
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
             content: {
               errorCode: 'CLIENT_DISCONNECTED',
               message: 'The prior host stopped before this tool returned. Verify state before retrying.',
@@ -2089,21 +2382,60 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
       }
     },
-    waitForAdmission: async (chatId) => {
+    waitForAdmission: async (chatId, runId) => {
       assertOpen();
       /* An external run holds no reservation and no `AgentSession` — its
        * admission is already durable by the time `runExternal` returns — but it
        * is every bit as admitted, and a caller asking "is a run already under
        * way here?" must not be told no and start a second one. */
-      if (externalByChat.has(chatId)) {
-        return snapshot(chatId);
+      const external = externalByChat.get(chatId);
+      if (external) {
+        return runId !== undefined && external.runId !== runId ? undefined : snapshot(chatId);
       }
-      const reservation = reservationsByChat.get(chatId);
-      if (!reservation) {
+      /* Keyed by run when the caller named one: the chat-keyed reservation is
+       * "whatever this chat is admitting", which answered one command with
+       * another run's snapshot — the very run-id mismatch this wait exists to
+       * prevent — while the refused command's own rejection went unobserved. */
+      const reservation = runId === undefined ? reservationsByChat.get(chatId) : reservationsByRun.get(runId);
+      if (!reservation || reservation.chatId !== chatId) {
         return undefined;
       }
       const active = await reservation.admitted;
       return active?.session.snapshot();
+    },
+    markAbandoned: async (chatId) => {
+      assertOpen();
+      const log = await logFor(chatId);
+      const { chat } = runLedgerOf(await log.read());
+      if (
+        chat === undefined ||
+        chat.state === 'none' ||
+        chat.state === 'terminal' ||
+        /* Waiting on a person, not on a host: republish its interrupt. */
+        chat.state === 'paused' ||
+        /* Ours: a takeover speaks only for a run whose driver is gone. */
+        activeByRun.has(chat.runId) ||
+        reservationsByRun.has(chat.runId) ||
+        externalByRun.has(chat.runId)
+      ) {
+        return describeRun(chatId);
+      }
+      await append({
+        chatId,
+        log,
+        runId: chat.runId,
+        events: [
+          {
+            type: 'run.lifecycle',
+            state: 'failed',
+            detail: {
+              code: 'RUN_ABANDONED' satisfies AgentHostRefusalCode,
+              message: 'The host executing this run is gone. Resume the turn to continue it.',
+            },
+          },
+        ],
+      });
+      return describeRun(chatId);
     },
     interrupt: async (request) => {
       assertOpen();
@@ -2190,13 +2522,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       await (active.completion ?? active.session.agent.waitForIdle());
     },
     snapshot,
+    describeRun,
     readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
       const log = await logFor(chatId);
       return log.readBatch({ cursor, limit, maxBytes });
     },
     recordSettlement: async ({ chatId, runId, event }) => {
       assertOpen();
-      await appendExternal({ chatId, runId, log: await logFor(chatId), events: [event] });
+      await append({ chatId, runId, log: await logFor(chatId), events: [event] });
     },
     assumeLeadership: (chatId, generation) => {
       assertOpen();

@@ -22,6 +22,7 @@ import { ModelModule } from '#api/models/model.module.js';
 import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import { BillingPolicyReadiness } from '#api/billing/billing-policy.readiness.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
@@ -236,6 +237,17 @@ const providerUpstreamFetch =
     BillingService,
     CreditLedgerService,
     BillingPolicyService,
+    {
+      provide: BillingPolicyReadiness,
+      inject: [BillingPolicyService, ConfigService],
+      useFactory(policy: BillingPolicyService, config: ConfigService<Environment, true>): BillingPolicyReadiness {
+        const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
+        return new BillingPolicyReadiness(policy, {
+          environment: environment.success ? environment.data : 'development',
+          cloudEnabled: config.get('TAU_CLOUD_ENABLED', { infer: true }),
+        });
+      },
+    },
     BillingUsageService,
     BillingEstimatesService,
     BillableModelInvocationService,

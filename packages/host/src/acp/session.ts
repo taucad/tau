@@ -51,7 +51,7 @@
  * is nowhere for a replayed update to go.
  */
 
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -473,22 +473,27 @@ const terminalCommandOf = (method: AuthMethod): string | undefined => {
 /**
  * The login facts a surface renders, from what the agent advertised (VSC4).
  *
- * @param agentId - Agent the user has to log in to.
+ * @param adapter - Agent the user has to log in to, including its CLI login fallback.
  * @param authMethods - Methods `initialize` listed.
  * @returns The payload of both the refusal and the durable login interrupt.
  */
-const loginOf = (agentId: string, authMethods: readonly AuthMethod[]): ExternalAgentLogin => ({
+const loginOf = (adapter: AcpAdapter, authMethods: readonly AuthMethod[]): ExternalAgentLogin => ({
   kind: 'external-agent-login',
-  agentId,
-  authMethods: authMethods.map((method) => {
-    const terminalCommand = terminalCommandOf(method);
-    return {
-      id: method.id,
-      name: method.name,
-      ...(method.description ? { description: method.description } : {}),
-      ...(terminalCommand ? { terminalCommand } : {}),
-    };
-  }),
+  agentId: adapter.id,
+  authMethods: [
+    ...authMethods.map((method) => {
+      const terminalCommand = terminalCommandOf(method);
+      return {
+        id: method.id,
+        name: method.name,
+        ...(method.description ? { description: method.description } : {}),
+        ...(terminalCommand ? { terminalCommand } : {}),
+      };
+    }),
+    ...(adapter.loginCommand === undefined || authMethods.some((method) => terminalCommandOf(method) !== undefined)
+      ? []
+      : [{ id: 'cli-login', name: `Sign in to ${adapter.displayName}`, terminalCommand: adapter.loginCommand }]),
+  ],
 });
 
 /**
@@ -1739,7 +1744,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       new Error(
         `${options.adapter.id} is not logged in. Sign in to it on the machine running this agent, then try again.`,
       ),
-      { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', login: loginOf(options.adapter.id, facts.authMethods) },
+      { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', login: loginOf(options.adapter, facts.authMethods) },
     );
 
   /**
@@ -2000,7 +2005,9 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     const capabilities = initialized.agentCapabilities;
     const canClose = advertised(capabilities?.sessionCapabilities?.close);
     const additionalDirectories = [...(options.additionalDirectories ?? [])];
-    if (additionalDirectories.length > 0 && !advertised(capabilities?.sessionCapabilities?.additionalDirectories)) {
+    const supportsDirectories = advertised(capabilities?.sessionCapabilities?.additionalDirectories);
+    const supportsPluginDirectories = initialized._meta?.['x.ai/pluginDirs'] === true;
+    if (additionalDirectories.length > 0 && !supportsDirectories && !supportsPluginDirectories) {
       throw Object.assign(
         new Error(`${options.adapter.id} does not support ACP additional directories required for Tau skills.`),
         { code: 'EXTERNAL_AGENT_UNAVAILABLE' },
@@ -2015,7 +2022,23 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
         code: 'EXTERNAL_AGENT_UNAVAILABLE',
       });
     }
-    const lifecycleDirectories = additionalDirectories.length === 0 ? {} : { additionalDirectories };
+    /* Grok loads skills from a plugin's skills/ directory. Tau's verified
+     * publication already has that layout under .agents, outside the project.
+     * Restoring conversation must not restore vendor-owned Git state: Tau's
+     * revision host owns the working tree for both resume and load. */
+    const lifecycleDirectories = {
+      ...(supportsDirectories && additionalDirectories.length > 0 ? { additionalDirectories } : {}),
+      ...(supportsPluginDirectories
+        ? {
+            _meta: {
+              'x.ai/restore_code': false,
+              ...(additionalDirectories.length > 0
+                ? { pluginDirs: additionalDirectories.map((directory) => join(directory, '.agents')) }
+                : {}),
+            },
+          }
+        : {}),
+    };
 
     /**
      * The prompt blocks this agent can actually receive (V12).

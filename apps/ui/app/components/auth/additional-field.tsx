@@ -1,5 +1,5 @@
 import { resolveInputType } from '@better-auth-ui/core';
-import type { AdditionalField as AdditionalFieldConfig } from '@better-auth-ui/core';
+import type { AdditionalField as AdditionalFieldConfig, AdditionalFieldOption } from '@better-auth-ui/core';
 import { useAuth } from '@better-auth-ui/react';
 import { format } from 'date-fns';
 import { CalendarIcon, Check, ChevronDownIcon, Copy } from 'lucide-react';
@@ -91,7 +91,7 @@ function CopyButton({ getValue, isDisabled }: { getValue: () => string | undefin
 }
 
 /** Renders a single additional user field via shadcn primitives. */
-export function AdditionalField({ name, field, isPending }: AdditionalFieldProps) {
+export function AdditionalField({ name, field, isPending }: AdditionalFieldProps): React.JSX.Element {
   const inputType = resolveInputType(field);
   // Used by `inputType: "input"` with `copyable: true` so the copy button
   // reads the input's *live* value rather than a stale `defaultValue`.
@@ -256,7 +256,7 @@ export function AdditionalField({ name, field, isPending }: AdditionalFieldProps
             <ComboboxEmpty>No items found.</ComboboxEmpty>
 
             <ComboboxList>
-              {(option) => (
+              {(option: AdditionalFieldOption) => (
                 <ComboboxItem key={option.value} value={option}>
                   {option.label}
                 </ComboboxItem>
@@ -445,9 +445,9 @@ function DateInput({ name, field, isPending }: AdditionalFieldProps) {
           tabIndex={-1}
           aria-hidden='true'
           className='pointer-events-none absolute inset-0 h-full w-full opacity-0'
-          onInvalid={(e) => {
-            e.preventDefault();
-            setError((e.target as HTMLInputElement).validationMessage);
+          onInvalid={(event) => {
+            event.preventDefault();
+            setError((event.target as HTMLInputElement).validationMessage);
           }}
         />
         <Popover open={open} onOpenChange={setOpen}>
@@ -497,8 +497,8 @@ function DateInput({ name, field, isPending }: AdditionalFieldProps) {
               id={`${name}-time`}
               step='1'
               value={time}
-              onChange={(e) => {
-                setTime(e.target.value);
+              onChange={(event) => {
+                setTime(event.target.value);
               }}
               disabled={isPending ?? field.readOnly}
               className='appearance-none bg-background [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none'

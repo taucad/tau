@@ -135,7 +135,14 @@ export const getMonacoConfiguration = (): MonacoConfiguration => configurationSn
 export const subscribeMonacoConfiguration = (listener: () => void): (() => void) => {
   const unsubscribe = configurationTopic.subscribe(listener);
   if (configurationSnapshot.status !== 'ready') {
-    void configureMonaco().catch(() => undefined);
+    // async-iife: bootstrap -- a `useSyncExternalStore` subscribe callback cannot await; the snapshot carries the outcome.
+    void (async () => {
+      try {
+        await configureMonaco();
+      } catch {
+        // `configureMonaco` records the failure on the configuration snapshot.
+      }
+    })();
   }
   return unsubscribe;
 };
@@ -219,6 +226,11 @@ const initializeMonaco = async (): Promise<typeof Monaco> => {
   // Languages
   await import('monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js');
   await import('monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js');
+  // Python and C# carry no Tau-side syntax: Monaco's own contributions own them.
+  // They load here, with the other basic languages, because a static import from
+  // a non-`.client` module drags `monaco-editor` into the SSR build.
+  await import('monaco-editor/esm/vs/basic-languages/python/python.contribution.js');
+  await import('monaco-editor/esm/vs/basic-languages/csharp/csharp.contribution.js');
   // Capture jsonDefaults to disable the built-in JSON tokenizer below.
   // Monaco's ESM .d.ts for this contribution declares only `export {}`, but
   // the module exposes `jsonDefaults` at runtime.

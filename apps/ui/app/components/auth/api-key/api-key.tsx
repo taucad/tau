@@ -12,7 +12,7 @@ export type ApiKeyProps = {
   apiKey: ListedApiKey;
 };
 
-export function ApiKey({ apiKey }: ApiKeyProps) {
+export function ApiKey({ apiKey }: ApiKeyProps): React.JSX.Element {
   const { localization } = useAuth();
   const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin);
   const [deleteOpen, setDeleteOpen] = useState(false);

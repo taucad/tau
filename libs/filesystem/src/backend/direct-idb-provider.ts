@@ -82,6 +82,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       quotaBased: true,
       // The inherited append rewrite commits as one IndexedDB transaction, so a crash cannot expose a torn tail.
       durability: 'transactional-rewrite',
+      coalescesWrites: true,
     };
   }
 
@@ -135,7 +136,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     const deferred = Promise.withResolvers<void>();
     this._pendingWritePaths.set(path, (this._pendingWritePaths.get(path) ?? 0) + 1);
     this._writeBatch.push({ path, data: bytes, resolve: deferred.resolve, reject: deferred.reject });
-    this._flushActive ??= this._drainFlushes();
+    this._flushActive ??= this._drainQueuedWrites();
     return deferred.promise.finally(() => {
       const remaining = (this._pendingWritePaths.get(path) ?? 1) - 1;
       if (remaining === 0) {
@@ -543,6 +544,16 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   // ---------------------------------------------------------------------------
   // Write batching (VS Code Throttler pattern)
   // ---------------------------------------------------------------------------
+
+  /**
+   * Drain after one microtask of queueing, so every write issued in one turn — a
+   * bulk batch is exactly that — commits as one generation instead of leaving
+   * the first caller alone in its own transaction (Rule 34).
+   */
+  private async _drainQueuedWrites(): Promise<void> {
+    await Promise.resolve();
+    await this._drainFlushes();
+  }
 
   /** Drain every queued generation; a failed generation does not strand later writes. */
   private async _drainFlushes(): Promise<void> {

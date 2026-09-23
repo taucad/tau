@@ -1,6 +1,7 @@
 import { fileParameterEntrySchema } from '@taucad/types';
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
 const tokenSchema = z
   .string()
@@ -50,8 +51,6 @@ const parameterSourceUnitCapabilitySchema = z
 
 const parameterEditSchema = z
   .object({
-    parameterId: tokenSchema,
-    resource: tokenSchema,
     pointer: z.string(),
     value: wireJsonValueSchema,
     inputUnit: tokenSchema.optional(),
@@ -64,8 +63,6 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.enum(['native-value']),
       group: tokenSchema,
-      parameterId: tokenSchema,
-      resource: tokenSchema,
       pointer: z.string(),
       value: wireJsonValueSchema,
     })
@@ -74,8 +71,6 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.enum(['unit-value']),
       group: tokenSchema,
-      parameterId: tokenSchema,
-      resource: tokenSchema,
       pointer: z.string(),
       inputUnit: tokenSchema,
       value: z.string(),
@@ -115,20 +110,11 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.enum(['source-unit']),
-      mode: z.enum(['preserve-size', 'reinterpret']),
+      mode: z.enum(['preserve-size']),
       group: tokenSchema,
-      parameterId: tokenSchema,
-      resource: tokenSchema,
       pointer: z.string(),
       unit: tokenSchema,
       producerCapability: parameterSourceUnitCapabilitySchema,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.enum(['display-preference']),
-      parameterId: tokenSchema,
-      unit: tokenSchema,
     })
     .strict(),
 ]);
@@ -175,6 +161,9 @@ export const getParametersOutputSchema = z
     manifest: parameterManifestWireSchema.optional(),
     current: parameterAuthoritySnapshotSchema.optional(),
     diagnostics: z.array(parameterDiagnosticSchema).optional(),
+    sourceRevision: sourceRevisionSchema
+      .optional()
+      .describe('Digests of the source this manifest was compiled from (R4).'),
   })
   .strict()
   .superRefine((output, context) => {

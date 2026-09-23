@@ -42,10 +42,21 @@ export type ServiceDiagnostics = {
   currentModelCount: number;
 };
 
-export const createWorkspaceContentBinding = (modelService: MonacoModelService) => ({
-  refreshContent: (uri: Monaco.Uri): Promise<void> => modelService.refreshContent(uri),
-  applyContentChange: (event: ContentChangeEvent): void => modelService.applyContentChange(event),
-  applyOutcomeChange: (event: OutcomeChangeEvent): void => modelService.applyOutcomeChange(event),
+/** The workspace-facing content seam the file manager binds to one model service. */
+export type WorkspaceContentBinding = {
+  readonly refreshContent: (uri: Monaco.Uri) => Promise<void>;
+  readonly applyContentChange: (event: ContentChangeEvent) => void;
+  readonly applyOutcomeChange: (event: OutcomeChangeEvent) => void;
+};
+
+export const createWorkspaceContentBinding = (modelService: MonacoModelService): WorkspaceContentBinding => ({
+  refreshContent: async (uri: Monaco.Uri): Promise<void> => modelService.refreshContent(uri),
+  applyContentChange: (event: ContentChangeEvent): void => {
+    modelService.applyContentChange(event);
+  },
+  applyOutcomeChange: (event: OutcomeChangeEvent): void => {
+    modelService.applyOutcomeChange(event);
+  },
 });
 
 type EditorModelSave = {

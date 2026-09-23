@@ -57,6 +57,7 @@ describe('ChatToolLabel', () => {
   });
 
   it('should treat empty-string children as no detail', () => {
+    // oxlint-disable-next-line react/jsx-curly-brace-presence -- the empty-string child is the case under test.
     const { container } = render(<ChatToolLabel verb='Listing'>{''}</ChatToolLabel>);
 
     expect(container.textContent).toBe('Listing');

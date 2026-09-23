@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as fc from 'fast-check';
 import {
   assertRootedPath,
   canonicalizePath,
@@ -13,6 +14,25 @@ import {
 import type { VirtualPathError } from '#path.utils.js';
 
 describe('resolveRootedPath', () => {
+  it('should normalize idempotently without escaping the selected root', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom('.', '..', 'src', 'nested', 'file.ts', 'προσχέδιο'), { maxLength: 30 }),
+        (segments) => {
+          const input = segments.join('/');
+          try {
+            const normalized = resolveRootedPath(input);
+            expect(resolveRootedPath(normalized)).toBe(normalized);
+            expect(normalized.startsWith('/')).toBe(false);
+            expect(normalized.split('/')).not.toContain('..');
+          } catch (error) {
+            expect(error).toMatchObject<Partial<VirtualPathError>>({ code: 'PATH_OUTSIDE_ROOT' });
+          }
+        },
+      ),
+    );
+  });
+
   it.each([
     ['', ''],
     ['.', ''],

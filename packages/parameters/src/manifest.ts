@@ -190,7 +190,8 @@ const limits = {
 } as const;
 const profile = unitProfile;
 const schemaUri = 'https://json-structure.org/meta/extended/v0/#';
-const rootResource = 'urn:taucad:parameter-schema:root';
+/** The resource every parameter schema root is addressed by; module-internal, never a caller's word. @internal */
+export const rootResource = 'urn:taucad:parameter-schema:root';
 const contentDigestPattern = /^sha256:[0-9a-f]{64}$/u;
 const decimalLexicalPattern = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
 const numericTypes = new Set([

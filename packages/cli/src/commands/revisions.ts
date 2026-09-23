@@ -125,11 +125,15 @@ const tagCommand = defineCommand({
     try {
       if (args.delete === true) {
         await revisions.deleteTag(args.name);
-        if (args.json) await emit({ kind: 'revision-tag', ok: true, deleted: args.name });
-        else await writeStdout(`Removed version name ${args.name}.\n`);
+        await (args.json
+          ? emit({ kind: 'revision-tag', ok: true, deleted: args.name })
+          : writeStdout(`Removed version name ${args.name}.\n`));
         return;
       }
-      const revisionId = args.revision || (await revisions.describe()).revisionId;
+      let revisionId = args.revision;
+      if (revisionId === undefined) {
+        ({ revisionId } = await revisions.describe());
+      }
       if (revisionId === undefined) {
         throw cliError('NO_REVISION', 'There is no revision to name yet.', exitCodes.refused);
       }
@@ -138,8 +142,9 @@ const tagCommand = defineCommand({
         revisionId,
         ...(args.note === undefined ? {} : { note: args.note }),
       });
-      if (args.json) await emit({ kind: 'revision-tag', ok: true, tag });
-      else await writeStdout(`${tag.name} names ${revisionId}.\n`);
+      await (args.json
+        ? emit({ kind: 'revision-tag', ok: true, tag })
+        : writeStdout(`${tag.name} names ${revisionId}.\n`));
     } finally {
       await revisions.close();
     }

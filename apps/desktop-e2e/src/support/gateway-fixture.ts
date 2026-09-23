@@ -386,3 +386,117 @@ export const installGatewayFixture = async (page: Page, file?: GatewayFixtureFil
   await fixture.routeThrough(page);
   return fixture;
 };
+
+/** One `tool_result` block as the provider wire carries it. */
+type WireToolResult = {
+  readonly content?: unknown;
+  readonly is_error?: unknown;
+  readonly tool_use_id?: unknown;
+  readonly type?: unknown;
+};
+
+/**
+ * Every failed `tool_result` in the given forwarded requests, bounded so the
+ * failure message stays readable.
+ *
+ * The agent's runtime tools (`get_kernel_result`, `screenshot`, `test_model`)
+ * run in the services utility, and a request main refuses answers the agent
+ * with an *error result* rather than a failed run — so every other assertion in
+ * a row still passes while the tool never touched the kernel. This is the seam
+ * that reads it, shared by the three specs that assert on it. Every forwarded
+ * request carries the whole conversation, so the last one covers every turn.
+ *
+ * @param requests - Forwarded provider request bodies, e.g.
+ *   `fixture.gatewayRequests.slice(-1)`.
+ * @returns One bounded JSON line per failed tool result.
+ */
+export const failedGatewayToolResults = (requests: readonly unknown[]): readonly string[] =>
+  requests
+    .flatMap((request) => {
+      const messages =
+        (request as { readonly messages?: ReadonlyArray<{ readonly content?: unknown }> }).messages ?? [];
+      return messages.flatMap((message) =>
+        Array.isArray(message.content) ? (message.content as readonly WireToolResult[]) : [],
+      );
+    })
+    .filter((block) => block.type === 'tool_result' && block.is_error === true)
+    .map((block) =>
+      JSON.stringify({
+        toolUseId: block.tool_use_id,
+        content:
+          typeof block.content === 'string' ? block.content.slice(0, 2e3) : JSON.stringify(block.content).slice(0, 2e3),
+      }),
+    );
+
+/**
+ * Flatten a `tool_result` block's content to text, whichever shape it took.
+ *
+ * The provider wire carries either a plain string or an array of text blocks
+ * depending on the adapter's serialisation, and a spec that asserts on a
+ * verdict should not have to care which.
+ *
+ * @param content - The block's `content` field.
+ * @returns One string holding everything the block said.
+ */
+const toolResultText = (content: unknown): string => {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return JSON.stringify(content);
+  }
+  return content
+    .map((part) => {
+      const { text } = part as { readonly text?: unknown };
+      return typeof text === 'string' ? text : JSON.stringify(part);
+    })
+    .join('\n');
+};
+
+/** One `tool_result`, paired with the call it answered. */
+export type GatewayToolResult = {
+  /** The tool the agent called, e.g. `get_kernel_result`. */
+  readonly name: string;
+  /** The provider's `is_error` flag. */
+  readonly isError: boolean;
+  /** Everything the result said, flattened to text. */
+  readonly text: string;
+};
+
+/**
+ * Every `tool_result` in the given forwarded requests, in conversation order,
+ * named by the `tool_use` it answers.
+ *
+ * The sibling {@link failedGatewayToolResults} answers "did any tool fail";
+ * this answers "what did the *n*th call of tool X say", which is what a
+ * sequence assertion (write, verdict, repair, verdict) needs. Every forwarded
+ * request carries the whole conversation, so `requests.slice(-1)` covers the
+ * turn.
+ *
+ * @param requests - Forwarded provider request bodies.
+ * @returns One entry per `tool_result`, in order.
+ */
+export const gatewayToolResults = (requests: readonly unknown[]): readonly GatewayToolResult[] =>
+  requests.flatMap((request) => {
+    const messages = (request as { readonly messages?: readonly WireMessage[] }).messages ?? [];
+    const names = new Map<string, string>();
+    const results: GatewayToolResult[] = [];
+    for (const message of messages) {
+      if (!Array.isArray(message.content)) {
+        continue;
+      }
+      for (const block of message.content as ReadonlyArray<Record<string, unknown>>) {
+        if (block['type'] === 'tool_use' && typeof block['id'] === 'string' && typeof block['name'] === 'string') {
+          names.set(block['id'], block['name']);
+        }
+        if (block['type'] === 'tool_result' && typeof block['tool_use_id'] === 'string') {
+          results.push({
+            name: names.get(block['tool_use_id']) ?? 'unknown',
+            isError: block['is_error'] === true,
+            text: toolResultText(block['content']),
+          });
+        }
+      }
+    }
+    return results;
+  });

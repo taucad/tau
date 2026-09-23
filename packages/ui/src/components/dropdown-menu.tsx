@@ -309,11 +309,7 @@ function DropdownMenuSwitchItem({
       {...properties}
     >
       <span className={menuItemLayoutClass}>{children}</span>
-      <Switch
-        className='data-[state=unchecked]:bg-muted-foreground!'
-        checked={isChecked}
-        onCheckedChange={onIsCheckedChange}
-      />
+      <Switch checked={isChecked} onCheckedChange={onIsCheckedChange} />
     </DropdownMenuPrimitive.Item>
   );
 }

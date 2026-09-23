@@ -1,19 +1,22 @@
 import { Color } from 'three';
 import type { Material } from 'three';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import { gltfEdgeHoverColor } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 
+/**
+ * Emphasis tint used where a component is represented by generated geometry that the overlay
+ * cannot proxy (section caps via {@link mixModelEmphasisTint}). Live surfaces are never tinted
+ * through their own material any more: `react/model-emphasis-overlay.tsx` draws a wash and a
+ * silhouette that are independent of the material's properties (metalness, maps, vertex colours).
+ */
 export const modelHighlightAppearance = {
-  color: 0x9b_e7_ff,
-  emissiveIntensity: 0.16,
-  colorMix: 0.12,
-  capTintMix: 0.4,
+  color: gltfEdgeHoverColor,
+  capTintMix: 0.7,
 } as const;
 
 export const modelHoverAppearance = {
   color: modelHighlightAppearance.color,
-  emissiveIntensity: 0.045,
-  colorMix: 0.035,
-  capTintMix: 0.16,
+  capTintMix: 0.35,
 } as const;
 
 export type ModelMaterialAppearanceSnapshot = Readonly<{
@@ -27,16 +30,10 @@ export type ModelMaterialAppearanceSnapshot = Readonly<{
 
 export type ModelComponentEmphasis = 'none' | 'hover' | 'selected' | 'focused';
 
-export type ModelMaterialAppearanceState = Readonly<{
-  opacity: number;
-  emphasis: ModelComponentEmphasis;
-}>;
-
 type MaterialWithColor = Material & { color: Color };
 type MaterialWithEmissive = Material & { emissive: Color };
 type MaterialWithEmissiveIntensity = Material & { emissiveIntensity: number };
 
-const highlightedColor = new Color(modelHighlightAppearance.color);
 const materialAppearanceSnapshots = new WeakMap<Material, ModelMaterialAppearanceSnapshot>();
 const hexColorSpace = 16_777_216;
 const redChannelDivisor = 65_536;
@@ -149,27 +146,16 @@ export function applyModelMaterialOpacityOverride(material: Material, opacity: n
   }
 }
 
+/** Restore the captured look, then apply the component's dimming opacity (never emphasis). */
 export function applyModelMaterialAppearance(
   material: Material,
   snapshot: ModelMaterialAppearanceSnapshot,
-  state: ModelMaterialAppearanceState,
+  opacity: number,
 ): void {
   restoreModelMaterialAppearance(material, snapshot);
 
-  if (state.opacity < 1) {
-    applyModelMaterialOpacityOverride(material, state.opacity);
-  }
-
-  const appearance = getAppearanceForEmphasis(state.emphasis);
-  if (appearance) {
-    if (hasEmissive(material)) {
-      material.emissive.copy(highlightedColor);
-      if (hasEmissiveIntensity(material)) {
-        material.emissiveIntensity = appearance.emissiveIntensity;
-      }
-    } else if (hasColor(material)) {
-      material.color.lerp(highlightedColor, appearance.colorMix);
-    }
+  if (opacity < 1) {
+    applyModelMaterialOpacityOverride(material, opacity);
   }
 
   material.needsUpdate = true;

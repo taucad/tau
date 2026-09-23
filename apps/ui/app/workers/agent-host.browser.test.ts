@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { DirectIdbProvider, OPFSProvider } from '@taucad/filesystem/backend';
 import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
+import { agentHostAuthorityName, agentHostProtocolVersion } from '#workers/agent-host-leader.js';
 import { handleAgentHostWorkerRequest } from '#workers/agent-host.impl.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- The browser vitest config reads this same composed source fixture until FIX-PROJ adds the UI package dependency.
@@ -244,7 +245,7 @@ it('reclaims an abandoned transactional writer lock after winning attach takeove
   }
 });
 
-it('detects a dead leader and proactively reattaches the follower from its durable cursor', async () => {
+it('detects a dead leader, takes its log over and records the run it left as abandoned', async () => {
   const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
   provider = fileSystemProvider;
   await fileSystemProvider.initialize();
@@ -318,13 +319,17 @@ it('detects a dead leader and proactively reattaches the follower from its durab
     await expect(follower.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
       leadership: { role: 'follower' },
     });
+    /* I4: the follower takes the log over and *records* what it found. It never
+     * drives the dead leader's run — that would ask the provider again for a
+     * turn nobody asked to repeat — so the run ends `failed`/`RUN_ABANDONED`
+     * and waits for the person's Resume. */
     const terminal = Promise.withResolvers<void>();
     const unsubscribe = follower.subscribe((eventChatId, eventItem) => {
       if (
         eventChatId === chatId &&
         eventItem.runId === runId &&
         eventItem.type === 'run.lifecycle' &&
-        eventItem.state === 'completed'
+        eventItem.state === 'failed'
       ) {
         terminal.resolve();
       }
@@ -332,7 +337,7 @@ it('detects a dead leader and proactively reattaches the follower from its durab
     leaderWorker.terminate();
 
     const outcome = await Promise.race([
-      terminal.promise.then(() => 'completed'),
+      terminal.promise.then(() => 'abandoned'),
       new Promise<'timeout'>((resolve) => {
         globalThis.setTimeout(() => {
           resolve('timeout');
@@ -340,10 +345,10 @@ it('detects a dead leader and proactively reattaches the follower from its durab
       }),
     ]);
     unsubscribe();
-    expect(outcome).toBe('completed');
+    expect(outcome).toBe('abandoned');
     await expect(follower.attach({ chatId, cursor: 0, limit: 16 })).resolves.toMatchObject({
       leadership: { role: 'leader' },
-      snapshot: { runId, state: 'completed' },
+      snapshot: { runId, state: 'failed', failure: { code: 'RUN_ABANDONED' } },
     });
   } finally {
     leaderWorker.terminate();
@@ -517,8 +522,8 @@ it('refuses a start that names an external agent instead of running it on Tau', 
  * twice is a duplicate dispatch — a retried post, a double-fired effect — not a
  * second turn. The worker consulted its durable log only when it knew it had
  * replayed the command, so an ordinary duplicate reached `admit` and came back
- * as RUN_ADMISSION_CONFLICT, which the page surfaces as a failed turn even
- * though the first copy ran to completion.
+ * as a refused admission, which the page surfaces as a failed turn even though
+ * the first copy ran to completion.
  */
 it('answers a duplicate start under a settled run id with that run, not a conflict', async () => {
   const fileSystemProvider = new OPFSProvider();
@@ -585,6 +590,390 @@ it('answers a duplicate start under a settled run id with that run, not a confli
       (event) => event.type === 'turn.history-projection-committed' && event.runId === start.runId,
     );
     expect(committed).toHaveLength(1);
+  } finally {
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/**
+ * Seed one chat's durable log directly, as a dead document would have left it.
+ *
+ * @param fileSystemProvider - The provider the worker session is opened over.
+ * @param input - Where the log lives and the record bodies to write.
+ * @returns Resolves once the log is on disk.
+ */
+const seedChatLog = async (
+  fileSystemProvider: FileSystemProvider,
+  input: {
+    readonly providerBasePath: string;
+    readonly chatId: string;
+    readonly runId: string;
+    readonly rows: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  },
+): Promise<void> => {
+  await fileSystemProvider.writeFile(
+    `${input.providerBasePath}/.tau/chats/${input.chatId}/events.jsonl`,
+    input.rows
+      .map(
+        (row, sequence) =>
+          `${JSON.stringify({
+            version: 1,
+            leaderEpoch: 'abandoned-leader',
+            sequence,
+            recordedAt: '2026-09-01T00:00:00.000Z',
+            runId: input.runId,
+            ...row,
+          })}\n`,
+      )
+      .join(''),
+  );
+};
+
+/**
+ * Open a worker session over a seeded project, with no gateway turn to run.
+ *
+ * @param fileSystemProvider - The provider the session is opened over.
+ * @param input - The project root and the session key to initialize under.
+ * @returns Resolves once `handleAgentHostWorkerRequest` will answer commands.
+ */
+const initializeSeededSession = async (
+  fileSystemProvider: FileSystemProvider,
+  input: { readonly providerBasePath: string; readonly sessionId: string },
+): Promise<void> => {
+  const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const workspace = rootedProvider(fileSystemProvider, input.providerBasePath);
+  await handleAgentHostWorkerRequest(
+    {
+      type: 'initialize',
+      fileSystemPort: createFileSystemBridgePort(workspace).port,
+      projectRootPort: createFileSystemBridgePort(workspace).port,
+      projectStorage: {
+        projectId: input.providerBasePath,
+        backend: 'indexeddb',
+        providerBasePath: input.providerBasePath,
+      },
+      authority: { projectId: input.providerBasePath, workspaceId: input.providerBasePath },
+      gatewayBaseUrl: location.origin,
+      systemPrompt: 'Browser takeover fixture.',
+      systemPromptBlocks: [
+        { type: 'text', text: 'Browser takeover fixture.' },
+        { type: 'text', text: 'Dynamic fixture.' },
+      ],
+      model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+      runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+    },
+    input.sessionId,
+  );
+};
+
+/*
+ * I4: a takeover *records* what it found; it never drives a run. Resuming the
+ * orphan re-asked the provider for a turn the person had already paid for — on
+ * a run no page owned, so it minted no revision and wrote no settlement — and
+ * it fired on the next gesture's attach rather than on any decision. The run is
+ * failed with `RUN_ABANDONED`, which `isResumableRunFailure` accepts, so the
+ * saved-turn card offers Resume and the person decides.
+ */
+it('records an attached run whose driver is gone as abandoned instead of resuming it', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-abandoned-${crypto.randomUUID()}`;
+  const chatId = 'chat-abandoned';
+  const runId = 'run-abandoned';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  // A partial stream is never durable, so the orphan carries its user turn and
+  // no assistant content — exactly what a resume would have re-asked for.
+  await seedChatLog(fileSystemProvider, {
+    providerBasePath,
+    chatId,
+    runId,
+    rows: [
+      { type: 'run.lifecycle', state: 'admitted' },
+      {
+        type: 'turn.history-projection-committed',
+        retainedMessageIds: [],
+        message: { id: 'user-abandoned', role: 'user', content: 'Build it.' },
+        context: {
+          version: 1,
+          systemPrompt: 'Browser takeover fixture.',
+          initialMessages: [],
+          postCompactionMessages: [],
+        },
+      },
+      { type: 'run.lifecycle', state: 'running' },
+    ],
+  });
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    const attached = await handleAgentHostWorkerRequest(
+      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
+      sessionId,
+    );
+
+    expect(attached).toMatchObject({
+      type: 'attach',
+      takeover: true,
+      snapshot: { chatId, runId, state: 'failed', failure: { code: 'RUN_ABANDONED' } },
+    });
+    const events = attached.type === 'attach' ? attached.batch.events : [];
+    // Nothing was re-asked: no second committed turn, no assistant message.
+    expect(events.filter((event) => event.type === 'turn.history-projection-committed')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'message.appended')).toHaveLength(0);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'failed' });
+  } finally {
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/*
+ * T2-D6. A paused run is waiting on a person, not on a host, so a takeover has
+ * nothing to record: resuming it blocked on an interrupt answer the UI could
+ * not render, because the transcript comes from that very attach. The attach
+ * republishes the pending interrupt and leaves the run paused.
+ *
+ * Reachability, checked at the source: `run.lifecycle: paused` has exactly two
+ * writers, `TauAgentHost.interrupt` (called only by the node launcher) and the
+ * external-agent runner's approval, and this worker refuses every external
+ * agent. A browser-placed Tau turn cannot pause today — this row pins the
+ * behaviour for the placement that can, and for the day one does.
+ */
+it('leaves an attached paused run paused and republishes its pending interrupt', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-paused-${crypto.randomUUID()}`;
+  const chatId = 'chat-paused';
+  const runId = 'run-paused';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  await seedChatLog(fileSystemProvider, {
+    providerBasePath,
+    chatId,
+    runId,
+    rows: [
+      { type: 'run.lifecycle', state: 'admitted' },
+      {
+        type: 'turn.history-projection-committed',
+        retainedMessageIds: [],
+        message: { id: 'user-paused', role: 'user', content: 'Ask me first.' },
+        context: {
+          version: 1,
+          systemPrompt: 'Browser takeover fixture.',
+          initialMessages: [],
+          postCompactionMessages: [],
+        },
+      },
+      { type: 'run.lifecycle', state: 'running' },
+      {
+        type: 'interrupt.recorded',
+        interruptId: 'interrupt-paused',
+        phase: 'requested',
+        reason: 'May I write this file?',
+        payload: { kind: 'approval', prompt: 'May I write this file?' },
+      },
+      { type: 'run.lifecycle', state: 'paused' },
+    ],
+  });
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    const attached = await handleAgentHostWorkerRequest(
+      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
+      sessionId,
+    );
+
+    expect(attached).toMatchObject({ type: 'attach', takeover: true, snapshot: { runId, state: 'paused' } });
+    const events = attached.type === 'attach' ? attached.batch.events : [];
+    expect(events.filter((event) => event.type === 'interrupt.recorded')).toMatchObject([
+      { interruptId: 'interrupt-paused', phase: 'requested' },
+    ]);
+    // Left paused: no terminal record was invented for a run awaiting a person.
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'paused' });
+  } finally {
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/*
+ * T4-08 / T2-D8. `snapshot`'s `NO_RUN_ADMITTED` escaped into `attach`, so a
+ * chat whose log holds records but no run could never be opened again — the
+ * same permanent wedge, re-armed from the other side. `attach` answers with the
+ * transcript it was asked for and no snapshot.
+ */
+it('attaches to a chat whose log holds records but no admitted run', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-runless-${crypto.randomUUID()}`;
+  const chatId = 'chat-runless';
+  const runId = 'run-runless';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  await seedChatLog(fileSystemProvider, {
+    providerBasePath,
+    chatId,
+    runId,
+    rows: [
+      {
+        type: 'turn.failed',
+        chatId,
+        turnId: 'user-runless',
+        reason: 'The turn ended before it recorded a revision.',
+      },
+    ],
+  });
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    const attached = await handleAgentHostWorkerRequest(
+      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
+      sessionId,
+    );
+
+    expect(attached).toMatchObject({ type: 'attach', takeover: false });
+    expect(attached.type === 'attach' ? attached.snapshot : 'missing').toBeUndefined();
+    expect(attached.type === 'attach' ? attached.batch.events : []).toHaveLength(1);
+  } finally {
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/*
+ * W10 finding 3. The follower's forwarding wait is bounded by the leader's
+ * heartbeat alone (T4-11 removed the fixed 2 s deadline, which was a *work*
+ * bound on someone else's command). A leader that drops a command in silence
+ * therefore wedges that request for the life of the tab: it keeps heartbeating,
+ * the wait never expires, `forwardCommand`'s re-address is unreachable, and the
+ * composer sits on the send with no banner. Both silent drops answer now.
+ *
+ * UNRUN: browser tier, machine gate (W6/W10 hold).
+ */
+it('answers every command it declines: a stale generation and a frame it cannot read', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-refusals-${crypto.randomUUID()}`;
+  const chatId = 'chat-refusals';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  await seedChatLog(fileSystemProvider, {
+    providerBasePath,
+    chatId,
+    runId: 'run-refusals',
+    rows: [{ type: 'run.lifecycle', state: 'admitted' }],
+  });
+  // A second channel object receives its own context's posts; only the sending
+  // object is skipped. This one plays the follower whose command is declined.
+  const followerChannel = new BroadcastChannel(
+    agentHostAuthorityName({ projectId: providerBasePath, workspaceId: providerBasePath, chatId }),
+  );
+  const refusals = new Map<string, { readonly code: string; readonly targetId: string | undefined }>();
+  const answered = Promise.withResolvers<void>();
+  followerChannel.addEventListener('message', (event: MessageEvent<unknown>) => {
+    const frame = event.data as {
+      readonly type?: string;
+      readonly targetId?: string;
+      readonly response?: { readonly type: string; readonly requestId: string; readonly code: string };
+    };
+    if (frame.type !== 'response' || frame.response?.type !== 'error') {
+      return;
+    }
+    refusals.set(frame.response.requestId, { code: frame.response.code, targetId: frame.targetId });
+    if (refusals.size === 2) {
+      answered.resolve();
+    }
+  });
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    // This context takes leadership of the chat; the frames below address it.
+    await handleAgentHostWorkerRequest(
+      { type: 'attach', chatId, cursor: 0, limit: agentHostTailBatchLimit },
+      sessionId,
+    );
+    const binding = {
+      version: agentHostProtocolVersion,
+      projectId: providerBasePath,
+      workspaceId: providerBasePath,
+      chatId,
+    };
+    // A well-formed command addressed to a generation that has rolled over.
+    followerChannel.postMessage({
+      ...binding,
+      type: 'command',
+      senderId: 'tab-follower',
+      targetGeneration: 'generation-that-has-rolled-over',
+      command: { type: 'tail', chatId, cursor: 0, limit: agentHostTailBatchLimit, requestId: 'req-stale', sessionId },
+    });
+    // A command frame this protocol cannot read, whose envelope still survives.
+    followerChannel.postMessage({
+      ...binding,
+      type: 'command',
+      senderId: 'tab-follower',
+      command: { type: 'teleport', chatId, requestId: 'req-unreadable', sessionId },
+    });
+
+    await answered.promise;
+    expect(refusals.get('req-stale')).toEqual({ code: 'LEADER_GENERATION_STALE', targetId: 'tab-follower' });
+    expect(refusals.get('req-unreadable')).toEqual({ code: 'LEADER_COMMAND_UNREADABLE', targetId: 'tab-follower' });
+  } finally {
+    followerChannel.close();
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});
+
+/*
+ * T4-07. The start pre-check's `try` spanned the resume and the snapshot, so a
+ * resume that failed for its own reason was discarded, fell through to `admit`,
+ * and came back as "this run id is already taken" — the real reason gone. Only
+ * the log read is forgiven now.
+ */
+it('surfaces a failed resume of a duplicate start as itself, not as an admission refusal', async () => {
+  const fileSystemProvider = new DirectIdbProvider(`agent-host-${crypto.randomUUID()}`);
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const providerBasePath = `agent-host-resume-failure-${crypto.randomUUID()}`;
+  const chatId = 'chat-resume-failure';
+  const runId = 'run-resume-failure';
+  const sessionId = `session-${crypto.randomUUID()}`;
+  // A paused run whose interrupt carries no durable W5 payload: `resume` cannot
+  // build the request it must wait on, and says so.
+  await seedChatLog(fileSystemProvider, {
+    providerBasePath,
+    chatId,
+    runId,
+    rows: [
+      { type: 'run.lifecycle', state: 'admitted' },
+      {
+        type: 'turn.history-projection-committed',
+        retainedMessageIds: [],
+        message: { id: 'user-resume-failure', role: 'user', content: 'Ask me first.' },
+        context: {
+          version: 1,
+          systemPrompt: 'Browser takeover fixture.',
+          initialMessages: [],
+          postCompactionMessages: [],
+        },
+      },
+      { type: 'run.lifecycle', state: 'running' },
+      { type: 'interrupt.recorded', interruptId: 'interrupt-resume-failure', phase: 'requested', reason: 'Approve?' },
+      { type: 'run.lifecycle', state: 'paused' },
+    ],
+  });
+
+  try {
+    await initializeSeededSession(fileSystemProvider, { providerBasePath, sessionId });
+    await expect(
+      handleAgentHostWorkerRequest(
+        {
+          type: 'start',
+          chatId,
+          runId,
+          trigger: 'submit',
+          message: { id: 'user-resume-failure', role: 'user', content: 'Ask me first.' },
+        },
+        sessionId,
+      ),
+    ).rejects.toThrow(/has no durable W5 request payload/u);
   } finally {
     await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
   }

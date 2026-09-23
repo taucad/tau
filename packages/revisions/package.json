@@ -39,6 +39,7 @@
     "./package.json": "./package.json",
     "./revision-effects": "./src/revision-effects.ts",
     "./project-revisions-machine": "./src/project-revisions.machine.ts",
+    "./revision-projection": "./src/revision-projection.ts",
     "./turn-machine": "./src/turn.machine.ts",
     "./checkout-machine": "./src/checkout.machine.ts",
     "./restore-machine": "./src/restore.machine.ts",
@@ -77,6 +78,11 @@
         "types": "./dist/project-revisions.machine.d.mts",
         "import": "./dist/project-revisions.machine.mjs",
         "default": "./dist/project-revisions.machine.mjs"
+      },
+      "./revision-projection": {
+        "types": "./dist/revision-projection.d.mts",
+        "import": "./dist/revision-projection.mjs",
+        "default": "./dist/revision-projection.mjs"
       },
       "./turn-machine": {
         "types": "./dist/turn.machine.d.mts",

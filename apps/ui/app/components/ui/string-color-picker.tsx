@@ -13,8 +13,11 @@ type StringColorPickerProperties = {
   readonly onChange: (value: string) => void;
   readonly className?: string;
   readonly id?: string;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop.
   readonly disabled?: boolean;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop.
   readonly readOnly?: boolean;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop.
   readonly autoFocus?: boolean;
   readonly 'aria-label'?: string;
   readonly onFocus?: React.FocusEventHandler<HTMLInputElement>;
@@ -181,7 +184,7 @@ export function StringColorPicker({
         <PopoverTrigger asChild>
           <Button
             variant='outline'
-            disabled={disabled || readOnly}
+            disabled={disabled === true || readOnly === true}
             className='h-(--param-field-h) w-(--param-field-h) shrink-0 rounded-(--param-field-radius) border-border/50 p-0 opacity-70 shadow-none transition-opacity hover:border-border hover:opacity-100'
             style={{ backgroundColor: isValid ? value : 'transparent' }}
             aria-label='Open color picker'

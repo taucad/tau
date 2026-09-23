@@ -79,8 +79,6 @@ describe('createRpcDispatcher invocation context', () => {
             operation: {
               kind: 'native-value',
               group: 'default',
-              parameterId: 'width',
-              resource: 'urn:test',
               pointer: '/width',
               value: 25,
             },

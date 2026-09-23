@@ -48,7 +48,7 @@ export const shaderSites = [
     modules: ['#components/geometry/graphics/three/materials/gltf-surface-depth-bias.ts'],
     authoring: ['on-before-compile', 'fixed-function'],
     backends: ['webgl', 'webgpu'],
-    risks: ['depth', 'clipping', 'upstream-drift'],
+    risks: ['camera', 'depth', 'clipping', 'upstream-drift'],
   },
   {
     id: 'fat-lines',
@@ -80,6 +80,15 @@ export const shaderSites = [
     authoring: ['tsl', 'render-pipeline'],
     backends: ['webgpu'],
     risks: ['camera', 'depth', 'lifecycle', 'hot-path'],
+  },
+  {
+    id: 'model-emphasis-silhouette',
+    modules: [
+      '#components/geometry/graphics/three/materials/model-emphasis-silhouette.material.ts',
+      '#components/geometry/graphics/three/materials/model-emphasis-silhouette.node.ts',
+    ],
+    backends: ['webgl', 'webgpu'],
+    risks: ['transparency', 'depth', 'lifecycle', 'hot-path'],
   },
   {
     id: 'metal-morph-loader',
@@ -147,7 +156,7 @@ export const shaderEvidence = {
   'surface-depth-bias': evidence(
     'apps/ui/app/components/geometry/graphics/three/materials/gltf-surface-depth-bias.test.ts',
     'fails compilation when the expected log-depth chunk is absent or duplicated',
-    'apps/ui/app/components/geometry/graphics/three/materials/gltf-surface-depth-bias.test.ts::pushes opaque WebGL triangles locally in logarithmic depth',
+    'apps/ui/app/components/geometry/graphics/three/materials/gltf-surface-depth-bias.test.ts::also separates orthographic surfaces when the renderer writes fragment depth',
   ),
   'fat-lines': evidence(
     'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts',
@@ -166,6 +175,11 @@ export const shaderEvidence = {
   'webgpu-post': evidence(
     'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx',
     'restores the selected scene-pass depth with one direct fullscreen draw',
+  ),
+  'model-emphasis-silhouette': evidence(
+    'apps/ui/app/components/geometry/graphics/three/materials/model-emphasis-silhouette.test.ts',
+    'draws the outline only where mask coverage changes',
+    'apps/ui/app/components/geometry/graphics/three/materials/model-emphasis-silhouette.test.ts::matches stable stripped silhouette node material JSON snapshot',
   ),
   'metal-morph-loader': {
     reference: [

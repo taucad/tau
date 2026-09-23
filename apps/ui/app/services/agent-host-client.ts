@@ -15,6 +15,7 @@ import type {
 import { isGatewayProviderKind } from '@taucad/agent-host';
 import { connectAgentWorkerChannel } from '@taucad/agent-host/channel-client';
 import { randomUuid } from '@taucad/utils/id';
+import { Topic } from '@taucad/events';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type {
@@ -658,7 +659,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
   }
   const sessionId = randomUuid();
   const channel = connectWorker(worker, sessionId);
-  const closeHandlers = new Topic<AgentHostTransportCloseReason>({ name: 'AgentHostWorker.close' });
+  const closeTopic = new Topic<AgentHostTransportCloseReason>({ name: 'agent-host-client:close' });
   let death: AgentHostTransportCloseReason | undefined;
   let disposed = false;
 
@@ -667,8 +668,8 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
       return;
     }
     death = reason;
-    closeHandlers.emit(reason);
-    closeHandlers.dispose();
+    closeTopic.emit(reason);
+    closeTopic.dispose();
   };
 
   const onError = (event: ErrorEvent): void => {
@@ -788,7 +789,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
         handler(death);
         return (): void => undefined;
       }
-      return closeHandlers.subscribe(handler);
+      return closeTopic.subscribe(handler);
     },
     close: dispose,
   };

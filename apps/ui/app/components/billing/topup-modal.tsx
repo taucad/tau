@@ -13,6 +13,7 @@ import {
   confirmPaymentAction,
   createPaymentRequestId,
   followPaymentRedirect,
+  getPaymentAction,
   getUnresolvedPaymentActions,
   prepareTopup,
   purchasesUnavailableMessage,
@@ -60,6 +61,8 @@ const stateLabel: Record<WirePaymentAction['state'], string> = {
   completed: 'Complete',
 };
 /* eslint-enable @typescript-eslint/naming-convention -- end wire state keys. */
+const settlingStates: ReadonlySet<WirePaymentAction['state']> = new Set(['creating', 'processing', 'funds_received']);
+const settleIntervalMilliseconds = 2000;
 const returnPath = (): string => `${globalThis.location.pathname}${globalThis.location.search}`;
 const formatUsdMinor = (minor: string | number): string => `US$${(Number(minor) / 100).toFixed(2)}`;
 
@@ -80,7 +83,7 @@ function CardBrandIcon({
 
 function PaymentMethod({ method }: { readonly method: { brand: string; last4: string } }): React.JSX.Element {
   return (
-    <span className='flex items-center gap-2'>
+    <span className='inline-flex items-center gap-2 align-middle'>
       <CardBrandIcon brand={method.brand} className='size-8' />
       {brandLabel[method.brand] ?? 'Card'} •••• {method.last4}
     </span>
@@ -145,7 +148,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           toast.warning(
             error.code === 'request_payload_conflict'
               ? 'This purchase changed. Start a new purchase to continue.'
-              : 'A payment is already in progress.',
+              : error.code === 'saved_card_not_found' || error.code === 'customer_tax_location_invalid'
+                ? 'No saved card with a billing address yet. Use another card in Checkout.'
+                : 'A payment is already in progress.',
           );
         } else {
           toast.warning(
@@ -210,8 +215,48 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
   };
   const visibleAction = binding && actionGenerationRef.current === generationValue ? action : undefined;
   const visibleBusy = busyGenerationRef.current === generationValue && isBusy;
-  /* oxlint-enable react/refs */
   const visibleBinding = binding && visibleAction ? { ...binding, subjectId: visibleAction.subjectId } : binding;
+  const settling = isOpen && visibleAction !== undefined && settlingStates.has(visibleAction.state);
+  const settlingActionId = settling ? visibleAction.actionId : undefined;
+  const settlingSubjectId = settling ? visibleAction.subjectId : undefined;
+
+  // A confirmed saved-card charge settles in the billing worker, so the dialog polls until it reaches a receipt.
+  useEffect(() => {
+    if (settlingActionId === undefined || !apiBaseUrl || !environment || !userId) {
+      return;
+    }
+    const pollBinding = { apiBaseUrl, environment, ownerId: userId, subjectId: settlingSubjectId };
+    const startedGeneration = generationValue;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await getPaymentAction(pollBinding, settlingActionId);
+        if (!active || scopeRef.current.value !== startedGeneration) {
+          return;
+        }
+        actionGenerationRef.current = startedGeneration;
+        setAction(next);
+        if (next.state === 'fulfilled') {
+          void queryClient.invalidateQueries({ queryKey: ['billing'] });
+        }
+        if (settlingStates.has(next.state)) {
+          timer = setTimeout(poll, settleIntervalMilliseconds);
+        }
+      } catch {
+        // ponytail: retries at the same interval while the dialog is open; the worker, not this poll, owns settlement.
+        if (active) {
+          timer = setTimeout(poll, settleIntervalMilliseconds);
+        }
+      }
+    };
+    timer = setTimeout(poll, settleIntervalMilliseconds);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [apiBaseUrl, environment, generationValue, queryClient, settlingActionId, settlingSubjectId, userId]);
+  /* oxlint-enable react/refs */
   const frozen = visibleAction?.frozen;
   const terminal =
     visibleAction?.state === 'fulfilled' || visibleAction?.state === 'failed' || visibleAction?.state === 'canceled';
@@ -411,7 +456,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
               <Button onClick={() => followPaymentRedirect(visibleAction)}>Resume Checkout</Button>
             </div>
           ) : undefined}
-          {visibleAction && ['creating', 'processing', 'funds_received'].includes(visibleAction.state) ? (
+          {visibleAction && settlingStates.has(visibleAction.state) ? (
             <p className='text-sm' role='status'>
               {visibleAction.state === 'funds_received'
                 ? 'Payment received. Credits are still being added.'

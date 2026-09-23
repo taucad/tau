@@ -465,7 +465,7 @@ describe('createRuntimeAgentClients', () => {
 });
 
 describe('createRuntimeParameterAgentClient', () => {
-  const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean }> = {}) => {
+  const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean; unbound?: boolean }> = {}) => {
     const target = { authority: 'test', root: '/project', entry: 'main.py' };
     const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
     const manifest = await compileParameterManifest({
@@ -476,9 +476,13 @@ describe('createRuntimeParameterAgentClient', () => {
           $uses: ['JSONSchemaUnits'],
           name: 'Parameters',
           type: 'object',
-          properties: { width: { type: 'double', ...(options.sourceUnit ? { ucumUnit: 'mm' } : {}) } },
+          properties: {
+            width: { type: 'double', ...(options.sourceUnit ? { ucumUnit: 'mm' } : {}) },
+            // A declared scalar the manifest binds nothing to: only numeric leaves get a binding.
+            ...(options.unbound ? { label: { type: 'string' } } : {}),
+          },
         },
-        defaults: { width: 1 },
+        defaults: { width: 1, ...(options.unbound ? { label: 'plate' } : {}) },
         ...(options.sourceUnit
           ? {
               bindings: {
@@ -504,8 +508,10 @@ describe('createRuntimeParameterAgentClient', () => {
       path: '.tau/parameters/main.py.json',
       bytes: null,
     });
+    let persisted = current;
     const commit = vi.fn(async ({ input }: { input: { proposed: typeof current } }) => {
       await gate;
+      persisted = structuredClone(input.proposed);
       return { status: 'applied', content: input.proposed.bytes! } as const;
     });
     const loads = vi.fn();
@@ -535,7 +541,7 @@ describe('createRuntimeParameterAgentClient', () => {
       pressure: 'final',
       operation: { kind: 'replace-group-values', group: 'default', values: { width: 5 } },
     } as const;
-    return { actor, adapter, request, current, commit, loads };
+    return { actor, adapter, request, current, commit, loads, persisted: () => persisted };
   };
 
   it('preserves operation identity and the complete business outcome', async () => {
@@ -549,6 +555,60 @@ describe('createRuntimeParameterAgentClient', () => {
       outcome: { status: 'rejected', requestId: 'agent:1', code: 'STALE_MANIFEST' },
     });
     expect(commit).not.toHaveBeenCalled();
+    actor.stop();
+  });
+
+  it('commits a native-value named by group, pointer and value alone on a field with no binding', async () => {
+    const { actor, adapter, current, persisted } = await fixture(undefined, { unbound: true });
+    await expect(
+      adapter.applyParameterOperation({
+        action: 'propose',
+        targetFile: 'main.py',
+        requestId: 'agent:unbound',
+        expected: current.identity,
+        pressure: 'final',
+        operation: { kind: 'native-value', group: 'default', pointer: '/label', value: 'rail' },
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      outcome: { status: 'committed', requestId: 'agent:unbound' },
+    });
+    expect(persisted().entry.groups['default']?.values['label']).toBe('rail');
+    actor.stop();
+  });
+
+  it('should evaluate an immediate kernel result after the parameter write settles', async () => {
+    const { actor, adapter, request, persisted } = await fixture();
+    const evaluate = vi.fn<RuntimeAgentClient['evaluate']>(async () => {
+      const width = persisted().entry.groups['default']?.values['width'];
+      if (typeof width !== 'number') {
+        throw new TypeError('Expected the settled width to be numeric');
+      }
+      return {
+        success: true,
+        data: { format: 'gltf', content: glb(), hash: `width:${width}` },
+        issues: [{ type: 'runtime', code: 'RUNTIME', severity: 'error', message: `width:${width}` }],
+      };
+    });
+    const clients = createRuntimeAgentClients({
+      runtime: {
+        evaluate,
+        export: vi.fn(async () => ({ success: true, data: [], issues: [] })),
+      },
+      exportImage: vi.fn(async () => undefined),
+      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+    });
+
+    await expect(adapter.applyParameterOperation(request)).resolves.toMatchObject({
+      success: true,
+      outcome: { status: 'committed' },
+    });
+    await expect(clients.kernelClient.getKernelResult('main.py')).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      kernelIssues: [{ message: 'width:5' }],
+    });
+    expect(evaluate).toHaveBeenCalledOnce();
     actor.stop();
   });
 
@@ -600,8 +660,6 @@ describe('createRuntimeParameterAgentClient', () => {
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: binding.parameter.value,
-        resource: binding.schema.resource,
         pointer: '/width',
         unit: 'cm',
         producerCapability: {

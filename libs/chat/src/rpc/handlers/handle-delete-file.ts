@@ -26,6 +26,8 @@ export async function handleDeleteFile(
     return {
       success: true,
       message: `File deleted: ${targetFile}`,
+      // R4: a delete produces absence, recorded with the same sentinel a source closure uses.
+      revision: { path: targetFile, digest: 'missing' },
       diffStats:
         originalContent === undefined
           ? undefined

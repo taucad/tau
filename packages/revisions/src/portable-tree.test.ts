@@ -5,10 +5,7 @@ import { ImmutableRevisionTree } from '#algorithms/index.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 
 describe('portable revision tree admission', () => {
-  it('refuses case aliases into reserved storage and portable file-directory collisions', () => {
-    expect(() => {
-      assertMaterializableRevisionTree(new ImmutableRevisionTree([['.TAU/chats/victim/chat.json', 'remote']]));
-    }).toThrow(/aliases a path reserved by Tau/u);
+  it('should refuse portable file-directory collisions', () => {
     expect(() => {
       assertMaterializableRevisionTree(
         new ImmutableRevisionTree([

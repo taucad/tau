@@ -35,11 +35,14 @@ const isOfferableProjectPath = (path: string, provenance: FileProvenance | undef
  * authored. Asking the registry which rows sit inside a container answers both
  * the container and everything under it, which keeps the answer in the one
  * table instead of restoring a `.tau` prefix test here.
+ *
+ * Only the root-matched rows: a segment-matched one is reserved wherever it
+ * appears, and `classify` has already answered for it above.
  */
 const isReservedPath = (path: string): boolean =>
   pathRegistry.some(
     (row) =>
-      row.anchored &&
+      row.match === 'root' &&
       row.prefix.includes('/') &&
       (row.prefix === path || row.prefix.startsWith(`${path}/`) || path.startsWith(`${row.prefix}/`)),
   );

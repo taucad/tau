@@ -5,7 +5,7 @@ docType: reference
 icon: lucide:folder
 ---
 
-Runtime provides constructors for Node.js, browser directory handles, in-memory and already-confined fs-compatible backends, plus filesystem-specific bridge utilities for cross-worker access.
+Runtime supports Node.js, browser, memory, confined fs-compatible, and cross-worker bridge filesystems.
 
 ## Filesystem Types
 
@@ -39,7 +39,7 @@ Every constructor establishes the root of the [runtime-path namespace](../concep
 
 <auto-type-table path='./props/filesystem.ts' name='ExposeFileSystemHandle' />
 
-`FileSystemBridgeConnection` is the value the `fromFileSystemBridge` factory returns per binding; `BridgePort` and `BridgeServerHandle` are the underlying wire primitives re-exported for host adapters.
+`fromFileSystemBridge` returns a `FileSystemBridgeConnection`; `BridgePort` and `BridgeServerHandle` support host adapters.
 
 ## Bridge Utilities
 
@@ -47,41 +47,12 @@ For cross-worker filesystem access, `@taucad/runtime/filesystem` provides the fi
 
 | Function                                   | Description                                                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `exposeFileSystem(handlers, options?)`     | Listen in the filesystem-owning worker for scoped bridge connections.                               |
+| `exposeFileSystem(handlers, options?)`     | Listen in the filesystem-owning worker; expose an authority as `workspaceBridgeService(service)`.   |
 | `openFileSystemBridge(worker, options?)`   | Open a fresh scoped connection for `fromFileSystemBridge`; use this for runtime transport wiring.   |
 | `createFileSystemBridge(worker, options?)` | Open a managed filesystem bridge when the current isolate also needs to call filesystem methods.    |
 | `createFileSystemBridgeProxy(bridge)`      | Create the validated filesystem proxy from the managed bridge returned by `createFileSystemBridge`. |
 
-## Usage
-
-```typescript
-import { createRuntimeClient } from '@taucad/runtime';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/replicad';
-import { esbuild } from '@taucad/esbuild';
-
-const runtime = defineRuntime({
-  plugins: [replicad(), esbuild()],
-});
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
-});
-```
-
-`fromMemoryFs` accepts an optional seed record of `string` or `Uint8Array` contents keyed by runtime path:
-
-```typescript
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-
-const fileSystem = fromMemoryFs({
-  'main.ts': 'export default function main() { return null; }',
-});
-```
-
-### Filesystem Bridge
+## Bridge Usage
 
 Trusted host code selects an authority route once and supplies a connection factory. The runtime sees only the rooted project's writable local namespace:
 
@@ -89,16 +60,26 @@ Trusted host code selects an authority route once and supplies a connection fact
 import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileManagerWorker = new Worker(new URL('./file-manager.worker.ts', import.meta.url), { type: 'module' });
-const fileSystem = fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' }));
+const fileSystem = fromFileSystemBridge(() =>
+  openFileSystemBridge(fileManagerWorker, { root: '/projects/widget', consumer: 'agent' }),
+);
 ```
+
+A `root` always names the surface it serves. There is no default: an absent or unknown `consumer` is refused, and the connection answers `ROOT_UNAVAILABLE`.
+
+| `consumer`       | Surface                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'working-copy'` | The checkout's own files, with no overlays composed above them. Trusted host composition only.                                                  |
+| `'user'`         | What a person sees in the file tree: host-written records included, the control plane hidden.                                                   |
+| `'agent'`        | What an agent sees: records readable but not writable, the control plane hidden. A runtime that renders agent-authored code names this one too. |
 
 Inside runtime, `main.ts`, `.tau/cache/**`, and `node_modules/**` all belong to that rooted capability. The runtime receives no project id or authority-global root and performs no authorization checks; filesystem reachability is the authority boundary. `fromFsLike(fs)` follows the same local-path contract but assumes `fs` is already confined. Use `fromNodeFs(hostRoot)` for raw Node.js access so the adapter can enforce lexical and symlink containment.
 
 ## Related
 
-- [Set Up the Filesystem](../guides/filesystem-setup) -- Practical guide to filesystem configuration
-- [Worker Model](../concepts/worker-model) -- How the filesystem is bridged to the worker
-- [Path Namespaces](../concepts/path-namespaces) -- How adapters establish the runtime root
-- [API: Client](./client) -- `createRuntimeClient` and wiring `transport` with a filesystem
-- [API: Types](./types) -- `RuntimeFileSystemBase`, `KernelFileSystem`, and the opaque `RuntimeFileSystem`
-- [RPC Wire Spec](https://github.com/taucad/tau/blob/main/docs/architecture/rpc-wire-spec.md) -- Low-level protocol reference for custom transport authors
+- [Set Up the Filesystem](../guides/filesystem-setup)
+- [Worker Model](../concepts/worker-model)
+- [Path Namespaces](../concepts/path-namespaces)
+- [API: Client](./client)
+- [API: Types](./types)
+- [RPC Wire Spec](https://github.com/taucad/tau/blob/main/docs/architecture/rpc-wire-spec.md)

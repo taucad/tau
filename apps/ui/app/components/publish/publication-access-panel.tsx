@@ -148,7 +148,15 @@ export function PublicationAccessPanel({
             placeholder='teammate@example.com'
             onEmailsChange={setPendingEmails}
           />
-          <Button type='button' size='sm' className='self-end' disabled={!canAdd} onClick={() => void handleAdd()}>
+          <Button
+            type='button'
+            size='sm'
+            className='self-end'
+            disabled={!canAdd}
+            onClick={() => {
+              void handleAdd();
+            }}
+          >
             {mutating ? <Loader2 className='size-4 animate-spin' aria-hidden /> : null}
             <span>Add access</span>
           </Button>

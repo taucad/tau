@@ -38,7 +38,7 @@ vi.mock('xstate', async (importOriginal) => {
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     fileManagerRef: { id: 'fmRef' },
-    files: { writeFiles: mockClientWriteFiles },
+    previewFiles: { writeFiles: mockClientWriteFiles },
     workspace: {
       mount: mockMount,
       unmount: mockUnmount,

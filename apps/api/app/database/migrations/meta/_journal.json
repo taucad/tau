@@ -302,6 +302,13 @@
       "when": 1789715936260,
       "tag": "0043_lfs_retirement_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790138637541,
+      "tag": "0044_retire_subscription_plugin",
+      "breakpoints": true
     }
   ]
 }

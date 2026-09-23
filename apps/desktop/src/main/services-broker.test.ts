@@ -244,7 +244,11 @@ describe('createServicesBroker', () => {
     await remaining;
 
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-a', workspaceRoot: '/home/a' });
-    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-a' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-a',
+      message: 'The desktop shell has not admitted /home/a as a runtime root.',
+    });
   });
 
   /*
@@ -267,7 +271,11 @@ describe('createServicesBroker', () => {
 
     expect(broker.computeProjectRoot('/home/a')).toBeUndefined();
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-a', workspaceRoot: '/home/a' });
-    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-a' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-a',
+      message: 'The desktop shell has not admitted /home/a as a runtime root.',
+    });
   });
 
   it('mints runtime ports only from a main-admitted agent context', () => {
@@ -283,7 +291,11 @@ describe('createServicesBroker', () => {
     expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port', requestId: 'runtime-1' }, [
       { id: 'runtime' },
     ]);
-    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-2' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-2',
+      message: 'The desktop shell has not admitted /home/other as a runtime root.',
+    });
     expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
       projectRoot: '/home/widget',
       computeProjectRoot: '/home/widget',
@@ -386,7 +398,11 @@ describe('createServicesBroker', () => {
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-2', workspaceRoot: checkout });
 
     expect(connectRuntime).toHaveBeenCalledOnce();
-    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-2' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-2',
+      message: `The desktop shell has not admitted ${checkout} as a runtime root.`,
+    });
   });
 
   it('registers a checkout only under a granted project, and never evicts the project itself', () => {
@@ -438,7 +454,11 @@ describe('createServicesBroker', () => {
      * utility's checkouts are forgotten. */
     spawns[1]?.message({ type: 'runtime-port-request', requestId: 'runtime-2', workspaceRoot: '/home/widget' });
 
-    expect(spawns[1]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-1' });
+    expect(spawns[1]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-1',
+      message: `The desktop shell has not admitted ${checkout} as a runtime root.`,
+    });
     expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
       projectRoot: '/home/widget',
       computeProjectRoot: '/home/widget',
@@ -485,6 +505,33 @@ describe('createServicesBroker', () => {
     expect(settled).toBe(true);
   });
 
+  it('should name the cause of a runtime refusal it decides on its own', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    const stale = spawns[0];
+    /* A utility that died mid-turn: main forked its successor, and the corpse's
+     * late request must not read as an unadmitted root. */
+    stale?.exit();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    stale?.message({ type: 'runtime-port-request', requestId: 'runtime-stale', workspaceRoot: '/home/widget' });
+
+    expect(stale?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-stale',
+      message: 'A superseded services utility asked for a runtime port.',
+    });
+
+    const disposal = broker.dispose();
+    spawns[1]?.message({ type: 'runtime-port-request', requestId: 'runtime-late', workspaceRoot: '/home/widget' });
+
+    expect(spawns[1]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-late',
+      message: 'The desktop services broker is quiescing and connects no new runtimes.',
+    });
+    await disposal;
+  });
+
   it('refuses a duplicate live runtime request identity without overwriting its lease', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', { workspaceRoot: '/home/widget' });
@@ -493,7 +540,29 @@ describe('createServicesBroker', () => {
     spawns[0]?.message(request);
 
     expect(connectRuntime).toHaveBeenCalledOnce();
-    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-1' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-1',
+      message: 'A live runtime lease already holds this request identity.',
+    });
+  });
+
+  it('should carry the reason a runtime connection failed back to the requesting utility', () => {
+    const { broker, connectRuntime, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    connectRuntime.mockImplementationOnce(() => {
+      throw new Error('registerElectronRuntimeMain: refusing to exceed 64 utility processes');
+    });
+
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
+
+    /* Without the message the agent's tool error says only that main refused;
+     * the cap it refused at lives in main's log, which no client reads. */
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({
+      type: 'runtime-port-refused',
+      requestId: 'runtime-1',
+      message: 'registerElectronRuntimeMain: refusing to exceed 64 utility processes',
+    });
   });
 
   it('replays the latest control frame of each kind onto a fresh fork', () => {

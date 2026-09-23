@@ -40,6 +40,8 @@ export function createBridgeCall<
     handler: (event: WatchEventPayload) => void,
   ) => { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
   ready: Promise<void>;
+  /** Settles when the channel closes, including on the death of the peer's port. */
+  closed: Promise<void>;
   hello: { readonly payload: HelloPayload };
   dispose: () => void;
 } {
@@ -266,6 +268,7 @@ export function createBridgeCall<
     },
     watchReady: startWatch,
     ready: channelClient.ready,
+    closed: channelClient.closed,
     hello: channelClient.hello,
     dispose,
   };

@@ -101,8 +101,6 @@ const seedPeriod = async (input: {
   await database.insert(schema.subscription).values({
     id: subscriptionId,
     plan: 'pro',
-    referenceId: `financial:${subscriptionId}`,
-    stripeCustomerId: customerId,
     stripeSubscriptionId: remoteSubscriptionId,
     accountId: input.accountId,
     environment: 'development',

@@ -1,9 +1,9 @@
 import { kernelConfigurations } from '@taucad/types/constants';
-import type { KernelConfiguration } from '@taucad/types/constants';
+import type { KernelConfiguration, KernelEntry } from '@taucad/types/constants';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
 /** Product offerings executable by the active runtime host. */
-export const availableKernelConfigurations = () => {
+export const availableKernelConfigurations = (): readonly KernelEntry[] => {
   const advertised = new Set(desktopBridge()?.runtimeKernelIds ?? []);
   return kernelConfigurations.filter((configuration) => {
     const required = 'requiresRuntimeKernelId' in configuration ? configuration.requiresRuntimeKernelId : undefined;

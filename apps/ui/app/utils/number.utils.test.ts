@@ -45,7 +45,7 @@ describe('formatNumberEngineeringNotation', () => {
       });
 
       it('should format with proper decimal places', () => {
-        expect(formatNumberEngineeringNotation(1.234_567, 3)).toBe('1.23');
+        expect(formatNumberEngineeringNotation(1.234567, 3)).toBe('1.23');
       });
 
       it('should remove trailing zeros', () => {
@@ -105,19 +105,19 @@ describe('formatNumberEngineeringNotation', () => {
       });
 
       it('should format 0.00001 as 10e-6', () => {
-        expect(formatNumberEngineeringNotation(0.000_01, 3)).toBe('10e-6');
+        expect(formatNumberEngineeringNotation(0.00001, 3)).toBe('10e-6');
       });
 
       it('should format 0.000001 as 1e-6', () => {
-        expect(formatNumberEngineeringNotation(0.000_001, 3)).toBe('1e-6');
+        expect(formatNumberEngineeringNotation(0.000001, 3)).toBe('1e-6');
       });
 
       it('should format 0.0000001 as 100e-9', () => {
-        expect(formatNumberEngineeringNotation(0.000_000_1, 3)).toBe('100e-9');
+        expect(formatNumberEngineeringNotation(0.0000001, 3)).toBe('100e-9');
       });
 
       it('should format 0.000_005_6 as 5.6e-6', () => {
-        expect(formatNumberEngineeringNotation(0.000_005_6, 3)).toBe('5.6e-6');
+        expect(formatNumberEngineeringNotation(0.0000056, 3)).toBe('5.6e-6');
       });
     });
 
@@ -141,20 +141,20 @@ describe('formatNumberEngineeringNotation', () => {
 
     describe('with 5 digits', () => {
       it('should format 0.00001 as 10e-6', () => {
-        expect(formatNumberEngineeringNotation(0.000_01, 5)).toBe('10e-6');
+        expect(formatNumberEngineeringNotation(0.00001, 5)).toBe('10e-6');
       });
 
       it('should format 0.00001234 as 12.34e-6', () => {
-        expect(formatNumberEngineeringNotation(0.000_012_34, 5)).toBe('12.34e-6');
+        expect(formatNumberEngineeringNotation(0.00001234, 5)).toBe('12.34e-6');
       });
 
       it('should format 0.000001234 as 1.234e-6', () => {
-        expect(formatNumberEngineeringNotation(0.000_001_234, 5)).toBe('1.234e-6');
+        expect(formatNumberEngineeringNotation(0.000001234, 5)).toBe('1.234e-6');
       });
 
       it('should format values above threshold normally', () => {
-        expect(formatNumberEngineeringNotation(0.001_234, 5)).toBe('0.0012');
-        expect(formatNumberEngineeringNotation(0.000_123_4, 5)).toBe('0.0001');
+        expect(formatNumberEngineeringNotation(0.001234, 5)).toBe('0.0012');
+        expect(formatNumberEngineeringNotation(0.0001234, 5)).toBe('0.0001');
       });
     });
 
@@ -176,7 +176,7 @@ describe('formatNumberEngineeringNotation', () => {
       });
 
       it('should not return "0" for any non-zero small value', () => {
-        const smallValues = [0.001, 0.0001, 0.000_01, 0.000_001, 0.000_000_1];
+        const smallValues = [0.001, 0.0001, 0.00001, 0.000001, 0.0000001];
         for (const smallValue of smallValues) {
           expect(formatNumberEngineeringNotation(smallValue, 3)).not.toBe('0');
         }
@@ -189,15 +189,15 @@ describe('formatNumberEngineeringNotation', () => {
       });
 
       it('should use e-6 for millionths', () => {
-        expect(formatNumberEngineeringNotation(0.000_005, 3)).toBe('5e-6');
+        expect(formatNumberEngineeringNotation(0.000005, 3)).toBe('5e-6');
       });
 
       it('should use e-9 for billionths', () => {
-        expect(formatNumberEngineeringNotation(0.000_000_005, 3)).toBe('5e-9');
+        expect(formatNumberEngineeringNotation(0.000000005, 3)).toBe('5e-9');
       });
 
       it('should not use e-4 or e-5 (should jump from e-3 to e-6)', () => {
-        const result = formatNumberEngineeringNotation(0.000_05, 3);
+        const result = formatNumberEngineeringNotation(0.00005, 3);
         expect(result).toBe('50e-6');
         expect(result).not.toContain('e-4');
         expect(result).not.toContain('e-5');
@@ -424,11 +424,11 @@ describe('clamp', () => {
 
   describe('floating-point precision', () => {
     it('should preserve decimal precision for small decimals', () => {
-      expect(clamp(3.141_59, 0, 10)).toBe(3.141_59);
+      expect(clamp(3.14159, 0, 10)).toBe(3.14159);
     });
 
     it('should preserve decimal precision for large decimals', () => {
-      expect(clamp(7.890_12, 0, 10)).toBe(7.890_12);
+      expect(clamp(7.89012, 0, 10)).toBe(7.89012);
     });
 
     it('should not truncate floating-point values', () => {
@@ -489,17 +489,17 @@ describe('roundToSignificantFigures', () => {
     expect(roundToSignificantFigures(1.2345, 3)).toBeCloseTo(1.23, 10);
     expect(roundToSignificantFigures(12.345, 3)).toBeCloseTo(12.3, 10);
     expect(roundToSignificantFigures(123.45, 3)).toBeCloseTo(123, 10);
-    expect(roundToSignificantFigures(0.012_345, 3)).toBeCloseTo(0.0123, 10);
+    expect(roundToSignificantFigures(0.012345, 3)).toBeCloseTo(0.0123, 10);
   });
 
   it('should handle negative values', () => {
     expect(roundToSignificantFigures(-1.2345, 3)).toBeCloseTo(-1.23, 10);
-    expect(roundToSignificantFigures(-0.012_345, 3)).toBeCloseTo(-0.0123, 10);
+    expect(roundToSignificantFigures(-0.012345, 3)).toBeCloseTo(-0.0123, 10);
   });
 
   it('should handle 4 significant figures', () => {
-    expect(roundToSignificantFigures(1.234_56, 4)).toBeCloseTo(1.235, 10);
-    expect(roundToSignificantFigures(0.123_456, 4)).toBeCloseTo(0.1235, 10);
+    expect(roundToSignificantFigures(1.23456, 4)).toBeCloseTo(1.235, 10);
+    expect(roundToSignificantFigures(0.123456, 4)).toBeCloseTo(0.1235, 10);
     expect(roundToSignificantFigures(12.3456, 4)).toBeCloseTo(12.35, 10);
   });
 });
@@ -517,8 +517,8 @@ describe('formatUnitDisplay', () => {
     });
 
     it('should format with 4 significant figures', () => {
-      expect(formatUnitDisplay(1.234_567)).toBe('1.235');
-      expect(formatUnitDisplay(12.345_67)).toBe('12.35');
+      expect(formatUnitDisplay(1.234567)).toBe('1.235');
+      expect(formatUnitDisplay(12.34567)).toBe('12.35');
       expect(formatUnitDisplay(123.4567)).toBe('123.5');
     });
 
@@ -529,8 +529,8 @@ describe('formatUnitDisplay', () => {
     });
 
     it('should handle small values', () => {
-      expect(formatUnitDisplay(0.001_234)).toBe('0.001234');
-      expect(formatUnitDisplay(0.000_123_45)).toBe('0.0001235'); // Stays fixed format above 1e-4
+      expect(formatUnitDisplay(0.001234)).toBe('0.001234');
+      expect(formatUnitDisplay(0.00012345)).toBe('0.0001235'); // Stays fixed format above 1e-4
     });
 
     it('should handle large values', () => {
@@ -554,7 +554,7 @@ describe('formatUnitDisplay', () => {
     });
 
     it('should format with 6 significant figures', () => {
-      expect(formatUnitDisplay(1.234_567_89, { significantFigures: 6 })).toBe('1.23457');
+      expect(formatUnitDisplay(1.23456789, { significantFigures: 6 })).toBe('1.23457');
     });
   });
 });

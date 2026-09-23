@@ -3,11 +3,14 @@ import { parameterSetMachine, submitParameterRequest } from '#parameter-set.mach
 import { commitParameterChange } from '#authority.js';
 import type { ParameterAuthority } from '#authority.js';
 import { contentDigest } from '@taucad/cache-core';
+import { createQuantity, convert } from '@taucad/units/quantity';
 import { expect, it } from 'vitest';
 import {
   compileParameterManifest,
+  parameterRecordInputValues,
   resolveParameterSnapshot,
   planParameterChange,
+  resolveEffectiveParameterBinding,
   resolveParameterInputValues,
   readParameterRecord,
 } from '@taucad/parameters';
@@ -63,6 +66,118 @@ const manifest = async (sourceUnit = true, revision = digest) =>
     middleware: digest,
   });
 
+const bindinglessScalarManifest = async () =>
+  compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: 'urn:test:bindingless-scalars',
+        $uses: ['JSONSchemaUnits'],
+        name: 'Parameters',
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean' },
+          label: { type: 'string' },
+          settings: { type: 'object', properties: { enabled: { type: 'boolean' } } },
+        },
+      },
+      defaults: { enabled: false, label: 'box', settings: { enabled: false } },
+    },
+    scope: {
+      kind: 'source',
+      authority: target.authority,
+      root: target.root,
+      entry: target.entry,
+    },
+    source: {
+      id: 'fixture',
+      version: '1',
+      revision: digest,
+      capability: 'json-structure',
+    },
+    dependency: digest,
+    middleware: digest,
+  });
+
+it('plans a native-value edit named by group, pointer and value alone on an unbound field', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'boolean',
+      pressure: 'final',
+      expected: current.identity,
+      operation: { kind: 'native-value', group: 'default', pointer: '/enabled', value: true },
+    },
+  });
+
+  expect(plan).toMatchObject({
+    status: 'prepared',
+    proposed: { entry: { groups: { default: { values: { enabled: true } } } } },
+  });
+});
+
+it('refuses a pointer the pinned manifest declares nowhere as an unknown field', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'unknown',
+      pressure: 'final',
+      expected: current.identity,
+      operation: { kind: 'native-value', group: 'default', pointer: '/enabeld', value: true },
+    },
+  });
+
+  expect(plan).toMatchObject({
+    status: 'rejected',
+    code: 'UNKNOWN_FIELD',
+    message: 'main.ts declares no parameter at /enabeld. Use a pointer that get_parameters lists.',
+  });
+});
+
+it('refuses a native-value edit that addresses an object', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'object',
+      pressure: 'final',
+      expected: current.identity,
+      operation: { kind: 'native-value', group: 'default', pointer: '/settings', value: { enabled: true } },
+    },
+  });
+
+  expect(plan).toMatchObject({
+    status: 'rejected',
+    code: 'REPRESENTATION_UNSUPPORTED',
+    message: '/settings is an object. Edit one of its fields, or replace the group values.',
+  });
+});
+
+it('refuses a unit-value on a declared field that carries no unit', async () => {
+  const admitted = await bindinglessScalarManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'unit-on-unbound',
+      pressure: 'final',
+      expected: current.identity,
+      operation: { kind: 'unit-value', group: 'default', pointer: '/label', inputUnit: 'mm', value: '2' },
+    },
+  });
+
+  expect(plan).toMatchObject({
+    status: 'rejected',
+    code: 'REPRESENTATION_UNSUPPORTED',
+    message: '/label declares no unit; send native-value.',
+  });
+});
+
 it('plans one checked first write without creating a record during resolution', async () => {
   const admitted = await manifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
@@ -70,15 +185,12 @@ it('plans one checked first write without creating a record during resolution', 
   const before = structuredClone(current);
   const request: ParameterSetRequest = {
     requestId: 'edit:1',
-    draftGeneration: 1,
     fingerprint: 'caller-label',
     pressure: 'final',
     expected: current.identity,
     operation: {
       kind: 'native-value',
       group: 'default',
-      parameterId: 'width',
-      resource: admitted.bindings['/width']!.schema.resource,
       pointer: '/width',
       value: 101,
     },
@@ -100,7 +212,6 @@ it('rejects deleting the last group through the pure API', async () => {
     current,
     request: {
       requestId: 'delete',
-      draftGeneration: 0,
       fingerprint: 'delete',
       pressure: 'final',
       expected: current.identity,
@@ -117,15 +228,12 @@ it('names the missing group when a value edit addresses one that does not exist'
     current,
     request: {
       requestId: 'edit:absent',
-      draftGeneration: 0,
       fingerprint: 'absent',
       pressure: 'final',
       expected: current.identity,
       operation: {
         kind: 'native-value',
         group: 'metric',
-        parameterId: 'width',
-        resource: admitted.bindings['/width']!.schema.resource,
         pointer: '/width',
         value: 101,
       },
@@ -139,7 +247,6 @@ it('requires explicit source-unit confirmation before one record write', async (
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const request: ParameterSetRequest = {
     requestId: 'source-unit',
-    draftGeneration: 0,
     fingerprint: 'untrusted-label',
     pressure: 'final',
     expected: current.identity,
@@ -147,8 +254,6 @@ it('requires explicit source-unit confirmation before one record write', async (
       kind: 'source-unit',
       mode: 'preserve-size',
       group: 'default',
-      parameterId: 'width',
-      resource: admitted.bindings['/width']!.schema.resource,
       pointer: '/width',
       unit: 'cm',
       producerCapability: {
@@ -270,6 +375,114 @@ it('converts unit-bearing text once while retaining native numeric overrides', a
   });
 });
 
+it('should render a sourceUnits field as unit-bearing text and a units-only field as its number', () => {
+  expect(
+    parameterRecordInputValues({
+      activeGroup: 'default',
+      groups: {
+        default: {
+          values: { sourceLength: 20, labelledLength: 30 },
+          units: { '/sourceLength': 'in', '/labelledLength': 'cm' },
+          sourceUnits: { '/sourceLength': 'in' },
+        },
+        inactive: { values: { sourceLength: 99 } },
+      },
+    }),
+  ).toEqual({ sourceLength: '20 in', labelledLength: 30 });
+});
+
+it('should leave a null source-unit value unchanged', () => {
+  expect(
+    parameterRecordInputValues({
+      activeGroup: 'default',
+      groups: {
+        default: {
+          values: { width: null },
+          units: { '/width': 'in' },
+          sourceUnits: { '/width': 'in' },
+        },
+      },
+    }),
+  ).toEqual({ width: null });
+});
+
+it.each([
+  { name: 'in', storedUnit: '[in_i]', storedValue: 2, nativeUnit: 'mm', nativeValue: 50.8 },
+  { name: 'ft', storedUnit: '[ft_i]', storedValue: 2, nativeUnit: 'mm', nativeValue: 609.6 },
+  { name: 'cm', storedUnit: 'cm', storedValue: 2, nativeUnit: 'mm', nativeValue: 20 },
+  { name: 'm', storedUnit: 'm', storedValue: 2, nativeUnit: 'mm', nativeValue: 2000 },
+  {
+    name: 'point space',
+    storedUnit: '[degF]',
+    storedValue: 32,
+    nativeUnit: 'Cel',
+    nativeValue: Number.EPSILON * 256,
+  },
+  { name: 'safe integer', storedUnit: 'mm', storedValue: 5, nativeUnit: 'mm', nativeValue: 5, integer: true },
+])('should convert a stored value identically as text and as a number ($name)', async (testCase) => {
+  const admitted = await compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: `urn:test:record-input:${testCase.name}`,
+        $uses: ['JSONSchemaUnits'],
+        name: 'RecordInput',
+        type: 'object',
+        properties: {
+          value: { type: testCase.integer === true ? 'integer' : 'double', ucumUnit: testCase.nativeUnit },
+        },
+      },
+      defaults: { value: testCase.nativeValue },
+      ...(testCase.name === 'point space'
+        ? {
+            bindings: {
+              '/value': {
+                quantityKind: 'http://qudt.org/vocab/quantitykind/Temperature',
+                space: 'point',
+                reference: 'urn:taucad:reference:thermodynamic-absolute-zero',
+              },
+            },
+          }
+        : {}),
+    },
+    scope: { kind: 'source', ...target },
+    source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
+    dependency: digest,
+    middleware: digest,
+  });
+  const recordInput = parameterRecordInputValues({
+    activeGroup: 'default',
+    groups: {
+      default: {
+        values: { value: testCase.storedValue },
+        units: { '/value': testCase.storedUnit },
+        sourceUnits: { '/value': testCase.storedUnit },
+      },
+    },
+  });
+  const numeric = createQuantity({
+    value: testCase.storedValue,
+    representation: testCase.integer === true ? 'safe-integer' : 'binary64',
+    unit: testCase.storedUnit,
+    space: testCase.name === 'point space' ? 'point' : 'linear',
+    ...(testCase.name === 'point space'
+      ? {
+          kind: 'http://qudt.org/vocab/quantitykind/Temperature',
+          reference: 'urn:taucad:reference:thermodynamic-absolute-zero',
+        }
+      : {}),
+  });
+  if (numeric.status !== 'success') {
+    throw new Error(JSON.stringify(numeric.diagnostic));
+  }
+  const converted = convert({ quantity: numeric.value, to: testCase.nativeUnit });
+  if (converted.status !== 'success') {
+    throw new Error(JSON.stringify(converted.diagnostic));
+  }
+
+  expect(resolveParameterInputValues(admitted, recordInput)).toEqual({ value: converted.value.value });
+});
+
 it('writes arbitrary JSON property names without traversing object prototypes', async () => {
   const admitted = compileParameterManifest({
     declaration: {
@@ -337,7 +550,6 @@ it('writes arbitrary JSON property names without traversing object prototypes', 
   });
   const operation: ParameterSetRequest = {
     requestId: 'write-prototype-keys',
-    draftGeneration: 1,
     fingerprint: 'fingerprint:write-prototype-keys',
     expected: current.identity,
     pressure: 'final',
@@ -346,20 +558,14 @@ it('writes arbitrary JSON property names without traversing object prototypes', 
       group: 'default',
       edits: [
         {
-          parameterId: 'prototype-marker',
-          resource: 'urn:taucad:parameter-schema:root',
           pointer: '/__proto__/unitsAuditMarker',
           value: 42,
         },
         {
-          parameterId: 'constructor-value',
-          resource: 'urn:taucad:parameter-schema:root',
           pointer: '/constructor/prototype/value',
           value: 7,
         },
         {
-          parameterId: 'escaped-value',
-          resource: 'urn:taucad:parameter-schema:root',
           pointer: '/safe~1branch/~0leaf',
           value: 3,
         },
@@ -447,18 +653,15 @@ const fieldBase = (pointer: string, value: number): NonNullable<ParameterSetRequ
 });
 
 const fieldRequest = (
-  admitted: Awaited<ReturnType<typeof twoFieldManifest>>,
   input: Readonly<{
     requestId: string;
     pointer: string;
-    parameterId: string;
     value: number;
     expected: ParameterSetRequest['expected'];
     base?: ParameterSetRequest['base'];
   }>,
 ): ParameterSetRequest => ({
   requestId: input.requestId,
-  draftGeneration: 1,
   fingerprint: `${input.requestId}:label`,
   pressure: 'final',
   expected: input.expected,
@@ -466,22 +669,19 @@ const fieldRequest = (
   operation: {
     kind: 'native-value',
     group: 'default',
-    parameterId: input.parameterId,
-    resource: admitted.bindings[input.pointer]!.schema.resource,
     pointer: input.pointer,
     value: input.value,
   },
 });
 
-it('rebases a draft whose record revision moved only because another field changed', async () => {
+it('keeps another field change when this field still matches its captured base', async () => {
   const admitted = await twoFieldManifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:1',
       pointer: '/width',
-      parameterId: 'width',
       value: 101,
       expected: current.identity,
     }),
@@ -496,10 +696,9 @@ it('rebases a draft whose record revision moved only because another field chang
   // The height editor still holds the pre-edit revision and has never been refreshed.
   const second = planParameterChange({
     current: first.proposed,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'height:1',
       pointer: '/height',
-      parameterId: 'height',
       value: 15,
       expected: current.identity,
       base: fieldBase('/height', 14),
@@ -509,6 +708,18 @@ it('rebases a draft whose record revision moved only because another field chang
     throw new Error(JSON.stringify(second));
   }
   expect(second.proposed.entry.groups['default']?.values).toEqual({ width: 101, height: 15 });
+
+  const wrongBase = planParameterChange({
+    current: first.proposed,
+    request: fieldRequest({
+      requestId: 'height:wrong-base',
+      pointer: '/height',
+      value: 15,
+      expected: current.identity,
+      base: fieldBase('/height', 13),
+    }),
+  });
+  expect(wrongBase).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
 });
 
 it('refuses a rebase when the field the draft touches changed underneath it', async () => {
@@ -516,10 +727,9 @@ it('refuses a rebase when the field the draft touches changed underneath it', as
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:1',
       pointer: '/width',
-      parameterId: 'width',
       value: 101,
       expected: current.identity,
     }),
@@ -529,10 +739,9 @@ it('refuses a rebase when the field the draft touches changed underneath it', as
   }
   const conflicting = planParameterChange({
     current: first.proposed,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:2',
       pointer: '/width',
-      parameterId: 'width',
       value: 102,
       expected: current.identity,
       base: fieldBase('/width', 100),
@@ -546,10 +755,9 @@ it('never rebases across a manifest revision change', async () => {
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const stale = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'height:1',
       pointer: '/height',
-      parameterId: 'height',
       value: 15,
       expected: { ...current.identity, manifestRevision: `${current.identity.manifestRevision}-old` },
       base: fieldBase('/height', 14),
@@ -563,10 +771,9 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const first = planParameterChange({
     current,
-    request: fieldRequest(admitted, {
+    request: fieldRequest({
       requestId: 'width:1',
       pointer: '/width',
-      parameterId: 'width',
       value: 101,
       expected: current.identity,
     }),
@@ -579,10 +786,9 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
   const scoped: ReadonlyArray<readonly [string, ParameterSetRequest]> = [
     [
       'another pointer',
-      fieldRequest(admitted, {
+      fieldRequest({
         requestId: 'cross',
         pointer: '/width',
-        parameterId: 'width',
         value: 5,
         expected: stale,
         base: heightBase,
@@ -592,21 +798,13 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
       'a batch',
       {
         requestId: 'batch',
-        draftGeneration: 1,
         pressure: 'final',
         expected: stale,
         base: heightBase,
         operation: {
           kind: 'batch',
           group: 'default',
-          edits: [
-            {
-              parameterId: 'height',
-              resource: admitted.bindings['/height']!.schema.resource,
-              pointer: '/height',
-              value: 1,
-            },
-          ],
+          edits: [{ pointer: '/height', value: 1 }],
         },
       } as unknown as ParameterSetRequest,
     ],
@@ -614,7 +812,6 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
       'a group reset',
       {
         requestId: 'reset',
-        draftGeneration: 1,
         pressure: 'final',
         expected: stale,
         base: heightBase,
@@ -626,16 +823,15 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
     scoped.map(async ([label, request]) => [label, planParameterChange({ current: first.proposed, request })] as const),
   );
   for (const [label, plan] of plans) {
-    expect(plan.status, label).toBe('rejected');
+    expect(plan, label).toMatchObject({ status: 'rejected', code: 'INVALID_REQUEST' });
   }
 
   const inactive = planParameterChange({
     current: first.proposed,
     request: {
-      ...fieldRequest(admitted, {
+      ...fieldRequest({
         requestId: 'inactive',
         pointer: '/height',
-        parameterId: 'height',
         value: 15,
         expected: stale,
         base: heightBase,
@@ -643,33 +839,28 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
       operation: {
         kind: 'native-value',
         group: 'other',
-        parameterId: 'height',
-        resource: admitted.bindings['/height']!.schema.resource,
         pointer: '/height',
         value: 15,
       },
     },
   });
   // A base never reaches a group the record does not hold; the record itself refuses the edit.
-  expect(inactive).toMatchObject({ status: 'rejected' });
+  expect(inactive).toMatchObject({ status: 'rejected', code: 'GROUP_NOT_FOUND' });
 });
 
-it('keeps a source-unit choice across unrelated source edits and asks for rebind when its declaration changes', async () => {
+it('should refuse SOURCE_UNIT_REBIND_REQUIRED at admission for a marked claim whose producer no longer advertises the capability', async () => {
   const admitted = await manifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const plan = planParameterChange({
     current,
     request: {
       requestId: 'unit',
-      draftGeneration: 0,
       pressure: 'final',
       expected: current.identity,
       operation: {
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: admitted.bindings['/width']!.schema.resource,
         pointer: '/width',
         unit: 'cm',
         producerCapability: {
@@ -690,14 +881,11 @@ it('keeps a source-unit choice across unrelated source edits and asks for rebind
     current: later,
     request: {
       requestId: 'value',
-      draftGeneration: 1,
       pressure: 'final',
       expected: later.identity,
       operation: {
         kind: 'native-value',
         group: 'default',
-        parameterId: 'width',
-        resource: edited.bindings['/width']!.schema.resource,
         pointer: '/width',
         value: 12,
       },
@@ -713,18 +901,227 @@ it('keeps a source-unit choice across unrelated source edits and asks for rebind
       current: snapshot,
       request: {
         requestId: 'value:rebind',
-        draftGeneration: 1,
         pressure: 'final',
         expected: snapshot.identity,
         operation: {
           kind: 'native-value',
           group: 'default',
-          parameterId: 'width',
-          resource: undeclared.bindings['/width']!.schema.resource,
           pointer: '/width',
           value: 12,
         },
       },
     }),
   ).toMatchObject({ code: 'SOURCE_UNIT_REBIND_REQUIRED' });
+});
+
+const boundedManifest = async () =>
+  compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: 'urn:test:bounded-parameters',
+        $uses: ['JSONSchemaUnits'],
+        name: 'BoundedParameters',
+        type: 'object',
+        properties: { width: { type: 'double', minimum: 10, maximum: 1000 } },
+      },
+      defaults: { width: 100 },
+      bindings: {
+        '/width': {
+          parameterId: 'width',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+          space: 'linear',
+          unit: 'mm',
+          sourceUnitCapability: 'change-source-unit:preserve-size:v1',
+          provenance: {
+            unit: {
+              origin: 'inferred',
+              producer: 'fixture',
+              sourceRevision: digest,
+              profile: 'test-v1',
+              rule: 'width-unit',
+              evidence: '/width',
+            },
+          },
+        },
+      },
+    },
+    scope: { kind: 'source', ...target },
+    source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
+    dependency: digest,
+    middleware: digest,
+  });
+
+it('should convert a claim marked in sourceUnits and only relabel a units-only claim', async () => {
+  const admitted = await boundedManifest();
+  const binding = admitted.bindings['/width']!;
+
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', binding, {
+      values: { width: 10 },
+      units: { '/width': 'cm' },
+      sourceUnits: { '/width': 'cm' },
+    }),
+  ).toMatchObject({ unit: 'cm', constraints: { minimum: 1, maximum: 100 } });
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', binding, {
+      values: { width: 10 },
+      units: { '/width': 'cm' },
+    }),
+  ).toMatchObject({ unit: 'cm', constraints: { minimum: 10, maximum: 1000 } });
+});
+
+it('should restate bounds in the chosen unit on a capability field', async () => {
+  const admitted = await boundedManifest();
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', admitted.bindings['/width']!, {
+      values: {},
+      units: { '/width': 'cm' },
+      sourceUnits: { '/width': 'cm' },
+    }).constraints,
+  ).toEqual({ minimum: 1, maximum: 100 });
+});
+
+it('should keep bounds unchanged for a relabel', async () => {
+  const admitted = await boundedManifest();
+  expect(
+    resolveEffectiveParameterBinding(admitted, '/width', admitted.bindings['/width']!, {
+      values: {},
+      units: { '/width': 'cm' },
+    }).constraints,
+  ).toEqual({ minimum: 10, maximum: 1000 });
+});
+
+it('should remove the claim when the producer unit is chosen again', async () => {
+  const admitted = await boundedManifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const capability = {
+    producer: admitted.source.id,
+    sourceRevision: admitted.source.revision,
+    capability: 'change-source-unit:preserve-size:v1',
+  };
+  const chooseCentimetres = planParameterChange({
+    current,
+    request: {
+      requestId: 'centimetres',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: capability,
+      },
+    },
+  });
+  if (chooseCentimetres.status !== 'prepared') {
+    throw new Error(JSON.stringify(chooseCentimetres));
+  }
+  const chooseProducerUnit = planParameterChange({
+    current: chooseCentimetres.proposed,
+    request: {
+      requestId: 'millimetres',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        pointer: '/width',
+        unit: 'mm',
+        producerCapability: capability,
+      },
+    },
+  });
+  if (chooseProducerUnit.status !== 'prepared') {
+    throw new Error(JSON.stringify(chooseProducerUnit));
+  }
+  expect(chooseProducerUnit.proposed.entry.groups['default']).toEqual({ values: { width: 100 } });
+});
+
+it('should keep a renamed group in its display position', async () => {
+  const admitted = await manifest();
+  let current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  for (const group of ['middle', 'last']) {
+    const created = planParameterChange({
+      current,
+      request: {
+        requestId: `create:${group}`,
+        pressure: 'final',
+        expected: current.identity,
+        operation: { kind: 'create-group', group },
+      },
+    });
+    if (created.status !== 'prepared') {
+      throw new Error(JSON.stringify(created));
+    }
+    current = created.proposed;
+  }
+  const renamed = planParameterChange({
+    current,
+    request: {
+      requestId: 'rename',
+      pressure: 'final',
+      expected: current.identity,
+      operation: { kind: 'rename-group', group: 'middle', nextGroup: 'renamed' },
+    },
+  });
+  if (renamed.status !== 'prepared') {
+    throw new Error(JSON.stringify(renamed));
+  }
+  expect(Object.keys(renamed.proposed.entry.groups)).toEqual(['default', 'renamed', 'last']);
+});
+
+const missingGroupOperations: ReadonlyArray<ParameterSetRequest['operation']> = [
+  { kind: 'select-group', group: 'missing' },
+  { kind: 'reset-group', group: 'missing' },
+  { kind: 'replace-group-values', group: 'missing', values: {} },
+  {
+    kind: 'native-value',
+    group: 'missing',
+    pointer: '/width',
+    value: 1,
+  },
+  {
+    kind: 'unit-value',
+    group: 'missing',
+    pointer: '/width',
+    inputUnit: 'cm',
+    value: '1',
+  },
+  {
+    kind: 'batch',
+    group: 'missing',
+    edits: [{ pointer: '/width', value: 1 }],
+  },
+  {
+    kind: 'source-unit',
+    mode: 'preserve-size',
+    group: 'missing',
+    pointer: '/width',
+    unit: 'cm',
+    producerCapability: {
+      producer: 'fixture',
+      sourceRevision: digest,
+      capability: 'change-source-unit:preserve-size:v1',
+    },
+  },
+];
+
+it.each(missingGroupOperations)('should refuse GROUP_NOT_FOUND for in-place $kind', async (operation) => {
+  const admitted = await manifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  expect(
+    planParameterChange({
+      current,
+      request: {
+        requestId: `missing:${operation.kind}`,
+        pressure: 'final',
+        expected: current.identity,
+        operation,
+      },
+    }),
+  ).toMatchObject({ status: 'rejected', code: 'GROUP_NOT_FOUND' });
 });

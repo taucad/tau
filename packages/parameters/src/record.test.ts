@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { fileParameterEntrySchema } from '@taucad/types';
 import { readParameterRecord, requireParameterRecord, sameRecordBytes, serializeParameterRecord } from '#record.js';
 
 const encoder = new TextEncoder();
@@ -8,6 +9,34 @@ const record = {
 } as const;
 
 describe('parameter record persistence', () => {
+  it.each([
+    {
+      name: 'recordVersion alone',
+      entry: { ...record, recordVersion: 1 },
+      issue: { code: 'unrecognized_keys', path: [], keys: ['recordVersion'] },
+    },
+    {
+      name: 'an absent active group',
+      entry: { activeGroup: 'missing', groups: record.groups },
+      issue: { code: 'custom', path: ['activeGroup'] },
+    },
+    {
+      name: 'a non-pointer unit key',
+      entry: {
+        activeGroup: 'default',
+        groups: { default: { values: {}, units: { width: 'mm' } } },
+      },
+      issue: { code: 'invalid_key', path: ['groups', 'default', 'units', 'width'] },
+    },
+  ])('reports the exact schema issue for $name', ({ entry, issue }) => {
+    const result = fileParameterEntrySchema.safeParse(entry);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error('Expected the record schema to refuse the entry');
+    }
+    expect(result.error.issues[0]).toMatchObject(issue);
+  });
+
   it('classifies current and invalid bytes without changing them', () => {
     const cases = [
       { bytes: encoder.encode(JSON.stringify(record)), status: 'current' },

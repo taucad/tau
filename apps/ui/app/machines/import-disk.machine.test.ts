@@ -3,9 +3,10 @@ import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type * as FileReaderUtilities from '#utils/file-reader.utils.js';
 
 vi.mock('#utils/file-reader.utils.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#utils/file-reader.utils.js')>()),
+  ...(await importOriginal<typeof FileReaderUtilities>()),
   readFromFileList: vi.fn(async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]])),
   readFromDataTransfer: vi.fn(
     async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]]),
@@ -37,7 +38,7 @@ const repositoryFiles = new Map([
   ['.git/objects/ab/cdef', { filename: '.git/objects/ab/cdef', content: new Uint8Array([4]) }],
   ['.tau/binding.json', { filename: '.tau/binding.json', content: new Uint8Array([5]) }],
   ['node_modules/replicad/index.js', { filename: 'node_modules/replicad/index.js', content: new Uint8Array([6]) }],
-  /* Anchored, so a vendored repository is the user's own content. */
+  /* The control plane at any depth: a vendored repository goes with the project's own. */
   ['vendor/dep/.git/HEAD', { filename: 'vendor/dep/.git/HEAD', content: new Uint8Array([7]) }],
 ]);
 
@@ -148,11 +149,7 @@ describe('importDiskMachine', () => {
       actor.send({ type: 'processFiles', files: mock<FileList>() });
       await waitFor(actor, (s) => s.value === 'selectingMainFile');
 
-      expect([...actor.getSnapshot().context.files.keys()]).toStrictEqual([
-        'main.ts',
-        'src/part.ts',
-        'vendor/dep/.git/HEAD',
-      ]);
+      expect([...actor.getSnapshot().context.files.keys()]).toStrictEqual(['main.ts', 'src/part.ts']);
       actor.stop();
     });
 
@@ -166,7 +163,7 @@ describe('importDiskMachine', () => {
       actor.send({ type: 'processFiles', files: mock<FileList>() });
       await waitFor(actor, (s) => s.value === 'selectingMainFile');
 
-      expect(ready).toStrictEqual([['main.ts', 'src/part.ts', 'vendor/dep/.git/HEAD']]);
+      expect(ready).toStrictEqual([['main.ts', 'src/part.ts']]);
       actor.stop();
     });
   });

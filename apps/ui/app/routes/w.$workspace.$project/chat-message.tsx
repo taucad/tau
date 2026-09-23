@@ -15,7 +15,6 @@ import { memo, useCallback, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
 import type { DynamicToolUIPart } from 'ai';
-import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
@@ -38,6 +37,8 @@ import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
 import { CopyButton } from '#components/copy-button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -456,6 +457,10 @@ function renderAssistantPart(
   }
 }
 
+/** A trailing thought still open in the active group: its spinner is the group's only motion once collapsed (resting block R3). */
+const isStreamingThought = (part: MyMessagePart | undefined): boolean =>
+  part?.type === 'reasoning' && part.state === 'streaming' && part.text.trim() !== '';
+
 function renderActivityGroup(
   group: ActivityGroup,
   groupIndex: number,
@@ -485,7 +490,10 @@ function renderActivityGroup(
       summary={group.summary}
       icon={activityIcons[group.families[0] ?? 'other']}
       isActive={context.isActiveGroup}
-      hasActiveRows={context.isMessageActive && group.parts.some((part) => isActivityPartActive(part))}
+      hasActiveRows={
+        (context.isMessageActive && group.parts.some((part) => isActivityPartActive(part))) ||
+        (context.isActiveGroup && isStreamingThought(group.parts.at(-1)))
+      }
     >
       {renderActivityRows(group, context)}
     </ChatActivityGroup>
@@ -588,27 +596,35 @@ type ChatMessageProperties = {
 };
 
 /**
- * Who produced this message, when it was not Tau.
+ * When the message was created, as a relative label whose tooltip is the exact
+ * time. ponytail: computed at render, so "just now" ages only when the message
+ * re-renders; a shared minute ticker is the upgrade if that ever shows.
  *
- * Read from the durable usage record rather than from the composer's current
- * selection (V6): a transcript is history, and a chat whose selector has since
- * moved to another agent must still say which one actually answered. A Tau turn
- * shows nothing — the model selector above already names its model, and a
- * second badge on every message would be noise.
- *
- * @param properties - The message's projected usage parts.
- * @returns The badge, or nothing for a Tau turn.
+ * @param properties - The message's `metadata.createdAt`, epoch milliseconds.
+ * @returns The timestamp, or nothing for an unstamped message.
  */
-function ChatMessageAttribution({ usageParts }: { readonly usageParts: UsageData[] }): React.JSX.Element | undefined {
-  const attributed = usageParts.findLast((usage) => usage.agent !== undefined);
-  if (!attributed?.agent) {
+function ChatMessageTimestamp({
+  createdAt,
+}: {
+  readonly createdAt: number | undefined;
+}): React.JSX.Element | undefined {
+  if (createdAt === undefined) {
     return undefined;
   }
-  const name = externalAgentDisplayName(attributed.agent);
+  const date = new Date(createdAt);
   return (
-    <span className='px-1 text-xs text-muted-foreground'>
-      {attributed.model === 'unknown' ? name : `${name} · ${attributed.model}`}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <time
+          dateTime={date.toISOString()}
+          tabIndex={0}
+          className='mx-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
+        >
+          {formatRelativeTime(date)}
+        </time>
+      </TooltipTrigger>
+      <TooltipContent side='bottom'>{formatAbsoluteTime(date)}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -869,23 +885,38 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           </When>
           {footer}
         </div>
+        {/* Both roles get the same row: a request is as worth copying and dating
+            as an answer. Usage only ever exists on an answer, so it self-omits.
+            A request's row mirrors its bubble: right-aligned under it, with the
+            time to the left of the buttons — `flex-row-reverse` gives that order
+            from the same children, and the extra inset mirrors the answer row's
+            own column (the user column is mx-2 against the assistant's mx-4). */}
+        <div
+          className={cn(
+            'flex flex-row items-start justify-start text-muted-foreground transition-opacity duration-150',
+            'opacity-0',
+            'group-hover/chat-message:opacity-100',
+            'group-focus-within/chat-message:opacity-100',
+            // An answer's last paragraph carries the markdown viewer's own bottom
+            // margin, so its row cancels the column gap; a bubble has none, so a
+            // request's row keeps it above and gives it back below, where the
+            // indicator's margin and the turn-group gap already separate the
+            // request from the answer.
+            isUser ? 'mx-2 -mb-1 flex-row-reverse' : '-mt-2',
+          )}
+        >
+          <CopyButton
+            tooltipContentProperties={{ side: 'bottom' }}
+            size='icon'
+            getText={() => serializeMessage(displayMessage)}
+            tooltip='Copy message'
+            className='size-7'
+          />
+          {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
+          <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
+        </div>
         {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
         {isUser ? <ChatMessagePlanning messageId={messageId} className='-mt-1 ml-0' /> : null}
-        <When shouldRender={!isUser}>
-          <div className='mt-1 flex flex-row items-start justify-start text-muted-foreground'>
-            <CopyButton
-              tooltipContentProperties={{ side: 'bottom' }}
-              size='icon'
-              getText={() => serializeMessage(displayMessage)}
-              tooltip='Copy message'
-              className='size-7'
-            />
-            <div className='flex flex-row items-center justify-end gap-1'>
-              <ChatMessageAttribution usageParts={usageParts} />
-              {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
-            </div>
-          </div>
-        </When>
       </div>
     </article>
   );

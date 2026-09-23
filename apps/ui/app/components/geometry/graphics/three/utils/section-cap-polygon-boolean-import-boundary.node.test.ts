@@ -40,7 +40,7 @@ describe('section cap polygon boolean import boundaries', () => {
       }))
       .filter(
         ({ contents, relativePath }) =>
-          /from ['"](?:clipper2-ts|clipper2-wasm|clipper2-wasm\/|polygon-clipping)/.test(contents) &&
+          /from ["'](?:clipper2-ts|clipper2-wasm|clipper2-wasm\/|polygon-clipping)/.test(contents) &&
           !allowedDirectPackageImportFiles.has(relativePath) &&
           !relativePath.endsWith('.test.ts') &&
           !relativePath.endsWith('.test.tsx'),

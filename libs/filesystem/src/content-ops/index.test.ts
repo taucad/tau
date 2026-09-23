@@ -3,9 +3,10 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { composeView } from '#composed-view.js';
-import { archive, contents, walk } from '#content-ops/index.js';
+import { archive, contents, walk, withReadContentOps } from '#content-ops/index.js';
 import { classify, tauPathPolicy } from '#path-registry.js';
-import type { WalkEntry } from '#content-ops/index.js';
+import type { ComposedOverlayNode, ComposedViewOverlay } from '#composed-view.js';
+import type { ReadContentOps, WalkEntry } from '#content-ops/index.js';
 
 const decoder = new TextDecoder();
 
@@ -121,6 +122,37 @@ describe('archive', () => {
       'tau.json': tree['tau.json'],
     });
   });
+
+  /**
+   * The ceiling, not the tree, is what bounds an archive's resident bytes: the
+   * whole-tree map is gone, and the ZIP writer is never handed more than the
+   * ceiling plus the file that crossed it — however large the tree is.
+   */
+  it('should refuse an archive over its byte ceiling instead of reading the whole tree', async () => {
+    const kibibyte = 'x'.repeat(1024);
+    const provider = await seeded(
+      Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`f-${index}.txt`, kibibyte])),
+    );
+    let read = 0;
+    const counting = Object.assign(Object.create(provider) as MemoryProvider, {
+      readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+        const bytes = await provider.readFile(path);
+        read += bytes.byteLength;
+        return bytes;
+      },
+    });
+
+    await expect(archive(counting, '', { maxBytes: 4096 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
+    expect(read).toBeLessThanOrEqual(4096 + 1024);
+  });
+
+  it('should refuse an oversized file before reading its bytes', async () => {
+    const provider = await seeded({ 'oversized.bin': 'x'.repeat(8192) });
+    const readFile = vi.spyOn(provider, 'readFile');
+
+    await expect(archive(provider, '', { maxBytes: 1024 })).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' });
+    expect(readFile).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -170,5 +202,99 @@ describe('a caller-built versionedOnly admits', () => {
     });
 
     expect(Object.keys(files).sort()).toEqual(['.gitignore', '.tau/parameters/size.json', 'main.ts', 'tau.json']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// withReadContentOps — "the project" is the view's provenance, not a spelling
+// ---------------------------------------------------------------------------
+
+describe('withReadContentOps over a view carrying a system-skills overlay', () => {
+  const skillsRoot = '.agents/skills';
+  const unitRoot = `${skillsRoot}/demo`;
+  const bundled = '# Bundled skill\n';
+
+  /** The overlay's own tree, shaped as the skill-bundle producer builds it. */
+  const overlayNodes = new Map<string, ComposedOverlayNode>([
+    ['', { type: 'dir', children: ['.agents'] }],
+    ['.agents', { type: 'dir', children: ['skills'] }],
+    [skillsRoot, { type: 'dir', children: ['demo'] }],
+    [unitRoot, { type: 'dir', children: ['SKILL.md'] }],
+    [`${unitRoot}/SKILL.md`, { type: 'file', size: bundled.length, contentKind: 'text', lineCount: 2 }],
+  ]);
+
+  const project = {
+    'main.ts': 'export const part = 1;',
+    'tau.json': '{}',
+    '.agents/skills/mine/SKILL.md': '# My own skill\n',
+    'exports/part.stl': 'solid part',
+  } as const;
+
+  /** The whole-project export surface: a `'user'` view with the bundle overlay above it. */
+  const exportView = async (): Promise<{
+    view: ReturnType<typeof composeView> & ReadContentOps;
+    read: ReturnType<typeof vi.fn<ComposedViewOverlay['read']>>;
+  }> => {
+    const read = vi.fn<ComposedViewOverlay['read']>(async () => new TextEncoder().encode(bundled));
+    const overlay: ComposedViewOverlay = {
+      root: skillsRoot,
+      source: 'system-skills',
+      unit: (path) =>
+        path === unitRoot || path.startsWith(`${unitRoot}/`) ? { root: unitRoot, identity: 'skill:demo@1' } : undefined,
+      node: (path) => overlayNodes.get(path),
+      read,
+    };
+    const view = composeView(
+      { filesystem: await seeded(project) },
+      { consumer: 'user', policy: tauPathPolicy, overlays: [overlay] },
+    );
+    return { view: withReadContentOps(view, tauPathPolicy), read };
+  };
+
+  it('should omit every overlay entry from contents and archive', async () => {
+    const { view } = await exportView();
+
+    expect(Object.keys(await view.contents('')).sort()).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'exports/part.stl',
+      'main.ts',
+      'tau.json',
+    ]);
+    expect(Object.keys(await archived(await view.archive('')))).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'exports/part.stl',
+      'main.ts',
+      'tau.json',
+    ]);
+  });
+
+  it('should export exactly the versioned project files when versionedOnly is set', async () => {
+    const { view } = await exportView();
+
+    expect(Object.keys(await view.contents('', { versionedOnly: true })).sort()).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'main.ts',
+      'tau.json',
+    ]);
+    expect(Object.keys(await archived(await view.archive('', { versionedOnly: true })))).toEqual([
+      '.agents/skills/mine/SKILL.md',
+      'main.ts',
+      'tau.json',
+    ]);
+  });
+
+  it('should keep a project-authored skill the checkout holds beside the overlay', async () => {
+    const { view } = await exportView();
+    const files = await view.contents('', { versionedOnly: true });
+
+    expect(decoder.decode(files['.agents/skills/mine/SKILL.md'])).toBe(project['.agents/skills/mine/SKILL.md']);
+  });
+
+  it('should prune an overlay unit at its root without reading its bytes', async () => {
+    const { view, read } = await exportView();
+
+    await view.archive('', { versionedOnly: true });
+
+    expect(read).not.toHaveBeenCalled();
   });
 });

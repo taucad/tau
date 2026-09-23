@@ -154,6 +154,23 @@ export type SectionViewTestCapCompleteness =
       failure: Readonly<{ sourceKey: string; code: string; message: string }>;
     }>;
 
+export type SectionViewTestMeasureState = Readonly<{
+  isMeasureActive: boolean;
+  /** True while camera controls own the pointer; a measure gesture started here is discarded. */
+  cameraInteracting: boolean;
+  /** Meshes the measure tool has drawn into the scene: snap indicators, lines and labels. */
+  measurementUiMeshCount: number;
+  currentStart: readonly [number, number, number] | undefined;
+  measurements: ReadonlyArray<
+    Readonly<{
+      id: string;
+      distance: number;
+      startPoint: readonly [number, number, number];
+      endPoint: readonly [number, number, number];
+    }>
+  >;
+}>;
+
 export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
   /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
@@ -183,6 +200,8 @@ export type SectionViewTestBridgeApi = Readonly<{
   projectWorldPoint(point: readonly [number, number, number]): SectionViewTestProjectedPoint;
   projectSectionTransformHandle(axis: 'X' | 'Y' | 'Z'): SectionViewTestProjectedPoint | undefined;
   getModelHoverState(): SectionViewTestModelHoverState;
+  setMeasureActive(active: boolean): void;
+  getMeasureState(): SectionViewTestMeasureState;
   getSelectorLabels(): string[];
   getSectionHelperSummary(): SectionViewTestHelperSummary;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
@@ -239,6 +258,20 @@ export const getSectionViewTestControlState = ({
     controlsEnabled: typeof enabled === 'boolean' ? enabled : true,
     viewportGizmoLockActive: interactionLock.activeRef.current,
   };
+};
+
+export const getSectionViewTestMeasurementUiMeshCount = (scene: THREE.Object3D): number => {
+  const meshes = new Set<THREE.Object3D>();
+
+  for (const root of getSceneRenderRoots(scene as THREE.Scene)) {
+    root.traverse((child) => {
+      if (child instanceof THREE.Mesh && hasSceneTag(child, sceneTag.measurementUi)) {
+        meshes.add(child);
+      }
+    });
+  }
+
+  return meshes.size;
 };
 
 export const getSectionViewTestSelectorLabels = (scene: THREE.Object3D): string[] => {
@@ -783,6 +816,24 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           : undefined;
 
         return { activeUnitId, hoveredComponentId };
+      },
+      setMeasureActive(active) {
+        graphicsActor.send({ type: 'setMeasureActive', payload: active });
+      },
+      getMeasureState() {
+        const { context } = graphicsActor.getSnapshot();
+        return {
+          isMeasureActive: context.isMeasureActive,
+          cameraInteracting: context.cameraInteracting,
+          measurementUiMeshCount: getSectionViewTestMeasurementUiMeshCount(scene),
+          currentStart: context.currentMeasurementStart,
+          measurements: context.measurements.map(({ id, distance, startPoint, endPoint }) => ({
+            id,
+            distance,
+            startPoint,
+            endPoint,
+          })),
+        };
       },
       getSelectorLabels() {
         return getSectionViewTestSelectorLabels(scene);

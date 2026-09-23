@@ -11,7 +11,8 @@ import {
   connectPickedFolder,
   expectSignedIn,
   expectVisible,
-  openExecutionPicker,
+  openAgentList,
+  selectAgent,
   selectKernel,
   submitPrompt,
 } from '#support/scenario.js';
@@ -76,12 +77,9 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
 
     await selectKernel(page, 'OpenSCAD');
     await connectPickedFolder(session);
-    const rows = await openExecutionPicker(page);
-    expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
-    await page
-      .getByRole('option', { name: /^Codex/u })
-      .first()
-      .click();
+    const rows = await openAgentList(page);
+    expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
+    expect(await selectAgent(page, 'Codex')).toMatch(/Runs with your local Codex login/u);
 
     /* Run the first project turn through the fake ACP adapter. This fixture
      * tests the desktop utility boundary, so it must not depend on a separate

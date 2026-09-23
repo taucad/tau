@@ -23,7 +23,7 @@
  * @public
  */
 export function srgbToLinear(channel: number): number {
-  return channel <= 0.040_45 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
 }
 
 /**

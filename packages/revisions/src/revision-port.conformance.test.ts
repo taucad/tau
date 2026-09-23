@@ -228,7 +228,11 @@ const conformance = (adapter: Adapter): void => {
     it('generates the ignore file', async () => {
       const ignore = await harness.readGenerated(generatedIgnorePath);
       expect(ignore).toContain('/.tau/cache/');
-      expect(ignore).toContain('/.git/');
+      /* Unanchored and without a trailing slash: the control plane is excluded
+       * at any depth, as a directory or as a worktree pointer file (PP5, G0-8).
+       * The block's exact content is `workspace-config.test.ts`'s pin; this one
+       * is that the port wrote it. */
+      expect(ignore).toContain('**/.git');
       expect(ignore).toContain('node_modules/');
     });
 

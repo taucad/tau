@@ -17,6 +17,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
+import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
@@ -65,7 +66,55 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
    * lease before this resolves — a turn that cannot be placed is refused rather
    * than run unrecorded (I-EDIT).
    */
-  prepare: (chatId: string, options?: { readonly turnId?: string }) => Promise<PreparedChatWorkspace>;
+  prepare: (
+    chatId: string,
+    options?: {
+      readonly turnId?: string;
+      /**
+       * The run this lease belongs to, when the host already holds it.
+       *
+       * A continuation is a second attempt at the run the host is still
+       * carrying (I1), so its lease must be keyed by that run and not by a
+       * fresh one — `drop` refuses a release that does not name the claim's
+       * current run, and a claim minted under a new id could never be retired
+       * by the settlement of the run it actually fenced.
+       */
+      readonly runId?: string;
+    },
+  ) => Promise<PreparedChatWorkspace>;
+  /**
+   * This chat's workspace for an attach that drives nothing: no lease, no run.
+   *
+   * Open-time discovery (I7) has to build a host client before it knows what
+   * the log holds, and building it through {@link prepare} made every chat
+   * open `admitTurn` a run id the host had never admitted — the abandoned
+   * run's settlement then named *that* id and the durable log refused it
+   * (*"was never admitted in chat …"*), so the recorded `RUN_ABANDONED` never
+   * became a `turn.failed`. A claim this chat already holds is reused; nothing
+   * is minted, because minting belongs to the admission.
+   *
+   * `undefined` when no checkout can be named: there is no turn to attach to.
+   */
+  attachment: (chatId: string) => Promise<PreparedChatWorkspace | undefined>;
+  /**
+   * Say where this chat's next turn works.
+   *
+   * `target` is a checkout id, or the settling answer of the verb that makes
+   * one (*New branch*). A {@link prepare} that arrives while it settles waits
+   * for it — the person chose the branch before they pressed send, and the turn
+   * goes where they chose or is refused with the reason the branch was. The
+   * authority is the only writer of `Chat.checkoutId`, and it remembers the
+   * root a settling verb answered with so an attach made before the registry
+   * publishes that checkout still finds its files.
+   *
+   * Resolves once the placement has settled either way. A refused branch is
+   * already the toast channel's to report and `prepare`'s to refuse; a caller
+   * has nothing left to say about it, so it is not asked to catch anything.
+   */
+  placeChat: (
+    chatId: string,
+    target: string | Promise<Readonly<{ checkoutId: string; checkoutRoot?: string }>>,
+  ) => Promise<void>;
   /**
    * Say this chat exists to resolve one conflicted revision (S33, AC14).
    *
@@ -102,6 +151,18 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
   subscribe: (listener: () => void) => () => void;
   /** Point the workbench at the checkout this chat's turns land on (D10). */
   followChat: (chatId: string) => void;
+  /**
+   * Whether this project's revision root is connected, so a turn can be placed.
+   *
+   * `prepare` throws *"This project has no revision root"* until the file
+   * manager's worker exists, and the authority's identity changes the moment it
+   * does — so a consumer that only registers once must read this and register
+   * again. The open-time reattach did not: it composed before the worker was
+   * up, its `createClient` threw inside the resume the AI SDK swallows into
+   * `onError`, and the chat's durable log was never attached — so an abandoned
+   * run was never recorded and never settled (I4, I7).
+   */
+  ready: boolean;
 }>;
 
 const ChatWorkspaceAuthorityContext = createContext<ChatWorkspaceAuthorityContextValue | undefined>(undefined);
@@ -122,7 +183,8 @@ export type WorkspaceFileSystemBinding = {
    * own.
    */
   connection?: Promise<FileSystemBridgeProxy>;
-  openConnection?: () => Promise<FileSystemBridgeProxy>;
+  /** Opens a connection rooted at `root`, or at `rootDirectory` when none is named. */
+  openConnection?: (root?: string) => Promise<FileSystemBridgeProxy>;
 };
 
 /** Read the selected provider's capabilities from its rooted bridge hello. */
@@ -220,7 +282,7 @@ const connectRootedBridge = async (binding: WorkspaceFileSystemBinding): Promise
   if (binding.openConnection === undefined) {
     throw new Error('Rooted filesystem bridge is unavailable.');
   }
-  const request = binding.connection ?? binding.openConnection();
+  const request = binding.connection ?? binding.openConnection(binding.rootDirectory);
   binding.connection = request;
   try {
     const proxy = await request;
@@ -355,6 +417,48 @@ export const createPreparedWorkspaceFileSystems = async (
   };
 };
 
+/**
+ * Where one chat's work happens, as the composer needs it.
+ *
+ * The admission answers all of it; an attach knows only the first two, because
+ * it takes no lease and starts from no revision.
+ */
+type ChatPlacement = Readonly<{
+  checkoutId: string;
+  root: string;
+  baseRevisionId?: string;
+  runId?: string;
+  conflict?: Readonly<{ revisionId: string; paths: readonly string[] }>;
+}>;
+
+/**
+ * The checkout a settling branch verb answers with, and where its files are.
+ *
+ * The root it answers with is remembered because the projection that names it
+ * is published a beat later, and an attach made in between would otherwise find
+ * no files at all. A refusal is re-thrown in the page's own words: the verb
+ * rejects with the port's diagnostic ("Branch x is unborn; a checkout of it
+ * needs an explicit base revision."), and this rejection *is* what the turn's
+ * error card renders — so the code crosses and the table chooses the sentence
+ * (P4, Rule 1).
+ */
+const settlePlacement = async (
+  target: Promise<Readonly<{ checkoutId: string; checkoutRoot?: string }>>,
+  checkoutRoots: Map<string, string>,
+): Promise<string> => {
+  let created;
+  try {
+    created = await target;
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+    throw Object.assign(new Error(describeRevisionFailure('branch', code).description), { code });
+  }
+  if (created.checkoutRoot !== undefined && created.checkoutRoot !== '') {
+    checkoutRoots.set(created.checkoutId, created.checkoutRoot);
+  }
+  return created.checkoutId;
+};
+
 const createOpaqueId = (prefix: string): string => `${prefix}_${randomUuid()}`;
 
 const getHostId = (): string => {
@@ -376,6 +480,8 @@ type TurnRecord = {
   readonly prepared: PreparedChatWorkspace;
   /** The turn id the root's lease is keyed by; `turnCompleted` names this one. */
   readonly leaseTurnId: string;
+  /** The turn's own connection when it was placed off the bound root; closed with the claim. */
+  readonly binding?: WorkspaceFileSystemBinding;
 };
 
 type BrowserWorkspaceAuthorityState = {
@@ -395,6 +501,23 @@ type BrowserWorkspaceAuthorityState = {
    */
   readonly placing: Map<string, { readonly leaseTurnId: string; readonly runId: string }>;
   readonly pending: Map<string, Promise<PreparedChatWorkspace>>;
+  /**
+   * The checkout each chat is moving to, while that is still settling (P1).
+   *
+   * *New branch* used to write `Chat.checkoutId` from an effect once the branch
+   * row appeared, so a send fired in between leased the project instead. The
+   * intent is recorded the moment it is expressed, and an admission that
+   * arrives while it settles waits for it rather than racing it.
+   */
+  readonly placements: Map<string, Promise<string>>;
+  /**
+   * Where a checkout's files are, as the verb that made it answered (P2).
+   *
+   * The registry's projection is the authority on this, but it is published
+   * after the verb resolves, so a chat attached in that window had no root and
+   * no workspace. Consulted only when the projection names no such checkout.
+   */
+  readonly checkoutRoots: Map<string, string>;
   /** Chats seeded by *Ask chat to resolve*, by chat id (S33). */
   readonly conflicts: Map<
     string,
@@ -439,6 +562,8 @@ const getBrowserWorkspaceAuthority = (input: {
     turns: new Map(),
     placing: new Map(),
     pending: new Map(),
+    placements: new Map(),
+    checkoutRoots: new Map(),
     conflicts: new Map(),
     listeners: new Set(),
     hostId: getHostId(),
@@ -459,7 +584,7 @@ export const browserWorkspaceAuthorityTestApi = {
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const { projectId } = useProject();
   const fileManager = useFileManager();
-  const { getChat, invalidateProjectedChats } = useProjectManager();
+  const { getChat, patchChat, invalidateProjectedChats } = useProjectManager();
   const chatSessions = useChatSessionStore();
   const { rootDirectory, proxy: providerIdentity } = fileManager.fileManagerRef.getSnapshot().context;
   const state = getBrowserWorkspaceAuthority({
@@ -469,12 +594,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       rootDirectory,
       backend: fileManager.backendType,
       providerIdentity,
-      openConnection: async () => {
+      openConnection: async (root = rootDirectory) => {
         await fileManager.workspace.syncProjectRoots();
         const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
         const { openFileSystemBridge } = await waitForRootedBridgeOpener(fileManager.fileManagerRef);
         /* Trusted composition: the workspace authority serves the checkout (G6). */
-        const proxy = createFileSystemBridgeProxy(openFileSystemBridge(rootDirectory, 'working-copy'));
+        const proxy = createFileSystemBridgeProxy(openFileSystemBridge(root, 'working-copy'));
         await proxy.ready;
         return proxy;
       },
@@ -555,6 +680,27 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
     }
     return unsubscribe;
   }, [projectId, revisions]);
+  /* P2: the answered root bridges one gap — from the branch verb to the
+   * projection that names its checkout — and is the registry's to end. A
+   * projection that names the checkout no longer is the discard or the rename,
+   * so the remembered root is a path to nothing and is dropped rather than
+   * handed to the next attach. Only a published projection prunes: the entry
+   * written while none has landed is the one the gap exists for. */
+  useEffect(
+    () =>
+      revisions?.subscribe(() => {
+        const status = revisions.status();
+        if (status === undefined) {
+          return;
+        }
+        for (const checkoutId of state.checkoutRoots.keys()) {
+          if (checkoutId !== status.checkoutId && !status.branches.some((row) => row.checkoutId === checkoutId)) {
+            state.checkoutRoots.delete(checkoutId);
+          }
+        }
+      }),
+    [revisions, state],
+  );
   const notify = useCallback(() => {
     for (const listener of state.listeners) {
       listener();
@@ -569,39 +715,168 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
    * released the fresh admission, and the root answered that with a
    * `turn.failed` recorded under a run the host had not admitted yet. A
    * settlement names one run; if that is not the run this chat currently holds,
-   * the claim is somebody else's and the settlement is over.
+   * the claim is somebody else's and this release must not take it.
+   *
+   * It must not answer as though it had, either. Refusing with a `console.warn`
+   * told the settlement its lease was retired when it was still held, so no
+   * owner ever retried it and every later turn of that chat waited out the
+   * admission bound and died on *"still holding a workspace"* (T3-amp). The
+   * refusal is thrown, so the turn's settlement fails visibly and its owner can
+   * retry; only discovery, which reads the claim and then retires it, tolerates
+   * the rollover.
    */
   const drop = useCallback(
     (chatId: string, command: 'turnCompleted' | 'turnAbandoned', runId: string | undefined): void => {
       const current = state.turns.get(chatId) ?? state.placing.get(chatId);
       if (current === undefined) {
+        /* Nothing is held: a daemon-placed turn leases nothing here, and a
+         * claim already retired cannot be retired twice. */
         return;
       }
       const currentRunId = 'prepared' in current ? current.prepared.runId : current.runId;
       if (currentRunId !== runId) {
-        console.warn(
-          `[chatWorkspaceAuthority] ${command} for run ${runId ?? '(none)'} does not name chat ${chatId}'s current run ${currentRunId ?? '(none)'}; the lease is left held.`,
+        throw Object.assign(
+          new Error(
+            `${command} for run ${runId ?? '(none)'} does not name chat ${chatId}'s current run ${currentRunId ?? '(none)'}.`,
+          ),
+          { code: 'CHAT_CLAIM_RUN_MISMATCH' },
         );
-        return;
       }
       state.turns.delete(chatId);
       state.placing.delete(chatId);
+      if ('binding' in current) {
+        disposeConnection(current.binding?.connection);
+      }
       revisions?.send({ command, turnId: current.leaseTurnId });
       notify();
     },
     [notify, revisions, state],
   );
 
+  /**
+   * The one workspace composer: a placement in, the filesystem a host client is
+   * handed out (P2).
+   *
+   * `prepare` and `attachment` built this twice with different chains, and only
+   * `prepare` knew the placement's root — so a chat on a branch was attached to
+   * the project's files. They are the same object built from the same facts; an
+   * attach is a prepare with no lease.
+   */
+  const composeWorkspace = useCallback(
+    async (
+      chatId: string,
+      placement: ChatPlacement,
+    ): Promise<{ readonly prepared: PreparedChatWorkspace; readonly binding?: WorkspaceFileSystemBinding }> => {
+      if (placement.root === '') {
+        /* A placement with no root is not a placement. `''` is not the
+         * project's root either — it is the authority's own origin, every
+         * project's files at once — so it is refused here rather than opened. */
+        throw Object.assign(new Error(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description), {
+          code: 'PLACEMENT_UNROOTED',
+        });
+      }
+      await ensureProviderCapabilities(state.binding);
+      /* The bound connection is rooted wherever the workbench stood when it
+       * opened, so work placed on a branch was handed the project's files,
+       * wrote there, and left the branch's own cut nothing to record. */
+      const binding: WorkspaceFileSystemBinding | undefined =
+        placement.root === state.binding.rootDirectory
+          ? undefined
+          : { ...state.binding, rootDirectory: placement.root, connection: undefined };
+      const preparedFileSystems = await createPreparedWorkspaceFileSystems(
+        binding === undefined ? state.rootedFileSystem : createRootedBridgeFileSystem(binding),
+      );
+      const prepared: PreparedChatWorkspace = Object.freeze({
+        chatId,
+        projectId,
+        ...(placement.runId === undefined ? {} : { runId: placement.runId }),
+        execution: Object.freeze({
+          hostId: state.hostId,
+          workspaceId: placement.checkoutId,
+          ...(placement.baseRevisionId === undefined || placement.baseRevisionId === ''
+            ? {}
+            : { baseRevisionId: placement.baseRevisionId }),
+          ...(placement.conflict === undefined
+            ? {}
+            : {
+                conflict: {
+                  revisionId: placement.conflict.revisionId,
+                  paths: [...placement.conflict.paths],
+                },
+              }),
+        }),
+        ...preparedFileSystems,
+        admitted: false,
+        reclaimed: false,
+        cancelled: false,
+      });
+      return binding === undefined ? { prepared } : { prepared, binding };
+    },
+    [projectId, state],
+  );
+
+  const placeChat = useCallback(
+    async (
+      chatId: string,
+      target: string | Promise<Readonly<{ checkoutId: string; checkoutRoot?: string }>>,
+    ): Promise<void> => {
+      const settling =
+        typeof target === 'string' ? Promise.resolve(target) : settlePlacement(target, state.checkoutRoots);
+      /* Recorded before it settles: an admission racing it has to wait for it
+       * rather than lease the checkout the record still names (Q2). */
+      state.placements.set(chatId, settling);
+      try {
+        /* The verb's refusal has two owners already (the toast channel and the
+         * next `prepare`); only a record write that fails is this call's own. */
+        const checkoutId = await settling.catch(() => undefined);
+        /* A later `placeChat` for this chat has replaced this one: the person
+         * moved on while it settled, and writing now would put the record back
+         * on the branch they moved away from. */
+        if (checkoutId !== undefined && state.placements.get(chatId) === settling) {
+          await patchChat(chatId, 'checkoutId', checkoutId);
+        }
+      } finally {
+        /* Only this placement's own entry: a later `placeChat` for the same
+         * chat has replaced it, and that one is the current intent. */
+        if (state.placements.get(chatId) === settling) {
+          state.placements.delete(chatId);
+        }
+      }
+    },
+    [patchChat, state],
+  );
+
   const prepare = useCallback(
-    async (chatId: string, options?: { readonly turnId?: string }): Promise<PreparedChatWorkspace> => {
+    async (
+      chatId: string,
+      options?: { readonly turnId?: string; readonly runId?: string },
+    ): Promise<PreparedChatWorkspace> => {
       const current = state.turns.get(chatId);
       if (current) {
+        /* The claim this chat holds *is* the turn's, so reusing it is right —
+         * unless the caller named a run and this claim is not it. Handing back
+         * a claim keyed by a different run would fence the continuation's
+         * writes under the wrong id, and its settlement would then name a run
+         * `drop` is not holding. Refused rather than mis-keyed: the admission
+         * routes this to the chat's banner. */
+        if (options?.runId !== undefined && current.prepared.runId !== options.runId) {
+          throw Object.assign(
+            new Error(
+              `Chat ${chatId} is still holding a workspace for run ${current.prepared.runId ?? '(none)'}, so run ${options.runId} cannot continue over it.`,
+            ),
+            { code: 'CHAT_CLAIM_RUN_MISMATCH' },
+          );
+        }
         return current.prepared;
       }
       const inFlight = state.pending.get(chatId);
       if (inFlight) {
         return inFlight;
       }
+      /* Read before the first await: a placement settles — or is refused —
+       * while this admission is still starting, and the entry is gone by the
+       * time an awaited read would reach it. It is still this turn's. */
+      const settlingPlacement = state.placements.get(chatId);
       const operation = (async (): Promise<PreparedChatWorkspace> => {
         if (revisions === undefined) {
           throw new Error('This project has no revision root; the file manager is not connected.');
@@ -609,46 +884,37 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         await ensureProviderCapabilities(state.binding);
         /* The lease key is also the host request id. Mint it before admission
          * so the revision settlement and chat lifecycle can only name the same
-         * run. */
-        const runId = generatePrefixedId(idPrefix.run);
+         * run — unless the caller is continuing a run the host already holds,
+         * whose id this lease has to carry instead. */
+        const runId = options?.runId ?? generatePrefixedId(idPrefix.run);
         const leaseTurnId = options?.turnId ?? runId;
         state.placing.set(chatId, { leaseTurnId, runId });
         const conflict = state.conflicts.get(chatId);
+        /* P1: a placement still settling *is* this chat's checkout — the person
+         * chose the branch before they pressed send, so the admission waits for
+         * it, and its refusal is the turn's refusal (E2). The resolved id is
+         * read from here rather than from the record: `placeChat`'s own write
+         * has not landed by the time this resumes. */
+        const placed = await settlingPlacement;
         /* Read at call time through the manager's own accessor. Deriving it
          * from the `useChats` query's `data` made `prepare` — and the whole
          * context value — a new identity on every chats refetch, and every
          * message persist invalidates that query: effects documented as
          * mount-only re-ran mid-dispatch. */
         const chat = await getChat(chatId);
-        const checkoutId = conflict?.checkoutId ?? chat?.checkoutId;
+        const checkoutId = placed ?? conflict?.checkoutId ?? chat?.checkoutId;
         const placement = await revisions.admitTurn({
           turnId: leaseTurnId,
           chatId,
           runId,
           ...(checkoutId === undefined ? {} : { checkoutId }),
         });
-        const preparedFileSystems = await createPreparedWorkspaceFileSystems(state.rootedFileSystem);
-        const prepared: PreparedChatWorkspace = Object.freeze({
-          chatId,
-          projectId,
+        const { prepared, binding } = await composeWorkspace(chatId, {
+          checkoutId: placement.checkoutId,
+          root: placement.root,
+          baseRevisionId: placement.baseRevisionId,
           runId,
-          execution: Object.freeze({
-            hostId: state.hostId,
-            workspaceId: placement.checkoutId,
-            ...(placement.baseRevisionId === '' ? {} : { baseRevisionId: placement.baseRevisionId }),
-            ...(conflict === undefined
-              ? {}
-              : {
-                  conflict: {
-                    revisionId: conflict.revisionId,
-                    paths: [...conflict.paths],
-                  },
-                }),
-          }),
-          ...preparedFileSystems,
-          admitted: false,
-          reclaimed: false,
-          cancelled: false,
+          ...(conflict === undefined ? {} : { conflict }),
         });
         /* The completion may already have arrived and dropped the placement; a
          * turn nobody is waiting for any more is not re-recorded here. */
@@ -656,7 +922,11 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
           return prepared;
         }
         state.placing.delete(chatId);
-        state.turns.set(chatId, { prepared, leaseTurnId });
+        state.turns.set(chatId, {
+          prepared,
+          leaseTurnId,
+          ...(binding === undefined ? {} : { binding }),
+        });
         notify();
         return prepared;
       })();
@@ -667,7 +937,58 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         state.pending.delete(chatId);
       }
     },
-    [getChat, notify, projectId, revisions, state],
+    [composeWorkspace, getChat, notify, revisions, state],
+  );
+
+  const attachment = useCallback(
+    async (chatId: string): Promise<PreparedChatWorkspace | undefined> => {
+      const current = state.turns.get(chatId);
+      if (current) {
+        return current.prepared;
+      }
+      /* Mirrors `prepare`'s own reuse: the claim is recorded only once
+       * `admitTurn` answers, so an attach composed while the placement is still
+       * in flight would fall through to the chain below and hand the turn's own
+       * worker a checkout that is not the turn's. */
+      const inFlight = state.pending.get(chatId);
+      if (inFlight) {
+        return inFlight;
+      }
+      const placed = await state.placements.get(chatId);
+      const chat = await getChat(chatId);
+      /* The checkout this chat's turns land on, in the order `prepare` itself
+       * resolves it — minus the `admitTurn` that would lease it. The root's own
+       * checkout is the last resort: a chat with no turn yet has no checkout of
+       * its own, and a project with no checkout at all has no log to attach to. */
+      const status = revisions?.status();
+      const checkoutId = placed ?? state.conflicts.get(chatId)?.checkoutId ?? chat?.checkoutId ?? status?.checkoutId;
+      if (checkoutId === undefined) {
+        return undefined;
+      }
+      /* P2: where that checkout's files are is the registry's own answer —
+       * its branch row, or `checkoutRoot` when the checkout is the selected one
+       * and no branch names it yet — never the workbench's bound root, which
+       * handed every chat the project's tree whatever checkout it named. A
+       * checkout the registry no longer names has no files to attach to, which
+       * is the same answer as no checkout at all. */
+      const root =
+        (checkoutId === status?.checkoutId
+          ? status.checkoutRoot
+          : status?.branches.find((row) => row.checkoutId === checkoutId)?.checkoutRoot) ??
+        state.checkoutRoots.get(checkoutId);
+      if (root === undefined) {
+        return undefined;
+      }
+      /* The attach's own binding is not kept: it drives nothing and is never
+       * dropped, and its connection opens lazily on the first filesystem call,
+       * which the open-time client does not make — it reads capabilities from
+       * the port's hello and the chat's log over the project-root bridge. A
+       * caller that does read a branch's files through an attach needs a close
+       * hook; there is none to hang one on today. */
+      const { prepared } = await composeWorkspace(chatId, { checkoutId, root });
+      return prepared;
+    },
+    [composeWorkspace, getChat, revisions, state],
   );
 
   const update = useCallback(
@@ -713,8 +1034,22 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   const value = useMemo<ChatWorkspaceAuthorityContextValue>(
     () => ({
       prepare,
+      attachment,
+      placeChat,
       bindConflict: (chatId, conflict) => {
         state.conflicts.set(chatId, conflict);
+        if (conflict.checkoutId !== undefined) {
+          /* The conflict's terms ride one turn, but its checkout is durable:
+           * seeding wrote only the in-memory map, so a reload dropped the chat
+           * onto the live checkout. The authority is the one writer of that
+           * field, so this goes through `placeChat` — which also makes a
+           * `prepare` racing the seed wait for it. */
+          // async-iife: bootstrap -- the seed has nothing to await; a record write that fails is reported, not surfaced.
+          // oxlint-disable-next-line promise/prefer-await-to-then -- same reason: the settlement belongs to the next `prepare`.
+          void placeChat(chatId, conflict.checkoutId).catch((error: unknown) => {
+            console.error('[chatWorkspaceAuthority] a seeded chat’s checkout was not recorded', error);
+          });
+        }
       },
       reclaim: async (chatId) => state.turns.get(chatId)?.prepared,
       /* Nothing durable to reclaim: a turn this document did not place holds a
@@ -742,15 +1077,24 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         drop(chatId, 'turnAbandoned', runId);
       },
       retireClaim: async (chatId, runId) => {
-        drop(chatId, 'turnAbandoned', runId);
+        try {
+          drop(chatId, 'turnAbandoned', runId);
+        } catch (error) {
+          /* Discovery reads `reclaimAll` and then retires, so the claim can
+           * roll over in between — and a claim that rolled over is a live turn
+           * this retirement must not touch. Nothing is leaked by leaving it:
+           * the turn that holds it settles it. */
+          console.warn('[chatWorkspaceAuthority] a claim rolled over before discovery could retire it', error);
+        }
       },
       subscribe: (listener) => {
         state.listeners.add(listener);
         return () => state.listeners.delete(listener);
       },
       followChat: (chatId) => revisions?.send({ command: 'followChat', chatId }),
+      ready: revisions !== undefined,
     }),
-    [drop, prepare, revisions, state, update],
+    [attachment, drop, placeChat, prepare, revisions, state, update],
   );
   return <ChatWorkspaceAuthorityContext.Provider value={value}>{children}</ChatWorkspaceAuthorityContext.Provider>;
 }

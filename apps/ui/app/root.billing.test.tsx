@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { usePaymentActionReturn } from '#root-layout.js';
+import { useCloudPaymentActionReturn } from '#cloud/root-billing.js';
 
 const payment = vi.hoisted(() => ({
   getPaymentAction: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock('#providers/financial-session-provider.js', () => ({
 }));
 
 function Harness(): React.JSX.Element {
-  usePaymentActionReturn();
+  useCloudPaymentActionReturn();
   return <div />;
 }
 

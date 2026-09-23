@@ -29,21 +29,20 @@ export type ParameterSourceUnitCapability = Readonly<{
   capability: string;
 }>;
 
-/** Supported headless parameter operation intents. @public */
+/**
+ * Supported headless parameter operation intents. A field is named by `group` plus `pointer` under
+ * the manifest revision the request declares; nothing else identifies it. @public
+ */
 export type ParameterSetOperation =
   | Readonly<{
       kind: 'native-value';
       group: string;
-      parameterId: string;
-      resource: string;
       pointer: string;
       value: JSONValue;
     }>
   | Readonly<{
       kind: 'unit-value';
       group: string;
-      parameterId: string;
-      resource: string;
       pointer: string;
       inputUnit: string;
       value: string;
@@ -53,8 +52,6 @@ export type ParameterSetOperation =
       group: string;
       edits: ReadonlyArray<
         Readonly<{
-          parameterId: string;
-          resource: string;
           pointer: string;
           value: JSONValue;
           inputUnit?: string;
@@ -77,15 +74,13 @@ export type ParameterSetOperation =
   | Readonly<{ kind: 'rename-group'; group: string; nextGroup: string }>
   | Readonly<{
       kind: 'source-unit';
-      mode: 'preserve-size' | 'reinterpret';
+      mode: 'preserve-size';
       group: string;
-      parameterId: string;
-      resource: string;
       pointer: string;
       unit: string;
+      /** The producer and revision sanctioning the rebind; it pins the producer, not the field. */
       producerCapability: ParameterSourceUnitCapability;
-    }>
-  | Readonly<{ kind: 'display-preference'; parameterId: string; unit: string }>;
+    }>;
 
 /**
  * Field-scoped freshness evidence for one draft: the value and effective binding the editor was
@@ -107,7 +102,6 @@ export type ParameterSetRequestBase = Readonly<{
 /** Correlated request accepted by the parameter-set owner. @public */
 export type ParameterSetRequest = Readonly<{
   requestId: string;
-  draftGeneration: number;
   /** Caller correlation label; it never reaches the record. */
   fingerprint?: string;
   /** The manifest this request was built from; the planner refuses it once the live one differs. */
@@ -131,19 +125,6 @@ export type ParameterSetPlanResult =
       producerCapability: ParameterSourceUnitCapability;
     }>
   | Readonly<{ status: 'rejected'; code: string; message: string }>;
-
-/** Result returned by the named checked-apply effect. @public */
-export type ParameterSetApplyResult =
-  | Readonly<{
-      status: 'applied' | 'unchanged';
-      current: ParameterSetAuthoritySnapshot;
-    }>
-  | Readonly<{
-      status: 'conflict';
-      code: 'STALE_MANIFEST';
-      current: ParameterSetAuthoritySnapshot;
-      conflicts: readonly string[];
-    }>;
 
 /** Stable public settlement vocabulary for every submitted request. @public */
 export type ParameterSetOutcome =

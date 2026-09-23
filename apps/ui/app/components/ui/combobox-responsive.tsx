@@ -118,6 +118,16 @@ export function ComboBoxResponsive<T>({
   const isMobile = useIsMobile();
   const selectionMadeReference = React.useRef(false);
   const pointerDismissedReference = React.useRef(false);
+  const closeFocusReference = React.useRef(false);
+  /* `onClose` runs where the surface hands focus back: called on the close
+     itself, the popover or drawer would move focus to its trigger right after. */
+  const handleCloseAutoFocus = (event: Event): void => {
+    if (closeFocusReference.current) {
+      closeFocusReference.current = false;
+      event.preventDefault();
+      onClose?.();
+    }
+  };
 
   const setOpen = React.useCallback(
     (next: boolean) => {
@@ -146,7 +156,7 @@ export function ComboBoxResponsive<T>({
     // Pointer dismissal owns the next focus target. Refocusing the composer here
     // races a sibling picker opening from the same click and closes it again.
     if (!isOpen && !selectionMadeReference.current && !pointerDismissedReference.current && open) {
-      onClose?.();
+      closeFocusReference.current = onClose !== undefined;
     }
 
     // Reset the selection flag when opening
@@ -170,6 +180,10 @@ export function ComboBoxResponsive<T>({
           {...properties}
           {...drawerProperties}
           className={cn('[&_[data-slot=command]]:bg-transparent', className, drawerProperties?.className)}
+          onCloseAutoFocus={(event) => {
+            drawerProperties?.onCloseAutoFocus?.(event);
+            handleCloseAutoFocus(event);
+          }}
         >
           <DrawerTitle className='sr-only' id='drawer-title'>
             {title}
@@ -213,6 +227,10 @@ export function ComboBoxResponsive<T>({
         onPointerDownOutside={(event) => {
           popoverProperties?.onPointerDownOutside?.(event);
           pointerDismissedReference.current = !event.defaultPrevented;
+        }}
+        onCloseAutoFocus={(event) => {
+          popoverProperties?.onCloseAutoFocus?.(event);
+          handleCloseAutoFocus(event);
         }}
       >
         <>

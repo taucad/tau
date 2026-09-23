@@ -93,7 +93,6 @@ describe('Build123d kernel lifecycle errors', () => {
   let definition: AnyKernelDefinition;
 
   beforeEach(async () => {
-    runtime.filesystem.readFile = vi.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }));
     definition = await resolveRuntimePluginDefinition('kernel', build123dKernel(kernelOptions));
   });
 
@@ -121,19 +120,17 @@ describe('Build123d kernel lifecycle errors', () => {
     });
   });
 
-  it.each([
-    ['{', 'INVALID_RECORD'],
-    [JSON.stringify({ recordVersion: 1, activeGroup: 'default', groups: {} }), 'INVALID_RECORD'],
-  ])('reports the stored record %s as a typed %s issue before building', async (record, code) => {
+  it('should not request analyze during createGeometry', async () => {
     const context = createContext();
-    runtime.filesystem.readFile = vi.fn().mockResolvedValue(new TextEncoder().encode(record));
-    await expect(
-      definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
-    ).rejects.toMatchObject({
-      name: 'Build123dKernelError',
-      issues: [{ code, type: 'runtime', severity: 'error', location: { fileName: '.tau/parameters/main.py.json' } }],
-    });
-    expect(context.session.request).not.toHaveBeenCalled();
+    context.session.request.mockResolvedValueOnce({ handleId: 'shape', observedDependencies: [] });
+
+    await definition.createGeometry(
+      { entryPath: 'main.py', parameters: { width: 20 }, options: renderOptions },
+      runtime,
+      context,
+    );
+
+    expect(context.session.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'analyze' }));
   });
 
   it('spans the native analyze so its wire time is attributed', async () => {

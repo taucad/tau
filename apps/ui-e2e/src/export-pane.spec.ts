@@ -154,3 +154,29 @@ test('keeps PNG composite options semantic, valid, and independently editable', 
 
   await target.screenshot(panel, 'export-pane-png-composite-options.png');
 });
+
+test('mounts and exports a transcoded mesh route with its options in declared units', async () => {
+  await target.emulateColorScheme('light');
+  await target.setViewport({ width: 1440, height: 900 });
+  await openSeededProject();
+  await openCommand('Export');
+
+  const panel = selectors.getByCss('[data-slot="export-panel-body"]');
+  await target.expectVisible(panel, 15_000);
+  // Replicad has no native 3MF writer, so 3MF is the assimp route whose edge pins the glTF source options.
+  await selectFormat('3MF');
+  await openOptions('3MF');
+  await target.click(panel.getByRole('button', { name: 'Group: Tessellation' }), { timeout: 15_000 });
+
+  const linearTolerance = panel.getByLabelText('Input for Linear Tolerance').first();
+  await target.expectVisible(linearTolerance, 15_000);
+  await target.expectCount(panel.getByText('Loading checked settings…'), 0);
+  await target.expectCount(selectors.getByText(/could not be prepared|INVALID_SCHEMA/u), 0);
+  expect(await fieldUnit(linearTolerance)).toBe('mm');
+  expect(await fieldUnit(panel.getByLabelText('Input for Angular Tolerance').first())).toBe('°');
+
+  const file = await target.download(panel.getByRole('button', { name: /^Export 3MF$/iu }));
+  expect(file.suggestedFilename).toMatch(/\.3mf$/u);
+  expect(file.base64.length).toBeGreaterThan(0);
+  await target.screenshot(panel, 'export-pane-3mf-transcoded-units.png');
+});

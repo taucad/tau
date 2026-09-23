@@ -18,13 +18,14 @@ import { Label } from '@taucad/ui/components/label';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 
 export type NewApiKeyDialogProps = {
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors Radix Dialog's controlled `open` prop API.
   open: boolean;
   onOpenChange: (open: boolean) => void;
   name: string | undefined;
   secretKey: string | undefined;
 };
 
-export function NewApiKeyDialog({ open, onOpenChange, name, secretKey }: NewApiKeyDialogProps) {
+export function NewApiKeyDialog({ open, onOpenChange, name, secretKey }: NewApiKeyDialogProps): React.JSX.Element {
   const { localization } = useAuth();
   const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin);
 

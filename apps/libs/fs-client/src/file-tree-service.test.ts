@@ -9,6 +9,7 @@ import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directo
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { createComposedViewClient } from '#composed-view-client.js';
 import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
+import type { WorkspaceAuthorityClient } from '#file-system-client.js';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
@@ -54,19 +55,21 @@ const skillOverlay = (): ComposedViewOverlay => {
 };
 
 /**
- * The production client: in-root reads through one composed view, everything
- * else on the authority.
+ * The production client: in-root reads through one composed view, the
+ * dependency mount through its own (W11), and topology on the authority.
  */
-const createComposedProxy = async (): Promise<ComposedViewClient> => {
+const createComposedProxy = async (dependencies?: ComposedViewProxy): Promise<ComposedViewClient> => {
   const provider = new MemoryProvider();
   await provider.writeFile('main.ts', 'export {};\n');
   return createComposedViewClient({
-    workspace: mock<ComposedViewClient>({
-      readDirectory: vi.fn().mockResolvedValue([]),
-      readdir: vi.fn().mockResolvedValue([]),
-      stat: vi.fn().mockResolvedValue(textStat()),
-      getDirectoryStat: vi.fn().mockResolvedValue([]),
-    }),
+    workspace: mock<WorkspaceAuthorityClient>(),
+    dependencies:
+      dependencies ??
+      mock<ComposedViewProxy>({
+        readdirWithStats: vi.fn().mockResolvedValue([]),
+        readdir: vi.fn().mockResolvedValue([]),
+        stat: vi.fn().mockResolvedValue(textStat()),
+      }),
     /* The rooted connection also archives a subtree (charter D2) and serves the
      * mutation pipeline's porcelain (D4); this harness reads rows. */
     view: Object.assign(
@@ -232,6 +235,78 @@ describe('FileTreeService composed-view provenance (north star W2)', () => {
       });
     } finally {
       harness.disposeChannel();
+    }
+  });
+});
+
+/**
+ * The dependency mount's own rooted view: it lives outside every checkout, so
+ * the checkout's view has never heard of it, and since W11 it is its own root
+ * rather than an authority-global read. Its paths are mount-relative.
+ */
+const dependencyMountView = (): ComposedViewProxy => {
+  const rows = new Map<string, Array<{ name: string } & FileStat>>([
+    ['', [{ name: 'three', type: 'dir', size: 0, mtimeMs: 0 }]],
+    ['three', [{ name: 'index.d.ts', ...textStat() }]],
+  ]);
+  return mock<ComposedViewProxy>({
+    readdirWithStats: vi.fn(async (path: string) => rows.get(path) ?? []),
+    readdir: vi.fn().mockResolvedValue([]),
+    stat: vi.fn().mockResolvedValue({ type: 'dir', size: 0, mtimeMs: 0 }),
+  });
+};
+
+/*
+ * Finding 4: a root listing is authoritative over the root's children, so the
+ * dependency mount has to be in it or every re-list deletes the row — and with
+ * the row goes the subtree the eager listing loaded.
+ */
+describe('FileTreeService dependency mount row (close-out W3)', () => {
+  it('should keep the dependency mount and its loaded children across a root refresh', async () => {
+    vi.useFakeTimers();
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: await createComposedProxy(dependencyMountView()),
+    });
+    try {
+      const root = await tree.listDirectory('');
+      expect(root.map(({ name }) => name)).toContain('node_modules');
+      await tree.listDirectory('node_modules');
+      expect(tree.getTreeSnapshot().get('node_modules')?.provenance).toMatchObject({ source: 'dependencies' });
+
+      emitFileChanged({ type: 'fileWritten', path: 'added.ts', backend: 'indexeddb' });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);
+      expect(tree.getTreeSnapshot().has('node_modules/three')).toBe(true);
+    } finally {
+      tree.dispose();
+      disposeChannel();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should keep the dependency mount and its loaded children across a backend resync', async () => {
+    const dependencies = dependencyMountView();
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: await createComposedProxy(dependencies),
+    });
+    try {
+      await tree.listDirectory('');
+      await tree.listDirectory('node_modules');
+      vi.mocked(dependencies.readdirWithStats).mockClear();
+
+      emitFileChanged({ type: 'backendChanged', backend: 'indexeddb' });
+      /* The resync walks resolved directories root-first, so the mount's own arm
+       * runs only while the row survived the root's merge. */
+      await vi.waitFor(() => {
+        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('');
+      });
+
+      expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);
+      expect(tree.getTreeSnapshot().has('node_modules/three')).toBe(true);
+    } finally {
+      tree.dispose();
+      disposeChannel();
     }
   });
 });
@@ -676,7 +751,9 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     vi.useRealTimers();
   });
 
-  it('should deeply resync every still-resolved directory after backendChanged under traffic', async () => {
+  /* A rooted watch spells topology loss as `{ type: 'reset' }`; the same loss
+   * reaches the tree's file-change channel as `backendChanged`. */
+  it('should re-list every loaded directory after a rooted topology reset', async () => {
     vi.useFakeTimers();
     let updated = false;
     const readDirectory = vi.fn(async (path: string): Promise<FileTreeNode[]> => {
@@ -707,11 +784,9 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     readDirectory.mockClear();
 
     emitFileChanged({ type: 'backendChanged', backend: 'indexeddb' });
-    emitFileChanged({ type: 'fileWritten', path: 'src/other.ts', backend: 'indexeddb' });
     await vi.waitFor(() => {
       expect(tree.getTreeSnapshot().has('src/nested/new.ts')).toBe(true);
     });
-    await vi.advanceTimersByTimeAsync(100);
 
     expect(tree.getTreeSnapshot().has('src/nested/old.ts')).toBe(false);
     expect(readDirectory).toHaveBeenCalledWith('/projects/abc');

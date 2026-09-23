@@ -274,7 +274,7 @@ import { contentDigest } from '@taucad/cache-core';
 import { parameterUnits } from '@taucad/middleware/parameter-units';
 import { compileParameterManifest } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine, submitParameterRequest } from '@taucad/parameters/set-machine';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
@@ -336,8 +336,8 @@ const authority = {
   },
 };
 const actor = createActor(parameterSetMachine.provide({ actors: {
-  loadParameterSet: fromPromise(async ({ signal }) => loadParameterSnapshot({ target, authority, manifest: async () => manifest, signal })),
-  commitParameterSet: fromPromise(async ({ input: change, signal }) => commitParameterChange({ change, authority, signal })),
+  loadParameterSet: createAsyncLogic({ run: async ({ signal }) => loadParameterSnapshot({ target, authority, manifest: async () => manifest, signal }) }),
+  commitParameterSet: createAsyncLogic({ run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }) }),
 } }), { input: { target } });
 actor.start();
 const resolution = await waitFor(actor, snapshot => snapshot.matches({ open: 'ready' }));

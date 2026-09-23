@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getCurrentAccountClosure, getReloadConsent, prepareAccountClosure } from './billing-lifecycle-client.js';
+import {
+  BillingAddressRequired,
+  getCurrentAccountClosure,
+  getReloadConsent,
+  prepareAccountClosure,
+  prepareReloadConsent,
+} from './billing-lifecycle-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 
 const binding = {
@@ -33,6 +39,19 @@ describe('billing lifecycle client', () => {
         body: JSON.stringify({ requestId: 'request-a' }),
         credentials: 'include',
       }),
+    );
+  });
+
+  it('types a missing billing address refusal and leaves other conflicts generic', async () => {
+    const refuse = (code: string) =>
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ code, statusCode: 409 }), { status: 409 }));
+    vi.stubGlobal('fetch', refuse('customer_tax_location_invalid'));
+    await expect(prepareReloadConsent(binding, { requestId: 'request-a', returnPath: '/' })).rejects.toBeInstanceOf(
+      BillingAddressRequired,
+    );
+    vi.stubGlobal('fetch', refuse('automatic_reload_unavailable'));
+    await expect(prepareReloadConsent(binding, { requestId: 'request-a', returnPath: '/' })).rejects.toThrow(
+      'Billing lifecycle request failed with 409',
     );
   });
 

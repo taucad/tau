@@ -14,10 +14,20 @@ import {
   recoverPaymentAction,
 } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
-import { getReloadConsent, prepareReloadConsent, revokeReloadConsent } from '#lib/billing-lifecycle-client.js';
+import {
+  BillingAddressRequired,
+  getReloadConsent,
+  prepareReloadConsent,
+  revokeReloadConsent,
+} from '#lib/billing-lifecycle-client.js';
 import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
+
+const formatHours = (seconds: number): string => {
+  const hours = Math.round(seconds / 3600);
+  return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+};
 
 /* eslint-disable @typescript-eslint/naming-convention -- keys are the wire's snake_case consent states. */
 const consentStateLabel: Record<WireAutoReloadConsent['state'], string> = {
@@ -98,7 +108,9 @@ export function AutoReloadSettings({
         setError(
           error_ instanceof BillingCollectionUnavailable
             ? purchasesUnavailableMessage
-            : 'Could not update automatic reload. Try again.',
+            : error_ instanceof BillingAddressRequired
+              ? 'Add credits once through Checkout to save a card and billing address, then set up automatic reload.'
+              : 'Could not update automatic reload. Try again.',
         );
       }
     } finally {
@@ -148,7 +160,7 @@ export function AutoReloadSettings({
             <dt>Reload threshold</dt>
             <dd>{formatCreditAtoms(BigInt(consent.terms.thresholdAtoms))} credits</dd>
             <dt>Minimum time between reloads</dt>
-            <dd>{Math.round(consent.terms.minimumCadenceSeconds / 3600)} hours</dd>
+            <dd>{formatHours(consent.terms.minimumCadenceSeconds)}</dd>
             <dt>Failure limit</dt>
             <dd>{consent.terms.terminalFailureLimit}</dd>
             <dt>Status</dt>

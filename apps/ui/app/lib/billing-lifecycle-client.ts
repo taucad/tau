@@ -4,6 +4,26 @@ import type { WireAccountClosure, WireAutoReloadConsent, WirePaymentAction } fro
 import { parseCollectionRefusal } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 
+/** Automatic reload quotes tax from a billing address that only a Checkout purchase saves; retrying cannot help. */
+export class BillingAddressRequired extends Error {
+  public constructor() {
+    super('customer_tax_location_invalid');
+    this.name = 'BillingAddressRequired';
+  }
+}
+
+const parseAddressRefusal = async (response: Response): Promise<BillingAddressRequired | undefined> => {
+  if (response.status !== 409) {
+    return undefined;
+  }
+  const body: unknown = await response
+    .clone()
+    .json()
+    .catch(() => undefined);
+  const code = body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
+  return code === 'customer_tax_location_invalid' ? new BillingAddressRequired() : undefined;
+};
+
 const base = (binding: PaymentActionBinding): string => `${binding.apiBaseUrl.replace(/\/$/u, '')}/v1/billing`;
 
 const request = async (binding: PaymentActionBinding, path: string, init?: RequestInit): Promise<unknown> => {
@@ -18,7 +38,9 @@ const request = async (binding: PaymentActionBinding, path: string, init?: Reque
   }
   if (!response.ok) {
     throw (
-      (await parseCollectionRefusal(response)) ?? new Error(`Billing lifecycle request failed with ${response.status}`)
+      (await parseCollectionRefusal(response)) ??
+      (await parseAddressRefusal(response)) ??
+      new Error(`Billing lifecycle request failed with ${response.status}`)
     );
   }
   const body: unknown = await response.json();

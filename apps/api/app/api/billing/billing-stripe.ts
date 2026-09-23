@@ -839,7 +839,12 @@ export function parseVerifiedStripeEvent(
     livemode: event.livemode,
     sourceType: source.object,
     sourceId: source.id,
-    payloadDigest: createHash('sha256').update(input.rawBody).digest('hex'),
+    // `pending_webhooks` counts endpoints still owed this event and changes between deliveries, so it is
+    // left out: a redelivery of a stored event must match, and only changed content is a conflict.
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe's wire field name.
+    payloadDigest: createHash('sha256')
+      .update(JSON.stringify({ ...event, pending_webhooks: undefined }))
+      .digest('hex'),
     // The inbox schedules a mandatory source fetch; webhook snapshots never qualify money.
     evidence: source,
   };

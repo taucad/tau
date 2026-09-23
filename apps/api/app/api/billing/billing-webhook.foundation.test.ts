@@ -150,9 +150,15 @@ describe('billing webhook native foundation', () => {
     expect(authCalls).toBe(before);
     const rows = await database.select().from(schema.stripeEventInbox);
     const retained = rows.find((row) => row.eventId === eventId);
-    expect(retained?.payloadDigest).toBe(createHash('sha256').update(body).digest('hex'));
-
     const parsed: unknown = JSON.parse(body);
+    // The digest covers the event content without the per-delivery `pending_webhooks` count.
+    expect(retained?.payloadDigest).toBe(
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe's wire field name.
+      createHash('sha256')
+        .update(JSON.stringify({ ...(parsed as Record<string, unknown>), pending_webhooks: undefined }))
+        .digest('hex'),
+    );
+
     const reserialized = JSON.stringify(parsed);
     const changedBytes = await deliver(reserialized, signature(body));
     expect(changedBytes.statusCode).toBe(400);
@@ -213,6 +219,10 @@ describe('billing webhook native foundation', () => {
       // oxlint-disable-next-line no-await-in-loop -- query verifies the sequential replay did not duplicate the row.
       const replayedRows = await database.select().from(schema.stripeEventInbox);
       expect(replayedRows.filter((row) => row.eventId === eventId)).toHaveLength(1);
+      // Stripe changes `pending_webhooks` between deliveries of one event; a redelivery is still a replay.
+      // oxlint-disable-next-line no-await-in-loop -- redelivery follows the committed first delivery.
+      const redelivery = await deliver(body.replace('"object": "event",', '"object": "event", "pending_webhooks": 2,'));
+      expect(redelivery.statusCode).toBe(200);
       const conflicting = payload({ id: eventId, type: 'payment_intent.canceled' });
       // oxlint-disable-next-line no-await-in-loop -- conflicting replay follows the committed exact replay.
       const conflict = await deliver(conflicting);

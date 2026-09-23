@@ -1,12 +1,18 @@
-import { coordinateSystemSchema, gltfExportConventionSchema } from '@taucad/runtime/kernel';
+import { coordinateSystemSchema, gltfExportConventionSchema, quantity, quantityKinds } from '@taucad/runtime/kernel';
 import { z } from 'zod';
+
+// A chordal deviation in the kernel's model millimetres.
+const linearTolerance = () => quantity({ unit: 'mm', quantityKind: quantityKinds.length, space: 'linear' }).positive();
+// OCCT-core's mesher angle, in degrees; replicad and opencascade convert to radians before meshing.
+const angularTolerance = () =>
+  quantity({ unit: 'deg', quantityKind: quantityKinds.planeAngle, space: 'linear' }).positive();
 
 /** Shared OCCT render tessellation schema with preview defaults. @public */
 export const occtRenderOptionSchema = z.object({
   tessellation: z
     .object({
-      linearTolerance: z.number().positive().default(0.02).describe('Linear tolerance (distance) for tessellation'),
-      angularTolerance: z.number().positive().default(20).describe('Angular tolerance (degrees) for tessellation'),
+      linearTolerance: linearTolerance().default(0.02).describe('Linear tolerance (distance) for tessellation'),
+      angularTolerance: angularTolerance().default(20).describe('Angular tolerance (degrees) for tessellation'),
     })
     .default({ linearTolerance: 0.02, angularTolerance: 20 })
     .describe('Tessellation quality for preview rendering'),
@@ -18,8 +24,8 @@ export const occtStlExportSchema = z
   .extend({
     tessellation: z
       .object({
-        linearTolerance: z.number().positive().default(0.01).describe('Linear tolerance (distance) for tessellation'),
-        angularTolerance: z.number().positive().default(20).describe('Angular tolerance (degrees) for tessellation'),
+        linearTolerance: linearTolerance().default(0.01).describe('Linear tolerance (distance) for tessellation'),
+        angularTolerance: angularTolerance().default(20).describe('Angular tolerance (degrees) for tessellation'),
       })
       .default({ linearTolerance: 0.01, angularTolerance: 20 })
       .describe('Tessellation quality for mesh-based exports'),

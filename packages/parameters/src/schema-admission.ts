@@ -339,8 +339,12 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
   });
   try {
     canonicalizeCacheValue({ value: schema as CacheValue });
-  } catch {
-    fail('INVALID_SCHEMA', '', 'schema must be finite JSON data');
+  } catch (error) {
+    fail(
+      'INVALID_SCHEMA',
+      '',
+      `schema must be canonical JSON data (${error instanceof Error ? error.message : String(error)})`,
+    );
   }
   const stack: Work[] = [{ value: schema, depth: 0, pointer: '', role: 'schema' }];
   const seen = new Set<Record<string, unknown>>();

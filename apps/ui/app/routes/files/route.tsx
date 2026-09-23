@@ -433,7 +433,7 @@ function WorkspaceConnectionStatus({
               : 'Try again'}
         </Button>
       ) : state.phase === 'ready' && state.conflictCount > 0 ? (
-        <AlertCircle className='text-amber-600 size-4 shrink-0' />
+        <AlertCircle className='size-4 shrink-0 text-warning' />
       ) : state.phase === 'ready' ? (
         <CheckCircle2 className='size-4 shrink-0 text-primary' />
       ) : (

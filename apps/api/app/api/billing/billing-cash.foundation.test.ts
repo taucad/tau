@@ -3,7 +3,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
@@ -17,7 +17,10 @@ import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import type { QualifiedCashSource } from '#api/billing/billing-cash.service.js';
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
-import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
+import {
+  assertNewCollectionCashScope,
+  BillingCashReconciliationService,
+} from '#api/billing/billing-cash-reconciliation.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { seedPaidPurchase } from '#testing/billing-payment.fixture.js';
@@ -62,6 +65,12 @@ let invalidBalance = false;
 let settlementCurrency = 'usd';
 let failPaymentIntentRead = false;
 let lostPaymentIntentId = '';
+/** Payments on customers this database never bound, keyed by customer, with each customer's environment stamp. */
+let strangerPayments: ReadonlyArray<{
+  readonly paymentIntentId: string;
+  readonly customerId: string;
+  readonly stamp?: string;
+}> = [];
 
 const cashClaimId = (chargeId: string): string =>
   createHash('sha256')
@@ -127,6 +136,18 @@ const server = createServer((request, response) => {
     );
     return;
   }
+  const stranger = strangerPayments.find(({ customerId }) => url.pathname === `/v1/customers/${customerId}`);
+  if (request.method === 'GET' && stranger !== undefined) {
+    response.end(
+      JSON.stringify({
+        id: stranger.customerId,
+        object: 'customer',
+        livemode: false,
+        metadata: stranger.stamp === undefined ? {} : { tau_environment: stranger.stamp },
+      }),
+    );
+    return;
+  }
   if (request.method === 'GET' && url.pathname === '/v1/payment_intents') {
     const paymentIntent = {
       id: value.paymentIntentId,
@@ -148,7 +169,18 @@ const server = createServer((request, response) => {
     response.end(
       JSON.stringify({
         object: 'list',
-        data: listCashSources ? [paymentIntent, ...(lostPaymentIntentId === '' ? [] : [lostPaymentIntent])] : [],
+        data: listCashSources
+          ? [
+              paymentIntent,
+              ...(lostPaymentIntentId === '' ? [] : [lostPaymentIntent]),
+              ...strangerPayments.map(({ paymentIntentId, customerId }) => ({
+                ...paymentIntent,
+                id: paymentIntentId,
+                customer: customerId,
+                latest_charge: `ch_${paymentIntentId}`,
+              })),
+            ]
+          : [],
         has_more: false,
         url: '/v1/payment_intents',
       }),
@@ -384,8 +416,6 @@ async function zeroEligiblePlanFixture() {
   await database.insert(schema.subscription).values({
     id: subscriptionId,
     plan: 'pro',
-    referenceId: `financial:${subscriptionId}`,
-    stripeCustomerId: customerId,
     stripeSubscriptionId,
     accountId,
     environment: 'development',
@@ -1494,6 +1524,95 @@ describe('cash disposition foundation', () => {
             value_.sourceId === `txn_lost_reversal_${lostPaymentIntent}`),
       ),
     ).toHaveLength(0);
+  });
+
+  it('keeps a test-mode payment stamped by another environment out of the cash stop, and stops on an unstamped stranger', async () => {
+    const value = await fixture();
+    refundFixture = {
+      customerId: value.purchase.proof.paidEvidence.customerId,
+      paymentIntentId: value.purchase.proof.paymentIntentId,
+      chargeId: value.purchase.proof.chargeId,
+      refundId: `re_${randomUUID()}`,
+      intentId: randomUUID(),
+      reversalCaseId: randomUUID(),
+    };
+    serveRefund = false;
+    serveDispute = false;
+    listCashSources = true;
+    invalidBalance = false;
+    const staging = {
+      paymentIntentId: `pi_staging_${randomUUID()}`,
+      customerId: `cus_staging_${randomUUID()}`,
+      stamp: 'staging',
+    };
+    const own = {
+      paymentIntentId: `pi_own_${randomUUID()}`,
+      customerId: `cus_own_${randomUUID()}`,
+      stamp: 'development',
+    };
+    const stranger = { paymentIntentId: `pi_stranger_${randomUUID()}`, customerId: `cus_stranger_${randomUUID()}` };
+    strangerPayments = [staging, own, stranger];
+    const stripe = createBillingStripeClient({ secretKey: 'sk_test_cash_foreign', fixtureUrl: stripeOrigin });
+    const reconciliation = new BillingCashReconciliationService({ database: runtimeDatabase }, stripe, {
+      environment: 'development',
+      stripeAccountId: cashStripeAccountId,
+      livemode: false,
+    });
+    const now = new Date();
+    const scanId = await reconciliation.createScan({
+      environment: 'development',
+      currency: 'usd',
+      lookbackStart: new Date(now.getTime() - 60_000),
+      windowStart: new Date(now.getTime() - 30_000),
+      windowEnd: new Date(now.getTime() + 60_000),
+    });
+    try {
+      await expect(reconciliation.runScan({ scanId, maximumPagesPerStream: 3 })).resolves.toEqual({
+        status: 'complete',
+      });
+    } finally {
+      strangerPayments = [];
+      listCashSources = false;
+    }
+    const cases = await database
+      .select()
+      .from(schema.billingFinancialCase)
+      .where(
+        and(
+          eq(schema.billingFinancialCase.environment, 'development'),
+          eq(schema.billingFinancialCase.kind, 'missing_local_payment'),
+          inArray(schema.billingFinancialCase.sourceId, [
+            staging.paymentIntentId,
+            own.paymentIntentId,
+            stranger.paymentIntentId,
+          ]),
+        ),
+      );
+    // Stamped by another environment sharing the test sandbox: its cash, not this one's.
+    expect(cases.filter((row) => row.sourceId === staging.paymentIntentId)).toHaveLength(0);
+    // A stamp naming this environment on an unbound customer proves nothing: the stop still opens.
+    expect(cases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceId: own.paymentIntentId, accountId: null, state: 'open' }),
+        expect.objectContaining({ sourceId: stranger.paymentIntentId, accountId: null, state: 'open' }),
+      ]),
+    );
+    await expect(
+      assertNewCollectionCashScope(
+        { database: runtimeDatabase },
+        {
+          environment: 'development',
+          stripeAccountId: cashStripeAccountId,
+          livemode: false,
+        },
+        value.accountId,
+      ),
+    ).rejects.toThrow('cash_scope_attention');
+    // The two environment-wide stops would refuse every later collection in this file.
+    await database
+      .update(schema.billingFinancialCase)
+      .set({ state: 'resolved', resolvedAt: new Date(), resolutionEvidence: { disposition: 'test_cleanup' } })
+      .where(inArray(schema.billingFinancialCase.sourceId, [own.paymentIntentId, stranger.paymentIntentId]));
   });
 
   it('reclaims an expired running scan owned by the configured provider account', async () => {

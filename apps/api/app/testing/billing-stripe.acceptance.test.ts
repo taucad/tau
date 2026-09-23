@@ -43,7 +43,6 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
   let webhookSecret: string;
   let forwardedEvent: Promise<ForwardedEvent>;
   let resolveForwardedEvent: ((event: ForwardedEvent) => void) | undefined;
-  let customerId: string | undefined;
   let subscriptionId: string | undefined;
   const checkoutIds: string[] = [];
 
@@ -167,9 +166,7 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
     if (subscriptionId !== undefined) {
       await createStripe.subscriptions.cancel(subscriptionId).catch(() => undefined);
     }
-    if (customerId !== undefined) {
-      await createStripe.customers.del(customerId).catch(() => undefined);
-    }
+    // The customer stays: deleting it erases the environment stamp the other scans read.
   }, 60_000);
 
   it('qualifies restricted roles, tax, Checkout, saved-card settlement, signed forwarding, refund and portal paths', async () => {
@@ -181,9 +178,10 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
       name: 'Tau Billing Acceptance',
       email: `billing-${suffix}@example.com`,
       address: { line1: '510 Townsend St', city: 'San Francisco', state: 'CA', postal_code: '94103', country: 'US' },
-      metadata: { tau_account_id: suffix },
+      /* The test sandbox is shared with local development and staging, whose cash scans read this
+       * customer's charge and refunds. The stamp is what tells them the cash is not theirs. */
+      metadata: { tau_account_id: suffix, tau_environment: 'acceptance' },
     });
-    customerId = customer.id;
     const paymentMethod = await createStripe.paymentMethods.attach('pm_card_visa', { customer: customer.id });
     await createStripe.customers.update(customer.id, {
       invoice_settings: { default_payment_method: paymentMethod.id },

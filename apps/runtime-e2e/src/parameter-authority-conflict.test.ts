@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createActor, fromPromise, waitFor } from 'xstate';
 import { compileParameterManifest, readParameterRecord } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange, refreshParameterSnapshot } from '@taucad/parameters/authority';
@@ -23,7 +24,11 @@ it('admits one writer across two actual Node transport clients and refreshes the
   const authority = new NodeFsAuthorityHost({ authorityDirectory: () => authorityRoot, authorityIdentity: () => root });
   const ports = [new MessageChannel(), new MessageChannel()];
   const stops = ports.map(({ port2 }) =>
-    serveNodeFsProvider(toNodeFsPort(port2), { allowRoot: (candidate) => candidate === root, authority }),
+    serveNodeFsProvider(toNodeFsPort(port2), {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === root,
+      authority,
+    }),
   );
   const connections = ports.map(({ port1 }) => {
     const channel = new NodeFsChannel(toNodeFsPort(port1));
@@ -87,10 +92,17 @@ it('admits one writer across two actual Node transport clients and refreshes the
         submitParameterRequest(actor, {
           requestId: `writer:${index}`,
           fingerprint: `writer:${index}`,
-          draftGeneration: 0,
           pressure: 'final',
           expected: snapshots[index]!.context.current!.identity,
-          operation: { kind: 'replace-group-values', group: 'default', values: { width: 20 + index } },
+          // Only `base` decides a conflict: the loser re-plans against the winner's bytes and is refused
+          // because the field it edited from 10 has moved.
+          base: { pointer: '/width', value: 10 },
+          operation: {
+            kind: 'native-value',
+            group: 'default',
+            pointer: '/width',
+            value: 20 + index,
+          },
         }),
       ),
     );

@@ -70,7 +70,11 @@ export async function readDirectoryEntries(
   return Promise.all(
     names.map(async (name) => {
       const stat = await provider.stat(`${base}${name}`);
-      return { name, kind: stat.type === 'dir' ? 'dir' : 'file' } satisfies DirectoryEntry;
+      return {
+        name,
+        kind: stat.type === 'dir' ? 'dir' : 'file',
+        provenance: stat.provenance,
+      } satisfies DirectoryEntry;
     }),
   );
 }

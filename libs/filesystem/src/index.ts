@@ -97,7 +97,7 @@ export type {
  * answers which one that is (D10). The route *builders* remain module-private —
  * nothing outside L1 spells a route it did not read. */
 export type { RouteKind, ParsedRoute } from '#project-routes.js';
-export { parseRoute } from '#project-routes.js';
+export { parseRoute, policyAtRoot } from '#project-routes.js';
 
 export {
   MissingWorkspaceHandleError,

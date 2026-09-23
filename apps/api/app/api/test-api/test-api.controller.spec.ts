@@ -6,6 +6,7 @@ import type { TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
 import { DatabaseService } from '#database/database.service.js';
+import { BillingPolicyReadiness } from '#api/billing/billing-policy.readiness.js';
 import { RedisService } from '#redis/redis.service.js';
 import { getEnvironment } from '#config/environment.config.js';
 
@@ -52,6 +53,9 @@ describe('TestApiController (e2e)', () => {
       .useValue(mockDatabaseService)
       .overrideProvider(RedisService)
       .useValue(mockRedisService)
+      // No database means no tariff to observe; the readiness check would otherwise fail this module.
+      .overrideProvider(BillingPolicyReadiness)
+      .useValue({})
       .compile();
 
     app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

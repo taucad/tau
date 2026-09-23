@@ -7,6 +7,7 @@ const baseConfig: UserConfig = {
     'src/algorithms/index.ts',
     'src/node/index.ts',
     'src/revision-effects.ts',
+    'src/revision-projection.ts',
     'src/project-revisions.machine.ts',
     'src/turn.machine.ts',
     'src/checkout.machine.ts',

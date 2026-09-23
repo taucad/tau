@@ -7,7 +7,7 @@ describe('measureInputMachine', () => {
     const actor = createActor(measureInputMachine);
     actor.start();
 
-    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraInteracting: false });
+    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraMoving: false });
     actor.send({
       type: 'pointerUp',
       button: 0,
@@ -21,12 +21,12 @@ describe('measureInputMachine', () => {
     actor.stop();
   });
 
-  it('should discard a left-click when camera interaction starts during the pointer gesture', () => {
+  it('should discard a left-click when the camera moves during the pointer gesture', () => {
     const actor = createActor(measureInputMachine);
     actor.start();
 
-    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraInteracting: false });
-    actor.send({ type: 'cameraInteractionStart' });
+    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraMoving: false });
+    actor.send({ type: 'cameraMoved' });
     actor.send({
       type: 'pointerUp',
       button: 0,
@@ -40,11 +40,11 @@ describe('measureInputMachine', () => {
     actor.stop();
   });
 
-  it('should discard a pointer gesture that starts while camera controls are already interacting', () => {
+  it('should discard a pointer gesture that starts while the camera is already moving', () => {
     const actor = createActor(measureInputMachine);
     actor.start();
 
-    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraInteracting: true });
+    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraMoving: true });
     actor.send({
       type: 'pointerUp',
       button: 0,
@@ -62,7 +62,7 @@ describe('measureInputMachine', () => {
     const actor = createActor(measureInputMachine);
     actor.start();
 
-    actor.send({ type: 'pointerDown', button: 2, hasTarget: false, cameraInteracting: false });
+    actor.send({ type: 'pointerDown', button: 2, hasTarget: false, cameraMoving: false });
     actor.send({
       type: 'pointerUp',
       button: 2,
@@ -80,7 +80,7 @@ describe('measureInputMachine', () => {
     const actor = createActor(measureInputMachine);
     actor.start();
 
-    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraInteracting: false });
+    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraMoving: false });
     actor.send({
       type: 'pointerUp',
       button: 0,
@@ -98,7 +98,7 @@ describe('measureInputMachine', () => {
     const actor = createActor(measureInputMachine);
     actor.start();
 
-    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraInteracting: false });
+    actor.send({ type: 'pointerDown', button: 0, hasTarget: true, cameraMoving: false });
     actor.send({
       type: 'pointerUp',
       button: 0,

@@ -1,7 +1,6 @@
 import { assign, assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
-import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
+import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
@@ -29,7 +28,7 @@ import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-gua
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
+import { bundledTypesWorkspaceRootSegment, dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
   formatWorkerError,
@@ -99,24 +98,16 @@ const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) =
  */
 export type WorkspaceUnavailableReason = 'missing' | 'disconnected' | 'permission';
 
-/**
- * Which surface a rooted bridge connection asks for. Required, never defaulted
- * (gate G-B finding G6).
- *
- * A UI-originated connection names the consumer whose composed view it reads —
- * `'user'` or `'agent'` — and gets that consumer's mask and overlays. Trusted
- * composition names `'working-copy'`: the host's own capture, apply and language
- * planes must read the checkout itself and never the overlays above it
- * (architecture V6). Since W5 that raw surface also carries the mutating
- * porcelain, so the choice is a write decision as well as a read one — which is
- * why it is spelled at every call site instead of falling out of an omitted
- * argument.
- */
-export type RootedBridgeConsumer = ComposedViewConsumer | 'working-copy';
+/** The worker connection this machine holds: the authority's surface, its change stream, and its death. */
+type FileManagerWorkerProxy = FileManagerProxy & {
+  listen?: (event: string, handler: (data: unknown) => void) => () => void;
+  /** Settles when the bridge channel closes, which is what a dead worker looks like (G2c-2). */
+  closed: Promise<void>;
+};
 
 type FileManagerContext = {
   worker: Worker | undefined;
-  proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
+  proxy: FileManagerWorkerProxy | undefined;
   bridgeDispose?: () => void;
   openFileSystemBridge?: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
   openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
@@ -170,7 +161,7 @@ type FileManagerContext = {
 type WorkerConnectedEvent = {
   type: 'workerConnected';
   worker: Worker;
-  proxy: FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void };
+  proxy: FileManagerWorkerProxy;
   bridgeDispose: () => void;
   openFileSystemBridge: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
   openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
@@ -189,7 +180,6 @@ type WorkerInitializedEvent = {
   configuredBackend: FileSystemBackend;
   activeWorkspaceId: string | undefined;
   activeWorkspaceName: string | undefined;
-  initialEntries: FileEntry[];
   contentService: FileContentService;
   treeService: FileTreeService;
   viewClient: ComposedViewClient;
@@ -269,6 +259,14 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     // least visible in the console (the `crashSignal` Promise is only racy
     // during the connect phase — `armed` is flipped to `false` afterwards
     // so its callback no longer rejects).
+    //
+    // After readiness they stay logging, deliberately: a Worker `error` event
+    // is an uncaught exception inside a worker that is still running, and
+    // `messageerror` is one message that failed structured clone — neither
+    // means the proxies are dead, and nested file managers share this worker
+    // (`context.sharedWorker`), so treating one as fatal would tear down every
+    // project view at once. Death arrives on `proxy.closed` instead, which
+    // `ready` watches (G2c-2).
     let armed = true;
     let rejectOnCrash!: (error: Error) => void;
     const crashSignal = new Promise<never>((_resolve, reject) => {
@@ -361,10 +359,8 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
         class: 'authored',
       });
     }
-    /* `'working-copy'` is the absence of a consumer on the wire: the bridge hands
-     * back the checkout's raw rooted filesystem when no consumer is named. */
     const openBridge = (root: string, consumer: RootedBridgeConsumer): FileSystemBridgeConnection =>
-      openFileSystemBridge(worker, { root, ...(consumer === 'working-copy' ? {} : { consumer }) });
+      openFileSystemBridge(worker, { root, consumer });
     worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
     const { openComputeBinding, openComputeStorePort, computeControl } = computeOpeners(worker, context.projectId);
 
@@ -384,6 +380,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
 
 type ProjectConfigLookup = Awaited<ReturnType<typeof getProjectFileSystemConfig>>;
 
+// oxlint-disable complexity -- cancellation-safe resource handoff adds one lifecycle path to the existing initializer.
 const initializeServicesActor = fromSafeAsync<
   WorkerInitializedEvent | WebAccessUnavailableEvent,
   { context: FileManagerContext }
@@ -437,52 +434,6 @@ const initializeServicesActor = fromSafeAsync<
     }
   }
 
-  let initialEntries: FileEntry[] = [];
-  try {
-    const rootPath = context.rootDirectory;
-    const absolutePath = normalizePath(rootPath);
-    if (backend === 'webaccess') {
-      await proxy.pollExternalChanges(absolutePath);
-    }
-    const rootNodes = await proxy.readDirectory(absolutePath);
-    for (const node of rootNodes) {
-      if (node.children !== undefined) {
-        initialEntries.push({
-          path: node.name,
-          name: node.name,
-          type: 'dir',
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-          isDirectoryResolved: false,
-        });
-      } else if (node.contentKind === 'text') {
-        initialEntries.push({
-          path: node.name,
-          name: node.name,
-          type: 'file',
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-          contentKind: 'text',
-          lineCount: node.lineCount,
-        });
-      } else {
-        initialEntries.push({
-          path: node.name,
-          name: node.name,
-          type: 'file',
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-          contentKind: 'binary',
-        });
-      }
-    }
-  } catch {
-    initialEntries = [];
-  }
-
   const filePool = context.filePoolBuffer ? new SharedPool(context.filePoolBuffer) : undefined;
 
   const paths = new WorkspacePathResolver(context.rootDirectory);
@@ -502,74 +453,171 @@ const initializeServicesActor = fromSafeAsync<
    * content.
    */
   const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  signal.throwIfAborted();
   const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
   const viewProxy = createFileSystemBridgeProxy(viewConnection);
+  /*
+   * The dependency mount is the checkout's sibling, so no view of the checkout
+   * lists it — but a mount is a root, and since W11 it is read through a rooted
+   * `'user'` connection of its own rather than off the authority's global
+   * surface, which carries no content at all any more (H3, EQ3). Its lifetime is
+   * the project session's, exactly like the checkout's view.
+   */
+  const dependencyConnection = context.openFileSystemBridge!(dependencyMountRoot, 'user');
+  const dependencyProxy = createFileSystemBridgeProxy(dependencyConnection);
   const disposeComposedView = (): void => {
     safeDispose(() => {
       viewProxy.dispose();
     });
+    safeDispose(() => {
+      dependencyProxy.dispose();
+    });
   };
-  const workerChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
-  const client = createComposedViewClient({ workspace: proxy, view: viewProxy, paths });
+  let workerChangeChannel: WorkerChangeChannel | undefined;
+  let contentService: FileContentService | undefined;
+  let treeService: FileTreeService | undefined;
+  let ownsConstructed = true;
+  const disposeConstructed = (): void => {
+    if (!ownsConstructed) {
+      return;
+    }
+    ownsConstructed = false;
+    safeDispose(() => contentService?.dispose());
+    safeDispose(() => treeService?.dispose());
+    safeDispose(() => workerChangeChannel?.dispose());
+    disposeComposedView();
+  };
+  const disposeOnAbort = (): void => {
+    disposeConstructed();
+  };
+  signal.addEventListener('abort', disposeOnAbort, { once: true });
 
-  const contentService = new FileContentService({
-    proxy: client,
-    paths,
-    channel: workerChangeChannel,
-    refreshGuard,
-    cacheOptions: {
-      maxEntries: fileCacheMaxEntries,
-      maxTotalBytes: fileCacheMaxTotalBytes,
-      maxSingleFileBytes: fileCacheMaxSingleFileBytes,
-    },
-    filePool,
-  });
-
-  const treeService = new FileTreeService({
-    proxy: client,
-    paths,
-    channel: workerChangeChannel,
-    visibility: visibilityProvider,
-    initialEntries,
-    onExternalPollTelemetry: context.onExternalPollTelemetry,
-  });
-
-  treeService.connectToContentService(contentService);
-
-  // Eagerly load `/node_modules` + each package directory through the regular
-  // treeService so the file tree renders the bundled-types subtree without
-  // user interaction (cmd+click was the smoking gun before R1). The mount is
-  // populated by the FM worker before `workerReady`, so these listings always
-  // see the full set of kernel typings.
   try {
-    const rootEntries = await treeService.listDirectory(bundledTypesWorkspaceRootSegment, { signal });
-    await Promise.all(
-      rootEntries
-        .filter((entry) => entry.isFolder)
-        .map(async (entry) =>
-          treeService.listDirectory(`${bundledTypesWorkspaceRootSegment}/${entry.name}`, { signal }),
-        ),
-    );
-  } catch {
-    // Bundled types remain lazily loadable through the regular tree path.
+    const initializedChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
+    workerChangeChannel = initializedChangeChannel;
+    const client = createComposedViewClient({
+      workspace: proxy,
+      view: viewProxy,
+      dependencies: dependencyProxy,
+      paths,
+    });
+
+    /*
+     * The first listing of the root, through the same composition every later
+     * listing of it uses (CI3). Read off the raw workspace surface it showed the
+     * control plane with no provenance, and `initialEntries` marks the root
+     * resolved — so that listing was the one the tree kept (blueprint Finding 3).
+     */
+    let initialEntries: FileEntry[] = [];
+    try {
+      const absolutePath = normalizePath(context.rootDirectory);
+      if (backend === 'webaccess') {
+        await proxy.pollExternalChanges(absolutePath);
+      }
+      const rootNodes = await client.readDirectory(absolutePath);
+      for (const node of rootNodes) {
+        const common = {
+          path: node.name,
+          name: node.name,
+          size: node.size,
+          mtimeMs: node.mtimeMs,
+          isLoaded: false,
+          ...(node.provenance === undefined ? {} : { provenance: node.provenance }),
+        };
+        if (node.children !== undefined) {
+          initialEntries.push({ ...common, type: 'dir', isDirectoryResolved: false });
+        } else if (node.contentKind === 'text') {
+          initialEntries.push({ ...common, type: 'file', contentKind: 'text', lineCount: node.lineCount });
+        } else {
+          initialEntries.push({ ...common, type: 'file', contentKind: 'binary' });
+        }
+      }
+    } catch {
+      initialEntries = [];
+    }
+    signal.throwIfAborted();
+
+    const initializedContentService = new FileContentService({
+      proxy: client,
+      paths,
+      channel: initializedChangeChannel,
+      refreshGuard,
+      cacheOptions: {
+        maxEntries: fileCacheMaxEntries,
+        maxTotalBytes: fileCacheMaxTotalBytes,
+        maxSingleFileBytes: fileCacheMaxSingleFileBytes,
+      },
+      filePool,
+    });
+    contentService = initializedContentService;
+
+    const initializedTreeService = new FileTreeService({
+      proxy: client,
+      paths,
+      channel: initializedChangeChannel,
+      visibility: visibilityProvider,
+      initialEntries,
+      onExternalPollTelemetry: context.onExternalPollTelemetry,
+    });
+    treeService = initializedTreeService;
+
+    initializedTreeService.connectToContentService(initializedContentService);
+
+    // The root listing carries the mount's own row; eagerly load each package
+    // directory inside it through the regular treeService so the file tree renders
+    // the bundled-types subtree without user interaction (cmd+click was the
+    // smoking gun before R1). The mount is populated by the FM worker before
+    // `workerReady`, so these listings always see the full set of kernel typings.
+    try {
+      const rootEntries = await initializedTreeService.listDirectory(bundledTypesWorkspaceRootSegment, { signal });
+      await Promise.all(
+        rootEntries
+          .filter((entry) => entry.isFolder)
+          .map(async (entry) =>
+            initializedTreeService.listDirectory(`${bundledTypesWorkspaceRootSegment}/${entry.name}`, { signal }),
+          ),
+      );
+    } catch {
+      // Bundled types remain lazily loadable through the regular tree path.
+    }
+    signal.throwIfAborted();
+    ownsConstructed = false;
+    return {
+      type: 'workerInitialized',
+      configuredBackend: backend,
+      activeWorkspaceId,
+      activeWorkspaceName,
+      contentService: initializedContentService,
+      treeService: initializedTreeService,
+      viewClient: client,
+      workerChangeChannel: initializedChangeChannel,
+      disposeComposedView,
+    };
+  } finally {
+    signal.removeEventListener('abort', disposeOnAbort);
+    disposeConstructed();
   }
-  return {
-    type: 'workerInitialized',
-    configuredBackend: backend,
-    activeWorkspaceId,
-    activeWorkspaceName,
-    initialEntries,
-    contentService,
-    treeService,
-    viewClient: client,
-    workerChangeChannel,
-    disposeComposedView,
-  };
+});
+// oxlint-enable complexity
+
+/**
+ * Fails when the worker behind this connection dies (G2c-2).
+ *
+ * The bridge channel treats a dead port as the bye frame the peer never sent,
+ * so `closed` is the one signal that means the proxies `ready` published are
+ * gone. Invoked by `ready`, which means XState cancels it — and any transition
+ * it would have caused — the moment the machine leaves that state for another
+ * reason.
+ */
+const watchProxyClosedActor = fromSafeAsync<void, { proxy: FileManagerContext['proxy'] }>(async ({ input }) => {
+  await input.proxy?.closed;
+  throw new Error('The file service for this project stopped.');
 });
 
 const fileManagerActors = {
   connectWorkerActor,
   initializeServicesActor,
+  watchProxyClosedActor,
 } as const;
 
 // ============ Events ============
@@ -948,6 +996,16 @@ export const fileManagerMachine = setup({
     ready: {
       entry: ['startPolling'],
       exit: ['stopPolling'],
+      invoke: {
+        src: 'watchProxyClosedActor',
+        input({ context }) {
+          return { proxy: context.proxy };
+        },
+        onError: {
+          target: 'error',
+          actions: ['setError', 'destroyWorkerAndServices'],
+        },
+      },
       on: {
         setRoot: {
           target: 'connectingWorker',

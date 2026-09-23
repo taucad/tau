@@ -130,7 +130,14 @@ export const AgentsPanelBody = ({ metadataByChatId }: AgentsPanelBodyProps): Rea
             aria-label='Agents unavailable'
             className='m-0 min-h-full rounded-xl border bg-card'
           >
-            <Button type='button' size='sm' variant='outline' onClick={() => void retry()}>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={() => {
+                void retry();
+              }}
+            >
               Retry
             </Button>
           </PanelEmptyState>

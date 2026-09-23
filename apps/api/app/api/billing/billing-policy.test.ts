@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import {
   assertPolicyFleetCompatibility,
+  assertPolicySchemaCompatibility,
   commercialPolicySchema,
+  parseCommercialPolicyDocument,
   qualifiedMeterContracts,
   resolvePolicyRoute,
   validateCommercialPolicy,
@@ -449,5 +451,111 @@ describe('commercial policy', () => {
     expect(() => {
       assertPolicyFleetCompatibility(policy, 1, ['meter-v1']);
     }).toThrow('meter contract');
+  });
+
+  it('should read a document naming a route this replica cannot dispatch, and still publish-check it', () => {
+    const meterContractId = 'policy-lenient-meter-v1';
+    const rate: CommercialPolicy['rates'][number] = {
+      rateId: 'lenient-output-rate',
+      meterContractId,
+      dimension: 'output',
+      tier: null,
+      unit: 'token',
+      referenceNumeratorPicoUsd: '1',
+      denominatorUnits: '1',
+      retailOverride: null,
+    };
+    const route: CommercialPolicy['routes'][number] = {
+      routeId: 'provider:lenient-model',
+      sku: 'model:lenient',
+      meterContractId,
+      rateIds: [rate.rateId],
+      enabled: true,
+      spendBudgetId: 'spend-budget',
+      riskBudgetId: 'risk-budget',
+    };
+    const policy: CommercialPolicy = {
+      ...launchPolicy(),
+      fleet: { minimumSchemaVersion: 1, meterContractIds: [meterContractId] },
+      rates: [rate],
+      routes: [route],
+    };
+
+    // The catalogue has retired the contract: the qualifying validator refuses the whole document.
+    qualifiedMeterContracts.delete(meterContractId);
+    expect(() => validateCommercialPolicy(policy)).toThrow('is not qualified');
+    const read = parseCommercialPolicyDocument(policy);
+    expect(read.policy.routes[0]?.routeId).toBe('provider:lenient-model');
+
+    // Canonical form and content hash are shared, so a stored hash written by publication still matches.
+    qualifiedMeterContracts.set(meterContractId, new Set(['output:']));
+    const published = validateCommercialPolicy(policy);
+    expect(read.contentHash).toBe(published.contentHash);
+    expect(read.canonicalContent).toBe(published.canonicalContent);
+    qualifiedMeterContracts.delete(meterContractId);
+
+    // Everything the document says about itself is still refused by both entry points.
+    const malformed: CommercialPolicy[] = [
+      { ...policy, routes: [route, { ...route, sku: 'model:other' }] },
+      {
+        ...policy,
+        offers: [
+          policy.offers[0]!,
+          {
+            offerId: 'top-up-v1',
+            kind: 'top_up',
+            currency: 'usd',
+            minimumPrincipalMinor: '500',
+            maximumPrincipalMinor: '1',
+            creditAtomsPerPrincipalMinor: '10000',
+          },
+        ],
+      },
+      { ...policy, routes: [{ ...route, riskBudgetId: 'spend-budget' }] },
+      { ...policy, routes: [{ ...route, meterContractId: 'other-meter-v1' }] },
+      {
+        ...policy,
+        rates: [rate, { ...rate, rateId: 'second-rate' }],
+        routes: [{ ...route, rateIds: [rate.rateId, 'second-rate'] }],
+      },
+      { ...policy, fleet: { minimumSchemaVersion: 1, meterContractIds: [] } },
+    ];
+    for (const candidate of malformed) {
+      expect(() => parseCommercialPolicyDocument(candidate)).toThrow();
+      expect(() => validateCommercialPolicy(candidate)).toThrow();
+    }
+  });
+
+  it('should keep the schema floor on reads and the meter-contract check on publication', () => {
+    const policy: CommercialPolicy = {
+      ...launchPolicy(),
+      routes: [
+        {
+          routeId: 'route',
+          sku: 'sku',
+          meterContractId: 'meter-v2',
+          rateIds: ['rate'],
+          enabled: true,
+          spendBudgetId: 'spend-budget',
+          riskBudgetId: 'risk-budget',
+        },
+      ],
+    };
+
+    // A read tolerates the unknown contract; publication still refuses it.
+    expect(() => {
+      assertPolicySchemaCompatibility(policy, 1);
+    }).not.toThrow();
+    expect(() => {
+      assertPolicyFleetCompatibility(policy, 1, ['meter-v1']);
+    }).toThrow('meter contract');
+
+    // A document this replica's code cannot interpret at all stays fatal on both paths.
+    expect(() => {
+      assertPolicySchemaCompatibility(policy, 0);
+    }).toThrow('policy schema is incompatible with this replica');
+    expect(() => {
+      assertPolicyFleetCompatibility(policy, 0, ['meter-v2']);
+    }).toThrow('policy schema is incompatible with this replica');
   });
 });

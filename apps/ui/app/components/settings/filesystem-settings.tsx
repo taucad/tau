@@ -383,8 +383,8 @@ export function FileSystemSettings(): React.JSX.Element {
                 </div>
               </div>
               {isStorageUnderPressure ? (
-                <div className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'>
-                  <AlertCircle className='text-amber-600 size-4 shrink-0' />
+                <div className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
+                  <AlertCircle className='size-4 shrink-0 text-warning' />
                   <p className='text-sm'>
                     Browser storage is nearly full. Free up space or move projects to a connected workspace — writes
                     start failing once the quota is reached.

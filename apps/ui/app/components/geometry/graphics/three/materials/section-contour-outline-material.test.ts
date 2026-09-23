@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { Vector2 } from 'three';
 import {
   createSectionContourOutlineMaterial,
+  resolveSectionContourOutlineEmphasis,
   setSectionContourOutlineMaterialColor,
 } from '#components/geometry/graphics/three/materials/section-contour-outline-material.js';
+import {
+  gltfEdgeColorLightMode,
+  gltfEdgeHoverColor,
+  gltfEdgeSelectedColor,
+} from '#components/geometry/graphics/three/overlay-colors.constants.js';
+import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
 describe('section-contour-outline-material', () => {
   for (const backend of ['webgl', 'webgpu'] as const) {
@@ -20,6 +27,25 @@ describe('section-contour-outline-material', () => {
       expect(material.color.getHex()).toBe(0x12_34_56);
     });
   }
+
+  it('gives a cap outline the emphasis colour and draw order of the component it belongs to', () => {
+    // The cut face is part of the component. Leaving its outline at the theme colour strands a
+    // black loop inside an otherwise yellow shape.
+    expect(resolveSectionContourOutlineEmphasis('none', gltfEdgeColorLightMode)).toEqual({
+      edgeColor: gltfEdgeColorLightMode,
+      renderOrder: viewportRenderTiers.sectionContourOutline,
+    });
+    expect(resolveSectionContourOutlineEmphasis('hover', gltfEdgeColorLightMode)).toEqual({
+      edgeColor: gltfEdgeHoverColor,
+      renderOrder: viewportRenderTiers.modelEmphasisEdge,
+    });
+    for (const emphasis of ['selected', 'focused'] as const) {
+      expect(resolveSectionContourOutlineEmphasis(emphasis, gltfEdgeColorLightMode)).toEqual({
+        edgeColor: gltfEdgeSelectedColor,
+        renderOrder: viewportRenderTiers.modelEmphasisEdge,
+      });
+    }
+  });
 
   it('should preserve contour-specific state when recoloring a reused material', () => {
     const material = createSectionContourOutlineMaterial({

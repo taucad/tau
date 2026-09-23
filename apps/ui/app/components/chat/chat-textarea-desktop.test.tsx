@@ -1,556 +1,218 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { AcpSessionData } from '@taucad/chat';
-import type { ResolvedModel } from '#hooks/use-models.js';
 import { kernelConfigurations } from '@taucad/types/constants';
-import type { KernelConfiguration } from '@taucad/types/constants';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 
 const manifoldKernel = kernelConfigurations.find((k) => k.id === 'manifold')!;
-const openscadKernel = kernelConfigurations.find((k) => k.id === 'openscad')!;
-const mockKernelByConsumer: { current: KernelConfiguration | undefined } = {
-  current: manifoldKernel,
-};
-const mockExecutionByConsumer: { current: ChatComposerContextValue['execution']['execution'] } = {
+const execution: { current: ChatComposerContextValue['execution']['execution'] } = {
   current: { kind: 'tau', model: 'm' },
 };
-const mockCanSelectExecutionByConsumer: { current: boolean } = { current: false };
-const mockSetActiveExecution = vi.fn();
-
-vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ setDraftMode: vi.fn() }),
-  useChatContext: () => ({ persistenceActorRef: { send: vi.fn() } }),
-  useChatSelector: (selector: (state: unknown) => unknown) => selector({ draftMode: 'agent', status: 'idle' }),
-  useDraftActions: () => ({ setDraftMode: vi.fn() }),
-  useDraftSelector: (selector: (state: unknown) => unknown) => selector({ draftMode: 'agent' }),
-}));
-
-// Single composer-context mock backs every chat-scoped read the desktop
-// controls perform — kernel label is the only field the visible-label
-// tests assert on, but we populate the full contract so the unified
-// `useChatComposer()` hook stays type-correct.
-const mockUseChatComposer = vi.fn(
-  (): ChatComposerContextValue =>
-    ({
-      draftActorRef: { send: vi.fn() },
-      model: { modelId: 'm', model: undefined, setActiveModel: vi.fn() },
-      execution: { execution: mockExecutionByConsumer.current, setActiveExecution: mockSetActiveExecution },
-      kernel: {
-        kernelId: mockKernelByConsumer.current?.id,
-        kernel: mockKernelByConsumer.current,
-        setActiveKernel: vi.fn(),
-      },
-      status: 'ready',
-      agentActivity: 'ready',
-      stop: () => undefined,
-      contextUsage: undefined,
-      session: undefined,
-      canSelectExecution: mockCanSelectExecutionByConsumer.current,
-    }) as unknown as ChatComposerContextValue,
-);
+const setActiveExecution = vi.fn();
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
-  useChatComposer: () => mockUseChatComposer(),
+  useChatComposer: () => ({
+    kernel: { kernelId: manifoldKernel.id, kernel: manifoldKernel, setActiveKernel: vi.fn() },
+    execution: { execution: execution.current, setActiveExecution },
+    contextUsage: undefined,
+  }),
 }));
 
+const keybindings = vi.hoisted(() => new Map<string, { callback: () => void; enabled: () => boolean }>());
 vi.mock('#hooks/use-keyboard.js', () => ({
-  useKeybinding: () => ({ formattedKeyCombination: 'm' }),
+  useKeybinding: (
+    combination: { key: string },
+    callback: () => void,
+    options?: { enabled?: boolean | (() => boolean) },
+  ) => {
+    const enabled = options?.enabled ?? true;
+    keybindings.set(combination.key, {
+      callback,
+      enabled: () => (typeof enabled === 'function' ? enabled() : enabled),
+    });
+    return { formattedKeyCombination: '⌘.' };
+  },
 }));
 
-vi.mock('@xstate/react', () => ({
-  useSelector: () => undefined,
-}));
-
-// `planMode` is the only flag this row reads, so one switch covers it.
-const mockPlanModeEnabled = { current: false };
-
-vi.mock('#flags/use-feature.js', () => ({
-  useFeature: () => mockPlanModeEnabled.current,
-}));
-
-vi.mock('#components/chat/chat-model-selector.js', () => ({
-  openModelSelectorKeyCombination: { key: '/', modKey: true },
-  ChatModelSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
-    <div data-testid='model-selector'>{children({})}</div>
+/* The sheet has its own suite; here it only has to sit beside Send. */
+vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ChatAgentSheet: () => (
+    <button type='button' data-slot='agent-trigger'>
+      Agent and model
+    </button>
   ),
-}));
-
-const mockAgentSelectorOffered = { current: true };
-
-// The chip has its own suite; here it only has to appear for a Tau turn and
-// stay away from an external agent's turns.
-vi.mock('#components/billing/credit-estimate.js', () => ({
-  CreditBalanceChip: () => <div data-testid='credit-balance-chip' />,
-}));
-
-vi.mock('#components/chat/chat-execution-selector.js', () => ({
-  formatChatAgentActivity: () => 'Approval needed',
-  useChatAgentSelection: () => ({ isOffered: mockAgentSelectorOffered.current, label: 'Claude Code' }),
-  ChatExecutionSelector: ({
-    children,
-  }: {
-    readonly children: (props: {
-      readonly label: string;
-      readonly kind: 'tau' | 'tau-host';
-      readonly activity: 'approval-required';
-    }) => React.ReactNode;
-  }) => <div>{children({ label: 'Claude Code', kind: 'tau-host', activity: 'approval-required' })}</div>,
-}));
-
-const acpModel = { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' };
-
-vi.mock('#components/chat/chat-agent-model-selector.js', () => ({
-  useChatAgentModel: () => ({ models: [acpModel], selectedModel: acpModel, isOffered: true, agentName: 'Codex' }),
-  ChatAgentModelSelector: ({
-    children,
-  }: {
-    readonly children: (props: { readonly selectedModel: typeof acpModel }) => React.ReactNode;
-  }) => <div>{children({ selectedModel: acpModel })}</div>,
 }));
 
 vi.mock('#components/chat/chat-kernel-selector.js', () => ({
   ChatKernelSelector: ({
     children,
   }: {
-    readonly children: (props: { selectedKernel: KernelConfiguration | undefined }) => React.ReactNode;
-  }) => <div>{children({ selectedKernel: mockKernelByConsumer.current })}</div>,
-}));
-
-vi.mock('#components/chat/chat-tool-selector.js', () => ({
-  ChatToolSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
-    <div>{children({ selectedMode: undefined, selectedTools: [], toolMetadata: {} })}</div>
-  ),
-}));
-
-const modeConfig = {
-  label: 'Agent',
-  icon: () => <span data-testid='mode-icon' />,
-  activeClass: '',
-};
-
-vi.mock('#components/chat/chat-mode-selector.js', () => ({
-  ChatAgentSelector: ({
-    children,
-  }: {
-    readonly children: (props: { readonly currentConfig: typeof modeConfig }) => React.ReactNode;
-  }) => <div data-testid='mode-selector'>{children({ currentConfig: modeConfig })}</div>,
-  toggleModeKeyCombination: { key: 'm' },
+    readonly children: (props: { selectedKernel: typeof manifoldKernel }) => React.ReactNode;
+  }) => <div>{children({ selectedKernel: manifoldKernel })}</div>,
 }));
 
 vi.mock('#components/icons/svg-icon.js', () => ({
-  SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon'>{id}</span>,
+  SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 
-vi.mock('#components/ui/key-shortcut.js', () => ({
-  KeyShortcut: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
-}));
+const { ChatTextareaBar, acpCommandToSlashCommand } = await import('#components/chat/chat-textarea-desktop.js');
 
-vi.mock('@taucad/ui/components/tooltip', () => ({
-  Tooltip: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-  TooltipContent: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='tooltip-content'>{children}</div>
-  ),
-}));
-
-vi.mock('@taucad/ui/components/button', () => ({
-  Button: ({ children, ...properties }: React.ComponentProps<'button'>) => (
-    <button type='button' {...properties}>
-      {children}
-    </button>
-  ),
-}));
-
-vi.mock('@taucad/ui/components/popover', () => ({
-  Popover: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-  PopoverTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-  PopoverContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-}));
-
-const { ChatTextareaLeftControls, acpCommandToSlashCommand } =
-  await import('#components/chat/chat-textarea-desktop.js');
-
-const stubModel: ResolvedModel = {
-  id: 'm',
-  name: 'M',
-  family: 'gpt',
-  provider: { id: 'openai', name: 'OpenAI' },
-  isResolved: true,
-};
-// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref objects are typed with `null` upstream
-const stubFileInput: React.RefObject<HTMLInputElement | null> = { current: null };
 const noop = (): void => undefined;
+const asyncNoop = async (): Promise<void> => undefined;
 
-function controls(
-  creationLocationControl?: React.ReactNode,
-  acpSessionData?: AcpSessionData,
-  status = 'ready',
-): React.JSX.Element {
-  return (
-    <ChatTextareaLeftControls
-      selectedModel={stubModel}
-      enableKernelSelector
-      selectedToolChoice='auto'
-      focusEditor={noop}
-      setDraftToolChoice={noop}
-      fileInputReference={stubFileInput}
-      attachmentAccept='image/png,application/pdf'
-      handleFileChange={noop}
-      creationLocationControl={creationLocationControl}
-      acpSessionData={acpSessionData}
-      status={status}
-    />
+const codexSession: AcpSessionData = {
+  type: 'acp-session',
+  id: 'state',
+  agentId: 'codex',
+  commands: [],
+  configOptions: [
+    {
+      type: 'select',
+      id: 'mode',
+      name: 'Approval',
+      category: 'mode',
+      currentValue: 'read-only',
+      options: [
+        { value: 'read-only', name: 'Ask for approval' },
+        { value: 'agent', name: 'Approve for me' },
+      ],
+    },
+  ],
+};
+
+const renderBar = (
+  options: {
+    readonly acpSessionData?: AcpSessionData;
+    readonly enableContextActions?: boolean;
+    readonly attachmentInputSupported?: boolean;
+    readonly sendRefusal?: string;
+    readonly handleFileSelect?: () => void;
+    readonly handleAtButtonClick?: () => void;
+  } = {},
+) =>
+  render(
+    <TooltipProvider>
+      <ChatTextareaBar
+        composerMode='main'
+        containerReference={{ current: null }}
+        enableContextActions={options.enableContextActions ?? true}
+        enableKernelSelector
+        acpSessionData={options.acpSessionData}
+        status='ready'
+        focusEditor={noop}
+        handleAtButtonClick={options.handleAtButtonClick ?? noop}
+        handleFileSelect={options.handleFileSelect ?? noop}
+        attachmentInputSupported={options.attachmentInputSupported ?? true}
+        fileInputReference={{ current: null }}
+        attachmentAccept='image/png,application/pdf'
+        handleFileChange={noop}
+        isSubmitting={false}
+        sendRefusal={options.sendRefusal}
+        describedBy={undefined}
+        formattedCancelKeyCombination='⇧⌘⌫'
+        handleSubmit={asyncNoop}
+        handleCancelClick={noop}
+      />
+    </TooltipProvider>,
   );
-}
 
-function renderControls(creationLocationControl?: React.ReactNode, acpSessionData?: AcpSessionData, status = 'ready') {
-  return render(controls(creationLocationControl, acpSessionData, status));
-}
-
-describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
+describe('ChatTextareaBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockKernelByConsumer.current = manifoldKernel;
-    mockExecutionByConsumer.current = { kind: 'tau', model: 'm' };
-    mockCanSelectExecutionByConsumer.current = false;
-    mockAgentSelectorOffered.current = true;
-    mockPlanModeEnabled.current = false;
+    keybindings.clear();
+    execution.current = { kind: 'tau', model: 'm' };
   });
 
-  it('should render the kernel label from useChatComposer().kernel (no direct useKernel)', () => {
-    renderControls();
+  it('lays out +, the kernel, the agent trigger and Send — no branch, balance or Tau mode (D6, Q11, Q16)', () => {
+    const { container } = renderBar();
 
-    expect(mockUseChatComposer).toHaveBeenCalled();
-    expect(screen.getAllByText('Manifold').length).toBeGreaterThan(0);
+    const left = container.querySelector('[data-slot=composer-left]')!;
+    const right = container.querySelector('[data-slot=composer-right]')!;
+    expect([...left.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Add',
+      'Select kernel (Manifold)',
+    ]);
+    expect([...right.querySelectorAll('button')].map((button) => button.textContent || button.ariaLabel)).toEqual([
+      'Agent and model',
+      'Send',
+    ]);
+    expect(screen.queryByRole('button', { name: /branch/iu })).toBeNull();
+    expect(screen.queryByRole('button', { name: /credits/iu })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Mode/u })).toBeNull();
   });
 
-  it('should reflect the new kernel name when active chat kernel changes', () => {
-    const { unmount } = renderControls();
-    expect(screen.getAllByText('Manifold').length).toBeGreaterThan(0);
-    unmount();
+  it('lets the kernel label leave first when the bar needs the room', () => {
+    renderBar();
 
-    mockKernelByConsumer.current = openscadKernel;
-    renderControls();
-
-    expect(screen.getAllByText('OpenSCAD').length).toBeGreaterThan(0);
+    const kernel = screen.getByRole('button', { name: 'Select kernel (Manifold)' });
+    expect(kernel.querySelector('span:not([data-testid])')!.className).toContain('group-data-[hide-kernel]/bar:hidden');
   });
 
-  it('places the creation location control directly after the model selector', () => {
-    renderControls(<button type='button'>Create in Home</button>);
-    const location = screen.getByRole('button', { name: 'Create in Home' });
-    expect(location.previousElementSibling).toHaveTextContent('Select model');
+  it('offers attaching and adding context from one + (F10)', async () => {
+    const handleFileSelect = vi.fn();
+    const handleAtButtonClick = vi.fn();
+    renderBar({ handleFileSelect, handleAtButtonClick });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Attach image or PDF',
+      'Add context@',
+    ]);
+    await userEvent.click(screen.getByRole('menuitem', { name: /Add context/u }));
+    expect(handleAtButtonClick).toHaveBeenCalledOnce();
   });
 
-  it('names the agent selector and hides the Tau model selector for an external execution', () => {
-    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'claude' };
-    mockCanSelectExecutionByConsumer.current = true;
+  it('keeps the attach item, disabled with its reason, for a model that cannot read files (F14)', async () => {
+    renderBar({ attachmentInputSupported: false, enableContextActions: false });
 
-    renderControls();
-
-    expect(screen.getByRole('button', { name: 'Select agent: Claude Code' })).toHaveAttribute(
-      'aria-description',
-      'Agent status: Approval needed',
-    );
-    expect(screen.queryByTestId('model-selector')).toBeNull();
-    // Tau credits do not fund an external agent's turns.
-    expect(screen.queryByTestId('credit-balance-chip')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const attach = screen.getByRole('menuitem', { name: /Attach image or PDF/u });
+    expect(attach).toHaveAttribute('aria-disabled', 'true');
+    expect(attach).toHaveTextContent("This model can't read images or PDFs");
+    expect(screen.queryByRole('menuitem', { name: /Add context/u })).toBeNull();
   });
 
-  it('shows the credit balance chip alongside the Tau model selector', () => {
-    renderControls();
+  it('gives Send its refusal while staying focusable (F14)', () => {
+    renderBar({ sendRefusal: 'Write a message first' });
 
-    expect(screen.getByTestId('credit-balance-chip')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute('aria-disabled', 'true');
   });
 
-  /* Q12.2 + Q12.5: the readiness dot is gone from the trigger and readiness
-   * reads out of the tooltip, in the model selector's style. */
-  it('names the selected agent and its readiness in the agent tooltip', () => {
-    mockCanSelectExecutionByConsumer.current = true;
+  it('shows an external agent’s permission mode, named, and steps it with ⌘. (C5)', () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    renderBar({ acpSessionData: codexSession });
 
-    renderControls();
-
-    expect(screen.getAllByTestId('tooltip-content').map((node) => node.textContent)).toContain(
-      'Select agent (Claude Code) · Approval needed',
-    );
-  });
-
-  /* Q12.6: one agent is not a choice. */
-  it('does not render the agent selector when Tau is the only agent', () => {
-    mockCanSelectExecutionByConsumer.current = true;
-    mockAgentSelectorOffered.current = false;
-
-    renderControls();
-
-    expect(screen.queryByRole('button', { name: /^Select agent: /u })).toBeNull();
-  });
-
-  /* Q12 fold 1: the ACP model trigger collapses like its Tau sibling, so its
-   * label is hidden below the container breakpoint and the name moves to the
-   * trigger's accessible name. */
-  it('collapses the ACP model label below the container breakpoint and keeps its accessible name', () => {
-    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    mockCanSelectExecutionByConsumer.current = true;
-
-    renderControls();
-
-    const trigger = screen.getByRole('button', { name: 'Select model (GPT-5.6-Sol)' });
-    const label = trigger.querySelector('span')!;
-    expect(label).toHaveTextContent('GPT-5.6-Sol');
-    expect(label.className).toContain('hidden');
-    expect(label.className).toContain('@[22rem]:block');
-    expect(trigger.className).toContain('@max-[22rem]:w-7');
-  });
-
-  it('renders offered ACP config separately and stores the exact selected value', () => {
-    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    renderControls(undefined, {
-      type: 'acp-session',
-      id: 'state-1',
-      agentId: 'codex',
-      commands: [],
-      configOptions: [
-        {
-          type: 'select',
-          id: 'model',
-          name: 'Model',
-          category: 'model',
-          currentValue: 'gpt-5.6-sol',
-          options: [{ value: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }],
-        },
-        {
-          type: 'select',
-          id: 'thought_level',
-          name: 'Thinking',
-          category: 'thought_level',
-          currentValue: 'medium',
-          options: [
-            {
-              group: 'effort',
-              name: 'Effort',
-              options: [
-                { value: 'medium', name: 'Medium' },
-                { value: 'high', name: 'High' },
-              ],
-            },
-          ],
-        },
-      ],
+    expect(screen.getByRole('button', { name: 'Mode: Ask for approval' })).toBeInTheDocument();
+    act(() => {
+      const binding = keybindings.get('.');
+      if (binding?.enabled()) {
+        binding.callback();
+      }
     });
-
-    expect(screen.getByRole('button', { name: 'Agent settings' })).toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
-    expect(screen.getByRole('group', { name: 'Effort' })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'high' } });
-    expect(mockSetActiveExecution).toHaveBeenCalledWith({
+    expect(setActiveExecution).toHaveBeenLastCalledWith({
       kind: 'acp',
-      hostId: 'origin',
+      hostId: 'desktop',
       agentId: 'codex',
-      config: Object.fromEntries([['thought_level', 'high']]),
+      config: { mode: 'agent' },
     });
   });
 
-  it('shows the agent-confirmed config value instead of a stale requested value', () => {
-    mockExecutionByConsumer.current = {
-      kind: 'acp',
-      hostId: 'origin',
-      agentId: 'codex',
-      config: Object.fromEntries([['thought_level', 'high']]),
-    };
-    renderControls(undefined, {
-      type: 'acp-session',
-      id: 'state-confirmed',
-      agentId: 'codex',
-      commands: [],
-      configOptions: [
-        {
-          type: 'select',
-          id: 'thought_level',
-          name: 'Thinking',
-          currentValue: 'medium',
-          options: [
-            { value: 'medium', name: 'Medium' },
-            { value: 'high', name: 'High' },
-          ],
-        },
-      ],
-    });
+  it('leaves ⌘. and ⌘/ to an edit box that has focus (F6)', () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    renderBar({ acpSessionData: codexSession });
+    const edit = document.createElement('div');
+    edit.dataset['chatComposer'] = 'edit';
+    const input = document.createElement('input');
+    edit.append(input);
+    document.body.append(edit);
+    input.focus();
 
-    expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveValue('medium');
-  });
-
-  it('clears a rejected request even when the confirmed value is unchanged', () => {
-    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    const confirmed: AcpSessionData = {
-      type: 'acp-session',
-      id: 'state-config',
-      agentId: 'codex',
-      commands: [],
-      configOptions: [
-        {
-          type: 'select',
-          id: 'thought_level',
-          name: 'Thinking',
-          currentValue: 'medium',
-          options: [
-            { value: 'medium', name: 'Medium' },
-            { value: 'high', name: 'High' },
-          ],
-        },
-      ],
-    };
-    const view = renderControls(undefined, confirmed);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'high' } });
-    view.rerender(controls(undefined, confirmed, 'submitted'));
-    view.rerender(controls(undefined, { ...confirmed }, 'ready'));
-
-    expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveValue('medium');
-    expect(mockSetActiveExecution).toHaveBeenLastCalledWith({
-      kind: 'acp',
-      hostId: 'origin',
-      agentId: 'codex',
-      config: Object.fromEntries([['thought_level', 'medium']]),
-    });
-  });
-
-  it('retains an option edited after the submitted snapshot', () => {
-    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    const confirmed: AcpSessionData = {
-      type: 'acp-session',
-      id: 'state-config-late',
-      agentId: 'codex',
-      commands: [],
-      configOptions: [
-        {
-          type: 'select',
-          id: 'thought_level',
-          name: 'Thinking',
-          currentValue: 'medium',
-          options: [
-            { value: 'medium', name: 'Medium' },
-            { value: 'high', name: 'High' },
-            { value: 'max', name: 'Max' },
-          ],
-        },
-      ],
-    };
-    const view = renderControls(undefined, confirmed);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'high' } });
-    view.rerender(controls(undefined, confirmed, 'submitted'));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Thinking' }), { target: { value: 'max' } });
-    view.rerender(controls(undefined, { ...confirmed }, 'ready'));
-
-    expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveValue('max');
-    expect(mockSetActiveExecution).toHaveBeenLastCalledWith({
-      kind: 'acp',
-      hostId: 'origin',
-      agentId: 'codex',
-      config: Object.fromEntries([['thought_level', 'max']]),
-    });
-  });
-
-  it('waits for the turn boundary before acknowledging unchanged startup configuration', () => {
-    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    const confirmed: AcpSessionData = {
-      type: 'acp-session',
-      id: 'state-startup',
-      sessionId: 'session',
-      agentId: 'codex',
-      commands: [],
-      configOptions: [
-        {
-          type: 'select',
-          id: 'effort',
-          name: 'Effort',
-          currentValue: 'medium',
-          options: [
-            { value: 'medium', name: 'Medium' },
-            { value: 'high', name: 'High' },
-          ],
-        },
-      ],
-    };
-    const view = renderControls(undefined, confirmed);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Effort' }), { target: { value: 'high' } });
-    view.rerender(controls(undefined, confirmed, 'submitted'));
-    const startup = { ...confirmed, commands: [{ name: 'help', description: 'Help' }] };
-    view.rerender(controls(undefined, startup, 'streaming'));
-    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('high');
-    view.rerender(controls(undefined, startup, 'ready'));
-    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('medium');
-  });
-
-  it.each(['session', 'agent', 'host'] as const)('drops unsubmitted settings when its %s is replaced', (scope) => {
-    mockExecutionByConsumer.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    const confirmed: AcpSessionData = {
-      type: 'acp-session',
-      id: 'state-session',
-      sessionId: 'session-before',
-      agentId: 'codex',
-      commands: [],
-      configOptions: [
-        {
-          type: 'select',
-          id: 'effort',
-          name: 'Effort',
-          currentValue: 'medium',
-          options: [
-            { value: 'medium', name: 'Medium' },
-            { value: 'high', name: 'High' },
-          ],
-        },
-      ],
-    };
-    const view = renderControls(undefined, confirmed);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Effort' }), { target: { value: 'high' } });
-    const selection = {
-      kind: 'acp',
-      hostId: scope === 'host' ? 'another-host' : 'origin',
-      agentId: scope === 'agent' ? 'claude' : 'codex',
-    } as const;
-    mockExecutionByConsumer.current = selection;
-    view.rerender(
-      controls(undefined, {
-        ...confirmed,
-        agentId: selection.agentId,
-        sessionId: scope === 'session' ? 'session-after' : 'session-before',
-      }),
-    );
-    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('medium');
-    expect(mockSetActiveExecution).toHaveBeenLastCalledWith({
-      ...selection,
-      config: { effort: 'medium' },
-    });
-  });
-
-  /* C3-review M2: at the 280 px pane every trigger label is `display:none`, so
-   * the kernel and mode triggers are only reachable by their `aria-label`. */
-  it('names the kernel and mode triggers when their labels are collapsed', () => {
-    mockKernelByConsumer.current = openscadKernel;
-    mockPlanModeEnabled.current = true;
-
-    renderControls();
-
-    expect(screen.getByRole('button', { name: 'Select kernel (OpenSCAD)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Select mode (Agent)' })).toBeInTheDocument();
-  });
-
-  /* C3-review M1: the agent trigger collapses to 28 px like its four siblings. */
-  it('collapses the agent trigger below the container breakpoint', () => {
-    mockCanSelectExecutionByConsumer.current = true;
-
-    renderControls();
-
-    expect(screen.getByRole('button', { name: 'Select agent: Claude Code' }).className).toContain('@max-[22rem]:w-7');
-  });
-
-  /* Q12.7: no chevron on any trigger in the row. */
-  it('renders no chevron on any trigger', () => {
-    mockCanSelectExecutionByConsumer.current = true;
-
-    const { container } = renderControls();
-
-    expect(container.querySelectorAll('svg.lucide-chevron-down')).toHaveLength(0);
+    expect(keybindings.get('.')?.enabled()).toBe(false);
+    edit.remove();
   });
 });
 

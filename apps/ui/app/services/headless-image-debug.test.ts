@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- `ENV` and `TAU_DEBUG` are the environment facade's own names. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 type DebugBridge = { readonly records: unknown[]; reset(): void };

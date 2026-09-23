@@ -37,6 +37,7 @@
     "build-environment.test.ts",
     "desktop/**/*.ts",
     "serve/**/*.ts",
+    "serve/**/*.tsx",
     "tests/**/*.spec.ts",
     "tests/**/*.test.ts",
     "tests/**/*.spec.tsx",

@@ -347,7 +347,7 @@ export class TypeAcquisitionService {
 
   private async scanModelImports(model: Monaco.editor.ITextModel): Promise<void> {
     try {
-      const imports = await getAllImports(model);
+      const imports = getAllImports(model);
       ataLog('scan:', model.uri.toString(), `(${imports.length} imports)`);
 
       for (const imp of imports) {
@@ -524,7 +524,7 @@ export class TypeAcquisitionService {
       return;
     }
 
-    const exportNames = await parseExportNames(jsSource);
+    const exportNames = parseExportNames(jsSource);
 
     if (exportNames.length === 0) {
       this.acquiredTypes.add(packageName);

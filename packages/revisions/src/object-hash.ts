@@ -271,10 +271,34 @@ export const concatBytes = (...parts: ReadonlyArray<Uint8Array<ArrayBuffer>>): U
 /**
  * Compare two byte runs.
  *
+ * The package's one byte comparison (W10.1): an apply, a recovery and a chat
+ * projection all ran their own copy of it, and the apply's was the only fast one.
+ *
+ * Four bytes a step through a `DataView`, which needs no alignment of its own,
+ * rather than a JavaScript callback per byte: this runs once per changed file
+ * in an apply and once per path in a recovery, over whole CAD models.
+ *
  * @param left - First run.
  * @param right - Second run.
  * @returns Whether the runs are identical.
  * @public
  */
-export const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-  left.length === right.length && left.every((byte, index) => byte === right[index]);
+export const equalBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean => {
+  if (left.byteLength !== right.byteLength) {
+    return false;
+  }
+  const leftWords = new DataView(left.buffer, left.byteOffset, left.byteLength);
+  const rightWords = new DataView(right.buffer, right.byteOffset, right.byteLength);
+  const wordEnd = left.byteLength - (left.byteLength % 4);
+  for (let offset = 0; offset < wordEnd; offset += 4) {
+    if (leftWords.getUint32(offset) !== rightWords.getUint32(offset)) {
+      return false;
+    }
+  }
+  for (let offset = wordEnd; offset < left.byteLength; offset += 1) {
+    if (left[offset] !== right[offset]) {
+      return false;
+    }
+  }
+  return true;
+};

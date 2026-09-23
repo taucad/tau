@@ -31,6 +31,7 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId } from '@taucad/revisions/algorithms';
 import {
+  admissionMilliseconds,
   awaitSyncSettled,
   createProjectRevisionsActor,
   describeTurnSettlement,
@@ -50,10 +51,12 @@ import {
   readRevisionDiff,
   readRevisionLog,
   readRevisionPlace,
-  registerProjectFailureMessage,
+  publishOverHttp,
+  registerProjectOverHttp,
   tauRemoteUrl,
 } from '@taucad/revisions';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
+import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type {
   RevisionActor,
@@ -316,16 +319,6 @@ const revisionJson = (value: unknown): JsonValue =>
  * other's.
  */
 const hostDeviceId = `${hostname()}:${userInfo().username}`;
-
-/**
- * How long an admission waits for its turn to take its lease.
- *
- * The same bound the turn machine gives its own cut (`turnCutSettlementMilliseconds`),
- * spelled here rather than imported because it is the *host's* patience: a turn
- * whose base mint never settles must refuse the run rather than hold the client
- * open for the life of the process.
- */
-const admissionMilliseconds = 30_000;
 
 /**
  * How long an admission waits for the checkout registry's first answer.
@@ -733,17 +726,21 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             if (credential === undefined) {
               throw new Error('This host is not signed in to Tau Cloud.');
             }
-            await registerProjectOverHttp(apiBaseUrl, credential.authorization, {
-              id,
-              name: await readProjectName(options.workspaceRoot),
-            });
+            await registerProjectOverHttp(
+              apiBaseUrl,
+              { kind: 'bearer', authorization: credential.authorization },
+              {
+                id,
+                name: await readProjectName(options.workspaceRoot),
+              },
+            );
           },
           publishPublication: async (input: PublishPublicationActorInput) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
               throw new Error('This host is not signed in to Tau Cloud.');
             }
-            return publishOverHttp(apiBaseUrl, credential.authorization, input);
+            return publishOverHttp(apiBaseUrl, { kind: 'bearer', authorization: credential.authorization }, input);
           },
         }),
     onChatsProjected: (chatIds) => {
@@ -859,11 +856,17 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       branches: status.branches.map((branch) => ({ ...branch, checkoutRoot: route(branch.checkoutId) })),
     };
   };
+  /* One status frame per *visible* change (W10.5). The projection is rebuilt on
+   * every transition, so identity never answers; without the comparator the
+   * daemon sent a frame per transition and every client repainted for each. */
+  let publishedStatus: RevisionStatusProjection | undefined;
   actor.subscribe((snapshot) => {
-    emitChannel({
-      kind: 'status',
-      value: revisionJson(channelStatus(snapshot)),
-    });
+    const next = channelStatus(snapshot);
+    if (publishedStatus !== undefined && sameRevisionStatus(publishedStatus, next)) {
+      return;
+    }
+    publishedStatus = next;
+    emitChannel({ kind: 'status', value: revisionJson(next) });
   });
   actor.start();
   const restoreChild = actor.getSnapshot().children.restore;
@@ -934,14 +937,13 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       value: revisionJson({ ...toast, type: 'branch' }),
     });
   });
-  branchChild?.on('toast.error', (toast) => {
+  /* Whole, like `toast.branch` above: the code phrases the refusal on the
+   * page and the verb and branch let a waiting create tell its own refusal
+   * from another verb's. */
+  branchChild?.on('toast.error', ({ type: _type, ...toast }) => {
     emitChannel({
       kind: 'toast',
-      value: revisionJson({
-        type: 'error',
-        subject: 'branch',
-        message: toast.message,
-      }),
+      value: revisionJson({ ...toast, type: 'error', subject: 'branch' }),
     });
   });
   const admit = async (input: {
@@ -954,6 +956,31 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     admissions.set(input.runId, pending);
     turns.set(input.runId, input.turnId);
     const bound = setTimeout(() => {
+      if (!admissions.has(input.runId)) {
+        return;
+      }
+      /*
+       * The root is told, not only the caller (T4-02).
+       *
+       * An admission the root is still holding — buffered before the registry
+       * answered, or queued behind the turn id a running turn holds (V8) —
+       * outlives this wait: the root replays it later, the turn it spawns takes
+       * the checkout's lease, and nothing is left to send it `turnCompleted`,
+       * so the checkout reads as held for the life of the process and every
+       * save on it records nothing. A lease has no heartbeat by policy (§8),
+       * so this host giving up is the only liveness signal it has.
+       */
+      actor.send({ type: 'turnAbandoned', turnId: input.turnId, runId: input.runId });
+      /*
+       * And the run id becomes admittable again, as it does on every other way
+       * an admission ends (`turnReleased`, a failed `execute`).
+       *
+       * `execute` skips admission for a run it has already admitted, so a
+       * client retrying the run id this bound just refused went straight to the
+       * launcher: the agent ran with no lease, unfenced, and its turn recorded
+       * no revision (I-EDIT).
+       */
+      turns.delete(input.runId);
       refuseAdmission(input.runId, 'it was never leased.');
     }, admissionMilliseconds);
     /* No wait for the registry: the root holds an admission that arrives before
@@ -1607,7 +1634,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
              * not hold one for the life of the host. */
             const turnId = turns.get(command.runId);
             if (turnId !== undefined) {
-              actor.send({ type: 'turnAbandoned', turnId });
+              /* Named by run as well as by turn: an edit reuses the message id
+               * the previous run leased, so the verb must not end whichever run
+               * holds that turn id now. */
+              actor.send({ type: 'turnAbandoned', turnId, runId: command.runId });
               turns.delete(command.runId);
             }
             options.checkouts?.delete(command.runId);
@@ -1663,104 +1693,6 @@ export type RevisionSwitchOutcome =
 export type RevisionDiscardOutcome =
   | Readonly<{ status: 'discarded'; branch: string }>
   | Readonly<{ status: 'refused'; branch: string; reason: string }>;
-
-/**
- * Record one publication on Tau Cloud from a Node host (S32, A21).
- *
- * The browser worker makes the same request with its cookie session; this leg
- * carries a bearer session token instead, because a terminal has no cookie jar.
- *
- * ponytail: the two legs repeat this request and its copy. They merge into
- * `@taucad/revisions` the moment a third leg needs it — the shape that matters
- * (the pointer, the failure edges) is already shared in `publish.machine`.
- *
- * @param apiBaseUrl - The API origin, without a trailing slash.
- * @param authorization - A complete Better Auth bearer value.
- * @param input - The pointer and the settings the caller collected.
- * @returns The publication's id and the link to share.
- * @throws Error When the API refused, in the words a person can act on (A18).
- */
-const publishOverHttp = async (
-  apiBaseUrl: string,
-  authorization: string,
-  input: PublishPublicationActorInput,
-): Promise<PublishPublicationActorOutput> => {
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/publications`, {
-    method: 'POST',
-    /* eslint-disable @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire. */
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: authorization,
-    },
-    /* eslint-enable @typescript-eslint/naming-convention -- end wire header names. */
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => undefined);
-    const code = (body as Readonly<{ code?: unknown }> | undefined)?.code;
-    throw new Error(
-      response.status === 401
-        ? 'Tau Cloud did not accept this token. Set TAU_API_TOKEN to a current session token.'
-        : code === 'ENTITLEMENT_REQUIRED'
-          ? 'Private links need the Pro plan.'
-          : code === 'MISSING_ENTRY_PATH'
-            ? 'This version does not contain the file this project opens with.'
-            : 'Tau Cloud could not publish this project. Try again.',
-    );
-  }
-  const body = (await response.json()) as Readonly<{
-    id?: string;
-    urls?: Readonly<{ share?: string; view?: string }>;
-  }>;
-  const url = body.urls?.share ?? body.urls?.view;
-  if (body.id === undefined || url === undefined) {
-    throw new Error('Tau Cloud answered without a link for this publication.');
-  }
-  return { publicationId: body.id, url };
-};
-
-/**
- * Claim this project on Tau Cloud, so connecting to it can take (P51, W18 DEF-1).
- *
- * `PUT /v1/projects/<id>` creates the caller's project row and its bare
- * repository and is idempotent, so a retried *Connect* costs one request. Like
- * {@link publishOverHttp} this leg carries a bearer session token, because a
- * terminal has no cookie jar.
- *
- * @param apiBaseUrl - The API origin, without a trailing slash.
- * @param authorization - A complete Better Auth bearer value.
- * @param project - The id and manifest name this host knows.
- * @returns Nothing.
- * @throws Error When Tau Cloud refused, in the words a person can act on (A18).
- */
-const registerProjectOverHttp = async (
-  apiBaseUrl: string,
-  authorization: string,
-  project: Readonly<{ id: string; name: string | undefined }>,
-): Promise<void> => {
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(project.id)}`, {
-    method: 'PUT',
-    /* eslint-disable @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire. */
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: authorization,
-    },
-    /* eslint-enable @typescript-eslint/naming-convention -- end wire header names. */
-    body: JSON.stringify(project.name === undefined ? {} : { name: project.name }),
-  });
-  if (!response.ok) {
-    /* One owner for this ladder (C6): the copy this host used to compose had a
-     * dead rung — the API answers 404 for a project id that is not this
-     * account's, and 403 only for the project ceiling, which the old 403
-     * sentence hid behind "belongs to another account". */
-    const body = (await response.json().catch(() => undefined)) as
-      | Readonly<{ code?: string; message?: string }>
-      | undefined;
-    throw new Error(registerProjectFailureMessage(response.status, body?.code, body?.message));
-  }
-};
 
 /**
  * Read the exact project name a disk host registers with Tau Cloud.
@@ -1899,16 +1831,21 @@ export const openProjectRevisions = (
     options.publishPublication ??
     (apiBaseUrl === undefined || apiToken === undefined
       ? undefined
-      : async (input: PublishPublicationActorInput) => publishOverHttp(apiBaseUrl, `Bearer ${apiToken}`, input));
+      : async (input: PublishPublicationActorInput) =>
+          publishOverHttp(apiBaseUrl, { kind: 'bearer', authorization: `Bearer ${apiToken}` }, input));
   /* Connecting Tau Cloud is what registers a project on it (P51). */
   const registerRemoteProject =
     apiBaseUrl === undefined || apiToken === undefined
       ? undefined
       : async (id: string) => {
-          await registerProjectOverHttp(apiBaseUrl, `Bearer ${apiToken}`, {
-            id,
-            name: await readProjectName(options.workspaceRoot),
-          });
+          await registerProjectOverHttp(
+            apiBaseUrl,
+            { kind: 'bearer', authorization: `Bearer ${apiToken}` },
+            {
+              id,
+              name: await readProjectName(options.workspaceRoot),
+            },
+          );
         };
   const port =
     options.port ??

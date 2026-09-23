@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
+import { checkoutRoute, nodeModulesRoute, parseRoute, policyAtRoot, projectRoute } from '#project-routes.js';
+import { tauPathPolicy } from '#path-registry.js';
 import { MountTable } from '#mount-table.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { ProviderRegistry } from '#provider-registry.js';
@@ -55,6 +56,21 @@ describe('ProjectRoutes', () => {
     });
     expect(parseRoute('/projects')).toEqual({ kind: 'other', rest: '' });
     expect(parseRoute('/cube-design/main.ts')).toEqual({ kind: 'other', rest: '' });
+  });
+
+  it('should rebase project paths only when the view is rooted above them', () => {
+    const workspacePolicy = policyAtRoot(tauPathPolicy, '/');
+    // eslint-disable-next-line no-restricted-syntax -- Exact retired spelling reproduces the authority-boundary regression.
+    const reserved = ['.tau', 'revisions', 'secret'].join('/');
+
+    expect(workspacePolicy.classify(`projects/alpha/${reserved}`)).toEqual(tauPathPolicy.classify(reserved));
+    expect(workspacePolicy.classify('checkouts/candidate/exports/model.step')).toEqual(
+      tauPathPolicy.classify('exports/model.step'),
+    );
+    expect(workspacePolicy.classify('previews/card/thumbnail.webp')).toEqual(tauPathPolicy.classify('thumbnail.webp'));
+    expect(workspacePolicy.classify('projects/alpha')).toEqual(tauPathPolicy.classify('projects/alpha'));
+    expect(workspacePolicy.classify('home.txt')).toEqual(tauPathPolicy.classify('home.txt'));
+    expect(policyAtRoot(tauPathPolicy, projectRoute(projectId))).toBe(tauPathPolicy);
   });
 });
 

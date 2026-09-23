@@ -5,7 +5,9 @@ import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js'
 
 const getReloadConsent = vi.hoisted(() => vi.fn());
 const prepareReloadConsent = vi.hoisted(() => vi.fn());
+const AddressRequired = vi.hoisted(() => class extends Error {});
 vi.mock('#lib/billing-lifecycle-client.js', () => ({
+  BillingAddressRequired: AddressRequired,
   getReloadConsent,
   prepareReloadConsent,
   revokeReloadConsent: vi.fn(),
@@ -56,6 +58,41 @@ describe('AutoReloadSettings', () => {
     expect(await screen.findByText('Purchases are not available yet.')).toBeInTheDocument();
     expect(screen.queryByText(/try again/i)).toBeNull();
   });
+  it('names the reload cadence in singular or plural hours', async () => {
+    const consent = (minimumCadenceSeconds: number) => ({
+      state: 'enabled',
+      setupAction: null,
+      paymentMethod: null,
+      terms: {
+        principalMinor: '2500',
+        quotedTaxMinor: '0',
+        grossCeilingMinor: '2500',
+        monthlyGrossCapMinor: '10000',
+        thresholdAtoms: '1000000',
+        minimumCadenceSeconds,
+        terminalFailureLimit: 2,
+      },
+    });
+    getReloadConsent.mockResolvedValue(consent(3600));
+    const { unmount } = render(<AutoReloadSettings binding={binding} />);
+    expect(await screen.findByText('1 hour')).toBeInTheDocument();
+    unmount();
+    getReloadConsent.mockResolvedValue(consent(7200));
+    render(<AutoReloadSettings binding={binding} />);
+    expect(await screen.findByText('2 hours')).toBeInTheDocument();
+  });
+
+  it('points a customer without a saved billing address to a Checkout purchase first', async () => {
+    prepareReloadConsent.mockRejectedValue(new AddressRequired());
+    render(<AutoReloadSettings binding={binding} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Review automatic reload' }));
+    expect(
+      await screen.findByText(
+        'Add credits once through Checkout to save a card and billing address, then set up automatic reload.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('requires an explicit review action before preparing consent', async () => {
     prepareReloadConsent.mockResolvedValue({ state: 'prepared' });
     render(<AutoReloadSettings binding={binding} />);

@@ -182,8 +182,16 @@ vi.mock('#components/chat/context-chip.js', () => ({
 }));
 
 vi.mock('#components/chat/chat-activity-group.js', () => ({
-  ChatActivityGroup: ({ children, summary }: { readonly children: React.ReactNode; readonly summary: string }) => (
-    <div data-testid='chat-activity-group' data-summary={summary}>
+  ChatActivityGroup: ({
+    children,
+    summary,
+    hasActiveRows,
+  }: {
+    readonly children: React.ReactNode;
+    readonly summary: string;
+    readonly hasActiveRows?: boolean;
+  }) => (
+    <div data-testid='chat-activity-group' data-summary={summary} data-active-rows={String(hasActiveRows ?? false)}>
       {children}
     </div>
   ),
@@ -414,6 +422,50 @@ describe('ChatMessage activity composition', () => {
     expect(reasoningBlocks[0]).toHaveTextContent('Inspecting the model|Confirming dimensions');
     expect(reasoningBlocks[1]).toHaveTextContent('Preparing the answer');
     expect(group).toHaveAttribute('data-summary', 'Reading files');
+  });
+
+  it('marks the trailing group busy while its last thought still streams behind settled tools (resting block R3)', () => {
+    const message: MyUIMessage = {
+      id: 'msg-resting-thought',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-read_file',
+          toolCallId: 'read-1',
+          state: 'output-available',
+          input: { targetFile: 'main.scad' },
+          output: { content: '', size: 0, contentKind: 'text', totalLines: 0 },
+        },
+        { type: 'reasoning', text: '**Refining blade geometry**', state: 'streaming' },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-active-rows', 'true');
+  });
+
+  it('does not mark a group busy for a streaming thought once the message has settled', () => {
+    const message: MyUIMessage = {
+      id: 'msg-stale-thought',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-read_file',
+          toolCallId: 'read-1',
+          state: 'output-available',
+          input: { targetFile: 'main.scad' },
+          output: { content: '', size: 0, contentKind: 'text', totalLines: 0 },
+        },
+        { type: 'reasoning', text: 'Left open by a failed run', state: 'streaming' },
+      ],
+    };
+    setMessages([message], 'ready');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-active-rows', 'false');
   });
 });
 
@@ -743,11 +795,11 @@ it('shows generic diagnostics for an unsupported historical static tool', () => 
 });
 
 /*
- * V6. The transcript is history: a message an external agent produced says so,
- * from its own durable usage record, whatever the composer is selected on now.
- * A Tau turn shows nothing — the model selector already names its model.
+ * The action row under an assistant message: Copy, the usage button (its card
+ * carries the model and any external agent — V6 lives there now) and the
+ * message's timestamp. A user message has none of it.
  */
-describe('external attribution badge', () => {
+describe('assistant action row', () => {
   const usagePart = (data: Record<string, unknown>): MyUIMessage['parts'][number] =>
     ({
       type: 'data-usage',
@@ -760,28 +812,46 @@ describe('external attribution badge', () => {
         reasoningTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        inputTokensCost: 0,
-        outputTokensCost: 0,
-        cacheReadTokensCost: 0,
-        cacheWriteTokensCost: 0,
-        totalCost: 0,
         ...data,
       },
     }) as unknown as MyUIMessage['parts'][number];
 
-  it('names the external agent and the model its usage recorded', () => {
-    setMessages([{ id: 'msg-external', role: 'assistant', parts: [usagePart({ agent: 'codex' })] }]);
+  it('shows Copy, usage and a relative timestamp whose tooltip is the exact time', () => {
+    const createdAt = Date.now() - 3 * 60_000;
+    setMessages([{ id: 'msg-a', role: 'assistant', parts: [usagePart({ agent: 'codex' })], metadata: { createdAt } }]);
 
-    render(<ChatMessage messageId='msg-external' />);
+    render(<ChatMessage messageId='msg-a' />);
 
-    expect(screen.getByText('codex · gpt-5.3-codex')).toBeInTheDocument();
+    expect(screen.getByTestId('copy-button')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-message-data-usage')).toBeInTheDocument();
+    const time = screen.getByText('3 minutes ago');
+    expect(time.tagName).toBe('TIME');
+    expect(time.getAttribute('datetime')).toBe(new Date(createdAt).toISOString());
   });
 
-  it('shows no badge on a Tau turn', () => {
-    setMessages([{ id: 'msg-tau', role: 'assistant', parts: [usagePart({ model: 'openai-gpt-5.5' })] }]);
+  it('gives a user message the same copy and timestamp, and no usage button', () => {
+    const createdAt = Date.now() - 2 * 60 * 60_000;
+    setMessages([
+      { id: 'msg-u', role: 'user', parts: [{ type: 'text', text: 'make the blade longer' }], metadata: { createdAt } },
+    ]);
 
-    render(<ChatMessage messageId='msg-tau' />);
+    render(<ChatMessage messageId='msg-u' />);
 
-    expect(screen.queryByText(/openai-gpt-5\.5/u)).not.toBeInTheDocument();
+    const copy = screen.getByTestId('copy-button');
+    expect(screen.getByText('2 hours ago')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-message-data-usage')).not.toBeInTheDocument();
+    /* Right-aligned under the bubble, time left of the buttons: one reversed row. */
+    const row = copy.parentElement;
+    expect(row?.className).toContain('flex-row-reverse');
+    expect(row?.firstElementChild).toBe(copy);
+  });
+
+  it('omits the usage button without usage parts and the timestamp without a stamp', () => {
+    setMessages([{ id: 'msg-b', role: 'assistant', parts: [{ type: 'text', text: 'Hi' }] }]);
+
+    render(<ChatMessage messageId='msg-b' />);
+
+    expect(screen.queryByTestId('chat-message-data-usage')).not.toBeInTheDocument();
+    expect(document.querySelector('time')).toBeNull();
   });
 });

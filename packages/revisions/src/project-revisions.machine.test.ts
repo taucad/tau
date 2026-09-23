@@ -6,6 +6,7 @@ import { projectRevisionsMachine, selectRevisionStatus } from '#project-revision
 import { checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
+import { RevisionPortError } from '#revision-port.js';
 import type { CheckoutRecord } from '#revision-port.js';
 import { remoteMachine } from '#remote.machine.js';
 import { resolutionMachine } from '#resolution.machine.js';
@@ -67,6 +68,9 @@ import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js
  *     dropped rather than thrown
  * 28  `conflictResolved` is re-emitted and the registry is asked to read again
  * 29  `turnRequested` is re-emitted for whatever starts a chat turn (W10)
+ * 30  a turn-ending verb that names a run reaches the queue as well as the ref,
+ *     and a run id another turn already holds is refused whatever turn id
+ *     carries it (T4-02, T4-hyp1)
  * --  `checkoutChanged` re-heads the checkout; the checkouts' own statuses feed
  *     the `RevisionStatus` projection; serializable snapshot; one machine value
  */
@@ -377,6 +381,81 @@ describe('projectRevisionsMachine', () => {
     expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
     expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
       turnId: 'turn-1',
+      chatId: 'chat-1',
+      runId: 'run-1',
+      code: 'TURN_ALREADY_LEASED',
+    });
+
+    harness.actor.stop();
+  });
+
+  /*
+   * T4-02: a queued admission outlives the wait that asked for it.
+   *
+   * Every host bounds its admission wait (30 s) while the queue has neither a
+   * bound nor a removal verb, so an entry whose caller had already given up was
+   * still raised when the turn ahead of it retired. The turn that spawned took
+   * the checkout's lease with nothing left to send it `turnCompleted`: the
+   * checkout read as held for the rest of the session, every manual save on it
+   * answered `nothingToSave`, and every later edit of that message queued
+   * behind it. A lease has no heartbeat by policy (§8), so the caller giving
+   * up is its only liveness signal — the verb that host already sends has to
+   * reach the queue as well as the ref.
+   */
+  it('should drop a queued admission whose caller abandoned its run before the holding turn retired', async () => {
+    const harness = start();
+
+    registerCheckouts(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
+
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([
+      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' },
+    ]);
+
+    /* The caller's wait expired. It names the run it gave up on, which is not
+     * the run the same turn id is still held by (V8). */
+    harness.actor.send({ type: 'turnAbandoned', turnId: 'turn-1', runId: 'run-2' });
+
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    /* The other run of that turn id is still recording. */
+    expect(harness.actor.getSnapshot().context.turnRefs['turn-1']?.getSnapshot().context.outcome).toBeUndefined();
+
+    harness.actor.send({
+      type: 'turnReleased',
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-1',
+      outcome: 'released',
+    });
+    await flush();
+
+    /* Nothing is raised for the abandoned run, so no turn takes a lease that
+     * nothing will ever retire. */
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
+
+    harness.actor.stop();
+  });
+
+  /*
+   * T4-hyp1: the V9 guard read the run id of the turn id it was handed, so the
+   * same run arriving under a *different* turn id passed `turnIsNew` and
+   * spawned a second turn. A run id is the lease's own key
+   * (`.tau/runs/<runId>.json`), so that is two turns writing one lease file and
+   * each retiring the other's.
+   */
+  it('should refuse a turn whose run id another turn already holds', async () => {
+    const harness = start();
+
+    registerCheckouts(harness);
+    await turnToRequesting(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-2', chatId: 'chat-1', runId: 'run-1' });
+
+    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
+      turnId: 'turn-2',
       chatId: 'chat-1',
       runId: 'run-1',
       code: 'TURN_ALREADY_LEASED',
@@ -1103,20 +1182,109 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* A fresh project has files and no revision. *New branch* there used to reach
+   * the registry with no base, which the port refuses as unborn — so the
+   * composer's picker made no checkout and the turn leased the project itself.
+   * The sequence moved to the `branch` child (P3); the root names the selection
+   * and forwards the cut's trigger-only answers. */
+  it('records the files first when a branch is made on a project that has no revision yet', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    await flush();
+
+    /* The root names where the person is standing; only it knows. */
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context).toMatchObject({
+      checkoutId: 'checkout-live',
+      head: undefined,
+    });
+    /* The checkout is the sole minter (F2), so the verb asks it and waits. */
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+    expect(harness.actor.getSnapshot().children['checkout:checkout-live']?.getSnapshot().matches('minting')).toBe(true);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
+    await flush();
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'isolated-run', from: 'rev-1' },
+    ]);
+
+    harness.actor.stop();
+  });
+
+  it('names the selected head on a branch verb, so a clean tree branches from it', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    await flush();
+
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context).toMatchObject({
+      checkoutId: 'checkout-live',
+      head: 'rev-1',
+    });
+    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    await flush();
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'isolated-run', from: 'rev-1' },
+    ]);
+
+    harness.actor.stop();
+  });
+
+  /*
+   * A trigger-only cut naming no checkout was dropped on the floor, so the
+   * `branch` child sat in `recording` for the whole 30 s bound and the person
+   * watched a spinner rather than a refusal (review finding 10).
+   */
+  it('refuses a branch made on a project with nothing selected, without waiting out the bound', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, []);
+    /* The child's own words for this refusal, which the page keys on: a name
+     * collision it is not, so *Pick another name* would never clear it. */
+    const refusals = recordEmitted(harness.actor.getSnapshot().children.branch!);
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'isolated-run' } });
+    await flush();
+
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().matches('idle')).toBe(true);
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('CHECKOUT_UNKNOWN');
+    expect(refusals).toContainEqual({
+      type: 'toast.error',
+      operation: 'create',
+      branch: 'isolated-run',
+      message: 'This project has no checkout checkout-live.',
+      code: 'CHECKOUT_UNKNOWN',
+    });
+
+    harness.actor.stop();
+  });
+
   it('tells the branch child when the registry refuses its delegated verb', async () => {
     const harness = start();
 
-    await readyRegistry(harness);
+    /* A head to branch from: with none, the verb records the files first. The
+     * cut's answer is what takes it to the registry now (P3). */
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
     harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2' } });
     await flush();
-    harness.promises.settle('addCheckout', { error: new Error('That branch already has a checkout.') });
+    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    await flush();
+    harness.promises.settle('addCheckout', {
+      error: new RevisionPortError('CHECKOUT_CONFLICT', 'That branch already has a checkout.'),
+    });
     await flush();
 
+    /* P4: the code rides out with the refusal, so the page can choose words. */
     expect(harness.emitted).toContainEqual({
       type: 'checkoutFailed',
       operation: 'add',
       reason: 'That branch already has a checkout.',
+      code: 'CHECKOUT_CONFLICT',
     });
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('CHECKOUT_CONFLICT');
     expect(harness.actor.getSnapshot().children.branch?.getSnapshot().matches('idle')).toBe(true);
 
     harness.actor.stop();

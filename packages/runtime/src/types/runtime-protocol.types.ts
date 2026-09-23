@@ -344,6 +344,7 @@ export type RuntimeTranscodeArgs = {
 export type RuntimeExportModelArgs = {
   readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
   readonly file: { readonly path: string; readonly filename: string };
+  /** Caller overrides. A unit-bound numeric field accepts its declared-unit number or unit-bearing text. */
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
   readonly format: FileExtension;
@@ -355,6 +356,7 @@ export type RuntimeExportModelArgs = {
 export type RuntimeEvaluateModelArgs = {
   readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
   readonly file: { readonly path: string; readonly filename: string };
+  /** Caller overrides. A unit-bound numeric field accepts its declared-unit number or unit-bearing text. */
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
@@ -380,12 +382,13 @@ export type RuntimeSourceSnapshotArgs = {
  */
 export type RuntimeOpenFileArgs = RuntimePreviewIdentity & {
   readonly file: { readonly path: string; readonly filename: string };
+  /** Caller overrides. A unit-bound numeric field accepts its declared-unit number or unit-bearing text. */
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
   /**
    * Render for display only: the result reaches the geometry event but never becomes the published
-   * artifact, so exports and retained handles keep answering the last committed render (D2).
+   * artifact, so exports and retained handles keep answering the last committed render.
    */
   readonly transient?: boolean;
 };
@@ -398,6 +401,7 @@ export type RuntimeOpenFileArgs = RuntimePreviewIdentity & {
 export type RuntimeStageAndRenderArgs = RuntimePreviewIdentity & {
   readonly stage: Record<string, Uint8Array<ArrayBuffer>>;
   readonly file: { readonly path: string; readonly filename: string };
+  /** Caller overrides. A unit-bound numeric field accepts its declared-unit number or unit-bearing text. */
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
@@ -405,6 +409,7 @@ export type RuntimeStageAndRenderArgs = RuntimePreviewIdentity & {
 
 /** Args for a render-scoped parameter update. @public */
 export type RuntimeUpdateParametersArgs = RuntimePreviewIdentity & {
+  /** Caller overrides. A unit-bound numeric field accepts its declared-unit number or unit-bearing text. */
   readonly parameters: Record<string, unknown>;
 };
 

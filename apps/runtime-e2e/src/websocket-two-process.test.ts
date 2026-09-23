@@ -27,7 +27,8 @@ import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import { exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { exposeFileSystem, openFileSystemBridge, workspaceBridgeService } from '@taucad/fs-bridge';
 import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
@@ -133,7 +134,8 @@ const createBrowserFileSystem = async (
   }
 
   const workerScope = new EventTarget();
-  const exposed = exposeFileSystem(service, {
+  const exposed = exposeFileSystem(workspaceBridgeService(service), {
+    policy: tauPathPolicy,
     changeEventBus: eventBus,
     handlerForRoot: (authorityRoot, context) => service.createRootedFileSystem(authorityRoot, context),
     messageSource: workerScope,
@@ -148,7 +150,7 @@ const createBrowserFileSystem = async (
     service.dispose();
   });
   return {
-    fileSystem: fromFileSystemBridge(() => openFileSystemBridge(bridgeWorker, { root })),
+    fileSystem: fromFileSystemBridge(() => openFileSystemBridge(bridgeWorker, { root, consumer: 'working-copy' })),
     service,
     root,
   };

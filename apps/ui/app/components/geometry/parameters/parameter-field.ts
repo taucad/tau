@@ -31,7 +31,7 @@ export const validateParameterInputValue = (
   if (binding.representation === 'safe-integer' && !Number.isSafeInteger(value)) {
     return {
       code: 'REPRESENTATION_UNSUPPORTED',
-      message: 'Input does not preserve a safe integer in the native unit.',
+      message: 'Enter a whole number.',
     };
   }
   const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf } = binding.constraints;

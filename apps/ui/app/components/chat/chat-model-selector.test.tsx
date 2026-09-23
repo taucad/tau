@@ -45,19 +45,6 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => useChatComposerMock(),
 }));
 
-const useKeybindingMock = vi.hoisted(() => vi.fn(() => ({ formattedKeyCombination: '' })));
-vi.mock('#hooks/use-keyboard.js', () => ({
-  useKeybinding: useKeybindingMock,
-}));
-
-// The affordance hook is exercised by its own suite; here it only has to place
-// the estimate, the turns-left copy and the below-one-turn warning on the row.
-const affordanceForMock = vi.hoisted(() => vi.fn());
-vi.mock('#components/billing/credit-estimate.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useCreditAffordance: () => affordanceForMock,
-}));
-
 const openSettingsDialogMock = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', () => ({
   useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialogMock, close: vi.fn() }),
@@ -196,8 +183,6 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
     capturedComboBox.onSelect = undefined;
     capturedComboBox.renderLabel = undefined;
     capturedComboBox.value = undefined;
-    affordanceForMock.mockReturnValue(undefined);
-    useKeybindingMock.mockReturnValue({ formattedKeyCombination: '' });
   });
 
   it('renders the selected model from useChatComposer().model (not useModels)', () => {
@@ -277,12 +262,10 @@ describe('ChatModelSelector — chat-scoped read + dual-write', () => {
   });
 });
 
-describe('ChatModelSelector — spend tiers and per-turn estimates', () => {
+describe('ChatModelSelector — spend tiers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     chatModelState.current = stubModel;
-    affordanceForMock.mockReturnValue(undefined);
-    useKeybindingMock.mockReturnValue({ formattedKeyCombination: '' });
   });
 
   const renderLabelFor = (modelId: string): void => {
@@ -309,47 +292,9 @@ describe('ChatModelSelector — spend tiers and per-turn estimates', () => {
     expect(tierOf('cookie-model')).toBe('Fast');
   });
 
-  it('shows the per-turn credit estimate on the row and turns left in its details', () => {
-    affordanceForMock.mockReturnValue({ credits: '308.43', turns: 9 });
+  it('shows no credit estimate on any row (operator ruling, 2026-09-23)', () => {
     renderLabelFor('openai-gpt-6-astra');
-
-    // The row carries the bare estimate; the hover card spells out the turns.
-    expect(screen.getAllByText(/≈ 308\.43 credits/)).toHaveLength(2);
-    expect(screen.getByText('≈ 308.43 credits per turn · about 9 turns left')).toBeInTheDocument();
-  });
-
-  it('warns but keeps a route the balance cannot cover for one turn selectable', () => {
-    affordanceForMock.mockReturnValue({ credits: '308.43', turns: 0 });
-    renderLabelFor('openai-gpt-6-astra');
-
-    expect(screen.getByText(/does not cover one turn/i)).toBeInTheDocument();
-
-    // P1: any balance buys any tier — the warned route still selects.
-    capturedComboBox.onSelect?.('openai-gpt-6-astra');
-    expect(setActiveModel).toHaveBeenCalledWith('openai-gpt-6-astra');
-  });
-
-  it('omits the turns-left clause while the balance is unreadable', () => {
-    affordanceForMock.mockReturnValue({ credits: '6.59', turns: undefined });
-    renderLabelFor('openai-gpt-6-astra');
-
-    expect(screen.getByText('≈ 6.59 credits per turn')).toBeInTheDocument();
-    expect(screen.queryByText(/turns left/)).not.toBeInTheDocument();
-  });
-
-  it('renders no estimate at all when the API publishes none for the route', () => {
-    renderLabelFor('cookie-model');
 
     expect(screen.queryByText(/credits/i)).not.toBeInTheDocument();
-  });
-
-  it('leaves the open shortcut to the composer when a second picker opts out', () => {
-    render(
-      <ChatModelSelector enableShortcut={false}>
-        {({ selectedModel }) => <span>{selectedModel.id}</span>}
-      </ChatModelSelector>,
-    );
-
-    expect(useKeybindingMock).toHaveBeenCalledWith(expect.anything(), expect.any(Function), { enabled: false });
   });
 });

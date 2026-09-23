@@ -49,7 +49,7 @@ import { assertRootedPath } from '@taucad/utils/path';
  * follow, and it bundles rather than externalises. `@taucad/runtime` is a peer,
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
-import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
+import type { ExportFile, RuntimeFileSystemBase, SourceRevision } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -62,6 +62,17 @@ type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
 /** Runtime surface accepted by the host's GeoSpec model loader. @public */
 export type HostGeoSpecRuntimeClient = GeoSpecRuntimeClient;
+
+/**
+ * A GeoSpec runner that can also name the sources its models were loaded from (R4, invariant I5).
+ *
+ * Optional because a runner whose loader is the CLI's own — no Tau runtime behind it — resolves
+ * sources the runtime never hashed, and has no revision to report.
+ * @public
+ */
+export type HostGeoSpecRunner = GeoSpecRunner & {
+  readonly sourceRevisions?: () => readonly SourceRevision[];
+};
 
 /**
  * One rendered artifact returned by a runtime export route.
@@ -181,19 +192,21 @@ const geoSpecEngineResolves = (): boolean => {
 export const createHostGeoSpecRunner = async (
   workspaceRoot: string,
   runtime?: HostGeoSpecRuntimeClient,
-): Promise<GeoSpecRunner> => {
+): Promise<HostGeoSpecRunner> => {
   await import('@taucad/geospec-engine/register/node');
   const [{ createGeoSpecNodeRunner, createNodeVmFileSystem }, { createModelLoader }] = await Promise.all([
     import('geospec/runner/node'),
     import('geospec/model'),
   ]);
-  return createGeoSpecNodeRunner({
+  const loader = runtime ? createProjectModelLoader({ runtime }) : undefined;
+  const runner = createGeoSpecNodeRunner({
     projectPath: workspaceRoot,
     filesystem: createNodeVmFileSystem(workspaceRoot),
-    modelLoader: runtime
-      ? createProjectModelLoader({ runtime }).modelLoader
-      : createModelLoader({ projectPath: workspaceRoot }),
+    modelLoader: loader ? loader.modelLoader : createModelLoader({ projectPath: workspaceRoot }),
   });
+  /* R4/I5: the loader is per-runner and nothing else can reach it, so the runner is where its
+   * provenance belongs — every factory that returns this runner carries it without extra wiring. */
+  return loader ? Object.assign(runner, { sourceRevisions: loader.sourceRevisions }) : runner;
 };
 
 /**
@@ -208,12 +221,27 @@ export const createHostGeoSpecRunner = async (
 export const createHostNativeGeoSpecRunner = async (
   workspaceRoot: string,
   runtime: HostGeoSpecRuntimeClient,
-): Promise<GeoSpecRunner> => {
+): Promise<HostGeoSpecRunner> => {
   const [nativeEngineModule, { createNativeGeoSpecRunner }, { createNodeVmFileSystem }] = await Promise.all([
     import('@taucad/geospec-engine-native/node'),
     import('geospec/runner/native'),
     import('@taucad/geospec-engine/node-filesystem'),
   ]);
+  const revisions = new Map<string, SourceRevision>();
+  const trackedRuntime = new Proxy(runtime, {
+    get(target, property, receiver: unknown): unknown {
+      if (property !== 'export') {
+        return Reflect.get(target, property, receiver) as unknown;
+      }
+      return async (...args: Parameters<HostGeoSpecRuntimeClient['export']>) => {
+        const result = await target.export(...args);
+        if (result.sourceRevision) {
+          revisions.set(result.sourceRevision.entry, result.sourceRevision);
+        }
+        return result;
+      };
+    },
+  });
   const filesystem = createNodeVmFileSystem(workspaceRoot);
   const engine = new nativeEngineModule.Engine();
   try {
@@ -222,7 +250,7 @@ export const createHostNativeGeoSpecRunner = async (
       nativeAssertions: { engine, canonicalize: nativeEngineModule.canonicalize },
       model: {
         projectPath: workspaceRoot,
-        runtime,
+        runtime: trackedRuntime,
         readSource: async (source) => {
           if (typeof source !== 'string') {
             throw new TypeError('Native GeoSpec file sources must be project paths.');
@@ -233,6 +261,7 @@ export const createHostNativeGeoSpecRunner = async (
     });
     return {
       ...runner,
+      sourceRevisions: () => [...revisions.values()],
       async close() {
         try {
           await runner.close();
@@ -280,7 +309,7 @@ export type HostToolRegistryOptions = {
    * `@taucad/geospec-engine` resolves; pass `false` to withhold `test_model`
    * from an installation that has the engine.
    */
-  readonly geospecRunner?: ((workspaceRoot: string) => Promise<GeoSpecRunner>) | false | undefined;
+  readonly geospecRunner?: ((workspaceRoot: string) => Promise<HostGeoSpecRunner>) | false | undefined;
   /**
    * Authoring API of `geospecRunner`, advertised before the first model turn.
    * Defaults to legacy, matching the built-in runner. A custom native runner
@@ -359,7 +388,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * D1): this provider is the checkout, and what the agent sees over it is
      * the composed view. The skill resolver below reads the disk directly and
      * mutates nothing. */
-    const provider = options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot);
+    const provider =
+      options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot, { policy: tauPathPolicy });
     const view = composeView(
       { filesystem: provider },
       {
@@ -471,6 +501,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               runner,
               projectPath: workspaceRoot,
               args,
+              // R4/I5: absent on a runner with no Tau runtime behind it — a CLI-style model loader
+              // resolves its own sources, and an unproven verdict must not claim a revision.
+              ...(runner.sourceRevisions === undefined ? {} : { sourceRevisions: runner.sourceRevisions }),
             });
             return { success: true, ...output };
           } finally {

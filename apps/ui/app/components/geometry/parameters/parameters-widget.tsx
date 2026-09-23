@@ -69,7 +69,11 @@ export function ParametersWidget(
       return;
     }
     try {
-      await parameterEdit.commit.setValue({ pointer, value: newValue });
+      await parameterEdit.commit.setValue({
+        pointer,
+        value: newValue,
+        base: { pointer, value: value as boolean | string },
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'The parameter could not be saved.');
     }
@@ -106,9 +110,10 @@ export function ParametersWidget(
         throw new Error(`Numeric parameter '${name}' has no rendered instance path.`);
       }
       const nativeBinding = resolveParameterBinding(formContext.parameterManifest, instancePointer);
-      const requestedUnit = isLengthUnit(nativeBinding?.unit)
-        ? toUcumLengthCode(formContext.units.length.displaySymbol)
-        : undefined;
+      const requestedUnit =
+        nativeBinding?.representation !== 'safe-integer' && isLengthUnit(nativeBinding?.unit)
+          ? toUcumLengthCode(formContext.units.length.displaySymbol)
+          : undefined;
       const fieldProjection = projectParameterField(
         formContext.parameterManifest,
         instancePointer,
@@ -172,6 +177,7 @@ export function ParametersWidget(
           value={numericValue}
           defaultValue={Number.isFinite(effectiveDefault) ? effectiveDefault : numericValue}
           fieldProjection={fieldProjection}
+          sourceUnit={formContext.parameterGroup?.sourceUnits?.[instancePointer]}
           edit={formContext.parameterEdit}
           min={min}
           max={max}

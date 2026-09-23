@@ -185,6 +185,37 @@ describe('MountTable integration', () => {
       expect(await nodeModulesProvider.readFile('temp.js', 'utf8')).toBe('temp content');
     });
 
+    it('should keep the source, remove the destination, and repair both indexes when a cross-mount copy fails', async () => {
+      await rootProvider.writeFile('source/a.txt', 'a');
+      await rootProvider.writeFile('source/b.txt', 'b');
+      await rootProvider.writeFile('source/c.txt', 'c');
+      const sourceView = service.createRootedFileSystem('/');
+      const destinationView = service.createRootedFileSystem('/previews/deps');
+      await sourceView.statTree!('source');
+      await destinationView.statTree!('');
+      const writeFile = nodeModulesProvider.writeFile.bind(nodeModulesProvider);
+      let writes = 0;
+      vi.spyOn(nodeModulesProvider, 'writeFile').mockImplementation(async (path, data) => {
+        writes++;
+        if (writes === 2) {
+          throw new Error('injected destination write failure');
+        }
+        await writeFile(path, data);
+      });
+
+      await expect(service.move('/source', '/previews/deps/destination')).rejects.toThrow(
+        'injected destination write failure',
+      );
+
+      await expect(rootProvider.readFile('source/a.txt', 'utf8')).resolves.toBe('a');
+      await expect(rootProvider.readFile('source/b.txt', 'utf8')).resolves.toBe('b');
+      await expect(rootProvider.readFile('source/c.txt', 'utf8')).resolves.toBe('c');
+      await expect(nodeModulesProvider.exists('destination')).resolves.toBe(false);
+      const sourceIndex = await sourceView.statTree!('source');
+      expect(sourceIndex.map(({ path }) => path).toSorted()).toEqual(['a.txt', 'b.txt', 'c.txt']);
+      expect(await destinationView.statTree!('')).toEqual([]);
+    });
+
     it('should handle a same-mount move', async () => {
       await rootProvider.writeFile('old.ts', 'code');
       await service.move('/old.ts', '/new.ts');

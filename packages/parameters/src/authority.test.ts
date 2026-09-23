@@ -63,7 +63,6 @@ it('loads without writing, pins only the sidecar, and commits once without anoth
     current,
     request: {
       requestId: 'create',
-      draftGeneration: 0,
       fingerprint: 'label',
       pressure: 'final',
       expected: current.identity,
@@ -170,7 +169,6 @@ const request = (
   operation: ParameterSetRequest['operation'],
 ): ParameterSetRequest => ({
   requestId,
-  draftGeneration: 1,
   fingerprint: requestId,
   pressure: 'final',
   expected,
@@ -180,8 +178,6 @@ const request = (
 const unitEdit = (value: string): ParameterSetRequest['operation'] => ({
   kind: 'unit-value',
   group: 'default',
-  parameterId: 'width',
-  resource: 'urn:taucad:parameter-schema:root',
   pointer: '/width',
   inputUnit: 'cm',
   value,
@@ -273,7 +269,7 @@ it('refuses a request built on a manifest the authority has replaced', async () 
   expect(memory.counts().writes).toBe(0);
 });
 
-it('admits one of two stale actors, conflicts the other, and refreshes the loser to the winning record', async () => {
+it('re-plans a stale actor without a field base and commits over the winning record', async () => {
   const memory = memoryAuthority(null);
   const manifest = await widthManifest();
   const actorFor = () =>
@@ -305,14 +301,14 @@ it('admits one of two stale actors, conflicts the other, and refreshes the loser
     status: 'committed',
     write: 'applied',
   });
-  // The loser planned against bytes the winner replaced, so its checked write conflicts.
+  // The second actor has no field base, so the byte conflict refreshes and re-plans the overwrite.
   await expect(submitParameterRequest(second, request('second', identity, unitEdit('15')))).resolves.toMatchObject({
-    status: 'rejected',
-    code: 'STALE_MANIFEST',
+    status: 'committed',
+    write: 'applied',
   });
   await waitFor(second, (state) => state.matches({ open: 'ready' }));
-  expect(second.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 120 });
-  expect(memory.counts().writes).toBe(1);
+  expect(second.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 150 });
+  expect(memory.counts().writes).toBe(2);
   first.stop();
   second.stop();
 });
@@ -322,7 +318,6 @@ it('honours an authored unit for a field the producer left undeclared, through a
     JSON.stringify({ activeGroup: 'default', groups: { default: { values: {}, units: { '/width': 'mm' } } } }),
   );
   const manifest = await widthManifest('none');
-  const { parameter, schema } = manifest.bindings['/width']!;
   const current = await load(memory, manifest);
   const edited = prepared(
     planParameterChange({
@@ -330,8 +325,6 @@ it('honours an authored unit for a field the producer left undeclared, through a
       request: request('edit', current.identity, {
         kind: 'unit-value',
         group: 'default',
-        parameterId: parameter.value,
-        resource: schema.resource,
         pointer: '/width',
         inputUnit: 'cm',
         value: '12',
@@ -358,8 +351,6 @@ it('rejects an authored unit the declaration contradicts, and an undeclared sour
       request: request('edit-conflicting', declared.identity, {
         kind: 'native-value',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:taucad:parameter-schema:root',
         pointer: '/width',
         value: 12,
       }),
@@ -376,8 +367,6 @@ it('rejects an authored unit the declaration contradicts, and an undeclared sour
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:taucad:parameter-schema:root',
         pointer: '/width',
         unit: 'cm',
         producerCapability: {
@@ -403,8 +392,6 @@ it('records a sanctioned source-unit change as the chosen unit in both claim map
         kind: 'source-unit',
         mode: 'preserve-size',
         group: 'default',
-        parameterId: 'width',
-        resource: 'urn:taucad:parameter-schema:root',
         pointer: '/width',
         unit: 'cm',
         producerCapability: {

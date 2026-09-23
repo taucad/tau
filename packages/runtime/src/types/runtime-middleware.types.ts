@@ -113,6 +113,7 @@ export type KernelMiddlewareRuntime<
  */
 export type MiddlewareCreateGeometryRequest<Content extends RuntimeContentKey = RuntimeContentKey> = {
   readonly entryPath: string;
+  /** Caller overrides plus any values composed by outer middleware; defaults are filled at the kernel boundary. */
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
 } & ContentHookInputFor<Content>;
@@ -302,7 +303,7 @@ export type WrapGetParametersHook<
  *   name: 'ParameterResolver',
  *   async getDependencies({ entryPath }, { signal }) {
  *     const response = await fetch(`/parameter-path?entry=${encodeURIComponent(entryPath)}`, { signal });
- *     return [{ path: await response.text() }];
+ *     return [{ path: await response.text(), affects: ['createGeometry'] }];
  *   },
  * });
  * ```
@@ -310,6 +311,8 @@ export type WrapGetParametersHook<
 export type MiddlewareDependencyDeclaration = Readonly<{
   /** Path of the dependency within the runtime filesystem. */
   path: string;
+  /** Operations whose results this file changes. */
+  affects: ReadonlyArray<'getParameters' | 'createGeometry' | 'meshGeometry' | 'exportGeometry'>;
   /** Milliseconds. */
   watchDebounce?: number;
 }>;

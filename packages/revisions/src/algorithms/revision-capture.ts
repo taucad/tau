@@ -10,7 +10,9 @@
 
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { bufferToStream } from '@taucad/filesystem/backend/stream-utils';
-import type { FileMode, FileSystemProvider } from '@taucad/filesystem';
+import { walk } from '@taucad/filesystem/content-ops';
+import type { WalkFileSystem } from '@taucad/filesystem/content-ops';
+import type { DirectoryEntry, FileMode, FileStatEntry, FileSystemProvider } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
 import type { RevisionTreeInput } from '#algorithms/revision-tree.js';
 
@@ -39,6 +41,13 @@ export type CaptureRevisionTreeOptions = Readonly<{
   maximumTotalBytes?: number;
   /** Cancels traversal and all active file streams. */
   signal?: AbortSignal;
+  /**
+   * Bytes the caller already holds for a file it knows has not changed, read
+   * instead of the file itself — see {@link createCaptureMemo}.
+   */
+  reuse?: (path: string) => Uint8Array<ArrayBuffer> | undefined;
+  /** Every file this capture did read, with the bytes it read. */
+  onRead?: (path: string, content: Uint8Array<ArrayBuffer>) => void;
 }>;
 
 const defaultCaptureConcurrency = 16;
@@ -128,38 +137,51 @@ export const captureRevisionTree = async (
     const stat = await skipIfVanished(async () => filesystem.stat(path));
     return stat?.type;
   };
-  const filePaths: Array<Readonly<{ path: string; mode: FileMode }>> = [];
-  const visit = async (path: string): Promise<void> => {
-    throwIfAborted();
-    const children = await skipIfVanished(async () => listChildren(path));
-    for (const child of children ?? []) {
+  /*
+   * The listing surface `walk` traverses, which is where capture keeps what a
+   * walker's contract does not carry: a directory that vanished between its
+   * parent's listing and its own is empty rather than fatal, and a reserved
+   * path is dropped before its kind is asked for, so an excluded entry costs no
+   * `stat` and no descent.
+   */
+  const listing: WalkFileSystem = {
+    readdir: async (path) => filesystem.readdir(path),
+    stat: async (path) => filesystem.stat(path),
+    readdirEntries: async (path) => {
       throwIfAborted();
-      const childPath = joinRelativePath(path, child.name);
-      if (excluded?.(childPath) === true) {
-        continue;
+      const children = await skipIfVanished(async () => listChildren(path));
+      const admitted: DirectoryEntry[] = [];
+      for (const child of children ?? []) {
+        throwIfAborted();
+        const childPath = joinRelativePath(path, child.name);
+        if (excluded?.(childPath) === true) {
+          continue;
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids a second nested concurrency pool.
+        const kind = child.kind ?? (await statKind(childPath));
+        if (kind !== undefined) {
+          admitted.push({ name: child.name, kind });
+        }
       }
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids a second nested concurrency pool.
-      const kind = child.kind ?? (await statKind(childPath));
-      if (kind === undefined) {
-        continue;
-      }
-      if (kind === 'dir') {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids deadlocking nested bounded pools.
-        await visit(childPath);
-      } else {
-        const mode =
-          (filesystem.getFileMode === undefined
-            ? undefined
-            : // oxlint-disable-next-line no-await-in-loop -- mode belongs to the entry reached by sequential traversal.
-              await skipIfVanished(async () => filesystem.getFileMode!(childPath))) ??
-          options?.inheritedMode?.(childPath) ??
-          '100644';
-        filePaths.push({ path: childPath, mode });
-      }
-    }
+      return admitted;
+    },
   };
+  const filePaths: Array<Readonly<{ path: string; mode: FileMode }>> = [];
   try {
-    await visit('');
+    for await (const entry of walk(listing, '')) {
+      throwIfAborted();
+      if (entry.kind === 'dir') {
+        continue;
+      }
+      const mode =
+        (filesystem.getFileMode === undefined
+          ? undefined
+          : // oxlint-disable-next-line no-await-in-loop -- mode belongs to the entry reached by sequential traversal.
+            await skipIfVanished(async () => filesystem.getFileMode!(entry.relativePath))) ??
+        options?.inheritedMode?.(entry.relativePath) ??
+        '100644';
+      filePaths.push({ path: entry.relativePath, mode });
+    }
     const entries = Array.from<RevisionTreeInput | undefined>({
       length: filePaths.length,
     });
@@ -191,6 +213,18 @@ export const captureRevisionTree = async (
       };
       try {
         throwIfAborted();
+        /* An unchanged file is bytes the caller already holds, so the cheapest
+         * read of it is no read at all (EQ7). It still costs its own budget. */
+        const held = options?.reuse?.(path);
+        if (held !== undefined) {
+          if (capturedBytes + held.byteLength > maximumTotalBytes) {
+            throw new RangeError(`Revision tree capture exceeds maximumTotalBytes (${maximumTotalBytes}).`);
+          }
+          capturedBytes += held.byteLength;
+          reservedBytes += held.byteLength;
+          entries[index] = [path, held, mode];
+          return;
+        }
         const streamOptions = { signal: abortController.signal };
         /*
          * A rooted view that cannot stream natively buffers each file whole.
@@ -231,6 +265,7 @@ export const captureRevisionTree = async (
           offset += chunk.byteLength;
         }
         entries[index] = [path, content, mode];
+        options?.onRead?.(path, content);
       } catch (error) {
         capturedBytes -= reservedBytes;
         if (!requiredPaths.has(path) && isNotFoundError(error)) {
@@ -299,4 +334,123 @@ export const captureRevisionTree = async (
   } finally {
     options?.signal?.removeEventListener('abort', abortFromCaller);
   }
+};
+
+/**
+ * The coarsest modification time a filesystem we capture through reports: FAT's
+ * two seconds. Nothing advertises its own resolution, so the memo assumes the
+ * worst and never trusts a stat this young (EQ7, C3).
+ */
+const timestampGranularityMilliseconds = 2000;
+
+/**
+ * How many bytes of one checkout a memo may keep resident, by default.
+ *
+ * Deliberately far below the capture's own 1 GiB payload bound: capture bytes
+ * used to be transient, and every byte held here is held for as long as the
+ * checkout is open, in a worker that also holds the kernel's own memory. Sixty
+ * four mebibytes covers the many-small-files tree the memo exists for — a
+ * project's sources, parameters and chats — and declines the single large mesh
+ * whose re-read costs one stream and whose residency costs the tab.
+ */
+const defaultMemoRetainedBytes = 64 * 1024 * 1024;
+
+/** Bytes one checkout's captures may reuse instead of reading. @public */
+export type CaptureMemo = Readonly<{
+  /**
+   * The reuse options for one capture of the tree these stats describe.
+   *
+   * @param stats - Every file stat of the tree, or `undefined` from a surface
+   *   that keeps none — which opts the capture out and pays the read.
+   * @param observedAt - Clock reading taken no later than those stats were.
+   * @returns Capture options that read only what changed.
+   */
+  unchanged: (
+    stats: readonly FileStatEntry[] | undefined,
+    observedAt: number,
+  ) => Pick<CaptureRevisionTreeOptions, 'reuse' | 'onRead'>;
+}>;
+
+/**
+ * Memoise one checkout's captured bytes on `(path, size, mtimeMs)` (EQ7).
+ *
+ * A cut over a tree nobody has touched reads no file bytes: the stats the
+ * rooted surface already maintains answer what changed, and the bytes of what
+ * did not come from the last capture. Two bounds make that trustworthy. A stat
+ * younger than {@link timestampGranularityMilliseconds} cannot prove the bytes
+ * it describes are the bytes that were read, so it is never memoised at all and
+ * a same-size same-timestamp rewrite is read and seen (C3). And a capture whose
+ * bytes did not match the size its stat claimed memoises nothing for that path.
+ *
+ * **What it retains is a second copy.** `ImmutableRevisionTree` copies every byte
+ * run it is given and every one it hands back, so a memoised file is resident
+ * twice while a tree built from it is alive — the memo's own copy and the tree's.
+ * That is why the ceiling is {@link defaultMemoRetainedBytes} and not the
+ * capture's payload bound.
+ *
+ * ponytail: a byte budget with per-file admission, in capture order, and no
+ * eviction — a file that does not fit is simply not held and pays its read next
+ * time, so a tree larger than the budget keeps the first files that fit rather
+ * than the most useful ones. Upgrade path, in order: hold the blob **id** rather
+ * than the bytes, which needs `ImmutableRevisionTree` to carry a lazily loaded
+ * entry (it is a synchronous copy-on-read value today, read by thirteen modules
+ * and three port adapters) — and only if that proves impossible, an LRU here.
+ *
+ * @param options - Byte ceiling for what this memo keeps resident.
+ * @returns A memo to hand the captures of one checkout, dropped with it.
+ * @public
+ */
+export const createCaptureMemo = (options?: Readonly<{ maximumRetainedBytes?: number }>): CaptureMemo => {
+  const budget = assertCaptureLimit(
+    options?.maximumRetainedBytes ?? defaultMemoRetainedBytes,
+    'maximumRetainedBytes',
+    Number.MAX_SAFE_INTEGER,
+  );
+  const held = new Map<string, Readonly<{ size: number; mtimeMs: number; content: Uint8Array<ArrayBuffer> }>>();
+  let retainedBytes = 0;
+  const drop = (path: string): void => {
+    const entry = held.get(path);
+    if (entry !== undefined) {
+      retainedBytes -= entry.content.byteLength;
+      held.delete(path);
+    }
+  };
+  return {
+    unchanged: (stats, observedAt) => {
+      if (stats === undefined) {
+        held.clear();
+        retainedBytes = 0;
+        return {};
+      }
+      const byPath = new Map(stats.map((entry) => [entry.path, entry]));
+      for (const path of held.keys()) {
+        if (!byPath.has(path)) {
+          drop(path);
+        }
+      }
+      return {
+        reuse: (path) => {
+          const stat = byPath.get(path);
+          const entry = held.get(path);
+          return entry !== undefined && entry.size === stat?.size && entry.mtimeMs === stat.mtimeMs
+            ? entry.content
+            : undefined;
+        },
+        onRead: (path, content) => {
+          const stat = byPath.get(path);
+          drop(path);
+          if (
+            stat === undefined ||
+            stat.size !== content.byteLength ||
+            observedAt - stat.mtimeMs <= timestampGranularityMilliseconds ||
+            retainedBytes + content.byteLength > budget
+          ) {
+            return;
+          }
+          retainedBytes += content.byteLength;
+          held.set(path, { size: stat.size, mtimeMs: stat.mtimeMs, content });
+        },
+      };
+    },
+  };
 };

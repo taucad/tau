@@ -22,6 +22,10 @@ import process from 'node:process';
 export type WorktreeIdentity = Readonly<{ gitDirectory: string; gitCommonDirectory: string }>;
 
 const localHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+/* The fork is made by `docker exec` into the compose container, which only serves this port. A local
+ * cluster on any other port (the billing-foundation runner's disposable one, a keg) is not that
+ * container, so forking it would copy the wrong database or fail on a `createdb` it cannot reach. */
+const composePort = '5432';
 const identifier = /^[a-z0-9_]+$/u;
 const postgresIdentifierLength = 63;
 /** How long a starter waits for a sibling's restore to land, and how often it looks. */
@@ -78,12 +82,12 @@ export const worktreeDatabaseName = (base: string, worktree: WorktreeIdentity | 
  *
  * @param url - A `postgresql://` URL.
  * @param worktree - The checkout identity from `detectWorktree`, undefined outside a repository.
- * @returns The URL with its database renamed, or `url` itself for the main worktree and remote hosts.
+ * @returns The URL with its database renamed, or `url` itself for the main worktree, remote hosts and local clusters off the compose port.
  * @public
  */
 export const worktreeDatabaseUrl = (url: string, worktree: WorktreeIdentity | undefined): string => {
   const parsed = new URL(url);
-  if (!localHosts.has(parsed.hostname)) {
+  if (!localHosts.has(parsed.hostname) || (parsed.port !== '' && parsed.port !== composePort)) {
     return url;
   }
   const base = parsed.pathname.slice(1);

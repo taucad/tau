@@ -22,7 +22,8 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 vi.mock('#components/ui/sonner.js', () => ({ toast: { success: toastSuccess, error: toastError, info: toastInfo } }));
-vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture: vi.fn() }) }));
+const capture = vi.hoisted(() => vi.fn<(event: string, payload?: Record<string, unknown>) => void>());
+vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
 
 const plan = (over: Partial<(typeof revisionStatusHarness)['status']['restore']>): void => {
   revisionStatusHarness.status = {
@@ -35,6 +36,7 @@ beforeEach(() => {
   revisionStatusHarness.reset();
   toastSuccess.mockReset();
   toastError.mockReset();
+  capture.mockReset();
 });
 
 describe('RevisionRestore', () => {
@@ -115,17 +117,47 @@ describe('RevisionRestore', () => {
     expect(options?.description).toContain('1 file could not be recovered');
   });
 
-  it('says why a save failed, not just that one did (W18 DEF-7)', () => {
+  /* The refusal crosses the boundary as a code; the page owns the words (P4).
+     The engine's own sentence names a checkout and calls the branch unborn,
+     which is banned product vocabulary (Rule 1) and unactionable besides. */
+  it('phrases a refused branch from its code, not the sentence the engine wrote', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
-      /* The Revisions pane counted this and named nothing: "one change could
-       * not be saved" is a count, not a reason a person can act on (I12). */
+      listener({
+        type: 'error',
+        subject: 'branch',
+        message: 'Branch x is unborn; a checkout of it needs an explicit base revision.',
+        code: 'BRANCH_NEEDS_REVISION',
+      });
+    }
+
+    const [title, options] = toastError.mock.calls[0] ?? [];
+    expect(title).toBe('That branch change did not go through');
+    expect(options?.description).toBe('There is nothing to branch from yet. Add a file, then try again.');
+    expect(options?.description).not.toMatch(/checkout|unborn/iu);
+  });
+
+  /* W18 DEF-7 wanted the toast to say why. E5 ruled where "why" goes: a person
+     cannot act on `Buffer is not defined`, so they get the one thing they can
+     do, and the developer who can act on it reads it in analytics and the
+     console. The count the Revisions pane showed is still not a reason (I12). */
+  it('sends the engine\u2019s own words to analytics and the console, not to the person (W18 DEF-7, E5)', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    render(<RevisionRestore />);
+
+    for (const listener of revisionStatusHarness.toasts) {
       listener({ type: 'error', subject: 'save', message: 'Buffer is not defined' });
     }
 
     const [title, options] = toastError.mock.calls[0] ?? [];
     expect(title).toBe('That change could not be saved');
-    expect(options?.description).toBe('Buffer is not defined');
+    expect(options?.description).toBe('Tau could not record this change. Reload the page and try again.');
+    expect(capture).toHaveBeenCalledWith('revision_save_failed', {
+      message: 'Buffer is not defined',
+      code: undefined,
+    });
+    expect(consoleError).toHaveBeenCalledWith('[revisions]', 'save', undefined, 'Buffer is not defined');
+    consoleError.mockRestore();
   });
 });

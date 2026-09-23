@@ -186,6 +186,10 @@ function SkillItemButton({
       type='button'
       data-selected={isSelected}
       className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full gap-2 px-2.25 text-left font-normal')}
+      /* F2: a click must not move focus out of the editor — that would end an edit. */
+      onMouseDown={(event) => {
+        event.preventDefault();
+      }}
       onClick={() => {
         onSelect(globalIndex);
       }}

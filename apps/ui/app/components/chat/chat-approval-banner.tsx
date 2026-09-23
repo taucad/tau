@@ -200,10 +200,10 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   return (
     <section
       aria-label='Approval required'
-      className='border-amber-500/40 bg-amber-500/10 mb-2 flex flex-col gap-2 rounded-md border p-3 text-sm'
+      className='mb-2 flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm'
     >
       <div className='flex min-w-0 items-center gap-2'>
-        <ShieldQuestion className='text-amber-600 size-4 shrink-0' />
+        <ShieldQuestion className='size-4 shrink-0 text-warning' />
         <p className='min-w-0 truncate font-medium'>{`${name} is waiting for approval`}</p>
       </div>
       <p className='min-w-0 break-words text-foreground/90'>{approval.prompt}</p>

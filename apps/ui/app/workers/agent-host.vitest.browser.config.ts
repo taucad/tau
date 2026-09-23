@@ -1,6 +1,5 @@
 /* oxlint-disable import/extensions -- The composed source fixture is replaced by the package export when FIX-PROJ adds the UI dependency. */
 import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
@@ -38,37 +37,6 @@ export default defineConfig({
       },
     },
     {
-      /*
-       * `tauRuntime()`'s asset plugin rewrites package-owned
-       * `new URL(import.meta.resolve('<pkg>/<asset>'))` to a `/@fs/` URL the dev
-       * server can serve, but it no-ops whenever `config.mode === 'test'` — a
-       * guard for node/jsdom runs, where a served URL would be meaningless.
-       * Browser mode *is* served, so without this mirror the page's own
-       * `import.meta.resolve` throws on the first bare specifier (the resvg
-       * wasm the headless image service resolves at worker boot) and every test
-       * in this file fails on `initialize`.
-       */
-      name: 'agent-host-package-asset-urls',
-      enforce: 'pre',
-      transform(code: string, id: string) {
-        if (!code.includes('import.meta.resolve')) {
-          return null;
-        }
-        const require_ = createRequire(id.replace(/[#?].*$/, ''));
-        const rewritten = code.replaceAll(
-          /new\s+URL\(\s*import\.meta\.resolve\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*\)\s*,?\s*\)/g,
-          (match: string, _quote: string, specifier: string) => {
-            try {
-              return `new URL(${JSON.stringify(`/@fs/${require_.resolve(specifier).replaceAll('\\', '/')}`)}, import.meta.url)`;
-            } catch {
-              return match;
-            }
-          },
-        );
-        return rewritten === code ? null : { code: rewritten, map: null };
-      },
-    },
-    {
       name: 'agent-host-gateway-fixture',
       configureServer(server) {
         server.middlewares.use('/v1/llm/openai/v1/chat/completions', (_request, response) => {
@@ -96,10 +64,12 @@ export default defineConfig({
   test: {
     include: [
       'app/workers/agent-host.browser.test.ts',
+      'app/workers/agent-host-executor-view.browser.test.ts',
       'app/workers/gltf-codec.browser.test.ts',
       'app/workers/headless-capture-in-worker.browser.test.ts',
       'app/workers/skill-resources.browser.test.ts',
       'app/machines/file-manager.browser.test.ts',
+      'app/machines/web-locks.browser.test.ts',
       'app/components/geometry/loader/metal-morph-spinner.browser.test.tsx',
     ],
     fileParallelism: false,

@@ -58,7 +58,14 @@ export const createCanvasConfig = (
   }
   const styleSources = new Set([
     root,
-    ...(aliases.size > 0 ? [appRoot, ...Array.from(aliases.values(), dirname)] : []),
+    // Tailwind must see the shared guide renderer's classes.
+    dirname(sharedStyles),
+    // …and the app's, because a canvas that imports an app component imports its
+    // class strings too. `dockviewStyleOverrides` is the case that proved it: its
+    // arbitrary variants live in `dockview.tsx`, so an unscanned app root renders
+    // the real Dockview markup with none of the theme that gives it its geometry.
+    appRoot,
+    ...Array.from(aliases.values(), dirname),
   ]);
   return defineConfig({
     root,
@@ -67,6 +74,8 @@ export const createCanvasConfig = (
     resolve: {
       alias: {
         '@taucad/ui': resolve(repoRoot, 'packages/ui/src'),
+        // The shared API design guide renderer (create-ts-api skill).
+        '@tau/api-guide': resolve(import.meta.dirname, '../canvas/api-guide.tsx'),
         react: resolve(repoRoot, 'scripts/node_modules/react'),
         'react-dom': resolve(repoRoot, 'packages/ui/node_modules/react-dom'),
       },

@@ -1,7 +1,7 @@
 import { formatConfigurations } from '@taucad/types/constants';
 import type { FileExtension } from '@taucad/types';
 import { getFileExtension } from '#utils/filesystem.utils.js';
-import type { ConverterExportFormat, ConverterImportFormat } from '#routes/convert/converter-runtime.definition.js';
+import type { ConverterExportFormat, ConverterImportFormat } from '@taucad/converter/runtime';
 
 /**
  * Extract file format from filename extension

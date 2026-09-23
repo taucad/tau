@@ -6,23 +6,23 @@ Run from the workspace root with pnpm and the actual Nx project name:
 
 ```bash
 pnpm nx show projects
-pnpm nx show project <project>           # Owners, targets and configuration
-pnpm nx lint <project>                  # oxlint then ESLint
-pnpm nx lint <project> --files=<path>    # Focused lint
+pnpm nx show project <project>        # Owners, targets and configuration
+pnpm nx lint <project>                # oxlint then ESLint
+pnpm nx lint <project> --files=<path> # Focused lint
 pnpm nx test <project> --watch=false
 pnpm nx typecheck <project>
-pnpm nx build <project>                 # When the project has this target
+pnpm nx build <project>               # When the project has this target
 pnpm nx affected -t lint test build typecheck
-pnpm docs:validate                      # Policy/research frontmatter
+pnpm docs:validate                    # Policy/research frontmatter
 pnpm nx run scripts:validate-agent-config
-pnpm nx serve ui                        # Production server after build
-pnpm infra:up                           # Local PostgreSQL and Redis
+pnpm nx serve ui                      # Production server after build
+pnpm infra:up                         # Local PostgreSQL and Redis
 pnpm infra:down
 pnpm db:generate
 pnpm db:migrate
 ```
 
-Use Nx tasks and workspace generators; inspect help/source for unfamiliar flags. Tau owns its instructions; Nx agent provisioning is retired.
+Use Nx tasks and workspace generators; inspect help/source for unfamiliar flags.
 
 ## Scope and authority
 
@@ -66,21 +66,23 @@ Read these owners when a task touches each concern:
 - Filesystem/runtime/app/UI event fan-out: [event fan-out](docs/policy/event-fanout-policy.md)
 - Filesystem authority, rooted views, mounts or watches: [filesystem](docs/policy/filesystem-policy.md), [authority](docs/policy/filesystem-authority-policy.md)
 - Three.js/TSL, cameras, materials, graphics machines or capture: [graphics backend](docs/policy/graphics-backend-policy.md)
+- Parameter sidecars: [record](docs/policy/parameter-record-policy.md)
 - Geometry assertions/GeoSpec: [GeoSpec](docs/policy/geospec-policy.md), [testing](docs/policy/testing-policy.md)
 - Policy/research/MDX: [documentation](docs/policy/documentation-policy.md); use `create-policy`/`create-research`; published content also follows docs-site gates
 - AGENTS/CLAUDE, skills, agent/MCP config: [agent instructions](docs/policy/agents-md-policy.md), [MCP capabilities](docs/policy/mcp-tool-budget-policy.md); use `create-skill`
 - Dependencies/commits/releases: [npm](docs/policy/npm-policy.md), [commit](docs/policy/commit-policy.md), applicable procedure and authorization
+- Cloud services, deploys, IaC, DNS, secrets, billing operations: [handbooks](docs/handbooks); use `create-handbook` to update affected pages and the go-live checklist in the same change. Outage, customer-impacting failure or credential leak: `create-incident` first; records in [incidents](docs/incidents)
 - Generated outputs or temporary files: [tool output locations](docs/policy/tool-output-location-policy.md)
 
 ## Skills and collaboration
 
-Use relevant shared skills within the authorized task, including composing their required helpers. Model invocation is enabled by default; loading does not authorize publication, external messages, destructive actions or expanded scope. Any manual-only exception needs a deliberate user requirement recorded with its native metadata; do not bypass a native invocation denial by copying its body.
+Use relevant shared skills within the authorized task, including composing their required helpers. Model invocation is enabled by default; loading does not authorize publication, external messages, destructive actions or expanded scope.
 
-Use `create-research`, `create-charter`, `superplan`, `work-charter` and `update-agent-memory` for their workflows. Preserve approved plans and one coordinator-owned queue. Worker briefs name task/attempt IDs, exclusive paths, instructions, checks and evidence writers. Snapshot tracked/untracked bytes; status alone misses edits to dirty files. Inspect live jobs before redispatch; quiet does not mean dead.
+Use `create-research`, `create-charter`, `superplan`, `work-charter` and `update-agent-memory` for their workflows. Preserve approved plans and one coordinator-owned queue. Worker briefs name task/attempt IDs, exclusive paths, instructions, checks and evidence writers.
 
 ## Repository and evidence boundaries
 
-`docs/research` and `docs/reference` link into optional `repos/tau-brain`. Write through `docs/...`, validate from Tau root, and check Git with `git -C repos/tau-brain status --short -- research/<path>` or `reference/<path>`. Follow the [artifact contract](.agents/skills/create-research/artifacts.md). Workers without Brain return evidence to the permitted parent; ordinary install/build/test/runtime works without Brain.
+`docs/{research,reference,handbooks,incidents}` link into optional `repos/tau-brain`. Write through `docs/...`, validate from Tau root, and check Git with `git -C repos/tau-brain status --short -- research/<path>` or `reference/<path>`. Follow the [artifact contract](.agents/skills/create-research/artifacts.md). Workers without Brain return evidence to the permitted parent; ordinary install/build/test/runtime works without Brain.
 
 `repos.yaml` is the public source catalog; authorized checkouts may overlay `repos/tau-brain/repos.yaml`. Use the `repos` skill for dependency-source investigation. Checkouts are optional. New entries default private; `--catalog public -g public-maintenance` requires deliberate OSS publication.
 

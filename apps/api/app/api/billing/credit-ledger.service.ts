@@ -10,7 +10,7 @@ import {
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
 import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-cost.js';
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
-import { resolvePolicyRoute, validateCommercialPolicy } from '#api/billing/billing-policy.js';
+import { parseCommercialPolicyDocument, resolvePolicyRoute } from '#api/billing/billing-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
@@ -23,7 +23,7 @@ import {
 } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
-import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import {
   billingFinancialCase,
   billingBudget,
@@ -512,7 +512,10 @@ export class CreditLedgerService {
     minimumOutput: bigint;
     minimumSupplierPicoUsd: bigint;
   }): Promise<{ status: 'eligible'; executionDeadline: Date; remaining: number } | AdmissionDenied> {
-    const effective = await this.policyService.selectEffectivePolicyRoute(input);
+    const effective = await this.selectRouteOrDeny(input);
+    if ('status' in effective) {
+      return effective;
+    }
     const [bound] = await this.databaseService.database
       .select({ account: creditAccount })
       .from(billingOwnerBinding)
@@ -643,7 +646,7 @@ export class CreditLedgerService {
     }
     try {
       return await this.databaseService.database.transaction(async (tx) => {
-        const effective = await this.policyService.selectEffectivePolicyRoute(
+        const effective = await this.selectRouteOrDeny(
           {
             environment: input.environment,
             sku: input.sku,
@@ -651,6 +654,9 @@ export class CreditLedgerService {
           },
           tx,
         );
+        if ('status' in effective) {
+          return effective;
+        }
         if (input.executionDeadline !== undefined && input.executionDeadline <= effective.selectedAt) {
           return { status: 'denied', reason: 'policy_unavailable' };
         }
@@ -2555,6 +2561,25 @@ export class CreditLedgerService {
    * lease from one minute and absorbs once the attempt budget is spent, so no
    * operation can hold credit forever behind a silent loop.
    */
+  /**
+   * A route this replica cannot dispatch denies that SKU alone. The policy document as a whole is
+   * still read strictly; only `PolicyRouteUnavailableError` — an unknown meter contract or an
+   * unpublished SKU — becomes a denial, and every other failure still throws.
+   */
+  private async selectRouteOrDeny(
+    input: Parameters<BillingPolicyService['selectEffectivePolicyRoute']>[0],
+    database?: Parameters<BillingPolicyService['selectEffectivePolicyRoute']>[1],
+  ): Promise<Awaited<ReturnType<BillingPolicyService['selectEffectivePolicyRoute']>> | AdmissionDenied> {
+    try {
+      return await this.policyService.selectEffectivePolicyRoute(input, database);
+    } catch (error) {
+      if (error instanceof PolicyRouteUnavailableError) {
+        return { status: 'denied', reason: 'policy_unavailable' };
+      }
+      throw error;
+    }
+  }
+
   private async resolveRecoveryFailure(claim: OperationClaim, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     const unresolvable = unresolvableRecoveryFailures.has(message);
@@ -3022,7 +3047,10 @@ export class CreditLedgerService {
     const base =
       row === undefined
         ? undefined
-        : resolvePolicyRoute(validateCommercialPolicy(row.canonicalContent).policy, baseSku);
+        : /* The pinned policy is an older stored document read inside the terminalising transaction:
+           * parse it leniently, or one route this replica has since retired would strand the
+           * settlement of an unrelated turn (defect A on the worst path). */
+          resolvePolicyRoute(parseCommercialPolicyDocument(row.canonicalContent).policy, baseSku);
     if (base === undefined) {
       return operation.pinnedTariff;
     }

@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatHistoryTidyFailureMessage, chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
@@ -30,8 +30,12 @@ import { externalAgentStopCodes, externalAgentStopSchema, isResumableRunFailure 
  * the host would resume from is complete. The category cannot tell them apart:
  * the masked in-stream failure arrives on an HTTP 200, which reads as
  * `generic`, and a 502 reads as `server`.
+ *
+ * `RUN_ABANDONED` is the host's record of a run whose document died: nothing
+ * the person did failed, and the host resumes it from what it had saved.
  */
 const pausedTurnCodes = new Set([
+  'RUN_ABANDONED',
   'NETWORK_ERROR',
   'PROVIDER_UNAVAILABLE',
   'MALFORMED_RESPONSE',
@@ -39,8 +43,11 @@ const pausedTurnCodes = new Set([
   'WORKER_CRASHED',
 ]);
 
-/** Refusals only a new conversation clears. */
+/** Compaction refusals described as a chat-length problem. */
 const chatTooLongCodes = new Set(['NO_EVICTABLE_HISTORY', 'CIRCUIT_BREAKER_OPEN']);
+
+/** Compaction failures whose plain-language recovery is the same kept turn. */
+const chatHistoryTidyFailureCodes = new Set(['SESSION_LOG_INTEGRITY', 'SUMMARY_REQUIRED']);
 
 /**
  * Attempts to format a string as pretty-printed JSON.
@@ -92,6 +99,19 @@ function codedErrorCard({
     return <ChatErrorProviderAccount className={className} description={error.message} details={error.details} />;
   }
 
+  if (chatHistoryTidyFailureCodes.has(code)) {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        reason={chatHistoryTidyFailureMessage}
+        resumable={resumable}
+        guidance='Resume to continue without losing your work.'
+        canTryAgain
+        {...raw}
+      />
+    );
+  }
+
   if (pausedTurnCodes.has(code)) {
     return (
       <ChatErrorPausedTurn
@@ -122,7 +142,29 @@ function codedErrorCard({
   }
 
   if (chatTooLongCodes.has(code)) {
-    return <ChatErrorTooLong className={className} />;
+    return <ChatErrorTooLong className={className} resumable={resumable} />;
+  }
+
+  /* Not a failure: the host was asked to continue a run it no longer holds —
+   * it was already settled, or it ended in a way a resume cannot pick up. The
+   * turn is whole and nothing was spent, so the card says so and offers the
+   * one thing that does work, which is running the turn again. */
+  if (code === 'RESUME_UNAVAILABLE') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={Bot}
+        title='Nothing left to continue'
+        description={error.message}
+        actions={
+          <Button variant='outline' size='sm' onClick={onTryAgain}>
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
+      />
+    );
   }
 
   // Another tab holds this chat's log. Taking it back is a leadership protocol,

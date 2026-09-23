@@ -5,6 +5,8 @@
     "types": ["node", "vitest/importMeta", "vitest", "vite/client"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowJs": true,
+    "jsx": "preserve",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
     "paths": {

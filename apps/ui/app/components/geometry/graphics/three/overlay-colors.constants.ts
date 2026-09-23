@@ -69,6 +69,19 @@ export const gltfEdgeColorLightMode = 0x00_00_00;
 export const gltfEdgeColorDarkMode = 0x86_86_86;
 
 /**
+ * Edge tint of a **hovered** model component, drawn through occluding surfaces. Light yellow;
+ * one value for both themes — reads against white and `#171717`. See
+ * `docs/research/viewer-edge-emphasis-highlighting-blueprint.md`.
+ */
+export const gltfEdgeHoverColor = 0xff_d5_4a;
+
+/**
+ * Edge tint of a **selected** or focused model component. Same light yellow as hover: the
+ * darker `0xb88600` read as illegible over orange/wood surfaces (operator ruling 2026-09-22).
+ */
+export const gltfEdgeSelectedColor = gltfEdgeHoverColor;
+
+/**
  * Default tints for the {@link AxesHelper} XYZ axis lines. Stock Three.js axis hues,
  * desaturated slightly so they read as orientation cues rather than primary geometry.
  * Consumed verbatim by `THREE.Color`; valid in any {@linkcode @react-three/drei} `<Line>`,

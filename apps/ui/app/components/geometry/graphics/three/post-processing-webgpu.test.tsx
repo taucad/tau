@@ -53,7 +53,7 @@ const mocks = vi.hoisted(() => {
       ) => void)
     | undefined;
   let retarget: ((camera: typeof perspectiveCamera, snapshot: MockCameraSnapshot) => void) | undefined;
-  let restoreDepth: (() => void) | undefined;
+  let restoreDepth: ((target?: unknown) => void) | undefined;
   let constructionCamera: unknown;
   const compileSettlers: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   const scenePasses: Array<{
@@ -313,6 +313,13 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
     expect(mocks.glRender).toHaveBeenCalledOnce();
     const { QuadMesh } = await import('three/webgpu');
     expect(mocks.glRender.mock.calls[0]![0]).toBeInstanceOf(QuadMesh);
+    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
+
+    // The emphasis coverage mask depth-tests inside its own target and asks the same owner for it.
+    const maskTarget = { kind: 'mask-target' };
+    mocks.setRenderTarget.mockClear();
+    mocks.getRestoreDepth()?.(maskTarget);
+    expect(mocks.setRenderTarget).toHaveBeenNthCalledWith(1, maskTarget);
     expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
   });
 

@@ -2,7 +2,12 @@ import { NodeIO } from '@gltf-transform/core';
 import type { Document, JSONDocument, Mesh as GltfTransformMesh } from '@gltf-transform/core';
 
 import { embedGltfResources, registerTauGltfExtensions, TauCadTopology } from '@taucad/geometry-core';
-import type { KittyCadBrepNode, KittyCadBrepRoot, TauCadTopologyComponent } from '@taucad/geometry-core';
+import type {
+  KittyCadBrepNode,
+  KittyCadBrepRoot,
+  TauCadTopologyComponent,
+  TauCadTopologyExport,
+} from '@taucad/geometry-core';
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { JSONObject } from '@taucad/runtime/types';
 
@@ -62,6 +67,11 @@ type BuildTopologyResult = {
   bodyComponentIdsByNode: Map<number, string>;
 };
 
+const defaultExports: TauCadTopologyExport[] = [
+  { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
+  { fidelity: 'brep', formats: ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'], available: true },
+];
+
 const defaultCapabilities = {
   canHide: true,
   canIsolate: true,
@@ -69,10 +79,7 @@ const defaultCapabilities = {
   canAdjustOpacity: true,
   hasDrawings: false,
   hasPreciseTopology: true,
-  exports: [
-    { fidelity: 'mesh' as const, formats: ['glb', 'stl'], available: true },
-    { fidelity: 'brep' as const, formats: ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'], available: true },
-  ],
+  exports: defaultExports,
 } satisfies JSONObject;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

@@ -20,6 +20,7 @@ import { assertRootedPath, parentDirectory, resolveAuthorityPath } from '@taucad
 import type { SharedPool } from '@taucad/memory';
 import type { ExternalChangeFact, FileSystemProvider } from '#types.js';
 import { isChromiumSwapArtifactName } from '#backend/fs-access-provider.js';
+import { mapConcurrent } from '#concurrency.js';
 import type { MountResolution, MountTable, StorageRootConfig, WorkspaceScope } from '#mount-table.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
@@ -767,19 +768,8 @@ export class ExternalChangeIngest {
       names: readonly T[],
       toRow: (item: T) => Promise<[name: string, row: string | undefined]>,
     ): Promise<Map<string, string>> => {
-      const resolved = new Map<string, string>();
-      for (let offset = 0; offset < names.length; offset += externalSnapshotConcurrency) {
-        // oxlint-disable-next-line no-await-in-loop -- Chunked awaits are what bound concurrency to externalSnapshotConcurrency.
-        const chunk = await Promise.all(
-          names.slice(offset, offset + externalSnapshotConcurrency).map(async (item) => toRow(item)),
-        );
-        for (const [name, row] of chunk) {
-          if (row !== undefined) {
-            resolved.set(name, row);
-          }
-        }
-      }
-      return resolved;
+      const rows = await mapConcurrent(names, externalSnapshotConcurrency, toRow);
+      return new Map(rows.filter((row): row is [name: string, row: string] => row[1] !== undefined));
     };
     const fileRow = async (name: string, relative: string, handle: FileSystemFileHandle): Promise<[string, string]> => {
       const file = await handle.getFile();

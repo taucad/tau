@@ -80,7 +80,7 @@ const validBatchOperation = (operation: Readonly<Record<string, unknown>>): bool
   operation['edits'].every(
     (edit) =>
       isRecord(edit) &&
-      hasOperationText(edit, 'parameterId', 'resource', 'pointer') &&
+      hasOperationText(edit, 'pointer') &&
       (edit['inputUnit'] === undefined || hasOperationText(edit, 'inputUnit')) &&
       isJsonValue(edit['value']),
   );
@@ -88,8 +88,8 @@ const validBatchOperation = (operation: Readonly<Record<string, unknown>>): bool
 const validSourceUnitOperation = (operation: Readonly<Record<string, unknown>>): boolean => {
   const capability = sourceUnitCapability(operation['producerCapability']);
   return (
-    (operation['mode'] === 'preserve-size' || operation['mode'] === 'reinterpret') &&
-    hasOperationText(operation, 'group', 'parameterId', 'resource', 'pointer', 'unit') &&
+    operation['mode'] === 'preserve-size' &&
+    hasOperationText(operation, 'group', 'pointer', 'unit') &&
     capability !== undefined &&
     hasOperationText(capability, 'producer', 'sourceRevision', 'capability')
   );
@@ -101,13 +101,10 @@ const validOperation = (value: unknown): value is ParameterSetOperation => {
   }
   switch (value['kind']) {
     case 'native-value': {
-      return hasOperationText(value, 'group', 'parameterId', 'resource', 'pointer') && isJsonValue(value['value']);
+      return hasOperationText(value, 'group', 'pointer') && isJsonValue(value['value']);
     }
     case 'unit-value': {
-      return (
-        hasOperationText(value, 'group', 'parameterId', 'resource', 'pointer', 'inputUnit') &&
-        typeof value['value'] === 'string'
-      );
+      return hasOperationText(value, 'group', 'pointer', 'inputUnit') && typeof value['value'] === 'string';
     }
     case 'batch': {
       return validBatchOperation(value);
@@ -132,9 +129,6 @@ const validOperation = (value: unknown): value is ParameterSetOperation => {
     }
     case 'source-unit': {
       return validSourceUnitOperation(value);
-    }
-    case 'display-preference': {
-      return hasOperationText(value, 'parameterId', 'unit');
     }
     default: {
       return false;
@@ -176,8 +170,6 @@ const requestShape = (request: unknown): request is ParameterSetRequest =>
   hasText(typeof request['requestId'] === 'string' ? request['requestId'] : undefined) &&
   (request['fingerprint'] === undefined ||
     hasText(typeof request['fingerprint'] === 'string' ? request['fingerprint'] : undefined)) &&
-  Number.isSafeInteger(request['draftGeneration']) &&
-  Number(request['draftGeneration']) >= 0 &&
   isIdentity(request['expected']) &&
   validBase(request['base'], request['operation']) &&
   (request['pressure'] === 'transient' || request['pressure'] === 'final') &&

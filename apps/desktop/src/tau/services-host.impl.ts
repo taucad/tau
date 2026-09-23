@@ -31,6 +31,8 @@ import { MessageChannel } from 'node:worker_threads';
 
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { createNodeAgentLauncher, serveAgentChannel } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
@@ -47,7 +49,7 @@ import {
   createHostNativeGeoSpecRunner,
   createHostToolRegistry,
 } from '@taucad/host/agent-tools';
-import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
+import type { HostGeoSpecRuntimeClient, HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
@@ -75,6 +77,21 @@ const agentSessionKey = 'tau-agent';
  * main to answer a runtime-port request, with room over the slower probe.
  */
 const agentHostConfigTimeout = 10_000;
+
+/**
+ * Compose the rejection a refused runtime-port request settles with.
+ *
+ * Main is the only process that knows why it refused — a utility guard, a root
+ * it has not admitted — and this sentence is the whole path that reason takes
+ * to the agent's tool error.
+ *
+ * @param reason - The `message` main sent with its refusal, if it sent one.
+ * @returns The sentence to reject the pending request with.
+ */
+export const refusedRuntimePortMessage = (reason: unknown): string =>
+  typeof reason === 'string' && reason.length > 0
+    ? `Main refused the desktop runtime-port request: ${reason}`
+    : 'Main refused the desktop runtime-port request.';
 
 /** What `createAcpExternalAgentPort` is handed to offer an agent the `tau` server. */
 type McpBinding = NonNullable<Parameters<typeof createAcpExternalAgentPort>[0]['mcp']>;
@@ -431,7 +448,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const stopInternalAuthority =
     authority === undefined || internalPorts === undefined
       ? undefined
-      : serve(toNodeFsPort(internalPorts.port1), { allowRoot: isInternalRoot, authority });
+      : /* The reserved layout every provider this host opens enforces, so a
+         * symlink inside a checkout cannot resolve onto the control plane (G0-6). */
+        serve(toNodeFsPort(internalPorts.port1), { allowRoot: isInternalRoot, authority, policy: tauPathPolicy });
   const internalChannel =
     internalPorts === undefined ? undefined : new NodeFsChannel(toNodeFsPort(internalPorts.port2));
 
@@ -443,6 +462,19 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       });
     }
     return new NodeFsProviderClient(internalChannel, canonicalRoot);
+  };
+
+  /**
+   * The agent's view of one admitted root, for whatever executes project code.
+   *
+   * Typed as {@link HostToolFileSystem} for the same reason the tool registry is:
+   * the client arms its watcher asynchronously, a shape `WatchableFileSystem`
+   * does not describe, and a view composes over the provider's unwatched face
+   * while the bridge keeps serving the client's own watch.
+   */
+  const executorViewFor = (root: string) => {
+    const checkout: HostToolFileSystem = providerForAgentRoot(root);
+    return composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
   };
 
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-stop contract.
@@ -1137,7 +1169,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       const context = record['context'] as Record<string, unknown> | undefined;
       switch (record['concern']) {
         case 'nodeFs': {
-          const stop = serve(toNodeFsPort(port), { allowRoot: isTrustedRoot, ...(authority ? { authority } : {}) });
+          const stop = serve(toNodeFsPort(port), {
+            allowRoot: isTrustedRoot,
+            policy: tauPathPolicy,
+            ...(authority ? { authority } : {}),
+          });
           let stopped: Promise<void> | undefined;
           // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
           const disposeFileSystem = (): Promise<void> => {
@@ -1181,7 +1217,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             port.close();
             return;
           }
-          const lifecycle = drainingRuntimeFileSystem(providerForAgentRoot(requested));
+          /* The kernel utility executes project code the agent wrote, so it reads
+           * the agent's view of the checkout and never the working copy: the
+           * control plane is absent from it and the records Tau keeps itself are
+           * read-only (invariant CI1, W14). */
+          const lifecycle = drainingRuntimeFileSystem(executorViewFor(requested));
           const server = serveRuntimeFileSystem(lifecycle.handlers, port);
           let stopped: Promise<void> | undefined;
           const stopRuntimeFileSystem = async (): Promise<void> => {

@@ -33,9 +33,8 @@ export type Handle = {
    */
   commandPalette?: (match: UIMatch) => ReactNode;
   /**
-   * Use this when you need to provide for the entire page,
-   * such as providing for both the page content and breadcrumb items.
-   * This ensures only a single provider is rendered per page.
+   * Providers composed around the route's own content only. The shell renders breadcrumbs,
+   * actions and the command palette above them, so those nodes cannot read a route provider.
    */
   providers?: (match: UIMatch) => React.JSXElementConstructor<React.PropsWithChildren>;
   /**

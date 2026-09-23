@@ -40,14 +40,14 @@ describe('entitlements wire round-trip', () => {
     expect(parseEntitlements(serializeEntitlements(withoutCard)).paymentMethod).toBeUndefined();
   });
 
-  it('should round-trip period-end dates through ISO strings', () => {
-    const periodEnd = new Date('2026-08-17T00:00:00.000Z');
-    const original = { ...entitlementsFromTier('pro'), currentPeriodEnd: periodEnd, cancelAtPeriodEnd: true };
+  it('should round-trip the paid-through date through ISO strings', () => {
+    const paidThrough = new Date('2026-08-17T00:00:00.000Z');
+    const original = { ...entitlementsFromTier('pro'), paidThrough, cancelAtPeriodEnd: true };
 
     // oxlint-disable-next-line prefer-structured-clone -- structuredClone preserves Date, defeating the JSON-fidelity assertion
     const rehydrated = parseEntitlements(JSON.parse(JSON.stringify(serializeEntitlements(original))));
 
-    expect(rehydrated.currentPeriodEnd).toStrictEqual(periodEnd);
+    expect(rehydrated.paidThrough).toStrictEqual(paidThrough);
     expect(rehydrated.cancelAtPeriodEnd).toBe(true);
   });
 

@@ -12,6 +12,8 @@
  * @module
  */
 
+import type { PathPolicy } from '#types.js';
+
 /**
  * What one virtual path names.
  *
@@ -86,4 +88,32 @@ export const parseRoute = (canonicalPath: string): ParsedRoute => {
   return kind === undefined || id === undefined
     ? { kind: 'other', rest: '' }
     : { kind, id, rest: segments.slice(2).join('/') };
+};
+
+/**
+ * Rebase policy questions from a view root onto the project route they name.
+ *
+ * Project, checkout, preview and dependency roots already expose project-local
+ * spellings. Only the workspace root can receive a route-qualified path whose
+ * reserved layout begins below the view root.
+ *
+ * @public
+ * @param policy - Project-relative policy to adapt.
+ * @param root - Absolute authority root of the view.
+ * @returns The original policy for project-relative roots, otherwise a workspace-root adapter.
+ */
+export const policyAtRoot = (policy: PathPolicy, root: string): PathPolicy => {
+  if (parseRoute(root).kind !== 'root') {
+    return policy;
+  }
+  return {
+    classify(path) {
+      const route = parseRoute(`/${path}`);
+      return policy.classify(
+        (route.kind === 'project' || route.kind === 'checkout' || route.kind === 'preview') && route.rest !== ''
+          ? route.rest
+          : path,
+      );
+    },
+  };
 };

@@ -35,12 +35,13 @@ import { noImplInIndexRule } from './rules/no-impl-in-index.js';
 import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename.js';
 import { noAuthoredPointerCursorRule } from './rules/no-authored-pointer-cursor.js';
 import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
+import { noEngineeringVocabularyInCopyRule } from './rules/no-engineering-vocabulary-in-copy.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.21.0',
+    version: '1.22.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -71,6 +72,7 @@ const plugin = {
     'plugin-capability-filename': pluginCapabilityFilenameRule,
     'no-authored-pointer-cursor': noAuthoredPointerCursorRule,
     'no-inline-actor-selector': noInlineActorSelectorRule,
+    'no-engineering-vocabulary-in-copy': noEngineeringVocabularyInCopyRule,
   },
 };
 

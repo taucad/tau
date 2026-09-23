@@ -17,8 +17,10 @@
  */
 
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
+import type { ProjectModelLoader } from '@taucad/agent-tools/geospec';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromFsLike } from '@taucad/runtime/filesystem';
+import type { SourceRevision } from '@taucad/runtime/types';
 import type { FsLike } from '@taucad/runtime/filesystem';
 import type { FileStat } from '@taucad/types';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
@@ -145,6 +147,7 @@ type WorkerSession = {
   runner: GeoSpecRunner;
   resetFatalModelLoadError?: (() => void) | undefined;
   closeEngine?: (() => void) | undefined;
+  sourceRevisions: ProjectModelLoader['sourceRevisions'];
 };
 
 type QueuedRun = {
@@ -215,6 +218,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       }),
     );
     let resetFatalError: (() => void) | undefined;
+    let sourceRevisions: ProjectModelLoader['sourceRevisions'];
     if (request.geoSpecEngine === 'native') {
       const [native, { createNativeGeoSpecRunner }] = await Promise.all([
         import('@taucad/geospec-engine-native'),
@@ -226,11 +230,30 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
         engine.close();
       };
       const projectFiles = fileSystem;
+      const revisions = new Map<string, SourceRevision>();
+      const trackedRuntime = new Proxy(runtimeClient, {
+        get(target, property, receiver: unknown): unknown {
+          if (property !== 'export') {
+            return Reflect.get(target, property, receiver) as unknown;
+          }
+          return async (...args: Parameters<typeof target.export>) => {
+            const result = await target.export(...args);
+            if (result.sourceRevision) {
+              revisions.set(result.sourceRevision.entry, result.sourceRevision);
+            }
+            return result;
+          };
+        },
+      });
+      sourceRevisions = () => [...revisions.values()];
+      resetFatalError = () => {
+        revisions.clear();
+      };
       runner = createNativeGeoSpecRunner({
         filesystem: createBridgeVmFileSystem(fileSystem),
         nativeAssertions: { engine, canonicalize: native.canonicalize },
         model: {
-          runtime: runtimeClient,
+          runtime: trackedRuntime,
           readSource: async (source) => {
             if (typeof source !== 'string') {
               throw new TypeError('Project GeoSpec sources must be rooted filesystem paths or in-memory bytes.');
@@ -244,6 +267,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       const { createGeoSpecWebRunner } = await import('geospec/runner/web');
       const legacy = createProjectModelLoader({ runtime: runtimeClient });
       resetFatalError = legacy.resetFatalError;
+      sourceRevisions = legacy.sourceRevisions;
       runner = createGeoSpecWebRunner({
         filesystem: createBridgeVmFileSystem(fileSystem),
         modelLoader: legacy.modelLoader,
@@ -255,6 +279,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runtimeClient,
       runner,
       resetFatalModelLoadError: resetFatalError,
+      sourceRevisions,
       closeEngine,
     };
     session = activeSession;
@@ -293,6 +318,7 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
       discovery: createDiscoveryFileSystem(activeSession.fileSystem),
       runner: activeSession.runner,
       args: request.args,
+      sourceRevisions: activeSession.sourceRevisions,
     });
     workerScope.postMessage({
       type: 'result',

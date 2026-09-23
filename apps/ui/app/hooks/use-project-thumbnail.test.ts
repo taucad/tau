@@ -12,11 +12,11 @@ type FileManagerReturn = ReturnType<typeof useFileManager>;
 type ChangeChannel = NonNullable<FileManagerReturn['workerChangeChannel']>;
 
 const createFileManager = (
-  readFile: FileManagerReturn['files']['readFile'],
+  readFile: FileManagerReturn['recordFiles']['readFile'],
   workerChangeChannel?: ChangeChannel,
 ): FileManagerReturn =>
   mock<FileManagerReturn>({
-    files: mock<FileManagerReturn['files']>({ readFile }),
+    recordFiles: mock<FileManagerReturn['recordFiles']>({ readFile }),
     workerChangeChannel,
   });
 

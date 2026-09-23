@@ -54,10 +54,10 @@ export function PreviewDetails({ project, hasGeometry, cadRef }: PreviewDetailsP
       {/* Downloads */}
       <div>
         <h3 className='mb-3 text-sm font-semibold'>Downloads</h3>
-        {!hasGeometry ? (
-          <p className='text-xs text-muted-foreground'>Render the geometry to enable export.</p>
-        ) : (
+        {hasGeometry ? (
           <ExportSelector cadActor={cadRef} filenameBase={project.name} variant='inline' />
+        ) : (
+          <p className='text-xs text-muted-foreground'>Render the geometry to enable export.</p>
         )}
       </div>
 

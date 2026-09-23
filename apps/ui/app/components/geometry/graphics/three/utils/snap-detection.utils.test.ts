@@ -74,7 +74,12 @@ describe('findClosestSnapPoint', () => {
     camera.updateProjectionMatrix();
     const near: SnapPoint = { position: new THREE.Vector3(0.02, 0, 0), type: 'vertex' };
     const far: SnapPoint = { position: new THREE.Vector3(0.5, 0, 0), type: 'vertex' };
-    const canvas = { width: 1000, height: 1000 } satisfies Partial<HTMLCanvasElement>;
+    const canvas = {
+      width: 1000,
+      height: 1000,
+      clientWidth: 1000,
+      clientHeight: 1000,
+    } satisfies Partial<HTMLCanvasElement>;
 
     expect(
       findClosestSnapPoint([far, near], {
@@ -85,5 +90,31 @@ describe('findClosestSnapPoint', () => {
         snapPointBufferPx: 0,
       }),
     ).toBe(near);
+  });
+
+  it('measures the snap radius in CSS pixels on a high-density canvas', () => {
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.z = 1;
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld(true);
+    camera.updateProjectionMatrix();
+    // 0.06 NDC from the pointer: 30 CSS px on a 1000 px-wide canvas backed by a 2x buffer.
+    const withinSnapRadius: SnapPoint = { position: new THREE.Vector3(0.06, 0, 0), type: 'vertex' };
+    const canvas = {
+      width: 2000,
+      height: 2000,
+      clientWidth: 1000,
+      clientHeight: 1000,
+    } satisfies Partial<HTMLCanvasElement>;
+
+    expect(
+      findClosestSnapPoint([withinSnapRadius], {
+        camera,
+        canvas: canvas as HTMLCanvasElement,
+        mousePos: new THREE.Vector2(0, 0),
+        snapDistancePx: 40,
+        snapPointBufferPx: 0,
+      }),
+    ).toBe(withinSnapRadius);
   });
 });

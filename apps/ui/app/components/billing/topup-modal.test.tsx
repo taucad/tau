@@ -14,6 +14,7 @@ const client = vi.hoisted(() => ({
   recoverPaymentAction: vi.fn(),
   createPortalAction: vi.fn(),
   getUnresolvedPaymentActions: vi.fn(),
+  getPaymentAction: vi.fn(),
   followPaymentRedirect: vi.fn(() => false),
 }));
 type TestSession = {
@@ -122,6 +123,7 @@ describe('TopupModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     client.getUnresolvedPaymentActions.mockResolvedValue([]);
+    client.getPaymentAction.mockResolvedValue(wireAction('processing'));
     entitlements.current = {
       isResolved: true,
       paymentCollectionAvailable: true,
@@ -302,6 +304,30 @@ describe('TopupModal', () => {
     expect(screen.queryByRole('button', { name: /review/i })).toBeNull();
   });
 
+  it('polls a processing purchase until the worker settles it, then shows the receipt', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('processing')]);
+      client.getPaymentAction.mockResolvedValue({
+        ...wireAction('fulfilled'),
+        receipt: { revision: '1', grantedCreditAtoms: '25000000', chargedPaymentMethod: null },
+      });
+      renderModal();
+      expect(await screen.findByText(/payment is still processing/i)).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await screen.findByText('Credits added')).toBeInTheDocument();
+      expect(client.getPaymentAction).toHaveBeenCalledWith(
+        expect.objectContaining({ subjectId: 'account-a' }),
+        'topup_1',
+      );
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing'] });
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(client.getPaymentAction).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('resumes an owned Checkout only after the user clicks', async () => {
     const redirect = {
       ...wireAction('redirect_required'),
@@ -375,6 +401,23 @@ describe('TopupModal', () => {
     await userEvent.click(review);
     await waitFor(() => {
       expect(toast.warning).toHaveBeenCalledWith('Purchases are not available yet.');
+    });
+  });
+
+  it('points to Checkout when there is no saved card with a billing address', async () => {
+    const { toast } = await import('#components/ui/sonner.js');
+    const refusal = Object.assign(new PaymentConflict(undefined), { code: 'customer_tax_location_invalid' });
+    client.prepareTopup.mockRejectedValue(refusal);
+    renderModal();
+    const review = screen.getByRole('button', { name: /review purchase with saved card/i });
+    await waitFor(() => {
+      expect(review).toBeEnabled();
+    });
+    await userEvent.click(review);
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        'No saved card with a billing address yet. Use another card in Checkout.',
+      );
     });
   });
 

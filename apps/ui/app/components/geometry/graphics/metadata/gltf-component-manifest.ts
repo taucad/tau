@@ -289,7 +289,7 @@ function clampUnit(value: number): number {
 
 function linearChannelToSrgbByte(channel: number): number {
   const clamped = clampUnit(channel);
-  const srgb = clamped <= 0.003_130_8 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055;
+  const srgb = clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055;
   return Math.round(clampUnit(srgb) * 255);
 }
 

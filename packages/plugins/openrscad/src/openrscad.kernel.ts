@@ -21,6 +21,8 @@ import {
   finalizeMeshOutput,
   gltfExportConventionSchema,
   isRecordObject,
+  quantity,
+  quantityKinds,
   resolveImportPath,
 } from '@taucad/runtime/kernel';
 import type { KernelFileSystem, KernelIssue, RuntimeLogger } from '@taucad/runtime/kernel';
@@ -34,12 +36,18 @@ type OpenRscadContext = {
   entryPath: string | undefined;
 };
 
+// `$fa`: the minimum fragment angle, in degrees.
+const minimumAngle = () =>
+  quantity({ unit: 'deg', quantityKind: quantityKinds.planeAngle, space: 'linear' }).positive();
+// `$fs`: the minimum fragment size, in model millimetres.
+const minimumSize = () => quantity({ unit: 'mm', quantityKind: quantityKinds.length, space: 'linear' }).positive();
+
 const renderTessellationSchema = z.object({
   tessellation: z
     .object({
       segments: z.number().int().min(0).optional(),
-      minimumAngle: z.number().positive().optional(),
-      minimumSize: z.number().positive().optional(),
+      minimumAngle: minimumAngle().optional(),
+      minimumSize: minimumSize().optional(),
     })
     .default({}),
 });
@@ -51,8 +59,8 @@ const exportTessellationSchema = z.object({
   tessellation: z
     .object({
       segments: z.number().int().min(3).default(32),
-      minimumAngle: z.number().positive().default(12),
-      minimumSize: z.number().positive().default(2),
+      minimumAngle: minimumAngle().default(12),
+      minimumSize: minimumSize().default(2),
     })
     .default({ segments: 32, minimumAngle: 12, minimumSize: 2 }),
 });

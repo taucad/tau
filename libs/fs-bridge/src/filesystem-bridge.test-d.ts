@@ -12,16 +12,22 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { WorkspaceFileService, WorkspaceMutationContext } from '@taucad/filesystem';
-import { bindMutationContextForPort } from '@taucad/fs-bridge';
+import type { PathPolicy, WorkspaceFileService, WorkspaceMutationContext, WorkspaceScope } from '@taucad/filesystem';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { bindMutationContextForPort, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 import type {
   FileSystemBridgeHello,
   FileSystemBridgeRootedProxy,
   FileSystemBridgeWorkspaceProxy,
+  FileSystemBridgeWorkspaceService,
   MutationMethodNameInternal,
   MutationOverrideMapInternal,
+  RootedBridgeConsumer,
+  RootedFileSystemHandlerFactory,
 } from '@taucad/fs-bridge';
 import type { createBridgeServer } from '@taucad/rpc/bridge';
+
+declare const workspaceService: FileSystemBridgeWorkspaceService;
 
 /**
  * Strict equality check: `true` only when `A` and `B` are mutually
@@ -109,6 +115,60 @@ describe('bridge proxy surfaces — rooted / workspace split', () => {
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('rename');
   });
 
+  /*
+   * H3 is closed (W11, EQ3): the authority's wire is topology, the `/files`
+   * browser's scoped reads and `pollExternalChanges`. Every per-path content
+   * call the workspace surface used to carry — all 21 of them — is served by a
+   * rooted connection, so an unmasked read or write of a project tree has no
+   * spelling here at all.
+   */
+  it('should keep every per-path content call off the unrooted wire', () => {
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('readFile');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('writeFile');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('writeFileChecked');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('appendFile');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('writeFiles');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('mkdir');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('readdir');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('stat');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('lstat');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('move');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('canMove');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('canRename');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('canCreate');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('canDelete');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('bulkMove');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('unlink');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('rmdir');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('exists');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('getZippedDirectory');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('readShallowDirectory');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().not.toHaveProperty('readDirectory');
+  });
+
+  it('should serve the `/files` browser its scoped reads, scope required', () => {
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('readScopedFile');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('readScopedShallowDirectory');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('getScopedZippedDirectory');
+    expectTypeOf<Parameters<FileSystemBridgeWorkspaceProxy['readScopedShallowDirectory']>[1]>().toEqualTypeOf<{
+      readonly scope: WorkspaceScope;
+    }>();
+    expectTypeOf<Parameters<FileSystemBridgeWorkspaceProxy['getScopedZippedDirectory']>[1]>().toEqualTypeOf<{
+      readonly scope: WorkspaceScope;
+    }>();
+  });
+
+  it('should keep the per-path content calls on a rooted proxy', () => {
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('readFile');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('appendFile');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('readdir');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('stat');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('lstat');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('exists');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('bulkMove');
+    expectTypeOf<FileSystemBridgeRootedProxy>().toHaveProperty('canCreate');
+  });
+
   it('keeps the authority surface and the transport on it', () => {
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('mount');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('configureProjectRoots');
@@ -133,6 +193,42 @@ describe('bridge proxy surfaces — rooted / workspace split', () => {
     expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('copyDirectory');
     expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('searchFiles');
     expectTypeOf<FileSystemBridgeRootedProxy>().not.toHaveProperty('getDirectoryStat');
+  });
+});
+
+/**
+ * A rooted connection names its consumer in the type, not only on the wire
+ * (blueprint W2, invariant CI2): the options are a discriminated pair —
+ * unrooted carries neither member, rooted carries both.
+ */
+describe('rooted connect options — type guarantees', () => {
+  it('requires a consumer beside a root and refuses one without a root', () => {
+    const worker = { postMessage: () => undefined };
+    // @ts-expect-error A rooted connection must name the surface it reads.
+    openFileSystemBridge(worker, { root: '/projects/alpha' });
+    // @ts-expect-error A workspace connection reads no composed view, so it names no consumer.
+    openFileSystemBridge(worker, { consumer: 'user' });
+    openFileSystemBridge(worker, { root: '/projects/alpha', consumer: 'working-copy' });
+    openFileSystemBridge(worker);
+    expectTypeOf<RootedBridgeConsumer>().toEqualTypeOf<'user' | 'agent' | 'working-copy'>();
+  });
+
+  it('hands the rooted handler the literal consumer, never an absent one', () => {
+    expectTypeOf<Parameters<RootedFileSystemHandlerFactory>[2]>().toEqualTypeOf<RootedBridgeConsumer>();
+  });
+
+  /*
+   * G0b-6: the policy that masks the change stream sits beside a root gate that
+   * is not optional, and a host used to be able to omit it — silently serving a
+   * masked consumer the stream whole (CI1). It is now required, and the bridge
+   * hands the factory the root-rebased policy so the view and the stream are
+   * masked by one object rather than by two spellings that may disagree.
+   */
+  it('requires a policy beside the rooted factory and hands it to the factory', () => {
+    // @ts-expect-error A host that serves a rooted connection states the layout it masks.
+    exposeFileSystem(workspaceService, { handlerForRoot: () => undefined });
+    exposeFileSystem(workspaceService, { handlerForRoot: () => undefined, policy: tauPathPolicy });
+    expectTypeOf<Parameters<RootedFileSystemHandlerFactory>[3]>().toEqualTypeOf<PathPolicy>();
   });
 });
 

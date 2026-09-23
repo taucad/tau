@@ -14,6 +14,7 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
+import { toggleChatKeyCombination } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -23,7 +24,6 @@ import {
   FloatingPanelErrorContent,
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
@@ -31,11 +31,6 @@ import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#co
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
-
-const toggleChatHistoryKeyCombination = {
-  key: 'c',
-  ctrlKey: true,
-} satisfies KeyCombination;
 
 // Component-local CSS variable. Declared here (rather than in global.css)
 // to keep the chat-history pinning system self-contained — the only
@@ -147,7 +142,7 @@ export const ChatHistory = memo(function (props: {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
 
-  const { formattedKeyCombination } = useKeybinding(toggleChatHistoryKeyCombination, toggleChatHistory);
+  const { formattedKeyCombination } = useKeybinding(toggleChatKeyCombination, toggleChatHistory);
 
   useEffect(() => {
     if (location.state?.focusChatComposer === true) {

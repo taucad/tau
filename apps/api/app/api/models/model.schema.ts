@@ -1,7 +1,24 @@
 import { z } from 'zod';
+import { reasoningLevels } from '@taucad/chat/constants';
 import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.schema.js';
 
 export const modelSupportSchema = z.object({
+  /*
+   * A capability, not a request option: `configuration` is spread into the
+   * LangChain constructor on the name/commit path, `support` is not. The
+   * default level stays in `configuration`, where each provider's shape lives.
+   */
+  reasoning: z
+    .object({
+      levels: z
+        .array(z.enum(reasoningLevels))
+        .min(1)
+        .describe(
+          'Reasoning levels this model accepts and Tau forwards, ascending; absent means no user-selectable reasoning',
+        ),
+    })
+    .describe('User-selectable reasoning support')
+    .optional(),
   tools: z.boolean().describe('Whether the model supports tools').optional(),
   toolChoice: z.boolean().describe('Whether the model supports tool choice').optional(),
   modalities: z
@@ -112,4 +129,5 @@ export type ModelProviderKind = z.infer<typeof modelProviderKindSchema>;
 export type ModelDetails = z.infer<typeof modelDetailsSchema>;
 export type ModelSupport = z.infer<typeof modelSupportSchema>;
 export type ModelModalities = NonNullable<ModelSupport['modalities']>;
+export type ModelReasoningSupport = NonNullable<ModelSupport['reasoning']>;
 export type ModelInputModality = NonNullable<ModelSupport['modalities']>['input'][number];

@@ -44,6 +44,7 @@ import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import { signalBufferByteLength } from '#framework/runtime-framework.constants.js';
+import { admitJsonSchema } from '@taucad/parameters/schema';
 
 const tessellationSchema = z.object({
   tessellation: z
@@ -237,6 +238,138 @@ class DisposingKernelWorker extends MockKernelWorker {
 // =============================================================================
 
 describe('KernelWorker lifecycle', () => {
+  class ParameterBoundaryWorker extends MockKernelWorker {
+    public receivedParameters: Record<string, unknown> | undefined;
+
+    protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+      return createParameterDeclaration(
+        { width: 10, height: 5 },
+        {
+          properties: {
+            width: { type: 'double', ucumUnit: 'mm' },
+            height: { type: 'double' },
+          },
+        },
+      );
+    }
+
+    protected override async onCreateGeometry(
+      input: CreateGeometryInput,
+      runtime: KernelRuntime,
+    ): Promise<CreateGeometryResult> {
+      this.receivedParameters = input.parameters;
+      return super.onCreateGeometry(input, runtime);
+    }
+  }
+
+  const storedUnitBearingWidth = defineMiddleware({
+    id: 'storedUnitBearingWidth',
+    name: 'StoredUnitBearingWidth',
+    async wrapCreateGeometry(input, handler) {
+      return handler({ ...input, parameters: { width: '20 in', ...input.parameters } });
+    },
+  });
+
+  it('should convert unit-bearing text at the kernel boundary', async () => {
+    const worker = new ParameterBoundaryWorker({ middleware: [], onLog: noopLog });
+
+    const result = await worker.evaluateModel({
+      file: createGeometryFile('main.ts'),
+      parameters: { width: '20 in' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameters?.['width']).toBeCloseTo(508);
+    expect(worker.receivedParameters?.['height']).toBe(5);
+  });
+
+  it('should convert stored unit-bearing text and fill defaults on a direct createGeometry', async () => {
+    const worker = new ParameterBoundaryWorker({ middleware: [storedUnitBearingWidth()], onLog: noopLog });
+
+    const result = await worker.createGeometry({ file: createGeometryFile('main.ts'), parameters: {} });
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameters?.['width']).toBeCloseTo(508);
+    expect(worker.receivedParameters?.['height']).toBe(5);
+  });
+
+  it('should rematerialize an export with the converted default-filled parameters', async () => {
+    class ExportParameterBoundaryWorker extends ParameterBoundaryWorker {
+      public readonly receivedParameterHistory: Array<Readonly<Record<string, unknown>>> = [];
+
+      public constructor(options: MockKernelWorkerOptions) {
+        super(options);
+        this.kernelCreateOptionsZodSchemaMap.set('mock-kernel', z.object({ tessellation: z.number() }));
+      }
+
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        this.receivedParameterHistory.push(input.parameters);
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+    const worker = new ExportParameterBoundaryWorker({
+      middleware: [storedUnitBearingWidth()],
+      onLog: noopLog,
+      renderZodSchema: z.object({ tessellation: z.number().default(0.1) }),
+      exportZodSchemas: { gltf: z.object({ tessellation: z.number().default(0.01) }) },
+    });
+
+    await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+    const result = await worker.runExportGeometry('gltf');
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameterHistory).toHaveLength(2);
+    for (const parameters of worker.receivedParameterHistory) {
+      expect(parameters['width']).toBeCloseTo(508);
+      expect(parameters['height']).toBe(5);
+    }
+  });
+
+  it('should report SEMANTICS_UNRESOLVED for unit-bearing text on a field with no unit', async () => {
+    const worker = new ParameterBoundaryWorker({ middleware: [], onLog: noopLog });
+
+    const result = await worker.evaluateModel({
+      file: createGeometryFile('main.ts'),
+      parameters: { height: '20 in' },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error('Expected unit-less text to be refused');
+    }
+    expect(result.issues[0]?.code).toBe('SEMANTICS_UNRESOLVED');
+    expect(result.issues[0]?.message).toMatch(/\/height.*20 in.*number|unit declaration/iu);
+  });
+
+  it('should pass a string that a mixed numeric-or-string field accepts', async () => {
+    class MixedParameterWorker extends ParameterBoundaryWorker {
+      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+        return createParameterDeclaration(
+          {},
+          {
+            properties: {
+              stock: {
+                oneOf: [{ type: 'number' }, { type: 'string', enum: ['3mm-plate'] }],
+              },
+            },
+          },
+        );
+      }
+    }
+    const worker = new MixedParameterWorker({ middleware: [], onLog: noopLog });
+
+    const result = await worker.evaluateModel({
+      file: createGeometryFile('main.ts'),
+      parameters: { stock: '3mm-plate' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(worker.receivedParameters?.['stock']).toBe('3mm-plate');
+  });
+
   it('should stop direct, interactive, and export renders when parameter discovery fails', async () => {
     const issue: KernelIssue = {
       message: 'Workspace changed while reading current schema.',
@@ -1817,7 +1950,10 @@ describe('KernelWorker lifecycle', () => {
     }
 
     const createPreparationWorker = (): PreparationCountingWorker => {
-      const filesystem = Object.assign(createMockFileSystem(), {
+      /* `readFile` and `readFiles` have to answer the same bytes for the same path: the hash
+       * cache is filled from one and arm-time validation reads the other, so a fixture where
+       * they disagree never commits a watch. */
+      const filesystem = Object.assign(createMockFileSystem({ readFileResult: new Uint8Array([1, 2, 3]) }), {
         watch: vi.fn(() => vi.fn()),
       });
       filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
@@ -2408,6 +2544,40 @@ describe('KernelWorker lifecycle', () => {
   // ---------------------------------------------------------------------------
 
   describe('middleware getDependencies', () => {
+    it('should leave the manifest revision unchanged when a createGeometry-scoped dependency of a middleware that also wraps getParameters changes', async () => {
+      const dependencyPath = '.tau/parameters/main.ts.json';
+      const middleware = defineMiddleware({
+        id: 'operation-scoped-dependency',
+        name: 'operation-scoped-dependency',
+        getDependencies() {
+          return [{ path: dependencyPath, affects: ['createGeometry'] }];
+        },
+        async wrapGetParameters(input, handler) {
+          return handler(input);
+        },
+      });
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({
+        'main.ts': new Uint8Array([1, 2, 3]),
+      });
+      filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([10]));
+      const worker = createConfiguredWorker({ middleware: [middleware], filesystem });
+      const file = createGeometryFile('main.ts');
+
+      const first = await worker.getParameters(file);
+      filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([20]));
+      // @ts-expect-error - accessing the private invalidation seam for contract verification.
+      worker._invalidateCachesForPaths([dependencyPath]);
+      const second = await worker.getParameters(file);
+
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      if (!first.success || !second.success) {
+        throw new Error('Expected both parameter manifests to resolve');
+      }
+      expect(second.data.revision).toBe(first.data.revision);
+    });
+
     it('should include middleware dependency files in the dependency hash', async () => {
       const parameterFileContent = new Uint8Array([10, 20, 30]);
 
@@ -2415,7 +2585,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '.tau/parameters/main.ts.json' }];
+          return [{ path: '.tau/parameters/main.ts.json', affects: ['createGeometry'] }];
         },
       });
 
@@ -2461,7 +2631,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '.tau/parameters/main.ts.json' }];
+          return [{ path: '.tau/parameters/main.ts.json', affects: ['createGeometry'] }];
         },
       });
 
@@ -2494,7 +2664,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '.tau/missing.json' }];
+          return [{ path: '.tau/missing.json', affects: ['createGeometry'] }];
         },
       });
 
@@ -2587,7 +2757,7 @@ describe('KernelWorker lifecycle', () => {
         id: 'invalid-dependency',
         name: 'invalid-dependency',
         getDependencies() {
-          return [{ path: '../outside.json' }];
+          return [{ path: '../outside.json', affects: ['createGeometry'] }];
         },
       });
       const filesystem = createMockFileSystem();
@@ -3470,7 +3640,13 @@ describe('preview admission invariants', () => {
     await observed.waitForState((event) => event.renderId === initialId && event.state === 'idle');
 
     worker.exportInProgress = true;
-    const exported = worker.exportModel({ file: createGeometryFile('main.ts'), parameters: {}, format: 'gltf' });
+    /* A different entry from the preview's, so the export genuinely extracts parameters and
+     * reaches the gate. Request-scoped lanes stopped clearing the preview's volatile caches
+     * when revalidation took over freshness (Q5/EQ7), and an export of the entry the preview
+     * just rendered now legitimately reuses its parameters. What this test pins — a preview
+     * timeout must not abort in-flight export work — rides on the shared abort context and
+     * SAB generation, not on which entry the export names. */
+    const exported = worker.exportModel({ file: createGeometryFile('export.ts'), parameters: {}, format: 'gltf' });
     await exportEntered.promise;
 
     const timedOutId = previewId(2902);
@@ -4538,6 +4714,49 @@ describe('transcoder loading', () => {
       expect.any(Object),
       expect.any(Object),
     );
+  });
+
+  it('should publish every capability schema as plain JSON that survives transport and admission', async () => {
+    const glbSchema = tessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape);
+    const stlModule = createMockTranscoderModule([
+      {
+        from: 'glb',
+        to: 'stl',
+        fidelity: 'mesh',
+        optionsSchema: z.strictObject({ binary: z.boolean().default(false) }),
+        sourceOptions: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+      },
+    ]);
+    const worker = createConfiguredWorker({
+      exportZodSchemas: { glb: glbSchema },
+      renderZodSchema: tessellationSchema,
+      transcoders: [createMockTranscoderPlugin('stl-transcoder', stlModule)],
+    });
+    // @ts-expect-error -- route-planner contract test configures the mock kernel's protected declaration map.
+    worker.kernelExportContentMap.set('mock-kernel', { glb: ['includeEdges'] });
+
+    await worker.initialize({ callbacks: { onLog: vi.fn() }, transferables: {}, options: {} });
+
+    const { routes, renderCapabilities } = worker.capabilitiesManifest;
+    expect(routes.some((route) => route.targetFormat === 'stl' && route.transcoderId !== undefined)).toBe(true);
+    const schemas = [
+      ...routes.flatMap((route) => [
+        [`${route.targetFormat} export options`, route.exportOptions.schema],
+        ...(route.content ? [[`${route.targetFormat} content`, route.content.schema] as const] : []),
+      ]),
+      ...Object.entries(renderCapabilities).flatMap(([kernelId, capability]) =>
+        capability ? [[`${kernelId} render options`, capability.renderOptions.schema] as const] : [],
+      ),
+    ] as ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]>;
+    for (const [label, schema] of schemas) {
+      expect(Reflect.ownKeys(schema), label).toEqual(Object.keys(schema));
+      expect(Object.values(schema).includes(undefined), label).toBe(false);
+      if (Object.keys(schema).length > 0) {
+        expect(() => {
+          admitJsonSchema(structuredClone(schema) as Record<string, unknown>);
+        }, label).not.toThrow();
+      }
+    }
   });
 
   it('should pin image source semantics while exposing only consumer-controlled route options', async () => {

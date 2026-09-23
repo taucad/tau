@@ -1,12 +1,14 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { assign, createActor, setup, waitFor } from 'xstate';
+import { assign, createActor, fromCallback, setup, waitFor } from 'xstate';
+import type { EventObject } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
 import type { CapabilitiesManifest, KernelIssue, RenderOutcome, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
+import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
@@ -17,6 +19,21 @@ import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory }
 const noop = () => {
   /* No-op */
 };
+
+/* Observe the connection the kernel's filesystem opens, without changing it: the
+ * thunk runs when the runtime binds, so the pin calls it (W14). */
+const kernelBridgeOpens = vi.hoisted(() => [] as Array<() => unknown>);
+
+vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
+  const original = await importOriginal<typeof RuntimeFileSystem>();
+  return {
+    ...original,
+    fromFileSystemBridge: (open: Parameters<(typeof RuntimeFileSystem)['fromFileSystemBridge']>[0]) => {
+      kernelBridgeOpens.push(open);
+      return original.fromFileSystemBridge(open);
+    },
+  };
+});
 
 const createMockAppRuntimeClient = () => createMockRuntimeClient();
 
@@ -469,6 +486,21 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should re-render the committed record when a scrub returns to its start', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'scrubParameters', parameters: { height: 21 } });
+      vi.mocked(mockClient.render).mockClear();
+
+      actor.send({ type: 'restoreParameters' });
+
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        content: { includeEdges: true },
+      });
+      actor.stop();
+    });
+
     it('should forward initializeModel as a render carrying no values', async () => {
       const { actor, mockClient } = await startAndConnect();
 
@@ -723,6 +755,33 @@ describe('cadMachine', () => {
         geometry: stubGeometry,
       });
       actor.stop();
+    });
+
+    /* R4: the refusal has to leave the unit — the project machine is what the
+     * live session, and through it the sidebar row, reads. */
+    it('tells its parent why the kernel was refused, after saying it was trying', async () => {
+      const received: Array<{ type: string; reason?: string }> = [];
+      const parentRef = createActor(
+        fromCallback<EventObject>(({ receive }) => {
+          receive((event) => received.push(event as { type: string; reason?: string }));
+        }),
+      );
+      parentRef.start();
+      const { actor } = await startAndConnect({
+        parentRef,
+        connectError: new Error(
+          'Electron main refused the tau:runtime:port request: registerElectronRuntimeMain: refusing to exceed 64 utility processes',
+        ),
+      });
+
+      const refusals = received.filter((event) => event.type === 'geometryUnit.kernelRefused');
+      expect(actor.getSnapshot().value).toBe('error');
+      /* The attempt clears first, so a unit that reconnects leaves nothing behind. */
+      expect(refusals.at(0)?.reason).toBeUndefined();
+      expect(refusals.at(-1)?.reason).toContain('refusing to exceed 64 utility processes');
+
+      actor.stop();
+      parentRef.stop();
     });
 
     it('should keep running availability-affecting transitions without a parentRef', async () => {
@@ -1292,6 +1351,112 @@ describe('cadMachine', () => {
   // =========================================================================
   // Cleanup (destroyKernel exit action)
   // =========================================================================
+  // =========================================================================
+  // State: parked (R3)
+  // =========================================================================
+  describe('parked', () => {
+    it('releases the kernel process and keeps everything else', async () => {
+      const cleanup = vi.fn();
+      const client = createMockAppRuntimeClient();
+      const { actor } = await startAndConnect({
+        connectResult: async () => ({ type: 'kernelConnected', client, cleanups: [cleanup] }),
+      });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+
+      actor.send({ type: 'parkRuntime' });
+
+      expect(actor.getSnapshot().value).toBe('parked');
+      expect(cleanup).toHaveBeenCalledOnce();
+      expect(client.terminate).toHaveBeenCalledOnce();
+      expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
+      /* Only the process goes: the last good geometry is still on screen. */
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
+      actor.stop();
+    });
+
+    it('reconnects when the project comes back', async () => {
+      const firstClient = createMockAppRuntimeClient();
+      const secondClient = createMockAppRuntimeClient();
+      let attempt = 0;
+      const { actor } = await startAndConnect({
+        connectResult: async () => {
+          attempt++;
+          return {
+            type: 'kernelConnected',
+            client: attempt === 1 ? firstClient : secondClient,
+            cleanups: [],
+          };
+        },
+      });
+      actor.send({ type: 'parkRuntime' });
+      expect(actor.getSnapshot().value).toBe('parked');
+
+      actor.send({ type: 'resumeRuntime' });
+
+      expect(actor.getSnapshot().value).toBe('connecting');
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+      expect(attempt).toBe(2);
+      expect(actor.getSnapshot().context.kernelClient).toBe(secondClient);
+      actor.stop();
+    });
+
+    it('refuses to park a render in flight, and keeps its result', async () => {
+      const client = createMockAppRuntimeClient();
+      const { actor } = await startAndConnect({
+        connectResult: async () => ({ type: 'kernelConnected', client, cleanups: [] }),
+      });
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'stateChanged', state: 'rendering' });
+      expect(actor.getSnapshot().matches('rendering')).toBe(true);
+
+      actor.send({ type: 'parkRuntime' });
+
+      expect(actor.getSnapshot().matches('rendering')).toBe(true);
+      expect(client.terminate).not.toHaveBeenCalled();
+
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
+      expect(actor.getSnapshot().context.latestGeometryOutcome).toBe('success');
+      actor.stop();
+    });
+
+    it('leaves the error state when the project comes back (V1-4)', async () => {
+      const { actor } = await startAndConnect({ connectError: new Error('refusing to exceed 8 utility processes') });
+      expect(actor.getSnapshot().value).toBe('error');
+
+      actor.send({ type: 'resumeRuntime' });
+
+      expect(actor.getSnapshot().value).toBe('connecting');
+      actor.stop();
+    });
+
+    it('takes a parameter restore without a client instead of failing into error (V1-4)', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'parkRuntime' });
+
+      actor.send({ type: 'restoreParameters' });
+
+      expect(actor.getSnapshot().value).toBe('parked');
+      expect(actor.getSnapshot().context.parameterRender).toBeUndefined();
+      actor.stop();
+    });
+
+    it('retargets a renamed entry while parked and renders it on resume', async () => {
+      const { actor } = await startAndConnect();
+      actor.send({ type: 'parkRuntime' });
+
+      actor.send({ type: 'setEntryPath', entryPath: 'renamed.ts' });
+
+      expect(actor.getSnapshot().value).toBe('parked');
+      expect(actor.getSnapshot().context.entryPath).toBe('renamed.ts');
+
+      actor.send({ type: 'resumeRuntime' });
+      await waitFor(actor, (snapshot) => snapshot.matches('rendering') || snapshot.value === 'idle');
+      expect(actor.getSnapshot().context.entryPath).toBe('renamed.ts');
+      actor.stop();
+    });
+  });
+
   describe('cleanup', () => {
     it('should wire destroyKernel as a root exit action', () => {
       expect(cadMachine.config.exit).toContainEqual('destroyKernel');
@@ -1791,6 +1956,45 @@ describe('cadMachine', () => {
       expect(selected?.[0]?.message).toBe('The selected CAD render failed');
       expect(selectCadFailureIssues(actor.getSnapshot())).toBe(selected);
       actor.stop();
+    });
+  });
+
+  describe('the surface the kernel reads', () => {
+    /* The kernel executes project code the agent wrote, so its filesystem is the
+     * agent's view of the checkout and not the working copy (CI1, W14). */
+    it('should open the kernel filesystem as the agent consumer', async () => {
+      const openFileSystemBridge = vi.fn(() => ({ port: new MessageChannel().port1, dispose: noop }));
+      const readyFileManager = createActor(
+        setup({}).createMachine({
+          initial: 'ready',
+          context: { contentService: { id: 'content-service' }, openFileSystemBridge },
+          states: { ready: {} },
+        }),
+      ).start();
+      kernelBridgeOpens.length = 0;
+
+      /* The thunk is captured while the kernel options are built, before the real
+       * client is created over them — so how that connection settles is not this
+       * row's subject, only which surface it asked for. */
+      const actor = createActor(cadMachine, {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileManagerRef: readyFileManager as unknown as NonNullable<CadContext['fileManagerRef']>,
+          kernelOptionsFactory: createKernelOptionsFactory(),
+          fileSystemRoot: '/projects/test',
+        },
+      }).start();
+      await waitFor(actor, (state) => state.value !== 'connecting');
+
+      const open = kernelBridgeOpens.at(-1);
+      if (!open) {
+        throw new TypeError('Expected the kernel to hold a bridge opener.');
+      }
+      open();
+
+      expect(openFileSystemBridge).toHaveBeenCalledExactlyOnceWith('/projects/test', 'agent');
+      actor.stop();
+      readyFileManager.stop();
     });
   });
 

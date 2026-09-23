@@ -1,5 +1,6 @@
 import { assertType, expectTypeOf } from 'vitest';
 import type { AnyStateMachine, SnapshotFrom } from 'xstate';
+import type { JSONValue, ParameterGroup } from '@taucad/types';
 
 import { parameterSetMachine } from '#parameter-set.machine.js';
 import type {
@@ -12,7 +13,14 @@ import type { ParameterSetIdentity, ParameterSetOperation, ParameterSetOutcome, 
 expectTypeOf(parameterSetMachine).toExtend<AnyStateMachine>();
 
 const identity: ParameterSetIdentity = { manifestRevision: 'manifest:1' };
-const field = { group: 'default', parameterId: 'width', resource: 'urn:test', pointer: '/width' } as const;
+expectTypeOf<ParameterSetIdentity>().toEqualTypeOf<Readonly<{ manifestRevision: string }>>();
+expectTypeOf<ParameterGroup>().toEqualTypeOf<{
+  values: Record<string, JSONValue>;
+  units?: Record<string, string>;
+  sourceUnits?: Record<string, string>;
+}>();
+// A field is named by its group and pointer under the manifest revision the request declares.
+const field = { group: 'default', pointer: '/width' } as const;
 
 // Every operation kind is a positive fixture of the public operation union.
 const operations = [
@@ -32,13 +40,11 @@ const operations = [
     unit: 'cm',
     producerCapability: { producer: 'fixture', sourceRevision: 'source:1', capability: 'change-source-unit:v1' },
   },
-  { kind: 'display-preference', parameterId: 'width', unit: 'cm' },
 ] as const satisfies readonly ParameterSetOperation[];
 expectTypeOf(operations).toExtend<readonly ParameterSetOperation[]>();
 
 const request: ParameterSetRequest = {
   requestId: 'edit',
-  draftGeneration: 1,
   pressure: 'final',
   expected: identity,
   base: { pointer: '/width', value: 1, binding: { unit: 'mm', representation: 'binary64' } },
@@ -52,10 +58,54 @@ assertType<ParameterSetOperation>({
   group: 'default',
 });
 assertType<ParameterSetOperation>({
+  kind: 'native-value',
+  ...field,
+  // @ts-expect-error -- the package derives identity from the pinned manifest
+  parameterId: `${'sha256:1'}:/width`,
+  value: 1,
+});
+assertType<ParameterSetOperation>({
+  kind: 'unit-value',
+  ...field,
+  inputUnit: 'cm',
+  // @ts-expect-error -- no caller spells the root schema resource any more
+  resource: 'urn:taucad:parameter-schema:root',
+  value: '1',
+});
+assertType<ParameterSetOperation>({
+  kind: 'batch',
+  group: 'default',
+  // @ts-expect-error -- a batch edit is a pointer and a value; it carries no identity either
+  edits: [{ pointer: '/width', parameterId: 'width', resource: 'urn:test', value: 1 }],
+});
+assertType<ParameterSetOperation>({
+  kind: 'source-unit',
+  mode: 'preserve-size',
+  ...field,
+  unit: 'cm',
+  // @ts-expect-error -- source-unit keeps its producer pin and drops the field pair like every other kind
+  parameterId: 'width',
+  producerCapability: { producer: 'fixture', sourceRevision: 'source:1', capability: 'change-source-unit:v1' },
+});
+assertType<ParameterSetOperation>({
   // @ts-expect-error -- user-authored kind, space and reference claims were retired with the record ledger
   kind: 'bind-parameter',
   ...field,
   binding: { unit: 'mm' },
+});
+assertType<ParameterSetOperation>({
+  // @ts-expect-error -- display preferences are not parameter record operations
+  kind: 'display-preference',
+  parameterId: 'width',
+  unit: 'cm',
+});
+assertType<ParameterSetOperation>({
+  kind: 'source-unit',
+  // @ts-expect-error -- source-unit changes preserve physical size
+  mode: 'reinterpret',
+  ...field,
+  unit: 'cm',
+  producerCapability: { producer: 'fixture', sourceRevision: 'source:1', capability: 'change-source-unit:v1' },
 });
 assertType<ParameterSetRequest>({
   ...request,

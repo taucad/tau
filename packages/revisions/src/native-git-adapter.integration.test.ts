@@ -1,13 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { MessageChannel } from 'node:worker_threads';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { ImmutableRevisionTree, mergeRevisionTrees, revisionId } from '#algorithms/index.js';
 import { revisionBranchName } from '#revision-authority.js';
 import type { RevisionId } from '#algorithms/index.js';
@@ -17,6 +18,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { createNativeGitAdapter } from '#native-git-adapter.js';
 import { createNativeGitRevisionPort } from '#node/index.js';
 import { NativeGitError } from '#native-git.types.js';
+import { generatedGitattributesPath, generatedIgnoreContent, generatedIgnorePath } from '#workspace-config.js';
 
 const execute = promisify(execFile);
 const createdAt = Date.UTC(2026, 7, 28, 12, 0, 0);
@@ -96,6 +98,7 @@ nativeGitIntegration('native Git adapter integration', () => {
     const { port1, port2 } = new MessageChannel();
     const admittedRoots = new Set<string>();
     const stopServer = serveNodeFsProvider(toNodeFsPort(port1), {
+      policy: tauPathPolicy,
       authority,
       allowRoot: (root) => admittedRoots.has(root),
     });
@@ -327,6 +330,36 @@ nativeGitIntegration('native Git adapter integration', () => {
    * / `readRef` / `log` are how every reader in the tree reaches it. */
   const openPort = (executable?: string): RevisionPort =>
     createNativeGitRevisionPort({ repositoryPath, ...(executable === undefined ? {} : { gitExecutable: executable }) });
+
+  /*
+   * G0-9 on the disk leg: `init` is also the open seam
+   * (`revision-effects.ensureStore` calls it once per authority, and `git init`
+   * is skipped for a store that is already here), so a project created by an
+   * older build is migrated on its next open — and a project already current is
+   * not rewritten, which a pinned mtime is the only way to observe here.
+   */
+  it('should migrate a stale generated block on open and then leave both files alone', async () => {
+    const ignorePath = join(repositoryPath, generatedIgnorePath);
+    const attributesPath = join(repositoryPath, generatedGitattributesPath);
+    await writeFile(
+      ignorePath,
+      `# mine\n*.log\n# BEGIN Tau generated — derived content is never versioned\n/.git/\n/.jj/\n/.tau/binding.json\nnode_modules/\n# END Tau generated\n`,
+    );
+
+    await openPort().init({ author: { name: 'Tau', email: 'tau@example.com' } });
+
+    expect(await readFile(ignorePath, 'utf8')).toBe(generatedIgnoreContent('# mine\n*.log\n'));
+    const pinned = Date.UTC(2020, 0, 1);
+    await utimes(ignorePath, new Date(pinned), new Date(pinned));
+    await utimes(attributesPath, new Date(pinned), new Date(pinned));
+
+    await openPort().init({ author: { name: 'Tau', email: 'tau@example.com' } });
+
+    const ignoreStat = await stat(ignorePath);
+    const attributesStat = await stat(attributesPath);
+    expect(ignoreStat.mtimeMs).toBe(pinned);
+    expect(attributesStat.mtimeMs).toBe(pinned);
+  });
 
   const write = async (
     port: RevisionPort,

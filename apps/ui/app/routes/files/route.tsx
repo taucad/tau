@@ -34,6 +34,7 @@ import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
 import { toast } from '#components/ui/sonner.js';
+import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
@@ -432,7 +433,7 @@ function WorkspaceConnectionStatus({
               : 'Try again'}
         </Button>
       ) : state.phase === 'ready' && state.conflictCount > 0 ? (
-        <AlertCircle className='text-amber-600 size-4 shrink-0' />
+        <AlertCircle className='size-4 shrink-0 text-warning' />
       ) : state.phase === 'ready' ? (
         <CheckCircle2 className='size-4 shrink-0 text-primary' />
       ) : (
@@ -625,13 +626,21 @@ export default function FilesRoute(): React.JSX.Element {
 
   // Load Home on mount; load each connected disk workspace as it appears.
   useEffect(() => {
-    void Promise.resolve().then(() => loadColumnTree(homeBackend));
+    // async-iife: bootstrap -- an effect cannot await the tree load.
+    void (async () => {
+      await Promise.resolve();
+      await loadColumnTree(homeBackend);
+    })();
   }, [homeBackend, loadColumnTree]);
 
   useEffect(() => {
     for (const column of workspaceColumns) {
       if (column.status === 'connected') {
-        void Promise.resolve().then(() => loadColumnTree('webaccess', column.workspace.workspaceId));
+        // async-iife: bootstrap -- an effect cannot await the tree load.
+        void (async () => {
+          await Promise.resolve();
+          await loadColumnTree('webaccess', column.workspace.workspaceId);
+        })();
       }
     }
   }, [workspaceColumns, loadColumnTree]);
@@ -765,9 +774,15 @@ export default function FilesRoute(): React.JSX.Element {
           toast.error('Workspace is not connected.');
           return;
         }
-        const blob = await scopedStorage.getZippedDirectory(path, { scope });
         const folderName = path.split('/').pop() ?? 'folder';
-        downloadBlob(blob, `${folderName}.zip`);
+        toast.promise(async () => scopedStorage.getZippedDirectory(path, { scope }), {
+          loading: `Downloading ${folderName}...`,
+          success(blob) {
+            downloadBlob(blob, `${folderName}.zip`);
+            return `Downloaded ${folderName}.zip`;
+          },
+          error: getFileTreeDownloadErrorMessage,
+        });
       },
     }),
     [projects, resolveScope, scopedStorage],
@@ -803,7 +818,11 @@ export default function FilesRoute(): React.JSX.Element {
 
   useEffect(() => {
     if (connectionWorkspace && connectionCanBrowse) {
-      void Promise.resolve().then(() => loadColumnTree('webaccess', connectionWorkspace.workspaceId));
+      // async-iife: bootstrap -- an effect cannot await the tree load.
+      void (async () => {
+        await Promise.resolve();
+        await loadColumnTree('webaccess', connectionWorkspace.workspaceId);
+      })();
     }
   }, [connectionCanBrowse, connectionWorkspace, loadColumnTree]);
 
@@ -844,7 +863,12 @@ export default function FilesRoute(): React.JSX.Element {
                   connectionState.phase !== 'idle' &&
                   connectionState.phase !== 'selecting' &&
                   connectionState.phase !== 'registering' ? (
-                    <WorkspaceConnectionStatus state={connectionState} onRetry={() => void handleRetryWorkspace()} />
+                    <WorkspaceConnectionStatus
+                      state={connectionState}
+                      onRetry={() => {
+                        void handleRetryWorkspace();
+                      }}
+                    />
                   ) : undefined;
                 return (
                   <ColumnShell
@@ -866,7 +890,9 @@ export default function FilesRoute(): React.JSX.Element {
                             size='icon'
                             className='size-7'
                             disabled={busyWorkspaceId === column.workspace.workspaceId}
-                            onClick={() => void handleDisconnectWorkspace(column.workspace)}
+                            onClick={() => {
+                              void handleDisconnectWorkspace(column.workspace);
+                            }}
                             aria-label='Disconnect workspace'
                           >
                             <Unplug className='size-3.5' aria-hidden />
@@ -922,7 +948,12 @@ export default function FilesRoute(): React.JSX.Element {
                         </div>
                       </div>
                     ) : connectionState.phase === 'idle' ? undefined : (
-                      <WorkspaceConnectionStatus state={connectionState} onRetry={() => void handleRetryWorkspace()} />
+                      <WorkspaceConnectionStatus
+                        state={connectionState}
+                        onRetry={() => {
+                          void handleRetryWorkspace();
+                        }}
+                      />
                     )
                   }
                 />

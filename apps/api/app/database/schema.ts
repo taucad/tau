@@ -40,8 +40,6 @@ export const user = pgTable('user', {
   image: text('image'),
   /** Whether the user allows their AI prompts and designs to be used for AI service improvement */
   allowsAiTraining: boolean('allows_ai_training').default(true).notNull(),
-  /** Historical Better Auth customer hint; never financial authority or a first-party write target. */
-  stripeCustomerId: text('stripe_customer_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
@@ -470,31 +468,26 @@ export const subscription = pgTable(
   'subscription',
   {
     id: text('id').primaryKey(),
+    /** The tier the subscription grants: `pro`, or `enterprise` for a sales-led deal. */
     plan: text('plan').notNull(),
-    referenceId: text('reference_id').notNull(),
-    stripeCustomerId: text('stripe_customer_id'),
     stripeSubscriptionId: text('stripe_subscription_id'),
     status: text('status').default('incomplete').notNull(),
-    periodStart: timestamp('period_start'),
-    periodEnd: timestamp('period_end'),
-    trialStart: timestamp('trial_start'),
-    trialEnd: timestamp('trial_end'),
     cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false),
-    cancelAt: timestamp('cancel_at'),
     canceledAt: timestamp('canceled_at'),
     endedAt: timestamp('ended_at'),
-    seats: integer('seats'),
-    billingInterval: text('billing_interval'),
-    stripeScheduleId: text('stripe_schedule_id'),
-    accountId: text('account_id').references((): AnyPgColumn => creditAccount.id, { onDelete: 'restrict' }),
-    environment: text('environment'),
-    customerBindingId: text('customer_binding_id').references((): AnyPgColumn => billingStripeCustomer.id, {
-      onDelete: 'restrict',
-    }),
-    requestId: text('request_id'),
-    requestHash: text('request_hash'),
-    offerSnapshot: jsonb('offer_snapshot').$type<PaymentOfferSnapshot>(),
-    slotState: text('slot_state'),
+    accountId: text('account_id')
+      .notNull()
+      .references((): AnyPgColumn => creditAccount.id, { onDelete: 'restrict' }),
+    environment: text('environment').notNull(),
+    customerBindingId: text('customer_binding_id')
+      .notNull()
+      .references((): AnyPgColumn => billingStripeCustomer.id, {
+        onDelete: 'restrict',
+      }),
+    requestId: text('request_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    offerSnapshot: jsonb('offer_snapshot').$type<PaymentOfferSnapshot>().notNull(),
+    slotState: text('slot_state').notNull(),
     paidThrough: timestamp('paid_through', { withTimezone: true }),
     failedRenewalInvoiceId: text('failed_renewal_invoice_id'),
     dunningStartedAt: timestamp('dunning_started_at', { withTimezone: true }),
@@ -508,15 +501,11 @@ export const subscription = pgTable(
       .where(sql`${table.slotState} IN ('pending','current','attention')`),
     uniqueIndex('subscription_owned_source').on(table.customerBindingId, table.stripeSubscriptionId),
     uniqueIndex('subscription_owned_request').on(table.accountId, table.requestId),
-    check(
-      'subscription_financial_state',
-      sql`${table.accountId} IS NULL OR (${table.environment} IS NOT NULL AND ${table.customerBindingId} IS NOT NULL AND ${table.offerSnapshot} IS NOT NULL AND ${table.requestId} IS NOT NULL AND ${table.requestHash} IS NOT NULL AND ${table.slotState} IN ('pending','current','attention','ended'))`,
-    ),
+    check('subscription_slot_state', sql`${table.slotState} IN ('pending','current','attention','ended')`),
     check(
       'subscription_grace',
       sql`(${table.failedRenewalInvoiceId} IS NULL AND ${table.dunningStartedAt} IS NULL AND ${table.graceEndsAt} IS NULL) OR (${table.failedRenewalInvoiceId} IS NOT NULL AND ${table.dunningStartedAt} IS NOT NULL AND ${table.graceEndsAt} = ${table.dunningStartedAt} + interval '7 days')`,
     ),
-    index('subscription_reference_idx').on(table.referenceId),
     index('subscription_stripe_idx').on(table.stripeSubscriptionId),
   ],
 );

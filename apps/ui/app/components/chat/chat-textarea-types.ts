@@ -145,7 +145,6 @@ const parseFileDragPaths = (raw: string): string[] => {
 
 export type ChatTextareaHandle = {
   focus: () => void;
-  closeOptions?: () => void;
 };
 
 export type ChatTextareaProperties = {
@@ -157,10 +156,8 @@ export type ChatTextareaProperties = {
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
-  readonly creationLocationControls?: {
-    readonly toolbar: React.ReactNode;
-    readonly field: React.ReactNode;
-  };
+  /** Where a project created from this draft goes: Home's location control, in the bar. */
+  readonly creationLocationControl?: React.ReactNode;
   /** Blocks every submit path while external prerequisites are unresolved. */
   readonly isSubmitDisabled?: boolean;
   readonly mode?: 'main' | 'edit';
@@ -456,7 +453,8 @@ export function useChatTextareaLogic({
   const { formattedKeyCombination: formattedCancelKeyCombination } = useKeybinding(
     cancelChatStreamKeyCombination,
     () => {
-      if (status === 'streaming') {
+      /* F7: the same condition that shows Stop. */
+      if (status === 'streaming' || status === 'submitted') {
         stop();
       }
     },
@@ -797,9 +795,15 @@ export function useChatTextareaLogic({
         return;
       }
 
-      // Check if focus moved to a related element (marked with data attribute)
-      // This allows child components to mark their portaled content as related
-      if (activeElement instanceof Element && activeElement.closest(`[${focusTrapAttribute}]`)) {
+      // Check if focus moved to a related element (marked with data attribute).
+      // This allows child components to mark their portaled content as related —
+      // but not the controls of another composer on the page.
+      const otherComposer = activeElement?.closest('[data-chat-composer]');
+      if (
+        activeElement instanceof Element &&
+        activeElement.closest(`[${focusTrapAttribute}]`) &&
+        (!otherComposer || otherComposer.contains(container))
+      ) {
         return;
       }
 

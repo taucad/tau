@@ -1,0 +1,22 @@
+<!doctype html>
+<html class="light">
+  <head>
+    <title>WebGL rendering comparison</title>
+    <script type="module">
+      import RefreshRuntime from '/@react-refresh';
+      RefreshRuntime.injectIntoGlobalHook(window);
+      window.$RefreshReg$ = () => {};
+      window.$RefreshSig$ = () => (type) => type;
+      window.__vite_plugin_react_preamble_installed__ = true;
+      document.getElementById('root').textContent = 'Loading renderer modules';
+      try {
+        await import('/app/calibration-preview.tsx');
+      } catch (error) {
+        document.getElementById('root').textContent = String(error);
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -42,7 +42,10 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
 export const handle: Handle = {
   breadcrumb(match) {
     const { workspace, project } = match.params as { workspace: string; project: string };
-    return previewBreadcrumb(project, projectPreviewUrl({ workspaceSlug: workspace, projectSlug: project }));
+    return previewBreadcrumb(
+      { workspace, project },
+      projectPreviewUrl({ workspaceSlug: workspace, projectSlug: project }),
+    );
   },
   providers: () => RouteProvider,
 };

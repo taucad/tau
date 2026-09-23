@@ -97,11 +97,6 @@ export const viewCommand = defineCommand({
       description: 'JSON-encoded parameters for the model (e.g. \'{"width":100}\')',
       required: false,
     },
-    resolutionMode: {
-      type: 'string',
-      description: 'Parameter semantic resolution: default or declared-only',
-      required: false,
-    },
   },
   async run({ args }) {
     if (args.output === '-') {
@@ -131,7 +126,6 @@ export const viewCommand = defineCommand({
           ...(height === undefined ? {} : { height }),
         })}`,
         ...(args.params === undefined ? [] : [`--params=${args.params}`]),
-        ...(args.resolutionMode === undefined ? [] : [`--resolution-mode=${args.resolutionMode}`]),
       ],
     });
 

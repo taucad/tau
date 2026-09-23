@@ -285,6 +285,10 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
           type='button'
           className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full px-2 text-left text-sm')}
           data-selected={index === selectedIndex}
+          /* F2: a click must not move focus out of the editor — that would end an edit. */
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
           onClick={() => {
             selectEntry(index);
           }}
@@ -313,6 +317,10 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
         type='button'
         className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full px-2 text-left text-sm')}
         data-selected={index === selectedIndex}
+        /* F2: a click must not move focus out of the editor — that would end an edit. */
+        onMouseDown={(event) => {
+          event.preventDefault();
+        }}
         onClick={() => {
           selectEntry(index);
         }}
@@ -383,6 +391,9 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
             menuItemVariants({ highlight: 'selected' }),
             'w-full gap-1.5 px-2 py-1.5 text-xs font-medium text-muted-foreground',
           )}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
           onClick={handleDrillBack}
         >
           <ChevronLeft className='size-3 shrink-0' />

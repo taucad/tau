@@ -76,7 +76,7 @@ export const ChatErrorPausedTurn = memo(function ({
           {canSwitchModel ? (
             /* The composer's picker is the owner, opened here as the credits
              * card opens it, without claiming its shortcut. */
-            <ChatModelSelector enableShortcut={false} popoverProperties={{ align: 'end' }}>
+            <ChatModelSelector popoverProperties={{ align: 'end' }}>
               {() => (
                 <Button variant='outline' size='sm'>
                   <Repeat className='size-3.5' />

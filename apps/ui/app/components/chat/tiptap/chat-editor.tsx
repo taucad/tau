@@ -52,6 +52,10 @@ export type ChatEditorProps = {
 const tiptapShimmerOverrides = cn(
   '[&_.tiptap]:bg-clip-text [&_.tiptap]:text-transparent',
   '[&_.tiptap]:animate-shiny-text [&_.tiptap]:bg-repeat [&_.tiptap]:[background-size:170%_100%]',
+  // F12: the shimmer holds still under reduced motion.
+  'motion-reduce:[&_.tiptap]:animate-none',
+  // F21: chips keep their own colour and glyphs through the clipped gradient.
+  '[&_.tiptap_[data-node-view-wrapper]]:text-foreground',
   '[&_.tiptap]:bg-gradient-to-r [&_.tiptap]:from-foreground/30 [&_.tiptap]:via-foreground [&_.tiptap]:via-25% [&_.tiptap]:to-foreground/30 [&_.tiptap]:to-50%',
 );
 

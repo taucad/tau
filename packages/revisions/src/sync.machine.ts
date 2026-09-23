@@ -34,8 +34,14 @@ import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 import { isCeilingRefusal } from '#refusal-markers.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
-import type { SyncFacet, SyncPushOutcome, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
-import type { SyncFailureReason } from '#sync.types.js';
+import type {
+  SyncFacet,
+  SyncPushOutcome,
+  SyncQueueEntry,
+  SyncQueueRecord,
+  SyncRefOutcome,
+  SyncFailureReason,
+} from '#sync.types.js';
 
 /** Input accepted when creating the syncMachine actor. @public */
 export type SyncMachineInput = Readonly<{
@@ -1237,9 +1243,14 @@ type SyncMachineDefinition = typeof syncMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface SyncMachine extends SyncMachineDefinition {}
 
+/**
+ * One project's push scheduler and retry queue.
+ *
+ * @public
+ */
 export const syncMachine: SyncMachine = syncMachineDefinition;
 
 /** The actor set `syncMachine.provide` needs. @public */

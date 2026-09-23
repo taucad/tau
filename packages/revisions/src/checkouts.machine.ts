@@ -112,10 +112,9 @@ const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueu
 const announceFailure = (
   context: CheckoutsMachineContext,
   enq: CheckoutsEnqueue,
-  operation: CheckoutOperation,
-  reason?: string,
-  code?: RevisionPortErrorCode,
+  failure: Readonly<{ operation: CheckoutOperation; reason?: string; code?: RevisionPortErrorCode }>,
 ): void => {
+  const { operation, reason, code } = failure;
   /* R11: the root routes this to the workbench; an emit alone never
    * leaves this actor. */
   publish(context, enq, {
@@ -139,11 +138,11 @@ const announceFailure = (
 const failOperation = (
   context: CheckoutsMachineContext,
   enq: CheckoutsEnqueue,
-  error: unknown,
-  operation: CheckoutOperation,
+  failure: Readonly<{ error: unknown; operation: CheckoutOperation }>,
 ): Partial<CheckoutsMachineContext> => {
+  const { error, operation } = failure;
   const patch = { reason: describeFailure(error), reasonCode: describeFailureCode(error) };
-  announceFailure({ ...context, ...patch }, enq, operation);
+  announceFailure({ ...context, ...patch }, enq, { operation });
   return patch;
 };
 
@@ -326,7 +325,7 @@ const checkoutsMachineDefinition = setup({
         },
         onError: ({ context, event }, enq) => ({
           target: 'failed',
-          context: failOperation(context, enq, event.error, 'open'),
+          context: failOperation(context, enq, { error: event.error, operation: 'open' }),
         }),
       },
     },
@@ -345,7 +344,7 @@ const checkoutsMachineDefinition = setup({
          * now says so on the way. */
         onError: ({ context, event }, enq) => ({
           target: 'failed',
-          context: failOperation(context, enq, event.error, 'open'),
+          context: failOperation(context, enq, { error: event.error, operation: 'open' }),
         }),
       },
     },
@@ -390,7 +389,11 @@ const checkoutsMachineDefinition = setup({
               if (guards.branchIsFree(context, event.branch)) {
                 return { target: 'adding' };
               }
-              announceFailure(context, enq, 'add', 'That branch already has a checkout.', 'CHECKOUT_CONFLICT');
+              announceFailure(context, enq, {
+                operation: 'add',
+                reason: 'That branch already has a checkout.',
+                code: 'CHECKOUT_CONFLICT',
+              });
               return {};
             },
             removeCheckout: ({ context, event, guards }, enq) => {
@@ -400,14 +403,12 @@ const checkoutsMachineDefinition = setup({
               /* Policy Rule 1: *lease* and *checkout* are engineering terms
                * and this sentence reaches a toast and the CLI. What the
                * person can act on is which branch is busy. */
-              announceFailure(
-                context,
-                enq,
-                'remove',
-                `An agent is working in ${
+              announceFailure(context, enq, {
+                operation: 'remove',
+                reason: `An agent is working in ${
                   context.checkouts.find((checkout) => checkout.id === event.id)?.branch ?? 'this branch'
                 }.`,
-              );
+              });
               return {};
             },
           },
@@ -427,7 +428,7 @@ const checkoutsMachineDefinition = setup({
             },
             onError: ({ context, event }, enq) => ({
               target: 'idle',
-              context: failOperation(context, enq, event.error, 'add'),
+              context: failOperation(context, enq, { error: event.error, operation: 'add' }),
             }),
           },
         },
@@ -445,7 +446,7 @@ const checkoutsMachineDefinition = setup({
             },
             onError: ({ context, event }, enq) => ({
               target: 'idle',
-              context: failOperation(context, enq, event.error, 'remove'),
+              context: failOperation(context, enq, { error: event.error, operation: 'remove' }),
             }),
           },
         },
@@ -471,7 +472,7 @@ const checkoutsMachineDefinition = setup({
                 reasonCode: describeFailureCode(event.error),
                 pendingRetirements: context.pendingRetirements.slice(1),
               };
-              announceFailure({ ...context, ...patch }, enq, 'retire');
+              announceFailure({ ...context, ...patch }, enq, { operation: 'retire' });
               return { target: 'idle', context: patch };
             },
           },
@@ -488,7 +489,7 @@ type CheckoutsMachineDefinition = typeof checkoutsMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface CheckoutsMachine extends CheckoutsMachineDefinition {}
 
 /**

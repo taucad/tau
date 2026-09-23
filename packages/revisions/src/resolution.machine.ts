@@ -459,7 +459,9 @@ const resolutionMachineDefinition = setup({
     },
     resolved: {
       type: 'final',
-      entry: ({ context }, enq) => announce(context, enq),
+      entry: ({ context }, enq) => {
+        announce(context, enq);
+      },
     },
     /* The conflicted revision stays: it is the only record of what collided,
        and Restore-by-id still reaches it (A25). */
@@ -474,7 +476,7 @@ type ResolutionMachineDefinition = typeof resolutionMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface ResolutionMachine extends ResolutionMachineDefinition {}
 
 /**

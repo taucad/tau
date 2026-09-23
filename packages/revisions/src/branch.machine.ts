@@ -535,7 +535,7 @@ const branchMachineDefinition = setup({
                 type: 'branchMerged',
                 branch: context.branch ?? '',
                 into: context.currentBranch ?? '',
-                revisionId: event.output.status === 'merged' ? event.output.revisionId : '',
+                revisionId: event.output.revisionId,
               };
               enq.emit(fact);
               if (context.parentRef !== undefined) {
@@ -568,7 +568,9 @@ const branchMachineDefinition = setup({
                 guards.hasBase(context) ? { target: 'adding' } : { target: 'recording' },
             },
             recording: {
-              entry: ({ context }, enq) => delegate(context, enq, 'cut'),
+              entry: ({ context }, enq) => {
+                delegate(context, enq, 'cut');
+              },
               after: {
                 [branchRegistryMilliseconds]: registryTimeout,
               },
@@ -617,7 +619,9 @@ const branchMachineDefinition = setup({
               },
             },
             adding: {
-              entry: ({ context }, enq) => delegate(context, enq, 'addCheckout'),
+              entry: ({ context }, enq) => {
+                delegate(context, enq, 'addCheckout');
+              },
               after: {
                 [branchRegistryMilliseconds]: registryTimeout,
               },
@@ -646,7 +650,9 @@ const branchMachineDefinition = setup({
           },
         },
         discarding: {
-          entry: ({ context }, enq) => delegate(context, enq, 'removeCheckout'),
+          entry: ({ context }, enq) => {
+            delegate(context, enq, 'removeCheckout');
+          },
           after: {
             [branchRegistryMilliseconds]: registryTimeout,
           },
@@ -734,7 +740,7 @@ type BranchMachineDefinition = typeof branchMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface BranchMachine extends BranchMachineDefinition {}
 
 /**

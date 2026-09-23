@@ -149,6 +149,8 @@ describe('remoteMachine', () => {
     const parent = createActor(
       setup({}).createMachine({
         on: {
+          /* The wildcard is XState's own event key, not a method name. */
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- XState wildcard event key
           '*': ({ event }, enq) => {
             enq(() => received.push(event));
             return {};

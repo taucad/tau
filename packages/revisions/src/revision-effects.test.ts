@@ -992,7 +992,7 @@ for (const actorSet of actorSets) {
         authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
-      const running = createActor(heldActors.sync.fastForward!, {
+      const running = createActor(heldActors.sync.fastForward, {
         input: { remote: 'tau', branch: 'main' },
       });
       running.start();
@@ -1095,9 +1095,6 @@ describe('checkout fence cancellation', () => {
   it('keeps a later waiter behind the active owner when the middle waiter stops', async () => {
     const { actors } = await fixture();
     const { fence } = actors.checkout;
-    if (fence === undefined) {
-      throw new Error('The checkout fence actor is required.');
-    }
     const owner = (onGranted: () => void) =>
       createActor(
         createMachine({

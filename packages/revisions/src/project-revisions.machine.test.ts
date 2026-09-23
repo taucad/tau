@@ -1,5 +1,5 @@
 import { createActor } from 'xstate';
-import type { AnyActorRef } from 'xstate';
+import type { ActorRefFrom, AnyActorRef } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#project-revisions.machine.js';
@@ -1204,7 +1204,8 @@ describe('projectRevisionsMachine', () => {
     expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
     /* Spawned children are not in the typed `schemas.children` map, so they are read by id. */
     const children: Readonly<Record<string, AnyActorRef | undefined>> = harness.actor.getSnapshot().children;
-    expect(children['checkout:checkout-live']?.getSnapshot().matches('minting')).toBe(true);
+    const liveCheckout: ActorRefFrom<typeof checkoutMachine> | undefined = children['checkout:checkout-live'];
+    expect(liveCheckout?.getSnapshot().matches('minting')).toBe(true);
 
     harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
     await flush();

@@ -140,7 +140,6 @@ export type {
   SyncQueueEntry,
   SyncQueueRecord,
   SyncRefOutcome,
-  SyncRefStatus,
 } from '#sync.types.js';
 export type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
 export type {

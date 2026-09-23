@@ -40,8 +40,7 @@ import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
 import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
-import type { RevisionStatusProjection } from '#project-revisions.types.js';
-import type { RevisionBranchFacet, RevisionConflictFacet } from '#project-revisions.types.js';
+import type { RevisionStatusProjection, RevisionBranchFacet, RevisionConflictFacet } from '#project-revisions.types.js';
 
 /** What one checkout last reported about itself. @public */
 export type CheckoutStatusEntry = Readonly<{ status: CheckoutStatus; headRevisionId: string | undefined }>;
@@ -497,9 +496,12 @@ const releaseAdmissions = (
 const settleTurn = (
   context: ProjectRevisionsMachineContext,
   enq: ProjectRevisionsEnqueue,
-  registry: AnyActorRef | undefined,
-  event: Extract<ProjectRevisionsMachineEvent, { type: 'turnFinalized' | 'turnConflicted' | 'turnReleased' }>,
+  settlement: Readonly<{
+    registry: AnyActorRef | undefined;
+    event: Extract<ProjectRevisionsMachineEvent, { type: 'turnFinalized' | 'turnConflicted' | 'turnReleased' }>;
+  }>,
 ) => {
+  const { registry, event } = settlement;
   enq.sendTo(registry, event);
   enq.emit(event);
   return { context: dropTurn(context, enq, event.turnId) };
@@ -896,8 +898,10 @@ const projectRevisionsMachineDefinition = setup({
           enq.emit(event);
           return {};
         },
-        turnFinalized: ({ children, context, event }, enq) => settleTurn(context, enq, children.checkouts, event),
-        turnConflicted: ({ children, context, event }, enq) => settleTurn(context, enq, children.checkouts, event),
+        turnFinalized: ({ children, context, event }, enq) =>
+          settleTurn(context, enq, { registry: children.checkouts, event }),
+        turnConflicted: ({ children, context, event }, enq) =>
+          settleTurn(context, enq, { registry: children.checkouts, event }),
         leaseStale: ({ event }, enq) => {
           enq.sendTo('checkouts', event);
           return {};
@@ -906,7 +910,8 @@ const projectRevisionsMachineDefinition = setup({
           enq.sendTo('checkouts', event);
           return {};
         },
-        turnReleased: ({ children, context, event }, enq) => settleTurn(context, enq, children.checkouts, event),
+        turnReleased: ({ children, context, event }, enq) =>
+          settleTurn(context, enq, { registry: children.checkouts, event }),
         /* R9: the host drives the tree through the root, so the root owns the
          * inbound routes as well as the outbound ones. */
         changed: ({ context, event }, enq) => {
@@ -1239,7 +1244,7 @@ type ProjectRevisionsMachineDefinition = typeof projectRevisionsMachineDefinitio
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface ProjectRevisionsMachine extends ProjectRevisionsMachineDefinition {}
 
 /**

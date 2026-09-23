@@ -273,7 +273,7 @@ type RestoreMachineDefinition = typeof restoreMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface RestoreMachine extends RestoreMachineDefinition {}
 
 /**

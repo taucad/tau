@@ -640,16 +640,30 @@ const turnMachineDefinition = setup({
     },
     finalized: {
       type: 'final',
-      entry: ({ context }, enq) => announceSettlement(context, enq, 'turnFinalized'),
+      entry: ({ context }, enq) => {
+        announceSettlement(context, enq, 'turnFinalized');
+      },
     },
     conflicted: {
       type: 'final',
-      entry: ({ context }, enq) => announceSettlement(context, enq, 'turnConflicted'),
+      entry: ({ context }, enq) => {
+        announceSettlement(context, enq, 'turnConflicted');
+      },
     },
     /* R12: the root drops the turn ref and `checkouts` drops the lease only if
      * it hears that the turn ended. */
-    released: { type: 'final', entry: ({ context }, enq) => announceRelease(context, enq) },
-    failed: { type: 'final', entry: ({ context }, enq) => announceRelease(context, enq) },
+    released: {
+      type: 'final',
+      entry: ({ context }, enq) => {
+        announceRelease(context, enq);
+      },
+    },
+    failed: {
+      type: 'final',
+      entry: ({ context }, enq) => {
+        announceRelease(context, enq);
+      },
+    },
   },
 });
 
@@ -660,7 +674,7 @@ type TurnMachineDefinition = typeof turnMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface TurnMachine extends TurnMachineDefinition {}
 
 /**

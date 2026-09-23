@@ -455,10 +455,10 @@ const gitStderrRefusal = (stderr: string): RemoteRefusal => {
  * server's or git's own words, and a sideband line beside one of those is
  * progress rather than a refusal.
  *
+ * @internal
  * @param reported - What the per-ref status said.
  * @param said - The remote's sideband lines, git's own restatements included.
  * @returns The sentence to show.
- * @internal
  */
 export const remoteRefusalSaid = (reported: string, said: readonly string[]): string => {
   const sentence = said

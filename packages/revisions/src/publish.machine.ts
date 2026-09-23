@@ -33,8 +33,12 @@ import type { MachineActors } from '#machine-schemas.js';
 
 import type { RevisionTag } from '#revision-port.js';
 import type { SyncPushOutcome } from '#sync.types.js';
-import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
-import type { PublishDraft, PublishFacet } from '#publish.types.js';
+import type {
+  PublishPublicationActorInput,
+  PublishPublicationActorOutput,
+  PublishDraft,
+  PublishFacet,
+} from '#publish.types.js';
 
 /** How long `pushing` waits for the settlement that names its push. @public */
 export const publishPushMilliseconds = 60_000;
@@ -426,7 +430,7 @@ type PublishMachineDefinition = typeof publishMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface PublishMachine extends PublishMachineDefinition {}
 
 /**

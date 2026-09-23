@@ -399,7 +399,9 @@ const checkoutMachineDefinition = setup({
   },
   states: {
     clean: {
-      entry: ({ context }, enq) => reportStatus(context, enq, 'clean'),
+      entry: ({ context }, enq) => {
+        reportStatus(context, enq, 'clean');
+      },
       always: ({ context, guards }) =>
         guards.hasQueuedCut(context) ? { target: 'minting', context: takeQueuedRequest(context) } : undefined,
       on: {
@@ -408,7 +410,9 @@ const checkoutMachineDefinition = setup({
       },
     },
     dirty: {
-      entry: ({ context }, enq) => reportStatus(context, enq, 'dirty'),
+      entry: ({ context }, enq) => {
+        reportStatus(context, enq, 'dirty');
+      },
       always: ({ context, guards }) =>
         guards.hasQueuedCut(context) ? { target: 'minting', context: takeQueuedRequest(context) } : undefined,
       on: {
@@ -539,7 +543,9 @@ const checkoutMachineDefinition = setup({
         guards.writeGenerationUnchanged(context) ? { target: 'clean' } : { target: 'dirty' },
     },
     stale: {
-      entry: ({ context }, enq) => reportStatus(context, enq, 'stale'),
+      entry: ({ context }, enq) => {
+        reportStatus(context, enq, 'stale');
+      },
       always: { target: 'rereading' },
     },
     rereading: {
@@ -579,7 +585,7 @@ type CheckoutMachineDefinition = typeof checkoutMachineDefinition;
  *
  * @public
  */
-// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- a named alias of the inferred machine type
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
 export interface CheckoutMachine extends CheckoutMachineDefinition {}
 
 /**

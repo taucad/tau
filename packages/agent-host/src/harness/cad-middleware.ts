@@ -470,6 +470,26 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
   return value;
 };
 
+/**
+ * Replace a tool result's model-visible content, wherever the request reads it.
+ *
+ * The transport does not send `content`: the session serialises `details.content`
+ * (`piMessageToProvider`) and the transport rebuilds pi blocks from it
+ * (`providerMessageToPi` → `toPiToolContent`), so a trim left only in `content`
+ * would re-send every capture it removed. A pi block array passes through
+ * `toPiToolContent` unchanged, and a second trim reads it back as already done.
+ *
+ * @param message - The tool result being trimmed.
+ * @param content - Its replacement model-visible blocks.
+ * @returns A copy whose `content` and `details.content` both carry `content`.
+ */
+const withModelContent = (message: ToolResultMessage, content: ToolResultMessage['content']): ToolResultMessage => {
+  const details = message.details as HostToolExecutionDetails | undefined;
+  return details && 'content' in details
+    ? { ...message, content, details: { ...details, content } }
+    : { ...message, content };
+};
+
 /** Apply Tau's CAD-specific historical tool-result reductions to a provider view. @public */
 export function trimToolResultContext(
   messages: readonly Message[],
@@ -500,18 +520,18 @@ export function trimToolResultContext(
       return message;
     }
     if (message.content.some((block) => block.type === 'image')) {
-      return {
-        ...message,
-        content: message.content.map((block) =>
+      return withModelContent(
+        message,
+        message.content.map((block) =>
           block.type === 'image' ? { type: 'text', text: '[screenshot image - previously captured]' } : block,
         ),
-      };
+      );
     }
     const structured = toolJson(message);
     const trimmed = trimStructuredResult(message.toolName, structured);
     return trimmed === structured
       ? message
-      : { ...message, content: [{ type: 'text', text: JSON.stringify(trimmed) }] };
+      : withModelContent(message, [{ type: 'text', text: JSON.stringify(trimmed) }]);
   });
 }
 

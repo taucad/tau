@@ -6,10 +6,12 @@ import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 const billing = vi.hoisted(() => ({
   explanation: undefined as WireBalanceExplanation | undefined,
   estimates: undefined as WireModelEstimates | undefined,
+  autoReloadEnabled: false,
 }));
 
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits: () => billing.explanation }));
 vi.mock('@taucad/billing/hooks/use-model-estimates', () => ({ useModelEstimates: () => billing.estimates }));
+vi.mock('#hooks/use-auto-reload-enabled.js', () => ({ useAutoReloadEnabled: () => billing.autoReloadEnabled }));
 
 /** Only `balance.eligibleAvailableCreditAtoms` is read; the rest is envelope. */
 const withAvailable = (atoms: string): WireBalanceExplanation =>
@@ -35,13 +37,25 @@ const astraEstimates: WireModelEstimates = {
   ],
 };
 
-const preflight = (explanation: WireBalanceExplanation | undefined, estimates: WireModelEstimates | undefined) => {
+const preflight = (
+  explanation: WireBalanceExplanation | undefined,
+  estimates: WireModelEstimates | undefined,
+  autoReloadEnabled = false,
+) => {
+  billing.autoReloadEnabled = autoReloadEnabled;
   billing.explanation = explanation;
   billing.estimates = estimates;
   return renderHook(() => useCreditPreflight()).result.current;
 };
 
 describe('useCreditPreflight', () => {
+  it('leaves a short balance to the server while automatic reload is enabled, since its denial wakes the reload', () => {
+    const admit = preflight(withAvailable('0'), astraEstimates, true);
+    expect(() => {
+      admit('openai-gpt-6-astra', 'GPT-6 Astra');
+    }).not.toThrow();
+  });
+
   it('refuses a turn below the route floor and reports the real shortfall', () => {
     const refuse = preflight(withAvailable('1000000'), astraEstimates);
 

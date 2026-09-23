@@ -3,6 +3,7 @@ import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useModelEstimates } from '@taucad/billing/hooks/use-model-estimates';
 import { errorCategory } from '@taucad/types/constants';
 import { errorCategoryTitles } from '@taucad/chat/utils';
+import { useAutoReloadEnabled } from '#hooks/use-auto-reload-enabled.js';
 
 /**
  * Refuse a turn the account cannot fund, before it is dispatched.
@@ -11,7 +12,8 @@ import { errorCategoryTitles } from '@taucad/chat/utils';
  * 402 projects (`agent-host-event-projection.ts`), so the refusal renders on the
  * existing credits card with the same `details` shortfall the server would have
  * sent. Returns normally — fails **open** to the server's own admission — when
- * either read is unavailable or the route publishes no estimate.
+ * either read is unavailable, the route publishes no estimate, or automatic reload
+ * is enabled: the server's own insufficient-credit denial is what wakes the reload.
  */
 export type CreditPreflight = (routeId: string, modelName: string) => void;
 
@@ -31,6 +33,7 @@ export type CreditPreflight = (routeId: string, modelName: string) => void;
 export const useCreditPreflight = (): CreditPreflight => {
   const explanation = useCredits();
   const estimates = useModelEstimates();
+  const autoReloadEnabled = useAutoReloadEnabled();
 
   return useCallback(
     (routeId: string, modelName: string): void => {
@@ -40,7 +43,7 @@ export const useCreditPreflight = (): CreditPreflight => {
       const balance = explanation?.balance;
       const available = balance ? balance.eligibleAvailableCreditAtoms : undefined;
       const required = estimates?.routes.find((route) => route.routeId === routeId)?.minimumHoldAtoms;
-      if (available === undefined || required === undefined) {
+      if (available === undefined || required === undefined || autoReloadEnabled) {
         return;
       }
       const availableAtoms = BigInt(available);
@@ -68,6 +71,6 @@ export const useCreditPreflight = (): CreditPreflight => {
         }),
       );
     },
-    [estimates, explanation],
+    [autoReloadEnabled, estimates, explanation],
   );
 };

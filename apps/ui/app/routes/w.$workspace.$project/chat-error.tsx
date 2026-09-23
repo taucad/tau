@@ -43,8 +43,11 @@ const pausedTurnCodes = new Set([
   'WORKER_CRASHED',
 ]);
 
-/** Compaction refusals described as a chat-length problem. */
-const chatTooLongCodes = new Set(['NO_EVICTABLE_HISTORY', 'CIRCUIT_BREAKER_OPEN']);
+/**
+ * Refusals described as a chat-length problem: compaction could not make room,
+ * or the gateway refused the request's size (`REQUEST_TOO_LARGE`).
+ */
+const chatTooLongCodes = new Set(['NO_EVICTABLE_HISTORY', 'CIRCUIT_BREAKER_OPEN', 'REQUEST_TOO_LARGE']);
 
 /** Compaction failures whose plain-language recovery is the same kept turn. */
 const chatHistoryTidyFailureCodes = new Set(['SESSION_LOG_INTEGRITY', 'SUMMARY_REQUIRED']);

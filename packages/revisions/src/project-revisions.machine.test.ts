@@ -1,4 +1,5 @@
 import { createActor } from 'xstate';
+import type { AnyActorRef } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#project-revisions.machine.js';
@@ -1201,7 +1202,9 @@ describe('projectRevisionsMachine', () => {
     });
     /* The checkout is the sole minter (F2), so the verb asks it and waits. */
     expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
-    expect(harness.actor.getSnapshot().children['checkout:checkout-live']?.getSnapshot().matches('minting')).toBe(true);
+    /* Spawned children are not in the typed `schemas.children` map, so they are read by id. */
+    const children: Readonly<Record<string, AnyActorRef | undefined>> = harness.actor.getSnapshot().children;
+    expect(children['checkout:checkout-live']?.getSnapshot().matches('minting')).toBe(true);
 
     harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
     await flush();
@@ -1615,6 +1618,6 @@ describe('root invokes notify the host on every child transition (P45)', () => {
   });
 
   it.each(children)('declares onSnapshot on %s so a child transition is a root snapshot', (id) => {
-    expect(entries.find((entry) => entry.id === id)?.onSnapshot).toStrictEqual({ actions: [] });
+    expect(entries.find((entry) => entry.id === id)?.onSnapshot).toStrictEqual({});
   });
 });

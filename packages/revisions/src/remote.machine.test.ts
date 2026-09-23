@@ -147,14 +147,18 @@ describe('remoteMachine', () => {
   it('tells its parent when the remote comes and goes, so a sibling scheduler starts on the fact (W18 review DEF-6b, P53)', async () => {
     const received: Array<{ type: string }> = [];
     const parent = createActor(
-      setup({}).createMachine({ on: { '*': { actions: ({ event }) => received.push(event) } } }),
+      setup({}).createMachine({
+        on: {
+          '*': ({ event }, enq) => {
+            enq(() => received.push(event));
+            return {};
+          },
+        },
+      }),
     ).start();
-    const actor = createActor(
-      remoteMachine.provide({ actors: start().actor.logic.implementations.actors as RemoteActors }),
-      {
-        input: { projectId: 'p1', parentRef: parent },
-      },
-    );
+    const actor = createActor(remoteMachine.provide({ actors: start().actor.logic.sources.actors as RemoteActors }), {
+      input: { projectId: 'p1', parentRef: parent },
+    });
     actor.start();
     await settle();
 

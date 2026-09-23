@@ -23,9 +23,11 @@
  * requests reach the remote only through the API's git proxy (S34, P17).
  */
 
-import { assign, emit, enqueueActions, fromPromise, raise, setup } from 'xstate';
-import type { AnyActorRef, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
+import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
+import { eventSchemas } from '#machine-schemas.js';
+import type { MachineActors } from '#machine-schemas.js';
 import { syncFailureReason } from '#sync.machine.js';
 import type { SyncFailureReason } from '#sync.machine.js';
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
@@ -236,6 +238,64 @@ const unsupported = async (): Promise<never> => {
 const reason = (error: unknown): string =>
   error instanceof Error ? error.message : 'The remote could not be reached.';
 
+type RemoteEnqueue = EnqueueObject<RemoteMachineEvent, RemoteMachineEmitted>;
+
+/* One place converts a rejection into what a surface renders: the sentence
+ * and the class beside it, from the classifier `sync.machine` owns. */
+const failWith = (error: unknown): Partial<RemoteMachineContext> => ({
+  error: reason(error),
+  reason: syncFailureReason(error),
+});
+
+/** Everything this abandoned attempt wrote, forgotten; the reason stays. */
+const forgetAttempt = {
+  remote: undefined,
+  kind: 'none',
+  storage: undefined,
+  quota: undefined,
+  overQuota: [],
+  attemptWroteRemote: false,
+} satisfies Partial<RemoteMachineContext>;
+
+/* `connect` from a settled state: choosing *No remote* disconnects, anything else starts an attempt. */
+const reconnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
+  event.kind === 'none'
+    ? { target: 'disconnecting' }
+    : { target: 'choosing', context: { kind: event.kind, error: undefined } };
+
+/* A connect gesture before any remote is recorded: *No remote* is already the answer. */
+const firstConnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
+  event.kind === 'none' ? {} : { target: 'choosing', context: { kind: event.kind, error: undefined } };
+
+/* A connection step that failed: a stale credential asks for reauthorization, an
+ * attempt that already wrote its remote undoes that write, anything else fails. */
+const connectionFailed = (context: RemoteMachineContext, error: unknown) => {
+  if (isReauthorizationRequired(error)) {
+    return { target: 'reconnectRequired', context: failWith(error) };
+  }
+  return { target: context.attemptWroteRemote ? 'abandoning' : 'failed', context: failWith(error) };
+};
+
+const announceConnected = (context: RemoteMachineContext, enq: RemoteEnqueue): void => {
+  enq.emit({
+    type: 'remoteConnected',
+    /* A kind was chosen to reach `connected`, so `'none'` is not
+     * reachable here; the fallback keeps the type honest. */
+    kind: context.kind === 'none' ? 'tau' : context.kind,
+    url: context.remote?.url ?? '',
+  });
+  /* Siblings hear it through the parent (A38): `sync` starts on
+   * this fact, not on the next open (W18 review DEF-6b, P53). */
+  if (context.parentRef !== undefined && context.remote !== undefined) {
+    enq.sendTo(context.parentRef, {
+      type: 'remoteConnected',
+      kind: context.remote.kind,
+      url: context.remote.url,
+      name: context.remote.name,
+    });
+  }
+};
+
 /**
  * Headless remote connection for one project.
  *
@@ -253,46 +313,21 @@ const reason = (error: unknown): string =>
  * ```
  */
 export const remoteMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as RemoteMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as RemoteMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as RemoteMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as RemoteMachineInput,
+  schemas: {
+    context: types<RemoteMachineContext>(),
+    events: eventSchemas<RemoteMachineEvent>(),
+    emitted: eventSchemas<RemoteMachineEmitted>(),
+    input: types<RemoteMachineInput>(),
   },
   actors: {
     /** What git's own remotes list already says (D29: rehydrate from records). */
-    readRemote: fromPromise<RemoteReadActorOutput, Readonly<{ projectId: string }>>(unsupported),
-    writeRemote: fromPromise<RemoteWriteActorOutput, RemoteWriteActorInput>(unsupported),
-    removeRemote: fromPromise<void, Readonly<{ name: string }>>(unsupported),
+    readRemote: createAsyncLogic<RemoteReadActorOutput, Readonly<{ projectId: string }>>({ run: unsupported }),
+    writeRemote: createAsyncLogic<RemoteWriteActorOutput, RemoteWriteActorInput>({ run: unsupported }),
+    removeRemote: createAsyncLogic<void, Readonly<{ name: string }>>({ run: unsupported }),
     /** Resolves the *reference* the host will authenticate with, never a secret (I8). */
-    authorize: fromPromise<void, RemoteAuthorizeActorInput>(unsupported),
-    validate: fromPromise<RemoteValidateActorOutput, RemoteValidateActorInput>(unsupported),
-    initialSync: fromPromise<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>(unsupported),
-  },
-  guards: {
-    choseNone: (_, params: Readonly<{ kind: RemoteKind | 'none' }>) => params.kind === 'none',
-    attemptWroteRemote: ({ context }) => context.attemptWroteRemote,
-  },
-  actions: {
-    /* One place converts a rejection into what a surface renders: the sentence
-     * and the class beside it, from the classifier `sync.machine` owns. */
-    failWith: assign({
-      error: (_, params: Readonly<{ error: unknown }>) => reason(params.error),
-      reason: (_, params: Readonly<{ error: unknown }>) => syncFailureReason(params.error),
-    }),
-    /** Everything this abandoned attempt wrote, forgotten; the reason stays. */
-    forgetAttempt: assign({
-      remote: undefined,
-      kind: 'none',
-      storage: undefined,
-      quota: undefined,
-      overQuota: [],
-      attemptWroteRemote: false,
-    }),
+    authorize: createAsyncLogic<void, RemoteAuthorizeActorInput>({ run: unsupported }),
+    validate: createAsyncLogic<RemoteValidateActorOutput, RemoteValidateActorInput>({ run: unsupported }),
+    initialSync: createAsyncLogic<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>({ run: unsupported }),
   },
 }).createMachine({
   id: 'remote',
@@ -322,39 +357,29 @@ export const remoteMachine = setup({
       invoke: {
         src: 'readRemote',
         input: ({ context }) => ({ projectId: context.projectId }),
-        onDone: [
-          {
-            guard: ({ event }) => event.output.remote !== undefined,
-            target: 'connected',
-            actions: assign({
-              remote: ({ event }) => event.output.remote,
-              kind: ({ event }) => event.output.remote?.kind ?? 'none',
-            }),
-          },
-          { target: 'none' },
-        ],
+        onDone: ({ event }) =>
+          event.output.remote === undefined
+            ? { target: 'none' }
+            : {
+                target: 'connected',
+                context: { remote: event.output.remote, kind: event.output.remote.kind },
+              },
         onError: {
           target: 'failed',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
+          context: ({ event }) => failWith(event.error),
         },
       },
       /* A route can carry a connect gesture into the project before this
        * first config read settles. The gesture is newer than the read, so it
        * wins instead of being dropped. */
       on: {
-        connect: [
-          { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) } },
-          { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
-        ],
+        connect: ({ event }) => firstConnect(event),
       },
     },
 
     none: {
       on: {
-        connect: [
-          { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) } },
-          { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
-        ],
+        connect: ({ event }) => firstConnect(event),
       },
     },
 
@@ -372,17 +397,17 @@ export const remoteMachine = setup({
         }),
         onDone: {
           target: 'authorizing',
-          actions: assign({ remote: ({ event }) => event.output.remote, attemptWroteRemote: true }),
+          context: ({ event }) => ({ remote: event.output.remote, attemptWroteRemote: true }),
         },
         onError: {
           target: 'failed',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
+          context: ({ event }) => failWith(event.error),
         },
       },
       /* Nothing has been written yet, so there is nothing to remove: going
        * through `disconnecting` would ask the port to remove a remote with no
        * name and land the person in `failed` over their own Cancel. */
-      on: { cancel: { target: 'none', actions: assign({ kind: 'none', error: undefined }) } },
+      on: { cancel: { target: 'none', context: { kind: 'none', error: undefined } } },
     },
 
     /**
@@ -402,19 +427,7 @@ export const remoteMachine = setup({
           url: context.remote?.url ?? '',
         }),
         onDone: { target: 'validating' },
-        onError: [
-          {
-            guard: ({ event }) => isReauthorizationRequired(event.error),
-            target: 'reconnectRequired',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
-          },
-          {
-            guard: 'attemptWroteRemote',
-            target: 'abandoning',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
-          },
-          { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) } },
-        ],
+        onError: ({ context, event }) => connectionFailed(context, event.error),
       },
       on: { authorized: { target: 'validating' }, cancel: { target: 'disconnecting' } },
     },
@@ -424,23 +437,11 @@ export const remoteMachine = setup({
       invoke: {
         src: 'validate',
         input: ({ context }) => ({ remote: context.remote?.name ?? '', url: context.remote?.url ?? '' }),
-        onDone: { target: 'initialSync', actions: assign({ storage: ({ event }) => event.output.storage }) },
-        onError: [
-          {
-            guard: ({ event }) => isReauthorizationRequired(event.error),
-            target: 'reconnectRequired',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
-          },
-          {
-            guard: 'attemptWroteRemote',
-            target: 'abandoning',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
-          },
-          { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) } },
-        ],
+        onDone: { target: 'initialSync', context: ({ event }) => ({ storage: event.output.storage }) },
+        onError: ({ context, event }) => connectionFailed(context, event.error),
       },
       on: {
-        validated: { target: 'initialSync', actions: assign({ storage: ({ event }) => event.storage }) },
+        validated: { target: 'initialSync', context: ({ event }) => ({ storage: event.storage }) },
         cancel: { target: 'disconnecting' },
       },
     },
@@ -450,108 +451,38 @@ export const remoteMachine = setup({
       invoke: {
         src: 'initialSync',
         input: ({ context }) => ({ remote: context.remote?.name ?? '', branch: context.branch }),
-        onDone: [
-          {
+        onDone: ({ context, event }, enq) => {
+          announceConnected(context, enq);
+          if ((event.output.overQuota ?? []).length > 0) {
             /* The history landed and some files did not fit. The connection is
              * real, so this is `connected` with the list — and it arrives the
              * one way `overQuota` is ever written: as `quotaRefused`, raised
              * here and handled in `connected`, which is also the event W13's
              * `sync.machine` forwards for every later push (P19). */
-            guard: ({ event }) => (event.output.overQuota ?? []).length > 0,
-            target: 'connected',
-            actions: [
-              emit(
-                ({ context }): RemoteMachineEmitted => ({
-                  type: 'remoteConnected',
-                  kind: context.kind === 'none' ? 'tau' : context.kind,
-                  url: context.remote?.url ?? '',
-                }),
-              ),
-              enqueueActions(({ context, enqueue }) => {
-                /* Siblings hear it through the parent (A38): `sync` starts on
-                 * this fact, not on the next open (W18 review DEF-6b, P53). */
-                if (context.parentRef !== undefined && context.remote !== undefined) {
-                  enqueue.sendTo(context.parentRef, {
-                    type: 'remoteConnected',
-                    kind: context.remote.kind,
-                    url: context.remote.url,
-                    name: context.remote.name,
-                  });
-                }
-              }),
-              emit(
-                ({ event }): RemoteMachineEmitted => ({
-                  type: 'toast.error',
-                  message: event.output.message ?? 'Some files are over this project’s storage plan.',
-                }),
-              ),
-              raise(
-                ({ event }): RemoteMachineEvent => ({
-                  type: 'quotaRefused',
-                  paths: event.output.overQuota ?? [],
-                  ...(event.output.storage === undefined ? {} : { storage: event.output.storage }),
-                }),
-              ),
-            ],
-          },
-          {
-            target: 'connected',
-            actions: [
-              emit(
-                ({ context }): RemoteMachineEmitted => ({
-                  type: 'remoteConnected',
-                  /* A kind was chosen to reach `connected`, so `'none'` is not
-                   * reachable here; the fallback keeps the type honest. */
-                  kind: context.kind === 'none' ? 'tau' : context.kind,
-                  url: context.remote?.url ?? '',
-                }),
-              ),
-              enqueueActions(({ context, enqueue }) => {
-                /* Siblings hear it through the parent (A38): `sync` starts on
-                 * this fact, not on the next open (W18 review DEF-6b, P53). */
-                if (context.parentRef !== undefined && context.remote !== undefined) {
-                  enqueue.sendTo(context.parentRef, {
-                    type: 'remoteConnected',
-                    kind: context.remote.kind,
-                    url: context.remote.url,
-                    name: context.remote.name,
-                  });
-                }
-              }),
-              emit(
-                ({ context }): RemoteMachineEmitted => ({
-                  type: 'toast.info',
-                  message:
-                    context.remote?.fetchOnly === true
-                      ? 'This project is linked read-only.'
-                      : 'This project is backed up.',
-                }),
-              ),
-            ],
-          },
-        ],
-        onError: [
-          {
-            guard: ({ event }) => isReauthorizationRequired(event.error),
-            target: 'reconnectRequired',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
-          },
-          {
-            guard: 'attemptWroteRemote',
-            target: 'abandoning',
-            actions: [
-              { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
-              emit(({ event }): RemoteMachineEmitted => ({ type: 'toast.error', message: reason(event.error) })),
-            ],
-          },
-          {
-            target: 'failed',
-            actions: [
-              { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
-              emit(({ event }): RemoteMachineEmitted => ({ type: 'toast.error', message: reason(event.error) })),
-            ],
-          },
-        ],
+            enq.emit({
+              type: 'toast.error',
+              message: event.output.message ?? 'Some files are over this project’s storage plan.',
+            });
+            enq.raise({
+              type: 'quotaRefused',
+              paths: event.output.overQuota ?? [],
+              ...(event.output.storage === undefined ? {} : { storage: event.output.storage }),
+            });
+            return { target: 'connected' };
+          }
+          enq.emit({
+            type: 'toast.info',
+            message:
+              context.remote?.fetchOnly === true ? 'This project is linked read-only.' : 'This project is backed up.',
+          });
+          return { target: 'connected' };
+        },
+        onError: ({ context, event }, enq) => {
+          if (!isReauthorizationRequired(event.error)) {
+            enq.emit({ type: 'toast.error', message: reason(event.error) });
+          }
+          return connectionFailed(context, event.error);
+        },
       },
       on: { cancel: { target: 'disconnecting' } },
     },
@@ -573,26 +504,23 @@ export const remoteMachine = setup({
         input: ({ context }) => ({ name: context.remote?.name ?? '' }),
         /* A remote this host could not even remove is still not one it will
          * push to, so both edges land in the same place. */
-        onDone: { target: 'failed', actions: 'forgetAttempt' },
-        onError: { target: 'failed', actions: 'forgetAttempt' },
+        onDone: { target: 'failed', context: forgetAttempt },
+        onError: { target: 'failed', context: forgetAttempt },
       },
     },
 
     connected: {
-      entry: assign({ attemptWroteRemote: false }),
+      entry: () => ({ context: { attemptWroteRemote: false } }),
       on: {
         disconnect: { target: 'disconnecting' },
-        connect: [
-          { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) }, target: 'disconnecting' },
-          { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
-        ],
+        connect: ({ event }) => reconnect(event),
         /* A refused push is the one thing that makes a connected remote say
          * something: which files would not fit (D16, AC16). */
         quotaRefused: {
-          actions: assign({
-            overQuota: ({ event }) => event.paths,
-            quota: ({ context, event }) => event.storage ?? context.quota,
-            storage: ({ context, event }) =>
+          context: ({ context, event }) => ({
+            overQuota: event.paths,
+            quota: event.storage ?? context.quota,
+            storage:
               event.used === undefined || event.quota === undefined
                 ? context.storage
                 : { used: event.used, quota: event.quota },
@@ -606,28 +534,26 @@ export const remoteMachine = setup({
       invoke: {
         src: 'removeRemote',
         input: ({ context }) => ({ name: context.remote?.name ?? '' }),
-        onDone: {
-          target: 'none',
-          actions: [
-            assign({
+        onDone: ({ context }, enq) => {
+          enq.emit({ type: 'remoteDisconnected' });
+          if (context.parentRef !== undefined) {
+            enq.sendTo(context.parentRef, { type: 'remoteDisconnected' });
+          }
+          return {
+            target: 'none',
+            context: {
               remote: undefined,
               kind: 'none',
               storage: undefined,
               quota: undefined,
               overQuota: [],
               error: undefined,
-            }),
-            emit((): RemoteMachineEmitted => ({ type: 'remoteDisconnected' })),
-            enqueueActions(({ context, enqueue }) => {
-              if (context.parentRef !== undefined) {
-                enqueue.sendTo(context.parentRef, { type: 'remoteDisconnected' });
-              }
-            }),
-          ],
+            },
+          };
         },
         onError: {
           target: 'failed',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
+          context: ({ event }) => failWith(event.error),
         },
       },
     },
@@ -645,21 +571,15 @@ export const remoteMachine = setup({
       on: {
         /* The remote here is an established one, not this attempt's write, so a
          * later validate failure must not remove it (C10). */
-        authorized: { target: 'validating', actions: assign({ error: undefined, attemptWroteRemote: false }) },
-        connect: [
-          { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) }, target: 'disconnecting' },
-          { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
-        ],
+        authorized: { target: 'validating', context: { error: undefined, attemptWroteRemote: false } },
+        connect: ({ event }) => reconnect(event),
         disconnect: { target: 'disconnecting' },
       },
     },
 
     failed: {
       on: {
-        connect: [
-          { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) }, target: 'disconnecting' },
-          { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
-        ],
+        connect: ({ event }) => reconnect(event),
         disconnect: { target: 'disconnecting' },
       },
     },
@@ -667,7 +587,7 @@ export const remoteMachine = setup({
 });
 
 /** The actor set `remoteMachine.provide` needs. @public */
-export type RemoteActors = NonNullable<Parameters<typeof remoteMachine.provide>[0]['actors']>;
+export type RemoteActors = MachineActors<typeof remoteMachine>;
 
 const phaseOf = (value: string): RemoteFacet['phase'] => {
   switch (value) {

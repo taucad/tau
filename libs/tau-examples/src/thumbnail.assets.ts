@@ -53,6 +53,7 @@ import thumbnail46 from './kernels/replicad/tray/thumbnail.webp?url';
 import thumbnail47 from './kernels/replicad/vase/thumbnail.webp?url';
 import thumbnail48 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
 import thumbnail49 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail50 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -106,6 +107,7 @@ export const thumbnailAssets = {
   'replicad/vase': thumbnail47,
   'replicad/wavy-vase': thumbnail48,
   'replicad/wedge-door-stopper': thumbnail49,
+  'replicad/worm-gear-system': thumbnail50,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

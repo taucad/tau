@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { Actor, ActorRefFrom } from 'xstate';
 import type { ThreeCameraRig } from '@taucad/three/camera';
 import type { RenderFrame } from '@taucad/spatial';
 import {
@@ -26,7 +26,7 @@ import {
 import type { ViewCameraFraming, ViewCameraSession } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
-const actors: Array<ActorRefFrom<typeof graphicsMachine>> = [];
+const actors: Array<Actor<typeof graphicsMachine>> = [];
 
 const compiledGraphics = await (async () => {
   const { transformSync } = await import('oxc-transform-react');

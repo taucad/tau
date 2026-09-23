@@ -11,7 +11,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
-import { assign, createActor, setup } from 'xstate';
+import { createActor, setup, types } from 'xstate';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -38,16 +39,14 @@ const projectId = 'alpha';
 
 /** The file-manager's own context, as far as this hook reads it. */
 const fileManagerMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as { worker: Worker | undefined },
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as { type: 'worker'; worker: Worker | undefined },
+  schemas: {
+    context: types<{ worker: Worker | undefined }>(),
+    events: eventSchemas<{ type: 'worker'; worker: Worker | undefined }>(),
   },
 }).createMachine({
   context: { worker: undefined },
   on: {
-    worker: { actions: assign(({ event }) => ({ worker: event.worker })) },
+    worker: { context: ({ event }) => ({ worker: event.worker }) },
   },
 });
 

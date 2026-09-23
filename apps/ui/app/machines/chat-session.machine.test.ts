@@ -1,6 +1,6 @@
 import { util as zodUtility } from 'zod';
 import { createActor, createCallbackLogic } from 'xstate';
-import type { AnyActorRef, EventObject } from 'xstate';
+import type { AnyActorRef, CallbackActorLogic, EventObject } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -409,7 +409,7 @@ describe('chatSessionMachine', () => {
 describe('chatSessionMachine host region', () => {
   /** Counts binding invocations and releases, in order. */
   const countingBinding = (): {
-    readonly logic: ReturnType<typeof createCallbackLogic<EventObject, { chatId: string; placement: string }>>;
+    readonly logic: CallbackActorLogic<EventObject, { chatId: string; placement: string }>;
     readonly bound: string[];
     readonly released: string[];
   } => {

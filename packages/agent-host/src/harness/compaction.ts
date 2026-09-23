@@ -527,9 +527,23 @@ export const installCompaction = (
       32,
       options.contextWindow - settings.reserveTokens - settings.keepRecentTokens - fixedOverhead,
     );
-    const forcedClearingThreshold = Math.max(messageBudget, settings.keepRecentTokens);
+    /*
+     * Clear a result on its own only where eviction cannot take it. The model has
+     * not answered it yet, so the only cut after it evicts every earlier turn with
+     * it; or it is larger than a whole request, so no summarizer can read it. A
+     * result the model already answered is ordinary history, evicted and
+     * summarized with its turn.
+     */
+    const lastAnswer = input.findLastIndex((message) => message.role === 'assistant');
     const emergencyClearings = new Set(
-      input.filter((message) => message.role === 'toolResult' && estimateTokens(message) > forcedClearingThreshold),
+      input.filter(
+        (message, index) =>
+          message.role === 'toolResult' &&
+          estimateTokens(message) >
+            (index > lastAnswer
+              ? Math.max(messageBudget, settings.keepRecentTokens)
+              : options.contextWindow - settings.reserveTokens),
+      ),
     );
     const tierOne = clearOldToolResults(input, emergencyClearings);
     const tierOneTokens = fixedOverhead + messageTokens(tierOne.messages);

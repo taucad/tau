@@ -121,6 +121,7 @@ fn main() {
         "OPT_LEVEL",
         "DEBUG",
         "CARGO_ENCODED_RUSTFLAGS",
+        "GEOSPEC_WASM_SIMD_PROFILE",
         "CXXSTDLIB",
         "CRATE_CC_NO_DEFAULTS",
         "CC_SHELL_ESCAPED_FLAGS",
@@ -879,6 +880,33 @@ fn installed_occt_inputs(prefix: &Path) -> Vec<(String, PathBuf)> {
 }
 
 fn build_context(profile_context: &[u8]) -> Vec<u8> {
+    if let Some(profile) = env::var_os("GEOSPEC_WASM_SIMD_PROFILE") {
+        assert_eq!(
+            profile,
+            OsString::from("simd128-v1"),
+            "unsupported WASM SIMD profile"
+        );
+        assert_eq!(
+            env::var("TARGET").as_deref(),
+            Ok("wasm32-unknown-emscripten")
+        );
+        assert!(
+            semantic_rustflags()
+                .windows(2)
+                .any(|flags| flags == ["-C", "target-feature=+simd128"]),
+            "selected WASM producer must compile Rust with +simd128"
+        );
+        let selected_cxx_flags = cc_target_envs("CXXFLAGS")
+            .into_iter()
+            .find_map(|name| env::var(name).ok())
+            .unwrap_or_default();
+        assert!(
+            selected_cxx_flags
+                .split_whitespace()
+                .any(|flag| flag == "-msimd128"),
+            "selected WASM producer must compile the OCCT bridge with -msimd128"
+        );
+    }
     let mut entries = env::vars()
         .filter_map(|(name, value)| {
             if name == "CARGO_CFG_FEATURE" {
@@ -921,6 +949,11 @@ fn build_context(profile_context: &[u8]) -> Vec<u8> {
     bytes.extend_from_slice(b"semantic-rustflags\0");
     for flag in semantic_rustflags() {
         bytes.extend_from_slice(flag.as_bytes());
+        bytes.push(0);
+    }
+    if let Some(profile) = env::var_os("GEOSPEC_WASM_SIMD_PROFILE") {
+        bytes.extend_from_slice(b"wasm-simd-profile\0");
+        bytes.extend_from_slice(profile.as_encoded_bytes());
         bytes.push(0);
     }
     for (name, value) in entries {

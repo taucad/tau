@@ -26,6 +26,7 @@ type Closure = {
   libraries: string[];
   inputs: Input[];
   linkOptimization?: string;
+  wasmSimd: { rustFlags: string[]; cxxFlag: string; linkFlag: string };
 };
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -47,11 +48,11 @@ const main = (): void => {
     process.env['GEOSPEC_MIXED_INPUTS'] ??
     resolve(
       process.env['GEOSPEC_DELIVERY_CACHE'] ?? resolve(root, 'node_modules/.cache/geospec-engine-native/delivery'),
-      'mixed-inputs.json',
+      'mixed-inputs-simd128.json',
     );
   const manifestBytes = readFileSync(manifestPath);
   const closure = JSON.parse(manifestBytes.toString()) as Closure;
-  if (closure.schema !== 'geospec-mixed-build-inputs-v2' || closure.sourceRoot !== root) {
+  if (closure.schema !== 'geospec-mixed-build-inputs-v3' || closure.sourceRoot !== root) {
     throw new Error('Run prepare-delivery.py inputs for this checkout after the source freeze.');
   }
   const python = verifiedTool(closure, 'python3');
@@ -86,6 +87,12 @@ const main = (): void => {
   if (linkOptimization !== 'O0' && linkOptimization !== 'O3') {
     throw new Error('Mixed link optimization must be O0 or O3.');
   }
+  if (
+    JSON.stringify(closure.wasmSimd) !==
+    JSON.stringify({ rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' })
+  ) {
+    throw new Error('Prepared closure must select fixed WASM SIMD for Rust, C++ and link.');
+  }
   const packageRoot = resolve(closure.sourceRoot, 'packages/geospec-engine-native');
   if (
     (process.env['GEOSPEC_MIXED_OUTPUT'] !== undefined && resolve(process.env['GEOSPEC_MIXED_OUTPUT']) !== output) ||
@@ -110,8 +117,9 @@ const main = (): void => {
     CC_wasm32_unknown_emscripten: closure.emcc,
     CXX_wasm32_unknown_emscripten: closure.emxx,
     AR_wasm32_unknown_emscripten: closure.emar,
-    CXXFLAGS_wasm32_unknown_emscripten:
-      '-fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
+    CARGO_ENCODED_RUSTFLAGS: closure.wasmSimd.rustFlags.join('\u001F'),
+    GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
+    CXXFLAGS_wasm32_unknown_emscripten: `${closure.wasmSimd.cxxFlag} -fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten`,
   };
   /* eslint-enable @typescript-eslint/naming-convention -- Resume normal identifier checks after external keys. */
   const commands: Array<{ executable: string; args: string[]; status: ReturnType<typeof spawnSync>['status'] }> = [];
@@ -161,6 +169,7 @@ const main = (): void => {
   const modulePath = resolve(output, 'geospec_engine_native.mjs');
   run('link', closure.emxx, [
     `-${linkOptimization}`,
+    closure.wasmSimd.linkFlag,
     '-fexceptions',
     '-frtti',
     '--no-entry',
@@ -200,6 +209,7 @@ const main = (): void => {
     resolve(runDirectory, 'build-receipt.json'),
     `${JSON.stringify(
       {
+        schema: 'geospec-mixed-build-receipt-v2',
         manifestSha256: digest(manifestBytes),
         sourceRoot: closure.sourceRoot,
         sourceRevision: closure.sourceRevision,
@@ -207,7 +217,15 @@ const main = (): void => {
         bindingSha256: digest(binding),
         rustVersion,
         emVersion,
-        profile: `emscripten-6.0.5-js-exceptions-sjlj-st-rust-c656540-panic-abort-link-${linkOptimization}`,
+        wasmSimd: closure.wasmSimd,
+        /* eslint-disable @typescript-eslint/naming-convention -- Exact Cargo and cc-rs environment keys. */
+        buildEnvironment: {
+          CARGO_ENCODED_RUSTFLAGS: environment.CARGO_ENCODED_RUSTFLAGS,
+          CXXFLAGS_wasm32_unknown_emscripten: environment.CXXFLAGS_wasm32_unknown_emscripten,
+          GEOSPEC_WASM_SIMD_PROFILE: environment.GEOSPEC_WASM_SIMD_PROFILE,
+        },
+        /* eslint-enable @typescript-eslint/naming-convention -- Resume ordinary receipt keys. */
+        profile: `emscripten-6.0.5-js-exceptions-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-${linkOptimization}`,
         artifacts,
         qualification: 'Current-source compile/link only; runtime and target parity require independent checks.',
       },

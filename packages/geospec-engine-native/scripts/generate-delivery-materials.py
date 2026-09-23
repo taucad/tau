@@ -684,6 +684,10 @@ cp -R "$GEOSPEC_RELINK_ROOT/materials/python/." \\
 
 def mixed_environment(closure):
     """The recorded build-mixed-wasm.mts environment, also used for metadata."""
+    simd = closure.get('wasmSimd')
+    require(simd is None or simd == {'rustFlags': ['-C', 'target-feature=+simd128'],
+                                    'cxxFlag': '-msimd128', 'linkFlag': '-msimd128'},
+            'Unsupported mixed SIMD selection')
     return {
         **closure['environment'], 'RUSTC': closure['rustc'],
         'GEOSPEC_OCCT_PREFIX': closure['occtPrefix'], 'CARGO_INCREMENTAL': '0',
@@ -691,7 +695,10 @@ def mixed_environment(closure):
         'CXX_wasm32_unknown_emscripten': closure['emxx'],
         'AR_wasm32_unknown_emscripten': closure['emar'],
         'CXXFLAGS_wasm32_unknown_emscripten':
+            (simd['cxxFlag'] + ' ' if simd else '') +
             '-fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
+        **({'CARGO_ENCODED_RUSTFLAGS': '\x1f'.join(simd['rustFlags']),
+            'GEOSPEC_WASM_SIMD_PROFILE': 'simd128-v1'} if simd else {}),
     }
 
 
@@ -708,7 +715,8 @@ def select_mixed_build():
         paths[key.lower()] = Path(value).resolve()
     receipt, commands, closure = (read_json(paths[k]) for k in ['receipt', 'commands', 'inputs'])
     require(receipt['manifestSha256'] == digest(paths['inputs']), 'Mixed receipt/manifest differ')
-    require(closure['schema'] == 'geospec-mixed-build-inputs-v2', 'Expected mixed inputs v2')
+    require(closure['schema'] == 'geospec-mixed-build-inputs-v3', 'Expected fixed-SIMD mixed inputs v3')
+    require(receipt.get('schema') == 'geospec-mixed-build-receipt-v2', 'Expected fixed-SIMD build receipt v2')
     require(closure['sourceRoot'] == str(ROOT) == receipt['sourceRoot'], 'Wrong source root')
     require(closure['sourceRevision'] == receipt['sourceRevision'], 'Mixed revision references differ')
     require(closure['linkOptimization'] == 'O3', 'Expected current ST O3 mixed profile')
@@ -741,6 +749,17 @@ def select_mixed_build():
     selected = read_json(recipe)
     require(selected['rust']['commit'] in receipt['rustVersion']
             and selected['emscripten']['commit'] in receipt['emVersion'], 'Mixed tool versions differ')
+    if closure.get('wasmSimd'):
+        expected = mixed_environment(closure)
+        require(closure['wasmSimd'] == selected['wasmSimd'] == receipt.get('wasmSimd'),
+                'Mixed SIMD recipe/receipt differ')
+        require(receipt.get('buildEnvironment') == {
+            key: expected[key] for key in ['CARGO_ENCODED_RUSTFLAGS',
+                                           'CXXFLAGS_wasm32_unknown_emscripten',
+                                           'GEOSPEC_WASM_SIMD_PROFILE']},
+            'Mixed SIMD build environment differs from receipt')
+        require(closure['wasmSimd']['linkFlag'] in commands[3]['args'],
+                'Mixed link command omitted fixed SIMD')
     cargo_args = commands[2]['args']
     require(cargo_args == ['build', '--manifest-path', str(PACKAGE / 'bindings/emscripten/Cargo.toml'),
                           '--locked', '--offline', '--release', '--target', 'wasm32-unknown-emscripten',
@@ -815,6 +834,8 @@ def mixed_runtime_license(relative):
 def mixed_producer_recipe(mixed):
     """Rebase the observed argv into shell commands; never call the build helper."""
     c = mixed['closure']
+    prefix_name = Path(c['occtPrefix']).parent.name
+    require(prefix_name in {'occt-mixed', 'occt-mixed-simd128'}, 'Unsupported mixed prefix route')
     # Specific path roles from this producer contract, not an arbitrary command driver.
     replacements = {
         c['cache']: 'GEOSPEC_MIXED_BUILD', c['output']: 'GEOSPEC_MIXED_OUTPUT',
@@ -844,7 +865,7 @@ def mixed_producer_recipe(mixed):
     commands = [' '.join(word(v) for v in [item['executable'], *item['args']]) for item in mixed['commands']]
     prefix_environment = {**c['environment'], **{k: v for k, v in mixed['prefix']['environment'].items()
                                                if k.startswith('GEOSPEC_OCCT_')}}
-    prefix_environment['GEOSPEC_OCCT_CACHE'] = c['preparationCache'] + '/occt-mixed'
+    prefix_environment['GEOSPEC_OCCT_CACHE'] = str(Path(c['occtPrefix']).parent)
     prefix_command = 'env -i ' + ' '.join(word(f'{k}={v}') for k, v in prefix_environment.items()
                                          if k not in control_keys) + ' ' + controls
     prefix_command += ' ' + ' '.join(word(v) for v in mixed['prefix']['command'])
@@ -859,12 +880,11 @@ def mixed_producer_recipe(mixed):
         '"NODE_JS":os.environ["GEOSPEC_MIXED_NODE"],"PYTHON":os.environ["GEOSPEC_MIXED_PYTHON3"]}; '
         'Path(os.environ["GEOSPEC_MIXED_PREP"],"emscripten.config").write_text('
         '"".join(k+" = "+repr(v)+"\\n" for k,v in v.items()))'))
-    prepare = '''# Export absolute paths for every variable below; use fresh writable build/prep/output roots.
-# GEOSPEC_MIXED_PREFIX must be $GEOSPEC_MIXED_PREP/occt-mixed/install.
-# Provision the exact SDK/Rust archives from receipts/selected-delivery.json first.
-mkdir -p "$GEOSPEC_MIXED_PREP"/sources "$GEOSPEC_MIXED_PREP"/downloads \\
-  "$GEOSPEC_MIXED_PREP"/tmp "$GEOSPEC_MIXED_BUILD" "$GEOSPEC_MIXED_OUTPUT"
-'''
+    prepare = ('# Export absolute paths for every variable below; use fresh writable build/prep/output roots.\n'
+               f'# GEOSPEC_MIXED_PREFIX must be $GEOSPEC_MIXED_PREP/{prefix_name}/install.\n'
+               '# Provision the exact SDK/Rust archives from receipts/selected-delivery.json first.\n'
+               'mkdir -p "$GEOSPEC_MIXED_PREP"/sources "$GEOSPEC_MIXED_PREP"/downloads \\\n'
+               '  "$GEOSPEC_MIXED_PREP"/tmp "$GEOSPEC_MIXED_BUILD" "$GEOSPEC_MIXED_OUTPUT"\n')
     for name in ['occt', 'rapidjson', 'freetype']:
         prepare += (f'mkdir "$GEOSPEC_MIXED_PREP/sources/{name}"\n'
                     f'cp "$GEOSPEC_RELINK_ROOT/archives/{name}.tar.gz" "$GEOSPEC_MIXED_PREP/downloads/{name}.tar.gz"\n'

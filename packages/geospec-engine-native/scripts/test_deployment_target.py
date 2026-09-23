@@ -10,6 +10,7 @@ from contextlib import ExitStack
 from copy import deepcopy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -18,8 +19,9 @@ import shlex
 import subprocess
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -55,6 +57,17 @@ class DeploymentTargetTest(unittest.TestCase):
         with patch.object(Path, 'read_text', return_value='# mocked Emscripten config\n'):
             recipe = materials.mixed_producer_recipe(mixed)
         self.assertNotIn('EMCC_CORES', recipe['recordedEnvironment'])
+        closure['wasmSimd'] = prepare.RECIPE['wasmSimd']
+        closure['occtPrefix'] = '/recorded/prep/occt-mixed-simd128/install'
+        with patch.object(Path, 'read_text', return_value='# mocked Emscripten config\n'):
+            simd_recipe = materials.mixed_producer_recipe(mixed)
+        self.assertEqual(simd_recipe['recordedEnvironment']['CARGO_ENCODED_RUSTFLAGS'],
+                         '-C\x1ftarget-feature=+simd128')
+        self.assertTrue(simd_recipe['recordedEnvironment']['CXXFLAGS_wasm32_unknown_emscripten']
+                        .startswith('-msimd128 '))
+        self.assertIn('occt-mixed-simd128', simd_recipe['rebuildMixedPrefix'])
+        self.assertIn('occt-mixed-simd128/install', simd_recipe['prepare'])
+        recipe = simd_recipe
         exported = {name: '/owned path/' + name for name in recipe['requiredExportedVariables']}
         exported['GEOSPEC_SOURCE_ROOT'] = str(SCRIPTS)
         ceiling = ':'.join(exported[name] for name in
@@ -175,7 +188,7 @@ class PreparationContractTest(unittest.TestCase):
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())).resolve()
         self.cache = self.root / 'cache'
         self.package = self.root / 'package'
-        self.prefix = self.cache / 'occt-mixed'
+        self.prefix = self.cache / 'occt-mixed-simd128'
         for directory in [self.prefix / 'install/lib', self.prefix / 'build',
                           self.package / 'native/occt', self.cache / 'downloads']:
             directory.mkdir(parents=True)
@@ -212,7 +225,8 @@ class PreparationContractTest(unittest.TestCase):
         self.stack.enter_context(patch.dict(os.environ, {}, clear=True))
         for name, value in {'CACHE': self.cache, 'PACKAGE': self.package, 'RECIPE': self.recipe,
                             'RECIPE_PATH': self.recipe_path, 'SOURCE': self.cache / 'sources/occt',
-                            'MIXED': self.prefix / 'install'}.items():
+                            'MIXED': self.prefix / 'install',
+                            'MIXED_INPUTS': self.cache / 'mixed-inputs-simd128.json'}.items():
             self.stack.enter_context(patch.object(prepare, name, value))
         self.receipt_path = self.prefix / 'prefix-receipt.json'
         self.receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
@@ -223,6 +237,67 @@ class PreparationContractTest(unittest.TestCase):
 
     def verify(self):
         return prepare.verify_prefix(self.prefix, self.contract())
+
+    def test_should_prepare_only_selected_prefix_after_common_gates(self):
+        for selection, expected in [(None, ['native', 'mixed']), ('mixed', ['mixed']), ('native', ['native'])]:
+            with self.subTest(selection=selection), \
+                    patch.object(prepare, 'room') as room, \
+                    patch.object(prepare, 'prepare_sources') as sources, \
+                    patch.object(prepare, 'prefix_context', return_value=self.context) as context, \
+                    patch.object(prepare, 'prepare_prefix') as build:
+                prepare.prepare_prefixes(self.paths, self.env, build_prefix=selection)
+                room.assert_called_once_with('prefixes')
+                sources.assert_called_once_with()
+                context.assert_called_once_with(self.paths, self.env)
+                self.assertEqual(build.call_args_list,
+                                 [call(kind, self.paths, self.env, self.context) for kind in expected])
+
+        with patch.object(prepare, 'room', side_effect=ValueError('disk gate')), \
+                patch.object(prepare, 'prepare_sources') as sources, \
+                patch.object(prepare, 'prepare_prefix') as build:
+            with self.assertRaisesRegex(ValueError, 'disk gate'):
+                prepare.prepare_prefixes(self.paths, self.env, build_prefix='mixed')
+            sources.assert_not_called()
+            build.assert_not_called()
+
+    def test_should_reject_combining_build_and_reuse_prefix_selectors(self):
+        with patch.object(prepare.sys, 'argv', ['prepare-delivery.py', 'prefixes',
+                                               '--build-prefix', 'mixed', '--reuse-prefix', 'native']), \
+                patch.object(prepare.sys, 'stderr', new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as error:
+                prepare.main()
+            self.assertEqual(error.exception.code, 2)
+            self.assertIn('not allowed with argument', stderr.getvalue())
+
+    def test_should_reserve_build_space_only_for_build_routes(self):
+        for name in ['occt', *prepare.RECIPE['headers']]:
+            (self.cache / 'sources' / name).mkdir(parents=True)
+            (self.cache / 'downloads' / f'{name}.tar.gz').touch()
+        for stage, required_gib in [('prefixes', 14), ('reuse-prefix', 6)]:
+            with self.subTest(stage=stage):
+                required = required_gib * 1024 ** 3
+                with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required)):
+                    prepare.room(stage)
+                with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required - 1)):
+                    with self.assertRaisesRegex(ValueError, f'requires {required} free bytes'):
+                        prepare.room(stage)
+        with patch.object(prepare, 'SOURCE', self.cache / 'missing-source'):
+            with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=6 * 1024 ** 3)):
+                with self.assertRaisesRegex(ValueError, f'requires {7 * 1024 ** 3} free bytes'):
+                    prepare.room('reuse-prefix')
+            with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=7 * 1024 ** 3)):
+                prepare.room('reuse-prefix')
+
+        with patch.object(prepare, 'room') as room, \
+                patch.object(prepare, 'prepare_sources') as sources, \
+                patch.object(prepare, 'prefix_context', return_value=self.context), \
+                patch.object(prepare, 'producer_builder', return_value=self.builder), \
+                patch.object(prepare, 'prepare_prefix') as build:
+            # Exercise real receipt verification over the existing inert prefix.
+            prepare.prepare_prefixes(self.paths, self.env, reuse_prefix='mixed')
+            room.assert_called_once_with('reuse-prefix')
+            sources.assert_called_once_with()
+            build.assert_not_called()
 
     def sdk_support_fixture(self):
         sdk = self.root / 'sdk'
@@ -299,7 +374,7 @@ class PreparationContractTest(unittest.TestCase):
             mocked.enter_context(patch.object(prepare, 'run', side_effect=lambda command, *args, **kwargs:
                                               '{"packages": []}' if 'metadata' in command else 'inert-head'))
             prepare.prepare_inputs(self.paths, self.env)
-            manifest_path = self.cache / 'mixed-inputs.json'
+            manifest_path = self.cache / 'mixed-inputs-simd128.json'
             manifest = json.loads(manifest_path.read_text())
             selected = {row['path']: row['sha256'] for row in manifest['inputs']}
             self.assertIn(str(Path(self.env['EM_CACHE']) / 'sysroot/include/header.h'), selected)
@@ -320,7 +395,12 @@ class PreparationContractTest(unittest.TestCase):
                              original['supportPayload'])
             with patch.dict(os.environ, {}, clear=True):
                 prepare.verify_manifest(transported)
-            self.assertEqual(prepare.digest(transported), prepare.digest(manifest_path))
+                self.assertEqual(prepare.digest(transported), prepare.digest(manifest_path))
+                changed = json.loads(transported.read_text())
+                changed['wasmSimd']['rustFlags'] = []
+                prepare.write_json(transported, changed)
+                with self.assertRaisesRegex(ValueError, 'Wrong fixed SIMD flags'):
+                    prepare.verify_manifest(transported)
 
     def test_should_require_explicit_external_cache_for_support_projection(self):
         self.sdk_support_fixture()
@@ -381,6 +461,14 @@ class PreparationContractTest(unittest.TestCase):
         self.recipe['mixedOcctOptions'] = [*self.recipe['mixedOcctOptions'], '-DUSE_FREETYPE=OFF']
         with self.assertRaisesRegex(ValueError, 'Prefix receipt command changed'):
             self.verify()
+
+    def test_should_bind_simd_to_occt_compilation_and_separate_prefix(self):
+        command = self.contract()['command']
+        self.assertIn('-DUSE_TBB=OFF', command)
+        for flag in ['-DCMAKE_C_FLAGS=', '-DCMAKE_CXX_FLAGS=']:
+            self.assertTrue(any(option.startswith(flag) and '-msimd128' in option for option in command))
+        self.assertEqual(prepare.MIXED_PREFIX, 'occt-mixed-simd128')
+        self.assertEqual(self.verify(), self.receipt)
 
     def test_should_refuse_changed_selected_source_archives(self):
         selections = [self.recipe['occt'], *self.recipe['headers'].values()]
@@ -464,11 +552,14 @@ class PreparationContractTest(unittest.TestCase):
             mocked.enter_context(patch.object(prepare, 'run', side_effect=lambda command, *args, **kwargs:
                                               '{"packages": []}' if 'metadata' in command else 'inert-head'))
             prepare.prepare_inputs(self.paths, self.env)
-        manifest = json.loads((self.cache / 'mixed-inputs.json').read_text())
+        manifest = json.loads((self.cache / 'mixed-inputs-simd128.json').read_text())
         self.assertFalse((self.cache / 'occt-native').exists())
         self.assertEqual(manifest['prefixRecovery'], {'mixed': None})
         self.assertEqual(manifest['recipeSha256'], prepare.digest(self.recipe_path))
         self.assertEqual(manifest['prefixProducerRecipe'], str(self.original_recipe))
+        self.assertEqual(manifest['wasmSimd'], self.recipe['wasmSimd'])
+        self.assertEqual(manifest['cache'], str(self.cache / 'mixed-build-simd128'))
+        self.assertEqual(manifest['occtPrefix'], str(self.prefix / 'install'))
         inputs = {row['path']: row['sha256'] for row in manifest['inputs']}
         self.assertEqual(inputs[str(self.original_recipe)], prepare.digest(self.original_recipe))
         self.assertNotIn(str(self.cache / 'occt-native/prefix-receipt.json'), inputs)

@@ -8,6 +8,7 @@ import {
   trimToolResultContext,
 } from '#harness/cad-middleware.js';
 import { toPiToolContent } from '#harness/tools.js';
+import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { ModelCallRequest } from '#harness/model-call-middleware.js';
 
@@ -47,6 +48,22 @@ const model: Model<Api> = {
   maxTokens: 1024,
 };
 const request = (context: Context): ModelCallRequest => ({ model, context });
+
+/**
+ * What the transport sends for a trimmed history: the session serialises each
+ * message to its durable envelope (`providerHistory`) and the gateway transport
+ * rebuilds pi content from that envelope on every request (`piContextFor`).
+ */
+const onTheWire = (messages: readonly AgentMessage[]): AgentMessage[] => {
+  const identities = new MessageIdentities(() => 'id');
+  return trimToolResultContext(messages).map((message) => {
+    const provider = piMessageToProvider(message, identities);
+    if (provider.role === 'tool-input') {
+      throw new TypeError('A tool result never serialises to tool input.');
+    }
+    return providerMessageToPi(provider, model, identities);
+  });
+};
 const dummyStream = (): AssistantMessageEventStream => createAssistantMessageEventStream();
 
 describe('ToolResultTrimmer', () => {
@@ -124,6 +141,59 @@ describe('ToolResultTrimmer', () => {
         (message) => message.role === 'toolResult' && message.content.every((block) => block.type === 'text'),
       ),
     ).toBe(true);
+  });
+
+  describe('on the wire', () => {
+    const capture = (toolCallId: string): AgentMessage => {
+      const content = { success: true, images: [{ view: 'top', dataUrl: 'data:image/webp;base64,AAAA' }] };
+      return {
+        role: 'toolResult',
+        toolCallId,
+        toolName: 'screenshot',
+        content: toPiToolContent(content),
+        details: { content, isError: false, substituted: false },
+        isError: false,
+        timestamp: 0,
+      };
+    };
+    const imageCount = (message: AgentMessage | undefined): number =>
+      message?.role === 'toolResult' ? message.content.filter((block) => block.type === 'image').length : -1;
+
+    it('should send only the newest capture as image blocks', () => {
+      const [older, newest] = onTheWire([capture('call-1'), capture('call-2')]);
+
+      expect(imageCount(older)).toBe(0);
+      expect(older?.role === 'toolResult' ? older.content.at(-1) : undefined).toEqual({
+        type: 'text',
+        text: '[screenshot image - previously captured]',
+      });
+      expect(imageCount(newest)).toBe(1);
+    });
+
+    it('should send the trimmed structured result, not the durable one', () => {
+      const content = { failures: [{ targetFile: 'main.ts', message: 'bad' }], passes: [{ huge: 'x' }], total: 2 };
+      const [sent] = onTheWire([
+        {
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          toolName: 'test_model',
+          content: [{ type: 'text', text: JSON.stringify(content) }],
+          details: { content, isError: false, substituted: false },
+          isError: false,
+          timestamp: 0,
+        },
+      ]);
+
+      expect(sent?.role === 'toolResult' ? sent.content : undefined).toEqual([
+        { type: 'text', text: '{"failures":[{"targetFile":"main.ts","message":"bad"}],"total":2}' },
+      ]);
+    });
+
+    it('should leave an already trimmed history as it is', () => {
+      const once = trimToolResultContext([capture('call-1'), capture('call-2')]);
+
+      expect(trimToolResultContext(once)).toEqual(once);
+    });
   });
 });
 

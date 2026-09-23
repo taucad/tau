@@ -1,8 +1,8 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { ShaderMaterial } from 'three';
-import type { Camera, Scene, Texture, WebGLRenderer } from 'three';
-import { EffectComposer, Pass, RenderPass } from 'postprocessing';
+import { AlwaysDepth, HalfFloatType, ShaderMaterial } from 'three';
+import type { Camera, Scene, Texture, WebGLRenderer, WebGLRenderTarget } from 'three';
+import { EffectComposer, EffectPass, Pass, RenderPass, ToneMappingEffect, ToneMappingMode } from 'postprocessing';
 // @ts-expect-error -- n8ao 1.10.2 does not publish TypeScript declarations.
 import { N8AOPostPass as N8AoPostPassUntyped } from 'n8ao';
 import type { ThreeCamera } from '@taucad/three/camera';
@@ -27,7 +27,7 @@ type EndpointComposer = Readonly<{
   depthRestore: CanvasDepthRestorePass;
 }>;
 
-/** Receives the composer's stable depth texture, then writes it to canvas on demand. */
+/** Receives the composer's stable depth texture, then writes it to the canvas or a caller's target. */
 class CanvasDepthRestorePass extends Pass {
   public constructor() {
     super('TauCanvasDepthRestorePass');
@@ -35,7 +35,10 @@ class CanvasDepthRestorePass extends Pass {
     this.needsSwap = false;
     this.fullscreenMaterial = new ShaderMaterial({
       colorWrite: false,
-      depthTest: false,
+      // The test stays enabled and always passes: WebGL discards every depth write while
+      // `GL_DEPTH_TEST` is disabled, so `depthTest: false` here would write no depth at all.
+      depthTest: true,
+      depthFunc: AlwaysDepth,
       depthWrite: true,
       uniforms: { depthBuffer: { value: null } },
       vertexShader: `
@@ -65,9 +68,10 @@ class CanvasDepthRestorePass extends Pass {
     return undefined;
   }
 
-  public restore(renderer: WebGLRenderer): void {
+  /** Stamp this frame's depth into `target`, or the canvas when it is omitted. */
+  public restore(renderer: WebGLRenderer, target?: WebGLRenderTarget): void {
     const previousTarget = renderer.getRenderTarget();
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(target ?? null);
     try {
       renderer.clearDepth();
       renderer.render(this.scene, this.camera);
@@ -90,20 +94,22 @@ const createEndpointComposer = ({
   readonly width: number;
   readonly height: number;
 }): EndpointComposer => {
-  const composer = new EffectComposer(gl, { stencilBuffer: true, multisampling: 4 });
+  const composer = new EffectComposer(gl, { stencilBuffer: true, multisampling: 4, frameBufferType: HalfFloatType });
   const renderPass = new RenderPass(scene, camera);
   const depthRestore = new CanvasDepthRestorePass();
+  const toneMappingPass = new EffectPass(camera, new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }));
   let aoPass: N8AoPass | undefined;
   let renderPassAdded = false;
   let depthRestoreAdded = false;
   let aoPassAdded = false;
+  let toneMappingPassAdded = false;
   try {
     aoPass = new N8AoPostPass(scene, camera);
     Object.assign(aoPass.configuration, {
       screenSpaceRadius: true,
       aoRadius: 24,
       intensity: 1,
-      distanceFalloff: 0,
+      distanceFalloff: 0.2,
     });
     composer.addPass(renderPass);
     renderPassAdded = true;
@@ -111,9 +117,14 @@ const createEndpointComposer = ({
     depthRestoreAdded = true;
     composer.addPass(aoPass);
     aoPassAdded = true;
+    composer.addPass(toneMappingPass);
+    toneMappingPassAdded = true;
     composer.setSize(width, height);
     return { camera, composer, depthRestore };
   } catch (error) {
+    if (!toneMappingPassAdded) {
+      toneMappingPass.dispose();
+    }
     if (!aoPassAdded) {
       aoPass?.dispose();
     }
@@ -197,9 +208,12 @@ export function PostProcessingWebGL(): undefined {
   }, []);
   useCameraRetarget(retarget);
 
-  const restoreDepth = useCallback((): void => {
-    selectedRef.current?.depthRestore.restore(gl);
-  }, [gl]);
+  const restoreDepth = useCallback(
+    (target?: WebGLRenderTarget): void => {
+      selectedRef.current?.depthRestore.restore(gl, target);
+    },
+    [gl],
+  );
   useOverlayDepthRestore(restoreDepth);
 
   useFrame((state, delta) => {

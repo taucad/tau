@@ -2,26 +2,30 @@ import type { JSX } from 'react';
 import { useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import {
-  AdditiveBlending,
   Color,
+  CustomBlending,
+  DepthTexture,
+  DoubleSide,
   Group,
   Mesh,
   MeshBasicMaterial,
   NearestFilter,
+  OneFactor,
   PlaneGeometry,
   RGBAFormat,
   Scene,
   UnsignedByteType,
+  UnsignedIntType,
   Vector2,
   WebGLRenderTarget,
 } from 'three';
-import type { Material, Object3D } from 'three';
+import type { Camera, Material, Object3D, WebGLRenderer } from 'three';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
-import { SceneOverlay } from '#components/geometry/graphics/three/scene-overlay.js';
+import { SceneOverlay, useOverlayDepthRestorer } from '#components/geometry/graphics/three/scene-overlay.js';
+import type { DepthRestore } from '#components/geometry/graphics/three/scene-overlay.js';
 import { useModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
 import type { ModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
-import { applyGltfSurfaceDepthBias } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
 import {
   createWebGlSilhouetteMaterial,
   setWebGlSilhouetteMaskSize,
@@ -42,7 +46,21 @@ export const modelEmphasisWashOpacity = { hover: 0.15, selected: 0.3 } as const;
 
 type ModelEmphasisState = 'hover' | 'selected';
 
-type Proxy = Readonly<{ source: Mesh; mask: Mesh; wash: Mesh }>;
+/** The two things the mask measures, each into its own channels, from one pass. */
+const modelEmphasisMaskLayers = ['coverage', 'visibility'] as const;
+type ModelEmphasisMaskLayer = (typeof modelEmphasisMaskLayers)[number];
+
+/**
+ * Samples the coverage mask resolves, matching the canvas.
+ *
+ * One sample per pixel can only report 0 or 1, so the composite's difference is 0 or 1 too and
+ * the outline is a hard staircase. Resolved multisample coverage gives the boundary pixels a
+ * fraction, and the same difference then ramps — the outline's antialiasing comes from the mask,
+ * not from a wider filter in the composite.
+ */
+export const modelEmphasisMaskSamples = 4;
+
+type Proxy = Readonly<{ source: Mesh; state: ModelEmphasisState; mask: Mesh; visibility: Mesh; wash: Mesh }>;
 
 type CompositeMaterial =
   | ReturnType<typeof createWebGlSilhouetteMaterial>
@@ -55,7 +73,7 @@ export type ModelEmphasisResources = Readonly<{
   /** Portalled into the overlay scene: wash proxies then the composite quad. */
   overlayGroup: Group;
   composite: CompositeMaterial;
-  mask: Readonly<Record<ModelEmphasisState, MeshBasicMaterial>>;
+  mask: Readonly<Record<ModelEmphasisMaskLayer, Readonly<Record<ModelEmphasisState, MeshBasicMaterial>>>>;
   wash: Readonly<Record<ModelEmphasisState, MeshBasicMaterial>>;
   proxies: Proxy[];
   setMaskSize: (size: SilhouetteMaskSize) => void;
@@ -65,33 +83,69 @@ export type ModelEmphasisResources = Readonly<{
 const disableRaycast = (): void => undefined;
 const maskClearColor = new Color(0x00_00_00);
 
-/** Union coverage into R (hover) or G (selected); additive so overlapping states both survive. */
-function createMaskMaterial(state: ModelEmphasisState): MeshBasicMaterial {
+/** One mask channel per (layer, state): coverage in RG, visibility in BA. */
+const maskLayerColor = {
+  coverage: { hover: 0xff_00_00, selected: 0x00_ff_00 },
+  visibility: { hover: 0x00_00_ff, selected: 0x00_00_00 },
+} as const;
+const maskLayerOpacity = {
+  coverage: { hover: 0, selected: 0 },
+  visibility: { hover: 0, selected: 1 },
+} as const;
+
+/**
+ * Union one channel of the mask; every draw adds exactly its own channel and leaves the rest.
+ *
+ * `CustomBlending` at One/One rather than `AdditiveBlending`, which scales the colour by the
+ * source alpha that the selected-visibility channel carries as its payload.
+ *
+ * Double-sided because coverage is occupancy, not shading: a section cut opens the shell, and
+ * culling the back faces it exposes would punch holes into the mask that the composite then
+ * outlines across the section cap.
+ *
+ * The visibility layer is the same draw under the frame's own depth, so the depth test decides
+ * where the part is frontmost — no depth is decoded in a shader, and reversed-Z and logarithmic
+ * depth stay the renderer's business. It is deliberately never clipped: a section cut replaces
+ * the material it removes with a cap that belongs to the same part, so the uncut solid is what
+ * "this part is what you see here" means, while coverage stays clipped to what is drawn.
+ */
+function createMaskMaterial(layer: ModelEmphasisMaskLayer, state: ModelEmphasisState): MeshBasicMaterial {
   const material = new MeshBasicMaterial({
-    color: state === 'hover' ? 0xff_00_00 : 0x00_ff_00,
-    blending: AdditiveBlending,
-    depthTest: false,
+    color: maskLayerColor[layer][state],
+    opacity: maskLayerOpacity[layer][state],
+    blending: CustomBlending,
+    blendSrc: OneFactor,
+    blendDst: OneFactor,
+    blendSrcAlpha: OneFactor,
+    blendDstAlpha: OneFactor,
+    side: DoubleSide,
+    depthTest: layer === 'visibility',
     depthWrite: false,
     toneMapped: false,
     fog: false,
   });
-  material.name = `tau-emphasis-mask-${state}`;
+  material.name = `tau-emphasis-${layer}-${state}`;
   return material;
 }
 
-/** Transparent overlay that lands exactly on the biased surface depth (policy rule 7 row 2). */
-function createWashMaterial(state: ModelEmphasisState, backend: ResolvedGraphicsBackend): MeshBasicMaterial {
+/**
+ * Translucent overlay at geometric depth, so it beats the pushed-back surface by the same
+ * slope-scaled margin the characteristic edges rely on. Copying the surface's bias instead made
+ * the depth test an exact tie, which resolves per pixel and speckles — see
+ * `docs/research/viewer-emphasis-depth-and-coverage-blueprint.md`.
+ */
+function createWashMaterial(state: ModelEmphasisState): MeshBasicMaterial {
   const material = new MeshBasicMaterial({
     color: silhouetteColor,
     transparent: true,
     opacity: modelEmphasisWashOpacity[state],
+    side: DoubleSide,
     depthTest: true,
     depthWrite: false,
     toneMapped: false,
     fog: false,
   });
   material.name = `tau-emphasis-wash-${state}`;
-  applyGltfSurfaceDepthBias(material, backend, { allowTransparent: true });
   return material;
 }
 
@@ -106,13 +160,20 @@ function createProxy(source: Mesh, material: Material): Mesh {
 
 export function createModelEmphasisResources(backend: ResolvedGraphicsBackend): ModelEmphasisResources {
   const maskTarget = new WebGLRenderTarget(1, 1, {
-    depthBuffer: false,
+    depthBuffer: true,
     stencilBuffer: false,
     format: RGBAFormat,
     type: UnsignedByteType,
     minFilter: NearestFilter,
     magFilter: NearestFilter,
     generateMipmaps: false,
+    samples: modelEmphasisMaskSamples,
+    // Nothing ever samples the mask's depth — only the depth test reads it — so the resolve blit
+    // that would produce a single-sample copy of it is pure cost.
+    resolveDepthBuffer: false,
+    // 24-bit, matching the canvas the restored depth comes from; a 16-bit renderbuffer would
+    // quantise the frame's depth below the margin that separates a surface from its overlays.
+    depthTexture: new DepthTexture(1, 1, UnsignedIntType),
   });
   maskTarget.texture.name = 'tau-emphasis-mask';
   const maskScene = new Scene();
@@ -129,8 +190,14 @@ export function createModelEmphasisResources(backend: ResolvedGraphicsBackend): 
   quad.renderOrder = 1;
   overlayGroup.add(washGroup, quad);
 
-  const mask = { hover: createMaskMaterial('hover'), selected: createMaskMaterial('selected') };
-  const wash = { hover: createWashMaterial('hover', backend), selected: createWashMaterial('selected', backend) };
+  const mask = {
+    coverage: { hover: createMaskMaterial('coverage', 'hover'), selected: createMaskMaterial('coverage', 'selected') },
+    visibility: {
+      hover: createMaskMaterial('visibility', 'hover'),
+      selected: createMaskMaterial('visibility', 'selected'),
+    },
+  };
+  const wash = { hover: createWashMaterial('hover'), selected: createWashMaterial('selected') };
   const proxies: Proxy[] = [];
 
   const setMaskSize = (size: SilhouetteMaskSize): void => {
@@ -157,8 +224,15 @@ export function createModelEmphasisResources(backend: ResolvedGraphicsBackend): 
       maskScene.clear();
       washGroup.clear();
       quad.geometry.dispose();
-      composite.dispose();
-      for (const material of [mask.hover, mask.selected, wash.hover, wash.selected]) {
+      for (const material of [
+        composite,
+        mask.coverage.hover,
+        mask.coverage.selected,
+        mask.visibility.hover,
+        mask.visibility.selected,
+        wash.hover,
+        wash.selected,
+      ]) {
         material.dispose();
       }
       maskTarget.dispose();
@@ -173,11 +247,12 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
   resources.maskScene.clear();
   washGroup.clear();
   const add = (source: Mesh, state: ModelEmphasisState): void => {
-    const mask = createProxy(source, resources.mask[state]);
+    const mask = createProxy(source, resources.mask.coverage[state]);
+    const visibility = createProxy(source, resources.mask.visibility[state]);
     const wash = createProxy(source, resources.wash[state]);
-    resources.maskScene.add(mask);
+    resources.maskScene.add(mask, visibility);
     washGroup.add(wash);
-    resources.proxies.push({ source, mask, wash });
+    resources.proxies.push({ source, state, mask, visibility, wash });
   };
   for (const source of set.hover) {
     add(source, 'hover');
@@ -194,14 +269,16 @@ const firstMaterial = (object: Object3D): Material | undefined => {
 
 /** Per-frame CPU work: follow the sources' world transforms and section clipping. */
 export function syncModelEmphasisFrame(resources: ModelEmphasisResources): void {
-  for (const { source, mask, wash } of resources.proxies) {
+  for (const { source, mask, visibility, wash } of resources.proxies) {
     mask.matrixWorld.copy(source.matrixWorld);
+    visibility.matrixWorld.copy(source.matrixWorld);
     wash.matrixWorld.copy(source.matrixWorld);
   }
+  // Only what is drawn on screen is clipped; the visibility layer answers for the uncut solid.
   const planes = (resources.proxies[0] && firstMaterial(resources.proxies[0].source)?.clippingPlanes) ?? null;
   for (const material of [
-    resources.mask.hover,
-    resources.mask.selected,
+    resources.mask.coverage.hover,
+    resources.mask.coverage.selected,
     resources.wash.hover,
     resources.wash.selected,
   ]) {
@@ -211,9 +288,48 @@ export function syncModelEmphasisFrame(resources: ModelEmphasisResources): void 
   }
 }
 
+/**
+ * Draw one frame of the coverage mask: coverage, and the same proxies under the frame's depth.
+ *
+ * The target carries its own 24-bit depth so `restoreDepth` can stamp the finished frame into it
+ * — the same bridge the post owner already publishes for canvas overlays — and the visibility
+ * layer then falls out of the ordinary depth test. Without a post owner the restore is a no-op,
+ * the depth stays cleared, every pixel reads visible, and the outline is the single-strength one
+ * this shipped with.
+ */
+export function renderModelEmphasisMask(
+  resources: ModelEmphasisResources,
+  {
+    gl,
+    camera,
+    restoreDepth,
+    previousClear,
+  }: { gl: WebGLRenderer; camera: Camera; restoreDepth: DepthRestore; previousClear: Color },
+): void {
+  const previousTarget = gl.getRenderTarget();
+  const previousAutoClear = gl.autoClear;
+  gl.getClearColor(previousClear);
+  const previousClearAlpha = gl.getClearAlpha();
+  try {
+    gl.setRenderTarget(resources.maskTarget);
+    gl.setClearColor(maskClearColor, 0);
+    gl.autoClear = false;
+    gl.clear(true, true, false);
+    restoreDepth(resources.maskTarget);
+    // Both layers in one pass: a second `gl.render` would cost a second multisample resolve of a
+    // device-resolution target for nothing, since the layers never read each other.
+    gl.render(resources.maskScene, camera);
+  } finally {
+    gl.setRenderTarget(previousTarget);
+    gl.setClearColor(previousClear, previousClearAlpha);
+    gl.autoClear = previousAutoClear;
+  }
+}
+
 function ModelEmphasisMaskPass({ resources }: { readonly resources: ModelEmphasisResources }): undefined {
   const sizeRef = useMemo(() => new Vector2(), []);
   const previousClearRef = useMemo(() => new Color(), []);
+  const restoreDepth = useOverlayDepthRestorer();
 
   useFrame((state) => {
     const { gl, camera } = state;
@@ -222,21 +338,7 @@ function ModelEmphasisMaskPass({ resources }: { readonly resources: ModelEmphasi
       resources.setMaskSize({ width: sizeRef.x, height: sizeRef.y, pixelRatio: gl.getPixelRatio() });
     }
     syncModelEmphasisFrame(resources);
-
-    const previousTarget = gl.getRenderTarget();
-    const previousAutoClear = gl.autoClear;
-    gl.getClearColor(previousClearRef);
-    const previousClearAlpha = gl.getClearAlpha();
-    try {
-      gl.setRenderTarget(resources.maskTarget);
-      gl.setClearColor(maskClearColor, 0);
-      gl.autoClear = true;
-      gl.render(resources.maskScene, camera);
-    } finally {
-      gl.setRenderTarget(previousTarget);
-      gl.setClearColor(previousClearRef, previousClearAlpha);
-      gl.autoClear = previousAutoClear;
-    }
+    renderModelEmphasisMask(resources, { gl, camera, restoreDepth, previousClear: previousClearRef });
   }, modelEmphasisMaskPriority);
 
   return undefined;
@@ -246,9 +348,11 @@ function ModelEmphasisMaskPass({ resources }: { readonly resources: ModelEmphasi
  * Silhouette + wash for hovered/selected model components.
  *
  * Mask stage (priority 1.4): proxies of the emphasised meshes render flat coverage into a
- * device-resolution target with no depth. Overlay stage (priority 1.5, `SceneOverlay` so the
- * post owner's depth restore applies): translucent wash proxies depth-tested against the frame,
- * then one fullscreen composite that draws the outline where coverage changes. Idle cost is
+ * multisampled device-resolution target, alongside a second proxy under the frame's restored
+ * depth so the same target also carries where the part is frontmost. Overlay stage (priority 1.5, `SceneOverlay`
+ * so the post owner's depth restore applies): translucent wash proxies depth-tested against the
+ * frame at geometric depth, then one fullscreen composite that draws the outline where coverage
+ * changes — full strength where it is visible, dimmer where it is behind something. Idle cost is
  * zero — neither stage subscribes while nothing is emphasised.
  */
 export function ModelEmphasisOverlay(): JSX.Element {

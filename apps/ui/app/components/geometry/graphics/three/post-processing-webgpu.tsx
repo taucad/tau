@@ -16,7 +16,7 @@ import {
 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { Vector3 } from 'three';
-import type { Camera } from 'three';
+import type { Camera, WebGLRenderTarget } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import type { ThreeCamera } from '@taucad/three/camera';
@@ -44,9 +44,9 @@ type PostProcessingPipelineResources = Readonly<{
  * - **Compose-based AO** — the composite quad multiplies scene color by the AO factor (`scenePassColor.mul(vec4(vec3(ao.r), 1))`)
  *   instead of routing AO through `builtinAOContext`. This is the GTAO-paper-canonical pattern recommended in
  *   `three/addons/tsl/display/GTAONode.js`.
- * - **Explicit canvas-depth restore** — the active scene-pass depth is sampled by a retained
- *   direct-to-canvas `QuadMesh` that writes depth only immediately before overlays. The main
- *   scene is never traversed or replayed.
+ * - **Explicit depth restore** — the active scene-pass depth is sampled by a retained `QuadMesh`
+ *   that writes depth into the canvas, or into a caller's target, only when a pass asks for it.
+ *   The main scene is never traversed or replayed.
  * - **`compileAsync` warmup** — the `RenderPipeline` is built off the critical path inside `useLayoutEffect`
  *   so the first `useFrame` after mount does not block on pipeline compile.
  *
@@ -243,21 +243,24 @@ function PostProcessingWebGpuActive(): ReactNode {
   );
   useCameraRetarget(retarget);
 
-  const restoreDepth = useCallback((): void => {
-    const selected = resourcesRef.current?.get(selectedCameraRef.current);
-    if (!selected) {
-      return;
-    }
-    const renderer = gl as unknown as WebGPURenderer;
-    const previousTarget = renderer.getRenderTarget();
-    renderer.setRenderTarget(null);
-    try {
-      renderer.clearDepth();
-      selected.depthRestore.render(renderer);
-    } finally {
-      renderer.setRenderTarget(previousTarget);
-    }
-  }, [gl]);
+  const restoreDepth = useCallback(
+    (target?: WebGLRenderTarget): void => {
+      const selected = resourcesRef.current?.get(selectedCameraRef.current);
+      if (!selected) {
+        return;
+      }
+      const renderer = gl as unknown as WebGPURenderer;
+      const previousTarget = renderer.getRenderTarget();
+      renderer.setRenderTarget(target ?? null);
+      try {
+        renderer.clearDepth();
+        selected.depthRestore.render(renderer);
+      } finally {
+        renderer.setRenderTarget(previousTarget);
+      }
+    },
+    [gl],
+  );
   useOverlayDepthRestore(restoreDepth);
 
   useFrame((state) => {

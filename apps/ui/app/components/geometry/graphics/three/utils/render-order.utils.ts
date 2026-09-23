@@ -12,6 +12,12 @@ export const viewportRenderTiers = {
   model: 0,
   sectionCapFill: 10_000,
   sectionContourOutline: 10_010,
+  /**
+   * Edges of an emphasised component, including its cap outline. Above every ordinary edge so a
+   * coincident neighbour can never win the `LEQUAL` tie they share at geometric depth; the opaque
+   * sort is front-to-back by centroid, which flips as the camera moves.
+   */
+  modelEmphasisEdge: 10_020,
   sectionControlBody: 20_000,
   sectionControlLabel: 20_010,
   sectionTransformControl: 20_020,

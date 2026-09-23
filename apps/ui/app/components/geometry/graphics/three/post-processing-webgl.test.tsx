@@ -1,5 +1,6 @@
 import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AlwaysDepth, HalfFloatType } from 'three';
 
 const mocks = vi.hoisted(() => {
   const perspectiveCamera = { kind: 'perspective' };
@@ -19,10 +20,11 @@ const mocks = vi.hoisted(() => {
     | ((state: { gl: typeof gl; scene: typeof scene; camera: typeof perspectiveCamera }, delta: number) => void)
     | undefined;
   let retarget: ((camera: typeof perspectiveCamera) => void) | undefined;
-  let restoreDepth: (() => void) | undefined;
+  let restoreDepth: ((target?: unknown) => void) | undefined;
   let failCamera: unknown;
   const composers: Array<{
     autoRenderToScreen: boolean;
+    options: unknown;
     addPass: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     render: ReturnType<typeof vi.fn>;
@@ -109,6 +111,7 @@ vi.mock('postprocessing', () => {
 
   class EffectComposer {
     public autoRenderToScreen = true;
+    public readonly options: unknown;
     public readonly passes: Array<Record<string, unknown> & { dispose?: () => void }> = [];
     public readonly addPass = vi.fn((pass: Record<string, unknown> & { dispose?: () => void }) => {
       this.passes.push(pass);
@@ -124,7 +127,8 @@ vi.mock('postprocessing', () => {
     public readonly render = vi.fn();
     public readonly setSize = vi.fn();
 
-    public constructor(_renderer: unknown, _options: unknown) {
+    public constructor(_renderer: unknown, options: unknown) {
+      this.options = options;
       mocks.composers.push(this);
     }
   }
@@ -140,7 +144,18 @@ vi.mock('postprocessing', () => {
     }
   }
 
-  return { EffectComposer, Pass, RenderPass };
+  class EffectPass {
+    public readonly dispose = vi.fn();
+  }
+
+  class ToneMappingEffect {
+    public get mode(): string {
+      return 'aces';
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- exact upstream enum key.
+  return { EffectComposer, EffectPass, Pass, RenderPass, ToneMappingEffect, ToneMappingMode: { ACES_FILMIC: 'aces' } };
 });
 
 vi.mock('n8ao', () => ({
@@ -193,8 +208,25 @@ describe('PostProcessingWebGL retained endpoint composers', () => {
     expect(mocks.renderPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera, mocks.orthographicCamera]);
     expect(mocks.aoPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera, mocks.orthographicCamera]);
     expect(mocks.composers.every(({ render }) => render.mock.calls.length === 1)).toBe(true);
-    expect(mocks.composers.every(({ passes }) => passes.length === 3)).toBe(true);
+    expect(mocks.composers.every(({ passes }) => passes.length === 4)).toBe(true);
     expect(mocks.composers.every(({ passes }) => passes[1]?.['needsDepthTexture'] === true)).toBe(true);
+  });
+
+  it('keeps screen-space occlusion attenuation positive for both cameras', async () => {
+    await mount();
+
+    for (const { configuration } of mocks.aoPasses) {
+      expect(configuration['screenSpaceRadius']).toBe(true);
+      expect(configuration['distanceFalloff']).toBe(0.2);
+    }
+  });
+
+  it('preserves HDR highlights until the final tone-mapping pass', async () => {
+    await mount();
+
+    for (const { options } of mocks.composers) {
+      expect(options).toMatchObject({ frameBufferType: HalfFloatType });
+    }
   });
 
   it('restores the selected composer depth directly to canvas without replaying the scene', async () => {
@@ -208,6 +240,34 @@ describe('PostProcessingWebGL retained endpoint composers', () => {
     expect(mocks.glRender).toHaveBeenCalledOnce();
     expect(mocks.glRender.mock.calls[0]![0]).toEqual({ kind: 'fullscreen-scene' });
     expect(mocks.glRender).not.toHaveBeenCalledWith(mocks.scene, expect.anything());
+    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
+  });
+
+  it('writes depth with the test enabled, because WebGL drops writes while it is off', async () => {
+    await mount();
+
+    const material = mocks.composers[0]!.passes[1]!['fullscreenMaterial'] as {
+      colorWrite: boolean;
+      depthTest: boolean;
+      depthFunc: number;
+      depthWrite: boolean;
+    };
+    expect(material.colorWrite).toBe(false);
+    expect(material.depthWrite).toBe(true);
+    expect(material.depthTest).toBe(true);
+    expect(material.depthFunc).toBe(AlwaysDepth);
+  });
+
+  it("stamps that same depth into a caller's own target", async () => {
+    // The emphasis coverage mask depth-tests inside its own target; it asks the one owner of the
+    // frame's depth for it rather than re-rasterising the scene.
+    await mount();
+    const maskTarget = { kind: 'mask-target' };
+    mocks.setRenderTarget.mockClear();
+
+    mocks.getRestoreDepth()?.(maskTarget);
+
+    expect(mocks.setRenderTarget).toHaveBeenNthCalledWith(1, maskTarget);
     expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
   });
 

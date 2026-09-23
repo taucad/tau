@@ -28,8 +28,8 @@
     }
   ],
   "polygonOffset": true,
-  "polygonOffsetFactor": -1,
-  "polygonOffsetUnits": -1,
+  "polygonOffsetFactor": -1.5,
+  "polygonOffsetUnits": -2,
   "reflectivity": 1,
   "refractionRatio": 0.98,
   "side": 2,

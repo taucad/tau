@@ -11,6 +11,7 @@ import {
   gltfEdgeSelectedColor,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
 /**
  * Default line width in pixels for edge rendering.
@@ -371,6 +372,13 @@ function getOrCreateEdgeEmphasisMaterials(base: GltfFatLineMaterial): EdgeEmphas
 /**
  * Swap a fat line between its shared base material and the shared hover/selected overlay
  * material for its component's emphasis. `focused` reads as selected, matching the surface tint.
+ *
+ * The emphasised line also moves to {@link viewportRenderTiers.modelEmphasisEdge}. Every edge in
+ * the scene sits at geometric depth under `LEQUAL`, so where an emphasised component's edge is
+ * coincident with a neighbour's — a screw seated in its counterbore, two abutting faces — the
+ * draw order alone decides which colour survives, and three sorts opaque draws front-to-back by
+ * centroid, which reorders as the camera moves. Drawing last makes the emphasis colour win every
+ * tie, in every state and from every angle.
  */
 export function setGltfFatLineEmphasis(object: Object3D, emphasis: ModelComponentEmphasis): void {
   const base = fatLineBaseMaterials.get(object);
@@ -380,10 +388,12 @@ export function setGltfFatLineEmphasis(object: Object3D, emphasis: ModelComponen
   const line = object as LineSegments2;
   if (emphasis === 'none') {
     line.material = base as LineMaterial;
+    line.renderOrder = viewportRenderTiers.model;
     return;
   }
   const materials = getOrCreateEdgeEmphasisMaterials(base);
   line.material = (emphasis === 'hover' ? materials.hover : materials.selected) as LineMaterial;
+  line.renderOrder = viewportRenderTiers.modelEmphasisEdge;
 }
 
 /** Every material `object` can wear (base + any built emphasis variants), for disposal. */

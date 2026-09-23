@@ -31,9 +31,9 @@ import {
   versionedChangePaths as classifiedChangePaths,
 } from '@taucad/revisions/revision-projection';
 import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
-import type { BranchOperation } from '@taucad/revisions/branch-machine';
-import type { PublishDraft } from '@taucad/revisions/publish-machine';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { BranchOperation } from '@taucad/revisions';
+import type { PublishDraft } from '@taucad/revisions';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   publishFailureMessage,

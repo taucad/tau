@@ -12,6 +12,7 @@ import { composerRecordPaths, createComposerRecordStore } from '#db/composer-rec
 import { createComposerRecordActor, draftPersistenceFor } from '#hooks/composer-record.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { composerRecordMachine } from '#machines/composer-record.machine.js';
+import { spyOnSend } from '#lib/xstate-test.utils.js';
 
 const unused = async (): Promise<never> => {
   throw new Error('The selection hand-off never touches the store.');
@@ -45,9 +46,7 @@ describe('draftPersistenceFor', () => {
       }),
       { input: {} },
     ).start();
-    // v6 exposes `send` as a bound getter: wrap what it returns and keep calling through.
-    const send = vi.fn(record.send);
-    vi.spyOn(record, 'send', 'get').mockReturnValue(send);
+    const send = spyOnSend(record);
 
     createActor(draftPersistenceFor(record, store).persistSelectionActor, { input: { mode: 'plan' } }).start();
     await vi.waitFor(() => {

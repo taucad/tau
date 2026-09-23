@@ -13,7 +13,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
 
 /**
  * The one *New branch* control, wherever it is offered.

@@ -11,6 +11,8 @@
  *
  * @see https://github.com/statelyai/xstate/blob/main/packages/xstate-react/src/useActorRef.ts
  */
+import { vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { Actor, AnyActorLogic } from 'xstate';
 
 type PendingStop = { cancel(): void };
@@ -79,3 +81,22 @@ export const toSnapshotCallback =
       listener.next?.(snapshot);
     }
   };
+
+/**
+ * Spies on an actor's `send`, calling through unless an implementation replaces it.
+ *
+ * XState v6 exposes `send` as a bound prototype getter, so a method spy cannot
+ * replace it; this shadows the getter on the one instance, which is all a test holds.
+ *
+ * @param actor - The actor whose sends are observed.
+ * @param implementation - Replaces the actor's own `send` when given.
+ * @returns The spy every `actor.send` now reaches.
+ */
+export const spyOnSend = <TSend extends (event: never) => void>(
+  actor: { readonly send: TSend },
+  implementation?: TSend,
+): Mock<TSend> => {
+  const spy = vi.fn(implementation ?? actor.send);
+  Object.defineProperty(actor, 'send', { configurable: true, get: () => spy });
+  return spy;
+};

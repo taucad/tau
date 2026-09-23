@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { spyOnSend } from '#lib/xstate-test.utils.js';
 
 const harness = vi.hoisted(() => ({
   projectManager: {
@@ -104,17 +105,14 @@ function renderWithStore(onSessionStage: () => void = () => undefined): {
 }
 
 function spyOnActorSends(session: ReturnType<InstanceType<typeof ChatSessionStore>['acquire']>): {
-  persistenceSend: ReturnType<typeof vi.fn>;
-  draftSend: ReturnType<typeof vi.fn>;
+  persistenceSend: ReturnType<typeof spyOnSend>;
+  draftSend: ReturnType<typeof spyOnSend>;
 } {
-  const persistenceSend = vi.fn();
-  const draftSend = vi.fn();
   // Replacing `.send` with a mock is the cleanest way to assert the guard's
   // fan-out without depending on machine internals — the guard's contract
   // is that it `.send({ type: 'flushNow' })` to every actor.
-  // v6 exposes `send` as a bound getter, so the spy replaces what the getter returns.
-  vi.spyOn(session.persistenceActorRef, 'send', 'get').mockReturnValue(persistenceSend);
-  vi.spyOn(session.draftActorRef, 'send', 'get').mockReturnValue(draftSend);
+  const persistenceSend = spyOnSend(session.persistenceActorRef, () => undefined);
+  const draftSend = spyOnSend(session.draftActorRef, () => undefined);
   return { persistenceSend, draftSend };
 }
 

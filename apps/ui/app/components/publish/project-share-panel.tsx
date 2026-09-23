@@ -15,7 +15,7 @@ import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { toast } from '#components/ui/sonner.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
-import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions/publish-machine';
+import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
 import { PublicationAccessPanel } from '#components/publish/publication-access-panel.js';

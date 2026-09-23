@@ -32,12 +32,9 @@ import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 
 import type { RevisionTag } from '#revision-port.js';
-import type { SyncPushOutcome } from '#sync.machine.js';
+import type { SyncPushOutcome } from '#sync.types.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 import type { PublishDraft, PublishFacet } from '#publish.types.js';
-export type { PublishVisibility } from '#publish.types.js';
-export type { PublishDraft, PublishFacet } from '#publish.types.js';
-export type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 
 /** How long `pushing` waits for the settlement that names its push. @public */
 export const publishPushMilliseconds = 60_000;

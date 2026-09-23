@@ -52,8 +52,8 @@ import type {
   ResolutionLoadActorOutput,
   ResolutionMaterializeActorOutput,
   ResolutionSeedTurnActorOutput,
-  ResolutionSide,
 } from '#resolution.machine.js';
+import type { ResolutionSide } from '#resolution.types.js';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { AnyEventObject, AsyncActorLogic, AsyncLogicFunction } from 'xstate';
 
@@ -93,13 +93,12 @@ import { projectRevisionsMachine, selectRevisionStatus } from '#project-revision
 import { publishMachine } from '#publish.machine.js';
 import type {
   PublishActors,
-  PublishPublicationActorInput,
-  PublishPublicationActorOutput,
   PublishPushActorInput,
   PublishPushActorOutput,
   PublishTagActorInput,
   PublishVersionsActorOutput,
 } from '#publish.machine.js';
+import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 import { remoteMachine } from '#remote.machine.js';
 import type {
   RemoteActors,
@@ -125,7 +124,6 @@ import {
 } from '#workspace-config.js';
 import type {
   SyncActors,
-  SyncFacet,
   SyncFastForwardActorOutput,
   SyncFetchActorInput,
   SyncFetchActorOutput,
@@ -133,12 +131,11 @@ import type {
   SyncMergeActorOutput,
   SyncPushActorInput,
   SyncPushActorOutput,
-  SyncQueueRecord,
   SyncReadPendingActorInput,
   SyncReadRemoteActorOutput,
-  SyncRefOutcome,
   SyncWritePendingActorInput,
 } from '#sync.machine.js';
+import type { SyncFacet, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import type {
   RestoreActors,
   RestoreApplyPlanActorOutput,

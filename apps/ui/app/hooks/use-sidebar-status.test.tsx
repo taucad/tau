@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ProjectListItem } from '#types/project.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
@@ -161,8 +161,8 @@ type FakeRegistry = {
   chatReferences: Record<string, Record<string, ChatSessionActorRef>>;
   /** What the session recorded about a region that did not come up (R4). */
   failures: Record<string, Record<string, string>>;
-  registryListeners: Set<() => void>;
-  sessionListeners: Set<() => void>;
+  registryListeners: Set<(snapshot?: unknown) => void>;
+  sessionListeners: Set<(snapshot?: unknown) => void>;
 };
 
 /** The registry, the session and the revision clients, as thin as the hooks read them. */

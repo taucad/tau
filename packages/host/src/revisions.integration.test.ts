@@ -22,7 +22,7 @@ import type { ToolRegistry } from '@taucad/agent-host';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import type { RevisionPort } from '@taucad/revisions';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 

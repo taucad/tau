@@ -36,8 +36,6 @@ import { isCeilingRefusal } from '#refusal-markers.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
 import type { SyncFacet, SyncPushOutcome, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 import type { SyncFailureReason } from '#sync.types.js';
-export type { SyncFailureReason, SyncRefStatus } from '#sync.types.js';
-export type { SyncFacet, SyncPushOutcome, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.types.js';
 
 /** Input accepted when creating the syncMachine actor. @public */
 export type SyncMachineInput = Readonly<{

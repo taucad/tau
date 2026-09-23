@@ -29,11 +29,10 @@ import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 import { syncFailureReason } from '#sync.machine.js';
-import type { SyncFailureReason } from '#sync.machine.js';
+import type { SyncFailureReason } from '#sync.types.js';
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
 import type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
-export type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
 
 /** One remote as this machine records it. @public */
 export type RemoteRecord = Readonly<{

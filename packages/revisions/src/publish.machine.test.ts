@@ -38,11 +38,11 @@ import * as machineModule from '#publish.machine.js';
 import { publishMachine, publishPushMilliseconds, selectPublishFacet } from '#publish.machine.js';
 import type {
   PublishActors,
-  PublishDraft,
   PublishMachineEmitted,
   PublishTagActorInput,
   PublishVersionsActorOutput,
 } from '#publish.machine.js';
+import type { PublishDraft } from '#publish.types.js';
 import { revisionId } from '#algorithms/index.js';
 
 import type { RevisionTag } from '#revision-port.js';

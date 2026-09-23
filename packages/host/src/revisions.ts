@@ -57,7 +57,7 @@ import {
 } from '@taucad/revisions';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type {
   RevisionActor,
   CreateRevisionTagInput,
@@ -77,11 +77,7 @@ import type {
   TauApiCredential,
 } from '@taucad/revisions/node';
 import { publishPushMilliseconds } from '@taucad/revisions/publish-machine';
-import type {
-  PublishDraft,
-  PublishPublicationActorInput,
-  PublishPublicationActorOutput,
-} from '@taucad/revisions/publish-machine';
+import type { PublishDraft, PublishPublicationActorInput, PublishPublicationActorOutput } from '@taucad/revisions';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 

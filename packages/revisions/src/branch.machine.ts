@@ -30,7 +30,6 @@ import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { BranchOperation } from '#branch.types.js';
-export type { BranchOperation } from '#branch.types.js';
 
 /** How long a delegated registry verb waits for the registry's answer. @public */
 export const branchRegistryMilliseconds = 30_000;

@@ -30,7 +30,7 @@
 
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SnapshotFrom } from 'xstate';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSessionActorRef, chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import type { SessionsActorRef } from '#machines/sessions.machine.js';

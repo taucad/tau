@@ -26,22 +26,22 @@ import { checkoutsMachine } from '#checkouts.machine.js';
 import type { CheckoutOperation } from '#checkouts.machine.js';
 import { eventSchemas } from '#machine-schemas.js';
 import { publishMachine, selectPublishFacet } from '#publish.machine.js';
-import type { PublishFacet, PublishMachineEvent } from '#publish.machine.js';
+import type { PublishMachineEvent } from '#publish.machine.js';
+import type { PublishFacet } from '#publish.types.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
-import type { RemoteFacet, RemoteMachineEvent } from '#remote.machine.js';
+import type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
 import type { RemoteKind } from '#remotes.js';
 import { resolutionMachine, selectResolutionFacet } from '#resolution.machine.js';
 import type { ResolutionMachineEvent } from '#resolution.machine.js';
 import { restoreMachine, selectRestoreBusy, selectRestoreNeedsConfirmation } from '#restore.machine.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
-import type { SyncFacet, SyncMachineEvent, SyncPushOutcome } from '#sync.machine.js';
+import type { SyncMachineEvent } from '#sync.machine.js';
+import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
 import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
 import type { RevisionStatusProjection } from '#project-revisions.types.js';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '#project-revisions.types.js';
-export type { RevisionBranchFacet, RevisionConflictFacet } from '#project-revisions.types.js';
-export type { RevisionStatusProjection } from '#project-revisions.types.js';
 
 /** What one checkout last reported about itself. @public */
 export type CheckoutStatusEntry = Readonly<{ status: CheckoutStatus; headRevisionId: string | undefined }>;

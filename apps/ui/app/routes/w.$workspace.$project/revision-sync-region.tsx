@@ -12,7 +12,7 @@ import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
    contract forbids (§3). */
-import type { SyncFailureReason } from '@taucad/revisions/sync-machine';
+import type { SyncFailureReason } from '@taucad/revisions';
 import { CommercialUpgradeLabel } from '#cloud/commercial-features.js';
 import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';

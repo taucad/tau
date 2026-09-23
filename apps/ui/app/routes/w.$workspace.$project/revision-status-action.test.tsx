@@ -14,7 +14,7 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History, Rewind } from 'lucide-react';
 import type { RevisionRow } from '@taucad/revisions';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   RevisionStatusAction,

@@ -175,7 +175,7 @@ const awaitPort = async (
 
 /** Browser worker plus optional desktop native port, owned by one debug-route mount. */
 export class GeoSpecPerformanceService {
-  #worker: Worker | undefined;
+  readonly #workers = new Map<PerformanceLabRunInput['engine'], Worker>();
   #nativePort: MessagePort | undefined;
   readonly #warmModules = new Set<PerformanceLabRunInput['engine']>();
   #id = 0;
@@ -188,11 +188,11 @@ export class GeoSpecPerformanceService {
     const id = ++this.#id;
     if (input.engine !== 'native-desktop') {
       const worker =
-        input.cache === 'cold'
-          ? new Worker(new URL('../workers/geospec-performance.worker.ts', import.meta.url), { type: 'module' })
-          : (this.#worker ??= new Worker(new URL('../workers/geospec-performance.worker.ts', import.meta.url), {
-              type: 'module',
-            }));
+        (input.cache === 'warm' ? this.#workers.get(input.engine) : undefined) ??
+        new Worker(new URL('../workers/geospec-performance.worker.ts', import.meta.url), { type: 'module' });
+      if (input.cache === 'warm') {
+        this.#workers.set(input.engine, worker);
+      }
       const actualInput: PerformanceLabRunInput =
         input.cache === 'warm' && !this.#warmModules.has(input.engine) ? { ...input, cache: 'cold' } : input;
       try {
@@ -206,10 +206,10 @@ export class GeoSpecPerformanceService {
         }
         return result;
       } catch (error) {
-        if (worker === this.#worker) {
+        if (worker === this.#workers.get(input.engine)) {
           worker.terminate();
-          this.#worker = undefined;
-          this.#warmModules.clear();
+          this.#workers.delete(input.engine);
+          this.#warmModules.delete(input.engine);
         }
         throw error;
       } finally {
@@ -245,7 +245,10 @@ export class GeoSpecPerformanceService {
 
   public close(): void {
     this.#closed = true;
-    this.#worker?.terminate();
+    for (const worker of this.#workers.values()) {
+      worker.terminate();
+    }
+    this.#workers.clear();
     this.#nativePort?.close();
   }
 }

@@ -67,7 +67,16 @@ const invoke = async (
     signal: call.signal ?? new AbortController().signal,
   });
 
-const fileTools = ['read_file', 'edit_file', 'list_directory', 'create_file', 'delete_file', 'grep', 'glob_search'];
+const fileTools = [
+  'read_file',
+  'edit_file',
+  'list_directory',
+  'create_file',
+  'delete_file',
+  'grep',
+  'glob_search',
+  'update_todos',
+];
 
 describe('createChatToolRegistry listing', () => {
   it.each([
@@ -148,6 +157,7 @@ describe('createChatToolRegistry listing', () => {
         'read_file',
         'screenshot',
         'test_model',
+        'update_todos',
         'use_skill',
       ].toSorted(),
     );
@@ -288,6 +298,67 @@ describe('createChatToolRegistry invocation', () => {
       new Uint8Array([1]),
     );
     expect(agentWrite).not.toHaveBeenCalled();
+  });
+
+  /* The chat task list (design-to-print workbench D8): one tool, one file,
+   * offered by every host because it needs nothing but the filesystem. */
+  describe('update_todos', () => {
+    const items = [
+      { id: 'model-pyramid', title: 'Model the pyramid', status: 'done' },
+      { id: 'slice-pyramid', title: 'Slice the pyramid', status: 'in_progress', note: '0.2 mm layers' },
+      { id: 'request-print', title: 'Request the print', status: 'pending' },
+    ];
+
+    it('writes exactly the expected YAML bytes to the chat directory and reports counts', async () => {
+      const writeFile = vi.fn<RpcFileSystem['writeFile']>(async () => undefined);
+      const registry = build({ fileSystemFor: () => ({ ...emptyFileSystem(), writeFile }) });
+
+      const result = await invoke(registry, 'update_todos', { input: { chatId: 'chat_01', items } });
+
+      expect(result).toStrictEqual({
+        isError: false,
+        content: {
+          success: true,
+          path: '.tau/chats/chat_01/todo.yaml',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+          counts: { pending: 1, in_progress: 1, done: 1 },
+        },
+      });
+      expect(writeFile).toHaveBeenCalledExactlyOnceWith(
+        '.tau/chats/chat_01/todo.yaml',
+        [
+          'version: 1',
+          'items:',
+          '  - id: model-pyramid',
+          '    title: Model the pyramid',
+          '    status: done',
+          '  - id: slice-pyramid',
+          '    title: Slice the pyramid',
+          '    status: in_progress',
+          '    note: 0.2 mm layers',
+          '  - id: request-print',
+          '    title: Request the print',
+          '    status: pending',
+          '',
+        ].join('\n'),
+      );
+    });
+
+    it.each([
+      ['duplicate ids', { chatId: 'chat_01', items: [items[0], { ...items[1], id: 'model-pyramid' }] }, 'unique'],
+      ['a chat id with a path separator', { chatId: '../other', items }, 'chatId'],
+      ['an unknown status', { chatId: 'chat_01', items: [{ ...items[0], status: 'doing' }] }, 'status'],
+      ['a missing list', { chatId: 'chat_01' }, 'items'],
+    ])('refuses %s without writing', async (_label, input, expectedMessage) => {
+      const writeFile = vi.fn<RpcFileSystem['writeFile']>(async () => undefined);
+      const registry = build({ fileSystemFor: () => ({ ...emptyFileSystem(), writeFile }) });
+
+      const result = await invoke(registry, 'update_todos', { input });
+
+      expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+      expect(JSON.stringify(result.content)).toContain(expectedMessage);
+      expect(writeFile).not.toHaveBeenCalled();
+    });
   });
 
   it('throws the abort reason when the signal is already aborted', async () => {

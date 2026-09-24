@@ -64,6 +64,7 @@ const rpcForTool: Readonly<Record<string, { readonly rpc: RpcName; readonly need
     rpc: rpcName.applyParameterOperation,
     needs: 'parameters',
   },
+  [toolName.updateTodos]: { rpc: rpcName.writeTodos },
 };
 
 /**

@@ -128,6 +128,8 @@ export async function createRenderer(
   const webGlOptions: THREE.WebGLRendererParameters = {
     canvas: backingCanvas,
     alpha: true,
+    // Postprocessing writes straight-alpha color; keep canvas export and compositing consistent.
+    premultipliedAlpha: false,
     antialias: true,
     powerPreference: 'high-performance',
   };

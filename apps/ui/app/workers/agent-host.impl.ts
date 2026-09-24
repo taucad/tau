@@ -2,7 +2,11 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import {
+  createChatToolRegistry,
+  createMachinePrintPlanner,
+  createProviderRpcFileSystem,
+} from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -34,6 +38,7 @@ import type {
   InterruptResolution,
   StorageDurabilityClass,
   TauAgentHost,
+  ToolRegistry,
 } from '@taucad/agent-host';
 import { createOpfsEventLog, createProviderAttachmentReader, createProviderEventLog } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
@@ -191,6 +196,13 @@ type WorkerSession = {
   readonly providerBasePath: string;
   readonly projectId: string;
   readonly workspaceId: string;
+  /**
+   * The revision the most recently admitted turn runs on, as the page named it.
+   *
+   * Provenance only: a print request records it beside the artifact digest the
+   * machine host verifies. The worker never records a revision of its own.
+   */
+  readonly baseRevision: { current?: string | undefined };
 };
 
 /** OPFS sync access handles exist in workers and never on the main thread. */
@@ -843,11 +855,15 @@ const executeCommand = async (
             ...(command.config.contextMessages ? { contextMessages: command.config.contextMessages } : {}),
           }
         : undefined;
-      /* `mode` and `baseRevisionId` are deliberately dropped: on this
+      /* `mode` and `baseRevisionId` are deliberately not admitted: on this
        * placement the *page* owns the revision — `ChatWorkspaceAuthorityProvider`
        * prepares the turn's workspace in the selected mode and finalizes it —
        * so the worker would be recording a second, competing one. They ride the
-       * command only because one client object is sent to both transports. */
+       * command only because one client object is sent to both transports. The
+       * base is kept as provenance for print requests, never recorded. */
+      if (command.baseRevisionId !== undefined) {
+        active.baseRevision.current = command.baseRevisionId;
+      }
       const base = {
         chatId: command.chatId,
         runId: command.runId,
@@ -1741,7 +1757,9 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     mapRuntimeError: (error) => toRpcError(error),
     parameterActorFor,
   });
-  const toolRegistry = createChatToolRegistry({
+  const baseRevision: WorkerSession['baseRevision'] = {};
+  const { machines } = runtimeClient;
+  const toolRegistry: ToolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
     recordFileSystemFor: (signal) =>
@@ -1750,7 +1768,30 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     ...runtimeRpc,
     parameters,
     geospec: geoSpecClient,
-    machines: runtimeClient.machines,
+    machines,
+    ...(machines.available
+      ? {
+          planPrint: createMachinePrintPlanner({
+            // ponytail: one worker serves every chat of a project, so this is the latest admitted base; key it by run if concurrent chats must differ.
+            revisions: { describe: async () => ({ revisionId: baseRevision.current }) },
+            machines,
+            /* The registry's own route, so the slice is recorded exactly as an export is. */
+            exportGeometry: async (input) =>
+              toolRegistry.invoke({
+                toolCallId: input.toolCallId,
+                toolName: 'export_geometry',
+                input: { targetFile: input.targetFile, format: input.format },
+                signal: input.signal,
+              }),
+            readArtifact: async ({ path, signal }) => {
+              signal.throwIfAborted();
+              const bytes = await recordView.readFile(assertRootedPath(path));
+              signal.throwIfAborted();
+              return bytes;
+            },
+          }),
+        }
+      : {}),
     testingEnabled: request.testingEnabled ?? false,
   });
   const activeReference: { current?: WorkerSession } = {};
@@ -1849,6 +1890,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     providerBasePath: request.projectStorage.providerBasePath,
     projectId: request.authority.projectId,
     workspaceId: request.authority.workspaceId,
+    baseRevision,
   };
   activeReference.current = active;
   session = active;

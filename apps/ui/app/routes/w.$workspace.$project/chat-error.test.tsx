@@ -264,6 +264,22 @@ describe('ChatError', () => {
     expect(screen.getByRole('button', { name: 'New chat' })).toBeInTheDocument();
   });
 
+  it('should read a gateway REQUEST_TOO_LARGE as a chat that is too long, offering only New chat', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Model request is larger than Tau accepts.',
+      code: 'REQUEST_TOO_LARGE',
+      httpStatus: 413,
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('This chat is too long to continue')).toBeInTheDocument();
+    expect(screen.queryByText('Tau paused this turn')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['New chat']);
+  });
+
   it('should keep the host compaction sentence reachable in Details', async () => {
     const user = userEvent.setup();
     const hostSentence = 'Model invocation attempt-overflow has no durable result; it will not be sent again.';

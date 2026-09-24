@@ -260,7 +260,7 @@ const formatDuration = (seconds: number): string => {
   }
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return hours === 0 ? `${String(rest)} min` : `${String(hours)} h ${String(rest)} min`;
+  return `about ${hours === 0 ? `${String(rest)} min` : `${String(hours)} h ${String(rest)} min`}`;
 };
 
 /**
@@ -273,9 +273,7 @@ const formatDuration = (seconds: number): string => {
 const approvalPrompt = (request: PrintRequest, machine: MachineDirectoryEntry): string => {
   const facts = [
     ...(request.summary.layers === undefined ? [] : [`${String(request.summary.layers)} layers`]),
-    ...(request.summary.estimatedDuration === undefined
-      ? []
-      : [`about ${formatDuration(request.summary.estimatedDuration)}`]),
+    ...(request.summary.estimatedDuration === undefined ? [] : [formatDuration(request.summary.estimatedDuration)]),
   ];
   return `Print ${request.summary.fileName} on ${machine.descriptor.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}`;
 };

@@ -28,7 +28,8 @@ export const runWasmCorpus = async ({
 } = {}) => {
   if (binaryPath === undefined) {
     const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
-    const mixedBinding = manifest.imports?.['#mixed-wasm-binding'];
+    const mixedBindingImport = manifest.imports?.['#mixed-wasm-binding'];
+    const mixedBinding = typeof mixedBindingImport === 'string' ? mixedBindingImport : mixedBindingImport?.default;
     if (typeof mixedBinding !== 'string') {
       throw new Error('Package has no mixed WASM binding import.');
     }

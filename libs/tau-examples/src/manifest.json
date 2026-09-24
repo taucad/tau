@@ -214,6 +214,14 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "replicad",
+    "name": "copper-lampshade",
+    "mainFile": "main.ts",
+    "files": ["main.ts", "tau.json"]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
     "name": "cycloidal-gear",
     "mainFile": "main.ts",
     "files": ["main.ts", "tau.json"]

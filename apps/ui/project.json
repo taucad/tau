@@ -120,7 +120,13 @@
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/desktop/build"],
-      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
+      "inputs": [
+        "production",
+        "^production",
+        {
+          "env": "TAU_CLOUD_ENABLED"
+        }
+      ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}/desktop",
@@ -134,7 +140,13 @@
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/serve/build"],
-      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
+      "inputs": [
+        "production",
+        "^production",
+        {
+          "env": "TAU_CLOUD_ENABLED"
+        }
+      ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}/serve",
@@ -278,6 +290,12 @@
           "npx -y @posthog/cli sourcemap upload --directory {projectRoot}/build/client --delete-after"
         ],
         "parallel": false
+      }
+    },
+    "render-calibration-physical": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx apps/ui/scripts/render-calibration/generate-physical.mts"
       }
     }
   }

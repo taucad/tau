@@ -1,0 +1,7 @@
+{
+  "name": "slicer",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/slicer",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

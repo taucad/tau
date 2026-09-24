@@ -50,6 +50,7 @@ import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { isPrinterFileName } from '#components/printer/printer-file.js';
 import { WorkbenchTabContextMenu } from '#components/panes/editor-tab-context-menu.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import { DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
@@ -756,10 +757,25 @@ export const workbenchPanels = {
   console: getWorkbenchSurface('console').panel!,
 } as const satisfies Record<WorkbenchUtilityPanelId, { id: string; component: string; title: string }>;
 
-const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
+/**
+ * Tab glyph for workbench panes: the surface icon for utilities, the printer for printer files (as the
+ * viewer tab shows), and nothing for other files so the extension icon stays.
+ *
+ * @param properties - The tab's panel id and parameters.
+ * @returns The icon, or `undefined` for the default.
+ */
+export const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
   const mode = getPlaceholderParameters(properties)?.mode;
   const surface = workbenchSurfaces.find((candidate) => candidate.panel?.id === properties.api.id);
-  const Icon = mode === 'open-file' ? FolderOpen : mode === 'launcher' ? Plus : surface?.icon;
+  const filePath = getFileParameters(properties)?.filePath;
+  const Icon =
+    mode === 'open-file'
+      ? FolderOpen
+      : mode === 'launcher'
+        ? Plus
+        : filePath !== undefined && isPrinterFileName(filePath)
+          ? Printer
+          : surface?.icon;
   return Icon ? <Icon aria-hidden className='size-3 shrink-0' /> : undefined;
 };
 

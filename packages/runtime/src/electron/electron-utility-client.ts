@@ -28,6 +28,7 @@ import type {
 } from '#transport/index.js';
 
 import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
+import { createLazyMachineFacet } from '#electron/_internal/machine-facet.js';
 import { takeElectronRuntimeHostExit, takeElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
 import type { ElectronRuntimeHostExitDetail } from '#electron/_internal/runtime-host-lease.js';
 
@@ -93,6 +94,7 @@ export type ElectronUtilityMainClientOptions = {
 
 type ElectronUtilityClientHooks = {
   readonly origin: string;
+  readonly machines?: ElectronUtilityTransportOptions['machines'];
   readonly release?: (reason: 'requested' | 'render-timeout') => void;
   readonly subscribeHostExit?: (listener: (detail: ElectronRuntimeHostExitDetail) => void) => void;
   readonly wrappedPort: Port<unknown>;
@@ -103,6 +105,9 @@ const createElectronUtilityClient = (
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
   const { origin, release, subscribeHostExit, wrappedPort } = hooks;
   debugLog(origin, 'port-wrapped');
+  /* Carried beside the CAD channel, never over it: the shell brokers the
+   * machines port separately, and the facet dials it on first use. */
+  const machines = createLazyMachineFacet(hooks.machines);
 
   let openPromise: Promise<TransportClientReady> | undefined;
   let channel: Channel<RuntimeProtocol> | undefined;
@@ -131,6 +136,7 @@ const createElectronUtilityClient = (
     } catch {
       /* Best-effort */
     }
+    machines.close();
     try {
       wrappedPort.close();
     } catch {
@@ -215,6 +221,7 @@ const createElectronUtilityClient = (
 
   return {
     id: electronUtilityId,
+    machines: machines.facet,
     reservePreview() {
       return {};
     },
@@ -268,7 +275,7 @@ const createElectronUtilityClient = (
 export const electronUtilityClient = (
   clientOptions: ElectronUtilityTransportOptions,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
-  const { port: receivedPort } = clientOptions;
+  const { port: receivedPort, machines } = clientOptions;
   const releaseRuntimeHost = takeElectronRuntimeHostRelease(receivedPort);
   const wrappedPort = wrapMessagePort<unknown>(receivedPort, {
     label: 'electron-utility:renderer',
@@ -282,6 +289,7 @@ export const electronUtilityClient = (
   return createElectronUtilityClient({
     origin: 'renderer:client',
     wrappedPort,
+    ...(machines === undefined ? {} : { machines }),
     ...(releaseRuntimeHost === undefined ? {} : { release: releaseRuntimeHost }),
     subscribeHostExit: (listener) => {
       takeElectronRuntimeHostExit(receivedPort)?.(listener);

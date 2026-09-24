@@ -9,6 +9,7 @@
 import { randomUuid } from '@taucad/utils/id';
 import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client-core.js';
 import { electronUtilityTransport } from '#electron/electron-utility-transport.js';
+import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
 import type { AnyRuntimeDefinition, RuntimeConfigInput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
 import {
   registerElectronRuntimeHostExit,
@@ -87,6 +88,12 @@ export type ElectronClientOptionsInput<Runtime extends AnyRuntimeDefinition | un
      * Zero disables timeout enforcement.
      */
     readonly renderTimeout?: number;
+    /**
+     * Authenticated machines service brokered beside the runtime port, in the
+     * WebSocket transport's `machines` shape. Absent, the client negotiates
+     * `{ available: false, reason: 'unsupported' }`.
+     */
+    readonly machines?: ElectronUtilityTransportOptions['machines'];
   } & ([RuntimeConfigInput<Runtime>] extends [never]
       ? { readonly config?: never }
       : undefined extends RuntimeConfigInput<Runtime>
@@ -329,11 +336,11 @@ export const requestElectronRuntimePort = async (
 export const createElectronClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
   options: ElectronClientOptionsInput<Runtime> = {} as ElectronClientOptionsInput<Runtime>,
 ): (() => Promise<RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>>) => {
-  const { config, renderTimeout, ...portOptions } = options;
+  const { config, machines, renderTimeout, ...portOptions } = options;
   return async () => {
     const port = await requestElectronRuntimePort(portOptions);
     const clientOptions = {
-      transport: electronUtilityTransport({ port }),
+      transport: electronUtilityTransport({ port, ...(machines === undefined ? {} : { machines }) }),
       ...(config === undefined ? {} : { config }),
       ...(renderTimeout === undefined ? {} : { renderTimeout }),
     };

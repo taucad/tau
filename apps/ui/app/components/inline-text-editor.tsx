@@ -142,7 +142,9 @@ export function InlineTextEditor({
       ) : (
         <Button
           variant='ghost'
-          className='h-full cursor-text justify-start px-2'
+          /* Fills its slot and lets the text truncate, rather than sizing to the text
+           * and spilling over its neighbours (D35). */
+          className='h-full w-full min-w-0 cursor-text justify-start px-2 *:min-w-0'
           disabled={isDisabled}
           onClick={startEditing}
         >

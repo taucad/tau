@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { EllipsisVertical, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { formatShareUrl } from '@taucad/share/locator';
@@ -24,6 +24,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import {
+  awaitGithubGistConnection,
   connectGithubGist,
   getGithubGistConnectionStatus,
   parseGithubGistAuthorizationReturn,
@@ -58,6 +59,18 @@ export function GithubGistManagement({
   const [status, setStatus] = useState<GithubGistConnectionStatus>();
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /* D16c: desktop runs the Gist grant in the system browser and waits here for it. */
+  const [awaitingBrowser, setAwaitingBrowser] = useState(false);
+  /* The Cancel that was clicked unmounts; focus returns to the button that started the grant. */
+  const [refocusConnect, setRefocusConnect] = useState(false);
+  const consentRef = useRef<AbortController | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      consentRef.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -143,12 +156,41 @@ export function GithubGistManagement({
 
   const connect = async (): Promise<void> => {
     setBusy(true);
+    setRefocusConnect(false);
     try {
-      await connectGithubGist({ returnUrl: globalThis.location.href, surface: 'share-page' });
+      const handoff = await connectGithubGist({ returnUrl: globalThis.location.href, surface: 'share-page' });
+      if (handoff === 'redirect') {
+        return;
+      }
+      const consent = new AbortController();
+      consentRef.current = consent;
+      setAwaitingBrowser(true);
+      const connected = await awaitGithubGistConnection(consent.signal);
+      if (consent.signal.aborted) {
+        return;
+      }
+      consentRef.current = undefined;
+      setAwaitingBrowser(false);
+      setBusy(false);
+      if (connected) {
+        setStatus('connected');
+        toast.success('GitHub Gist access granted.');
+      } else {
+        toast.info('Gist access did not arrive within 10 minutes. Try again.');
+      }
     } catch (error) {
       handleFailure(error);
       setBusy(false);
     }
+  };
+
+  const cancelBrowserConsent = (): void => {
+    consentRef.current?.abort();
+    consentRef.current = undefined;
+    setAwaitingBrowser(false);
+    setBusy(false);
+    setRefocusConnect(true);
+    toast.info('Stopped waiting for your browser. Gist access was not changed here.');
   };
 
   if (status === 'signed-out') {
@@ -156,6 +198,20 @@ export function GithubGistManagement({
       <Button asChild type='button' size='sm' variant='ghost' className='h-8 px-2.5 text-xs'>
         <Link to={signIn}>Sign in to manage</Link>
       </Button>
+    );
+  }
+
+  if (awaitingBrowser) {
+    return (
+      <div className='flex items-center gap-1'>
+        <span role='status' className='flex items-center gap-1.5 px-1 text-xs text-muted-foreground'>
+          <Loader2 className='size-3.5 animate-spin' aria-hidden />
+          Finish in your browser
+        </span>
+        <Button type='button' size='sm' variant='ghost' className='h-8 px-2.5 text-xs' onClick={cancelBrowserConsent}>
+          Cancel
+        </Button>
+      </div>
     );
   }
 
@@ -167,6 +223,7 @@ export function GithubGistManagement({
         variant='ghost'
         className='h-8 px-2.5 text-xs'
         disabled={busy}
+        autoFocus={refocusConnect}
         onClick={() => {
           void connect();
         }}

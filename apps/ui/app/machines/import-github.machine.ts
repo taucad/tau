@@ -53,25 +53,25 @@ export type ImportGitHubContext = {
   urlFromNavigation: boolean;
 };
 
+/**
+ * One sentence for a failed public metadata read. Octokit reports the HTTP
+ * status on `status`; its message ("Not Found - https://docs…") is not for users.
+ *
+ * @param error - What the unauthenticated GitHub read threw.
+ * @returns An error whose message is written for the person importing.
+ */
 function toMetadataFetchError(error: unknown): Error {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-
-  if (errorMessage.includes('404')) {
-    return new Error('Repository not found. Please check the URL and try again.');
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
+      ? error.status
+      : undefined;
+  if (status === 404) {
+    return new Error("Tau couldn't find a public repository at this address.");
   }
-
-  if (errorMessage.includes('401') || errorMessage.toLowerCase().includes('unauthorized')) {
-    return new Error(
-      'GitHub API authentication failed. Your access token may be invalid or expired. ' +
-        'Public repository information could not be fetched.',
-    );
+  if (status === 403 || status === 429) {
+    return new Error("GitHub's rate limit for public reads was reached. Try again in a few minutes.");
   }
-
-  if (errorMessage.includes('403') || errorMessage.includes('rate limit')) {
-    return new Error('GitHub API rate limit exceeded. Please wait a few minutes and try again.');
-  }
-
-  return new Error(`Failed to fetch repository metadata: ${errorMessage}`);
+  return new Error("Tau couldn't read this repository from GitHub. Check the address and try again.");
 }
 
 /**
@@ -739,16 +739,6 @@ export const importGitHubMachine = setup({
     },
     hasSelectedMainFile({ context }) {
       return context.selectedMainFile !== undefined && context.selectedMainFile.length > 0;
-    },
-    hasCriticalFetchError({ context }) {
-      // Critical errors are 404 or rate limit on metadata (means repo doesn't exist or is inaccessible)
-      const metadataError = context.fetchErrors.metadata;
-      if (!metadataError) {
-        return false;
-      }
-
-      const errorMessage = metadataError.message;
-      return errorMessage.includes('404') || errorMessage.includes('403') || errorMessage.includes('rate limit');
     },
     canLoadMoreBranches({ context }) {
       return context.hasMoreBranches && !context.isLoadingMoreBranches;

@@ -21,6 +21,7 @@ const portableProviderPublish = vi.hoisted(() => vi.fn());
 const portableProviderLoad = vi.hoisted(() => vi.fn(async () => ({ publish: portableProviderPublish })));
 const getGithubGistConnectionStatus = vi.hoisted(() => vi.fn(async () => 'not-connected'));
 const connectGithubGist = vi.hoisted(() => vi.fn());
+const awaitGithubGistConnection = vi.hoisted(() => vi.fn<(signal: AbortSignal) => Promise<boolean>>());
 const portableContextDispose = vi.hoisted(() => vi.fn());
 const portableContext = {
   origin: 'https://tau.example',
@@ -41,6 +42,7 @@ vi.mock('#lib/share-providers.js', async (importOriginal) => {
     },
     getGithubGistConnectionStatus,
     connectGithubGist,
+    awaitGithubGistConnection,
     shareProviderRegistry: {
       descriptors: [
         { id: 'direct', label: 'Direct link', capabilities: ['project.publish', 'project.resolve'] },
@@ -191,6 +193,8 @@ describe('ProjectSharePanel', () => {
     getGithubGistConnectionStatus.mockReset();
     getGithubGistConnectionStatus.mockResolvedValue('not-connected');
     connectGithubGist.mockReset();
+    connectGithubGist.mockResolvedValue('redirect');
+    awaitGithubGistConnection.mockReset();
     portableContextDispose.mockClear();
 
     Object.defineProperty(globalThis.navigator, 'clipboard', {
@@ -380,6 +384,72 @@ describe('ProjectSharePanel', () => {
 
     expect(await screen.findByText('GitHub authorization could not be started.')).toBeInTheDocument();
     expect(allow).toBeEnabled();
+  });
+
+  // ── Desktop Gist consent in the system browser (D16c) ─────────────────────
+  describe('when Gist access is granted in the system browser', () => {
+    const renderDesktopGist = async (): Promise<HTMLElement> => {
+      getGithubGistConnectionStatus.mockResolvedValueOnce('permission-required');
+      connectGithubGist.mockResolvedValueOnce('system-browser');
+      renderPanel(
+        <ProjectSharePanel
+          projectId='proj_gist_desktop'
+          projectName='Gist'
+          entryPath='main.ts'
+          collectSnapshot={vi.fn(async () => ({ entryPath: 'main.ts', files: [], warnings: [] }))}
+          initialMethod='github-gist'
+        />,
+      );
+      const allow = await screen.findByRole('button', { name: 'Allow Gist access' });
+      await userEvent.click(allow);
+      return allow;
+    };
+
+    it('should wait for the browser and continue to publishing once access arrives', async () => {
+      let grant: (connected: boolean) => void = () => undefined;
+      awaitGithubGistConnection.mockImplementationOnce(
+        async () =>
+          new Promise<boolean>((resolve) => {
+            grant = resolve;
+          }),
+      );
+
+      const allow = await renderDesktopGist();
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Finish in your browser.');
+      expect(allow).toBeDisabled();
+      grant(true);
+      expect(await screen.findByRole('button', { name: 'Create Gist and copy link' })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    });
+
+    it('should stop waiting on Cancel and offer the grant again', async () => {
+      let signal: AbortSignal | undefined;
+      awaitGithubGistConnection.mockImplementationOnce(async (received) => {
+        signal = received;
+        return new Promise<boolean>(() => {
+          // Never settles: the person cancels first.
+        });
+      });
+
+      const allow = await renderDesktopGist();
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+      expect(signal?.aborted).toBe(true);
+      expect(screen.getByRole('status')).toHaveTextContent('Stopped waiting for your browser.');
+      expect(allow).toBeEnabled();
+      /* The Cancel that was clicked is gone; focus returns to the grant rather than the page body. */
+      expect(allow).toHaveFocus();
+    });
+
+    it('should say so and offer the grant again when access never arrives', async () => {
+      awaitGithubGistConnection.mockResolvedValueOnce(false);
+
+      const allow = await renderDesktopGist();
+
+      expect(await screen.findByText('Gist access did not arrive within 10 minutes. Try again.')).toBeInTheDocument();
+      expect(allow).toBeEnabled();
+    });
   });
 
   it('publishes a public Gist only when the user selects public visibility', async () => {

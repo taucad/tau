@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { AlertTriangle, Cloud, CloudOff, GitBranch } from 'lucide-react';
 import { Link } from 'react-router';
@@ -7,16 +8,17 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem } from '@taucad/revisions';
+import { gitRemoteUrlProblem, isGithubRemoteUrl } from '@taucad/revisions';
 import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
 /* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
    and a second copy of the union here would be exactly the dual vocabulary the
    contract forbids (§3). */
 import type { SyncFailureReason } from '@taucad/revisions/sync-machine';
 import { CommercialUpgradeLabel } from '#cloud/commercial-features.js';
-import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
-import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
-import { githubConnections } from '#lib/github-connections.js';
+import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
+import { githubConnections, githubErrorMessage } from '#lib/github-connections.js';
+import type { GithubRepository } from '#lib/github-connections.js';
+import { githubProjectBinding } from '#lib/github-project-binding.js';
 import { formatBytes } from '#lib/format-bytes.js';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
@@ -31,7 +33,7 @@ export type RemoteChoice = 'none' | 'tau' | 'git';
 type PendingConnection =
   | Readonly<{ kind: 'tau' }>
   | Readonly<{ kind: 'git'; url: string }>
-  | Readonly<{ kind: 'github'; selection: GithubRepositorySelection }>;
+  | Readonly<{ kind: 'github'; connectionId: string; repository: GithubRepository }>;
 
 export type RevisionSyncRegionProps = {
   /** The remote facet from the project's `RevisionStatus` projection. */
@@ -53,6 +55,7 @@ export type RevisionSyncRegionProps = {
       repositoryId?: string;
       connectionId?: string;
       generation?: number;
+      expiresAt?: string;
       fetchOnly?: boolean;
     }>,
   ) => void | Promise<void>;
@@ -90,7 +93,10 @@ export type RevisionSyncRegionProps = {
    * `undefined` is nothing known at all, and folds every affordance away.
    */
   readonly role?: ProjectAccessRole;
-  /** The Tau Cloud project id, which the owner's collaborator surface needs. */
+  /**
+   * The project id: the owner's collaborator surface needs it, and so does a
+   * moved GitHub repository, whose binding it keys (D11).
+   */
   readonly projectId?: string;
   readonly className?: string;
 };
@@ -137,6 +143,39 @@ export const syncCopy = (sync: SyncFacet): string | undefined => {
 };
 
 /**
+ * Whether a credential refusal on this remote is GitHub's to fix (D18).
+ *
+ * A repository picked from a connected account, or a github.com address typed
+ * into the Advanced form: both are fixed by connecting GitHub. Any other host
+ * is not, and must not be offered GitHub or Tau copy.
+ *
+ * @param remote - The connection.
+ * @returns Whether *Reconnect GitHub* is the answer.
+ */
+export const isGithubRemote = (remote: RemoteFacet): boolean =>
+  remote.provider === 'github' || (remote.kind === 'git' && remote.url !== undefined && isGithubRemoteUrl(remote.url));
+
+/**
+ * What the *reconnect* row says, keyed on whose credential was refused (D18).
+ *
+ * The remote's own sentence wins wherever it sent one (rule 19). A github.com
+ * address linked anonymously has no connection to renew, so it is pointed at
+ * connecting GitHub instead (ruling G2).
+ *
+ * @param remote - The connection in `reconnectRequired`.
+ * @returns The sentence to show.
+ */
+const reconnectCopy = (remote: RemoteFacet): string => {
+  if (remote.provider === 'github') {
+    return remote.error ?? 'Your GitHub connection needs to be renewed.';
+  }
+  if (isGithubRemote(remote)) {
+    return 'GitHub needs a connected account to reach this repository. Reconnect GitHub, then pick it from your repositories.';
+  }
+  return remote.error ?? 'The remote rejected the saved credentials.';
+};
+
+/**
  * The one action a failure class implies (N3).
  *
  * Keyed on the machine's own `reason`, never on the sentence: the text is the
@@ -150,10 +189,11 @@ export const syncCopy = (sync: SyncFacet): string | undefined => {
 const syncFailureAction = (
   reason: SyncFailureReason | undefined,
   remote: RemoteFacet,
-): 'signIn' | 'upgrade' | 'reconnectGithub' | 'syncNow' | 'retry' | undefined => {
+): 'signIn' | 'upgrade' | 'reconnectGithub' | 'moved' | 'syncNow' | 'retry' | undefined => {
   switch (reason) {
     case 'unauthorized': {
-      return remote.provider === 'github' ? 'reconnectGithub' : 'signIn';
+      /* Only Tau Cloud is reached with this device's own session (D18). */
+      return remote.kind === 'tau' ? 'signIn' : isGithubRemote(remote) ? 'reconnectGithub' : 'retry';
     }
     case 'notEntitled':
     case 'quota': {
@@ -161,8 +201,15 @@ const syncFailureAction = (
     }
     case 'forbidden':
     case 'notFound': {
-      return remote.provider === 'github' ? 'reconnectGithub' : 'retry';
+      return isGithubRemote(remote) ? 'reconnectGithub' : 'retry';
     }
+    /* D11: only the proxy's refused GitHub redirect raises this class. */
+    case 'moved': {
+      return 'moved';
+    }
+    /* A plan cannot carry large files to a Git remote (D18): the sentence names
+       the files to move, and the push is tried again once they are gone. */
+    case 'largeFiles':
     case 'rejected':
     case 'offline': {
       return 'syncNow';
@@ -203,10 +250,14 @@ const gitRemoteLabel = (url: string | undefined, github = false): string => {
  * it names the authority rather than the mechanism: a person deciding whether
  * to grant `repo` is deciding whether Tau may read their private repositories.
  *
+ * @param githubAvailable - `false` when this deployment has no GitHub
+ *   connection, so there is no picker to point at (D8).
  * @returns The sentence to show under the field.
  */
-const authoritySentence = (): string =>
-  'Advanced HTTPS remotes are anonymous. Use the GitHub picker above for private or writable repositories.';
+const authoritySentence = (githubAvailable: boolean | undefined): string =>
+  githubAvailable === false
+    ? 'Advanced HTTPS remotes are anonymous, so a GitHub address here is linked read-only.'
+    : 'Advanced HTTPS remotes are anonymous, so a GitHub address here is linked read-only. Use the GitHub picker above for private or writable repositories.';
 
 /**
  * *Available on Pro*, with the route the rest of the app already uses (N4).
@@ -252,6 +303,7 @@ function GitRemoteForm({
   /* P50: what this deployment allows, read from the page's own environment —
    * the server never tells the page to relax a client-side guard. */
   const allowPrivate = ENV.TAU_GIT_REMOTE_ALLOW_PRIVATE;
+  const githubAvailable = useGithubConnectionAvailable();
   const problem = url === '' ? undefined : gitRemoteUrlProblem(url, { allowPrivate });
   return (
     <div className='flex flex-col gap-2'>
@@ -271,7 +323,7 @@ function GitRemoteForm({
         }}
       />
       <p id='remote-git-authority' className='text-xs text-muted-foreground'>
-        {authoritySentence()}
+        {authoritySentence(githubAvailable)}
       </p>
       {/*
         Large objects do not cross this wire, and the port refuses the push by
@@ -295,14 +347,102 @@ function GitRemoteForm({
 }
 
 /**
+ * *Repository moved* (D11).
+ *
+ * The API's git proxy will not follow a renamed or transferred repository with
+ * the project's credential, so the repository is looked up again by its stable
+ * id on the connection it was picked from. A new address is offered, and the
+ * remote is re-pointed only once the person confirms it (policy rule 11).
+ *
+ * @param props - The project, the remote's own sentence, the re-point verb and
+ *   the fallback action for when there is no new address to offer.
+ * @returns The row.
+ */
+function MovedRepository({
+  projectId,
+  sentence,
+  onUpdate,
+  fallback,
+}: {
+  readonly projectId: string | undefined;
+  readonly sentence: string;
+  readonly onUpdate: (connectionId: string, repository: GithubRepository) => void;
+  readonly fallback: ReactNode;
+}): React.JSX.Element {
+  const binding = projectId === undefined ? undefined : githubProjectBinding.get(projectId);
+  const lookup = useQuery({
+    queryKey: ['github', 'repository', binding?.connectionId, binding?.repositoryId],
+    enabled: binding !== undefined,
+    retry: false,
+    queryFn: async () =>
+      binding === undefined ? undefined : githubConnections.repository(binding.connectionId, binding.repositoryId),
+  });
+  const [confirming, setConfirming] = useState(false);
+  /* The confirmation's buttons unmount on *Keep*; focus returns to *Update remote*. */
+  const [kept, setKept] = useState(false);
+  const moved = lookup.data !== undefined && lookup.data.cloneUrl !== binding?.repositoryUrl ? lookup.data : undefined;
+  if (binding === undefined || moved === undefined) {
+    return (
+      <span className='flex flex-wrap items-center gap-2 text-xs'>
+        <span className='min-w-0 flex-1'>{lookup.isError ? githubErrorMessage(lookup.error) : sentence}</span>
+        {fallback}
+      </span>
+    );
+  }
+  if (confirming) {
+    return (
+      <div className='flex flex-col gap-2'>
+        <p className='text-sm'>{`Update this project's remote to ${moved.fullName}? Every revision stays on this device.`}</p>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Button
+            autoFocus
+            size='sm'
+            onClick={() => {
+              setConfirming(false);
+              onUpdate(binding.connectionId, moved);
+            }}
+          >
+            Update remote
+          </Button>
+          <Button
+            size='sm'
+            variant='ghost'
+            onClick={() => {
+              setConfirming(false);
+              setKept(true);
+            }}
+          >
+            Keep current remote
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <span className='flex flex-wrap items-center gap-2 text-xs'>
+      <span className='min-w-0 flex-1'>{`This repository moved to ${moved.fullName}.`}</span>
+      <Button
+        autoFocus={kept}
+        size='xs'
+        variant='outline'
+        onClick={() => {
+          setConfirming(true);
+        }}
+      >
+        Update remote
+      </Button>
+    </span>
+  );
+}
+
+/**
  * *Sync* — the fourth region of the Revisions pane (S26, S34, S35).
  *
  * Presentational on purpose: it takes the projection's remote facet and three
  * callbacks, so the pane can render it, a test can script it, and nothing here
  * mounts a revision actor (which is what made earlier revision components hang
- * in jsdom). The one thing it does own is the GitHub consent window, because a
- * browser blocks a pop-up that is opened after an `await` — so it has to be
- * opened inside the click, which only the component can do.
+ * in jsdom). The one GitHub step it owns is minting the picked repository's
+ * token; consent itself is a full-page navigation the picker starts (D28).
  *
  * The copy names the authority a connection asks for before it asks (A18), the
  * storage row reads as a plan rather than as LFS (EQ7), and a refused push
@@ -374,6 +514,8 @@ export function RevisionSyncRegion({
           </Button>
         );
       }
+      /* Where there is no new address to offer, picking the repository again is the fix. */
+      case 'moved':
       case 'reconnectGithub': {
         return (
           <Button
@@ -430,7 +572,7 @@ export function RevisionSyncRegion({
     pendingConnection?.kind === 'tau'
       ? 'Tau Cloud'
       : pendingConnection?.kind === 'github'
-        ? pendingConnection.selection.repository.fullName
+        ? pendingConnection.repository.fullName
         : pendingConnection?.kind === 'git'
           ? gitRemoteLabel(pendingConnection.url)
           : undefined;
@@ -443,16 +585,17 @@ export function RevisionSyncRegion({
       } else if (pending.kind === 'git') {
         await onConnect('git', pending.url);
       } else {
-        const { selection } = pending;
-        const token = await githubConnections.token(selection.connection.id);
+        const { connectionId, repository } = pending;
+        const token = await githubConnections.token(connectionId);
         const authorization = `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`;
-        await onConnect('git', selection.repository.cloneUrl, {
+        await onConnect('git', repository.cloneUrl, {
           authorization,
           provider: 'github',
-          repositoryId: String(selection.repository.id),
-          connectionId: selection.connection.id,
+          repositoryId: String(repository.id),
+          connectionId,
           generation: token.generation,
-          fetchOnly: selection.repository.access !== 'write',
+          expiresAt: token.expiresAt,
+          fetchOnly: repository.access !== 'write',
         });
       }
       setPendingConnection(undefined);
@@ -471,14 +614,24 @@ export function RevisionSyncRegion({
       onUpgrade?.();
       return;
     }
+    /* D11: a moved repository keeps its id, so the address decides sameness too. */
     const same =
       pending.kind === 'tau'
         ? remote.kind === 'tau'
         : pending.kind === 'github'
           ? remote.kind === 'git' &&
             remote.provider === 'github' &&
-            remote.repositoryId === String(pending.selection.repository.id)
+            remote.repositoryId === String(pending.repository.id) &&
+            remote.url === pending.repository.cloneUrl
           : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+    /* R-U6: the same repository with changed access is re-sent with it. */
+    const accessChanged = pending.kind === 'github' && remote.fetchOnly !== (pending.repository.access !== 'write');
+    /* D3: the same remote picked while its credential is refused is the
+     * reconnect itself. It re-mints and re-sends, with nothing to replace. */
+    if (same && (remote.phase === 'reconnectRequired' || failureAction === 'reconnectGithub' || accessChanged)) {
+      await commitConnection(pending);
+      return;
+    }
     if (same) {
       setChangingBackup(false);
       setChoice(undefined);
@@ -640,7 +793,13 @@ export function RevisionSyncRegion({
           <GithubRepositoryPicker
             actionLabel='Connect repository'
             returnTo={globalThis.location.pathname}
-            onSelect={async (selection) => requestConnection({ kind: 'github', selection })}
+            onSelect={async (selection) =>
+              requestConnection({
+                kind: 'github',
+                connectionId: selection.connection.id,
+                repository: selection.repository,
+              })
+            }
           />
           <details>
             <summary className='text-sm text-muted-foreground'>Advanced HTTPS remote</summary>
@@ -715,7 +874,16 @@ export function RevisionSyncRegion({
             from `sync.reason`, which is a contract. A count is not a reason,
             and a reason with no verb is not an answer.
           */}
-          {sync.error === undefined ? undefined : (
+          {sync.error === undefined ? undefined : failureAction === 'moved' ? (
+            <MovedRepository
+              projectId={projectId}
+              sentence={sync.error}
+              fallback={renderFailureAction(failureAction)}
+              onUpdate={(connectionId, repository) => {
+                void commitConnection({ kind: 'github', connectionId, repository });
+              }}
+            />
+          ) : (
             <span className='flex flex-wrap items-center gap-2 text-xs'>
               <span className='min-w-0 flex-1'>{sync.error}</span>
               {renderFailureAction(failureAction)}
@@ -817,19 +985,39 @@ export function RevisionSyncRegion({
       */}
       {remote.phase === 'reconnectRequired' ? (
         <div className='flex flex-col gap-2'>
-          <p role='alert' aria-label='GitHub connection' className='flex items-center gap-2 text-sm'>
-            <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-            <span>{remote.error ?? 'Your GitHub connection needs to be renewed.'}</span>
-          </p>
-          <Button
-            size='sm'
-            className='self-start'
-            onClick={() => {
-              setChoice('git');
-            }}
+          <p
+            role='alert'
+            aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote credentials'}
+            className='flex items-center gap-2 text-sm'
           >
-            Reconnect GitHub
-          </Button>
+            <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+            <span>{reconnectCopy(remote)}</span>
+          </p>
+          {isGithubRemote(remote) ? (
+            <Button
+              size='sm'
+              className='self-start'
+              onClick={() => {
+                setChoice('git');
+                setChangingBackup(true);
+              }}
+            >
+              Reconnect GitHub
+            </Button>
+          ) : (
+            <Button
+              size='sm'
+              variant='outline'
+              className='self-start'
+              onClick={() => {
+                if (remote.url !== undefined) {
+                  void requestConnection({ kind: 'git', url: remote.url });
+                }
+              }}
+            >
+              Retry
+            </Button>
+          )}
         </div>
       ) : undefined}
 

@@ -1,6 +1,6 @@
-import { useLoaderData, useLocation, useNavigate } from 'react-router';
+import { Link, useLoaderData, useLocation, useNavigate } from 'react-router';
 import type { MetaDescriptor } from 'react-router';
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useId, useRef, useState, useCallback, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { AlertCircle, X, XCircle } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -45,10 +45,10 @@ import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest 
 import { largeObjectThresholdBytes } from '@taucad/revisions';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
+import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
-import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
 import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
@@ -127,6 +127,10 @@ export default function ImportRoute(): React.JSX.Element {
   const [linkedError, setLinkedError] = useState<string>();
   const [linkedReviewBlocked, setLinkedReviewBlocked] = useState(false);
   const [linkedSyncChats, setLinkedSyncChats] = useState(true);
+  const githubConnectionAvailable = useGithubConnectionAvailable();
+  const branchLabelId = useId();
+  const mainFileLabelId = useId();
+  const linkedMainFileLabelId = useId();
 
   // Track active import mode
   const [activeMode, setActiveMode] = useState<ImportMode | undefined>(undefined);
@@ -245,6 +249,10 @@ export default function ImportRoute(): React.JSX.Element {
     () => (linkedSelection?.manifest === undefined ? undefined : parseProjectManifestBytes(linkedSelection.manifest)),
     [linkedSelection],
   );
+  /* D19: a tau.json id already on this device can only be opened, never imported twice. */
+  const linkedManifestId = linkedManifest?.success === true ? linkedManifest.data.id : undefined;
+  const linkedExisting = useProjectSlugs(linkedManifestId);
+  const linkedExistingBlocks = linkedManifestId !== undefined && linkedExisting.status !== 'not-found';
   const linkedNeedsSetup =
     linkedSelection !== undefined &&
     (linkedSelection.branch.head === undefined ||
@@ -509,6 +517,7 @@ export default function ImportRoute(): React.JSX.Element {
         repositoryId: linkedSelection.repository.id,
         repositoryUrl: linkedSelection.repository.cloneUrl,
         generation: prepared.generation,
+        author: githubNoreplyAuthor(linkedSelection.connection.subject, linkedSelection.connection.login),
       });
       void navigate(projectUrl(created.slugs));
     } catch (error) {
@@ -682,12 +691,23 @@ export default function ImportRoute(): React.JSX.Element {
                 {!isCheckingOrFetching && !repoMetadata ? (
                   <div className='flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning'>
                     <AlertCircle className='size-5 shrink-0' />
-                    <div className='flex flex-col gap-1'>
-                      <div className='font-semibold'>Repository Not Found</div>
+                    <div className='flex flex-col items-start gap-1'>
+                      <div className='font-semibold'>Couldn’t open this repository</div>
                       <div className='text-sm'>
-                        The repository may not exist, be private, or you may not have access to it. Please check the URL
-                        and try again.
+                        {gitHubError?.message ?? "Tau couldn't find a public repository at this address."}
                       </div>
+                      {githubConnectionAvailable === false ? undefined : (
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          className='mt-2'
+                          onClick={() => {
+                            gitHubActorRef.send({ type: 'updateRepoUrl', url: '' });
+                          }}
+                        >
+                          Choose a private repository from GitHub
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ) : undefined}
@@ -716,8 +736,11 @@ export default function ImportRoute(): React.JSX.Element {
                     {/* Branch Selector or Error */}
                     {branches.length > 0 ? (
                       <div className='space-y-2 rounded-lg border bg-sidebar p-6'>
-                        <label className='text-sm font-medium'>Branch</label>
+                        <span id={branchLabelId} className='text-sm font-medium'>
+                          Branch
+                        </span>
                         <BranchSelector
+                          labelId={branchLabelId}
                           branches={branches}
                           selectedBranch={selectedBranch}
                           isLoadingMore={isLoadingMoreBranches}
@@ -747,8 +770,14 @@ export default function ImportRoute(): React.JSX.Element {
 
                     {/* Main File Selector or Error */}
                     {repoFiles.length > 0 || isLoadingFiles ? (
-                      <div className='space-y-2 rounded-lg border bg-sidebar p-6'>
-                        <label className='text-sm font-medium'>Main File</label>
+                      <div
+                        role='group'
+                        aria-labelledby={mainFileLabelId}
+                        className='space-y-2 rounded-lg border bg-sidebar p-6'
+                      >
+                        <span id={mainFileLabelId} className='text-sm font-medium'>
+                          Main File
+                        </span>
                         <FileSelector
                           dataSource={repoFilesDataSource}
                           selectedFile={gitHubSelectedMainFile}
@@ -823,7 +852,11 @@ export default function ImportRoute(): React.JSX.Element {
                       </div>
                       <div>
                         <h2 className='font-medium'>Import from GitHub</h2>
-                        <p className='text-xs text-muted-foreground'>Enter a repository URL</p>
+                        <p className='text-xs text-muted-foreground'>
+                          {githubConnectionAvailable === false
+                            ? 'Enter a public repository URL'
+                            : 'Link a repository you can access, or copy a public one'}
+                        </p>
                       </div>
                     </div>
 
@@ -892,11 +925,17 @@ export default function ImportRoute(): React.JSX.Element {
                       </p>
                     </div>
                     <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-                      <div className='space-y-2'>
-                        <label className='text-sm font-medium'>Main file</label>
+                      <div role='group' aria-labelledby={linkedMainFileLabelId} className='space-y-2'>
+                        <label
+                          id={linkedMainFileLabelId}
+                          htmlFor={linkedSelection.files.length === 0 ? 'linked-main-file' : undefined}
+                          className='text-sm font-medium'
+                        >
+                          Main file
+                        </label>
                         {linkedSelection.files.length === 0 ? (
                           <Input
-                            aria-label='New main file'
+                            id='linked-main-file'
                             value={linkedMainFile}
                             onChange={(event) => {
                               setLinkedMainFile(event.target.value);
@@ -934,10 +973,15 @@ export default function ImportRoute(): React.JSX.Element {
                         {linkedNeedsSetup ? (
                           <>
                             Setup change: add or update <span className='font-mono'>tau.json</span>
-                            {linkedSelection.files.length === 0 ? ` and create ${linkedMainFile}` : ''}.
+                            {linkedSelection.files.length === 0 ? ` and create ${linkedMainFile}` : ''}, with Tau’s{' '}
+                            <span className='font-mono'>.gitignore</span> and{' '}
+                            <span className='font-mono'>.gitattributes</span> entries.
                           </>
                         ) : (
-                          'Setup change: none; the local branch will point at the selected GitHub commit.'
+                          <>
+                            Setup change: Tau’s <span className='font-mono'>.gitignore</span> and{' '}
+                            <span className='font-mono'>.gitattributes</span> entries, only when missing.
+                          </>
                         )}
                       </p>
                       <p>Commit author: {linkedSelection.connection.login} using GitHub’s no-reply address.</p>
@@ -958,6 +1002,14 @@ export default function ImportRoute(): React.JSX.Element {
                         Choose a supported CAD source file as the project’s main file.
                       </p>
                     )}
+                    {linkedExisting.status === 'resolved' && linkedManifestId !== undefined ? (
+                      <div role='alert' className='flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm'>
+                        <span className='flex-1'>This repository is already a project on this device.</span>
+                        <Button asChild size='sm' variant='outline'>
+                          <Link to={projectUrl(linkedExisting.value)}>Open project</Link>
+                        </Button>
+                      </div>
+                    ) : undefined}
                     {linkedError === undefined ? undefined : (
                       <p role='alert' className='text-sm text-destructive'>
                         {linkedError}
@@ -968,6 +1020,7 @@ export default function ImportRoute(): React.JSX.Element {
                         disabled={
                           linkedBusy ||
                           linkedReviewBlocked ||
+                          linkedExistingBlocks ||
                           !linkedMainFileSupported ||
                           linkedMainFile === '' ||
                           linkedTargetBranch === ''

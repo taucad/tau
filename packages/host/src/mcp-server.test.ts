@@ -14,10 +14,14 @@ import { createServer, request } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { HostToolDefinition, HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
+import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
+import { createMachineToolRegistry } from '@taucad/agent-tools/registry';
+import type { MachinePrintPlanner } from '@taucad/agent-tools/registry';
+import type { MachineArtifactReference, MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
@@ -26,6 +30,57 @@ import { connectMcpOverFetch } from '#acp/fixtures/mcp-fetch-client.js';
 
 const token = 'agent-server-token-with-at-least-32-characters';
 const secret = randomBytes(32).toString('base64url');
+
+const jsonRpcReplySchema = z.object({
+  id: z.number(),
+  result: z.unknown().optional(),
+  error: z.object({ code: z.number(), message: z.string() }).optional(),
+});
+const toolsListSchema = z.object({
+  tools: z.array(z.object({ name: z.string(), inputSchema: z.record(z.string(), z.unknown()) })),
+});
+const toolResultSchema = z.object({ isError: z.boolean().optional(), structuredContent: z.unknown().optional() });
+
+/**
+ * One raw Streamable-HTTP MCP session: `initialize`, then any request by method.
+ *
+ * `connectMcpOverFetch` only calls tools; listing them needs the session id it keeps.
+ *
+ * @param url - The mounted `/mcp` route.
+ * @param authorization - The capability's `Authorization` header.
+ * @returns The `initialize` reply and a requester bound to its session.
+ */
+const openMcpSession = async (url: string, authorization: string) => {
+  let nextId = 0;
+  let sessionId: string | undefined;
+  const post = async (body: Readonly<Record<string, unknown>>): Promise<Response> =>
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        authorization,
+        ...(sessionId === undefined ? {} : { 'mcp-session-id': sessionId }),
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', ...body }),
+    });
+  const request = async (method: string, params: Readonly<Record<string, unknown>>) => {
+    nextId += 1;
+    const response = await post({ id: nextId, method, params });
+    sessionId ??= response.headers.get('mcp-session-id') ?? undefined;
+    const body = await response.text();
+    expect(response.status, body).toBe(200);
+    const frame = body.split('\n').find((line) => line.startsWith('data:'));
+    return jsonRpcReplySchema.parse(JSON.parse(frame === undefined ? body : frame.slice('data:'.length)));
+  };
+  const initialized = await request('initialize', {
+    protocolVersion: '2025-06-18',
+    capabilities: {},
+    clientInfo: { name: 'tau-host-mcp-test', version: '0.0.0' },
+  });
+  await post({ method: 'notifications/initialized' });
+  return { initialized, request };
+};
 
 const stubLauncher = (): NodeAgentLauncher =>
   ({
@@ -335,35 +390,63 @@ describe('the mounted /mcp route', () => {
     expect(invocations).toHaveLength(1);
   }, 30_000);
 
-  it('offers request_print beside the CAD four and dispatches it into the registry by name', async () => {
-    const printTools: readonly HostToolDefinition[] = [
-      {
-        name: 'request_print',
-        description: 'Ask to print one CAD source file on a bound machine.',
-        inputSchema: {
-          type: 'object',
-          properties: { targetFile: { type: 'string' }, machineId: { type: 'string' } },
-          required: ['targetFile'],
-          additionalProperties: false,
+  /* The real machine registry's definitions and handler, never a hand-written
+   * schema: a hand-written one is how a draft-07 `definitions` reference the
+   * SDK could not read reached every external agent's `initialize` as HTTP 500. */
+  it('should initialize, list and call request_print from the real machine registry', async () => {
+    const timestamp = '2026-09-24T00:00:00.000Z';
+    const machine = {
+      machineId: 'machine-1',
+      providerId: 'bambu',
+      descriptor: { id: 'physical-machine-1', name: 'Workshop X1C', model: 'X1C' },
+      snapshot: { connection: 'connected', readiness: 'idle', observedAt: timestamp },
+      freshness: 'current',
+    } as unknown as MachineDirectoryEntry;
+    const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
+      requestId: input.requestId,
+      machineId: input.machineId,
+      artifact: input.artifact,
+      configuration: input.configuration,
+      requestedBy: input.requestedBy,
+      summary: input.summary ?? { fileName: 'main.gcode.3mf' },
+      state: 'awaiting-approval',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+    /* Only what request_print reads; any other client call fails the test. */
+    const client = {
+      list: async () => ({
+        cursor: {
+          hostId: 'host-1',
+          authorityId: 'authority-1',
+          workspaceId: 'workspace-1',
+          generation: 'generation-1',
+          position: 1,
+          revision: 1,
+        },
+        entries: [machine],
+      }),
+      requestPrint,
+    } as unknown as MachineClient;
+    const planPrint = vi.fn<MachinePrintPlanner>(async () => ({
+      artifact: {
+        path: '.tau/artifacts/call__main.ts-gcode.3mf/main.gcode.3mf',
+        digest: `sha256:${'d'.repeat(64)}`,
+      } as unknown as MachineArtifactReference,
+      configuration: { expectedBedType: 'textured-pei' },
+      summary: { layers: 125 },
+    }));
+    const machineRegistry = createMachineToolRegistry(client, { planPrint });
+    endpoint = createHostMcpEndpoint({
+      secret,
+      registry: {
+        list: () => machineRegistry.list(),
+        invoke: async (invocation) => {
+          invocations.push(invocation);
+          return machineRegistry.invoke(invocation);
         },
       },
-      /* A registry tool outside the grant is never registered over MCP. */
-      { name: 'list_machines', description: 'List machines.', inputSchema: { type: 'object', properties: {} } },
-    ];
-    const printRegistry: ToolRegistry = {
-      list: () => printTools,
-      invoke: async (invocation) => {
-        invocations.push(invocation);
-        return {
-          content: {
-            request: { requestId: invocation.toolCallId, machineId: 'machine-1', state: 'awaiting-approval' },
-            nextStep: "Waiting for a person to accept the request in Tau's Print pane.",
-          },
-          isError: false,
-        };
-      },
-    };
-    endpoint = createHostMcpEndpoint({ secret, registry: printRegistry });
+    });
     server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot: '/tmp/tau-mcp-test', mcp: endpoint });
     await server.ready;
     const capability = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
@@ -373,33 +456,69 @@ describe('the mounted /mcp route', () => {
       chatId: 'chat-1',
       signal: new AbortController().signal,
     });
-    const client = await connectMcpOverFetch({
-      url: new URL('mcp', server.url()).href,
-      headers: { authorization: `Bearer ${capability.token}` },
+    const session = await openMcpSession(new URL('mcp', server.url()).href, `Bearer ${capability.token}`);
+
+    expect(session.initialized).toMatchObject({ result: { serverInfo: { name: '@taucad/mcp' } } });
+    const listed = await session.request('tools/list', {});
+    const { tools } = toolsListSchema.parse(listed.result);
+    /* The grant, in order; the registry's other machine tools are never registered. */
+    expect(tools.map(({ name }) => name)).toEqual([
+      'get_kernel_result',
+      'test_model',
+      'screenshot',
+      'export_geometry',
+      'request_print',
+      'get_print_request',
+      'list_print_requests',
+      'cancel_print',
+    ]);
+    expect(tools.find(({ name }) => name === 'request_print')?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: { targetFile: { type: 'string' } },
+      required: ['targetFile'],
     });
 
-    const requested = await client.callTool('request_print', { targetFile: 'main.ts' });
+    const call = async (name: string, args: Readonly<Record<string, unknown>>) => {
+      const reply = await session.request('tools/call', { name, arguments: args });
+      return toolResultSchema.parse(reply.result);
+    };
+    const options = { layerHeight: 0.2, supports: { enabled: true, angles: [45, 60] } };
+    const requested = await call('request_print', { targetFile: 'main.ts', options });
 
     expect(requested.isError).not.toBe(true);
     expect(invocations).toHaveLength(1);
-    expect(invocations[0]).toMatchObject({
-      toolName: 'request_print',
-      runId: 'run-1',
-      input: { targetFile: 'main.ts' },
-    });
-    /* The registry's content comes back verbatim as structured content, keyed
-     * by the call id `@taucad/mcp` minted for this one request. */
-    expect(requested.structuredContent).toEqual({
-      request: { requestId: invocations[0]?.toolCallId, machineId: 'machine-1', state: 'awaiting-approval' },
-      nextStep: "Waiting for a person to accept the request in Tau's Print pane.",
-    });
+    expect(invocations[0]).toMatchObject({ toolName: 'request_print', runId: 'run-1' });
     /* An MCP caller has no interrupt port: the registry sees no `approve` and
      * hands the request back awaiting approval instead of pausing anything. */
     expect(invocations[0]?.approve).toBeUndefined();
+    expect(planPrint.mock.calls[0]?.[0]).toMatchObject({ targetFile: 'main.ts', options });
+    const requestId = invocations[0]?.toolCallId;
+    expect(requested.structuredContent).toMatchObject({
+      request: {
+        requestId,
+        machineId: 'machine-1',
+        state: 'awaiting-approval',
+        requestedBy: { kind: 'agent', id: 'external-agent', label: 'External agent' },
+        summary: { fileName: 'main.gcode.3mf', layers: 125 },
+      },
+      machineName: 'Workshop X1C',
+    });
+    expect(z.object({ nextStep: z.string() }).parse(requested.structuredContent).nextStep).toContain(
+      `Waiting for a person to accept print request ${String(requestId)}`,
+    );
 
-    const unlisted = await client.callTool('list_machines', {});
-    expect(unlisted.isError).toBe(true);
+    /* The SDK validates against the registry's published schema before the host sees the call... */
+    await expect(call('request_print', { targetFile: 'main.ts', preset: 'ultra' })).resolves.toMatchObject({
+      isError: true,
+    });
+    await expect(call('list_machines', {})).resolves.toMatchObject({ isError: true });
     expect(invocations).toHaveLength(1);
+    /* ...and what the wire form leaves open (slicer options are any JSON on the
+     * wire) the registry refuses before anything reaches the ledger. */
+    await expect(call('request_print', { targetFile: 'main.ts', options: 'fine' })).resolves.toMatchObject({
+      isError: true,
+    });
+    expect(requestPrint).toHaveBeenCalledTimes(1);
     await release();
   }, 30_000);
 

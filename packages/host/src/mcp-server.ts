@@ -64,10 +64,10 @@ export const hostMcpAllowedTools = [
   toolName.testModel,
   toolName.screenshot,
   toolName.exportGeometry,
-  'request_print',
-  'get_print_request',
-  'list_print_requests',
-  'cancel_print',
+  toolName.requestPrint,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+  toolName.cancelPrint,
 ] as const;
 
 /** One name from {@link hostMcpAllowedTools}. @public */
@@ -80,10 +80,10 @@ export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
  * calls and this endpoint answers from the registry's own content.
  */
 const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
-  'request_print',
-  'get_print_request',
-  'list_print_requests',
-  'cancel_print',
+  toolName.requestPrint,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+  toolName.cancelPrint,
 ]);
 
 const isJsonObject = (value: JsonValue): value is JsonObject =>
@@ -96,15 +96,15 @@ const isJsonObject = (value: JsonValue): value is JsonObject =>
  * @returns The host tool `@taucad/mcp` registers.
  */
 const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMcpHostTool => {
-  const reads = definition.name === 'get_print_request' || definition.name === 'list_print_requests';
+  const reads = definition.name === toolName.getPrintRequest || definition.name === toolName.listPrintRequests;
   return {
     name: definition.name,
     description: definition.description,
     inputSchema: definition.inputSchema,
     annotations: {
       readOnlyHint: reads,
-      destructiveHint: definition.name === 'cancel_print',
-      idempotentHint: definition.name !== 'cancel_print',
+      destructiveHint: definition.name === toolName.cancelPrint,
+      idempotentHint: definition.name !== toolName.cancelPrint,
       /* A print request reaches a machine outside this process once accepted. */
       openWorldHint: !reads,
     },

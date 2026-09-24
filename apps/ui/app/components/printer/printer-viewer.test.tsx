@@ -6,6 +6,7 @@ import { Plus, Printer } from 'lucide-react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { mock } from 'vitest-mock-extended';
 import { writeBambuContainer } from '@taucad/slicer/container';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { printerAccent } from '#components/printer/printer-colors.constants.js';
 import { layerAtTime, liveTime } from '#components/printer/printer-playback.js';
 import type { PrinterSceneProps } from '#components/printer/printer-scene.js';
@@ -32,11 +33,23 @@ const container = writeBambuContainer({
   modelName: 'fixture',
   plate: 'textured-pei',
 });
-const renderPane = ({ body }: FileViewerPaneContent): React.ReactNode => <main>{body}</main>;
+const renderPane = ({ actions, body }: FileViewerPaneContent): React.ReactNode => (
+  <main>
+    <header role='group' aria-label={`File actions for ${name}`}>
+      {actions}
+    </header>
+    {body}
+  </main>
+);
 const readAll = async (): Promise<Uint8Array<ArrayBuffer>> => container;
 
-const renderViewer = (): ReturnType<typeof render> =>
-  render(<PrinterViewer name={name} kind='container' revision={1} readAll={readAll} renderPane={renderPane} />);
+const viewer = (): React.JSX.Element => (
+  <TooltipProvider>
+    <PrinterViewer name={name} kind='container' revision={1} readAll={readAll} renderPane={renderPane} />
+  </TooltipProvider>
+);
+
+const renderViewer = (): ReturnType<typeof render> => render(viewer());
 
 const latestSceneProps = (): PrinterSceneProps => {
   const call = mocks.scene.mock.calls.at(-1);
@@ -58,6 +71,7 @@ const liveState = (overrides: Partial<PrinterLiveState> = {}): PrinterLiveState 
   nozzleTarget: 250,
   bedTarget: 65,
   filamentColor: loadedSpoolColor,
+  manifest: undefined,
   ...overrides,
 });
 
@@ -217,20 +231,31 @@ describe('PrinterViewer', () => {
     expect(within(controls).getByRole('radio', { name: 'Max' })).toBeDisabled();
 
     mocks.live = liveState({ position: { currentLayer: 3, totalLayers: 3, progress: 90 } });
-    view.rerender(
-      <PrinterViewer name={name} kind='container' revision={1} readAll={readAll} renderPane={renderPane} />,
-    );
+    view.rerender(viewer());
     expect(props.store.getTime()).toBe(liveTime(props.program, mocks.live.position));
     expect(layerAtTime(props.program, props.store.getTime())).toBe(2);
 
     mocks.live = liveState({ runState: 'succeeded', isActive: false });
-    view.rerender(
-      <PrinterViewer name={name} kind='container' revision={1} readAll={readAll} renderPane={renderPane} />,
-    );
+    view.rerender(viewer());
     expect(within(controls).getByRole('switch', { name: 'Live' })).not.toBeChecked();
     expect(within(controls).getByRole('switch', { name: 'Live' })).toBeDisabled();
     expect(controls).toHaveTextContent('No active run to follow');
     expect(within(controls).getByRole('slider', { name: 'Time' })).toBeEnabled();
+  });
+
+  it('should frame the print again from the pane actions without touching playback', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+    await screen.findByRole('region', { name: `Printer simulation: ${name}` });
+    const initial = latestSceneProps();
+    const actions = screen.getByRole('group', { name: `File actions for ${name}` });
+    const frame = within(actions).getByRole('button', { name: 'Frame the print' });
+    await user.click(frame);
+    expect(latestSceneProps().frameRequest).toBe(initial.frameRequest + 1);
+    await user.click(frame);
+    expect(latestSceneProps().frameRequest).toBe(initial.frameRequest + 2);
+    expect(latestSceneProps().store).toBe(initial.store);
+    expect(initial.store.getSnapshot().isPlaying).toBe(true);
   });
 
   it('should report a file that cannot be read', async () => {

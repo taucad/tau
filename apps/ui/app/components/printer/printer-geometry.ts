@@ -10,6 +10,8 @@
  * @module
  */
 
+import { toolpathSegmentKinds } from '@taucad/slicer/toolpath';
+import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import type { PrinterManifest } from '#components/printer/printer-manifest.fixture.js';
 
 /** Axis-aligned box: centre and full size, millimetres. */
@@ -32,7 +34,10 @@ export type PrinterGeometry = Readonly<{
   motion: 'plate-descends' | 'head-rises';
   /** Plate slab in plate space; its top face is z = 0. */
   plate: PrinterBox;
-  /** Usable envelope outline in plate space. */
+  /**
+   * Usable envelope outline in world space: below the nozzle plane when the plate descends through
+   * it, above the plate when the head rises.
+   */
   envelope: PrinterBox;
   /** Opaque housing under the lowest plate position. */
   base: PrinterBox;
@@ -63,8 +68,6 @@ export type PrinterGeometry = Readonly<{
   purgeChute: PrinterBox;
   /** Chamber light strip; absent when the manifest declares no light. */
   light: PrinterBox | undefined;
-  /** Camera framing for the whole machine including the material unit. */
-  camera: Readonly<{ target: readonly [number, number, number]; radius: number }>;
 }>;
 
 const plateThickness = 4;
@@ -164,13 +167,14 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
           };
         })()
       : undefined;
-  const machineTop = enclosureTop + (materialUnit ? materialUnitHeight : 0);
-  const cameraTargetZ = (machineTop + enclosureFloor) / 2;
   return {
     buildVolume: build,
     motion,
     plate: { center: [centerX, centerY, -plateThickness / 2], size: [build[0], build[1], plateThickness] },
-    envelope: { center: [centerX, centerY, build[2] / 2], size: build },
+    envelope: {
+      center: [centerX, centerY, motion === 'plate-descends' ? -build[2] / 2 : build[2] / 2],
+      size: build,
+    },
     base: {
       center: [centerX, centerY, (chamberFloor + enclosureFloor) / 2],
       size: [outer[0], outer[1], chamberFloor - enclosureFloor],
@@ -200,11 +204,48 @@ export const derivePrinterGeometry = (manifest: PrinterManifest): PrinterGeometr
     light: manifest.chamber.light
       ? { center: [centerX, centerY - halfY + 10, enclosureTop - 10], size: [build[0] * 0.8, 6, 3] }
       : undefined,
-    camera: {
-      target: [centerX, centerY, cameraTargetZ],
-      radius: Math.hypot(outer[0], outer[1], machineTop - enclosureFloor) / 2,
-    },
   };
+};
+
+/** Axis-aligned bounds in millimetres, plate frame. */
+export type PrinterBounds = Readonly<{
+  min: readonly [number, number, number];
+  max: readonly [number, number, number];
+}>;
+
+/** Segment kinds that lay down the part itself; purge lines, skirts, brims and moves are not the part. */
+const partKinds: ReadonlySet<number> = new Set(
+  (['outer-wall', 'inner-wall', 'infill', 'support'] as const).map((kind) => toolpathSegmentKinds.indexOf(kind)),
+);
+
+/**
+ * The part's own extent: every wall, infill and support segment, measured on
+ * the extrusion centrelines, standing on the plate (Z starts at 0).
+ *
+ * The toolpath's `bounds` also hold the purge line, the moves from home and the
+ * end lift, so they overstate the part; they remain the right input for the
+ * fits-the-plate check.
+ *
+ * @param program - The parsed toolpath.
+ * @returns The part's bounds, or `undefined` when the G-code labels no walls, infill or support.
+ */
+export const partBounds = (
+  program: Pick<ToolpathProgram, 'segmentCount' | 'kinds' | 'positions'>,
+): PrinterBounds | undefined => {
+  const min = [Infinity, Infinity, 0];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let segment = 0; segment < program.segmentCount; segment += 1) {
+    if (!partKinds.has(program.kinds[segment]!)) {
+      continue;
+    }
+    for (let offset = segment * 6; offset < segment * 6 + 6; offset += 1) {
+      const axis = offset % 3;
+      const value = program.positions[offset]!;
+      min[axis] = Math.min(min[axis]!, value);
+      max[axis] = Math.max(max[axis]!, value);
+    }
+  }
+  return Number.isFinite(max[2]!) ? { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] } : undefined;
 };
 
 /** Plate group Z offset in world space for the print height reached so far. */
@@ -215,18 +256,130 @@ export const plateOffsetForHeight = (geometry: Pick<PrinterGeometry, 'motion'>, 
 export const toolheadLiftForHeight = (geometry: Pick<PrinterGeometry, 'motion'>, height: number): number =>
   geometry.motion === 'head-rises' ? height : 0;
 
-/** Camera position that frames the whole machine from the front-right, above. */
+/** Vertical field of view of the scene camera, degrees: a slightly long lens keeps the machine calm around the print. */
+export const printerCameraFov = 30;
+
+/** Where the eye sits and the point it orbits, millimetres in world space. */
+export type PrinterCameraPose = Readonly<{
+  position: readonly [number, number, number];
+  target: readonly [number, number, number];
+}>;
+
+/** The eye looks from the front right, above the plate: degrees round from the front, and up from level. */
+const viewAzimuth = 32;
+const viewElevation = 16;
+/** Share of the view the framed box fills on its binding axis. */
+const framingFill = 0.88;
+/** How far the framed box widens from the part toward the whole plate, 0 to 1. */
+const plateContext = 0.5;
+/** Millimetres of chamber kept in frame above the toolhead: the gantry, the lid and the base of the material unit. */
+const headroomContext = 50;
+/** Millimetres the eye keeps outside the enclosure, so no near wall or door frame sits on the lens. */
+const enclosureClearance = 20;
+
+const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
+
+const corners = (box: PrinterBounds): Array<readonly [number, number, number]> =>
+  [box.min[0], box.max[0]].flatMap((x) =>
+    [box.min[1], box.max[1]].flatMap((y) => [box.min[2], box.max[2]].map((z) => [x, y, z] as const)),
+  );
+
+/**
+ * The box the camera frames: the part, widened toward the plate for context,
+ * from the plate at the finished height up to some chamber above the toolhead.
+ *
+ * @param geometry - The machine.
+ * @param part - The part's bounds in the plate frame, or the whole toolpath's when the G-code labels no part.
+ * @returns The box in world space.
+ */
+export const framedPrintBox = (
+  geometry: Pick<PrinterGeometry, 'buildVolume' | 'motion' | 'gantry'>,
+  part: PrinterBounds,
+): PrinterBounds => {
+  const [width, depth] = geometry.buildVolume;
+  // ponytail: frames the finished part, not the end-of-print plate drop; a slicer that lowers the plate far
+  // after the last layer takes the part below the frame for that final move.
+  const height = Math.max(0, part.max[2]);
+  // Above the nozzle: the carriage, then some chamber.
+  const above = geometry.gantry.beamZ + geometry.gantry.carriageSize[2] / 2 + headroomContext;
+  const [bottom, top] =
+    geometry.motion === 'plate-descends' ? [-height - plateThickness, above] : [-plateThickness, height + above];
+  // A toolpath that wanders off the plate (home, purge, park moves) never widens the framing past it.
+  const widen = (value: number, edge: number): number => value + (edge - value) * plateContext;
+  return {
+    min: [widen(clamp(part.min[0], 0, width), 0), widen(clamp(part.min[1], 0, depth), 0), bottom],
+    max: [widen(clamp(part.max[0], 0, width), width), widen(clamp(part.max[1], 0, depth), depth), top],
+  };
+};
+
+/**
+ * Place the camera so a box fills the view from the front right for one
+ * canvas aspect: the binding axis meets the fill margin exactly, the other
+ * axis is centred, and the eye stays outside the enclosure.
+ *
+ * @param geometry - The machine whose enclosure the eye keeps clear of.
+ * @param box - The world-space box to frame, from {@link framedPrintBox}.
+ * @param aspect - Canvas width over height.
+ * @returns The camera pose; the target is on the view axis at the box's depth.
+ */
 export const framePrinterCamera = (
-  geometry: Pick<PrinterGeometry, 'camera'>,
-  fovDegrees: number,
-): readonly [number, number, number] => {
-  const distance = (geometry.camera.radius / Math.sin((fovDegrees * Math.PI) / 360)) * 1.05;
-  const direction = [1, -1.25, 0.72] as const;
-  const length = Math.hypot(...direction);
-  const [x, y, z] = geometry.camera.target;
-  return [
-    x + (direction[0] / length) * distance,
-    y + (direction[1] / length) * distance,
-    z + (direction[2] / length) * distance,
-  ];
+  geometry: Pick<PrinterGeometry, 'enclosure'>,
+  box: PrinterBounds,
+  aspect: number,
+): PrinterCameraPose => {
+  const azimuth = (viewAzimuth * Math.PI) / 180;
+  const elevation = (viewElevation * Math.PI) / 180;
+  const forward = [
+    -Math.sin(azimuth) * Math.cos(elevation),
+    Math.cos(azimuth) * Math.cos(elevation),
+    -Math.sin(elevation),
+  ] as const;
+  const right = [Math.cos(azimuth), Math.sin(azimuth), 0] as const;
+  const up = [-Math.sin(azimuth) * Math.sin(elevation), Math.cos(azimuth) * Math.sin(elevation), Math.cos(elevation)];
+  const dot = (a: readonly number[], b: readonly number[]): number => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+  const center = [0, 1, 2].map((axis) => (box.min[axis]! + box.max[axis]!) / 2);
+  const tanVertical = Math.tan((printerCameraFov * Math.PI) / 360) * framingFill;
+  const tanHorizontal = tanVertical * Math.max(0.05, aspect);
+  // For each frustum side, the furthest a corner reaches past it; opposite sides meet at the tightest eye.
+  let pastRight = -Infinity;
+  let pastLeft = -Infinity;
+  let pastTop = -Infinity;
+  let pastBottom = -Infinity;
+  for (const corner of corners(box)) {
+    const offset = corner.map((value, axis) => value - center[axis]!);
+    const [x, y, z] = [dot(offset, right), dot(offset, up), dot(offset, forward)];
+    pastRight = Math.max(pastRight, x - z * tanHorizontal);
+    pastLeft = Math.max(pastLeft, -x - z * tanHorizontal);
+    pastTop = Math.max(pastTop, y - z * tanVertical);
+    pastBottom = Math.max(pastBottom, -y - z * tanVertical);
+  }
+  // The binding axis sets the depth; standing further back leaves the other axis centred with even slack.
+  const depth = Math.min(-(pastRight + pastLeft) / (2 * tanHorizontal), -(pastTop + pastBottom) / (2 * tanVertical));
+  const across = (pastRight - pastLeft) / 2;
+  const lift = (pastTop - pastBottom) / 2;
+  const fitted = [0, 1, 2].map(
+    (axis) => center[axis]! + right[axis]! * across + up[axis]! * lift + forward[axis]! * depth,
+  );
+  const { center: middle, size } = geometry.enclosure;
+  const half = size.map((value) => value / 2 + enclosureClearance);
+  const isInside = fitted.every((value, axis) => Math.abs(value - middle[axis]!) < half[axis]!);
+  // Back straight out along the view axis: the framing stays centred and only grows smaller.
+  const backOut = isInside
+    ? Math.min(
+        ...forward.map((component, axis) =>
+          component === 0
+            ? Infinity
+            : (half[axis]! + Math.sign(component) * (fitted[axis]! - middle[axis]!)) / Math.abs(component),
+        ),
+      )
+    : 0;
+  const eye = fitted.map((value, axis) => value - forward[axis]! * backOut);
+  const reach = dot(
+    center.map((value, axis) => value - eye[axis]!),
+    forward,
+  );
+  return {
+    position: [eye[0]!, eye[1]!, eye[2]!],
+    target: [eye[0]! + forward[0] * reach, eye[1]! + forward[1] * reach, eye[2]! + forward[2] * reach],
+  };
 };

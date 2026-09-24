@@ -74,6 +74,18 @@ describe('createToolpathReveal', () => {
       reveal.dispose();
     }
   });
+
+  it('should keep the lowest layers the filament colour on the light theme, fading toward shade, not white', () => {
+    const reveal = createToolpathReveal(program, createToolpathPalette('#ff0000', 'light'));
+    try {
+      const bottom = vertexColor(reveal.baseColors, firstOfKind(0, 'outer-wall') * 2);
+      // Fading toward a light tint turned the whole print pink on the dark plate.
+      expect(bottom.r).toBeGreaterThan(bottom.g * 4);
+      expect(bottom.r).toBeGreaterThan(bottom.b * 4);
+    } finally {
+      reveal.dispose();
+    }
+  });
 });
 
 describe('updateToolpathReveal', () => {

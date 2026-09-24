@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import { Pause, Play, Radio, RotateCcw, SkipBack, SkipForward } from 'lucide-react';
+import { Focus, Pause, Play, Radio, RotateCcw, SkipBack, SkipForward } from 'lucide-react';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { useTheme } from '#hooks/use-theme.js';
+import { PaneButton } from '#components/ui/pane-button.js';
 import { printerAccent } from '#components/printer/printer-colors.constants.js';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { derivePrinterGeometry } from '#components/printer/printer-geometry.js';
@@ -70,6 +71,7 @@ export function PrinterViewer({ name, kind, revision, readAll, renderPane }: Pri
 
 function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterViewerProps, 'revision'>): ReactNode {
   const [resource, setResource] = useState<ProgramResource>({ kind: 'loading' });
+  const [frameRequest, setFrameRequest] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -119,7 +121,20 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
       ),
     });
   }
-  return renderPane({ body: <PrinterSimulation name={name} program={resource.program} /> });
+  return renderPane({
+    actions: (
+      <PaneButton
+        tooltip='Frame the print'
+        aria-label='Frame the print'
+        onClick={() => {
+          setFrameRequest((count) => count + 1);
+        }}
+      >
+        <Focus />
+      </PaneButton>
+    ),
+    body: <PrinterSimulation name={name} program={resource.program} frameRequest={frameRequest} />,
+  });
 }
 
 /**
@@ -135,7 +150,11 @@ const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
   return { manifest, geometry };
 };
 
-function PrinterSimulation({ name, program }: Readonly<{ name: string; program: ToolpathProgram }>): React.JSX.Element {
+function PrinterSimulation({
+  name,
+  program,
+  frameRequest,
+}: Readonly<{ name: string; program: ToolpathProgram; frameRequest: number }>): React.JSX.Element {
   const isReducedMotion = useSyncExternalStore(subscribeMotion, getMotion, serverMotion);
   const { theme } = useTheme();
   const live = usePrinterLive();
@@ -244,6 +263,7 @@ function PrinterSimulation({ name, program }: Readonly<{ name: string; program: 
               chamberLight={live?.chamberLight ?? 'unknown'}
               isReducedMotion={isReducedMotion}
               liveNozzleTarget={live?.nozzleTarget}
+              frameRequest={frameRequest}
               onContextLost={handleContextLost}
             />
           </div>

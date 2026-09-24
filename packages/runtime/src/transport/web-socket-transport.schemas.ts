@@ -9,12 +9,24 @@ import type { WebSocketLike } from '@taucad/rpc';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { ComputeBinding } from '#types/runtime-compute.types.js';
+import type { PreparedMachineWebSocket } from '#transport/machine-web-socket.js';
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(isRuntimeFileSystem, {
   message: 'webSocketTransport: `fileSystem` must be produced by a `fromX` factory',
 });
 
 const createSocketSchema = z.custom<(url: string) => WebSocketLike>((value) => typeof value === 'function');
+const unavailableMachinesSchema = z.strictObject({
+  available: z.literal(false),
+  reason: z.enum(['unsupported', 'not-granted']),
+});
+const machinesSchema = z.union([
+  z.strictObject({
+    available: z.literal(true),
+    connect: z.custom<PreparedMachineWebSocket['connect']>((value) => typeof value === 'function'),
+  }),
+  unavailableMachinesSchema,
+]);
 
 export const webSocketClientOptionsSchema = z
   .object({
@@ -30,6 +42,8 @@ export const webSocketClientOptionsSchema = z
      */
     fileSystem: runtimeFileSystemSchema.optional(),
     compute: z.custom<ComputeBinding>().optional(),
+    /** Authenticated machines route prepared by `prepareMachineWebSocket`. */
+    machines: machinesSchema.optional(),
     /**
      * Override for socket construction — primary use is unit-test injection
      * of a fake socket pair. The transport owns socket construction on

@@ -2,10 +2,11 @@ import type { Topic } from '@taucad/events';
 import { ResourceQueue } from '@taucad/filesystem';
 import type { CacheValue } from '@taucad/cache-core';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
+import { convert, quantityKinds } from '@taucad/units/quantity';
+import type { Quantity } from '@taucad/units/quantity';
 import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
-import type { JobJournal } from '#jobs/job-journal.js';
 import type { MachineDescriptor, MachineSession, MachineSnapshot } from '#machines/machine.js';
 
 const identity = z
@@ -20,6 +21,53 @@ const envelope = z.strictObject({
   depth: z.number().positive(),
   height: z.number().positive(),
   unit: z.literal('m'),
+});
+const nozzleDiameter = z.unknown().transform((value, context) => {
+  const candidate = value as Quantity;
+  const converted = convert({ quantity: candidate, to: 'm' });
+  if (
+    converted.status !== 'success' ||
+    candidate.kind !== quantityKinds.diameter ||
+    candidate.space !== 'linear' ||
+    typeof converted.value.value !== 'number' ||
+    converted.value.value <= 0
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Nozzle diameter must be a positive executable diameter quantity.',
+    });
+    return z.NEVER;
+  }
+  return candidate;
+});
+const temperaturePoint = z.unknown().transform((value, context) => {
+  const candidate = value as Quantity;
+  const converted = convert({ quantity: candidate, to: 'Cel' });
+  if (
+    converted.status !== 'success' ||
+    candidate.kind !== quantityKinds.temperature ||
+    candidate.space !== 'point' ||
+    typeof converted.value.value !== 'number'
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Temperature must be an executable affine point quantity.',
+    });
+    return z.NEVER;
+  }
+  return candidate;
+});
+const percentage = z.number().min(0).max(100);
+const material = z.strictObject({
+  slot: count.max(127),
+  state: z.enum(['empty', 'loaded', 'unknown']),
+  materialId: identity.optional(),
+  brand: identity.optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9A-F]{6}$/u)
+    .optional(),
+  remainingPercent: percentage.optional(),
 });
 const descriptorSchema = z.strictObject({
   id: identity,
@@ -43,7 +91,13 @@ const descriptorSchema = z.strictObject({
   ratedEnvelope: envelope,
   printableEnvelope: envelope,
   tools: z
-    .array(z.strictObject({ id: identity, kind: identity, nozzleDiameter: z.number().positive().optional() }))
+    .array(
+      z.strictObject({
+        id: identity,
+        kind: identity,
+        nozzleDiameter: nozzleDiameter.optional(),
+      }),
+    )
     .max(128),
   materialSystem: z.strictObject({ kind: identity, slotCount: count.max(128) }),
   bedTypes: names,
@@ -56,8 +110,61 @@ const snapshotSchema = z.strictObject({
   setup: z.strictObject({
     toolId: identity.optional(),
     bedType: identity.optional(),
-    materials: z.array(z.strictObject({ slot: count.max(127), materialId: identity.optional() })).max(128),
+    materials: z.array(material).max(128),
   }),
+  run: z
+    .strictObject({
+      state: z.enum(['failed', 'finishing', 'idle', 'paused', 'preparing', 'printing', 'succeeded', 'unknown']),
+      progress: z.number().min(0).max(100).optional(),
+      remainingSeconds: count.optional(),
+      name: identity.optional(),
+      file: identity.optional(),
+      currentLayer: count.optional(),
+      totalLayers: count.optional(),
+      stage: identity.optional(),
+      printType: identity.optional(),
+      speedProfile: z.enum(['silent', 'standard', 'sport', 'ludicrous', 'unknown']).optional(),
+      speedPercent: z.number().min(0).max(1000).optional(),
+    })
+    .optional(),
+  temperatures: z
+    .strictObject({
+      nozzle: temperaturePoint.optional(),
+      nozzleTarget: temperaturePoint.optional(),
+      bed: temperaturePoint.optional(),
+      bedTarget: temperaturePoint.optional(),
+      chamber: temperaturePoint.optional(),
+    })
+    .optional(),
+  fans: z
+    .strictObject({
+      part: percentage.optional(),
+      auxiliary: percentage.optional(),
+      chamber: percentage.optional(),
+    })
+    .optional(),
+  materialSystem: z
+    .strictObject({
+      currentSlot: count.max(127).optional(),
+      targetSlot: count.max(127).optional(),
+      units: z
+        .array(
+          z.strictObject({
+            unit: count.max(31),
+            humidityIndex: count.max(100).optional(),
+            temperature: temperaturePoint.optional(),
+          }),
+        )
+        .max(32),
+    })
+    .optional(),
+  network: z.strictObject({ wifiSignalDbm: z.number().min(-150).max(0).optional() }).optional(),
+  lights: z.strictObject({ chamber: z.enum(['off', 'on', 'unknown']).optional() }).optional(),
+  removableStorage: z.enum(['absent', 'present']).optional(),
+  alerts: z
+    .array(z.strictObject({ code: identity }))
+    .max(128)
+    .optional(),
 });
 const entrySchema = z.strictObject({
   machineId: identity,
@@ -66,15 +173,37 @@ const entrySchema = z.strictObject({
   snapshot: snapshotSchema,
   freshness: z.enum(['current', 'stale']),
 });
-const scope = { hostId: identity, authorityId: identity, workspaceId: identity };
+const scope = {
+  hostId: identity,
+  authorityId: identity,
+  workspaceId: identity,
+};
 const eventScope = { ...scope, revision: count.min(1) };
 const eventSchema = z.discriminatedUnion('type', [
-  z.strictObject({ ...eventScope, type: z.literal('machine-directory-upserted'), entry: entrySchema }),
+  z.strictObject({
+    ...eventScope,
+    type: z.literal('machine-directory-upserted'),
+    entry: entrySchema,
+  }),
   z.strictObject({ ...eventScope, type: z.literal('machine-directory-stale') }),
-  z.strictObject({ ...eventScope, type: z.literal('machine-directory-removed'), machineId: identity }),
+  z.strictObject({
+    ...eventScope,
+    type: z.literal('machine-directory-removed'),
+    machineId: identity,
+  }),
 ]);
-const cursorSchema = z.strictObject({ ...scope, generation: identity, position: count, revision: count });
-const limits = { code: 'MACHINE_DIRECTORY', maximumDepth: 12, maximumNodes: 16_384, maximumCharacters: 131_072 };
+const cursorSchema = z.strictObject({
+  ...scope,
+  generation: identity,
+  position: count,
+  revision: count,
+});
+const limits = {
+  code: 'MACHINE_DIRECTORY',
+  maximumDepth: 12,
+  maximumNodes: 16_384,
+  maximumCharacters: 131_072,
+};
 const pageSize = 128;
 const maximumLag = 1024;
 const maximumEntries = 256;
@@ -89,11 +218,14 @@ export type MachineDirectoryEvent = Readonly<{
   revision: number;
 }> &
   (
-    | Readonly<{ type: 'machine-directory-upserted'; entry: MachineDirectoryEntry }>
+    | Readonly<{
+        type: 'machine-directory-upserted';
+        entry: MachineDirectoryEntry;
+      }>
     | Readonly<{ type: 'machine-directory-stale' }>
     | Readonly<{ type: 'machine-directory-removed'; machineId: string }>
   );
-/** Host-selected identity and a validated observation. Current means this session incarnation, not wall-clock freshness or physical readiness. @internal */
+/** Host-selected identity and a validated observation. Current means this session incarnation, not wall-clock freshness or physical readiness. @public */
 export type MachineDirectoryEntry = Readonly<{
   machineId: string;
   providerId: string;
@@ -101,18 +233,26 @@ export type MachineDirectoryEntry = Readonly<{
   snapshot: MachineSnapshot;
   freshness: 'current' | 'stale';
 }>;
-/** A scoped read-through position distinct from projection revision. @internal */
+/** A scoped read-through position distinct from projection revision. @public */
 export type MachineDirectoryCursor = Readonly<z.infer<typeof cursorSchema>>;
-/** Full workspace directory at one committed read-through boundary. @internal */
+/** Full workspace directory at one committed read-through boundary. @public */
 export type MachineDirectorySnapshot = Readonly<{
   cursor: MachineDirectoryCursor;
   entries: readonly MachineDirectoryEntry[];
 }>;
-/** Durable observation frames; callers deduplicate by cursor/revision. @internal */
+/** Durable observation frames; callers deduplicate by cursor/revision. @public */
 export type MachineDirectoryFrame =
   | Readonly<{ type: 'snapshot'; snapshot: MachineDirectorySnapshot }>
-  | Readonly<{ type: 'event'; cursor: MachineDirectoryCursor; event: MachineDirectoryEvent }>
-  | Readonly<{ type: 'resync-required'; reason: 'revision-mismatch' | 'lag'; snapshot: MachineDirectorySnapshot }>;
+  | Readonly<{
+      type: 'event';
+      cursor: MachineDirectoryCursor;
+      event: MachineDirectoryEvent;
+    }>
+  | Readonly<{
+      type: 'resync-required';
+      reason: 'revision-mismatch' | 'lag';
+      snapshot: MachineDirectorySnapshot;
+    }>;
 /** Host-local transfer of one already-connected session. @internal */
 export type AttachMachineDirectorySessionInput = Readonly<{
   workspaceId: string;
@@ -136,13 +276,24 @@ export type MachineDirectory = Readonly<{
   watch(input: MachineDirectoryWatchInput): AsyncIterable<MachineDirectoryFrame>;
   close(): Promise<void>;
 }>;
+/** Narrow append/replay port owned by the machine authority. It is deliberately independent of jobs. @internal */
+export type MachineDirectoryJournal = Readonly<{
+  append(candidate: unknown): Promise<Readonly<{ sequence: number; event: CacheValue }>>;
+  replay(input: Readonly<{ cursor: number; limit: number }>): Promise<
+    Readonly<{
+      records: ReadonlyArray<Readonly<{ sequence: number; event: CacheValue }>>;
+      nextCursor: number;
+      endCursor: number;
+    }>
+  >;
+}>;
 /** The authority owns storage, generation and commit notifications. @internal */
 export type CreateMachineDirectoryInput = Readonly<{
   hostId: string;
   authorityId: string;
   /** Stable identity of the journal history, retained across ordinary host restarts. */
   generation: string;
-  journal: Pick<JobJournal<CacheValue>, 'append' | 'replay'>;
+  journal: MachineDirectoryJournal;
   commits: Topic<void>;
   onError(error: unknown): void;
 }>;
@@ -164,6 +315,68 @@ const freeze = <Value>(value: Value): Value => {
 export const parseMachineDirectoryEvent = (value: unknown): MachineDirectoryEvent =>
   freeze(eventSchema.parse(cloneBoundedJson(value, limits)));
 
+/** Parse one bounded public directory cursor.
+ * @param value - Untrusted cursor value.
+ * @returns Detached, frozen cursor.
+ * @public
+ */
+export const parseMachineDirectoryCursor = (value: unknown): MachineDirectoryCursor =>
+  freeze(cursorSchema.parse(cloneBoundedJson(value, limits)));
+
+/** Parse one bounded public directory entry.
+ * @param value - Untrusted entry value.
+ * @returns Detached, frozen entry.
+ * @public
+ */
+export const parseMachineDirectoryEntry = (value: unknown): MachineDirectoryEntry =>
+  freeze(entrySchema.parse(cloneBoundedJson(value, limits)));
+
+/** Parse one bounded public directory snapshot.
+ * @param value - Untrusted snapshot value.
+ * @returns Detached, frozen snapshot.
+ * @public
+ */
+export const parseMachineDirectorySnapshot = (value: unknown): MachineDirectorySnapshot => {
+  const candidate = cloneBoundedJson(value, limits);
+  const parsed = z
+    .strictObject({
+      cursor: cursorSchema,
+      entries: z.array(entrySchema).max(maximumEntries),
+    })
+    .parse(candidate);
+  return freeze(parsed);
+};
+
+/** Parse one bounded public directory stream frame.
+ * @param value - Untrusted stream-frame value.
+ * @returns Detached, frozen stream frame.
+ * @public
+ */
+export const parseMachineDirectoryFrame = (value: unknown): MachineDirectoryFrame => {
+  const candidate = cloneBoundedJson(value, limits);
+  const snapshot = z.strictObject({
+    cursor: cursorSchema,
+    entries: z.array(entrySchema).max(maximumEntries),
+  });
+  return freeze(
+    z
+      .discriminatedUnion('type', [
+        z.strictObject({ type: z.literal('snapshot'), snapshot }),
+        z.strictObject({
+          type: z.literal('event'),
+          cursor: cursorSchema,
+          event: eventSchema,
+        }),
+        z.strictObject({
+          type: z.literal('resync-required'),
+          reason: z.enum(['revision-mismatch', 'lag']),
+          snapshot,
+        }),
+      ])
+      .parse(candidate),
+  );
+};
+
 const machineEvent = (value: CacheValue): MachineDirectoryEvent | undefined => {
   if (
     value !== null &&
@@ -183,7 +396,10 @@ const observationState = (entry: MachineDirectoryEntry): string => {
   return canonicalizeCacheValue({ value: { ...entry, snapshot } });
 };
 
-type Projection = { revision: number; entries: Map<string, MachineDirectoryEntry> };
+type Projection = {
+  revision: number;
+  entries: Map<string, MachineDirectoryEntry>;
+};
 type OwnedSession = {
   input: AttachMachineDirectorySessionInput;
   abort: AbortController;
@@ -284,9 +500,20 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
     workspaceId: string,
     at = position,
     revision = projection(workspaceId).revision,
-  ): MachineDirectoryCursor => freeze({ hostId, authorityId, workspaceId, generation, position: at, revision });
+  ): MachineDirectoryCursor =>
+    freeze({
+      hostId,
+      authorityId,
+      workspaceId,
+      generation,
+      position: at,
+      revision,
+    });
   const snapshot = (workspaceId: string): MachineDirectorySnapshot =>
-    freeze({ cursor: cursor(workspaceId), entries: [...projection(workspaceId).entries.values()] });
+    freeze({
+      cursor: cursor(workspaceId),
+      entries: [...projection(workspaceId).entries.values()],
+    });
 
   const commit = async (event: MachineDirectoryEvent): Promise<void> => {
     const parsed = parseMachineDirectoryEvent(event);
@@ -353,18 +580,32 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
       if (previous && observationState(previous) === observationState(entry)) {
         return;
       }
-      await commit(change(owned.input.workspaceId, { type: 'machine-directory-upserted', entry }));
+      await commit(
+        change(owned.input.workspaceId, {
+          type: 'machine-directory-upserted',
+          entry,
+        }),
+      );
     });
   const observe = async (owned: OwnedSession, entry: MachineDirectoryEntry): Promise<void> => {
     try {
-      for await (const event of owned.input.session.observe({ signal: owned.abort.signal })) {
+      for await (const event of owned.input.session.observe({
+        signal: owned.abort.signal,
+      })) {
         if (!isCurrent(owned)) {
           break;
         }
         const parsed = z
-          .strictObject({ type: z.literal('snapshot'), snapshot: snapshotSchema })
+          .strictObject({
+            type: z.literal('snapshot'),
+            snapshot: snapshotSchema,
+          })
           .parse(cloneBoundedJson(event, limits));
-        await publish(owned, { ...entry, snapshot: parsed.snapshot, freshness: 'current' });
+        await publish(owned, {
+          ...entry,
+          snapshot: parsed.snapshot,
+          freshness: 'current',
+        });
       }
     } catch (error) {
       if (isCurrent(owned)) {
@@ -436,7 +677,12 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
   const readTail = async (
     after: MachineDirectoryCursor,
     end: number,
-  ): Promise<Readonly<{ cursor: MachineDirectoryCursor; frames: readonly MachineDirectoryFrame[] }>> => {
+  ): Promise<
+    Readonly<{
+      cursor: MachineDirectoryCursor;
+      frames: readonly MachineDirectoryFrame[];
+    }>
+  > => {
     const page = await input.journal.replay({
       cursor: after.position,
       limit: Math.min(pageSize, end - after.position),
@@ -489,7 +735,10 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
               const entry = projection(workspaceId).entries.get(machineId);
               if (isCurrent(owned) && entry?.freshness === 'current') {
                 await commit(
-                  change(workspaceId, { type: 'machine-directory-upserted', entry: { ...entry, freshness: 'stale' } }),
+                  change(workspaceId, {
+                    type: 'machine-directory-upserted',
+                    entry: { ...entry, freshness: 'stale' },
+                  }),
                 );
               }
             });
@@ -500,13 +749,23 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
           }
         }
         const descriptor = descriptorSchema.parse(
-          cloneBoundedJson(await attachment.session.getDescriptor({ signal: owned.abort.signal }), limits),
+          cloneBoundedJson(
+            await attachment.session.getDescriptor({
+              signal: owned.abort.signal,
+            }),
+            limits,
+          ),
         );
         if (!isCurrent(owned)) {
           return;
         }
         const current = snapshotSchema.parse(
-          cloneBoundedJson(await attachment.session.getSnapshot({ signal: owned.abort.signal }), limits),
+          cloneBoundedJson(
+            await attachment.session.getSnapshot({
+              signal: owned.abort.signal,
+            }),
+            limits,
+          ),
         );
         if (!isCurrent(owned)) {
           return;
@@ -553,7 +812,12 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
           if (sessions.get(key) !== owned) {
             throw new Error('MACHINE_DIRECTORY_SESSION_REPLACED');
           }
-          await commit(change(workspaceId, { type: 'machine-directory-removed', machineId }));
+          await commit(
+            change(workspaceId, {
+              type: 'machine-directory-removed',
+              machineId,
+            }),
+          );
         });
       } finally {
         if (owned) {
@@ -616,7 +880,11 @@ export const createMachineDirectory = async (input: CreateMachineDirectoryInput)
             checked = true;
             if (!valid) {
               after = current.cursor;
-              yield { type: 'resync-required', reason: 'revision-mismatch', snapshot: current };
+              yield {
+                type: 'resync-required',
+                reason: 'revision-mismatch',
+                snapshot: current,
+              };
             }
           }
           if (current.cursor.position - after.position > maximumLag) {

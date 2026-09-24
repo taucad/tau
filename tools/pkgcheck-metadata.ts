@@ -664,6 +664,9 @@ export const nodeOnlyDependencies: readonly string[] = [
   'ws',
 ];
 
+const hostTargets = ['browser', 'daemon', 'native', 'node', 'python'] as const;
+const expectedHostTargets = hostTargets.map((value) => `"${value}"`).join(', ');
+
 /**
  * `taucad.hostTarget` was inert metadata read once at scaffold time. This is the
  * gate that makes the declaration mean something.
@@ -680,14 +683,14 @@ export const hostTargetIssues = ({
   readonly hasPayloadGuardTest: boolean;
 }): string[] => {
   if (hostTarget === undefined) {
-    return [`${packageName}: package.json taucad.hostTarget is not declared (expected "browser" or "node")`];
+    return [`${packageName}: package.json taucad.hostTarget is not declared (expected ${expectedHostTargets})`];
   }
-  if (hostTarget !== 'browser' && hostTarget !== 'node') {
+  if (!hostTargets.includes(hostTarget as (typeof hostTargets)[number])) {
     return [
-      `${packageName}: package.json taucad.hostTarget is ${JSON.stringify(hostTarget)} (expected "browser" or "node")`,
+      `${packageName}: package.json taucad.hostTarget is ${JSON.stringify(hostTarget)} (expected ${expectedHostTargets})`,
     ];
   }
-  if (hostTarget === 'node') {
+  if (hostTarget !== 'browser') {
     return [];
   }
 

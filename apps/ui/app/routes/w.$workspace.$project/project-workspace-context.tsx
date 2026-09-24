@@ -21,6 +21,7 @@ export type WorkbenchPanelId =
   | 'revisions'
   | 'agents'
   | 'jobs'
+  | 'machines'
   | 'export'
   | 'share'
   | 'details'

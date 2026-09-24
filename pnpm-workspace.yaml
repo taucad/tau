@@ -27,8 +27,6 @@ allowBuilds:
   unrs-resolver: true
   '@nestjs/core': true
   nestjs-pino: true
-  # Install hook only prints upgrade warnings; Tau does not need it to run.
-  '@hatchet-dev/typescript-sdk': false
   '@google/genai': false
   # Downloads the platform vale binary at install time; required for prose linting.
   '@vvago/vale': true
@@ -274,7 +272,6 @@ catalog:
   nanoraster: ^0.5.1
   n8ao: 1.10.2
   postprocessing: 6.39.1
-  '@hatchet-dev/typescript-sdk': 1.29.2
   '@cfworker/json-schema': 4.1.1
   '@standard-schema/spec': 1.1.0
   ai: 6.0.208
@@ -283,6 +280,9 @@ catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.75
   '@lhncbc/ucum-lhc': 7.1.9
   '@json-structure/sdk': 0.7.0
+  mqtt: 5.15.2
+  basic-ftp: 6.2.1
+  fflate: 0.8.3
   portless: 0.15.6
   streamdown: ^2.6.0
   '@streamdown/code': ^1.1.1
@@ -365,7 +365,6 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-win32-arm64-msvc@1.2.3'
   - '@rolldown/binding-win32-x64-msvc@1.2.3'
   - rolldown@1.2.3
-  - '@hatchet-dev/typescript-sdk@1.29.2'
   - electron@43.5.1
   - '@agentclientprotocol/sdk@1.4.0'
   - '@agentclientprotocol/claude-agent-acp@0.70.0'

@@ -329,6 +329,7 @@ describe('plugin generator', () => {
       expect(plugin).toContain(`'${role}s.default'`);
       expect(typeTest).toContain(projection);
       expect(typeTest).toContain(`ReturnType<typeof ${factory}>`);
+      expect(typeTest.match(/from '#index\.js';/g)).toHaveLength(1);
       expect(typeTest).toContain(role === 'job' ? 'invalidJobConfiguration' : 'invalidMachineBinding');
       const readme = readText(tree, `${root}/README.md`);
       expect(readme).toContain("import { defineRuntime } from '@taucad/runtime/host';");

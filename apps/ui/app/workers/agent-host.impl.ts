@@ -1750,6 +1750,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     ...runtimeRpc,
     parameters,
     geospec: geoSpecClient,
+    machines: runtimeClient.machines,
     testingEnabled: request.testingEnabled ?? false,
   });
   const activeReference: { current?: WorkerSession } = {};

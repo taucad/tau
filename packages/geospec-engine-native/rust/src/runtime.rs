@@ -217,6 +217,22 @@ impl Engine {
         } else {
             None
         };
+        let response = |identity: &SubjectIdentity| {
+            encode(&Json::object([
+                ("requestId", Json::string(request_id)),
+                (
+                    "result",
+                    Json::object([(
+                        "subject",
+                        Json::object([
+                            ("subjectHash", Json::string(identity.hash())),
+                            ("format", Json::string(format)),
+                            ("descriptor", identity.descriptor().clone()),
+                        ]),
+                    )]),
+                ),
+            ]))
+        };
         let mut bundle = ResourceBundle::default();
         for (metadata, bytes) in metadata.iter().zip(resources) {
             let name = string_field(object(metadata, "resource metadata")?, "name")?;
@@ -316,6 +332,29 @@ impl Engine {
                     .brep
                     .as_ref()
                     .ok_or_else(|| invalid("This engine composition has no BRep connector."))?;
+                let profile = connector.identity_profile();
+                for subject in self.subjects.values() {
+                    if subject.format != SubjectFormat::Step
+                        || subject.pmi_source_bytes() != Some(primary.as_slice())
+                    {
+                        continue;
+                    }
+                    let identity = subject.semantic_identity.get().expect("admitted identity");
+                    let descriptor = object(identity.descriptor(), "retained descriptor")?;
+                    if field(descriptor, "ingestOptions")?
+                        == &Json::Object(
+                            step_name
+                                .map(|name| vec![("name".into(), Json::string(name))])
+                                .unwrap_or_default(),
+                        )
+                        && string_field(descriptor, "ingestProfile")? == profile.ingest_profile
+                        && string_field(descriptor, "backendProfile")? == profile.backend_profile
+                    {
+                        let response = response(identity)?;
+                        self.observations.add(WorkCounter::Admissions, 1);
+                        return Ok(response);
+                    }
+                }
                 self.observations.add(WorkCounter::Parses, 1);
                 let document = connector.open_step(&primary).map_err(backend)?;
                 let facts = document.admission_facts().map_err(backend)?;
@@ -329,7 +368,7 @@ impl Engine {
                     &primary,
                     &facts.source_length_unit,
                     facts.source_unit_to_millimeters,
-                    connector.identity_profile(),
+                    profile,
                     step_name,
                 )
                 .map_err(backend)?;
@@ -367,20 +406,7 @@ impl Engine {
             .semantic_identity
             .get()
             .expect("Full-format admission constructs identity");
-        let response = encode(&Json::object([
-            ("requestId", Json::string(request_id)),
-            (
-                "result",
-                Json::object([(
-                    "subject",
-                    Json::object([
-                        ("subjectHash", Json::string(identity.hash())),
-                        ("format", Json::string(format)),
-                        ("descriptor", identity.descriptor().clone()),
-                    ]),
-                )]),
-            ),
-        ]))?;
+        let response = response(identity)?;
         self.admit_retained(retained)?;
         Ok(response)
     }

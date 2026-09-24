@@ -10,7 +10,12 @@ import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { httpHeader } from '#constants/http-header.constant.js';
 
 it('should expose the durable chat run identity and bearer session token to cross-origin clients', () => {
-  expect(corsBaseConfiguration.exposedHeaders).toEqual(['x-tau-chat-run-id', 'x-tau-operation-id', 'set-auth-token']);
+  expect(corsBaseConfiguration.exposedHeaders).toEqual([
+    'x-tau-chat-run-id',
+    'x-tau-operation-id',
+    'set-auth-token',
+    'retry-after',
+  ]);
   expect(corsBaseConfiguration.allowedHeaders).toContain('x-tau-attempt-id');
 });
 

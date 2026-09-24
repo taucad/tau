@@ -1,6 +1,19 @@
 import process from 'node:process';
+import type { FastifyRequest } from 'fastify';
 import type { PinoLoggerOptions } from 'fastify/types/logger.js';
-import { consoleLoggingConfig, logServiceConfig } from '#logger/logger-factory.js';
+import { consoleLoggingConfig, logServiceConfig, redactUrlQuery } from '#logger/logger-factory.js';
+
+/** Fastify's own request projection, with an OAuth callback's query dropped as the request logger drops it. */
+const serializers = {
+  req: (request: FastifyRequest) => ({
+    method: request.method,
+    url: redactUrlQuery(request.url),
+    version: request.headers['accept-version'],
+    host: request.host,
+    remoteAddress: request.ip,
+    remotePort: request.socket.remotePort,
+  }),
+};
 
 /**
  * The logger Fastify is constructed with, before the ConfigService exists.
@@ -19,7 +32,7 @@ export function getFastifyLoggingConfig(): PinoLoggerOptions | boolean {
   // We use process.env here as the config service is not available when this function is called during app bootstrap.
   switch (process.env.NODE_ENV) {
     case 'production': {
-      return logServiceConfig(process.env.LOG_SERVICE);
+      return { ...logServiceConfig(process.env.LOG_SERVICE), serializers };
     }
 
     case 'test': {
@@ -28,7 +41,7 @@ export function getFastifyLoggingConfig(): PinoLoggerOptions | boolean {
     }
 
     default: {
-      return consoleLoggingConfig();
+      return { ...consoleLoggingConfig(), serializers };
     }
   }
 }

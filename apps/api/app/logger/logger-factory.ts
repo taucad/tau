@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
-import { loggingRedactPaths, logServiceProvider } from '#constants/app.constant.js';
+import { loggingRedactPaths, loggingRedactQueryPaths, logServiceProvider } from '#constants/app.constant.js';
 import type { LogServiceProvider } from '#constants/app.constant.js';
 import type { Environment } from '#config/environment.config.js';
 
@@ -93,7 +93,20 @@ const formatRequestId = (requestId: string) => {
   return `${colors.cyan}${requestId}${colors.reset}`;
 };
 
-const formatUrl = (url: string, isDevelopmentMode = true) => {
+/**
+ * Drops the query of an OAuth callback URL so its code and state never reach a log line.
+ *
+ * @param url - The request URL as received (path and optional query).
+ * @returns The URL unchanged, or only its path for a callback in `loggingRedactQueryPaths`.
+ */
+export const redactUrlQuery = (url: string): string => {
+  const queryStart = url.search(/[?#]/u);
+  const path = queryStart === -1 ? url : url.slice(0, queryStart);
+  return queryStart !== -1 && loggingRedactQueryPaths.some((pattern) => pattern.test(path)) ? path : url;
+};
+
+const formatUrl = (rawUrl: string, isDevelopmentMode = true) => {
+  const url = redactUrlQuery(rawUrl);
   if (!url) {
     return isDevelopmentMode ? `${colors.white}/${colors.reset}` : '/';
   }
@@ -315,6 +328,18 @@ export async function useLoggerFactory(configService: ConfigService<Environment,
       /** Custom error serializer for stack traces */
       err: serializeError,
       error: serializeError,
+      /**
+       * Receives pino's own fresh request projection, so rewriting it leaves the request untouched. The Nest
+       * Fastify middleware copies the parsed query onto the raw request, so a redacted URL also drops `query`.
+       */
+      req(request: { url?: unknown; query?: unknown }) {
+        const url = typeof request.url === 'string' ? redactUrlQuery(request.url) : request.url;
+        if (url !== request.url) {
+          request.url = url;
+          request.query = undefined;
+        }
+        return request;
+      },
     },
     redact: {
       paths: loggingRedactPaths,

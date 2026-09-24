@@ -6,6 +6,9 @@ import { jsonCodec } from '#lib/zod.lib.js';
 const strictEnvironmentBoolean = (defaultValue: boolean) =>
   z.union([z.boolean(), z.enum(['true', 'false']).transform((value) => value === 'true')]).default(defaultValue);
 
+const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === '' ? undefined : value), schema);
+
 const environmentSchemaBase = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']),
@@ -97,14 +100,17 @@ const environmentSchemaBase = z.object({
   GITHUB_CLIENT_ID: z.string(),
   GITHUB_CLIENT_SECRET: z.string(),
   GITHUB_API_TOKEN: z.string().optional(),
-  GITHUB_REPOSITORY_APP_CLIENT_ID: z.string().optional(),
-  GITHUB_REPOSITORY_APP_CLIENT_SECRET: z.string().optional(),
-  GITHUB_REPOSITORY_APP_SLUG: z.string().optional(),
-  GITHUB_REPOSITORY_APP_CALLBACK_URL: z.url().optional(),
-  GITHUB_REPOSITORY_CONNECTION_KEY: z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{43}$/u, 'must be an unpadded base64url-encoded 32-byte key')
-    .optional(),
+  // An empty value (the copied `.env.example`) means unset, so the App stays wholly unconfigured.
+  GITHUB_REPOSITORY_APP_CLIENT_ID: unsetWhenEmpty(z.string().optional()),
+  GITHUB_REPOSITORY_APP_CLIENT_SECRET: unsetWhenEmpty(z.string().optional()),
+  GITHUB_REPOSITORY_APP_SLUG: unsetWhenEmpty(z.string().optional()),
+  GITHUB_REPOSITORY_APP_CALLBACK_URL: unsetWhenEmpty(z.url().optional()),
+  GITHUB_REPOSITORY_CONNECTION_KEY: unsetWhenEmpty(
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{43}$/u, 'must be an unpadded base64url-encoded 32-byte key')
+      .optional(),
+  ),
   GITHUB_REPOSITORY_CONNECTION_KEY_VERSION: z.coerce.number().int().positive().default(1),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
@@ -273,19 +279,19 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
     });
   }
 
-  const githubRepositoryKeys = [
+  // The App's client id, secret and slug decide whether it is configured, all or none. A callback URL or
+  // connection key on its own leaves it unconfigured; with the App configured they are required too.
+  const githubRepositoryAppKeys = [
     'GITHUB_REPOSITORY_APP_CLIENT_ID',
     'GITHUB_REPOSITORY_APP_CLIENT_SECRET',
     'GITHUB_REPOSITORY_APP_SLUG',
-    'GITHUB_REPOSITORY_APP_CALLBACK_URL',
-    'GITHUB_REPOSITORY_CONNECTION_KEY',
   ] as const;
-  const configuredGithubRepositoryKeys = githubRepositoryKeys.filter((key) => data[key] !== undefined);
-  if (
-    configuredGithubRepositoryKeys.length > 0 &&
-    configuredGithubRepositoryKeys.length < githubRepositoryKeys.length
-  ) {
-    for (const key of githubRepositoryKeys) {
+  if (githubRepositoryAppKeys.some((key) => data[key] !== undefined)) {
+    for (const key of [
+      ...githubRepositoryAppKeys,
+      'GITHUB_REPOSITORY_APP_CALLBACK_URL',
+      'GITHUB_REPOSITORY_CONNECTION_KEY',
+    ] as const) {
       if (data[key] === undefined) {
         context.addIssue({
           code: 'custom',

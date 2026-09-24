@@ -21,7 +21,8 @@ const corsAllowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
  */
 export const corsBaseConfiguration = {
   allowedHeaders: corsAllowedHeaders,
-  exposedHeaders: ['x-tau-chat-run-id', 'x-tau-operation-id', 'set-auth-token'],
+  // `retry-after` carries a rate-limited refusal's retry estimate (`GITHUB_RATE_LIMITED`); the body does not.
+  exposedHeaders: ['x-tau-chat-run-id', 'x-tau-operation-id', 'set-auth-token', 'retry-after'],
   methods: corsAllowedMethods,
   credentials: true,
   maxAge: corsMaxAge,

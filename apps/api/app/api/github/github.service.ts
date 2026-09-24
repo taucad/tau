@@ -5,10 +5,12 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -25,6 +27,8 @@ import { RedisService } from '#redis/redis.service.js';
 const apiVersion = '2026-03-10';
 const startTtlSeconds = 600;
 const completionTtlSeconds = 300;
+/** Pages of 100 read to find a repository's installation; past 1,000 installations or repositories access is `unknown`. */
+const installationLookupPages = 10;
 const refreshSkewMilliseconds = 60_000;
 const refreshLockMilliseconds = 10_000;
 const refreshWaitMilliseconds = 100;
@@ -58,6 +62,27 @@ const tokenSchema = z.object({
   refresh_token: z.string().min(1).optional(),
   refresh_token_expires_in: z.number().int().positive().optional(),
 });
+/** GitHub's token endpoint answers most refusals with 200 and an `error` field. */
+const tokenErrorSchema = z.object({ error: z.string().min(1) });
+const attemptSchema = z.object({ userId: z.string(), sessionId: z.string(), attemptId: z.string(), state: z.string() });
+const callbackFailureCodes = [
+  'GITHUB_CONSENT_DENIED',
+  'GITHUB_CALLBACK_EXPIRED',
+  'GITHUB_CALLBACK_FAILED',
+  'GITHUB_EXPIRING_TOKENS_REQUIRED',
+  'GITHUB_APP_CREDENTIALS_INVALID',
+] as const;
+type CallbackFailureCode = (typeof callbackFailureCodes)[number];
+const failureSchema = z.object({ userId: z.string(), sessionId: z.string(), code: z.enum(callbackFailureCodes) });
+/* Socket errors raised before a request byte leaves this process; anything else may have reached GitHub. */
+const preSendErrorCodes: ReadonlySet<string> = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
 const githubId = z.number().int().positive();
 const userSchema = z.object({ id: githubId, login: z.string().min(1), avatar_url: z.url().nullable() });
 const installationSchema = z.object({
@@ -126,17 +151,108 @@ const startKey = (state: string): string => `github:connection:start:${state}`;
 const pendingKey = (attemptId: string): string => `github:connection:pending:${attemptId}`;
 const attemptKey = (attemptId: string): string => `github:connection:attempt:${attemptId}`;
 const cancelledKey = (attemptId: string): string => `github:connection:cancelled:${attemptId}`;
+const failedKey = (attemptId: string): string => `github:connection:failed:${attemptId}`;
 const completionLockKey = (attemptId: string): string => `github:connection:complete:${attemptId}`;
 const refreshKey = (connectionId: string): string => `github:connection:refresh:${connectionId}`;
-const completionModes: ReadonlySet<string> = new Set(['browser', 'desktop-poll']);
 const base64url = (value: Uint8Array<ArrayBuffer>): string => Buffer.from(value).toString('base64url');
 const oauthChallenge = (verifier: string): string =>
   base64url(Uint8Array.from(createHash('sha256').update(verifier).digest()));
 const reconnectRequired = (): UnauthorizedException =>
   new UnauthorizedException({ code: 'GITHUB_RECONNECT_REQUIRED', message: 'Reconnect GitHub to continue.' });
+const pause = async (): Promise<void> =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, refreshWaitMilliseconds);
+  });
+const responseField = (error: unknown, field: 'code' | 'status'): unknown => {
+  const response = error instanceof HttpException ? error.getResponse() : undefined;
+  return typeof response === 'object' ? (response as Record<string, unknown>)[field] : undefined;
+};
+const callbackFailureCode = (error: unknown): CallbackFailureCode => {
+  const code = responseField(error, 'code');
+  return callbackFailureCodes.find((known) => known === code) ?? 'GITHUB_CALLBACK_FAILED';
+};
+const failedBeforeSending = (error: unknown): boolean => {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const code = typeof cause === 'object' && cause !== null && 'code' in cause ? cause.code : undefined;
+  return typeof code === 'string' && preSendErrorCodes.has(code);
+};
+/**
+ * A rotated refresh token is spent once GitHub reads it, so it is kept only when GitHub provably did not consume
+ * it: the request never left, GitHub throttled or failed (429/5xx), or it refused the App's own credentials.
+ */
+const refreshTokenSurvives = (error: unknown): boolean => {
+  const code = responseField(error, 'code');
+  const status = responseField(error, 'status');
+  return (
+    code === 'GITHUB_RATE_LIMITED' ||
+    code === 'GITHUB_APP_CREDENTIALS_INVALID' ||
+    (code === 'GITHUB_UPSTREAM_FAILED' && typeof status === 'number' && status >= 500) ||
+    (code === 'GITHUB_UPSTREAM_UNAVAILABLE' && error instanceof Error && failedBeforeSending(error.cause))
+  );
+};
+const retryAfterSeconds = (headers: Headers): number | undefined => {
+  const retryAfter = headers.get('retry-after');
+  if (retryAfter !== null && /^\d+$/u.test(retryAfter)) {
+    return Number(retryAfter);
+  }
+  const reset = headers.get('x-ratelimit-reset');
+  return reset !== null && /^\d+$/u.test(reset)
+    ? Math.max(0, Number(reset) - Math.floor(Date.now() / 1000))
+    : undefined;
+};
+/** Maps a non-OK GitHub REST or OAuth response to the module's typed refusal. */
+const upstreamRefusal = (response: Response): HttpException => {
+  if (response.status === 401) {
+    return reconnectRequired();
+  }
+  if (
+    response.status === 429 ||
+    response.headers.get('x-ratelimit-remaining') === '0' ||
+    (response.status === 403 && response.headers.has('retry-after'))
+  ) {
+    const seconds = retryAfterSeconds(response.headers);
+    return new HttpException(
+      {
+        code: 'GITHUB_RATE_LIMITED',
+        message: 'GitHub rate limit reached. Try again after the reported reset time.',
+        ...(seconds === undefined ? {} : { retryAfterSeconds: seconds }),
+      },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
+  }
+  if (response.status === 403 && response.headers.has('x-github-sso')) {
+    return new ForbiddenException({
+      code: 'GITHUB_SSO_REQUIRED',
+      message: 'Start an organization SSO session, then reconnect GitHub.',
+    });
+  }
+  if (response.status === 403) {
+    return new ForbiddenException({
+      code: 'GITHUB_ACCESS_REFUSED',
+      message: 'GitHub refused access to this resource.',
+    });
+  }
+  if (response.status === 404) {
+    return new NotFoundException({
+      code: 'GITHUB_NOT_FOUND_OR_DENIED',
+      message: 'The GitHub resource was not found or this connection cannot access it.',
+    });
+  }
+  return new BadGatewayException({ code: 'GITHUB_UPSTREAM_FAILED', status: response.status });
+};
+const connectionSummary = (
+  row: ConnectionRow,
+): { id: string; subject: number; login: string; avatarUrl?: string; generation: number } => ({
+  id: row.id,
+  subject: row.githubSubject,
+  login: row.login,
+  ...(row.avatarUrl === null ? {} : { avatarUrl: row.avatarUrl }),
+  generation: row.generation,
+});
 
 @Injectable()
 export class GithubService {
+  private readonly logger = new Logger(GithubService.name);
   private readonly clientId: string | undefined;
   private readonly clientSecret: string | undefined;
   private readonly callbackUrl: string | undefined;
@@ -188,6 +304,28 @@ export class GithubService {
   }
 
   private tokenResponse(value: unknown): z.infer<typeof tokenSchema> {
+    const refusal = tokenErrorSchema.safeParse(value);
+    if (refusal.success) {
+      switch (refusal.data.error) {
+        case 'bad_verification_code': {
+          throw new BadRequestException({
+            code: 'GITHUB_CALLBACK_EXPIRED',
+            message: 'The GitHub authorization expired. Connect GitHub again.',
+          });
+        }
+        case 'bad_refresh_token': {
+          throw reconnectRequired();
+        }
+        default: {
+          // Only GitHub's error code is logged; the response carries no credential on this branch.
+          this.logger.error(`GitHub refused the repository App credentials: ${refusal.data.error}`);
+          throw new ServiceUnavailableException({
+            code: 'GITHUB_APP_CREDENTIALS_INVALID',
+            message: 'GitHub refused the configured GitHub App credentials.',
+          });
+        }
+      }
+    }
     const parsed = tokenSchema.safeParse(value);
     if (!parsed.success) {
       throw new BadGatewayException({
@@ -238,17 +376,26 @@ export class GithubService {
     }
   }
 
+  /** Starts an attempt; `returnTo` and `completionMode` arrive unvalidated from the request body. */
   public async start(
     userId: string,
     sessionId: string,
-    returnTo = '/import',
-    completionMode: 'browser' | 'desktop-poll' = 'browser',
+    returnTo: unknown = '/import',
+    completionMode: unknown = 'browser',
   ): Promise<{ attemptId: string; authorizationUrl: string }> {
     const configuration = this.requireConfiguration();
-    if (!completionModes.has(completionMode)) {
+    if (completionMode !== 'browser' && completionMode !== 'desktop-poll') {
       throw new BadRequestException({ code: 'GITHUB_COMPLETION_MODE_INVALID' });
     }
-    if (!returnTo.startsWith('/') || returnTo.startsWith('//') || returnTo.length > 2048) {
+    if (
+      typeof returnTo !== 'string' ||
+      !returnTo.startsWith('/') ||
+      returnTo.includes('//') ||
+      returnTo.includes('\\') ||
+      // A browser strips tab and newline from a URL, so `/\t/evil.example` would navigate to `//evil.example`.
+      [...returnTo].some((character) => character <= '\u001F' || character === '\u007F') ||
+      returnTo.length > 2048
+    ) {
       throw new BadRequestException({ code: 'RETURN_LOCATION_INVALID' });
     }
     const state = base64url(Uint8Array.from(randomBytes(32)));
@@ -283,19 +430,55 @@ export class GithubService {
     return { attemptId, authorizationUrl: url.toString() };
   }
 
-  public async callback(
-    state: string,
-    code: string,
-  ): Promise<{ attemptId: string; returnTo: string; completionMode: 'browser' | 'desktop-poll' }> {
+  /**
+   * Handles GitHub's redirect and returns the completion page URL to send the browser to. It never throws: every
+   * failure becomes `?error=<code>`, and a failure on a readable attempt is recorded so `complete` answers it.
+   */
+  public async callback(parameters: Readonly<{ state?: unknown; code?: unknown; error?: unknown }>): Promise<string> {
+    let start: StartRecord | undefined;
+    try {
+      if (typeof parameters.state === 'string' && oauthValuePattern.test(parameters.state)) {
+        const raw = await this.redisService.client.getdel(startKey(parameters.state));
+        start = raw === null ? undefined : (JSON.parse(raw) as StartRecord);
+      }
+      if (parameters.error !== undefined) {
+        throw new BadRequestException({
+          code: parameters.error === 'access_denied' ? 'GITHUB_CONSENT_DENIED' : 'GITHUB_CALLBACK_FAILED',
+        });
+      }
+      if (start === undefined) {
+        throw new BadRequestException({ code: 'GITHUB_CALLBACK_EXPIRED' });
+      }
+      if (typeof parameters.code !== 'string' || !oauthValuePattern.test(parameters.code)) {
+        throw new BadRequestException({ code: 'GITHUB_CALLBACK_FAILED' });
+      }
+      await this.storePending(start, parameters.code);
+      return this.completionUrl(start);
+    } catch (error) {
+      const code = callbackFailureCode(error);
+      this.logger.warn(
+        `GitHub connection callback failed with ${code}${error instanceof HttpException ? '' : ` (${error instanceof Error ? error.name : 'unknown'})`}`,
+      );
+      if (start !== undefined) {
+        try {
+          await this.redisService.client.eval(
+            storePendingLua,
+            2,
+            cancelledKey(start.attemptId),
+            failedKey(start.attemptId),
+            JSON.stringify({ userId: start.userId, sessionId: start.sessionId, code }),
+            String(completionTtlSeconds),
+          );
+        } catch {
+          // The redirect still carries the code; an unrecorded failure only makes a poller wait for expiry.
+        }
+      }
+      return this.completionUrl(start, code);
+    }
+  }
+
+  private async storePending(start: StartRecord, code: string): Promise<void> {
     const configuration = this.requireConfiguration();
-    if (!oauthValuePattern.test(state) || !oauthValuePattern.test(code)) {
-      throw new BadRequestException({ code: 'GITHUB_CALLBACK_INVALID' });
-    }
-    const raw = await this.redisService.client.getdel(startKey(state));
-    if (raw === null) {
-      throw new BadRequestException({ code: 'GITHUB_CALLBACK_EXPIRED' });
-    }
-    const start = JSON.parse(raw) as StartRecord;
     const token = this.tokenResponse(
       await this.githubJson('https://github.com/login/oauth/access_token', {
         method: 'POST',
@@ -309,6 +492,9 @@ export class GithubService {
         }),
       }),
     );
+    if (token.refresh_token === undefined) {
+      throw new BadGatewayException({ code: 'GITHUB_EXPIRING_TOKENS_REQUIRED' });
+    }
     const profile = userSchema.parse(await this.apiJson('/user', token.access_token));
     const now = Date.now();
     const pending: PendingRecord = {
@@ -317,7 +503,7 @@ export class GithubService {
       login: profile.login,
       ...(profile.avatar_url === null ? {} : { avatarUrl: profile.avatar_url }),
       accessToken: token.access_token,
-      ...(token.refresh_token === undefined ? {} : { refreshToken: token.refresh_token }),
+      refreshToken: token.refresh_token,
       accessTokenExpiresAt: new Date(now + token.expires_in * 1000).toISOString(),
       ...(token.refresh_token_expires_in === undefined
         ? {}
@@ -334,7 +520,6 @@ export class GithubService {
     if (stored !== 1) {
       throw new BadRequestException({ code: 'GITHUB_COMPLETION_CANCELLED' });
     }
-    return { attemptId: start.attemptId, returnTo: start.returnTo, completionMode: start.completionMode };
   }
 
   public async complete(
@@ -349,7 +534,7 @@ export class GithubService {
     const key = pendingKey(attemptId);
     const raw = await this.redisService.client.get(key);
     if (raw === null) {
-      throw new BadRequestException({ code: 'GITHUB_COMPLETION_EXPIRED' });
+      return this.unfinished(userId, sessionId, attemptId);
     }
     const pending = this.open<PendingRecord>(raw, userId, `pending:${attemptId}`);
     if (pending.userId !== userId || pending.sessionId !== sessionId || pending.attemptId !== attemptId) {
@@ -357,14 +542,29 @@ export class GithubService {
     }
     const lockKey = completionLockKey(attemptId);
     const lockValue = randomUUID();
-    const locked = await this.redisService.client.set(lockKey, lockValue, 'EX', 30, 'NX');
-    if (locked !== 'OK') {
+    let locked = false;
+    for (let attempt = 0; attempt < refreshWaitAttempts && !locked; attempt += 1) {
+      if (attempt > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- a concurrent completer holds the lock; wait for its result.
+        await pause();
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each retry attempts the same distributed lock.
+      locked = (await this.redisService.client.set(lockKey, lockValue, 'EX', 30, 'NX')) === 'OK';
+    }
+    if (!locked) {
       throw new ServiceUnavailableException({ code: 'GITHUB_COMPLETION_BUSY' });
     }
     try {
       const existing = await this.databaseService.database.query.githubConnection.findFirst({
         where: and(eq(githubConnection.userId, userId), eq(githubConnection.githubSubject, pending.githubSubject)),
       });
+      // A concurrent completer consumed the attempt while this one waited: answer with its row, bump nothing.
+      if ((await this.redisService.client.get(key)) !== raw) {
+        if (existing === undefined) {
+          throw new BadRequestException({ code: 'GITHUB_COMPLETION_INVALID' });
+        }
+        return connectionSummary(existing);
+      }
       const id = existing?.id ?? randomUUID();
       const generation = (existing?.generation ?? 0) + 1;
       const values = {
@@ -396,16 +596,39 @@ export class GithubService {
       }
       await this.redisService.client.eval(consumeValueLua, 1, key, raw);
       await this.redisService.client.del(attemptKey(attemptId), cancelledKey(attemptId));
-      return {
-        id: row.id,
-        subject: row.githubSubject,
-        login: row.login,
-        ...(row.avatarUrl === null ? {} : { avatarUrl: row.avatarUrl }),
-        generation: row.generation,
-      };
+      return connectionSummary(row);
     } finally {
       await this.redisService.client.eval(releaseLockLua, 1, lockKey, lockValue);
     }
+  }
+
+  /**
+   * Answers a completion with no pending result: the callback's recorded failure (consuming the attempt),
+   * `GITHUB_COMPLETION_PENDING` while the owned attempt is unresolved (GitHub has not redirected back, or the
+   * callback is still exchanging the code), otherwise expiry.
+   */
+  private async unfinished(userId: string, sessionId: string, attemptId: string): Promise<never> {
+    const owns = (record: Readonly<{ userId: string; sessionId: string }>): boolean =>
+      record.userId === userId && record.sessionId === sessionId;
+    const failedRaw = await this.redisService.client.get(failedKey(attemptId));
+    if (failedRaw !== null) {
+      const failure = failureSchema.parse(JSON.parse(failedRaw));
+      if (!owns(failure)) {
+        throw new UnauthorizedException({ code: 'GITHUB_COMPLETION_OWNER_MISMATCH' });
+      }
+      await this.redisService.client.del(failedKey(attemptId), attemptKey(attemptId), cancelledKey(attemptId));
+      throw new BadRequestException({ code: failure.code });
+    }
+    const attemptRaw = await this.redisService.client.get(attemptKey(attemptId));
+    if (attemptRaw !== null) {
+      const attempt = attemptSchema.parse(JSON.parse(attemptRaw));
+      if (!owns(attempt)) {
+        throw new UnauthorizedException({ code: 'GITHUB_COMPLETION_OWNER_MISMATCH' });
+      }
+      // ponytail: an attempt whose pending result expired unconsumed answers PENDING until the attempt's own TTL.
+      throw new ConflictException({ code: 'GITHUB_COMPLETION_PENDING' });
+    }
+    throw new BadRequestException({ code: 'GITHUB_COMPLETION_EXPIRED' });
   }
 
   public async cancel(userId: string, sessionId: string, attemptId: string): Promise<void> {
@@ -416,14 +639,17 @@ export class GithubService {
     if (raw === null) {
       return;
     }
-    const attempt = z
-      .object({ userId: z.string(), sessionId: z.string(), attemptId: z.string(), state: z.string() })
-      .parse(JSON.parse(raw));
+    const attempt = attemptSchema.parse(JSON.parse(raw));
     if (attempt.userId !== userId || attempt.sessionId !== sessionId || attempt.attemptId !== attemptId) {
       throw new UnauthorizedException({ code: 'GITHUB_COMPLETION_OWNER_MISMATCH' });
     }
     await this.redisService.client.set(cancelledKey(attemptId), '1', 'EX', startTtlSeconds);
-    await this.redisService.client.del(startKey(attempt.state), pendingKey(attemptId), attemptKey(attemptId));
+    await this.redisService.client.del(
+      startKey(attempt.state),
+      pendingKey(attemptId),
+      failedKey(attemptId),
+      attemptKey(attemptId),
+    );
   }
 
   public async list(
@@ -442,7 +668,16 @@ export class GithubService {
     return rows.map(({ avatarUrl, ...row }) => ({ ...row, ...(avatarUrl === null ? {} : { avatarUrl }) }));
   }
 
+  /** Revokes the grant at GitHub (best effort, never blocking removal), then deletes the connection row. */
   public async remove(userId: string, connectionId: string): Promise<void> {
+    try {
+      const { accessToken } = await this.token(userId, connectionId);
+      await this.revokeGrant(accessToken);
+    } catch (error) {
+      const code = responseField(error, 'code');
+      const reason = typeof code === 'string' ? code : error instanceof Error ? error.message : 'unknown';
+      this.logger.warn(`GitHub grant was not revoked before removing a connection: ${reason}`);
+    }
     await this.databaseService.database
       .delete(githubConnection)
       .where(and(eq(githubConnection.id, connectionId), eq(githubConnection.userId, userId)));
@@ -451,6 +686,26 @@ export class GithubService {
       if (key.startsWith(prefix)) {
         this.responseCache.delete(key);
       }
+    }
+  }
+
+  private async revokeGrant(accessToken: string): Promise<void> {
+    const { clientId, clientSecret } = this.requireConfiguration();
+    const response = await fetch(`https://api.github.com/applications/${encodeURIComponent(clientId)}/grant`, {
+      method: 'DELETE',
+      headers: {
+        accept: 'application/vnd.github+json',
+        authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+        'content-type': 'application/json',
+        'x-github-api-version': apiVersion,
+        'user-agent': 'tau-github-app',
+      },
+      body: JSON.stringify({ access_token: accessToken }),
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub answered ${String(response.status)}`);
     }
   }
 
@@ -497,9 +752,7 @@ export class GithubService {
         }
       }
       // oxlint-disable-next-line no-await-in-loop -- retries are intentionally serialized.
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, refreshWaitMilliseconds);
-      });
+      await pause();
     }
     throw new ServiceUnavailableException({ code: 'GITHUB_REFRESH_BUSY' });
   }
@@ -539,9 +792,12 @@ export class GithubService {
           }),
         }),
       );
-    } catch {
+    } catch (error) {
       /* A refresh token rotates when GitHub consumes it. If the exchange is
        * ambiguous, retrying the old value cannot be made safe. */
+      if (refreshTokenSurvives(error)) {
+        throw error;
+      }
       await this.databaseService.database
         .update(githubConnection)
         .set({ refreshToken: null, refreshTokenExpiresAt: null, generation: row.generation + 1, updatedAt: new Date() })
@@ -589,11 +845,16 @@ export class GithubService {
     };
   }
 
-  public completionUrl(attemptId: string, returnTo: string, completionMode: 'browser' | 'desktop-poll'): string {
+  private completionUrl(start: StartRecord | undefined, error?: CallbackFailureCode): string {
     const url = new URL('/github/complete', this.frontendUrl);
-    url.searchParams.set('attempt', attemptId);
-    url.searchParams.set('returnTo', returnTo);
-    url.searchParams.set('mode', completionMode);
+    if (start !== undefined) {
+      url.searchParams.set('attempt', start.attemptId);
+      url.searchParams.set('returnTo', start.returnTo);
+      url.searchParams.set('mode', start.completionMode);
+    }
+    if (error !== undefined) {
+      url.searchParams.set('error', error);
+    }
     return url.toString();
   }
 
@@ -637,7 +898,94 @@ export class GithubService {
     const body = z
       .object({ total_count: z.number(), repositories: z.array(repositorySchema) })
       .parse(await this.apiJson(path, accessToken, `${userId}:${connectionId}:${String(generation)}:${path}`));
-    return { totalCount: body.total_count, repositories: body.repositories.map((repo) => this.repository(repo)), page };
+    return {
+      totalCount: body.total_count,
+      repositories: body.repositories.map((repo) => this.repositorySummary(repo)),
+      page,
+    };
+  }
+
+  /**
+   * One repository by stable id, so a renamed or transferred repository can be re-resolved. GitHub answers this
+   * for any repository the user can see (a public one included) with the *user's* permissions, so the access is
+   * reported only for a repository one of the connection's App installations holds, and is `unknown` otherwise.
+   */
+  public async repository(userId: string, connectionId: string, repositoryId: number): Promise<unknown> {
+    const { accessToken, generation } = await this.token(userId, connectionId);
+    const cacheScope = `${userId}:${connectionId}:${String(generation)}`;
+    const path = `/repositories/${String(repositoryId)}`;
+    const repository = repositorySchema.parse(await this.apiJson(path, accessToken, `${cacheScope}:${path}`));
+    // Without the user's permissions the summary reports `unknown` access.
+    return this.repositorySummary(
+      (await this.installationHolds(repository, accessToken, cacheScope))
+        ? repository
+        : { ...repository, permissions: undefined },
+    );
+  }
+
+  /**
+   * Whether an unsuspended installation of the App on the repository owner's account holds the repository. Uses
+   * the same pages (and cache keys) as the picker's listings; bounded to `installationLookupPages` of each.
+   */
+  private async installationHolds(
+    repository: z.infer<typeof repositorySchema>,
+    accessToken: string,
+    cacheScope: string,
+  ): Promise<boolean> {
+    const listed = async <T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>> =>
+      schema.parse(await this.apiJson(path, accessToken, `${cacheScope}:${path}`));
+    let installation: z.infer<typeof installationSchema> | undefined;
+    for (let page = 1; page <= installationLookupPages && installation === undefined; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- pages are read only until the owner's installation appears.
+      const body = await listed(
+        `/user/installations?per_page=100&page=${String(page)}`,
+        z.object({ total_count: z.number(), installations: z.array(installationSchema) }),
+      );
+      installation = body.installations.find((item) => item.account.id === repository.owner.id);
+      if (page * 100 >= body.total_count) {
+        break;
+      }
+    }
+    if (installation === undefined || installation.suspended_at !== null) {
+      return false;
+    }
+    if (installation.repository_selection === 'all') {
+      return true;
+    }
+    for (let page = 1; page <= installationLookupPages; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- pages are read only until the repository appears.
+      const body = await listed(
+        `/user/installations/${String(installation.id)}/repositories?per_page=100&page=${String(page)}`,
+        z.object({ total_count: z.number(), repositories: z.array(repositorySchema) }),
+      );
+      if (body.repositories.some((item) => item.id === repository.id)) {
+        return true;
+      }
+      if (page * 100 >= body.total_count) {
+        break;
+      }
+    }
+    return false;
+  }
+
+  /** One branch by exact name; names may contain `/`. */
+  public async branch(userId: string, connectionId: string, repositoryId: number, name: unknown): Promise<unknown> {
+    if (
+      typeof name !== 'string' ||
+      name.length > 255 ||
+      name.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+    ) {
+      throw new BadRequestException({ code: 'GITHUB_BRANCH_INVALID' });
+    }
+    const { accessToken, generation } = await this.token(userId, connectionId);
+    const path = `/repositories/${String(repositoryId)}/branches/${name
+      .split('/')
+      .map((segment) => encodeURIComponent(segment))
+      .join('/')}`;
+    const branch = branchSchema.parse(
+      await this.apiJson(path, accessToken, `${userId}:${connectionId}:${String(generation)}:${path}`),
+    );
+    return { name: branch.name, head: branch.commit.sha };
   }
 
   public async branches(userId: string, connectionId: string, repositoryId: number, page: number): Promise<unknown> {
@@ -696,7 +1044,7 @@ export class GithubService {
     };
   }
 
-  private repository(repo: z.infer<typeof repositorySchema>): unknown {
+  private repositorySummary(repo: z.infer<typeof repositorySchema>): unknown {
     const access =
       repo.permissions?.pull === true
         ? repo.permissions.push && !repo.archived && !repo.disabled
@@ -748,50 +1096,17 @@ export class GithubService {
         response = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(10_000), redirect: 'error' });
       }
     } catch (error) {
-      throw new BadGatewayException({
-        code: 'GITHUB_UPSTREAM_UNAVAILABLE',
-        message: error instanceof Error ? error.message : 'GitHub did not respond.',
-      });
+      // The cause stays server-side: refresh reads it to tell a request that never left from an ambiguous one.
+      throw new BadGatewayException(
+        { code: 'GITHUB_UPSTREAM_UNAVAILABLE', message: 'GitHub did not respond.' },
+        { cause: error },
+      );
     }
     if (response.status === 304 && cached !== undefined) {
       return cached.body;
     }
     if (!response.ok) {
-      const retryAfter = response.headers.get('retry-after');
-      const rateLimitReset = response.headers.get('x-ratelimit-reset');
-      if (response.status === 401) {
-        throw reconnectRequired();
-      }
-      if (response.status === 429 || response.headers.get('x-ratelimit-remaining') === '0') {
-        throw new HttpException(
-          {
-            code: 'GITHUB_RATE_LIMITED',
-            message: 'GitHub rate limit reached. Try again after the reported reset time.',
-            ...(retryAfter === null ? {} : { retryAfter }),
-            ...(rateLimitReset === null ? {} : { rateLimitReset }),
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      if (response.status === 403 && response.headers.has('x-github-sso')) {
-        throw new ForbiddenException({
-          code: 'GITHUB_SSO_REQUIRED',
-          message: 'Start an organization SSO session, then reconnect GitHub.',
-        });
-      }
-      if (response.status === 403) {
-        throw new ForbiddenException({
-          code: 'GITHUB_ACCESS_REFUSED',
-          message: 'GitHub refused access to this resource.',
-        });
-      }
-      if (response.status === 404) {
-        throw new NotFoundException({
-          code: 'GITHUB_NOT_FOUND_OR_DENIED',
-          message: 'The GitHub resource was not found or this connection cannot access it.',
-        });
-      }
-      throw new BadGatewayException({ code: 'GITHUB_UPSTREAM_FAILED', status: response.status });
+      throw upstreamRefusal(response);
     }
     const body: unknown = await response.json();
     const etag = response.headers.get('etag');

@@ -1,28 +1,79 @@
 /* eslint-disable @typescript-eslint/naming-convention -- HTTP header names are not identifiers */
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ConfigService } from '@nestjs/config';
+import { PayloadTooLargeException } from '@nestjs/common';
+import type { StreamableFile } from '@nestjs/common';
 import type { Environment } from '#config/environment.config.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import type { RedisService } from '#redis/redis.service.js';
 
+/* Hermetic DNS: every hostname answers one public address unless a test says otherwise. */
+const dns = vi.hoisted(() => ({ lookup: vi.fn() }));
+vi.mock('node:dns/promises', () => ({ lookup: dns.lookup }));
+beforeEach(() => {
+  dns.lookup.mockResolvedValue([{ address: '140.82.112.3', family: 4 }]);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  dns.lookup.mockReset();
+});
+
 /** The proxy reads exactly one setting: ruling P50's dev-only relaxation. */
-const proxyController = (allowPrivate = false, redis?: RedisService): GitProxyController =>
+const proxyController = (
+  allowPrivate = false,
+  redis?: RedisService,
+  fetch: typeof globalThis.fetch | 'pinned' = globalThis.fetch,
+): GitProxyController =>
   new GitProxyController(
     {
       get: (key: string) => (key === 'TAU_API_URL' ? 'https://api.tau.test' : allowPrivate ? '1' : '0'),
     } as unknown as ConfigService<Environment, true>,
     redis ??
       ({
-        client: { get: vi.fn(), set: vi.fn() },
+        client: { get: vi.fn(), set: vi.fn(), eval: vi.fn(async () => 1) },
       } as unknown as RedisService),
-    globalThis.fetch,
+    fetch === 'pinned' ? undefined : fetch,
   );
 
-const request = (headers: Record<string, string>, method = 'GET'): FastifyRequest =>
-  ({ headers, method, raw: Readable.from([]) }) as unknown as FastifyRequest;
+const request = (headers: Record<string, string>, method = 'GET', raw: Readable = Readable.from([])): FastifyRequest =>
+  ({ headers, method, raw }) as unknown as FastifyRequest;
+
+const text = async (file: StreamableFile): Promise<string> => {
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  for await (const chunk of file.getStream()) {
+    chunks.push(Uint8Array.from(chunk as Uint8Array<ArrayBuffer>));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+};
+
+const relayHandle = '0f8fad5b-d9cb-469f-a165-70867728950e';
+
+/** A Redis holding one verify relay record for `user-1`, aimed at `url`. */
+const verifyRelayRedis = (url: string): RedisService =>
+  ({
+    client: {
+      get: vi.fn(async () =>
+        JSON.stringify({
+          userId: 'user-1',
+          oid: 'a'.repeat(64),
+          size: 3,
+          url,
+          method: 'POST',
+          headers: { Authorization: 'signed' },
+          expiresAt: Date.now() + 60_000,
+        }),
+      ),
+      set: vi.fn(),
+      eval: vi.fn(async () => 1),
+    },
+  }) as unknown as RedisService;
+
+const lfsMediaType = 'application/vnd.git-lfs+json';
 
 const reply = (): FastifyReply => {
   const value = {
@@ -124,20 +175,32 @@ describe('GitProxyController', () => {
         });
         return new Response(undefined, {
           status: 301,
-          headers: { location: 'https://github.com/someone-else/renamed.git/info/refs' },
+          headers: {
+            location: 'https://someone:pw@github.com/someone-else/renamed.git/info/refs?service=git-upload-pack&sig=x',
+          },
         });
       }),
     );
 
+    /* D11: still refused, but as a typed 409 that names where the repository
+       went — without the query or userinfo the upstream put on the Location. */
     const controller = proxyController();
-    await expect(
-      controller.proxyGet(
+    const answer = reply();
+    const body = await text(
+      await controller.proxyGet(
         'user-1',
         { url: 'https://github.com/tau/example.git/info/refs' },
         request({ 'x-tau-proxy-authorization': 'Bearer ghs_installation_token' }),
-        reply(),
+        answer,
       ),
-    ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_REDIRECTED_CREDENTIAL' } });
+    );
+    expect(answer.status).toHaveBeenCalledWith(409);
+    expect(JSON.parse(body)).toMatchObject({
+      code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
+      location: 'https://github.com/someone-else/renamed.git/info/refs',
+    });
+    expect(body).not.toContain('sig=x');
+    expect(body).not.toContain('pw@');
 
     /* The second repository never saw the token, because the hop was never
        taken: one upstream request, and it was the one the caller named. */
@@ -266,6 +329,7 @@ describe('GitProxyController', () => {
           return 'OK';
         }),
         get: vi.fn(async (key: string) => records.get(key) ?? null),
+        eval: vi.fn(async () => 1),
       },
     } as unknown as RedisService;
     vi.stubGlobal(
@@ -318,5 +382,300 @@ describe('GitProxyController', () => {
     const handle = key.slice('git:lfs:relay:'.length);
     await expect(controller.relayGet('user-2', handle, request({}), reply())).rejects.toThrow();
     vi.unstubAllGlobals();
+  });
+
+  it('forwards the git-lfs Accept on batch and verify, and keeps */* otherwise (D5)', async () => {
+    const accepts: Array<string | undefined> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        accepts.push(new Headers(init.headers).get('accept') ?? undefined);
+        return new Response(JSON.stringify({ objects: [] }), { status: 200 });
+      }),
+    );
+
+    const controller = proxyController();
+    await controller.proxyPost(
+      'user-1',
+      { url: 'https://github.com/tau/x.git/info/lfs/objects/batch' },
+      request({ accept: lfsMediaType, 'content-type': lfsMediaType }, 'POST'),
+      reply(),
+    );
+    await controller.proxyGet(
+      'user-1',
+      { url: 'https://github.com/tau/x.git/info/refs' },
+      request({ accept: 'text/html' }),
+      reply(),
+    );
+    await proxyController(false, verifyRelayRedis('https://lfs.example.com/verify')).relayPost(
+      'user-1',
+      relayHandle,
+      request({ accept: lfsMediaType }, 'POST', Readable.from([Buffer.from('{}')])),
+      reply(),
+    );
+
+    expect(accepts).toEqual([lfsMediaType, '*/*', lfsMediaType]);
+  });
+
+  it('refuses a credentialed redirect to a blocked host as a moved repository without echoing it (D11)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(undefined, { status: 302, headers: { location: 'https://10.0.0.4/tau/x.git/info/refs' } }),
+      ),
+    );
+    const answer = reply();
+
+    const body = await text(
+      await proxyController().proxyGet(
+        'user-1',
+        { url: 'https://github.com/tau/x.git/info/refs' },
+        request({ 'x-tau-proxy-authorization': 'Bearer ghs_installation_token' }),
+        answer,
+      ),
+    );
+
+    expect(answer.status).toHaveBeenCalledWith(409);
+    expect(JSON.parse(body)).toStrictEqual({
+      statusCode: 409,
+      code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
+      error: 'The repository moved; confirm its new location before sending the credential there',
+    });
+    expect(body).not.toContain('10.0.0.4');
+  });
+
+  it.each([
+    ['a credentialed', { 'x-tau-proxy-authorization': 'Bearer ghs_installation_token' }],
+    ['an anonymous', {}],
+  ])('answers %s redirect with a malformed Location as an upstream failure', async (_case, headers) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(undefined, { status: 302, headers: { location: 'https://[not-an-address' } })),
+    );
+
+    await expect(
+      proxyController().proxyGet(
+        'user-1',
+        { url: 'https://github.com/tau/x.git/info/refs' },
+        request(headers),
+        reply(),
+      ),
+    ).rejects.toMatchObject({ status: 502, response: { code: 'GIT_PROXY_UPSTREAM_FAILED' } });
+  });
+
+  it('proxies only the default https port unless local development relaxes it (D21)', async () => {
+    const upstream = vi.fn(async () => new Response('0000', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const controller = proxyController();
+
+    await expect(
+      controller.proxyGet('user-1', { url: 'https://github.com:8443/tau/x.git/info/refs' }, request({}), reply()),
+    ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_PORT_REFUSED' } });
+    // `:443` is the default port and the URL parser drops it.
+    await controller.proxyGet('user-1', { url: 'https://github.com:443/tau/x.git/info/refs' }, request({}), reply());
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers every upstream failure with one 502 but keeps the caller its own 413 (D21)', async () => {
+    const controller = (): GitProxyController => proxyController();
+    for (const failure of [
+      Object.assign(new Error('connect ECONNREFUSED 140.82.112.3:443'), { code: 'ECONNREFUSED' }),
+      new Error('The upstream git host did not answer in time.'),
+      new TypeError('fetch failed', { cause: new Error('certificate has expired') }),
+    ]) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          throw failure;
+        }),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one failure at a time, by design
+      await expect(
+        controller().proxyGet('user-1', { url: 'https://github.com/tau/x.git/info/refs' }, request({}), reply()),
+        failure.message,
+      ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_UPSTREAM_FAILED' } });
+    }
+
+    // A batch answer that is not JSON, or not a batch, is the same upstream failure.
+    for (const answer of ['<html>', '{"objects":"none"}']) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(answer, { status: 200 })),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one failure at a time, by design
+      await expect(
+        controller().proxyPost(
+          'user-1',
+          { url: 'https://github.com/tau/x.git/info/lfs/objects/batch' },
+          request({}, 'POST'),
+          reply(),
+        ),
+        answer,
+      ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_UPSTREAM_FAILED' } });
+    }
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('fetch failed', {
+          cause: new PayloadTooLargeException({ code: 'GIT_PROXY_REQUEST_TOO_LARGE' }),
+        });
+      }),
+    );
+    await expect(
+      controller().proxyPost(
+        'user-1',
+        { url: 'https://github.com/tau/x.git/git-receive-pack' },
+        request({}, 'POST'),
+        reply(),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_REQUEST_TOO_LARGE' } });
+  });
+
+  it('refuses NAT64 and IPv4-compatible IPv6 forms that embed a private IPv4 address (D21)', async () => {
+    const upstream = vi.fn(async () => new Response('0000', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const controller = proxyController();
+
+    for (const url of [
+      'https://[::127.0.0.1]/x.git/info/refs',
+      'https://[::a00:4]/x.git/info/refs',
+      'https://[64:ff9b::10.0.0.1]/x.git/info/refs',
+      'https://[64:ff9b::a9fe:a9fe]/x.git/info/refs',
+      'https://[::ffff:192.168.0.1]/x.git/info/refs',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time, by design
+      await expect(controller.proxyGet('user-1', { url }, request({}), reply()), url).rejects.toMatchObject({
+        response: { code: 'GIT_PROXY_HOST_REFUSED' },
+      });
+    }
+    // The resolver prints these with a dotted tail; its answers meet the same rule.
+    for (const address of ['::ffff:10.0.0.1', '::127.0.0.1', '64:ff9b::192.168.1.1', '64:ff9b::a00:1']) {
+      dns.lookup.mockResolvedValueOnce([{ address, family: 6 }]);
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time, by design
+      await expect(
+        controller.proxyGet('user-1', { url: 'https://git.example.com/x.git/info/refs' }, request({}), reply()),
+        address,
+      ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_HOST_REFUSED' } });
+    }
+    expect(upstream).not.toHaveBeenCalled();
+
+    // A NAT64 route to a public host is ordinary on an IPv6-only network.
+    await controller.proxyGet('user-1', { url: 'https://[64:ff9b::808:808]/x.git/info/refs' }, request({}), reply());
+    dns.lookup.mockResolvedValueOnce([{ address: '64:ff9b::8.8.8.8', family: 6 }]);
+    await controller.proxyGet('user-1', { url: 'https://git.example.com/x.git/info/refs' }, request({}), reply());
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses SIIT, 6to4, local-use NAT64 and site-local IPv6 forms that reach a private network', async () => {
+    const upstream = vi.fn(async () => new Response('0000', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const controller = proxyController();
+
+    for (const address of [
+      '::ffff:0:10.0.0.1',
+      '::ffff:0:7f00:1',
+      '2002:a00:1::1',
+      '2002:c0a8:101::',
+      '64:ff9b:1::8.8.8.8',
+      '64:ff9b:1:a00:1::',
+      'fec0::1',
+      'feff::1',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time, by design
+      await expect(
+        controller.proxyGet('user-1', { url: `https://[${address}]/x.git/info/refs` }, request({}), reply()),
+        address,
+      ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_HOST_REFUSED' } });
+      dns.lookup.mockResolvedValueOnce([{ address, family: 6 }]);
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time, by design
+      await expect(
+        controller.proxyGet('user-1', { url: 'https://git.example.com/x.git/info/refs' }, request({}), reply()),
+        address,
+      ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_HOST_REFUSED' } });
+    }
+    expect(upstream).not.toHaveBeenCalled();
+
+    // The same forms around a public IPv4 address stay reachable.
+    for (const address of ['::ffff:0:808:808', '2002:808:808::1']) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential by design
+      await controller.proxyGet('user-1', { url: `https://[${address}]/x.git/info/refs` }, request({}), reply());
+    }
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a caller past the per-minute proxy budget before reaching the host (D21)', async () => {
+    const upstream = vi.fn(async () => new Response('0000', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const counted = vi.fn(async () => 600);
+    const redis = { client: { get: vi.fn(), set: vi.fn(), eval: counted } } as unknown as RedisService;
+    const controller = proxyController(false, redis);
+    const url = 'https://github.com/tau/x.git/info/refs';
+
+    await controller.proxyGet('user-1', { url }, request({}), reply());
+    counted.mockResolvedValueOnce(601);
+    await expect(controller.proxyGet('user-1', { url }, request({}), reply())).rejects.toMatchObject({
+      response: { code: 'GIT_PROXY_RATE_LIMITED' },
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(counted.mock.calls.map((call: unknown[]) => call[2])).toEqual([
+      expect.stringMatching(/^git:proxy:rl:user-1:/u),
+      expect.stringMatching(/^git:proxy:rl:user-1:/u),
+    ]);
+  });
+
+  it('reaches a named host through the pinned socket fetch (D32)', async () => {
+    // Node's connect asks the pinned lookup with `all: true`; answering with a
+    // bare address failed every real upstream as ERR_INVALID_IP_ADDRESS.
+    const server = createServer((incoming, outgoing) => {
+      incoming.resume();
+      outgoing.writeHead(200, { 'content-type': 'application/x-git-upload-pack-advertisement' });
+      outgoing.end('0000');
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      dns.lookup.mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }]);
+      const controller = proxyController(true, undefined, 'pinned');
+      const answer = await controller.proxyGet(
+        'user-1',
+        { url: `http://localhost:${String(port)}/tau/x.git/info/refs?service=git-upload-pack` },
+        request({}),
+        reply(),
+      );
+      expect(await text(answer)).toBe('0000');
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('bounds a relayed verify body and answers 413 without waiting on the host (D22)', async () => {
+    // A host that never answers: without the bound the relay streamed on, and
+    // a failed body waited out the 60 s upstream timeout.
+    const server = createServer((incoming) => {
+      incoming.resume();
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const controller = proxyController(true, verifyRelayRedis(`http://127.0.0.1:${String(port)}/verify`), 'pinned');
+      await expect(
+        controller.relayPost(
+          'user-1',
+          relayHandle,
+          request({ accept: lfsMediaType }, 'POST', Readable.from([Buffer.alloc(128 * 1024)])),
+          reply(),
+        ),
+      ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_REQUEST_TOO_LARGE' } });
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
   });
 });

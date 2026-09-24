@@ -27,10 +27,13 @@ import type {
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
 import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { sha256String } from '@taucad/utils/hash';
 import { z } from 'zod';
 
 import type { HostToolDefinition, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-tool-registry.js';
 
 /** The optional dispatcher client one tool needs beyond the filesystem. */
 type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skillResolver' | 'revisions' | 'parameters';
@@ -170,6 +173,8 @@ export type ChatToolRegistryOptions = {
   readonly skillResolver?: RpcSkillResolver | undefined;
   /** Backs the read-only `revisions` tool; a host without a revision graph omits it. */
   readonly revisions?: RpcRevisionsClient | undefined;
+  /** Explicit machine tools, offered only after transport capability and route grant negotiation. */
+  readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
   /** Backs checked semantic parameter reads and operations. */
   readonly parameters?: RpcParameterClient | undefined;
   /** `test_model`'s independent policy gate in `@taucad/chat`. */
@@ -221,11 +226,21 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
    * are gone, so a disagreeing verdict is checked against the bytes on disk
    * before it is refused (`reconcile`). */
   const written = new Map<string, string>();
+  const machineRegistry = options.machines?.available ? createMachineToolRegistry(options.machines) : undefined;
+  definitions.push(...(machineRegistry?.list() ?? []));
 
   return {
     list: () => definitions,
     async invoke(invocation) {
       assertNotAborted(invocation.signal);
+      if (isMachineToolName(invocation.toolName)) {
+        return (
+          machineRegistry?.invoke(invocation) ?? {
+            content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+            isError: true,
+          }
+        );
+      }
       const entry = byName.get(invocation.toolName);
       const mapped = rpcForTool[invocation.toolName];
       if (!entry || !mapped) {

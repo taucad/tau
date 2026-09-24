@@ -29,8 +29,6 @@ export type {
   HostJobProgress,
   HostJobRunnerRegistration,
 } from '#job-attempt-host.js';
-export { createSolverHatchetJobWorkerFactory } from '#solver-job-worker.js';
-export type { SolverHatchetJobWorkerFactoryOptions } from '#solver-job-worker.js';
 export type { HostCredential } from '#credential-store.js';
 export { defaultConfigDirectory } from '#credential-store.js';
 export { hostDescriptorPath, hostSessionCookieName, startAgentServer } from '#agent-server.js';

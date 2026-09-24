@@ -190,17 +190,6 @@ const environmentSchemaBase = z.object({
 
   REDIS_URL: z.string().describe('Redis connection URL (e.g., redis://localhost:6379 or rediss://... for TLS)'),
 
-  // Durable job orchestration. Empty token keeps job dispatch unavailable without affecting chat/CAD startup.
-  HATCHET_CLIENT_TOKEN: z.string().default(''),
-  HATCHET_CLIENT_NAMESPACE: z.string().trim().min(1).default('tau-local'),
-  TAU_JOBS_ENABLED: z
-    .enum(['true', 'false'])
-    .transform((value) => value === 'true')
-    .optional()
-    .describe(
-      'B7 R10 gate for the paid job supplier path. Unset means enabled in development and refused everywhere else; set it true only once an operator-funded allowance covers admitted runs x attempts',
-    ),
-
   // Object storage (MinIO via infra/docker-compose in dev; Cloudflare R2 in staging/production — overrides defaults via Fly secrets + env)
   TAU_S3_ENDPOINT: z
     .string()

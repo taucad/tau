@@ -12,6 +12,7 @@ import {
   History,
   Info,
   Plus,
+  Printer,
   Share2,
   SlidersHorizontal,
   Terminal,
@@ -75,6 +76,7 @@ import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
 import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
+import { MachinesPanelBody } from '#routes/w.$workspace.$project/chat-machines.js';
 import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
 import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
 import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
@@ -266,6 +268,10 @@ function JobsWorkbenchPanel(): React.JSX.Element {
   return <JobsPanelBody />;
 }
 
+function MachinesWorkbenchPanel(): React.JSX.Element {
+  return <MachinesPanelBody />;
+}
+
 function ExportWorkbenchPanel(): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   return <ConverterPanelBody downloadOnly={profile === 'shared'} />;
@@ -345,6 +351,12 @@ const workbenchSurfaceGroups: readonly WorkbenchSurfaceGroup[] = [
         label: 'Jobs',
         icon: BriefcaseBusiness,
         panel: { id: 'workbench:jobs', component: 'jobs', title: 'Jobs' },
+      },
+      {
+        id: 'machines',
+        label: 'Machines',
+        icon: Printer,
+        panel: { id: 'workbench:machines', component: 'machines', title: 'Machines' },
       },
     ],
   },
@@ -720,6 +732,7 @@ const components = {
   revisions: RevisionsWorkbenchPanel,
   agents: AgentsWorkbenchPanel,
   jobs: JobsWorkbenchPanel,
+  machines: MachinesWorkbenchPanel,
   export: ExportWorkbenchPanel,
   share: ShareWorkbenchPanel,
   details: DetailsWorkbenchPanel,
@@ -733,6 +746,7 @@ export const workbenchPanels = {
   revisions: getWorkbenchSurface('revisions').panel!,
   agents: getWorkbenchSurface('agents').panel!,
   jobs: getWorkbenchSurface('jobs').panel!,
+  machines: getWorkbenchSurface('machines').panel!,
   export: getWorkbenchSurface('export').panel!,
   share: getWorkbenchSurface('share').panel!,
   details: getWorkbenchSurface('details').panel!,

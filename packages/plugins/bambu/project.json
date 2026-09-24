@@ -1,0 +1,15 @@
+{
+  "name": "bambu",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/bambu",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "qualify-x1c": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register packages/plugins/bambu/scripts/qualify-x1c.mts"
+      }
+    }
+  }
+}

@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTauMcpHttpHandler, tauMcpInstructions, tauMcpToolNames } from '#tau-mcp.js';
-import type { TauMcpDispatch, TauMcpRpcCall } from '#tau-mcp.js';
+import type { TauMcpDispatch, TauMcpHostCall, TauMcpHostTool } from '#tau-mcp.js';
 
 const rpcName = { getKernelResult: 'get_kernel_result' } as const;
 const toolName = { getKernelResult: 'get_kernel_result' } as const;
@@ -41,8 +41,8 @@ const readBody = async (request: AsyncIterable<Uint8Array<ArrayBuffer>>): Promis
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
 };
 
-const serve = async (dispatch: TauMcpDispatch): Promise<URL> => {
-  const handler = createTauMcpHttpHandler();
+const serve = async (dispatch: TauMcpDispatch, hostTools?: readonly TauMcpHostTool[]): Promise<URL> => {
+  const handler = createTauMcpHttpHandler({ hostTools });
   const handleRequest = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const body = request.method === 'POST' ? await readBody(request) : undefined;
     await handler.handle({
@@ -162,7 +162,7 @@ describe('Tau MCP Streamable HTTP transport', () => {
   });
 
   it('initializes with CAD-loop guidance and effect-correct tool annotations', async () => {
-    const calls: TauMcpRpcCall[] = [];
+    const calls: TauMcpHostCall[] = [];
     const dispatch: TauMcpDispatch = async (call) => {
       calls.push(call);
       return { success: true, status: 'ready' };
@@ -183,6 +183,49 @@ describe('Tau MCP Streamable HTTP transport', () => {
       client.callTool({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } }),
     ).resolves.toMatchObject({ structuredContent: { status: 'ready' } });
     expect(calls).toEqual([{ rpcName: rpcName.getKernelResult, args: { targetFile: 'main.ts' } }]);
+    await client.close();
+  });
+
+  it('lists host tools beside the CAD four with their own schema and dispatches them by name', async () => {
+    const calls: TauMcpHostCall[] = [];
+    const dispatch: TauMcpDispatch = async (call) => {
+      calls.push(call);
+      return 'toolName' in call
+        ? { success: true, requestId: 'req-1', state: 'awaiting-approval' }
+        : { errorCode: 'UNEXPECTED', message: 'not a host tool' };
+    };
+    const requestPrint: TauMcpHostTool = {
+      name: 'request_print',
+      description: 'Ask the person to approve one print.',
+      inputSchema: {
+        type: 'object',
+        properties: { machineId: { type: 'string' }, file: { type: 'string' } },
+        required: ['machineId', 'file'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    };
+    const client = await connect(await serve(dispatch, [requestPrint]));
+
+    const listed = await client.listTools();
+    expect(listed.tools.map(({ name }) => name)).toEqual([...tauMcpToolNames, 'request_print']);
+    const tool = listed.tools.find(({ name }) => name === 'request_print');
+    expect(tool?.inputSchema).toMatchObject({ type: 'object', required: ['machineId', 'file'] });
+    expect(tool?.annotations?.openWorldHint).toBe(true);
+    await expect(
+      client.callTool({
+        name: 'request_print',
+        arguments: { machineId: 'bambu-simulator', file: 'pyramid.gcode.3mf' },
+      }),
+    ).resolves.toMatchObject({ structuredContent: { requestId: 'req-1', state: 'awaiting-approval' } });
+    expect(calls).toEqual([
+      { toolName: 'request_print', args: { machineId: 'bambu-simulator', file: 'pyramid.gcode.3mf' } },
+    ]);
+    // The SDK refuses arguments the host schema rejects before the host sees them.
+    await expect(client.callTool({ name: 'request_print', arguments: { machineId: 1 } })).resolves.toMatchObject({
+      isError: true,
+    });
+    expect(calls).toHaveLength(1);
     await client.close();
   });
 

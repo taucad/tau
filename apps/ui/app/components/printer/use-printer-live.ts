@@ -16,6 +16,7 @@ import type {
   MachineDirectoryEntry,
   MachineDirectoryFrame,
   MachineDirectorySnapshot,
+  MachineManifest,
 } from '@taucad/runtime/machine';
 import { convert } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
@@ -36,6 +37,8 @@ export type PrinterLiveState = Readonly<{
   bedTarget: number | undefined;
   /** `#RRGGBB` of the first loaded material, when the machine reports one. */
   filamentColor: string | undefined;
+  /** The followed machine's provider manifest, which the scene draws; absent until the providers load. */
+  manifest: MachineManifest | undefined;
 }>;
 
 const activeRunStates = new Set(['printing', 'paused']);
@@ -51,9 +54,16 @@ const celsius = (quantity: Quantity | undefined): number | undefined => {
 const isFollowable = (entry: MachineDirectoryEntry): boolean =>
   entry.freshness === 'current' && entry.snapshot.connection === 'connected';
 
-/** Reduce directory entries to the machine the viewer follows. */
+/**
+ * Reduce directory entries to the machine the viewer follows.
+ *
+ * @param entries - The machine directory, when it has loaded.
+ * @param manifests - Provider manifests by provider id, when they have loaded.
+ * @returns The followed machine's live facts, or `undefined` when none is followable.
+ */
 export const selectPrinterLive = (
   entries: readonly MachineDirectoryEntry[] | undefined,
+  manifests?: ReadonlyMap<string, MachineManifest>,
 ): PrinterLiveState | undefined => {
   const candidates = entries?.filter((entry) => isFollowable(entry)) ?? [];
   const entry =
@@ -71,6 +81,7 @@ export const selectPrinterLive = (
     nozzleTarget: celsius(temperatures?.nozzleTarget),
     bedTarget: celsius(temperatures?.bedTarget),
     filamentColor: setup.materials.find((material) => material.state === 'loaded' && material.color)?.color,
+    manifest: manifests?.get(entry.providerId),
   };
 };
 
@@ -138,6 +149,42 @@ export const useMachineDirectoryEntries = (
   return state !== undefined && state.client === client ? state.snapshot.entries : undefined;
 };
 
+/**
+ * Provider manifests by provider id, listed once per client.
+ *
+ * @param client - The negotiated machines client, when there is one.
+ * @returns The manifests, or `undefined` until they load or without a client.
+ */
+export const useProviderManifests = (
+  client: MachineClient | undefined,
+): ReadonlyMap<string, MachineManifest> | undefined => {
+  // Keyed by client for the same reason as the directory: a replaced client never shows stale manifests.
+  const [state, setState] =
+    useState<Readonly<{ client: MachineClient; manifests: ReadonlyMap<string, MachineManifest> }>>();
+  useEffect(() => {
+    if (!client) {
+      return undefined;
+    }
+    const abort = new AbortController();
+    const load = async (): Promise<void> => {
+      try {
+        const providers = await client.listProviders({ signal: abort.signal });
+        if (!abort.signal.aborted) {
+          setState({ client, manifests: new Map(providers.map((provider) => [provider.id, provider.manifest])) });
+        }
+      } catch {
+        // Without manifests the scene keeps drawing the reference printer.
+      }
+    };
+    // async-iife: bootstrap -- a React effect cannot await; cleanup aborts the request.
+    void load();
+    return () => {
+      abort.abort();
+    };
+  }, [client]);
+  return state !== undefined && state.client === client ? state.manifests : undefined;
+};
+
 /** The machine the printer viewer follows, or `undefined` outside a project or without machines. */
 export const usePrinterLive = (): PrinterLiveState | undefined => {
   const project = useProject({ enableNoContext: true });
@@ -145,5 +192,6 @@ export const usePrinterLive = (): PrinterLiveState | undefined => {
   const machines = useSelector(unit, (state) => state?.context.kernelClient?.machines);
   const client = machines?.available ? machines : undefined;
   const entries = useMachineDirectoryEntries(client);
-  return useMemo(() => selectPrinterLive(entries), [entries]);
+  const manifests = useProviderManifests(client);
+  return useMemo(() => selectPrinterLive(entries, manifests), [entries, manifests]);
 };

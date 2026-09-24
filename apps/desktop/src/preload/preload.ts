@@ -27,6 +27,7 @@ import {
   appIconThemeChannel,
   agentHostSessionChannels,
   externalAgentsChannel,
+  machinesChannels,
   quitChannels,
   computeControlChannels,
   readBootstrap,
@@ -91,6 +92,12 @@ contextBridge.exposeInMainWorld('tau', {
     release: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
       await ipcRenderer.invoke(agentHostSessionChannels.release, { workspaceRoot, projectId, attachmentId });
     },
+  },
+  machines: {
+    /* The one route a secret takes: invoke → main → utility store. The port
+     * relay above carries the non-secret half of the same ceremony. */
+    completeBinding: async (input: { ceremonyId: string; address?: string; accessCode?: string }): Promise<unknown> =>
+      ipcRenderer.invoke(machinesChannels.completeBinding, input),
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,

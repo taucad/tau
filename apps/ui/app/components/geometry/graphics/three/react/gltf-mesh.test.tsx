@@ -47,6 +47,7 @@ import {
   gltfEdgeColorLightMode,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import type { GeometryComponentManifest } from '@taucad/types';
+import * as componentVisibility from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
 
 const firstComponentId = 'component:first';
 const secondComponentId = 'component:second';
@@ -670,6 +671,81 @@ describe('resolveComponentVisualState', () => {
 });
 
 describe('applyModelComponentVisualStateToScene', () => {
+  it('should build the selection set once for all component objects', () => {
+    const scene = new Group();
+    for (const componentId of [firstComponentId, secondComponentId]) {
+      const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      assignComponentOwner(mesh, componentId);
+      scene.add(mesh);
+    }
+    const selectedComponentIds = [firstComponentId];
+    const iterateSelection = vi.spyOn(selectedComponentIds, Symbol.iterator);
+
+    const emphasis = applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState({ selectedComponentIds, hoveredComponentId: secondComponentId }),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    expect(iterateSelection).toHaveBeenCalledTimes(1);
+    expect(emphasis.selected).toEqual([scene.children[0]]);
+    expect(emphasis.hover).toEqual([scene.children[1]]);
+  });
+
+  it('should skip empty emphasis ancestry and descendant queries', () => {
+    const ancestorQuery = vi.spyOn(componentVisibility, 'hasComponentOrAncestor');
+    const descendantQuery = vi.spyOn(componentVisibility, 'hasComponentOrDescendant');
+    const opacityAncestors = vi.spyOn(componentVisibility, 'getComponentAncestorIds');
+    const scene = new Group();
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    assignComponentOwner(mesh, firstComponentId);
+    scene.add(mesh);
+
+    const emphasis = applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState(),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    expect(emphasis).toEqual({ hover: [], selected: [] });
+    expect(mesh.visible).toBe(true);
+    expect(getMeshBasicMaterial(mesh).opacity).toBe(1);
+    expect(ancestorQuery).not.toHaveBeenCalled();
+    expect(descendantQuery).not.toHaveBeenCalled();
+    expect(opacityAncestors).not.toHaveBeenCalled();
+  });
+
+  it('should preserve inherited focus precedence, hidden state and explicit opacity', () => {
+    const scene = new Group();
+    const first = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const second = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    assignComponentOwner(first, firstComponentId);
+    assignComponentOwner(second, secondComponentId);
+    scene.add(first, second);
+
+    const emphasis = applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState({
+        focusedComponentId: 'root',
+        hoveredComponentId: secondComponentId,
+        hiddenComponentIds: [firstComponentId],
+        opacityByComponentId: { [secondComponentId]: 0.25 },
+      }),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    expect(first.visible).toBe(false);
+    expect(second.visible).toBe(true);
+    expect(getMeshBasicMaterial(second).opacity).toBe(0.25);
+    expect(emphasis).toEqual({ hover: [], selected: [second] });
+  });
+
   it('should dim non-focused component materials without writing depth', () => {
     const scene = new Group();
     const focusedMesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);

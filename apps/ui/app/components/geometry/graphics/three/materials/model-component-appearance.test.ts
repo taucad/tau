@@ -104,6 +104,29 @@ describe('model component appearance', () => {
     expect(material.depthWrite).toBe(true);
   });
 
+  it('should keep compiled material versions stable until transparency or depth-write state changes', () => {
+    const material = new MeshStandardMaterial({ color: 0x28_5e_88, metalness: 0.65, roughness: 0.32 });
+    const snapshot = captureModelMaterialAppearance(material);
+    const initialVersion = material.version;
+
+    applyModelMaterialAppearance(material, snapshot, 1);
+    applyModelMaterialAppearance(material, snapshot, 1);
+    expect(material.version).toBe(initialVersion);
+
+    applyModelMaterialAppearance(material, snapshot, 0.5);
+    expect(material.version).toBe(initialVersion + 1);
+    applyModelMaterialAppearance(material, snapshot, 0.25);
+    expect(material.opacity).toBe(0.25);
+    expect(material.version).toBe(initialVersion + 1);
+
+    applyModelMaterialAppearance(material, snapshot, 1);
+    expect(material.version).toBe(initialVersion + 2);
+    applyModelMaterialAppearance(material, snapshot, 1);
+    expect(material.version).toBe(initialVersion + 2);
+    expect(material.metalness).toBe(0.65);
+    expect(material.roughness).toBe(0.32);
+  });
+
   it('should restore the original depth-write state after temporary model dimming', () => {
     const material = new MeshBasicMaterial({ color: 0x40_40_40, opacity: 0.75, transparent: true });
     material.depthWrite = false;

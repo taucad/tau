@@ -13,16 +13,23 @@ import type { PrinterSceneProps } from '#components/printer/printer-scene.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import { getViewerTabIcon } from '#components/panes/viewer-tab-context-menu.js';
+import { digestBytes } from '#utils/crypto.utils.js';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 const mocks = vi.hoisted(() => ({
   scene: vi.fn<(props: PrinterSceneProps) => undefined>(() => undefined),
   live: undefined as PrinterLiveState | undefined,
+  liveDigest: undefined as string | undefined,
   isReducedMotion: false,
 }));
 
 vi.mock('#components/printer/printer-scene.js', () => ({ PrinterScene: mocks.scene }));
-vi.mock('#components/printer/use-printer-live.js', () => ({ usePrinterLive: () => mocks.live }));
+vi.mock('#components/printer/use-printer-live.js', () => ({
+  usePrinterLive: (digest: string | undefined) => {
+    mocks.liveDigest = digest;
+    return mocks.live;
+  },
+}));
 vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ theme: 'dark' }) }));
 
 const { PrinterViewer } = await import('#components/printer/printer-viewer.js');
@@ -63,9 +70,11 @@ const latestSceneProps = (): PrinterSceneProps => {
 const loadedSpoolColor = '#3366FF';
 
 const liveState = (overrides: Partial<PrinterLiveState> = {}): PrinterLiveState => ({
+  machineId: 'machine-1',
   machineName: 'X1C simulator',
   runState: 'printing',
   isActive: true,
+  printsThisFile: true,
   position: { currentLayer: 2, totalLayers: 3, progress: 40 },
   chamberLight: 'on',
   nozzleTarget: 250,
@@ -235,12 +244,24 @@ describe('PrinterViewer', () => {
     expect(props.store.getTime()).toBe(liveTime(props.program, mocks.live.position));
     expect(layerAtTime(props.program, props.store.getTime())).toBe(2);
 
-    mocks.live = liveState({ runState: 'succeeded', isActive: false });
+    mocks.live = liveState({ runState: 'succeeded', isActive: false, printsThisFile: false });
     view.rerender(viewer());
     expect(within(controls).getByRole('switch', { name: 'Live' })).not.toBeChecked();
     expect(within(controls).getByRole('switch', { name: 'Live' })).toBeDisabled();
     expect(controls).toHaveTextContent('No active run to follow');
     expect(within(controls).getByRole('slider', { name: 'Time' })).toBeEnabled();
+  });
+
+  it('should not follow a run that prints another file, and say so', async () => {
+    mocks.live = liveState({ printsThisFile: false });
+    renderViewer();
+    const controls = await screen.findByRole('group', { name: 'Playback controls' });
+
+    expect(within(controls).getByRole('switch', { name: 'Live' })).toBeDisabled();
+    expect(controls).toHaveTextContent('The printer is running another file');
+    expect(within(screen.getByRole('region', { name: 'Print HUD' })).queryByText('Machine')).not.toBeInTheDocument();
+    // The viewer names its file by the digest of the bytes it shows, as the print request ledger does.
+    expect(mocks.liveDigest).toBe(await digestBytes(container));
   });
 
   it('should frame the print again from the pane actions without touching playback', async () => {

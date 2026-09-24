@@ -21,6 +21,16 @@ const terminalStates: ReadonlySet<PrintRequestState> = new Set([
  */
 export const isOpenPrintRequest = (request: Pick<PrintRequest, 'state'>): boolean => !terminalStates.has(request.state);
 
+/**
+ * The provider run a request's start receipt names, when it started one.
+ *
+ * @param request - Any request.
+ * @returns The run id, or `undefined` before a start or when the provider named none.
+ * @public
+ */
+export const startedRunIdOf = ({ receipt }: Pick<PrintRequest, 'receipt'>): string | undefined =>
+  receipt !== undefined && 'providerRunId' in receipt ? receipt.providerRunId : undefined;
+
 const byNewest = (left: PrintRequest, right: PrintRequest): number =>
   Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.requestId.localeCompare(right.requestId);
 
@@ -55,17 +65,20 @@ export type PrintRequestsView = Readonly<{
  * The list seeds the projection and every watched transition folds into it;
  * the host journal stays the only authority (blueprint D4). Unmount aborts the watch.
  *
- * @param client - The negotiated machines facet.
+ * @param client - The negotiated machines facet, or nothing while none is available.
  * @param machineId - The machine whose requests to read, or nothing while none is selected.
  * @returns The live requests.
  * @public
  */
-export const useMachinesPrintRequests = (client: MachineClient, machineId: string | undefined): PrintRequestsView => {
+export const useMachinesPrintRequests = (
+  client: MachineClient | undefined,
+  machineId: string | undefined,
+): PrintRequestsView => {
   const [records, setRecords] = useState<ReadonlyMap<string, PrintRequest>>(new Map());
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    if (machineId === undefined) {
+    if (client === undefined || machineId === undefined) {
       return;
     }
     const abort = new AbortController();

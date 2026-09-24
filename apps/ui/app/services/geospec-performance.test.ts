@@ -109,4 +109,55 @@ describe('GeoSpec performance route adapter', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('should preserve a combined warm worker when the legacy worker fails', async () => {
+    const fixture = performanceLabFixtures.find(({ id }) => id === 'box-step')!;
+    const calls: Array<{ worker: number; engine: string; cache: string }> = [];
+    const terminated: number[] = [];
+    let nextWorker = 0;
+    class InertWorker extends EventTarget {
+      public readonly id = nextWorker++;
+      public postMessage(request: { id: number; input: { engine: string; cache: string } }): void {
+        calls.push({ worker: this.id, engine: request.input.engine, cache: request.input.cache });
+        if (request.input.engine === 'legacy-wasm') {
+          this.dispatchEvent(new Event('error'));
+          return;
+        }
+        this.dispatchEvent(
+          new MessageEvent('message', {
+            data: { id: request.id, type: 'result', result: { cache: request.input.cache } },
+          }),
+        );
+      }
+      public terminate(): void {
+        terminated.push(this.id);
+      }
+    }
+    vi.stubGlobal('Worker', InertWorker);
+    const service = new GeoSpecPerformanceService();
+    const input = (engine: 'combined-wasm' | 'legacy-wasm') =>
+      runInput({
+        engine,
+        fixture,
+        bytes: new Uint8Array([1]),
+        cases: casesForFixture(fixture.id).slice(0, 1),
+        repeats: 1,
+        cache: 'warm',
+      });
+    try {
+      await service.run(input('combined-wasm'));
+      await expect(service.run(input('legacy-wasm'))).rejects.toThrow('failed to start or execute');
+      await service.run(input('combined-wasm'));
+      expect(calls).toEqual([
+        { worker: 0, engine: 'combined-wasm', cache: 'cold' },
+        { worker: 1, engine: 'legacy-wasm', cache: 'cold' },
+        { worker: 0, engine: 'combined-wasm', cache: 'warm' },
+      ]);
+      expect(terminated).toEqual([1]);
+    } finally {
+      service.close();
+      vi.unstubAllGlobals();
+    }
+    expect(terminated).toEqual([1, 0]);
+  });
 });

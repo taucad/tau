@@ -136,6 +136,11 @@ Common glob patterns:
 - "**/prefix_*" - Files starting with a prefix in any directory
 
 For searching file contents, use \`grep\`.`,
+  [toolName.updateTodos]: `Replace this chat's task list, the one the person watches above the composer while you work.
+
+Send the whole list every time: an item you leave out is removed. Keep one item \`in_progress\` at a time and mark items \`done\` as they finish. Titles are short and outcome-shaped ("Slice the pyramid"), not step narration.
+
+Returns the written path (\`.tau/chats/<chatId>/todo.yaml\`) and a count per status.`,
   [toolName.revisions]: `Read this project's saved revisions. Read-only.
 
 Actions:

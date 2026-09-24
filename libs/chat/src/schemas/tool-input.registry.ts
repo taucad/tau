@@ -17,6 +17,7 @@ import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/sc
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
 import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
+import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
 import {
   applyParameterOperationInputSchema,
   applyParameterOperationOutputSchema,
@@ -115,6 +116,10 @@ export const uiMessageTools = {
   [toolName.revisions]: {
     inputSchema: revisionsInputSchema,
     outputSchema: revisionsOutputSchema,
+  },
+  [toolName.updateTodos]: {
+    inputSchema: updateTodosInputSchema,
+    outputSchema: updateTodosOutputSchema,
   },
 } as const;
 

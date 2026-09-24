@@ -32,6 +32,7 @@ export const cadProviderFacingToolNames = [
   toolName.webSearch,
   toolName.webBrowser,
   toolName.revisions,
+  toolName.updateTodos,
 ] as const satisfies readonly ToolName[];
 
 const requiredModelInputModalities: Partial<Record<ToolName, readonly ModelInputModality[]>> = {

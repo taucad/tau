@@ -17,6 +17,7 @@ export const toolName = {
   applyParameterOperation: 'apply_parameter_operation',
   screenshot: 'screenshot',
   revisions: 'revisions',
+  updateTodos: 'update_todos',
 } as const satisfies Record<string, string>;
 
 /** @public */

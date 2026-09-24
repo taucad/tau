@@ -53,7 +53,11 @@ const main = async (): Promise<void> => {
   assert.ok(values.capture && values.output, '--capture and --output are required');
   await Promise.all(
     Object.entries(sources).map(async ([file, expected]) => {
-      assert.equal(sha(await readFile(resolve(threeRoot, file))), expected, `Review upstream shader changes: ${file}`);
+      assert.equal(
+        sha(new Uint8Array(await readFile(resolve(threeRoot, file)))),
+        expected,
+        `Review upstream shader changes: ${file}`,
+      );
     }),
   );
   const input = JSON.parse(await readFile(resolve(values.capture), 'utf8')) as {
@@ -86,7 +90,7 @@ const main = async (): Promise<void> => {
   }
   const encoder: unknown = requireDecoder('sharp');
   assert.equal(typeof encoder, 'function');
-  const png = await (encoder as Encoder)(packed, { raw: { width: 384, height: 1024, channels: 4 } })
+  const png = await (encoder as Encoder)(new Uint8Array(packed), { raw: { width: 384, height: 1024, channels: 4 } })
     .png({ compressionLevel: 9 })
     .toBuffer();
   // Read only the fingerprinted upstream constants, preserving little-endian bytes.
@@ -116,8 +120,8 @@ const main = async (): Promise<void> => {
         },
         dfg: { width: 16, height: 16, format: 'rg16float little-endian' },
         sources,
-        captureSha256: sha(original),
-        assets: { 'studio.png': sha(png), 'dfg.bin': sha(dfg) },
+        captureSha256: sha(new Uint8Array(original)),
+        assets: { 'studio.png': sha(png), 'dfg.bin': sha(new Uint8Array(dfg)) },
         generator: 'Tau apps/ui/scripts/render-calibration/pack-lighting.mts',
       },
       null,

@@ -39,6 +39,7 @@ import type { PublishPublicationActorInput } from '#publish.machine.js';
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
 import { syncFailureReason } from '#sync.machine.js';
+import { RevisionPortError } from '#revision-port.js';
 
 describe('remotes', () => {
   it('reads the kind from the reserved name, never from the URL', () => {
@@ -268,6 +269,14 @@ describe('remoteTransportError', () => {
     expect(refusal.message).toContain('huge.bin (5000 bytes)');
   });
 
+  /* D18: a Git remote that cannot hold large objects is not a plan problem,
+   * so the class that offers *Upgrade* must not claim it. */
+  it('should classify a large-object refusal on a Git remote apart from the storage plan', () => {
+    const refusal = new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(['huge.step']));
+
+    expect(syncFailureReason(refusal)).toBe('largeFiles');
+  });
+
   it('leaves a sideband refusal without the ceiling marker a plain rejection', () => {
     const stderr = [
       'remote: Tau: refused refs/heads/main — Tau Cloud never deletes a ref; retention is decided on the server.',
@@ -357,6 +366,31 @@ describe('remoteTransportError', () => {
     expect(refusal.code).toBe('REMOTE_REJECTED');
     expect(refusal.message).toBe(sentence);
     expect(syncFailureReason(refusal)).toBe('rejected');
+  });
+
+  /* D11: the git proxy refuses to carry a credential across a redirect and says
+   * so with a typed 409. That is a moved repository, not an outage to retry. */
+  it('reads the proxy’s refused credentialed redirect as a moved repository', () => {
+    const body = {
+      statusCode: 409,
+      code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
+      error: 'The repository moved; confirm its new location before sending the credential there',
+      location: 'https://github.com/octo/renamed.git/info/refs',
+    };
+    const thrown = Object.assign(new Error('HTTP Error: 409 Conflict'), {
+      data: { statusCode: 409, response: JSON.stringify(body) },
+    });
+
+    const refusal = remoteTransportError(thrown, { remote: 'origin' });
+
+    expect(refusal.code).toBe('REMOTE_MOVED');
+    expect(refusal.message).toBe(body.error);
+    expect(syncFailureReason(refusal)).toBe('moved');
+    /* Any other 409 is still the retryable class. */
+    const other = Object.assign(new Error('HTTP Error: 409 Conflict'), {
+      data: { statusCode: 409, response: JSON.stringify({ code: 'SOMETHING_ELSE' }) },
+    });
+    expect(remoteTransportError(other, { remote: 'origin' }).code).toBe('REMOTE_UNAVAILABLE');
   });
 
   it('still reads a failure with neither a status nor a server sentence as unreachable', () => {

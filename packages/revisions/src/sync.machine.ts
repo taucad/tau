@@ -108,6 +108,12 @@ export type SyncFailureReason =
   | 'forbidden'
   | 'notFound'
   | 'quota'
+  /* A Git remote that cannot carry large objects (P20): a plan cannot fix it,
+     so it is not `quota`, and the sentence names the files to move. */
+  | 'largeFiles'
+  /* The repository was renamed or transferred (D11): the surface looks it up by
+     its stable id and asks before re-pointing the remote. */
+  | 'moved'
   | 'rejected'
   | 'offline'
   | 'unknown';
@@ -410,6 +416,7 @@ const terminalFailureCodes: ReadonlySet<string> = new Set([
   'REMOTE_FORBIDDEN',
   'REMOTE_NOT_FOUND',
   'REMOTE_QUOTA_EXCEEDED',
+  'REMOTE_MOVED',
 ]);
 
 const codeOf = (error: unknown): string | undefined => {
@@ -453,9 +460,14 @@ export const syncFailureReason = (error: unknown): SyncFailureReason => {
     case 'REMOTE_NOT_FOUND': {
       return 'notFound';
     }
-    case 'REMOTE_QUOTA_EXCEEDED':
-    case 'LFS_REMOTE_UNSUPPORTED': {
+    case 'REMOTE_QUOTA_EXCEEDED': {
       return 'quota';
+    }
+    case 'LFS_REMOTE_UNSUPPORTED': {
+      return 'largeFiles';
+    }
+    case 'REMOTE_MOVED': {
+      return 'moved';
     }
     /* The server refused the refs, not the device (contract §4): a fetch and a
      * replay clear it, so the action beside it is *Sync now*, not *Sign in*. */

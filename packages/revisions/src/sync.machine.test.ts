@@ -538,6 +538,28 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D11: a renamed or transferred GitHub repository answers the proxy's typed
+   * 409 until the person confirms the new address, so the old one is never
+   * fetched again on backoff. */
+  it('row 43b (D11): a moved repository fails with its own class instead of retrying on backoff', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.effects.settle('fetch', {
+      error: Object.assign(new Error('This repository moved to a new address.'), { code: 'REMOTE_MOVED' }),
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    expect(selectSyncFacet(harness.actor.getSnapshot()).reason).toBe('moved');
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+
+    harness.stop();
+  });
+
   it('row 38 (C15): a pull that finds this device ahead pushes instead of saying Backed up', async () => {
     const harness = start();
 

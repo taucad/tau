@@ -428,8 +428,9 @@ describe.runIf(gitOnPath)('P20 — large objects and a third-party remote', () =
  *   TAU_E2E_GITHUB_TOKEN=<a token with `public_repo` on that repository> \
  *   pnpm nx test revisions --watch=false -- git-remote.integration
  *
- * The sandbox repository is expected to be empty and disposable: the run force-
- * pushes a branch of its own name and deletes nothing.
+ * The sandbox repository is expected to be empty and disposable: the run pushes
+ * a branch of its own name and deletes that branch again, through the same
+ * credential helper, however the row ends.
  */
 const sandboxUrl = process.env['TAU_E2E_GITHUB_SANDBOX'];
 const sandboxToken = process.env['TAU_E2E_GITHUB_TOKEN'];
@@ -441,6 +442,7 @@ describe.runIf(sandboxConfigured)('AC18 — the GitHub sandbox run (env-gated)',
     const repositoryPath = join(root, 'project');
     await mkdir(repositoryPath, { recursive: true });
     const branch = `tau-w12-${String(Date.now())}`;
+    let pushedBranch = false;
     try {
       const port = createNativeGitRevisionPort({ repositoryPath });
       await port.init({ author });
@@ -454,11 +456,11 @@ describe.runIf(sandboxConfigured)('AC18 — the GitHub sandbox run (env-gated)',
       await port.updateRef({ name: branch, expectedHead: undefined, head });
 
       /*
-       * On a disk host the credential is git's own — the system credential
-       * helper, which `createNativeGitRevisionPort` leaves reachable because it
-       * clears only `GIT_*` from the child's environment. That is the right
-       * answer for a person at a desktop and it is the whole seam (W12 report
-       * §"desktop and CLI"): Tau writes no token to disk.
+       * A remote Tau holds no credential record for is reached with git's own
+       * credential helper, which `createNativeGitRevisionPort` leaves reachable
+       * for exactly that case (ruling G1: only Tau-managed remotes switch the
+       * helpers off). That is the CLI's and a self-managed remote's seam, and
+       * Tau writes no token to disk.
        *
        * So this row hands the run's token to git the same way: a helper local
        * to one `mktemp` repository that echoes what the *environment* holds.
@@ -478,12 +480,21 @@ describe.runIf(sandboxConfigured)('AC18 — the GitHub sandbox run (env-gated)',
       );
       await port.setRemote({ name: 'origin', url: sandboxUrl ?? '' });
       const pushed = await port.push({ remote: 'origin', refs: [{ name: `refs/heads/${branch}` }], atomic: true });
+      pushedBranch = pushed.refs[0]?.status === 'updated';
 
       expect(pushed.refs[0]?.status).toBe('updated');
       const { stdout } = await runGit('git', ['ls-remote', sandboxUrl ?? '', branch], { cwd: repositoryPath });
       expect(stdout).toContain(head);
     } finally {
-      await rm(root, { force: true, recursive: true });
+      try {
+        if (pushedBranch) {
+          /* The same repository-local helper that pushed it; nothing is left
+             behind in the sandbox for the next run to trip over. */
+          await runGit('git', ['push', '--delete', 'origin', branch], { cwd: repositoryPath });
+        }
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
     }
   }, 300_000);
 });

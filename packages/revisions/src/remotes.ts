@@ -361,6 +361,7 @@ type RemoteRefusal = Readonly<{ status?: number; code?: string; message?: string
 /** The `code` values this classifier will hand back untouched when it finds one. */
 const remoteErrorCodes: ReadonlySet<string> = new Set<RevisionPortErrorCode>([
   'REMOTE_FORBIDDEN',
+  'REMOTE_MOVED',
   'REMOTE_NOT_ENTITLED',
   'REMOTE_NOT_FOUND',
   'REMOTE_QUOTA_EXCEEDED',
@@ -472,7 +473,7 @@ export const remoteRefusalSaid = (reported: string, said: readonly string[]): st
 const refusalSentence = (code: RevisionPortErrorCode): string => {
   switch (code) {
     case 'REMOTE_REAUTHORIZATION_REQUIRED': {
-      return 'This remote needs permission again before it can be backed up to.';
+      return 'The remote rejected the saved credentials.';
     }
     case 'REMOTE_UNAUTHORIZED': {
       return 'This remote did not accept this device; sign in again.';
@@ -485,6 +486,9 @@ const refusalSentence = (code: RevisionPortErrorCode): string => {
     }
     case 'REMOTE_NOT_FOUND': {
       return 'This remote has no repository at this address for your account.';
+    }
+    case 'REMOTE_MOVED': {
+      return 'This repository moved to a new address.';
     }
     case 'REMOTE_QUOTA_EXCEEDED': {
       return 'This project is over its storage plan.';
@@ -609,15 +613,19 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
                this address — and the server's own sentence below is what tells
                them which of the two happened. */
             'REMOTE_NOT_FOUND'
-          : status === 413
-            ? 'REMOTE_QUOTA_EXCEEDED'
-            : status === 422
-              ? /* The refs themselves were not committable: loose objects, or a
-                   connectivity check the pushed packs failed. The remote said
-                   so in its own words and a blind re-push reproduces it, so
-                   this is a rejection carrying that sentence, not a retry. */
-                'REMOTE_REJECTED'
-              : 'REMOTE_UNAVAILABLE';
+          : status === 409 && answered.code === 'GIT_PROXY_REDIRECTED_CREDENTIAL'
+            ? /* The proxy will not carry a credential across a redirect (D11):
+                 the repository moved, and only the person can confirm where. */
+              'REMOTE_MOVED'
+            : status === 413
+              ? 'REMOTE_QUOTA_EXCEEDED'
+              : status === 422
+                ? /* The refs themselves were not committable: loose objects, or a
+                     connectivity check the pushed packs failed. The remote said
+                     so in its own words and a blind re-push reproduces it, so
+                     this is a rejection carrying that sentence, not a retry. */
+                  'REMOTE_REJECTED'
+                : 'REMOTE_UNAVAILABLE';
   return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
 };
 
@@ -854,6 +862,14 @@ export type GitRemoteCredential = Readonly<{
   repositoryUrl?: string;
   /** The whole header value, e.g. `Bearer gho_…`. */
   authorization?: string;
+  /**
+   * When `authorization` stops working, as an ISO timestamp (D2).
+   *
+   * The page's re-mint deadline, not a guard: a transport never refuses on it,
+   * because the page's clock is not the provider's. A genuine 401 is the
+   * authority, and the page re-mints once on that too.
+   */
+  expiresAt?: string;
   /** Why there is none, when the session could not mint one. */
   unavailable?: string;
 }>;

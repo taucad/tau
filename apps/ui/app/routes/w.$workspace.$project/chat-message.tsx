@@ -57,6 +57,7 @@ import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-me
 import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-message-tool-revisions.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessageToolUpdateTodos } from '#routes/w.$workspace.$project/chat-message-tool-update-todos.js';
+import { ChatMessageToolRequestPrint } from '#routes/w.$workspace.$project/chat-message-tool-request-print.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
 import {
   ChatMessageToolExternal,
@@ -239,9 +240,22 @@ type PartRenderContext = {
   readonly isMessageActive: boolean;
 };
 
-const parameterToolPart = (
-  part: ToolInvocation<typeof toolName.getParameters> | ToolInvocation<typeof toolName.applyParameterOperation>,
-  name: typeof toolName.getParameters | typeof toolName.applyParameterOperation,
+/** Tau's own tools without a bespoke card: the generic card shows them under their own name. */
+const genericToolPart = (
+  part:
+    | ToolInvocation<typeof toolName.getParameters>
+    | ToolInvocation<typeof toolName.applyParameterOperation>
+    | ToolInvocation<typeof toolName.getMachine>
+    | ToolInvocation<typeof toolName.getPrintRequest>
+    | ToolInvocation<typeof toolName.listPrintRequests>
+    | ToolInvocation<typeof toolName.cancelPrint>,
+  name:
+    | typeof toolName.getParameters
+    | typeof toolName.applyParameterOperation
+    | typeof toolName.getMachine
+    | typeof toolName.getPrintRequest
+    | typeof toolName.listPrintRequests
+    | typeof toolName.cancelPrint,
 ): DynamicToolUIPart => ({
   ...part,
   type: 'dynamic-tool',
@@ -431,15 +445,12 @@ function renderAssistantPart(
     }
 
     case 'tool-get_parameters': {
-      return <ChatMessageToolExternal key={part.toolCallId} part={parameterToolPart(part, toolName.getParameters)} />;
+      return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.getParameters)} />;
     }
 
     case 'tool-apply_parameter_operation': {
       return (
-        <ChatMessageToolExternal
-          key={part.toolCallId}
-          part={parameterToolPart(part, toolName.applyParameterOperation)}
-        />
+        <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.applyParameterOperation)} />
       );
     }
 
@@ -453,6 +464,28 @@ function renderAssistantPart(
 
     case 'tool-update_todos': {
       return <ChatMessageToolUpdateTodos key={part.toolCallId} part={part} />;
+    }
+
+    case 'tool-request_print': {
+      return <ChatMessageToolRequestPrint key={part.toolCallId} part={part} />;
+    }
+
+    /* The other print tools read or stop what the request card and the Print
+     * pane already show, so the generic card is enough. */
+    case 'tool-get_machine': {
+      return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.getMachine)} />;
+    }
+
+    case 'tool-get_print_request': {
+      return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.getPrintRequest)} />;
+    }
+
+    case 'tool-list_print_requests': {
+      return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.listPrintRequests)} />;
+    }
+
+    case 'tool-cancel_print': {
+      return <ChatMessageToolExternal key={part.toolCallId} part={genericToolPart(part, toolName.cancelPrint)} />;
     }
 
     default: {

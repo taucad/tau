@@ -29,7 +29,7 @@ const main = async (): Promise<void> => {
   );
   const variants = [
     { id: 'copper-lampshade', label: 'Copper lampshade · standard physical materials', source },
-    ...(['metal', 'glass', 'layers'] as const).map((kind) => ({
+    ...(['metal', 'glass', 'layers', 'effects'] as const).map((kind) => ({
       id: `physical-${kind}`,
       label: `Physical ${kind} · roughness and layer matrix`,
       source: `import { makeSphere, makeBox } from 'replicad';
@@ -55,12 +55,22 @@ export default function main(): Model {
             ? { KHR_materials_sheen: { sheenColorFactor: [0.9, 0.2, 0.1], sheenRoughnessFactor: roughness[column] } }
             : { KHR_materials_iridescence: { iridescenceFactor: 1, iridescenceIor: 1.3, iridescenceThicknessMinimum: 400, iridescenceThicknessMaximum: 400 } },
       };
-      parts.push({ name: 'Sphere ' + row + ':' + column, shape: makeSphere(14).translate([column * 38 - 57, 0, row * 38]), material: '${kind}' === 'metal' ? metal : '${kind}' === 'glass' ? glass : layers });
+      const effects: Material = row === 0
+        ? { pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: roughness[column] }, extensions: { KHR_materials_transmission: { transmissionFactor: 1 }, KHR_materials_ior: { ior: 1.8 }, KHR_materials_volume: { thicknessFactor: 0.1 }, KHR_materials_dispersion: { dispersion: 1 } } }
+        : row === 1
+          ? { pbrMetallicRoughness: { baseColorFactor: [0.05, 0.05, 0.05, 1], metallicFactor: 0, roughnessFactor: roughness[column] }, emissiveFactor: [0.1, 0.4, 1], extensions: { KHR_materials_emissive_strength: { emissiveStrength: 0.5 + column * 2 } } }
+          : { pbrMetallicRoughness: { baseColorFactor: [0.65, 0.1, 0.05, [0.1, 0.35, 0.65, 0.9][column]], metallicFactor: 0, roughnessFactor: roughness[column] }, alphaMode: 'BLEND' };
+      parts.push({ name: 'Sphere ' + row + ':' + column, shape: makeSphere(14).translate([column * 38 - 57, 0, row * 38]), material: '${kind}' === 'metal' ? metal : '${kind}' === 'glass' ? glass : '${kind}' === 'layers' ? layers : effects });
     }
   }
-  if ('${kind}' === 'glass') {
+  if ('${kind}' === 'glass' || '${kind}' === 'effects') {
     for (let row = 0; row < 6; row++) for (let col = 0; col < 8; col++) {
       parts.push({ name: 'Backdrop ' + row + ':' + col, shape: makeBox([col * 19 - 76, 22, row * 19 - 19], [col * 19 - 57, 23, row * 19]), material: { pbrMetallicRoughness: { baseColorFactor: (row + col) % 2 ? [0.06, 0.15, 0.35, 1] : [0.8, 0.8, 0.8, 1] }, extensions: { KHR_materials_unlit: {} } } });
+    }
+  }
+  if ('${kind}' === 'effects') {
+    for (let column = 0; column < 32; column++) {
+      parts.push({ name: 'Dispersion stripe ' + column, shape: makeBox([column * 4.75 - 76, 21, -19], [(column + 1) * 4.75 - 76, 21.5, 19]), material: { pbrMetallicRoughness: { baseColorFactor: column % 2 ? [0.02, 0.8, 0.6, 1] : [0.8, 0.05, 0.02, 1] }, extensions: { KHR_materials_unlit: {} } } });
     }
   }
   return { shapes: parts };

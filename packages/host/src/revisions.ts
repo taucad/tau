@@ -1220,6 +1220,29 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     }
     return value;
   };
+  /**
+   * What one `remoteCredential` frame makes this host hold (D4, D16b).
+   *
+   * An `unavailable` frame is held as well: dropping it left native git free
+   * to reach the repository with the person's own credential helper, where
+   * holding it refuses the repository with reconnect-required (ruling G1). A
+   * frame that names no repository clears whatever was held.
+   *
+   * @param request - The parsed frame.
+   * @returns The credential native git reads next, if any.
+   */
+  const channelCredential = (request: Record<string, JsonValue>): NativeGitRemoteCredential | undefined => {
+    const repositoryUrl = optionalText(request, 'repositoryUrl');
+    const authorization = optionalText(request, 'authorization');
+    const unavailable = optionalText(request, 'unavailable');
+    if (repositoryUrl === undefined) {
+      return undefined;
+    }
+    if (unavailable !== undefined) {
+      return { repositoryUrl, unavailable };
+    }
+    return authorization === undefined ? undefined : { repositoryUrl, authorization };
+  };
   // oxlint-disable-next-line complexity -- One validated dispatch table mirrors the established worker wire without another protocol layer.
   const sendRevisionRequest = async (value: JsonValue): Promise<JsonValue> => {
     const request = hostRevisionRequestSchema.parse(value) as {
@@ -1239,10 +1262,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         actor.send({ type: 'sync', event: { type: 'open' } });
         return null;
       case 'remoteCredential': {
-        const repositoryUrl = optionalText(request, 'repositoryUrl');
-        const authorization = optionalText(request, 'authorization');
-        channelRemoteCredential =
-          repositoryUrl === undefined || authorization === undefined ? undefined : { repositoryUrl, authorization };
+        channelRemoteCredential = channelCredential(request);
         return null;
       }
       case 'log': {
@@ -1405,6 +1425,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         break;
       case 'cancelRemote':
         actor.send({ type: 'remote', event: { type: 'cancel' } });
+        break;
+      /* The page re-minted the credential a remote in `reconnectRequired` was
+         refused with, and sent the frame first (D3). */
+      case 'authorizeRemote':
+        actor.send({ type: 'remote', event: { type: 'authorized' } });
         break;
       case 'syncNow':
         actor.send({ type: 'syncNow' });

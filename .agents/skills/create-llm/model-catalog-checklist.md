@@ -182,6 +182,14 @@ Per-provider model overrides use `TAU_AGENT_LIVE_<PROVIDER>_MODEL`.
 
 A new model row must pass the live matrix row for its provider. A skipped live run is not validated; say so rather than reporting green.
 
+One pass cannot show a row that a model refuses part of the time. Validate a new or newly recommended row with repeats: each row runs `1 + TAU_LIVE_REPEATS` times and fails when any pass fails. The matrix names one representative per non-Vertex wire; when a model becomes its provider's recommended row, move that provider's matrix and provider-switch representative to it, otherwise add the row to the matrix list for the run.
+
+```bash
+TAU_LIVE_REPEATS=9 pnpm nx run api:test:live -- provider-matrix -t <model-id>
+```
+
+Live prompts call the value a scripted tool result hands back a _marker_. `createLiveSession` refuses a prompt that asks for a "token": Grok 4.7 refuses "reply with the exact token … and nothing else" as a jailbreak and completes the run with no tool call (`docs/research/grok-4-7-live-suite-refusal-blueprint.md`). A failing tool row reports the model's own answer; read it before suspecting the wire.
+
 ## Reporting Template
 
 Report:

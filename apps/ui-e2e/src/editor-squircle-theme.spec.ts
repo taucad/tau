@@ -70,7 +70,7 @@ test('should apply the shared squircle curve while preserving semantic circles',
   const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]');
   const parametersTab = selectors.getByRole('tab', { name: 'Parameters', exact: true });
   const filter = selectors.getByRole('textbox', { name: 'Filter parameters' });
-  const fullRoundAction = selectors.getByRole('button', { name: 'Add context' });
+  const fullRoundAction = selectors.getByRole('button', { name: 'Add', exact: true });
   const disclosure = selectors.getByRole('button', { name: mainPath, exact: true });
 
   await target.expectVisible(composer, 60_000);

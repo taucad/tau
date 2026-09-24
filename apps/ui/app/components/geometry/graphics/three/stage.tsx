@@ -4,6 +4,7 @@ import type * as THREE from 'three';
 import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import { createThreeRenderMatrix } from '@taucad/three/spatial';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
+import type { StudioLightingSettings } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { SectionContourFills } from '#components/geometry/graphics/three/react/section-contour-fill.js';
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 import { SectionViewTestBridge } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
@@ -16,6 +17,7 @@ import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphic
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 
 export type StageOptions = {
+  lighting?: Partial<StudioLightingSettings>;
   /** Fractional outer margin applied by projected-corner fitting. */
   fitMargin?: number;
   rotation?: {
@@ -134,6 +136,7 @@ export function Stage({
         />
       </group>
       <Lights
+        settings={stageOptions.lighting}
         enableMatcap={enableMatcap}
         sceneRadius={geometryRadius > 0 ? geometryRadius / renderFrame.metersPerRenderUnit : 0}
         upDirection={upDirection}

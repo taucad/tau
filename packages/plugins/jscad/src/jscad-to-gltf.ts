@@ -307,11 +307,13 @@ function buildNodeFromJscadPart(
     normals: normalsArray,
     indices: indicesArray,
     material: {
-      baseColorFactor: linearBaseColor,
-      metallicFactor: cadMaterialDefaults.metalnessFactor,
-      roughnessFactor: cadMaterialDefaults.roughnessFactor,
       doubleSided: true,
-      alphaMode: linearBaseColor[3] < 1 ? 'BLEND' : 'OPAQUE',
+      pbrMetallicRoughness: {
+        baseColorFactor: linearBaseColor,
+        metallicFactor: cadMaterialDefaults.metalnessFactor,
+        roughnessFactor: cadMaterialDefaults.roughnessFactor,
+      },
+      ...(linearBaseColor[3] < 1 ? { alphaMode: 'BLEND' } : {}),
     },
   };
 
@@ -326,8 +328,11 @@ function buildNodeFromJscadPart(
       mode: Primitive.Mode['LINES']!,
       positions: linePositions,
       material: {
-        ...cadEdgeOverlayMaterialDefaults,
-        baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],
+        doubleSided: cadEdgeOverlayMaterialDefaults.doubleSided,
+        pbrMetallicRoughness: {
+          baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],
+          metallicFactor: cadEdgeOverlayMaterialDefaults.metallicFactor,
+        },
         extensions: {
           [KHRMaterialsUnlit.EXTENSION_NAME]: {},
         },

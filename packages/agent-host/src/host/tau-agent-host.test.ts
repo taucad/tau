@@ -726,6 +726,8 @@ describe('createTauAgentHost', () => {
       ORIGIN_NOT_ALLOWED: false,
       PROVIDER_ACCOUNT_EXHAUSTED: false,
       RATE_LIMITED: true,
+      // The resumed run re-sends the same history, which meets the same bound.
+      REQUEST_TOO_LARGE: false,
       UNAUTHENTICATED: true,
       INVALID_REQUEST: true,
       PROVIDER_UNAVAILABLE: true,

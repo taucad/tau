@@ -104,11 +104,14 @@ describe('development reserve promise', () => {
     const tiered = policy.routes.filter((route) => route.routeId.endsWith(':long-context'));
     expect(tiered.map((route) => route.routeId)).toEqual([
       'openai-gpt-6-astra:long-context',
+      'openai-gpt-6-sol:long-context',
+      'openai-gpt-6-luna:long-context',
       'openai-gpt-5.6-sol:long-context',
       'openai-gpt-5.6-terra:long-context',
       'openai-gpt-5.6-luna:long-context',
       'openai-gpt-5.5:long-context',
       'google-gemini-3.1-pro:long-context',
+      'xai-grok-4.7:long-context',
       'xai-grok-4.6:long-context',
     ]);
     for (const route of tiered) {

@@ -9,7 +9,6 @@ import { getActiveGroupValues } from '@taucad/types';
 import type { ExportFile, FileExtension } from '@taucad/types';
 import { compileParameterManifest, projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
-import { quantityKinds } from '@taucad/units/quantity';
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -23,7 +22,8 @@ import {
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import { useProject } from '#hooks/use-project.js';
+import { useMainGraphics, useProject } from '#hooks/use-project.js';
+import type { LengthSymbol } from '#constants/length-units.js';
 import { toast } from '#components/ui/sonner.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -114,66 +114,6 @@ type ConfigurationParameterOwner = Readonly<{
   parameterService: ParameterSetService;
 }>;
 
-const configurationFieldSemantics: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  width: { 'x-tau-unit': '1', 'x-tau-space': 'linear', 'x-tau-symbol': 'px' },
-  height: { 'x-tau-unit': '1', 'x-tau-space': 'linear', 'x-tau-symbol': 'px' },
-  lineWidth: { 'x-tau-unit': '1', 'x-tau-space': 'linear', 'x-tau-symbol': 'px' },
-  verticalFieldOfView: {
-    'x-tau-unit': 'deg',
-    'x-tau-quantity-kind': quantityKinds.planeAngle,
-    'x-tau-space': 'linear',
-  },
-  zoom: {
-    'x-tau-unit': '1',
-    'x-tau-quantity-kind': quantityKinds.dimensionlessRatio,
-    'x-tau-space': 'linear',
-  },
-  quality: {
-    'x-tau-unit': '1',
-    'x-tau-quantity-kind': quantityKinds.dimensionlessRatio,
-    'x-tau-space': 'linear',
-  },
-  margin: {
-    'x-tau-unit': '1',
-    'x-tau-quantity-kind': quantityKinds.dimensionlessRatio,
-    'x-tau-space': 'linear',
-  },
-};
-
-const withConfigurationFieldSemantics = (schema: JSONSchema7): JSONSchema7 => {
-  const copy = structuredClone(schema) as Record<string, unknown>;
-  const pending = [copy];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    const { properties } = current;
-    if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
-      for (const [name, value] of Object.entries(properties)) {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) {
-          continue;
-        }
-        const child = value as Record<string, unknown>;
-        Object.assign(child, configurationFieldSemantics[name]);
-        pending.push(child);
-      }
-    }
-    for (const keyword of ['items', 'additionalProperties', 'if', 'then', 'else'] as const) {
-      const child = current[keyword];
-      if (child && typeof child === 'object' && !Array.isArray(child)) {
-        pending.push(child as Record<string, unknown>);
-      }
-    }
-    for (const keyword of ['allOf', 'anyOf', 'oneOf'] as const) {
-      const children = current[keyword];
-      if (Array.isArray(children)) {
-        pending.push(
-          ...children.filter((child): child is Record<string, unknown> => Boolean(child && typeof child === 'object')),
-        );
-      }
-    }
-  }
-  return copy;
-};
-
 const safePathSegment = (value: string): string => value.replaceAll(/[^a-z0-9._-]/giu, '_');
 
 export async function compileExportConfigurationManifest(
@@ -193,7 +133,7 @@ export async function compileExportConfigurationManifest(
   const revision = `sha256:${hash}` as ParameterManifest['identity']['dependency'];
   const manifest = await compileParameterManifest({
     declaration: projectDraft7SchemaToParameterDeclaration({
-      schema: withConfigurationFieldSemantics(resolved.schema),
+      schema: resolved.schema,
       defaults: resolved.defaults,
       schemaId: `urn:taucad:configuration:${encodeURIComponent(provider)}:${encodeURIComponent(configuration)}`,
       schemaName: 'ProviderConfiguration',
@@ -637,11 +577,10 @@ async function downloadExports(
 }
 
 // Shared static fields for export form context (no search; nested groups start collapsed)
-const exportFormContextBase: Pick<RJSFContext, 'searchTerm' | 'allExpanded' | 'shouldShowField' | 'units'> = {
+const exportFormContextBase: Pick<RJSFContext, 'searchTerm' | 'allExpanded' | 'shouldShowField'> = {
   searchTerm: '',
   allExpanded: false,
   shouldShowField: () => true,
-  units: { length: { displaySymbol: 'mm' } },
 };
 
 export function ExportSchemaForm({
@@ -653,6 +592,7 @@ export function ExportSchemaForm({
   shouldShowLabel,
   className,
   resolved,
+  lengthDisplaySymbol = 'mm',
   value,
   onChange,
 }: {
@@ -664,6 +604,8 @@ export function ExportSchemaForm({
   readonly shouldShowLabel: boolean;
   readonly className?: string;
   readonly resolved: ResolvedSchema;
+  /** The project's length display unit; model-length options convert to it. */
+  readonly lengthDisplaySymbol?: LengthSymbol;
   readonly value: Record<string, unknown>;
   readonly onChange: (value: Record<string, unknown>) => void;
 }): ReactElement {
@@ -751,7 +693,7 @@ export function ExportSchemaForm({
         });
       } catch (error) {
         if (!controller.signal.aborted) {
-          toast.error(error instanceof Error ? error.message : 'Failed to prepare checked export settings.');
+          toast.error(`${label} could not be prepared: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     };
@@ -760,7 +702,7 @@ export function ExportSchemaForm({
     return () => {
       controller.abort();
     };
-  }, [configuration, parameterService, provider, resolved]);
+  }, [configuration, label, parameterService, provider, resolved]);
 
   useEffect(() => {
     if (parameterSession && parameterSnapshot && JSON.stringify(authoritativeValue) !== JSON.stringify(value)) {
@@ -832,6 +774,7 @@ export function ExportSchemaForm({
 
   const formContext: RJSFContext = {
     ...exportFormContextBase,
+    units: { length: { displaySymbol: lengthDisplaySymbol } },
     idPrefix,
     rootPresentation: 'embedded',
     defaultParameters: activeResolved.defaults,
@@ -885,6 +828,8 @@ function ExportFormatSettings({
 }) {
   const { parameterService } = useProject();
   const parameterOwner = useMemo(() => ({ parameterService }), [parameterService]);
+  const graphicsActor = useMainGraphics();
+  const lengthDisplaySymbol = useSelector(graphicsActor, (state) => state?.context.displayUnits.length.symbol) ?? 'mm';
   const hasDualSchemas = Boolean(resolved.content && resolved.exportOptions);
   const isModified = Object.keys(formatContent).length > 0 || Object.keys(formatOptions).length > 0;
 
@@ -918,6 +863,7 @@ function ExportFormatSettings({
             label='Content'
             shouldShowLabel={hasDualSchemas}
             resolved={resolved.content}
+            lengthDisplaySymbol={lengthDisplaySymbol}
             value={{ ...formatContent }}
             onChange={(content) => {
               onContentChange(format, runtimeContentFromRecord(content));
@@ -934,6 +880,7 @@ function ExportFormatSettings({
             shouldShowLabel={hasDualSchemas}
             className={cn(hasDualSchemas && 'border-t border-border/70')}
             resolved={resolved.exportOptions}
+            lengthDisplaySymbol={lengthDisplaySymbol}
             value={formatOptions}
             onChange={(options) => {
               onOptionsChange(format, options);

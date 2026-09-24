@@ -101,7 +101,7 @@ export const ChatErrorCredits = memo(function ({
           )}
           {/* A cheaper tier is the other fix for a shortfall (P4); the composer's
            * picker is the owner, opened here without claiming its shortcut. */}
-          <ChatModelSelector enableShortcut={false} popoverProperties={{ align: 'end' }}>
+          <ChatModelSelector popoverProperties={{ align: 'end' }}>
             {() => (
               <Button variant='outline' size='sm'>
                 <Repeat className='size-3.5' />

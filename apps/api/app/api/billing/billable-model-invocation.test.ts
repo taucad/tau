@@ -139,12 +139,15 @@ describe('BillableModelInvocationService', () => {
       [
         ['anthropic-claude-fable-5.1', 'claude-fable-5-1', 'anthropic', 'max_tokens'],
         ['anthropic-claude-fable-5', 'claude-fable-5', 'anthropic', 'max_tokens'],
+        ['anthropic-claude-opus-5.5', 'claude-opus-5-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-5', 'claude-opus-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-opus-4.8', 'claude-opus-4-8', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-5', 'claude-sonnet-5', 'anthropic', 'max_tokens'],
         ['anthropic-claude-sonnet-4.6', 'claude-sonnet-4-6', 'anthropic', 'max_tokens'],
         ['anthropic-claude-haiku-4.5', 'claude-haiku-4-5-20251001', 'anthropic', 'max_tokens'],
         ['openai-gpt-6-astra', 'gpt-6-astra', 'openai-responses', 'max_output_tokens'],
+        ['openai-gpt-6-sol', 'gpt-6-sol', 'openai-responses', 'max_output_tokens'],
+        ['openai-gpt-6-luna', 'gpt-6-luna', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-5.6-sol', 'gpt-5.6-sol', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-5.6-terra', 'gpt-5.6-terra', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-5.6-luna', 'gpt-5.6-luna', 'openai-responses', 'max_output_tokens'],
@@ -157,6 +160,7 @@ describe('BillableModelInvocationService', () => {
         ['together-kimi-k3', 'moonshotai/Kimi-K3', 'openai-completions', 'max_completion_tokens'],
         ['together-glm-5.2', 'zai-org/GLM-5.2', 'openai-completions', 'max_completion_tokens'],
         ['morph-minimax-m2.7', 'morph-minimax27-230b', 'openai-completions', 'max_tokens'],
+        ['xai-grok-4.7', 'grok-4.7', 'openai-responses', 'max_output_tokens'],
         ['xai-grok-4.6', 'grok-4.6', 'openai-responses', 'max_output_tokens'],
       ] satisfies ReadonlyArray<
         readonly [
@@ -344,6 +348,85 @@ describe('BillableModelInvocationService', () => {
     await expect(service.invoke({ ...intent(), body: { model: 'changed' } })).rejects.toMatchObject({ status: 409 });
     expect(resolver.resolve).not.toHaveBeenCalled();
     expect(ledger.issueCurrentPromotion).not.toHaveBeenCalled();
+  });
+
+  describe('request bound', () => {
+    /** A Responses body whose one tool output carries `bytes` of base64 capture. */
+    const captureBody = (bytes: number) => ({
+      model: 'model',
+      input: [
+        {
+          type: 'function_call_output',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Responses wire key
+          call_id: 'call',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Responses wire key
+          output: [{ type: 'input_image', image_url: `data:image/webp;base64,${'A'.repeat(bytes)}`, detail: 'auto' }],
+        },
+      ],
+    });
+    const bounded = () => {
+      const qualified = new Error('reached qualification');
+      const ledger = { getOperationForAttempt: vi.fn(async () => undefined), issueCurrentPromotion: vi.fn() };
+      const resolver = {
+        resolve: vi.fn((): QualifiedBillableInvocation => {
+          throw qualified;
+        }),
+      };
+      const service = new BillableModelInvocationService(
+        ledger as unknown as CreditLedgerService,
+        resolver,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+        new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      );
+      return { ledger, qualified, resolver, service };
+    };
+
+    it('should hand a body past 4 MB but inside the 32 MB contract to qualification', async () => {
+      const { qualified, resolver, service } = bounded();
+
+      // Six 1600² captures re-sent in one chat's history are this size.
+      await expect(service.invoke({ ...intent(), body: captureBody(5_000_000) })).rejects.toBe(qualified);
+      expect(resolver.resolve).toHaveBeenCalledOnce();
+    });
+
+    it('should refuse a body over the 32 MB contract as a typed 413 before reading the ledger', async () => {
+      const { ledger, resolver, service } = bounded();
+
+      const refusal = await service
+        .invoke({ ...intent(), body: captureBody(32_000_000) })
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(LlmGatewayError);
+      expect((refusal as LlmGatewayError).getStatus()).toBe(413);
+      expect(gatewayErrorType(refusal)).toBe('REQUEST_TOO_LARGE');
+      expect(ledger.getOperationForAttempt).not.toHaveBeenCalled();
+      expect(resolver.resolve).not.toHaveBeenCalled();
+    });
+
+    it('should measure the bound in UTF-8 bytes, not UTF-16 code units', async () => {
+      const { resolver, service } = bounded();
+      // 10.7 M characters of a three-byte code point: 32.1 MB on the wire.
+      const text = '€'.repeat(10_700_000);
+
+      const refusal = await service
+        .invoke({ ...intent(), body: { model: 'model', input: [{ role: 'user', content: text }] } })
+        .catch((error: unknown) => error);
+
+      expect(gatewayErrorType(refusal)).toBe('REQUEST_TOO_LARGE');
+      expect(resolver.resolve).not.toHaveBeenCalled();
+    });
+
+    it('should refuse a body with more nodes than the digest walks as a typed 413', async () => {
+      const { resolver, service } = bounded();
+      const input = Array.from({ length: 100_001 }, () => ({ role: 'user', content: 'x' }));
+
+      const refusal = await service
+        .invoke({ ...intent(), body: { model: 'model', input } })
+        .catch((error: unknown) => error);
+
+      expect(gatewayErrorType(refusal)).toBe('REQUEST_TOO_LARGE');
+      expect(resolver.resolve).not.toHaveBeenCalled();
+    });
   });
 
   it('places no hold when the caller left before admission', async () => {

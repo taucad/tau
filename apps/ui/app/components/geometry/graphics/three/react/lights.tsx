@@ -1,16 +1,21 @@
-import { useDeferredValue, useLayoutEffect, useRef } from 'react';
+import { useDeferredValue, useLayoutEffect, useMemo, useRef } from 'react';
 import type * as THREE from 'three';
+import { BackSide, CubeTexture, PMREMGenerator } from 'three';
+import { PMREMGenerator as WebGpuPmremGenerator } from 'three/webgpu';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Environment, Lightformer } from '@react-three/drei';
 import {
   applyLightingForCamera,
   ambientBaseIntensity,
   headlampBaseIntensity,
-  environmentBaseIntensity,
   defaultHeadlampConfig,
   darkModeIntensityScale,
   darkModeAmbientBoost,
+  defaultStudioLighting,
 } from '#components/geometry/graphics/three/utils/lights.utils.js';
+import type { StudioLightingSettings } from '#components/geometry/graphics/three/utils/lights.utils.js';
+import { isViewportWebGpu } from '#components/geometry/graphics/three/viewport-cad-renderer.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 
 type UpDirection = 'x' | 'y' | 'z';
@@ -18,58 +23,28 @@ type UpDirection = 'x' | 'y' | 'z';
 /** Environment cubemap resolution (px). Higher = sharper specular reflections. */
 const envResolution = 512;
 
-// Studio preset Lightformer intensities ──────────────────────────────────────
-// Asymmetric camera-space rig matching Onshape's observed pattern.
-// Key upper-left, fill right, top overhead, ground below, back-fill behind.
-
-/** Key panel (right-upper in camera space) -- brightest light, creates NE-bright gradient. */
-const studioKeyIntensity = 4;
-/** Left-upper fill (left-upper in camera space) -- illuminates left-facing L sections (WNW/NW-left). */
+/** Broad, low-energy panels keep metallic and back-facing surfaces readable. */
 const studioLeftFillIntensity = 1.2;
-/** Top panel (overhead in camera space) -- subtle overhead accent on sloped surfaces. */
 const studioTopIntensity = 0.25;
-/** Ground panel (below in camera space) -- bright for bottom-view luminosity. */
 const studioGroundIntensity = 1.5;
-/** Specular highlight panel (upper-right for bottom face) -- creates focused off-center specular on flat faces. */
 const studioBackFillIntensity = 8;
 
 type LightsProperties = {
+  readonly settings?: Partial<StudioLightingSettings>;
   readonly enableMatcap?: boolean;
   readonly sceneRadius?: number;
   readonly upDirection?: UpDirection;
 };
 
-/**
- * Professional CAD lighting setup matching Onshape's rendering style.
- *
- * Design principles:
- * 1. **Azimuth-locked environment** — `scene.environmentRotation` is driven from
- *    only the azimuthal (yaw) component of the inverse camera quaternion each
- *    frame, so Lightformers stay stable during horizontal orbit but shift
- *    naturally when the camera tilts up/down, producing lighting variation.
- *
- * 2. **Asymmetric camera-space lightformers** — Key panel upper-left, fill right,
- *    top overhead, ground below, and back-fill behind camera. This matches Onshape's
- *    observed lighting pattern (upper-left brightest, lower-right darkest).
- *
- * 3. **FOV compensation** — As FOV decreases toward orthographic, specular highlights
- *    wash out (parallel view rays → uniform reflection). A multi-lever system scales
- *    down `scene.environmentIntensity` at low FOV while boosting headlamp and ambient
- *    to compensate diffuse loss. No material changes.
- *
- * 4. **Camera-space headlamp** — A subtle directional light offset in camera-up
- *    and camera-right directions so the highlight remains biased toward screen
- *    upper-right.
- *
- * 5. **Scale-adaptive** — All Lightformer positions and scales are expressed as
- *    multiples of `sceneRadius` so lighting adapts to model size.
- */
+/** Camera-relative PBR lighting with owned environment reflections. */
 export function Lights({
+  settings,
   enableMatcap = false,
   sceneRadius = 0,
   upDirection = 'z',
 }: LightsProperties): React.JSX.Element {
-  const { camera, scene } = useThree();
+  const { camera, scene, gl, invalidate } = useThree();
+  const lighting = { ...defaultStudioLighting, ...settings };
   const cameraLightReference = useRef<THREE.DirectionalLight>(null);
   const ambientReference = useRef<THREE.AmbientLight>(null);
   const { theme } = useTheme();
@@ -84,7 +59,13 @@ export function Lights({
     radiusRef.current = clampedSceneRadius;
   }, [clampedSceneRadius]);
 
-  // Theme-based intensity factors (1.0 in light mode, reduced in dark mode)
+  useLayoutEffect(() => {
+    // oxlint-disable-next-line react/immutability -- This effect owns the external Three renderer's exposure setting.
+    gl.toneMappingExposure = lighting.exposure;
+    invalidate();
+  }, [gl, invalidate, lighting.exposure]);
+
+  // Dark mode raises the ambient floor while preserving the key and reflections.
   const themeIntensityScale = isDark ? darkModeIntensityScale : 1;
   const themeAmbientBoost = isDark ? darkModeAmbientBoost : 1;
 
@@ -98,9 +79,9 @@ export function Lights({
       config: {
         sceneRadius: radiusRef.current,
         upDirection,
-        headlampIntensity: headlampBaseIntensity,
-        ambientIntensity: ambientBaseIntensity,
-        environmentIntensity: environmentBaseIntensity,
+        headlampIntensity: lighting.headlampIntensity,
+        ambientIntensity: lighting.ambientIntensity,
+        environmentIntensity: lighting.environmentIntensity,
         headlampConfig: defaultHeadlampConfig,
         themeIntensityScale,
         themeAmbientBoost,
@@ -110,77 +91,147 @@ export function Lights({
 
   const showEnvironment = useDeferredValue(!enableMatcap);
 
+  // Drei captures when its children identity changes. Only the environment's own
+  // geometry and radiance controls should recapture and filter all six faces.
+  const roomEnvironment = useMemo(() => <RoomLightingEnvironment />, []);
+  const whiteEnvironment = useMemo(
+    () => (
+      <OwnedLightingEnvironment near={0.01} far={20}>
+        <mesh>
+          <sphereGeometry args={[10, 32, 16]} />
+          <meshBasicMaterial color='white' side={BackSide} toneMapped={false} />
+        </mesh>
+      </OwnedLightingEnvironment>
+    ),
+    [],
+  );
+  const studioEnvironment = useMemo(
+    () => (
+      <OwnedLightingEnvironment near={clampedSceneRadius * 0.01} far={clampedSceneRadius * 20}>
+        <>
+          <color attach='background' args={[0, 0, 0]} />
+          {lighting.backgroundIntensity > 0 ? (
+            <mesh>
+              <boxGeometry args={[clampedSceneRadius * 20, clampedSceneRadius * 20, clampedSceneRadius * 20]} />
+              {/* A shader writes HDR radiance; WebGL clearColor clamps a Color background to [0, 1]. */}
+              <meshBasicMaterial
+                color={[lighting.backgroundIntensity, lighting.backgroundIntensity, lighting.backgroundIntensity]}
+                side={BackSide}
+                toneMapped={false}
+              />
+            </mesh>
+          ) : null}
+          {/* Cards occlude the enclosure, so each carries the same base radiance plus its local contrast. */}
+          <Lightformer
+            form='rect'
+            intensity={lighting.backgroundIntensity + lighting.keyIntensity}
+            position={[clampedSceneRadius, clampedSceneRadius, clampedSceneRadius]}
+            scale={[clampedSceneRadius * lighting.keySize, clampedSceneRadius * lighting.keySize, 1]}
+          />
+          <Lightformer
+            form='rect'
+            intensity={lighting.backgroundIntensity + studioLeftFillIntensity * lighting.fillIntensity}
+            position={[-clampedSceneRadius * 3, clampedSceneRadius, clampedSceneRadius * 0.5]}
+            rotation={[Math.PI / 8, Math.PI / 3, 0]}
+            scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
+          />
+          <Lightformer
+            form='rect'
+            intensity={lighting.backgroundIntensity + studioTopIntensity * lighting.fillIntensity}
+            position={[0, clampedSceneRadius * 3, 0]}
+            rotation={[Math.PI / 2, 0, 0]}
+            scale={[clampedSceneRadius * 3, clampedSceneRadius * 3, 1]}
+          />
+          <Lightformer
+            form='rect'
+            intensity={lighting.backgroundIntensity + studioGroundIntensity * lighting.fillIntensity}
+            position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, 0]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
+          />
+          <Lightformer
+            form='rect'
+            intensity={lighting.backgroundIntensity + studioBackFillIntensity * lighting.fillIntensity}
+            position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, clampedSceneRadius * 4]}
+            scale={[clampedSceneRadius * 2, clampedSceneRadius * 2, 1]}
+          />
+        </>
+      </OwnedLightingEnvironment>
+    ),
+    [clampedSceneRadius, lighting.backgroundIntensity, lighting.fillIntensity, lighting.keyIntensity, lighting.keySize],
+  );
+
   return (
     <>
-      {/* Base ambient fill -- always present for minimum illumination */}
+      {/* Low diffuse fill; conductors receive illumination from the environment. */}
       <ambientLight ref={ambientReference} intensity={ambientBaseIntensity} />
 
-      {/* Headlamp -- positioned above camera in world space for top-down gradients */}
+      {/* Key direction stays upper-right in view space. */}
       <directionalLight ref={cameraLightReference} intensity={headlampBaseIntensity} color='white' />
 
-      {showEnvironment ? (
-        <Environment resolution={envResolution} near={clampedSceneRadius * 0.01} far={clampedSceneRadius * 20}>
-          <>
-            {/* ── Key panel (right-upper in camera space) ── */}
-            {/* Brightest side light. Positioned primarily to the right of the
-                  camera with moderate upward offset. Creates the NE-bright
-                  gradient (NNE, ENE lit) while keeping NNW dark. */}
-            <Lightformer
-              form='rect'
-              intensity={studioKeyIntensity}
-              position={[clampedSceneRadius * 4, clampedSceneRadius * 1.5, clampedSceneRadius]}
-              rotation={[Math.PI / 8, -Math.PI / 3, 0]}
-              scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
-            />
-            {/* ── Left-upper fill (left-upper in camera space) ── */}
-            {/* Illuminates left-facing L sections (WNW = NW-left) that the
-                  rightward key cannot reach. Env_x dominant negative with moderate
-                  +env_y so WNW (env_y=0.38) gets more than WSW (env_y=-0.38). */}
-            <Lightformer
-              form='rect'
-              intensity={studioLeftFillIntensity}
-              position={[-clampedSceneRadius * 3, clampedSceneRadius, clampedSceneRadius * 0.5]}
-              rotation={[Math.PI / 8, Math.PI / 3, 0]}
-              scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
-            />
-            {/* ── Top panel (overhead in camera space) ── */}
-            {/* Reduced overhead accent — kept low to avoid over-brightening
-                  NNW (D section) which has high env_y normal component. */}
-            <Lightformer
-              form='rect'
-              intensity={studioTopIntensity}
-              position={[0, clampedSceneRadius * 3, 0]}
-              rotation={[Math.PI / 2, 0, 0]}
-              scale={[clampedSceneRadius * 3, clampedSceneRadius * 3, 1]}
-            />
-            {/* ── Ground panel (below-right in camera space) ── */}
-            {/* Bright ground for bottom-view luminosity. Offset in +X so that
-                  the bottom-face specular shifts toward the right (matching the
-                  asymmetric rig's "brighter on right" pattern). */}
-            <Lightformer
-              form='rect'
-              intensity={studioGroundIntensity}
-              position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, 0]}
-              rotation={[-Math.PI / 2, 0, 0]}
-              scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
-            />
-            {/* ── Specular highlight panel (upper-right in camera space) ── */}
-            {/* Positioned in the (+X, -Y, +Z) octant to create a focused specular
-                  highlight in the upper-right area of bottom-facing surfaces when
-                  viewed from below. In Z-up screen coords for the bottom face:
-                  +X → screen right, -Y → screen top, +Z → close to the reflection
-                  pole. Equal X and -Y offsets place the specular at 45° toward the
-                  top-right corner. Negligible contribution to front/side face
-                  speculars (~61° from front reflection direction). */}
-            <Lightformer
-              form='rect'
-              intensity={studioBackFillIntensity}
-              position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, clampedSceneRadius * 4]}
-              scale={[clampedSceneRadius * 2, clampedSceneRadius * 2, 1]}
-            />
-          </>
-        </Environment>
-      ) : null}
+      {showEnvironment && lighting.environment === 'room' ? roomEnvironment : null}
+      {showEnvironment && lighting.environment === 'white' ? whiteEnvironment : null}
+      {showEnvironment && lighting.environment === 'studio' ? studioEnvironment : null}
     </>
+  );
+}
+
+/** Three.js's neutral room is a reproducible reference environment, owned by this mount. */
+function RoomLightingEnvironment(): React.JSX.Element {
+  const room = useMemo(() => new RoomEnvironment(), []);
+  useLayoutEffect(
+    () => () => {
+      room.dispose();
+    },
+    [room],
+  );
+  return (
+    <OwnedLightingEnvironment near={0.01} far={100}>
+      <primitive object={room} />
+    </OwnedLightingEnvironment>
+  );
+}
+
+/** Own the filtered target while Drei owns the unchanged source cubemap capture. */
+function OwnedLightingEnvironment({
+  children,
+  near,
+  far,
+}: {
+  readonly children: React.ReactNode;
+  readonly near: number;
+  readonly far: number;
+}): React.JSX.Element {
+  const { gl, scene, invalidate } = useThree();
+  const generator = useMemo(() => (isViewportWebGpu(gl) ? new WebGpuPmremGenerator(gl) : new PMREMGenerator(gl)), [gl]);
+  useLayoutEffect(
+    () => () => {
+      generator.dispose();
+    },
+    [generator],
+  );
+  useLayoutEffect(() => {
+    // The child Environment's layout effect has captured and installed its cubemap.
+    // Supplying the finished PMREM bypasses Three's implicit, unowned texture cache.
+    const source = scene.environment;
+    if (!(source instanceof CubeTexture)) {
+      return undefined;
+    }
+    const filtered = generator.fromCubemap(source);
+    // oxlint-disable-next-line react/immutability -- This effect owns the external Three scene's filtered environment and restores it on cleanup.
+    scene.environment = filtered.texture;
+    invalidate();
+    return () => {
+      if (scene.environment === filtered.texture) {
+        scene.environment = source;
+      }
+      filtered.dispose();
+    };
+  }, [children, generator, invalidate, scene]);
+
+  return (
+    <Environment resolution={envResolution} near={near} far={far}>
+      {children}
+    </Environment>
   );
 }

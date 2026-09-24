@@ -1,9 +1,17 @@
 import type { JSX, ReactNode, RefObject } from 'react';
-import { createContext, useContext, useLayoutEffect, useMemo, useRef } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import type { WebGLRenderTarget } from 'three';
 import { createPortal, useFrame, useThree } from '@react-three/fiber';
 
-type DepthRestore = () => void;
+/**
+ * Write the frame's authoritative depth into `target`, or the canvas when it is omitted.
+ *
+ * The post owner holds that depth in its own offscreen attachment, so anything that needs to
+ * depth-test against the finished frame — overlays on the canvas, the emphasis coverage mask in
+ * its own target — asks the owner to stamp it rather than re-rasterising the scene.
+ */
+export type DepthRestore = (target?: WebGLRenderTarget) => void;
 type DepthRestoreReference = RefObject<DepthRestore | undefined>;
 
 const OverlayDepthContext = createContext<DepthRestoreReference | undefined>(undefined);
@@ -21,7 +29,7 @@ export function OverlayDepthProvider({ children }: { readonly children: ReactNod
   return <OverlayDepthContext.Provider value={restoreRef}>{children}</OverlayDepthContext.Provider>;
 }
 
-/** Register the active post owner's direct-to-canvas depth restore. */
+/** Register the active post owner's depth restore. */
 export const useOverlayDepthRestore = (restore: DepthRestore | undefined): void => {
   const restoreRef = useContext(OverlayDepthContext);
   useLayoutEffect(() => {
@@ -37,6 +45,22 @@ export const useOverlayDepthRestore = (restore: DepthRestore | undefined): void 
   }, [restore, restoreRef]);
 };
 
+/**
+ * Stamp the frame's depth into a pass's own render target.
+ *
+ * Returns a stable no-op while no post owner is registered: the main pass then already left
+ * authoritative canvas depth, and a pass with its own target keeps whatever it cleared to.
+ */
+export function useOverlayDepthRestorer(): DepthRestore {
+  const restoreRef = useContext(OverlayDepthContext);
+  return useCallback(
+    (target?: WebGLRenderTarget): void => {
+      restoreRef?.current?.(target);
+    },
+    [restoreRef],
+  );
+}
+
 function SceneOverlayFrameLoop({
   shouldClearDepth,
   overlayScene,
@@ -46,7 +70,7 @@ function SceneOverlayFrameLoop({
   readonly overlayScene: THREE.Scene;
   readonly renderPriority: number;
 }): ReactNode {
-  const restoreRef = useContext(OverlayDepthContext);
+  const restoreDepth = useOverlayDepthRestorer();
 
   useFrame((state) => {
     const { gl, camera } = state;
@@ -59,7 +83,7 @@ function SceneOverlayFrameLoop({
         // Post-processing renders colour through an offscreen target. Its owner restores
         // that frame's encoded depth directly; without post, the main pass already left
         // authoritative canvas depth and this is intentionally a no-op.
-        restoreRef?.current?.();
+        restoreDepth();
       }
       gl.render(overlayScene, camera);
     } finally {

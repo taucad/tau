@@ -239,6 +239,8 @@ vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
     selectedModelId: 'cookie-model',
     setSelectedModelId: vi.fn(),
+    defaultExecution: { kind: 'tau', model: 'cookie-model' },
+    rememberExecution: vi.fn(),
     selectedModel: { id: 'cookie-model', name: 'Cookie Model', isResolved: true },
     resolveModel: (id: string) => ({ id, name: id, isResolved: false }),
     data: [],

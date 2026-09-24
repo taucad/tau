@@ -5,7 +5,15 @@ import { financialEnvironmentSchema } from '@taucad/billing';
 import { safeParseBillableModelRequest } from '#api/billing/billable-model-request.js';
 import type { BillingEnvironment, InputCountEvidence } from '#api/billing/credit-ledger.types.js';
 
-const countModels = new Set(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']);
+const countModels = new Set([
+  'gpt-6-astra',
+  'gpt-6-sol',
+  'gpt-6-luna',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+  'gpt-5.5',
+]);
 const createFields = new Set([
   'model',
   'input',

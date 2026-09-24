@@ -54,7 +54,8 @@ describe('composeTariff', () => {
     expect(policy.markupBps).toBe(developmentOverlay.markupBps);
     expect(policy.offers).toEqual(developmentOverlay.offers);
     expect(policy.promotionalIssuance).toEqual(developmentOverlay.promotionalIssuance);
-    expect(policy.autoReload).toBeUndefined();
+    expect(policy.autoReload).toEqual(developmentOverlay.autoReload);
+    expect(composeTariff({ overlay: { ...developmentOverlay, autoReload: null } }).policy.autoReload).toBeUndefined();
     expect(policy.fleet.meterContractIds).toEqual(billableModelRouteMeters.map((route) => route.meterContractId));
 
     const routes = new Map(policy.routes.map((route) => [route.routeId, route]));

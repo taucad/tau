@@ -1863,6 +1863,41 @@ describe('createGatewayModelTransport', () => {
     });
   });
 
+  it('should read an oversized request as REQUEST_TOO_LARGE, enveloped or bare', async () => {
+    const enveloped = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: {
+                type: 'REQUEST_TOO_LARGE',
+                message: 'Model request is larger than Tau accepts.',
+                details: { maximumBytes: 32_000_000 },
+              },
+            }),
+            { status: 413, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    });
+    await expect(collect(enveloped.stream(request()))).rejects.toMatchObject({
+      code: 'REQUEST_TOO_LARGE',
+      status: 413,
+      details: { maximumBytes: 32_000_000 },
+    });
+
+    // A proxy in front of the gateway answers its own 413 with no Tau envelope.
+    const bare = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async () => new Response('Payload Too Large', { status: 413 })),
+    });
+    await expect(collect(bare.stream(request()))).rejects.toMatchObject({
+      code: 'REQUEST_TOO_LARGE',
+      status: 413,
+    });
+  });
+
   it('should carry a provider-account refusal envelope off the 503 body', async () => {
     const details = {
       providerId: 'openai',

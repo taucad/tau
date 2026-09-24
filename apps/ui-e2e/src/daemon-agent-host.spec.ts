@@ -62,16 +62,23 @@ const createProject = async (origin: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };
 
+const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });
+const tauHostSegment = selectors.getByRole('tab', { name: /^Tau Host · /u });
+
+/** Open the agent sheet and wait for the daemon's segment under *Runs on*. */
+const openRunsOn = async (): Promise<void> => {
+  await target.expectVisible(agentTrigger, 60_000);
+  await target.click(agentTrigger);
+  await target.expectVisible(tauHostSegment, 60_000);
+};
+
 const selectTauHost = async (workspace: string): Promise<void> => {
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }), 60_000);
-  await target.click(selectors.getByRole('button', { name: 'Select agent: Tau' }));
-  // The row names the daemon, and its secondary line names the directory the
-  // turn will write to — the one fact a user needs before placing a turn there.
-  const row = selectors.getByRole('option', { name: /Tau Host · /u });
-  await target.expectVisible(row, 60_000);
-  await target.expectVisible(selectors.getByText(workspace, { exact: true }), 10_000);
-  await target.click(row);
-  await target.expectVisible(selectors.getByRole('button', { name: /Select agent: Tau Host · / }), 30_000);
+  await openRunsOn();
+  await target.click(tauHostSegment);
+  // The note names the directory the turn will write to — the one fact a user
+  // needs before placing a turn there.
+  await target.expectVisible(selectors.getByText(`In ${workspace}`, { exact: true }), 10_000);
+  await target.keyboardPress('Escape');
 };
 
 const durableLog = async (): Promise<string> => {
@@ -280,7 +287,11 @@ describe('daemon agent host (AV-4, rung 1)', () => {
     await dismissCookieBanner();
 
     // The seed carried the chip's promise into the chat that now owns the turn.
-    await target.expectVisible(selectors.getByRole('button', { name: /^Select agent: Tau Host · /u }), 60_000);
+    await openRunsOn();
+    await expect
+      .poll(async () => target.getAttribute(tauHostSegment, 'aria-selected'), { timeout: 60_000 })
+      .toBe('true');
+    await target.keyboardPress('Escape');
 
     /* And the daemon really ran it: the log directory and the tool call's file
      * are both on the daemon's disk, in the directory the row named — the run

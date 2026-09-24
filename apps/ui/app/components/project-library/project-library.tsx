@@ -301,9 +301,9 @@ export function ProjectLibrary(): React.JSX.Element {
           {workspaceBindingRepairs.map((repair) => (
             <div
               key={repair.canonicalWorkspaceId}
-              className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'
+              className='flex items-center gap-3 rounded-md border border-warning/40 p-3'
             >
-              <AlertCircle className='text-amber-600 size-4 shrink-0' />
+              <AlertCircle className='size-4 shrink-0 text-warning' />
               <div className='min-w-0 flex-1'>
                 <div className='font-medium'>
                   {repair.projectCount} {repair.projectCount === 1 ? 'project is' : 'projects are'} linked to previous
@@ -334,8 +334,8 @@ export function ProjectLibrary(): React.JSX.Element {
                 ? (conflict.locator.relativeDirectory.split('/').at(-1) ?? conflict.locator.relativeDirectory)
                 : conflict.manifest.name;
             return (
-              <div key={key} className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'>
-                <AlertCircle className='text-amber-600 size-4 shrink-0' />
+              <div key={key} className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
+                <AlertCircle className='size-4 shrink-0 text-warning' />
                 <div className='min-w-0 flex-1'>
                   <div className='truncate font-medium'>{label}</div>
                   <div className='text-sm text-muted-foreground'>
@@ -370,9 +370,16 @@ export function ProjectLibrary(): React.JSX.Element {
           {recoveries.map((recovery) => (
             <div
               key={recovery.operationId}
-              className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'
+              className={cn(
+                'flex items-center gap-3 rounded-md border p-3',
+                recovery.status === 'failed' && 'border-warning/40',
+              )}
             >
-              <AlertCircle className='text-amber-600 size-4 shrink-0' />
+              {recovery.status === 'failed' ? (
+                <AlertCircle className='size-4 shrink-0 text-warning' />
+              ) : (
+                <Loader className='size-4 shrink-0 text-muted-foreground' />
+              )}
               <div className='min-w-0 flex-1'>
                 {/* The directory is the only handle the user has on an
                     unfinished operation — an unnamed banner is unactionable (DF11). */}

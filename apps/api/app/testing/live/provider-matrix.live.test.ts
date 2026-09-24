@@ -11,7 +11,6 @@ import type {
   HostToolResult,
   JsonValue,
   ProviderMessage,
-  ToolInputProviderMessage,
 } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
 import { applyParameterOperationInputSchema } from '@taucad/chat/schemas';
@@ -23,11 +22,19 @@ import {
   liveCadSystemPrompt,
   liveCompletionCeiling,
   liveCredentialName,
+  liveRepeats,
   liveSessionModel,
   runWithRateLimitRetry,
   startLiveGateway,
 } from '#testing/live/live-gateway.harness.js';
 import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
+import {
+  expectCompleted,
+  expectPairedToolMessages,
+  finalText,
+  refusal,
+  toolCalls,
+} from '#testing/live/live-assertions.js';
 
 /**
  * Live provider matrix.
@@ -46,7 +53,7 @@ import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
  *
  * Assertions are on durable outcomes only — the run's lifecycle state, the
  * paired tool-call/tool-result rows of the session log, and whether the final
- * answer carries the distinctive token the scripted tool result handed back —
+ * answer carries the distinctive marker the scripted tool result handed back —
  * never on a model's prose style.
  */
 
@@ -60,17 +67,17 @@ const matrixModelIds: readonly string[] = [
   ...vertexModelIds,
   'anthropic-claude-haiku-4.5',
   'openai-gpt-5.6-luna',
-  'xai-grok-4.6',
+  'xai-grok-4.7',
 ];
 
 /**
- * Distinctive tokens no model could plausibly guess.
+ * Distinctive markers no model could plausibly guess.
  *
  * An answer that carries one is an answer that actually consumed the scripted
  * tool result (or, for `text`, the prompt), which is what each row asserts
  * instead of anything about the model's prose.
  */
-const tokens = {
+const markers = {
   text: 'TAU-TEXT-6B3K',
   main: 'TAU-MAIN-2H7P',
   beta: 'TAU-BETA-4K9M',
@@ -82,16 +89,16 @@ const tokens = {
 /**
  * The scripted project the toolbelt reads.
  *
- * `alpha.ts` names its successor rather than carrying a token, so a model that
- * wants `beta.ts`'s token has no way to answer without two calls in sequence.
+ * `alpha.ts` names its successor rather than carrying a marker, so a model that
+ * wants `beta.ts`'s marker has no way to answer without two calls in sequence.
  */
 const scriptedFiles: Readonly<Record<string, string>> = {
-  'main.ts': `export const token = '${tokens.main}';\n`,
-  'alpha.ts': "// The token you need is in the file beta.ts. Read that file next.\nexport const stage = 'alpha';\n",
-  'beta.ts': `export const token = '${tokens.beta}';\n`,
-  'gamma.ts': `export const token = '${tokens.gamma}';\n`,
-  'left.ts': `export const token = '${tokens.left}';\n`,
-  'right.ts': `export const token = '${tokens.right}';\n`,
+  'main.ts': `export const marker = '${markers.main}';\n`,
+  'alpha.ts': "// The marker you need is in the file beta.ts. Read that file next.\nexport const stage = 'alpha';\n",
+  'beta.ts': `export const marker = '${markers.beta}';\n`,
+  'gamma.ts': `export const marker = '${markers.gamma}';\n`,
+  'left.ts': `export const marker = '${markers.left}';\n`,
+  'right.ts': `export const marker = '${markers.right}';\n`,
 };
 
 /** Values the parameter propose row hands the model, so nothing about the call is guessed. */
@@ -187,7 +194,10 @@ const economyReasoning = (model: AgentSessionModel): AgentSessionModel['reasonin
   if (model.reasoning === undefined) {
     return undefined;
   }
-  return model.providerKind === 'anthropic' ? { budgetTokens: 1024 } : { ...model.reasoning, effort: 'low' };
+  // Adaptive-only Claude rows reject a thinking budget, so they economise through effort like every other wire.
+  return model.providerKind === 'anthropic' && model.reasoning.budgetTokens !== undefined
+    ? { budgetTokens: 1024 }
+    : { ...model.reasoning, effort: 'low' };
 };
 
 let started: { readonly gateway: LiveGateway; readonly root: string } | undefined;
@@ -278,56 +288,8 @@ const liveThread = async (options: LiveThreadOptions): Promise<HostRunSnapshot> 
     { attempts: rateLimitAttempts },
   );
 
-/** @returns The provider's own refusal when there was one, so a failing row reports why. */
-const refusal = (snapshot: HostRunSnapshot): string => JSON.stringify(snapshot.failure ?? snapshot.messages.slice(-2));
-
-const expectCompleted = (snapshot: HostRunSnapshot): void => {
-  expect(snapshot.state, refusal(snapshot)).toBe('completed');
-};
-
-const textOf = (message: ProviderMessage): string =>
-  typeof message.content === 'string'
-    ? message.content
-    : Array.isArray(message.content)
-      ? message.content
-          .flatMap((block) =>
-            block !== null && typeof block === 'object' && !Array.isArray(block) && typeof block['text'] === 'string'
-              ? [block['text']]
-              : [],
-          )
-          .join('')
-      : '';
-
 const lastAssistant = (snapshot: HostRunSnapshot): ProviderMessage | undefined =>
   snapshot.messages.findLast((message) => message.role === 'assistant');
-
-/** @returns The final answer's text, which is where a consumed tool result has to show up. */
-const finalText = (snapshot: HostRunSnapshot): string => {
-  const assistant = lastAssistant(snapshot);
-  if (!assistant) {
-    expect.fail(`the thread produced no assistant message: ${refusal(snapshot)}`);
-  }
-  return textOf(assistant);
-};
-
-const toolCalls = (snapshot: HostRunSnapshot, name?: string): readonly ToolInputProviderMessage[] =>
-  snapshot.messages.filter(
-    (message): message is ToolInputProviderMessage =>
-      message.role === 'tool-input' && (name === undefined || message.toolName === name),
-  );
-
-/** Every tool call the model made was dispatched and answered; nothing was left open. */
-const expectPairedToolMessages = (snapshot: HostRunSnapshot): void => {
-  const results = new Set(
-    snapshot.messages.flatMap((message) => (message.role === 'tool-output' ? [message.toolCallId] : [])),
-  );
-  expect(
-    toolCalls(snapshot)
-      .map((call) => call.toolCallId)
-      .filter((id) => !results.has(id)),
-  ).toEqual([]);
-  expect(toolCalls(snapshot).length).toBeGreaterThan(0);
-};
 
 /** @returns Index of the first message satisfying the predicate, or -1. */
 const indexOf = (snapshot: HostRunSnapshot, predicate: (message: ProviderMessage) => boolean): number =>
@@ -336,16 +298,17 @@ const indexOf = (snapshot: HostRunSnapshot, predicate: (message: ProviderMessage
 const describeModel = (modelId: string): void => {
   describe.skipIf(!hasLiveCredential(modelId))(
     `live provider matrix: ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`,
+    { repeats: liveRepeats },
     () => {
       it('should answer a text turn with assistant text and non-zero usage', async () => {
         const snapshot = await liveThread({
           modelId,
           slug: `${modelId}-text`,
-          prompts: [`Reply with the token ${tokens.text} and nothing else. Do not call any tool.`],
+          prompts: [`Reply with the marker ${markers.text} and nothing else. Do not call any tool.`],
         });
 
         expectCompleted(snapshot);
-        expect(finalText(snapshot)).toContain(tokens.text);
+        expect(finalText(snapshot)).toContain(markers.text);
         const usage = lastAssistant(snapshot)?.metadata?.usage;
         expect(usage?.input).toBeGreaterThan(0);
         expect(usage?.output).toBeGreaterThan(0);
@@ -356,14 +319,16 @@ const describeModel = (modelId: string): void => {
           modelId,
           slug: `${modelId}-single-tool`,
           prompts: [
-            `Call ${toolName.readFile} on main.ts, then reply with the exact token that file contains and nothing else.`,
+            `Call ${toolName.readFile} on main.ts, then reply with the exact marker that file exports and nothing else.`,
           ],
         });
 
         expectCompleted(snapshot);
         expectPairedToolMessages(snapshot);
-        expect(toolCalls(snapshot, toolName.readFile).map((call) => namedFile(call.content))).toContain('main.ts');
-        expect(finalText(snapshot)).toContain(tokens.main);
+        expect(toolCalls(snapshot.messages, toolName.readFile).map((call) => namedFile(call.content))).toContain(
+          'main.ts',
+        );
+        expect(finalText(snapshot)).toContain(markers.main);
       });
 
       it('should call two tools one after another within a single turn', async () => {
@@ -371,7 +336,7 @@ const describeModel = (modelId: string): void => {
           modelId,
           slug: `${modelId}-sequential-tools`,
           prompts: [
-            `Call ${toolName.readFile} on alpha.ts. Its contents name a second file; call ${toolName.readFile} on that second file too, then reply with the exact token the second file contains and nothing else.`,
+            `Call ${toolName.readFile} on alpha.ts. Its contents name a second file; call ${toolName.readFile} on that second file too, then reply with the exact marker the second file exports and nothing else.`,
           ],
         });
 
@@ -384,7 +349,7 @@ const describeModel = (modelId: string): void => {
         );
         expect(secondCall, `beta.ts was never read: ${refusal(snapshot)}`).toBeGreaterThan(-1);
         expect(secondCall, 'the second call did not follow the first result').toBeGreaterThan(firstResult);
-        expect(finalText(snapshot)).toContain(tokens.beta);
+        expect(finalText(snapshot)).toContain(markers.beta);
       });
 
       it('should call a tool on a second user turn that follows a turn with tools', async () => {
@@ -392,17 +357,17 @@ const describeModel = (modelId: string): void => {
           modelId,
           slug: `${modelId}-second-turn`,
           prompts: [
-            `Call ${toolName.readFile} on main.ts, then reply with the exact token that file contains and nothing else.`,
-            `Now call ${toolName.readFile} on gamma.ts and reply with the exact token that file contains and nothing else.`,
+            `Call ${toolName.readFile} on main.ts, then reply with the exact marker that file exports and nothing else.`,
+            `Now call ${toolName.readFile} on gamma.ts and reply with the exact marker that file exports and nothing else.`,
           ],
         });
 
         expectCompleted(snapshot);
         expectPairedToolMessages(snapshot);
-        const read = toolCalls(snapshot, toolName.readFile).map((call) => namedFile(call.content));
+        const read = toolCalls(snapshot.messages, toolName.readFile).map((call) => namedFile(call.content));
         expect(read).toContain('main.ts');
         expect(read).toContain('gamma.ts');
-        expect(finalText(snapshot)).toContain(tokens.gamma);
+        expect(finalText(snapshot)).toContain(markers.gamma);
       });
 
       it('should consume both results when asked for two independent reads at once', async () => {
@@ -410,17 +375,17 @@ const describeModel = (modelId: string): void => {
           modelId,
           slug: `${modelId}-parallel-tools`,
           prompts: [
-            `You must call ${toolName.readFile} twice, once for left.ts and once for right.ts, issuing both calls in the same step. You do not know either file's contents until the results come back, so do not answer before you have called the tool. Then reply with both exact tokens separated by a space and nothing else.`,
+            `You must call ${toolName.readFile} twice, once for left.ts and once for right.ts, issuing both calls in the same step. You do not know either file's contents until the results come back, so do not answer before you have called the tool. Then reply with both exact markers separated by a space and nothing else.`,
           ],
         });
 
         expectCompleted(snapshot);
         expectPairedToolMessages(snapshot);
-        const read = toolCalls(snapshot, toolName.readFile).map((call) => namedFile(call.content));
+        const read = toolCalls(snapshot.messages, toolName.readFile).map((call) => namedFile(call.content));
         expect(read).toContain('left.ts');
         expect(read).toContain('right.ts');
-        expect(finalText(snapshot)).toContain(tokens.left);
-        expect(finalText(snapshot)).toContain(tokens.right);
+        expect(finalText(snapshot)).toContain(markers.left);
+        expect(finalText(snapshot)).toContain(markers.right);
         // A model is free to serialize the two reads; the matrix records which it did.
         const parallel = snapshot.messages.some(
           (message, index) => message.role === 'tool-input' && snapshot.messages[index + 1]?.role === 'tool-input',
@@ -433,7 +398,7 @@ const describeModel = (modelId: string): void => {
         const snapshot = await liveThread({
           modelId,
           slug: `${modelId}-declared-reasoning`,
-          prompts: [`Reply with the token ${tokens.text} and nothing else. Do not call any tool.`],
+          prompts: [`Reply with the marker ${markers.text} and nothing else. Do not call any tool.`],
           ...(declared === undefined ? {} : { reasoning: declared }),
         });
 
@@ -452,7 +417,7 @@ const describeModel = (modelId: string): void => {
 
         expectCompleted(snapshot);
         expectPairedToolMessages(snapshot);
-        const [call] = toolCalls(snapshot, toolName.applyParameterOperation);
+        const [call] = toolCalls(snapshot.messages, toolName.applyParameterOperation);
         if (!call) {
           expect.fail(`${toolName.applyParameterOperation} was never called: ${refusal(snapshot)}`);
         }

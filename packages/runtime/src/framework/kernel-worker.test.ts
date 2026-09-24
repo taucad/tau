@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { logLevels } from '@taucad/types/constants';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 import type { OnWorkerLog } from '@taucad/types';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { WatchEvent } from '@taucad/filesystem';
 import type {
   CapabilitiesManifest,
@@ -44,6 +45,7 @@ import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import { signalBufferByteLength } from '#framework/runtime-framework.constants.js';
+import { admitJsonSchema } from '@taucad/parameters/schema';
 
 const tessellationSchema = z.object({
   tessellation: z
@@ -4665,6 +4667,51 @@ describe('transcoder loading', () => {
       expect.any(Object),
       expect.any(Object),
     );
+  });
+
+  it('should publish every capability schema as plain JSON that survives transport and admission', async () => {
+    const glbSchema = tessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape);
+    const stlModule = createMockTranscoderModule([
+      {
+        from: 'glb',
+        to: 'stl',
+        fidelity: 'mesh',
+        optionsSchema: z.strictObject({ binary: z.boolean().default(false) }),
+        sourceOptions: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+      },
+    ]);
+    const worker = createConfiguredWorker({
+      exportZodSchemas: { glb: glbSchema },
+      renderZodSchema: tessellationSchema,
+      transcoders: [createMockTranscoderPlugin('stl-transcoder', stlModule)],
+    });
+    // @ts-expect-error -- route-planner contract test configures the mock kernel's protected declaration map.
+    worker.kernelExportContentMap.set('mock-kernel', { glb: ['includeEdges'] });
+
+    await worker.initialize({ callbacks: { onLog: vi.fn() }, transferables: {}, options: {} });
+
+    const { routes, renderCapabilities } = worker.capabilitiesManifest;
+    expect(routes.some((route) => route.targetFormat === 'stl' && route.transcoderId !== undefined)).toBe(true);
+    const schemas: Array<readonly [string, JSONSchema7]> = [
+      ...routes.flatMap(
+        (route): Array<readonly [string, JSONSchema7]> => [
+          [`${route.targetFormat} export options`, route.exportOptions.schema],
+          ...(route.content ? [[`${route.targetFormat} content`, route.content.schema] as const] : []),
+        ],
+      ),
+      ...Object.entries(renderCapabilities).flatMap(([kernelId, capability]) =>
+        capability ? [[`${kernelId} render options`, capability.renderOptions.schema] as const] : [],
+      ),
+    ];
+    for (const [label, schema] of schemas) {
+      expect(Reflect.ownKeys(schema), label).toEqual(Object.keys(schema));
+      expect(Object.values(schema).includes(undefined), label).toBe(false);
+      if (Object.keys(schema).length > 0) {
+        expect(() => {
+          admitJsonSchema(structuredClone(schema) as Record<string, unknown>);
+        }, label).not.toThrow();
+      }
+    }
   });
 
   it('should pin image source semantics while exposing only consumer-controlled route options', async () => {

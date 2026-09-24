@@ -10,6 +10,7 @@ import type { AgentChannelClient } from '@taucad/agent-host';
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
+import { admittedReasoning } from '#utils/model-reasoning.js';
 import type {
   AgentHostAdmissionConfig,
   AgentHostExternalAgent,
@@ -113,26 +114,9 @@ export const agentHostConfig = (input: {
   }) as AgentHostAdmissionConfig['systemPromptBlocks'];
   const snapshotContext = agent.snapshot ? buildBrowserAgentHostSnapshotContext(agent.snapshot) : undefined;
   const providerKind = requireProviderKind(model?.provider.id);
-  const reasoning: AgentHostAdmissionConfig['model']['reasoning'] = (() => {
-    const configuration = model?.configuration;
-    if (providerKind === 'anthropic') {
-      if (configuration?.thinking?.type === 'enabled') {
-        return { budgetTokens: configuration.thinking.budget_tokens };
-      }
-      if (configuration?.thinking?.type === 'adaptive') {
-        return {
-          ...(configuration.outputConfig?.effort === undefined ? {} : { effort: configuration.outputConfig.effort }),
-          ...(configuration.thinking.display === undefined ? {} : { display: configuration.thinking.display }),
-        };
-      }
-      return undefined;
-    }
-    if (providerKind === 'vertexai') {
-      const effort = configuration?.thinkingLevel?.toLowerCase();
-      return effort === 'low' || effort === 'medium' || effort === 'high' ? { effort } : undefined;
-    }
-    return configuration?.reasoning;
-  })();
+  /* The chat's level replaces the catalog default, clamped to what this model
+   * offers — the picker reads the same helper, so what it shows is what runs. */
+  const reasoning = admittedReasoning(model, agent.execution.effort);
   return {
     systemPrompt: [prompt.static, prompt.dynamic].join('\n\n'),
     systemPromptBlocks,

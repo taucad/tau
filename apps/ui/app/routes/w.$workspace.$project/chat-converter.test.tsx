@@ -153,6 +153,7 @@ vi.mock('#hooks/use-project.js', () => ({
     mainEntryPath: 'main.ts',
     parameterService: mockParameterService,
   }),
+  useMainGraphics: () => undefined,
 }));
 
 vi.mock('#hooks/use-keyboard.js', () => ({
@@ -704,38 +705,37 @@ describe('ChatConverter', () => {
     expect(screen.getByRole('heading', { name: 'Format' })).toBeDefined();
   });
 
-  it('compiles export field semantics into the checked manifest', async () => {
+  it('compiles the units the image exporter declares into the checked manifest', async () => {
     const { manifest } = await compileExportConfigurationManifest('image', 'webp', {
-      schema: {
-        type: 'object',
-        properties: {
-          width: { type: 'number' },
-          height: { type: 'number' },
-          lineWidth: { type: 'number' },
-          verticalFieldOfView: { type: 'number' },
-          zoom: { type: 'number' },
-          quality: { type: 'number' },
-          margin: { type: 'number' },
-        },
-      },
-      defaults: {},
+      schema: toJSONSchema(imageEdgeSchemas.webp, { target: 'draft-7', io: 'input' }) as JSONSchema7,
+      defaults: imageEdgeSchemas.webp.parse({}),
     });
 
     for (const pointer of ['/width', '/height', '/lineWidth']) {
       expect(manifest.bindings[pointer]).toMatchObject({ unit: '1', symbol: 'px', space: 'linear' });
     }
-    expect(manifest.bindings['/verticalFieldOfView']).toMatchObject({
+    expect(manifest.bindings['/camera/projection/verticalFieldOfView']).toMatchObject({
       unit: 'deg',
       quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
       space: 'linear',
     });
-    for (const pointer of ['/zoom', '/quality', '/margin']) {
+    for (const pointer of ['/camera/projection/zoom', '/quality', '/camera/margin']) {
       expect(manifest.bindings[pointer]).toMatchObject({
         unit: '1',
         quantityKind: 'http://qudt.org/vocab/quantitykind/DimensionlessRatio',
         space: 'linear',
       });
     }
+  });
+
+  it('adds no unit the producer did not declare, whatever the field is called', async () => {
+    const { manifest } = await compileExportConfigurationManifest('mock', 'export/mock/options', {
+      schema: { type: 'object', properties: { width: { type: 'number' }, quality: { type: 'number' } } },
+      defaults: {},
+    });
+
+    expect(manifest.bindings['/width']?.unit).toBeUndefined();
+    expect(manifest.bindings['/quality']?.unit).toBeUndefined();
   });
 
   it('produces a re-admissible manifest from the real image exporter schema', async () => {

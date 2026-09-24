@@ -1,3 +1,5 @@
+import { useLayoutEffect } from 'react';
+import type { RenderFrame } from '@taucad/spatial';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
@@ -37,7 +39,11 @@ const mocks = vi.hoisted(() => {
       opacityByComponentId: {},
       selectedComponentIds: [],
     },
-    renderFrame: { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
+    renderFrame: {
+      anchorFrameId: 'tau:root',
+      originMeters: [0, 0, 0] as [number, number, number],
+      metersPerRenderUnit: 1,
+    },
     sectionView: { enableMesh: false, isActive: false, plane: undefined },
   };
 });
@@ -70,6 +76,11 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useGraphics: () => mocks.graphicsActor,
   useGraphicsSelector: () => false,
   useRenderFrame: () => mocks.renderFrame,
+  useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
+    useLayoutEffect(() => {
+      handler(mocks.renderFrame);
+    }, [handler, mocks.renderFrame]);
+  },
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),
@@ -88,11 +99,9 @@ vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
 const { GltfMesh } = await import('#components/geometry/graphics/three/react/gltf-mesh.js');
 
 const surfaceMaterial: GlbMaterial = {
-  baseColorFactor: [0.5, 0.5, 0.5, 1],
-  metallicFactor: 0.1,
-  roughnessFactor: 0.8,
   doubleSided: false,
   alphaMode: 'OPAQUE',
+  pbrMetallicRoughness: { baseColorFactor: [0.5, 0.5, 0.5, 1], metallicFactor: 0.1, roughnessFactor: 0.8 },
 };
 
 function buildGlb({ lift = 0, indices = [0, 1, 2] } = {}): Uint8Array<ArrayBuffer> {

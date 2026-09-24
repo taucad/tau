@@ -18,7 +18,7 @@ describe('entitlementsFromTier', () => {
       hasPaymentMethod: false,
       cancelAtPeriodEnd: false,
     });
-    expect(entitlements.currentPeriodEnd).toBeUndefined();
+    expect(entitlements.paidThrough).toBeUndefined();
   });
 
   it('grants free tier a bounded hosted-GeoSpec allowance with no CI or evidence access', () => {

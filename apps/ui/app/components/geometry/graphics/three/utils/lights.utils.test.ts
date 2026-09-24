@@ -8,7 +8,6 @@ import {
   ambientBaseIntensity,
   headlampBaseIntensity,
   environmentBaseIntensity,
-  poleFadeAngleDeg,
   darkModeIntensityScale,
   darkModeAmbientBoost,
 } from '#components/geometry/graphics/three/utils/lights.utils.js';
@@ -64,384 +63,50 @@ function orbitQuaternion(azimuth: number, polar: number, up: 'x' | 'y' | 'z' = '
   return qYaw.multiply(qPitch);
 }
 
-/** Polar angle (from top) within which the pole-fade is fully active (yaw → 0). */
-const poleFadeRad = (poleFadeAngleDeg * Math.PI) / 180;
-
 describe('computeEnvironmentRotation', () => {
-  // ── Basic identity and order ────────────────────────────────────────────
-
-  describe('identity camera', () => {
-    it('should produce a near-zero Euler for an identity quaternion', () => {
-      // Identity quaternion sits at the top pole — pole fade drives yaw to 0.
-      const identityQuat = new THREE.Quaternion(); // (0, 0, 0, 1)
-      const euler = computeEnvironmentRotation(identityQuat, 'z');
-
-      expect(euler.x).toBeCloseTo(0, 6);
-      expect(euler.y).toBeCloseTo(0, 6);
-      expect(euler.z).toBeCloseTo(0, 6);
-    });
-  });
-
-  describe('euler order selection', () => {
-    it('should use ZXY order for z-up', () => {
-      const quat = new THREE.Quaternion();
-      const euler = computeEnvironmentRotation(quat, 'z');
-      expect(euler.order).toBe('ZXY');
-    });
-
-    it('should use YXZ order for y-up', () => {
-      const quat = new THREE.Quaternion();
-      const euler = computeEnvironmentRotation(quat, 'y');
-      expect(euler.order).toBe('YXZ');
-    });
-
-    it('should use XZY order for x-up', () => {
-      const quat = new THREE.Quaternion();
-      const euler = computeEnvironmentRotation(quat, 'x');
-      expect(euler.order).toBe('XZY');
-    });
-  });
-
-  // ── Azimuth extraction (non-pole cameras) ───────────────────────────────
-
-  describe('azimuth-only extraction', () => {
-    it('should extract correct yaw for each up direction at equatorial polar', () => {
-      // Use polar = π/2 (equator) where blend = 1 → full yaw
-      const angle = Math.PI / 3;
-
-      const eulerZ = computeEnvironmentRotation(orbitQuaternion(angle, Math.PI / 2, 'z'), 'z');
-      expect(eulerZ.z).toBeCloseTo(angle, 4);
-      expect(eulerZ.x).toBeCloseTo(0, 6);
-      expect(eulerZ.y).toBeCloseTo(0, 6);
-
-      const eulerY = computeEnvironmentRotation(orbitQuaternion(angle, Math.PI / 2, 'y'), 'y');
-      expect(eulerY.y).toBeCloseTo(angle, 4);
-      expect(eulerY.x).toBeCloseTo(0, 6);
-      expect(eulerY.z).toBeCloseTo(0, 6);
-
-      const eulerX = computeEnvironmentRotation(orbitQuaternion(angle, Math.PI / 2, 'x'), 'x');
-      expect(eulerX.x).toBeCloseTo(angle, 4);
-      expect(eulerX.y).toBeCloseTo(0, 6);
-      expect(eulerX.z).toBeCloseTo(0, 6);
-    });
-
-    it('should only populate the up-axis Euler component (pitch/roll zeroed)', () => {
-      // Polar π/3 (60°) — well away from both poles, blend ≈ 1
-      const quat = orbitQuaternion(Math.PI / 4, Math.PI / 3, 'z');
-      const euler = computeEnvironmentRotation(quat, 'z');
-
-      expect(euler.z).toBeCloseTo(Math.PI / 4, 4);
-      expect(euler.x).toBeCloseTo(0, 6);
-      expect(euler.y).toBeCloseTo(0, 6);
-    });
-  });
-
-  // ── Polar-angle independence (mid-latitude band only) ───────────────────
-
-  describe('polar-angle independence (outside pole caps)', () => {
-    it('should return the same rotation for polar angles in the mid-latitude band (z-up)', () => {
-      const azimuth = Math.PI / 4;
-      // Stay well outside the pole-fade caps (poleFadeAngleDeg from each pole)
-      const safeMargin = poleFadeRad + 0.05;
-      const polarAngles = [
-        safeMargin,
-        Math.PI / 4,
-        Math.PI / 3,
-        Math.PI / 2,
-        (2 * Math.PI) / 3,
-        (3 * Math.PI) / 4,
-        Math.PI - safeMargin,
-      ];
-
-      const results = polarAngles.map((polar) => {
-        const quat = orbitQuaternion(azimuth, polar, 'z');
-        return computeEnvironmentRotation(quat, 'z');
-      });
-
-      for (const euler of results) {
-        expect(euler.z).toBeCloseTo(azimuth, 3);
-        expect(euler.x).toBeCloseTo(0, 6);
-        expect(euler.y).toBeCloseTo(0, 6);
+  it('keeps the studio reflection direction fixed in view space through tilt and roll', () => {
+    const panelDirection = new THREE.Vector3(1, 1, 1).normalize();
+    for (const angles of [
+      [0, 0, 0],
+      [0.8, -0.4, 0.2],
+      [Math.PI, 0.1, 0.7],
+    ]) {
+      const cameraRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(...angles));
+      for (const up of ['x', 'y', 'z'] as const) {
+        const environmentRotation = new THREE.Quaternion().setFromEuler(computeEnvironmentRotation(cameraRotation, up));
+        const viewDirection = panelDirection
+          .clone()
+          .applyQuaternion(environmentRotation)
+          .applyQuaternion(cameraRotation.clone().invert());
+        expect(viewDirection.distanceTo(panelDirection)).toBeLessThan(1e-10);
       }
-    });
-
-    it('should return the same rotation for polar angles in the mid-latitude band (y-up)', () => {
-      const azimuth = -Math.PI / 3;
-      const safeMargin = poleFadeRad + 0.05;
-      const polarAngles = [safeMargin, Math.PI / 4, Math.PI / 2, Math.PI - safeMargin];
-
-      const results = polarAngles.map((polar) => {
-        const quat = orbitQuaternion(azimuth, polar, 'y');
-        return computeEnvironmentRotation(quat, 'y');
-      });
-
-      for (const euler of results) {
-        expect(euler.y).toBeCloseTo(azimuth, 3);
-        expect(euler.x).toBeCloseTo(0, 6);
-        expect(euler.z).toBeCloseTo(0, 6);
-      }
-    });
-  });
-
-  // ── Continuity ──────────────────────────────────────────────────────────
-
-  describe('continuity across equatorial plane', () => {
-    it('should be continuous sweeping polar through 90° (z-up)', () => {
-      const azimuth = Math.PI / 3;
-      const steps = 100;
-      const polarStart = Math.PI / 4;
-      const polarEnd = (3 * Math.PI) / 4;
-
-      let previousZ: number | undefined;
-      for (let index = 0; index <= steps; index++) {
-        const polar = polarStart + (index / steps) * (polarEnd - polarStart);
-        const quat = orbitQuaternion(azimuth, polar, 'z');
-        const euler = computeEnvironmentRotation(quat, 'z');
-
-        if (previousZ !== undefined) {
-          const delta = Math.abs(euler.z - previousZ);
-          expect(delta).toBeLessThan(0.1);
-        }
-
-        previousZ = euler.z;
-      }
-    });
-
-    it('should be continuous sweeping polar through 90° (y-up)', () => {
-      const azimuth = -Math.PI / 6;
-      const steps = 100;
-      const polarStart = Math.PI / 4;
-      const polarEnd = (3 * Math.PI) / 4;
-
-      let previousY: number | undefined;
-      for (let index = 0; index <= steps; index++) {
-        const polar = polarStart + (index / steps) * (polarEnd - polarStart);
-        const quat = orbitQuaternion(azimuth, polar, 'y');
-        const euler = computeEnvironmentRotation(quat, 'y');
-
-        if (previousY !== undefined) {
-          const delta = Math.abs(euler.y - previousY);
-          expect(delta).toBeLessThan(0.1);
-        }
-
-        previousY = euler.y;
-      }
-    });
-  });
-
-  describe('full azimuth sweep is continuous', () => {
-    it('should have no jumps across the full −π→+π azimuth range', () => {
-      const polar = Math.PI / 3; // 60° — well away from poles
-      const steps = 360;
-
-      let previousZ: number | undefined;
-      for (let index = 0; index <= steps; index++) {
-        const azimuth = (index / steps) * 2 * Math.PI - Math.PI;
-        const quat = orbitQuaternion(azimuth, polar, 'z');
-        const euler = computeEnvironmentRotation(quat, 'z');
-
-        if (previousZ !== undefined) {
-          let delta = Math.abs(euler.z - previousZ);
-          if (delta > Math.PI) {
-            delta = 2 * Math.PI - delta;
-          }
-
-          expect(delta).toBeLessThan(0.1);
-        }
-
-        previousZ = euler.z;
-      }
-    });
-  });
-
-  // ── Pole-proximity fade ─────────────────────────────────────────────────
-
-  describe('pole-proximity fade', () => {
-    it('should return near-zero yaw at the top pole (polar ≈ 0)', () => {
-      // Top pole: polar = 0° → camera looking straight down along up axis
-      const quat = orbitQuaternion(Math.PI / 2, 0, 'z');
-      const euler = computeEnvironmentRotation(quat, 'z');
-      expect(Math.abs(euler.z)).toBeLessThan(0.01);
-    });
-
-    it('should return near-zero yaw at the bottom pole (polar ≈ π)', () => {
-      // Bottom pole: polar = π → camera looking straight up from below
-      const quat = orbitQuaternion(Math.PI / 2, Math.PI - 0.001, 'z');
-      const euler = computeEnvironmentRotation(quat, 'z');
-      expect(Math.abs(euler.z)).toBeLessThan(0.01);
-    });
-
-    it('should return full yaw at the equator (polar = π/2)', () => {
-      const azimuth = Math.PI / 3;
-      const quat = orbitQuaternion(azimuth, Math.PI / 2, 'z');
-      const euler = computeEnvironmentRotation(quat, 'z');
-      expect(euler.z).toBeCloseTo(azimuth, 4);
-    });
-
-    it('should return full yaw well outside the pole cap', () => {
-      const azimuth = Math.PI / 4;
-      // 30° from top pole — outside the 15° cap
-      const quat = orbitQuaternion(azimuth, Math.PI / 6, 'z');
-      const euler = computeEnvironmentRotation(quat, 'z');
-      expect(euler.z).toBeCloseTo(azimuth, 2);
-    });
-
-    it('should be symmetric between top and bottom poles', () => {
-      const azimuth = Math.PI / 4;
-      // 5° from top pole
-      const topQuat = orbitQuaternion(azimuth, 0.087, 'z');
-      const topEuler = computeEnvironmentRotation(topQuat, 'z');
-
-      // 5° from bottom pole
-      const bottomQuat = orbitQuaternion(azimuth, Math.PI - 0.087, 'z');
-      const bottomEuler = computeEnvironmentRotation(bottomQuat, 'z');
-
-      // Both should have heavily attenuated yaw (blend close to 0)
-      expect(Math.abs(topEuler.z)).toBeLessThan(Math.abs(azimuth) * 0.3);
-      expect(Math.abs(bottomEuler.z)).toBeLessThan(Math.abs(azimuth) * 0.3);
-    });
-
-    it('should produce a monotonically increasing blend from pole to equator', () => {
-      const azimuth = Math.PI / 3;
-      const steps = 50;
-      // Sweep from top pole (polar = 0) to equator (polar = π/2)
-      let previousAbsZ = -1;
-      for (let index = 1; index <= steps; index++) {
-        const polar = (index / steps) * (Math.PI / 2);
-        const quat = orbitQuaternion(azimuth, polar, 'z');
-        const euler = computeEnvironmentRotation(quat, 'z');
-        const absZ = Math.abs(euler.z);
-        expect(absZ).toBeGreaterThanOrEqual(previousAbsZ - 1e-6);
-        previousAbsZ = absZ;
-      }
-    });
-  });
-
-  describe('continuity through pole-fade transition (no lighting hop)', () => {
-    it('should be continuous sweeping from equator through bottom pole cap (z-up)', () => {
-      const azimuth = Math.PI / 3;
-      const steps = 500;
-      // Sweep from π/3 (60°) all the way to near-bottom pole
-      const polarStart = Math.PI / 3;
-      const polarEnd = Math.PI - 0.01;
-
-      let previousZ: number | undefined;
-      for (let index = 0; index <= steps; index++) {
-        const polar = polarStart + (index / steps) * (polarEnd - polarStart);
-        const quat = orbitQuaternion(azimuth, polar, 'z');
-        const euler = computeEnvironmentRotation(quat, 'z');
-
-        if (previousZ !== undefined) {
-          // A genuine hop (the original bug) would produce a delta of ~π.
-          // The smoothstep fade may produce up to ~0.04 rad per step at
-          // 500 steps, well within the 0.1 rad threshold.
-          const delta = Math.abs(euler.z - previousZ);
-          expect(delta).toBeLessThan(0.1);
-        }
-
-        previousZ = euler.z;
-      }
-    });
-
-    it('should be continuous sweeping from equator through top pole cap (z-up)', () => {
-      const azimuth = -Math.PI / 4;
-      const steps = 500;
-      const polarStart = (2 * Math.PI) / 3;
-      const polarEnd = 0.01;
-
-      let previousZ: number | undefined;
-      for (let index = 0; index <= steps; index++) {
-        const polar = polarStart + (index / steps) * (polarEnd - polarStart);
-        const quat = orbitQuaternion(azimuth, polar, 'z');
-        const euler = computeEnvironmentRotation(quat, 'z');
-
-        if (previousZ !== undefined) {
-          const delta = Math.abs(euler.z - previousZ);
-          expect(delta).toBeLessThan(0.1);
-        }
-
-        previousZ = euler.z;
-      }
-    });
-  });
-
-  describe('near-pole perturbation stability', () => {
-    it('should produce small yaw changes for small camera perturbations near bottom pole', () => {
-      // At 3° from the bottom pole, perturb the azimuth by 90° (worst case).
-      // Without pole-fade this would be a massive lighting change; with it
-      // the effective yaw should be heavily attenuated.
-      const polar = Math.PI - 0.05; // ~3° from bottom pole
-      const euler1 = computeEnvironmentRotation(orbitQuaternion(0, polar, 'z'), 'z');
-      const euler2 = computeEnvironmentRotation(orbitQuaternion(Math.PI / 2, polar, 'z'), 'z');
-
-      // The effective yaw difference should be much smaller than π/2 (the raw difference)
-      const effectiveDelta = Math.abs(euler2.z - euler1.z);
-      expect(effectiveDelta).toBeLessThan(0.15); // < ~9°
-    });
-
-    it('should produce small yaw changes for small camera perturbations near top pole', () => {
-      const polar = 0.05; // ~3° from top pole
-      const euler1 = computeEnvironmentRotation(orbitQuaternion(0, polar, 'z'), 'z');
-      const euler2 = computeEnvironmentRotation(orbitQuaternion(Math.PI / 2, polar, 'z'), 'z');
-
-      const effectiveDelta = Math.abs(euler2.z - euler1.z);
-      expect(effectiveDelta).toBeLessThan(0.15);
-    });
-  });
-
-  // ── Degenerate / edge cases ─────────────────────────────────────────────
-
-  describe('degenerate cases', () => {
-    it('should return identity for exact bottom-pole quaternion (q.z = q.w = 0)', () => {
-      const degenerate = new THREE.Quaternion(0, 1, 0, 0); // 180° around Y
-      const euler = computeEnvironmentRotation(degenerate, 'z');
-
-      expect(euler.x).toBeCloseTo(0, 6);
-      expect(euler.y).toBeCloseTo(0, 6);
-      expect(euler.z).toBeCloseTo(0, 6);
-    });
-
-    it('should return identity for exact top-pole quaternion (q.x = q.y = 0)', () => {
-      // Pure yaw with no pitch → top pole. Pole-fade drives effective yaw to 0.
-      const topPole = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
-      const euler = computeEnvironmentRotation(topPole, 'z');
-
-      expect(euler.x).toBeCloseTo(0, 6);
-      expect(euler.y).toBeCloseTo(0, 6);
-      // At top pole, blend = 0 so effective yaw = 0
-      expect(euler.z).toBeCloseTo(0, 6);
-    });
-
-    it('should handle near-zero-length quaternion gracefully', () => {
-      // Edge case: quaternion is nearly zero (shouldn't happen but protect against it)
-      const nearZero = new THREE.Quaternion(1e-8, 1e-8, 1e-8, 1e-8);
-      expect(() => computeEnvironmentRotation(nearZero, 'z')).not.toThrow();
-    });
-  });
-
-  // ── Input immutability ──────────────────────────────────────────────────
-
-  describe('does not mutate input', () => {
-    it('should not modify the input quaternion', () => {
-      const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 3);
-      const originalW = quat.w;
-      const originalX = quat.x;
-      const originalY = quat.y;
-      const originalZ = quat.z;
-
-      computeEnvironmentRotation(quat, 'z');
-
-      expect(quat.x).toBe(originalX);
-      expect(quat.y).toBe(originalY);
-      expect(quat.z).toBe(originalZ);
-      expect(quat.w).toBe(originalW);
-    });
+    }
   });
 });
 
 // ── computeHeadlampTransform ────────────────────────────────────────────────
 
 describe('computeHeadlampTransform', () => {
+  it('preserves the reference key direction through orbit, roll and scene scaling', () => {
+    const expected = new THREE.Vector3(1, 1, 1).normalize();
+    for (const radius of [0.001, 1, 1000]) {
+      const camera = createTestCamera(54, radius * 10);
+      camera.quaternion.setFromEuler(new THREE.Euler(0.8, -0.4, 0.6));
+      camera.updateMatrixWorld(true);
+      const { position, targetPosition } = computeHeadlampTransform({
+        cameraPosition: camera.position,
+        cameraMatrixWorld: camera.matrixWorld,
+        sceneRadius: radius,
+        config: defaultHeadlampConfig,
+      });
+      const viewDirection = position
+        .sub(targetPosition)
+        .normalize()
+        .applyQuaternion(camera.quaternion.clone().invert());
+      expect(viewDirection.distanceTo(expected)).toBeLessThan(1e-10);
+    }
+  });
+
   describe('identity camera matrix', () => {
     it('should offset position in camera-up (+Y) and camera-right (+X) directions', () => {
       const cameraPosition = new THREE.Vector3(0, 0, 10);
@@ -458,7 +123,6 @@ describe('computeHeadlampTransform', () => {
       // With identity matrix:
       // camera-right = column 0 = (1,0,0)
       // camera-up = column 1 = (0,1,0)
-      // Expected position: (0,0,10) + (0,1,0) * 5 * 2.1 + (1,0,0) * 5 * -0.1
       const expectedX = 0 + radius * defaultHeadlampConfig.rightOffset;
       const expectedY = 0 + radius * defaultHeadlampConfig.upOffset;
       const expectedZ = 10;
@@ -573,6 +237,26 @@ describe('computeHeadlampTransform', () => {
 // ── applyLightingForCamera ──────────────────────────────────────────────────
 
 describe('applyLightingForCamera', () => {
+  it('preserves light energy when switching projection or changing field of view', () => {
+    const scene = new THREE.Scene();
+    const headlamp = new THREE.DirectionalLight();
+    const ambient = new THREE.AmbientLight();
+    const config = createDefaultLightingConfig();
+    for (const camera of [
+      new THREE.OrthographicCamera(),
+      createTestCamera(10),
+      createTestCamera(54),
+      createTestCamera(90),
+    ]) {
+      applyLightingForCamera({ scene, camera, headlamp, ambient, config });
+      expect([headlamp.intensity, ambient.intensity, scene.environmentIntensity]).toEqual([
+        config.headlampIntensity,
+        config.ambientIntensity,
+        config.environmentIntensity,
+      ]);
+    }
+  });
+
   describe('environment rotation', () => {
     it('should set scene.environmentRotation based on camera orientation', () => {
       const scene = createTestScene();
@@ -596,7 +280,7 @@ describe('applyLightingForCamera', () => {
   });
 
   describe('environment intensity', () => {
-    it('should set scene.environmentIntensity using FOV compensation', () => {
+    it('should set scene.environmentIntensity from the configured profile', () => {
       const scene = createTestScene();
       const camera = createTestCamera(54); // Reference FOV
       const config = createDefaultLightingConfig();
@@ -609,11 +293,10 @@ describe('applyLightingForCamera', () => {
         config,
       });
 
-      // At reference FOV (54), envFactor ≈ 1.0, so intensity ≈ base
       expect(scene.environmentIntensity).toBeCloseTo(environmentBaseIntensity, 2);
     });
 
-    it('should reduce environment intensity at low FOV', () => {
+    it('should preserve environment intensity at low FOV', () => {
       const scene = createTestScene();
       const camera = createTestCamera(10); // Low FOV
       const config = createDefaultLightingConfig();
@@ -626,7 +309,7 @@ describe('applyLightingForCamera', () => {
         config,
       });
 
-      expect(scene.environmentIntensity).toBeLessThan(environmentBaseIntensity);
+      expect(scene.environmentIntensity).toBe(environmentBaseIntensity);
     });
   });
 
@@ -673,7 +356,7 @@ describe('applyLightingForCamera', () => {
   });
 
   describe('ambient light', () => {
-    it('should update ambient intensity with FOV compensation when provided', () => {
+    it('should update ambient intensity when provided', () => {
       const scene = createTestScene();
       const camera = createTestCamera(54); // Reference FOV
       const ambient = new THREE.AmbientLight('white', 1);
@@ -688,11 +371,10 @@ describe('applyLightingForCamera', () => {
         config,
       });
 
-      // At reference FOV, ambientFactor ≈ 1.0
       expect(ambient.intensity).toBeCloseTo(ambientBaseIntensity, 2);
     });
 
-    it('should boost ambient intensity at low FOV', () => {
+    it('should preserve ambient intensity at low FOV', () => {
       const scene = createTestScene();
       const camera = createTestCamera(10); // Low FOV
       const ambient = new THREE.AmbientLight('white', 1);
@@ -707,8 +389,7 @@ describe('applyLightingForCamera', () => {
         config,
       });
 
-      // At low FOV, ambientFactor > 1.0
-      expect(ambient.intensity).toBeGreaterThan(ambientBaseIntensity);
+      expect(ambient.intensity).toBe(ambientBaseIntensity);
     });
 
     it('should not throw when ambient is undefined', () => {
@@ -776,7 +457,13 @@ describe('applyLightingForCamera', () => {
         themeIntensityScale: darkModeIntensityScale,
       });
 
-      applyLightingForCamera({ scene, camera, headlamp: undefined, ambient: undefined, config });
+      applyLightingForCamera({
+        scene,
+        camera,
+        headlamp: undefined,
+        ambient: undefined,
+        config,
+      });
 
       expect(scene.environmentIntensity).toBeCloseTo(environmentBaseIntensity * darkModeIntensityScale, 2);
     });
@@ -791,7 +478,13 @@ describe('applyLightingForCamera', () => {
         themeIntensityScale: darkModeIntensityScale,
       });
 
-      applyLightingForCamera({ scene, camera, headlamp, ambient: undefined, config });
+      applyLightingForCamera({
+        scene,
+        camera,
+        headlamp,
+        ambient: undefined,
+        config,
+      });
 
       expect(headlamp.intensity).toBeCloseTo(headlampBaseIntensity * darkModeIntensityScale, 2);
     });
@@ -806,7 +499,13 @@ describe('applyLightingForCamera', () => {
         themeAmbientBoost: darkModeAmbientBoost,
       });
 
-      applyLightingForCamera({ scene, camera, headlamp: undefined, ambient, config });
+      applyLightingForCamera({
+        scene,
+        camera,
+        headlamp: undefined,
+        ambient,
+        config,
+      });
 
       const expected = ambientBaseIntensity * darkModeIntensityScale * darkModeAmbientBoost;
       expect(ambient.intensity).toBeCloseTo(expected, 4);
@@ -829,18 +528,22 @@ describe('applyLightingForCamera', () => {
       expect(ambient.intensity).toBeCloseTo(ambientBaseIntensity, 2);
     });
 
-    it('should compose theme scaling with FOV compensation at low FOV', () => {
+    it('should preserve theme scaling at low FOV', () => {
       const scene = createTestScene();
       const camera = createTestCamera(10);
       const config = createDefaultLightingConfig({
         themeIntensityScale: darkModeIntensityScale,
       });
 
-      applyLightingForCamera({ scene, camera, headlamp: undefined, ambient: undefined, config });
+      applyLightingForCamera({
+        scene,
+        camera,
+        headlamp: undefined,
+        ambient: undefined,
+        config,
+      });
 
-      // At low FOV with dark mode: environment should be less than both the
-      // base value AND the dark-mode-only value (both FOV and theme dim it)
-      expect(scene.environmentIntensity).toBeLessThan(environmentBaseIntensity * darkModeIntensityScale);
+      expect(scene.environmentIntensity).toBe(environmentBaseIntensity * darkModeIntensityScale);
     });
   });
 });

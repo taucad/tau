@@ -1,8 +1,10 @@
+import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Box3, REVISION, Vector3, WebGLRenderer } from 'three';
+import { Box3, HalfFloatType, REVISION, Vector3, WebGLRenderer, WebGLRenderTarget } from 'three';
+import type { Scene } from 'three';
 import { applyCanonicalGltfBounds } from '#components/geometry/graphics/three/gltf-world.js';
 import { z } from 'zod';
 import type { Geometry } from '@taucad/types';
@@ -79,6 +81,60 @@ type FrameSample = {
   projectionSwitch: boolean;
 };
 
+async function compressCapture(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const compressed = new Uint8Array(
+    await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer(),
+  );
+  return uint8ArrayToBase64(compressed);
+}
+
+/** Read shader output before canvas PNG conversion unpremultiplies sRGB channels. */
+async function captureFramebuffer(renderer: WebGLRenderer): Promise<Record<string, unknown>> {
+  const context = renderer.getContext();
+  const { drawingBufferWidth: width, drawingBufferHeight: height } = context;
+  const pixels = new Uint8Array(width * height * 4);
+  context.readPixels(0, 0, width, height, context.RGBA, context.UNSIGNED_BYTE, pixels);
+  const topDown = new Uint8Array(pixels.length);
+  for (let row = 0; row < height; row++) {
+    topDown.set(pixels.subarray(row * width * 4, (row + 1) * width * 4), (height - row - 1) * width * 4);
+  }
+  return { width, height, format: 'rgba8-srgb-framebuffer', compression: 'gzip', data: await compressCapture(topDown) };
+}
+
+/** Export the actual filtered lighting texture without changing its pixels or the live scene. */
+async function captureEnvironment(renderer: WebGLRenderer, scene: Scene): Promise<Record<string, unknown>> {
+  const source = scene.environment;
+  if (!source || source.type !== HalfFloatType) {
+    throw new Error('Select a filtered room environment before exporting lighting.');
+  }
+  const { width, height } = source.image as { width: number; height: number };
+  const target = new WebGLRenderTarget(width, height, { type: HalfFloatType, depthBuffer: false });
+  try {
+    renderer.initRenderTarget(target);
+    renderer.copyTextureToTexture(source, target.texture);
+    const pixels = new Uint16Array(width * height * 4);
+    await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height, pixels);
+    const red = new Uint16Array(width * height);
+    for (let index = 0; index < red.length; index++) {
+      const start = index * 4;
+      if (pixels[start] !== pixels[start + 1] || pixels[start] !== pixels[start + 2]) {
+        throw new Error('The neutral room must have equal RGB channels.');
+      }
+      red[index] = pixels[start]!;
+    }
+    return {
+      width,
+      height,
+      format: 'r16float-le',
+      compression: 'gzip',
+      data: await compressCapture(new Uint8Array(red.buffer)),
+      threeRevision: REVISION,
+    };
+  } finally {
+    target.dispose();
+  }
+}
+
 function summarize(values: number[]): {
   median: number;
   p95: number;
@@ -116,7 +172,7 @@ function CalibrationProbe({
   readonly metadata: Record<string, unknown> & { post: Partial<PostProcessingSettings> };
   readonly onReport: (report: Record<string, unknown>) => void;
 }): undefined {
-  const { gl, invalidate, size, setDpr } = useThree();
+  const { gl, scene, invalidate, size, setDpr } = useThree();
   const gpuTimer = useRef<FrameGpuTimer | undefined>(undefined);
   const rig = useCameraRig();
   const viewerBounds = useMemo(
@@ -352,13 +408,19 @@ function CalibrationProbe({
       const captureMetadata = report();
       const saveCapture = async (): Promise<void> => {
         try {
+          const image = gl.domElement.toDataURL('image/png');
+          const framebufferCapture = gl instanceof WebGLRenderer ? await captureFramebuffer(gl) : undefined;
+          const environmentCapture =
+            capture.name === 'lighting-assets' && gl instanceof WebGLRenderer
+              ? await captureEnvironment(gl, scene)
+              : undefined;
           const response = await fetch('/calibration-capture', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: capture.name,
-              image: gl.domElement.toDataURL('image/png'),
-              metadata: captureMetadata,
+              image,
+              metadata: { ...captureMetadata, environmentCapture, framebufferCapture },
             }),
           });
           if (!response.ok) {
@@ -1026,6 +1088,15 @@ export function RenderingProfile(): React.JSX.Element {
               }}
             >
               Save PNG + metadata
+            </button>
+            <button
+              type='button'
+              disabled={!captureReady || backend !== 'webgl'}
+              onClick={() => {
+                setCapture((previous) => ({ sequence: previous.sequence + 1, name: 'lighting-assets' }));
+              }}
+            >
+              Save lighting assets
             </button>
           </div>
           <details

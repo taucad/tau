@@ -38,6 +38,13 @@ describe('getIconIdForFilename', () => {
     expect(getIconIdForFilename('model.step')).toBe('step');
   });
 
+  it('resolves a sliced print container as G-code, not as its last extension', () => {
+    expect(getIconIdForFilename('exports/pyramid.gcode.3mf')).toBe('gcode');
+    expect(getIconIdForFilename('PYRAMID.GCODE.3MF')).toBe('gcode');
+    expect(getIconIdForFilename('pyramid.gcode')).toBe('gcode');
+    expect(getIconIdForFilename('pyramid.3mf')).toBe('3mf');
+  });
+
   it('returns undefined for unmapped files', () => {
     expect(getIconIdForFilename('notes.txt')).toBeUndefined();
     expect(getIconIdForFilename('no-extension')).toBeUndefined();

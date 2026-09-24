@@ -415,6 +415,21 @@ describe('machine tool registry', () => {
       });
     });
 
+    it('should say a very short print takes under a minute, without "about"', async () => {
+      const approve = approveWith('approved');
+      planPrint.mockResolvedValueOnce({
+        artifact: artifactFixture,
+        configuration: { expectedBedType: 'textured-pei' },
+        summary: { layers: 3, estimatedDuration: 20, filamentLength: 40 },
+      });
+
+      await run(clientFixture().client, { toolName: 'request_print', input: { targetFile: 'main.ts' }, approve });
+
+      expect(approve).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: 'Print pyramid.gcode.3mf on Workshop X1C? 3 layers, under a minute.' }),
+      );
+    });
+
     it('should deny the request, not withdraw it, when the person declines', async () => {
       const fixture = clientFixture();
       const result = await run(fixture.client, {

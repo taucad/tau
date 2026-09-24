@@ -58,4 +58,4 @@ camera.stop();
 
 Projection changes are immediate. Hosts may animate their input values before sending them and subscribe a renderer adapter to the actor. Snapshots contain only serializable camera data.
 
-Runtime support: Node.js 24 or newer and modern browsers. `xstate` 5 is a peer dependency. This package is Apache-2.0 licensed; its implementation was authored for Tau and does not include copied Three.js source.
+Runtime support: Node.js 24 or newer and modern browsers. `xstate` 6 (`^6.0.0-alpha.59`) is an optional peer dependency, needed only for `@taucad/camera/machine`. This package is Apache-2.0 licensed; its implementation was authored for Tau and does not include copied Three.js source.

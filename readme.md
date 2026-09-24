@@ -76,7 +76,7 @@ Tau is built on a foundation of excellent open-source projects:
 
 | Category             | Technologies                                                                                                                                                              |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **State Management** | [XState V5](https://xstate.js.org/)                                                                                                                                       |
+| **State Management** | [XState v6](https://xstate.js.org/)                                                                                                                                       |
 | **Code Editor**      | [Monaco Editor](https://microsoft.github.io/monaco-editor/)                                                                                                               |
 | **3D Rendering**     | [Three.js](https://threejs.org/), [React Three Fiber](https://docs.pmnd.rs/react-three-fiber)                                                                             |
 | **UI Framework**     | [React 19](https://react.dev/), [Radix UI](https://www.radix-ui.com/), [shadcn/ui](https://ui.shadcn.com/)                                                                |

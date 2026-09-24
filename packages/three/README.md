@@ -60,4 +60,4 @@ rig.dispose();
 
 The rig derives scale-covariant clip planes and applies the fitted zoom from `@taucad/camera`. Presentation planes are explicit physical planes; their normal is independent of camera roll. `@taucad/three/spatial` supplies native point, bounds, plane, and outer-matrix adapters. The package deliberately has no React, React Three Fiber, DOM, controls, gizmo, or post-processing dependency. Hosts retarget those resources from the rig's `onUpdate` callback and must call `dispose()` when the owning viewer is destroyed.
 
-Runtime support: Node.js 24 or newer and modern browsers with Three.js 0.184 or compatible. `@taucad/camera`, `@taucad/spatial`, `three`, and `xstate` 5 are peer dependencies. This package is Apache-2.0 licensed; it uses public Three.js APIs and does not redistribute Three.js source.
+Runtime support: Node.js 24 or newer and modern browsers with Three.js 0.184 or compatible. `@taucad/camera`, `@taucad/spatial`, `three`, and `xstate` 6 (`^6.0.0-alpha.59`) are peer dependencies. This package is Apache-2.0 licensed; it uses public Three.js APIs and does not redistribute Three.js source.

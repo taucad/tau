@@ -2,11 +2,7 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import {
-  createChatToolRegistry,
-  createMachinePrintPlanner,
-  createProviderRpcFileSystem,
-} from '@taucad/agent-tools/registry';
+import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -1758,7 +1754,6 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     parameterActorFor,
   });
   const baseRevision: WorkerSession['baseRevision'] = {};
-  const { machines } = runtimeClient;
   const toolRegistry: ToolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
@@ -1768,30 +1763,17 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     ...runtimeRpc,
     parameters,
     geospec: geoSpecClient,
-    machines,
-    ...(machines.available
-      ? {
-          planPrint: createMachinePrintPlanner({
-            // ponytail: one worker serves every chat of a project, so this is the latest admitted base; key it by run if concurrent chats must differ.
-            revisions: { describe: async () => ({ revisionId: baseRevision.current }) },
-            machines,
-            /* The registry's own route, so the slice is recorded exactly as an export is. */
-            exportGeometry: async (input) =>
-              toolRegistry.invoke({
-                toolCallId: input.toolCallId,
-                toolName: 'export_geometry',
-                input: { targetFile: input.targetFile, format: input.format },
-                signal: input.signal,
-              }),
-            readArtifact: async ({ path, signal }) => {
-              signal.throwIfAborted();
-              const bytes = await recordView.readFile(assertRootedPath(path));
-              signal.throwIfAborted();
-              return bytes;
-            },
-          }),
-        }
-      : {}),
+    machines: runtimeClient.machines,
+    print: {
+      // ponytail: one worker serves every chat of a project, so this is the latest admitted base; key it by run if concurrent chats must differ.
+      revisions: { describe: async () => ({ revisionId: baseRevision.current }) },
+      readArtifact: async ({ path, signal }) => {
+        signal.throwIfAborted();
+        const bytes = await recordView.readFile(assertRootedPath(path));
+        signal.throwIfAborted();
+        return bytes;
+      },
+    },
     testingEnabled: request.testingEnabled ?? false,
   });
   const activeReference: { current?: WorkerSession } = {};

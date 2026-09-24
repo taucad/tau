@@ -2,7 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { isValidElement } from 'react';
 import { createPortal } from 'react-dom';
+import { Printer } from 'lucide-react';
 import type {
   DockviewApi,
   DockviewDidDropEvent,
@@ -279,6 +281,7 @@ const {
   WorkbenchEmptyGroupWatermark,
   WorkbenchDockviewTab,
   WorkbenchLeftActions,
+  getWorkbenchTabIcon,
   WorkbenchPlaceholderPanel,
   WorkbenchRightHeaderActions,
   workbenchSurfaces,
@@ -352,6 +355,19 @@ const mockPanelApi = {
   updateParameters: vi.fn(),
   setTitle: vi.fn(),
 } as unknown as IDockviewPanelProps['api'];
+
+describe('getWorkbenchTabIcon', () => {
+  it('should mark printer files with the printer icon, as the viewer tab does, and leave other files to their extension', () => {
+    const icon = (id: string, params: Record<string, unknown>): React.ReactNode =>
+      getWorkbenchTabIcon(createTabProperties({ id, title: id, params }));
+    for (const filePath of ['exports/main.gcode.3mf', 'prints/bracket.gcode']) {
+      const element = icon('file-1', { filePath });
+      expect(isValidElement(element) && element.type).toBe(Printer);
+    }
+    expect(icon('file-2', { filePath: 'main.scad' })).toBeUndefined();
+    expect(icon('file-3', { filePath: 'exports/main.3mf' })).toBeUndefined();
+  });
+});
 
 describe('WorkbenchRightHeaderActions', () => {
   beforeEach(() => {

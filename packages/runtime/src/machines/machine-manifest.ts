@@ -18,11 +18,11 @@ const identifier = z
   .min(1)
   .max(64)
   .regex(/^[a-z0-9][a-z0-9._-]*$/u);
-const millimetres = z.number().finite().positive().max(10_000);
+const millimetres = z.number().positive().max(10_000);
 
 /** One declared physical quantity with its native unit. @public */
 export const machineManifestQuantitySchema = z.strictObject({
-  value: z.number().finite(),
+  value: z.number(),
   unit: z.string().min(1).max(32),
 });
 
@@ -119,7 +119,7 @@ export const machineManifestSchema = z.strictObject({
         group: identifier,
         label,
         /** Milliseconds after which an observation of this group is presented as stale. */
-        staleAfterMs: z.number().int().positive().max(3_600_000),
+        staleAfter: z.number().int().positive().max(3_600_000),
       }),
     )
     .max(32),

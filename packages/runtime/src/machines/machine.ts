@@ -1,6 +1,6 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
-import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { RevisionId } from '@taucad/revisions/algorithms';
 import type { Quantity } from '@taucad/units/quantity';
 import { z } from 'zod';
 
@@ -8,6 +8,8 @@ import { cloneBoundedJson } from '@taucad/parameters/json';
 import { admitConfigurationManifest, materializeConfigurationJsonSchema } from '#configuration/configuration.js';
 import type { ConfigurationDefinition, ConfigurationManifestV1, JsonSchema } from '#configuration/index.js';
 import { admitJsonSchema } from '@taucad/parameters/schema';
+import { machineManifestSchema, parseMachineManifest } from '#machines/machine-manifest.js';
+import type { MachineManifest } from '#machines/machine-manifest.js';
 import {
   attachRuntimePluginDefinition,
   attachRuntimePluginFactoryOptions,
@@ -38,6 +40,8 @@ export type MachineProvider<Id extends string = string, QueryName extends string
   vendor: string;
   technologies: readonly string[];
   accepts: readonly MachineAcceptedContainer[];
+  /** Frozen model facts that drive scenes, settings, actions and freshness budgets. */
+  manifest: MachineManifest;
   bindingConfiguration: ConfigurationManifestV1;
   submissionConfiguration: ConfigurationManifestV1;
   queries: Readonly<Record<QueryName, MachineQueryManifest>>;
@@ -365,12 +369,14 @@ export type MachineGetSnapshotInput = Readonly<{ signal: AbortSignal }>;
 /** Named observation operation input. @public */
 export type MachineObserveInput = Readonly<{ signal: AbortSignal }>;
 
-/** Named physical submission input. @public */
+/** Named physical start input for one exact, already transferred artifact. @public */
 export type MachineSubmitInput<Configuration> = Readonly<{
   operationId: string;
   expectedMachineId: string;
   artifact: MachineArtifactReference;
   remoteName: string;
+  /** Provider transfer evidence returned by the accepted upload. */
+  transferId: string;
   providerData: CacheValue;
   configuration: Configuration;
   signal: AbortSignal;
@@ -379,11 +385,11 @@ export type MachineSubmitInput<Configuration> = Readonly<{
 /** Provider-local lookup for a late semantic command reply. @public */
 export type MachineReconcileInput = Readonly<{
   operationId: string;
-  command: 'cancel' | 'pause' | 'project_file' | 'resume' | 'stop';
+  command: 'cancel' | 'pause' | 'project_file' | 'resume' | 'stop' | 'upload';
   signal: AbortSignal;
 }>;
 
-/** Provider-host preparation input; it may preflight and transfer but never starts a run. @public */
+/** Provider-host read-only preflight input; it validates the artifact and setup and never transfers or starts. @public */
 export type MachineProviderPreparePrintInput<Configuration> = Readonly<{
   operationId: string;
   expectedMachineId: string;
@@ -392,10 +398,10 @@ export type MachineProviderPreparePrintInput<Configuration> = Readonly<{
   signal: AbortSignal;
 }>;
 
-/** Provider proof that an immutable artifact was transferred without starting it. @public */
+/** Provider proof that an immutable artifact and the observed setup are ready for one transfer. @public */
 export type MachinePreparationReceipt =
   | Readonly<{
-      status: 'transferred';
+      status: 'ready';
       remoteName: string;
       digest: ContentDigest;
       length: number;
@@ -407,6 +413,38 @@ export type MachinePreparationReceipt =
       status: 'rejected';
       code: string;
       message: string;
+      observedAt: string;
+    }>;
+
+/** Provider-host transfer input for one exact prepared artifact; it never starts a run. @public */
+export type MachineProviderUploadInput<Configuration> = Readonly<{
+  operationId: string;
+  expectedMachineId: string;
+  artifact: MachineArtifactReference;
+  remoteName: string;
+  providerData: CacheValue;
+  configuration: Configuration;
+  signal: AbortSignal;
+}>;
+
+/** Provider result for one physical transfer attempt. @public */
+export type MachineTransferReceipt =
+  | Readonly<{
+      status: 'transferred';
+      transferId: string;
+      digest: ContentDigest;
+      length: number;
+      observedAt: string;
+    }>
+  | Readonly<{
+      status: 'rejected';
+      code: string;
+      message: string;
+      observedAt: string;
+    }>
+  | Readonly<{
+      status: 'unknown';
+      reason: string;
       observedAt: string;
     }>;
 
@@ -469,10 +507,11 @@ export type MachineSession<SubmissionConfiguration = unknown> = Readonly<{
   getDescriptor(input: MachineGetDescriptorInput): Promise<MachineDescriptor>;
   getSnapshot(input: MachineGetSnapshotInput): Promise<MachineSnapshot>;
   observe(input: MachineObserveInput): AsyncIterable<MachineObservation>;
-  preparePrint?(input: MachineProviderPreparePrintInput<SubmissionConfiguration>): Promise<MachinePreparationReceipt>;
+  preparePrint(input: MachineProviderPreparePrintInput<SubmissionConfiguration>): Promise<MachinePreparationReceipt>;
+  uploadPrint(input: MachineProviderUploadInput<SubmissionConfiguration>): Promise<MachineTransferReceipt>;
   submit(input: MachineSubmitInput<SubmissionConfiguration>): Promise<MachineSubmissionReceipt>;
   control(input: MachineControlInput): Promise<MachineCommandReceipt>;
-  reconcile?(input: MachineReconcileInput): Promise<MachineCommandReceipt>;
+  reconcile(input: MachineReconcileInput): Promise<MachineCommandReceipt>;
   close(): Promise<void>;
   dispose(): Promise<void>;
 }>;
@@ -533,6 +572,7 @@ export type MachineProviderDefinition<
   vendor: string;
   technologies: readonly string[];
   accepts: readonly MachineAcceptedContainer[];
+  manifest: MachineManifest;
   bindingConfiguration: ConfigurationDefinition<BindingSchema>;
   submissionConfiguration: ConfigurationDefinition<SubmissionSchema>;
   queries?: Queries & MachineQueryDefinitions<Queries>;
@@ -703,6 +743,7 @@ const machineProviderSchema = z.strictObject({
   vendor: providerIdentitySchema,
   technologies: z.array(providerIdentitySchema).min(1).max(64),
   accepts: z.array(acceptedContainerSchema).min(1).max(128),
+  manifest: machineManifestSchema,
   bindingConfiguration: configurationManifestSchema,
   submissionConfiguration: configurationManifestSchema,
   queries: z.record(providerIdentitySchema, z.strictObject({ inputSchema: z.unknown(), resultSchema: z.unknown() })),
@@ -716,6 +757,7 @@ const providerKeys = [
   'vendor',
   'technologies',
   'accepts',
+  'manifest',
   'bindingConfiguration',
   'submissionConfiguration',
   'queries',
@@ -793,6 +835,7 @@ export const defineMachine = <
     vendor: definition.vendor,
     technologies: definition.technologies,
     accepts: definition.accepts,
+    manifest: parseMachineManifest(definition.manifest),
     bindingConfiguration: definition.bindingConfiguration.manifest,
     submissionConfiguration: definition.submissionConfiguration.manifest,
     queries,

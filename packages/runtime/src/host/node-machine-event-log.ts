@@ -50,8 +50,8 @@ const checksum = async (event: CacheValue): Promise<ContentDigest> =>
   digestContent({ bytes: encoder.encode(canonicalizeCacheValue({ value: event })) });
 
 const openLogFile = async (authorityRoot: string): Promise<FileHandle> => {
-  // oxlint-disable-next-line eslint/no-bitwise -- POSIX open flags are bit masks.
   const createFlags =
+    // oxlint-disable-next-line eslint/no-bitwise -- POSIX open flags are bit masks.
     constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR;
   let file: FileHandle;
   try {

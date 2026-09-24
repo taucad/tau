@@ -26,6 +26,24 @@ describe('WebSocket machines facet', () => {
       async preparePrint() {
         throw new Error('Unused fixture operation');
       },
+      async uploadPrint() {
+        throw new Error('Unused fixture operation');
+      },
+      async requestPrint() {
+        throw new Error('Unused fixture operation');
+      },
+      async listPrintRequests() {
+        throw new Error('Unused fixture operation');
+      },
+      async *watchPrintRequests() {
+        yield* [];
+      },
+      async resolvePrintRequest() {
+        throw new Error('Unused fixture operation');
+      },
+      async withdrawPrintRequest() {
+        throw new Error('Unused fixture operation');
+      },
       async startPrint() {
         throw new Error('Unused fixture operation');
       },

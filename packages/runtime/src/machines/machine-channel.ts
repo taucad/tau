@@ -31,6 +31,7 @@ import type {
   MachinePreparedPrint,
   MachineReconcileOperationInput,
   MachineStartPrintInput,
+  MachineUploadPrintInput,
 } from '#machines/machine-client.js';
 import {
   parseMachineDirectoryCursor,
@@ -52,15 +53,29 @@ import type {
   MachineProvider,
   MachineStill,
 } from '#machines/machine.js';
+import type {
+  MachineListPrintRequestsInput,
+  MachineRequestPrintInput,
+  MachineResolvePrintRequestInput,
+  MachineWatchPrintRequestsInput,
+  MachineWithdrawPrintRequestInput,
+  PrintRequest,
+} from '#machines/print-request.js';
 
 type EmptyInput = Readonly<Record<string, never>>;
 type DiscoverInput = Omit<MachineDiscoverInput, 'signal'>;
 type BeginBindingInput = Omit<MachineBeginBindingInput, 'signal'>;
 type PreparePrintInput = Omit<MachinePreparePrintInput, 'signal'>;
+type UploadPrintInput = Omit<MachineUploadPrintInput, 'signal'>;
 type StartPrintInput = Omit<MachineStartPrintInput, 'signal'>;
 type ReconcileOperationInput = Omit<MachineReconcileOperationInput, 'signal'>;
 type ControlRunInput = Omit<MachineControlRunInput, 'signal'>;
 type CaptureStillInput = Omit<MachineCaptureStillClientInput, 'signal'>;
+type RequestPrintInput = Omit<MachineRequestPrintInput, 'signal'>;
+type ListPrintRequestsInput = Omit<MachineListPrintRequestsInput, 'signal'>;
+type WatchPrintRequestsInput = Omit<MachineWatchPrintRequestsInput, 'signal'>;
+type ResolvePrintRequestInput = Omit<MachineResolvePrintRequestInput, 'signal'>;
+type WithdrawPrintRequestInput = Omit<MachineWithdrawPrintRequestInput, 'signal'>;
 type GetInput = Readonly<{ machineId: string }>;
 type WatchInput = Readonly<{ cursor?: MachineDirectoryCursor }>;
 
@@ -70,10 +85,15 @@ type MachineChannelProtocol = {
     readonly listProviders: { readonly args: EmptyInput; readonly result: readonly MachineProvider[] };
     readonly beginBinding: { readonly args: BeginBindingInput; readonly result: MachineBindingOutcome };
     readonly preparePrint: { readonly args: PreparePrintInput; readonly result: MachinePreparedPrint };
+    readonly uploadPrint: { readonly args: UploadPrintInput; readonly result: MachineOperationReceipt };
     readonly startPrint: { readonly args: StartPrintInput; readonly result: MachineOperationReceipt };
     readonly reconcileOperation: { readonly args: ReconcileOperationInput; readonly result: MachineOperationSnapshot };
     readonly controlRun: { readonly args: ControlRunInput; readonly result: MachineOperationReceipt };
     readonly captureStill: { readonly args: CaptureStillInput; readonly result: MachineStill };
+    readonly requestPrint: { readonly args: RequestPrintInput; readonly result: PrintRequest };
+    readonly listPrintRequests: { readonly args: ListPrintRequestsInput; readonly result: readonly PrintRequest[] };
+    readonly resolvePrintRequest: { readonly args: ResolvePrintRequestInput; readonly result: PrintRequest };
+    readonly withdrawPrintRequest: { readonly args: WithdrawPrintRequestInput; readonly result: PrintRequest };
     readonly list: { readonly args: EmptyInput; readonly result: MachineDirectorySnapshot };
     readonly get: { readonly args: GetInput; readonly result: MachineDirectoryEntry };
   };
@@ -81,32 +101,31 @@ type MachineChannelProtocol = {
   readonly listens: {
     readonly discover: { readonly args: DiscoverInput; readonly event: MachineDiscoveryFrame };
     readonly watch: { readonly args: WatchInput; readonly event: MachineDirectoryFrame };
+    readonly watchPrintRequests: { readonly args: WatchPrintRequestsInput; readonly event: PrintRequest };
   };
 };
 
-/** Host-owned discovery and binding work invoked only after route admission. @public */
+type Admitted = Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>;
+
+/**
+ * Host-owned machine work invoked only after route admission. Every operation is
+ * required; a host that cannot serve one throws `MACHINE_OPERATION_UNAVAILABLE`.
+ * @public
+ */
 export type MachineChannelHostOperations = Readonly<{
-  discover(
-    input: DiscoverInput & Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>,
-  ): AsyncIterable<MachineDiscoveryFrame>;
-  beginBinding(
-    input: BeginBindingInput & Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>,
-  ): Promise<MachineBindingOutcome>;
-  preparePrint?(
-    input: PreparePrintInput & Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>,
-  ): Promise<MachinePreparedPrint>;
-  startPrint?(
-    input: StartPrintInput & Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>,
-  ): Promise<MachineOperationReceipt>;
-  reconcileOperation?(
-    input: ReconcileOperationInput & Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>,
-  ): Promise<MachineOperationSnapshot>;
-  controlRun?(
-    input: ControlRunInput & Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>,
-  ): Promise<MachineOperationReceipt>;
-  captureStill?(
-    input: CaptureStillInput & Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>,
-  ): Promise<MachineStill>;
+  discover(input: DiscoverInput & Admitted): AsyncIterable<MachineDiscoveryFrame>;
+  beginBinding(input: BeginBindingInput & Admitted): Promise<MachineBindingOutcome>;
+  preparePrint(input: PreparePrintInput & Admitted): Promise<MachinePreparedPrint>;
+  uploadPrint(input: UploadPrintInput & Admitted): Promise<MachineOperationReceipt>;
+  startPrint(input: StartPrintInput & Admitted): Promise<MachineOperationReceipt>;
+  reconcileOperation(input: ReconcileOperationInput & Admitted): Promise<MachineOperationSnapshot>;
+  controlRun(input: ControlRunInput & Admitted): Promise<MachineOperationReceipt>;
+  captureStill(input: CaptureStillInput & Admitted): Promise<MachineStill>;
+  requestPrint(input: RequestPrintInput & Admitted): Promise<PrintRequest>;
+  listPrintRequests(input: ListPrintRequestsInput & Admitted): Promise<readonly PrintRequest[]>;
+  watchPrintRequests(input: WatchPrintRequestsInput & Admitted): AsyncIterable<PrintRequest>;
+  resolvePrintRequest(input: ResolvePrintRequestInput & Admitted): Promise<PrintRequest>;
+  withdrawPrintRequest(input: WithdrawPrintRequestInput & Admitted): Promise<PrintRequest>;
 }>;
 
 /** Direct machines channel plus its explicit wire lifecycle. @public */
@@ -123,6 +142,11 @@ const identitySchema = z
   .string()
   .min(1)
   .max(256)
+  .refine((value) => value.isWellFormed());
+const textSchema = z
+  .string()
+  .min(1)
+  .max(1024)
   .refine((value) => value.isWellFormed());
 const timestampSchema = z.iso.datetime({ offset: true });
 const candidateSchema = z.strictObject({
@@ -179,27 +203,36 @@ const preparedPrintSchema = z.strictObject({
   preparedAt: timestampSchema,
   expiresAt: timestampSchema,
 });
-const operationKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
+const runOperationKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
+const operationKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop', 'upload']);
 const operationBaseSchema = {
   operationId: identitySchema,
   machineId: identitySchema,
-  kind: operationKindSchema,
   observedAt: timestampSchema,
 };
-const operationReceiptSchema = z.discriminatedUnion('status', [
-  z.strictObject({ ...operationBaseSchema, status: z.literal('accepted'), providerRunId: identitySchema.optional() }),
+const operationReceiptSchema = z.union([
   z.strictObject({
     ...operationBaseSchema,
-    status: z.literal('rejected'),
-    code: identitySchema,
-    message: z
-      .string()
-      .min(1)
-      .max(1024)
-      .refine((value) => value.isWellFormed()),
+    kind: z.literal('upload'),
+    status: z.literal('accepted'),
+    evidence: z.strictObject({ transferId: identitySchema }),
   }),
   z.strictObject({
     ...operationBaseSchema,
+    kind: runOperationKindSchema,
+    status: z.literal('accepted'),
+    providerRunId: identitySchema.optional(),
+  }),
+  z.strictObject({
+    ...operationBaseSchema,
+    kind: operationKindSchema,
+    status: z.literal('rejected'),
+    code: identitySchema,
+    message: textSchema,
+  }),
+  z.strictObject({
+    ...operationBaseSchema,
+    kind: operationKindSchema,
     status: z.literal('unknown'),
     reason: identitySchema,
     providerRunId: identitySchema.optional(),
@@ -232,6 +265,44 @@ const stillSchema = z.strictObject({
   expiresAt: timestampSchema,
 });
 const configurationSchema = z.unknown().transform((value) => cloneBoundedJson(value, limits));
+const requesterSchema = z.strictObject({ kind: z.enum(['user', 'agent']), id: identitySchema, label: identitySchema });
+const requestSummarySchema = z.strictObject({
+  fileName: identitySchema,
+  layers: z.number().int().nonnegative().optional(),
+  estimatedDuration: z.number().nonnegative().optional(),
+  filamentLength: z.number().nonnegative().optional(),
+});
+const printRequestSchema = z.strictObject({
+  requestId: identitySchema,
+  machineId: identitySchema,
+  artifact: artifactSchema,
+  configuration: configurationSchema,
+  requestedBy: requesterSchema,
+  summary: requestSummarySchema,
+  state: z.enum([
+    'preparing',
+    'awaiting-approval',
+    'approved',
+    'uploading',
+    'starting',
+    'started',
+    'denied',
+    'withdrawn',
+    'rejected',
+    'unknown',
+    'failed',
+  ]),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  prepared: preparedPrintSchema.optional(),
+  uploadOperationId: identitySchema.optional(),
+  startOperationId: identitySchema.optional(),
+  transferId: identitySchema.optional(),
+  receipt: operationReceiptSchema.optional(),
+  failure: z.strictObject({ code: identitySchema, message: textSchema }).optional(),
+  resolvedBy: requesterSchema.optional(),
+});
+const requestScopeSchema = z.strictObject({ machineId: identitySchema.optional() });
 
 const freeze = <Value>(value: Value): Value => {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -242,6 +313,12 @@ const freeze = <Value>(value: Value): Value => {
   }
   return value;
 };
+
+/** Admit one bounded print request record for the wire or the authority journal. @internal
+ * @param value - Untrusted record value.
+ * @returns Detached, frozen record.
+ */
+export const parsePrintRequest = (value: unknown): PrintRequest => freeze(printRequestSchema.parse(value));
 
 const validator = <Value>(parse: (value: unknown) => Value): WireValidator<Value> => ({
   safeParse(value) {
@@ -280,11 +357,21 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
       args: z.strictObject({ machineId: identitySchema, artifact: artifactSchema, configuration: configurationSchema }),
       result: preparedPrintSchema,
     },
+    uploadPrint: {
+      args: z.strictObject({
+        machineId: identitySchema,
+        preparedId: identitySchema,
+        preparedDigest: digestSchema,
+        operationId: identitySchema,
+      }),
+      result: operationReceiptSchema,
+    },
     startPrint: {
       args: z.strictObject({
         machineId: identitySchema,
         preparedId: identitySchema,
         preparedDigest: digestSchema,
+        transferId: identitySchema,
         expectedSetupDigest: digestSchema,
         operationId: identitySchema,
       }),
@@ -307,6 +394,35 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
       args: z.strictObject({ machineId: identitySchema }),
       result: stillSchema,
     },
+    requestPrint: {
+      args: z.strictObject({
+        requestId: identitySchema,
+        machineId: identitySchema,
+        artifact: artifactSchema,
+        configuration: configurationSchema,
+        requestedBy: requesterSchema,
+        summary: requestSummarySchema.optional(),
+      }),
+      result: printRequestSchema,
+    },
+    listPrintRequests: {
+      args: requestScopeSchema,
+      result: z.array(printRequestSchema).max(1024),
+    },
+    resolvePrintRequest: {
+      args: z.strictObject({
+        requestId: identitySchema,
+        decision: z.enum(['approve', 'deny']),
+        resolvedBy: requesterSchema,
+        uploadOperationId: identitySchema.optional(),
+        startOperationId: identitySchema.optional(),
+      }),
+      result: printRequestSchema,
+    },
+    withdrawPrintRequest: {
+      args: z.strictObject({ requestId: identitySchema, resolvedBy: requesterSchema }),
+      result: printRequestSchema,
+    },
     list: { args: emptySchema, result: validator(parseMachineDirectorySnapshot) },
     get: {
       args: z.strictObject({ machineId: identitySchema }),
@@ -322,6 +438,10 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
     watch: {
       args: z.strictObject({ cursor: cursorSchema.optional() }),
       event: validator(parseMachineDirectoryFrame),
+    },
+    watchPrintRequests: {
+      args: requestScopeSchema,
+      event: printRequestSchema.transform(freeze),
     },
   },
 };
@@ -381,7 +501,7 @@ const relay = async function* <Value>(
 };
 
 /** Serve one trusted session's typed machines route.
- * @param input - Trusted channel, admission, scope, directory, providers, discovery and binding operations.
+ * @param input - Trusted channel, admission, scope, directory, providers and host operations.
  * @returns The channel lifecycle handle; disposal never closes host-owned services.
  * @public
  */
@@ -430,87 +550,85 @@ export const exposeMachineChannel = (input: {
           admitted.assertCurrent();
           return providers;
         }
-        if (name === 'beginBinding') {
-          const result = await abortable(
-            input.operations.beginBinding({ ...(args as BeginBindingInput), admitted, signal: combined }),
-            combined,
-          );
+        if (name === 'list' || name === 'get') {
+          const directory = await abortable(input.directory.snapshot({ workspaceId: admitted.workspaceId }), combined);
           combined.throwIfAborted();
           admitted.assertCurrent();
-          return bindingOutcomeSchema.parse(result);
-        }
-        if (name === 'preparePrint') {
-          if (!input.operations.preparePrint) {
-            throw new Error('MACHINE_PREPARATION_UNAVAILABLE');
+          if (name === 'list') {
+            return directory;
           }
-          const result = await abortable(
-            input.operations.preparePrint({ ...(args as PreparePrintInput), admitted, signal: combined }),
-            combined,
-          );
-          combined.throwIfAborted();
-          admitted.assertCurrent();
-          return preparedPrintSchema.parse(result);
-        }
-        if (name === 'startPrint') {
-          if (!input.operations.startPrint) {
-            throw new Error('MACHINE_START_UNAVAILABLE');
+          const { machineId } = args as GetInput;
+          const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
+          if (!entry) {
+            throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
           }
-          const result = await abortable(
-            input.operations.startPrint({ ...(args as StartPrintInput), admitted, signal: combined }),
-            combined,
-          );
+          return entry;
+        }
+        const scope: Admitted = { admitted, signal: combined };
+        const settle = async <Value>(pending: Promise<Value>, parse: (value: Value) => Value): Promise<Value> => {
+          const result = await abortable(pending, combined);
           combined.throwIfAborted();
           admitted.assertCurrent();
-          return operationReceiptSchema.parse(result);
-        }
-        if (name === 'reconcileOperation') {
-          if (!input.operations.reconcileOperation) {
-            throw new Error('MACHINE_RECONCILIATION_UNAVAILABLE');
+          return parse(result);
+        };
+        const { operations } = input;
+        switch (name) {
+          case 'beginBinding': {
+            return settle(operations.beginBinding({ ...(args as BeginBindingInput), ...scope }), (value) =>
+              bindingOutcomeSchema.parse(value),
+            );
           }
-          const result = await abortable(
-            input.operations.reconcileOperation({ ...(args as ReconcileOperationInput), admitted, signal: combined }),
-            combined,
-          );
-          combined.throwIfAborted();
-          admitted.assertCurrent();
-          return operationSnapshotSchema.parse(result);
-        }
-        if (name === 'controlRun') {
-          if (!input.operations.controlRun) {
-            throw new Error('MACHINE_CONTROL_UNAVAILABLE');
+          case 'preparePrint': {
+            return settle(operations.preparePrint({ ...(args as PreparePrintInput), ...scope }), (value) =>
+              preparedPrintSchema.parse(value),
+            );
           }
-          const result = await abortable(
-            input.operations.controlRun({ ...(args as ControlRunInput), admitted, signal: combined }),
-            combined,
-          );
-          combined.throwIfAborted();
-          admitted.assertCurrent();
-          return operationReceiptSchema.parse(result);
-        }
-        if (name === 'captureStill') {
-          if (!input.operations.captureStill) {
-            throw new Error('MACHINE_STILL_UNAVAILABLE');
+          case 'uploadPrint': {
+            return settle(operations.uploadPrint({ ...(args as UploadPrintInput), ...scope }), (value) =>
+              operationReceiptSchema.parse(value),
+            );
           }
-          const result = await abortable(
-            input.operations.captureStill({ ...(args as CaptureStillInput), admitted, signal: combined }),
-            combined,
-          );
-          combined.throwIfAborted();
-          admitted.assertCurrent();
-          return stillSchema.parse(result);
+          case 'startPrint': {
+            return settle(operations.startPrint({ ...(args as StartPrintInput), ...scope }), (value) =>
+              operationReceiptSchema.parse(value),
+            );
+          }
+          case 'reconcileOperation': {
+            return settle(operations.reconcileOperation({ ...(args as ReconcileOperationInput), ...scope }), (value) =>
+              operationSnapshotSchema.parse(value),
+            );
+          }
+          case 'controlRun': {
+            return settle(operations.controlRun({ ...(args as ControlRunInput), ...scope }), (value) =>
+              operationReceiptSchema.parse(value),
+            );
+          }
+          case 'captureStill': {
+            return settle(operations.captureStill({ ...(args as CaptureStillInput), ...scope }), (value) =>
+              stillSchema.parse(value),
+            );
+          }
+          case 'requestPrint': {
+            return settle(operations.requestPrint({ ...(args as RequestPrintInput), ...scope }), parsePrintRequest);
+          }
+          case 'listPrintRequests': {
+            return settle(operations.listPrintRequests({ ...(args as ListPrintRequestsInput), ...scope }), (value) =>
+              value.map((request) => parsePrintRequest(request)),
+            );
+          }
+          case 'resolvePrintRequest': {
+            return settle(
+              operations.resolvePrintRequest({ ...(args as ResolvePrintRequestInput), ...scope }),
+              parsePrintRequest,
+            );
+          }
+          default: {
+            return settle(
+              operations.withdrawPrintRequest({ ...(args as WithdrawPrintRequestInput), ...scope }),
+              parsePrintRequest,
+            );
+          }
         }
-        const directory = await abortable(input.directory.snapshot({ workspaceId: admitted.workspaceId }), combined);
-        combined.throwIfAborted();
-        admitted.assertCurrent();
-        if (name === 'list') {
-          return directory;
-        }
-        const { machineId } = args as GetInput;
-        const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
-        if (!entry) {
-          throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
-        }
-        return entry;
       },
       // oxlint-disable-next-line eslint/max-params -- Typed ChannelServer listen signature is fixed.
       async *listen(_context, name, args, signal) {
@@ -519,6 +637,14 @@ export const exposeMachineChannel = (input: {
         if (name === 'discover') {
           yield* relay(
             input.operations.discover({ ...(args as DiscoverInput), admitted, signal: combined }),
+            admitted,
+            combined,
+          );
+          return;
+        }
+        if (name === 'watchPrintRequests') {
+          yield* relay(
+            input.operations.watchPrintRequests({ ...(args as WatchPrintRequestsInput), admitted, signal: combined }),
             admitted,
             combined,
           );
@@ -560,10 +686,16 @@ export const connectMachineChannel = (port: MachineChannelEndpoint): MachineChan
     discover: ({ signal, ...input }) => channel.listen('discover', input, signal),
     beginBinding: async ({ signal, ...input }) => channel.call('beginBinding', input, signal),
     preparePrint: async ({ signal, ...input }) => channel.call('preparePrint', input, signal),
+    uploadPrint: async ({ signal, ...input }) => channel.call('uploadPrint', input, signal),
     startPrint: async ({ signal, ...input }) => channel.call('startPrint', input, signal),
     reconcileOperation: async ({ signal, ...input }) => channel.call('reconcileOperation', input, signal),
     controlRun: async ({ signal, ...input }) => channel.call('controlRun', input, signal),
     captureStill: async ({ signal, ...input }) => channel.call('captureStill', input, signal),
+    requestPrint: async ({ signal, ...input }) => channel.call('requestPrint', input, signal),
+    listPrintRequests: async ({ signal, ...input }) => channel.call('listPrintRequests', input, signal),
+    watchPrintRequests: ({ signal, ...input }) => channel.listen('watchPrintRequests', input, signal),
+    resolvePrintRequest: async ({ signal, ...input }) => channel.call('resolvePrintRequest', input, signal),
+    withdrawPrintRequest: async ({ signal, ...input }) => channel.call('withdrawPrintRequest', input, signal),
     list: async ({ signal }) => channel.call('list', {}, signal),
     get: async ({ signal, machineId }) => channel.call('get', { machineId }, signal),
     watch: ({ signal, cursor }) => channel.listen('watch', cursor ? { cursor } : {}, signal),

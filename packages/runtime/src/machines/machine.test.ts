@@ -6,6 +6,7 @@ import { defineConfiguration } from '#configuration/configuration.js';
 import { defineMachine, defineMachineQuery } from '#machines/machine.js';
 import type { MachineConnectionRuntime, MachineConnectInput, MachineSession } from '#machines/machine.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
 
 type Binding = Readonly<{ logicalId: string }>;
 type Submission = Readonly<{ copies: number }>;
@@ -86,6 +87,7 @@ describe('defineMachine', () => {
       vendor: 'test',
       technologies: ['fff'],
       accepts: [accepted],
+      manifest: machineManifestFixture,
       bindingConfiguration,
       submissionConfiguration,
       queries: {
@@ -147,11 +149,20 @@ describe('defineMachine', () => {
           async *observe() {
             yield* [];
           },
+          async preparePrint() {
+            return { status: 'rejected', code: 'UNSUPPORTED', message: 'Fixture never prepares.', observedAt: 'now' };
+          },
+          async uploadPrint() {
+            return { status: 'rejected', code: 'UNSUPPORTED', message: 'Fixture never transfers.', observedAt: 'now' };
+          },
           async submit() {
             return { status: 'accepted', observedAt: 'now' };
           },
           async control() {
             return { status: 'accepted', observedAt: 'now' };
+          },
+          async reconcile() {
+            return { status: 'unknown', reason: 'fixture', observedAt: 'now' };
           },
           stillCapture: { type: 'unsupported' },
           close,
@@ -249,6 +260,7 @@ describe('defineMachine', () => {
       vendor: 'test',
       technologies: ['fff'],
       accepts: [accepted],
+      manifest: machineManifestFixture,
       bindingConfiguration,
       submissionConfiguration,
       async *discover() {
@@ -293,6 +305,7 @@ describe('defineMachine', () => {
         vendor: 'test',
         technologies: ['fff'],
         accepts: [accepted],
+        manifest: machineManifestFixture,
         bindingConfiguration,
         submissionConfiguration,
         queries: { unsafe: unsafeQuery },

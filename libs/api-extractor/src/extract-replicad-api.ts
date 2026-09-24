@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import ts from 'typescript';
+import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 import type { ApiData, ApiEntry } from '#api-extraction.types.js';
 
 // =============================================================================
@@ -237,6 +238,59 @@ export function buildBundledTypes(): Record<string, string> {
   };
 }
 
+/** Extract the type-only model surface without pulling the runtime into Monaco. */
+export function buildReplicadModelTypes(): BundledTypesPackageMap {
+  const root = join(import.meta.dirname, '../../..');
+  const sources = {
+    'model.d.ts': 'packages/plugins/replicad/src/model.ts',
+    'material.d.ts': 'packages/core/geometry/src/utils/glb-material.ts',
+    'interfaces.d.ts': 'packages/plugins/replicad/src/annotations/interface-declarations.ts',
+    'json.d.ts': 'libs/types/src/types/json-value.types.ts',
+    'gltf.d.ts': 'node_modules/@gltf-transform/core/src/types/gltf.ts',
+  };
+  const aliases: Record<string, string> = {
+    '@taucad/geometry-core': './material.js',
+    '#annotations/index.js': './interfaces.js',
+    '@gltf-transform/core': './gltf.js',
+    '@taucad/runtime/types': './json.js',
+  };
+  const printer = ts.createPrinter();
+  const files = Object.fromEntries(
+    Object.entries(sources).map(([name, path]) => {
+      const source = ts.createSourceFile(path, readFileSync(join(root, path), 'utf8'), ts.ScriptTarget.Latest, true);
+      const declarations = source.statements.filter(
+        (statement) =>
+          ts.isImportDeclaration(statement) ||
+          ts.isExportDeclaration(statement) ||
+          ts.isTypeAliasDeclaration(statement) ||
+          ts.isInterfaceDeclaration(statement) ||
+          ts.isModuleDeclaration(statement),
+      );
+      const content = declarations
+        .map((statement) => printer.printNode(ts.EmitHint.Unspecified, statement, source))
+        .join('\n');
+      return [
+        name,
+        content.replaceAll(/from ['"]([^'"]+)['"]/gu, (match, specifier: string) =>
+          aliases[specifier] ? `from '${aliases[specifier]}'` : match,
+        ),
+      ];
+    }),
+  );
+  return {
+    '@taucad/replicad': {
+      content: "export type * from './model.js';\n",
+      files,
+      packageJson: {
+        name: '@taucad/replicad',
+        type: 'module',
+        types: './index.d.ts',
+        exports: { './model': { types: './model.d.ts' } },
+      },
+    },
+  };
+}
+
 /**
  * Build the structured API data JSON.
  * Exported for testing.
@@ -289,6 +343,7 @@ function main(): void {
       writeFileSync(join(targetDirectory, 'index.d.ts'), content);
     }
 
+    writeFileSync(join(outputDirectory, 'model.bundled.json'), JSON.stringify(buildReplicadModelTypes()));
     console.log('\nReplicad type extraction completed successfully!');
   } catch (error) {
     console.error('Error during replicad type extraction:', error);

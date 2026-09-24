@@ -1492,3 +1492,46 @@ describe('a branch refusal over the host channel', () => {
     }
   }, 30_000);
 });
+
+/**
+ * The host half of D4/D16b and D3.
+ *
+ * A frame the page marked `unavailable` used to be dropped, which left native
+ * git free to reach the repository with the person's own credential helper.
+ * Held, it refuses the repository with reconnect-required before git starts,
+ * so none of this row touches the network. `authorizeRemote` is how the page
+ * re-validates once it has re-minted.
+ */
+describe.runIf(hasGit)('a Tau-managed remote credential over the host channel', () => {
+  it('should hold an unavailable frame and re-validate on authorizeRemote', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-remote-credential-'));
+    roots.push(workspaceRoot);
+    const repositoryUrl = 'https://git.example.invalid/owner/repository.git';
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1' });
+    const frame = (unavailable: string): Record<string, string> => ({
+      command: 'remoteCredential',
+      apiBaseUrl: 'https://api.tau.test',
+      origin: 'https://git.example.invalid',
+      repositoryUrl,
+      unavailable,
+    });
+    try {
+      await revisions.channel.request({ command: 'open' });
+      await revisions.channel.request(frame('Your GitHub connection needs to be renewed.'));
+      await revisions.channel.request({ command: 'connectRemote', kind: 'git', url: repositoryUrl });
+
+      await expect
+        .poll(() => revisions.status().remote, { timeout: 20_000 })
+        .toMatchObject({ phase: 'reconnectRequired', error: 'Your GitHub connection needs to be renewed.' });
+
+      await revisions.channel.request(frame('Still not renewed.'));
+      await revisions.channel.request({ command: 'authorizeRemote' });
+
+      await expect
+        .poll(() => revisions.status().remote, { timeout: 20_000 })
+        .toMatchObject({ phase: 'reconnectRequired', error: 'Still not renewed.' });
+    } finally {
+      await revisions.release();
+    }
+  }, 60_000);
+});

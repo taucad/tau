@@ -3,7 +3,6 @@ import { defineMachine } from '@taucad/runtime/machine';
 import type { MachineAcceptedContainer } from '@taucad/runtime/machine';
 import { z } from 'zod';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { bambuX1cManifest } from '#bambu.manifest.js';
 
 const bindingConfiguration = defineConfiguration({
@@ -73,12 +72,10 @@ export const bambuMachine = defineMachine({
   bindingConfiguration,
   submissionConfiguration: bambuSubmissionConfiguration,
   async *discover(input, runtime) {
-    // eslint-disable-next-line import-x/no-extraneous-dependencies -- lazy package-import self-reference resolves this package's host source.
     const { discoverBambuMachines } = await import('#bambu.host.js');
     yield* discoverBambuMachines(input, runtime);
   },
   async connect(input, runtime) {
-    // eslint-disable-next-line import-x/no-extraneous-dependencies -- lazy package-import self-reference resolves this package's host source.
     const { connectBambuMachine } = await import('#bambu.host.js');
     return connectBambuMachine(input, runtime);
   },

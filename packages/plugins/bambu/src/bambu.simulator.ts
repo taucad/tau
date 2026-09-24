@@ -17,11 +17,8 @@ import { quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
 import { z } from 'zod';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { bambuAcceptedContainers, bambuSubmissionConfiguration } from '#bambu.machine.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { bambuX1cManifest } from '#bambu.manifest.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { bambuQuantity, bambuRemoteName, parseBambuStill } from '#bambu.protocol.js';
 
 /** Deterministic fault switches accepted by the simulator. @internal */
@@ -297,7 +294,6 @@ const readPlate = async (
     signal: AbortSignal;
   }>,
 ): Promise<BambuSimulatedPlate> => {
-  // eslint-disable-next-line import-x/no-extraneous-dependencies -- lazy package-import self-reference keeps the archive reader out of the entry graph.
   const { prepareBambuArtifact } = await import('#bambu.archive.js');
   const { plate } = await prepareBambuArtifact({
     artifact: input.artifact,

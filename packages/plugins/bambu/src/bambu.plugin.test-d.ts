@@ -3,7 +3,6 @@ import type { ExpandPluginMachines } from '@taucad/runtime/plugin';
 
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { plugin, bambu, bambuMachine } from '#index.js';
 
 const selected = plugin();

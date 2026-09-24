@@ -129,7 +129,7 @@ const actorOf = (row: RevisionRow, session: RevisionSessionUser | undefined): st
     return `Anonymous · ${row.actor.slice('anon:'.length)}`;
   }
   if (session !== undefined && session.id === row.actor) {
-    return session.name ?? session.email ?? 'You';
+    return session.name ?? 'You';
   }
   return row.actor === '' ? 'Unknown' : 'Another account';
 };

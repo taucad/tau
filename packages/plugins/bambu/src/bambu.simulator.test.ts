@@ -529,6 +529,21 @@ describe('Simulated X1C run progression', () => {
     expect(simulator.writes()).toEqual(['upload:tau-prepared-1.gcode.3mf', 'start:run-1', 'urgent-stop:urgent-stop-1']);
   });
 
+  it('should declare the demo speed as a titled binding field that starts at real time', () => {
+    const { bindingConfiguration } = defineBambuSimulatorMachine()();
+    const schema = bindingConfiguration.legacyProjection.inputSchema;
+
+    expect(schema).toHaveProperty('required', ['logicalId']);
+    expect(schema).toHaveProperty('properties.speed', {
+      type: 'number',
+      minimum: 1,
+      maximum: 3600,
+      default: 1,
+      title: 'Demo speed',
+      description: 'Simulated seconds per real second, so a long print can be watched in minutes',
+    });
+  });
+
   it('should run a demo speed factor as simulated seconds per clock second', async () => {
     const time = manualClock();
     const simulator = createBambuSimulator({ clock: time.clock, speed: 60 });

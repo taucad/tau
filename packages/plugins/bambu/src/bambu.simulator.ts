@@ -760,12 +760,10 @@ const simulatorBindingConfiguration = defineConfiguration({
   version: '1.1.0',
   schema: z.object({
     logicalId: z.string().min(1).max(64),
-    speed: z
-      .number()
-      .min(1)
-      .max(3600)
-      .optional()
-      .describe('Simulated seconds per real second, so a long print can be watched in minutes'),
+    speed: z.number().min(1).max(3600).default(1).meta({
+      title: 'Demo speed',
+      description: 'Simulated seconds per real second, so a long print can be watched in minutes',
+    }),
   }),
   ui: { version: 1, rjsf: {} },
 });

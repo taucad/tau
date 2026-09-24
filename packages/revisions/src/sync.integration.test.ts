@@ -731,6 +731,29 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       await second.close();
     }
   }, 180_000);
+
+  it('row 10: a branch the remote has never had is pushed on open, not read as backed up (D38)', async () => {
+    const remoteRoot = await temporaryRoot('remote-new-branch');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      /* An import writes its setup revision straight to the ref: nothing is minted or queued. */
+      const one = await device({ leg, label: 'a-new-branch', remoteUrl: remote.url, files: { 'main.ts': 'setup\n' } });
+      const setup = await record({ device: one, files: { 'main.ts': 'setup\n' }, summary: 'Setup' });
+
+      const opened = one.scheduler();
+      opened.start();
+      await vi.waitFor(
+        async () => {
+          expect(selectSyncFacet(opened.getSnapshot()).state).toBe('backedUp');
+          expect(await remote.git(['rev-parse', mainRef])).toBe(setup);
+        },
+        { timeout: 30_000 },
+      );
+      opened.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
 });
 
 /*

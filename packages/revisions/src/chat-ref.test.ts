@@ -385,6 +385,31 @@ describe.each([
     expect(await readChatFile(target, 'chat.json', id)).toBe('{"name":"Local edit"}');
   });
 
+  it.runIf(enabled)('keeps a local metadata edit when the fetch brings back this device’s own ref (D40)', async () => {
+    const id = `echo_${_engine}`;
+    await writeChatFiles(harness.checkout, { 'chat.json': '{"name":"Pushed"}' }, id);
+    const pushed = await writeChatRef({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      chatId: id,
+      syncChats: true,
+      actorId,
+      now,
+    });
+    /* A first chat ref has no parent, so the incoming commit names no base of its own. */
+    await harness.checkout.writeFile(`${chatRecordsPath(id)}/chat.json`, '{"name":"Renamed here"}');
+
+    await projectChats({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-a',
+      refs: [{ name: `refs/remotes/tau/tau/chats/${id}`, head: pushed.head! }],
+    });
+
+    expect(await readChatFile(harness.checkout, 'chat.json', id)).toBe('{"name":"Renamed here"}');
+  });
+
   it.runIf(enabled)('never projects this device back over its own segment', async () => {
     const head = await harness.port.readRef(chatRefName(chatId));
     const target = await createMemoryProvider();
@@ -545,6 +570,9 @@ describe.each([
 
       const projected = await createMemoryProvider();
       await projected.writeFile(`${chatRecordsPath(staleChat)}/chat.json`, '{"name":"pending local edit"}');
+      /* The third device shares this store, so its own chat ref is put back at
+       * what it last recorded; the ref `mine` just wrote is not its own (D40). */
+      await harness.port.updateRef({ name: chatRefName(staleChat), expectedHead: written.head!, head: oldHead });
       await expect(
         projectChats({
           port: harness.port,

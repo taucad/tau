@@ -2775,8 +2775,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const localHead = await port.readRef(branchRef);
         const remoteHead = advertised.find((entry) => entry.name === branchRef)?.head;
         const integration = await (async (): Promise<SyncFetchActorOutput['integration']> => {
-          if (remoteHead === undefined || localHead === remoteHead) {
+          if (localHead === remoteHead) {
             return 'upToDate';
+          }
+          /* A branch the remote has never had — an import's setup revision is written
+           * straight to the ref, so nothing is queued to push it (D38). */
+          if (remoteHead === undefined) {
+            return 'ahead';
           }
           if (localHead === undefined) {
             return 'fastForward';

@@ -498,6 +498,10 @@ const noConnectivity = fromCallback(() => () => undefined);
 
 const historyRefOf = (branch: string): string => `refs/heads/${branch}`;
 
+/** A refused ref's reason in a person's words; `leaseLost` is the ports' code for "the remote moved" (D39). */
+const refusalSaid = (reason: string | undefined): string | undefined =>
+  reason === 'leaseLost' ? 'This branch changed on the remote; this project will catch up and try again.' : reason;
+
 /**
  * The queue entries *this* remote is owed.
  *
@@ -1223,7 +1227,7 @@ export const syncMachine = setup({
               failure: pending.length > 0 ? 'retry' : 'none',
               attempt: pending.length > 0 ? context.attempt + 1 : 0,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
-              error: refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined),
+              error: refusalSaid(refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined)),
               /* D20's ceiling refusal arrives here as a per-ref result rather
                  than as a thrown transport error, and it is a quota answer:
                  *Sync now* replays the same bytes and cannot clear a ceiling

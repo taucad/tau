@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,10 +9,19 @@ import type { HostRouteGrant } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { NodeMachineHost, NodeMachineRuntime } from '@taucad/runtime/host/node';
 import { connectMachineChannel } from '@taucad/runtime/machine';
-import type { MachineArtifactReference, MachineCandidate, MachineClient } from '@taucad/runtime/machine';
+import type {
+  MachineArtifactReference,
+  MachineCandidate,
+  MachineClient,
+  MachineObservation,
+  MachineRunSnapshot,
+  MachineSnapshot,
+} from '@taucad/runtime/machine';
+import { zipSync } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createBambuSimulator, defineBambuSimulatorMachine } from '#bambu.simulator.js';
+import { bambuX1cManifest } from '#bambu.manifest.js';
+import { createBambuSimulator, defineBambuSimulatorMachine, readBambuSimulatedPlate } from '#bambu.simulator.js';
 import type { BambuSimulator } from '#bambu.simulator.js';
 
 const { signal } = new AbortController();
@@ -75,6 +85,88 @@ const grants: readonly HostRouteGrant[] = (
     'reconcileOperation',
   ] as const
 ).map((operation) => ({ route: 'machines', operation: `machines.${operation}` }));
+
+/** The first observation instant every injected clock starts from. */
+const start = Date.parse('2026-09-14T00:00:00.000Z');
+/** The tightest freshness budget the X1C manifest declares, in milliseconds. */
+const freshnessBudget = Math.min(...bambuX1cManifest.observations.map(({ staleAfter }) => staleAfter));
+const encoder = new TextEncoder();
+// Two layers: a 0.2 mm lift and a 100 mm extrusion each, then a half-second dwell.
+const plateGcode = [
+  'M140 S60',
+  'M104 S200',
+  'G28',
+  'M190 S60',
+  'M109 S200',
+  'G90',
+  'M83',
+  'M106 S0',
+  ';LAYER_CHANGE',
+  'G1 Z0.2 F600',
+  'G1 X100 E5 F6000',
+  '; CHANGE_LAYER',
+  'M106 S255',
+  'M106 P2 S128',
+  'G1 Z0.4 F600',
+  'G1 X0 E5 F6000',
+  'G4 P500',
+  'M107',
+].join('\n');
+
+/** A clock the test moves by hand, in seconds. */
+const manualClock = () => {
+  let elapsed = 0;
+  return {
+    clock: { now: () => new Date(start + elapsed * 1000).toISOString() },
+    advance(seconds: number): void {
+      elapsed += seconds;
+    },
+  };
+};
+
+/** Prepare, upload and start one run as a host would after approval. */
+const startRun = async (simulator: BambuSimulator, runArtifact: MachineArtifactReference = artifact): Promise<void> => {
+  const prepared = await simulator.session.preparePrint({ ...operationInput, artifact: runArtifact });
+  if (prepared.status !== 'ready') {
+    throw new Error('expected simulator preparation');
+  }
+  const transfer = await simulator.session.uploadPrint({
+    ...operationInput,
+    artifact: runArtifact,
+    operationId: 'upload-1',
+    remoteName: prepared.remoteName,
+    providerData: prepared.providerData,
+  });
+  if (transfer.status !== 'transferred') {
+    throw new Error('expected simulator transfer');
+  }
+  await expect(
+    simulator.session.submit({
+      ...operationInput,
+      artifact: runArtifact,
+      operationId: 'run-1',
+      remoteName: prepared.remoteName,
+      transferId: transfer.transferId,
+      providerData: prepared.providerData,
+    }),
+  ).resolves.toMatchObject({ status: 'accepted', providerRunId: 'run-1' });
+};
+
+const control = async (simulator: BambuSimulator, command: 'cancel' | 'pause' | 'resume' | 'urgent-stop') =>
+  simulator.session.control({ command, operationId: `${command}-1`, expectedProviderRunId: 'run-1', signal });
+
+/** Pull the stream's next sample, moving fake time to the simulator's own sample timer as the directory waits. */
+const nextObservation = async (observations: AsyncIterator<MachineObservation>): Promise<MachineSnapshot> => {
+  const pending = observations.next();
+  await vi.advanceTimersToNextTimerAsync();
+  const result = await pending;
+  if (result.done === true) {
+    throw new Error('expected the observation stream to stay open');
+  }
+  return result.value.snapshot;
+};
+
+const withoutObservedAt = ({ observedAt: _observedAt, ...rest }: MachineSnapshot) => rest;
 
 const temporaryDirectories: string[] = [];
 const hosts: NodeMachineHost[] = [];
@@ -267,10 +359,303 @@ describe('Bambu simulator fault matrix', () => {
   });
 });
 
+describe('Simulated X1C plate reading', () => {
+  it('should read layer starts, duration, heater set points and fan changes from plate G-code', () => {
+    const layerTwo: unknown = expect.closeTo(1.0305, 9);
+    const end: unknown = expect.closeTo(2.561, 9);
+    expect(readBambuSimulatedPlate(plateGcode)).toEqual({
+      layerStarts: [0, layerTwo],
+      duration: end,
+      nozzleTarget: 200,
+      bedTarget: 60,
+      fans: {
+        part: [
+          [0, 0],
+          [layerTwo, 100],
+          [end, 0],
+        ],
+        auxiliary: [[layerTwo, 50]],
+        chamber: [],
+      },
+    });
+  });
+
+  it.each([';LAYER_CHANGE', '; CHANGE_LAYER', '; LAYER 1 Z0.4'])('should start a layer at the %s marker', (marker) => {
+    expect(readBambuSimulatedPlate(`;LAYER_CHANGE\nG1 X10 F600\n${marker}\nG1 X20\n`).layerStarts).toEqual([
+      0,
+      expect.closeTo(1.0005, 9),
+    ]);
+  });
+});
+
+describe('Simulated X1C run progression', () => {
+  it('should heat before moving, then print layer by layer to a finished idle machine on the injected clock', async () => {
+    const time = manualClock();
+    const simulator = createBambuSimulator({ clock: time.clock });
+    await startRun(simulator);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      readiness: 'busy',
+      activeRunId: 'run-1',
+      observedAt: '2026-09-14T00:00:00.000Z',
+      run: { state: 'preparing', progress: 0, remainingSeconds: 960, stage: 'Heating the bed and nozzle' },
+      temperatures: {
+        nozzle: { value: 24.9 },
+        nozzleTarget: { value: 220 },
+        bed: { value: 24.9 },
+        bedTarget: { value: 55 },
+      },
+      fans: { part: 0, auxiliary: 0, chamber: 0 },
+      lights: { chamber: 'on' },
+    });
+    time.advance(30);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      observedAt: '2026-09-14T00:00:30.000Z',
+      run: { state: 'preparing', progress: 0, remainingSeconds: 930 },
+      temperatures: { nozzle: { value: 174.9 }, bed: { value: 39.9 }, chamber: { value: 29.9 } },
+    });
+    time.advance(30);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { state: 'printing', progress: 0, currentLayer: 1, totalLayers: 150, remainingSeconds: 900 },
+      temperatures: { nozzle: { value: 219.9 }, bed: { value: 54.9 } },
+      fans: { part: 0 },
+    });
+    time.advance(450);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      readiness: 'busy',
+      run: { state: 'printing', progress: 50, currentLayer: 76, totalLayers: 150, remainingSeconds: 450 },
+      fans: { part: 100 },
+    });
+    time.advance(450);
+    const finished = await simulator.session.getSnapshot({ signal });
+    expect(finished).toMatchObject({
+      readiness: 'idle',
+      run: {
+        state: 'succeeded',
+        progress: 100,
+        currentLayer: 150,
+        totalLayers: 150,
+        remainingSeconds: 0,
+        file: 'tau-prepared-1.gcode.3mf',
+      },
+      fans: { part: 0, auxiliary: 0, chamber: 0 },
+      lights: { chamber: 'off' },
+    });
+    expect(finished).not.toHaveProperty('activeRunId');
+    expect(finished.temperatures).not.toHaveProperty('nozzleTarget');
+    time.advance(100);
+    // An idle machine reads its settled physics without the running thermistor wobble.
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { state: 'succeeded' },
+      temperatures: { nozzle: { value: 70 }, bed: { value: 45 } },
+    });
+    expect(simulator.writes()).toEqual(['upload:tau-prepared-1.gcode.3mf', 'start:run-1']);
+  });
+
+  it('should advance progress and layers and count remaining time down monotonically to completion', async () => {
+    const time = manualClock();
+    const simulator = createBambuSimulator({ clock: time.clock });
+    await startRun(simulator);
+    const runs: MachineRunSnapshot[] = [];
+    for (let second = 0; second <= 1000; second += 10) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each sample reads the machine at one clock instant.
+      const { run } = await simulator.session.getSnapshot({ signal });
+      runs.push(run ?? { state: 'unknown' });
+      time.advance(10);
+    }
+    const progress = runs.map((run) => run.progress ?? -1);
+    const layers = runs.map((run) => run.currentLayer ?? 0);
+    const remaining = runs.map((run) => run.remainingSeconds ?? -1);
+    expect(progress).toEqual(progress.toSorted((left, right) => left - right));
+    expect(layers).toEqual(layers.toSorted((left, right) => left - right));
+    expect(remaining).toEqual(remaining.toSorted((left, right) => right - left));
+    expect(new Set(runs.map((run) => run.state))).toEqual(new Set(['preparing', 'printing', 'succeeded']));
+    expect(runs.at(-1)).toMatchObject({ state: 'succeeded', progress: 100, currentLayer: 150, remainingSeconds: 0 });
+  });
+
+  it('should freeze a paused run and continue it from the same point on resume', async () => {
+    const time = manualClock();
+    const simulator = createBambuSimulator({ clock: time.clock });
+    await startRun(simulator);
+    time.advance(510);
+    await expect(control(simulator, 'pause')).resolves.toMatchObject({ status: 'accepted' });
+    const paused = {
+      readiness: 'busy',
+      activeRunId: 'run-1',
+      run: { state: 'paused', progress: 50, currentLayer: 76, remainingSeconds: 450 },
+    };
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject(paused);
+    time.advance(1000);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject(paused);
+    await expect(control(simulator, 'resume')).resolves.toMatchObject({ status: 'accepted' });
+    time.advance(225);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { state: 'printing', progress: 75, currentLayer: 113, remainingSeconds: 225 },
+    });
+    time.advance(225);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      readiness: 'idle',
+      run: { state: 'succeeded', progress: 100 },
+    });
+    expect(simulator.writes()).toEqual([
+      'upload:tau-prepared-1.gcode.3mf',
+      'start:run-1',
+      'pause:pause-1',
+      'resume:resume-1',
+    ]);
+  });
+
+  it('should return to idle with the heaters cooling after an urgent stop', async () => {
+    const time = manualClock();
+    const simulator = createBambuSimulator({ clock: time.clock });
+    await startRun(simulator);
+    time.advance(510);
+    await expect(control(simulator, 'urgent-stop')).resolves.toMatchObject({ status: 'accepted' });
+    const stopped = await simulator.session.getSnapshot({ signal });
+    expect(stopped).toMatchObject({
+      readiness: 'idle',
+      run: { state: 'idle' },
+      temperatures: { nozzle: { value: 220 }, bed: { value: 55 } },
+      fans: { part: 0, auxiliary: 0, chamber: 0 },
+      lights: { chamber: 'off' },
+    });
+    expect(stopped).not.toHaveProperty('activeRunId');
+    expect(stopped.temperatures).not.toHaveProperty('bedTarget');
+    time.advance(100);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { state: 'idle' },
+      temperatures: { nozzle: { value: 70 }, bed: { value: 45 } },
+    });
+    await expect(control(simulator, 'pause')).resolves.toMatchObject({ status: 'rejected', code: 'STALE_RUN' });
+    expect(simulator.writes()).toEqual(['upload:tau-prepared-1.gcode.3mf', 'start:run-1', 'urgent-stop:urgent-stop-1']);
+  });
+
+  it('should run a demo speed factor as simulated seconds per clock second', async () => {
+    const time = manualClock();
+    const simulator = createBambuSimulator({ clock: time.clock, speed: 60 });
+    await startRun(simulator);
+    time.advance(8.5);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      observedAt: '2026-09-14T00:00:08.500Z',
+      run: { state: 'printing', progress: 50, currentLayer: 76, remainingSeconds: 450 },
+    });
+    time.advance(7.5);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      readiness: 'idle',
+      run: { state: 'succeeded', progress: 100 },
+    });
+  });
+
+  it('should run the uploaded plate when the host reads artifacts', async () => {
+    const container = zipSync({ 'Metadata/plate_1.gcode': encoder.encode(plateGcode) });
+    const containerArtifact: MachineArtifactReference = {
+      ...artifact,
+      digest: `sha256:${createHash('sha256').update(container).digest('hex')}` as MachineArtifactReference['digest'],
+      length: container.byteLength,
+    };
+    const time = manualClock();
+    const simulator = createBambuSimulator({
+      clock: time.clock,
+      async *readArtifact() {
+        yield Uint8Array.from(container);
+      },
+    });
+    await startRun(simulator, containerArtifact);
+    // The bed needs 70 s to climb from 25 °C to the plate's 60 °C, then 2.561 s of motion follow.
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { state: 'preparing', remainingSeconds: 73 },
+      temperatures: { nozzleTarget: { value: 200 }, bedTarget: { value: 60 } },
+    });
+    time.advance(70);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { state: 'printing', currentLayer: 1, totalLayers: 2, remainingSeconds: 3 },
+      fans: { part: 0, auxiliary: 0 },
+    });
+    time.advance(1.5);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { state: 'printing', currentLayer: 2, totalLayers: 2, remainingSeconds: 2 },
+      fans: { part: 100, auxiliary: 50 },
+    });
+    time.advance(2);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      readiness: 'idle',
+      run: { state: 'succeeded', currentLayer: 2, totalLayers: 2 },
+    });
+  });
+
+  it('should refuse an upload the host cannot verify without writing to the device', async () => {
+    const simulator = createBambuSimulator({
+      async *readArtifact() {
+        yield Uint8Array.from([1, 2, 3, 4]);
+      },
+    });
+    const prepared = await simulator.session.preparePrint(operationInput);
+    if (prepared.status !== 'ready') {
+      throw new Error('expected simulator preparation');
+    }
+    await expect(
+      simulator.session.uploadPrint({
+        ...operationInput,
+        operationId: 'upload-1',
+        remoteName: prepared.remoteName,
+        providerData: prepared.providerData,
+      }),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'ARTIFACT_INVALID' });
+    expect(simulator.writes()).toEqual([]);
+    expect(simulator.uploadedNames()).toEqual([]);
+  });
+
+  it('should observe inside the freshness budgets, every sample distinct, while heating, printing, paused and cooling', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], now: start });
+    const abort = new AbortController();
+    try {
+      const simulator = createBambuSimulator({ clock: { now: () => new Date().toISOString() }, speed: 10 });
+      await startRun(simulator);
+      const observations = simulator.session.observe({ signal: abort.signal })[Symbol.asyncIterator]();
+      const samples = [await nextObservation(observations)];
+      let hasPaused = false;
+      while (samples.filter((sample) => sample.run?.state === 'succeeded').length < 3 && samples.length < 200) {
+        const latest = samples.at(-1)?.run;
+        if (!hasPaused && latest?.state === 'printing' && (latest.progress ?? 0) >= 50) {
+          hasPaused = true;
+          // oxlint-disable-next-line eslint/no-await-in-loop -- the pause lands between two samples of the same run.
+          await control(simulator, 'pause');
+          for (let pausedSample = 0; pausedSample < 3; pausedSample += 1) {
+            // oxlint-disable-next-line eslint/no-await-in-loop -- paused samples arrive one at a time.
+            samples.push(await nextObservation(observations));
+          }
+          // oxlint-disable-next-line eslint/no-await-in-loop -- the resume lands between two samples of the same run.
+          await control(simulator, 'resume');
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- samples arrive one at a time, as the directory reads them.
+        samples.push(await nextObservation(observations));
+      }
+      for (const [index, sample] of samples.entries()) {
+        const previous = samples[index - 1];
+        if (previous) {
+          expect(Date.parse(sample.observedAt) - Date.parse(previous.observedAt)).toBeLessThanOrEqual(freshnessBudget);
+          expect(withoutObservedAt(sample)).not.toEqual(withoutObservedAt(previous));
+        }
+      }
+      const states = samples.map((sample) => sample.run?.state);
+      expect(new Set(states)).toEqual(new Set(['preparing', 'printing', 'paused', 'succeeded']));
+      const pausedProgress = samples
+        .filter((sample) => sample.run?.state === 'paused')
+        .map((sample) => sample.run?.progress);
+      expect(pausedProgress).toHaveLength(3);
+      expect(new Set(pausedProgress).size).toBe(1);
+      const progress = samples.map((sample) => sample.run?.progress ?? -1);
+      expect(progress).toEqual(progress.toSorted((left, right) => left - right));
+    } finally {
+      abort.abort();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')(
   'Simulated X1C through the Node host',
   () => {
-    it('runs request, approval, upload, start, observed printing and urgent stop with the exact write sequence', async () => {
+    it('runs request, approval, upload, start, the observed heating run and urgent stop with the exact write sequence', async () => {
       const simulator = createBambuSimulator();
       const client = await bindSimulator(simulator);
 
@@ -310,9 +695,16 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')(
       expect(simulator.writes()).toEqual([`upload:${remoteName ?? ''}`, 'start:start-1']);
       expect(simulator.uploadedNames()).toEqual([remoteName]);
 
+      // The fixture simulator keeps its fixed clock, so the run holds at the start of heating.
       await vi.waitFor(async () => {
         await expect(client.get({ machineId: 'simulated-x1c' })).resolves.toMatchObject({
-          snapshot: { readiness: 'busy', activeRunId: 'start-1', run: { state: 'printing', progress: 42 } },
+          snapshot: {
+            readiness: 'busy',
+            activeRunId: 'start-1',
+            run: { state: 'preparing', progress: 0, remainingSeconds: 960, file: remoteName },
+            temperatures: { nozzleTarget: { value: 220 }, bedTarget: { value: 55 } },
+            lights: { chamber: 'on' },
+          },
         });
       });
       await expect(
@@ -326,7 +718,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')(
       expect(simulator.writes()).toEqual([`upload:${remoteName ?? ''}`, 'start:start-1', 'urgent-stop:stop-1']);
       await vi.waitFor(async () => {
         await expect(client.get({ machineId: 'simulated-x1c' })).resolves.toMatchObject({
-          snapshot: { readiness: 'idle', run: { state: 'idle' } },
+          snapshot: { readiness: 'idle', run: { state: 'idle' }, lights: { chamber: 'off' } },
         });
       });
       await expect(client.listPrintRequests({ machineId: 'simulated-x1c' })).resolves.toMatchObject([
@@ -336,6 +728,45 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')(
         client.resolvePrintRequest({ requestId: 'request-1', decision: 'approve', resolvedBy: operator }),
       ).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
       expect(simulator.writes()).toHaveLength(3);
+    });
+
+    it('keeps the directory observation inside the freshness budgets while the simulated run prints', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], now: start });
+      try {
+        const simulator = createBambuSimulator({ clock: { now: () => new Date().toISOString() }, speed: 10 });
+        const client = await bindSimulator(simulator);
+        await client.requestPrint({
+          requestId: 'request-fresh',
+          machineId: 'simulated-x1c',
+          artifact,
+          configuration,
+          requestedBy: operator,
+        });
+        await expect(
+          client.resolvePrintRequest({
+            requestId: 'request-fresh',
+            decision: 'approve',
+            resolvedBy: operator,
+            uploadOperationId: 'upload-fresh',
+            startOperationId: 'start-fresh',
+          }),
+        ).resolves.toMatchObject({ state: 'started' });
+        const runs: MachineRunSnapshot[] = [];
+        for (let step = 0; step < 24; step += 1) {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- the monitor reads the directory every five seconds.
+          await vi.advanceTimersByTimeAsync(5000);
+          // oxlint-disable-next-line eslint/no-await-in-loop -- each read follows its own clock step.
+          const { snapshot } = await client.get({ machineId: 'simulated-x1c' });
+          expect(Date.now() - Date.parse(snapshot.observedAt)).toBeLessThanOrEqual(freshnessBudget);
+          runs.push(snapshot.run ?? { state: 'unknown' });
+        }
+        const progress = runs.map((run) => run.progress ?? -1);
+        expect(progress).toEqual(progress.toSorted((left, right) => left - right));
+        expect(new Set(runs.map((run) => run.state))).toEqual(new Set(['preparing', 'printing', 'succeeded']));
+        expect(runs.at(-1)).toMatchObject({ state: 'succeeded', progress: 100, currentLayer: 150, totalLayers: 150 });
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('sends nothing to the device before approval (approval-required-not-honored guard)', async () => {

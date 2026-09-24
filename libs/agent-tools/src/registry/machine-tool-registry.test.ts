@@ -6,6 +6,9 @@ import type {
   MachineDirectoryEntry,
   PrintRequest,
 } from '@taucad/runtime/machine';
+import { requestPrintInputSchema } from '@taucad/chat';
+import { toolDescriptions, toolName } from '@taucad/chat/constants';
+import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import { createMachineToolRegistry } from '#registry/machine-tool-registry.js';
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
@@ -247,6 +250,39 @@ describe('machine tool registry', () => {
     }
   });
 
+  /* The CLI offers every machine tool, and a Tau turn offers the print tools:
+   * each schema reaches Vertex and Anthropic as published, so none may carry
+   * the ref loops or keywords they refuse. */
+  it('should publish every definition without the JSON Schema keywords providers refuse', () => {
+    const definitions = createMachineToolRegistry(clientFixture().client, { planPrint }).list();
+    const serialized = JSON.stringify(definitions.map(({ inputSchema }) => inputSchema));
+
+    for (const keyword of ['$schema', '$ref', 'definitions', '$defs', 'propertyNames', 'const', 'prefixItems']) {
+      expect(serialized, keyword).not.toContain(`"${keyword}"`);
+    }
+    expect(definitions.find(({ name }) => name === toolName.requestPrint)).toEqual({
+      name: toolName.requestPrint,
+      description: toolDescriptions[toolName.requestPrint],
+      inputSchema: toProviderToolJsonSchema(requestPrintInputSchema),
+    });
+  });
+
+  it('should read the only bound machine without an id, and name every bound machine when there are several', async () => {
+    await expect(invoke(clientFixture().client, 'get_machine', {})).resolves.toMatchObject({
+      isError: false,
+      content: { machineId: 'machine-1', descriptor: { name: 'Workshop X1C' } },
+    });
+    const two = clientFixture({ entries: [entry('machine-1', 'Workshop X1C'), entry('machine-2', 'Bench X1C')] });
+    await expect(invoke(two.client, 'get_machine', {})).resolves.toEqual({
+      isError: true,
+      content: {
+        errorCode: 'MACHINE_TOOL_ERROR',
+        message:
+          'Several machines are bound; pass machineId. Bound machines: machine-1 (Workshop X1C), machine-2 (Bench X1C).',
+      },
+    });
+  });
+
   it('collects bounded discovery and captures a still without touching run state', async () => {
     const { captureStill, client } = clientFixture();
     await expect(
@@ -322,27 +358,55 @@ describe('machine tool registry', () => {
       expect(fixture.uploadPrint).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         isError: false,
-        content: { approval: 'approved', request: { requestId: 'call-1', state: 'approved' } },
+        content: {
+          approval: 'approved',
+          machineName: 'Workshop X1C',
+          request: { requestId: 'call-1', state: 'approved' },
+        },
       });
     });
 
-    it.each(['denied', 'cancelled'] as const)('withdraws the request when the answer is %s', async (outcome) => {
+    it('should deny the request, not withdraw it, when the person declines', async () => {
       const fixture = clientFixture();
       const result = await run(fixture.client, {
         toolName: 'request_print',
         input: { targetFile: 'main.ts' },
-        approve: approveWith(outcome),
+        approve: approveWith('denied'),
+      });
+      expect(fixture.withdrawPrintRequest).not.toHaveBeenCalled();
+      /* No signal: a denial must land even while the run is being cancelled. */
+      expect(fixture.resolvePrintRequest.mock.calls).toEqual([
+        [
+          {
+            requestId: 'call-1',
+            decision: 'deny',
+            resolvedBy: { kind: 'user', id: 'chat', label: 'Declined in chat' },
+          },
+        ],
+      ]);
+      expect(fixture.startPrint).not.toHaveBeenCalled();
+      expect(fixture.uploadPrint).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        isError: false,
+        content: { approval: 'denied', request: { requestId: 'call-1', state: 'denied' } },
+      });
+    });
+
+    it('should withdraw the request when the run is cancelled before anyone answers', async () => {
+      const fixture = clientFixture();
+      const result = await run(fixture.client, {
+        toolName: 'request_print',
+        input: { targetFile: 'main.ts' },
+        approve: approveWith('cancelled'),
       });
       expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
-      expect(fixture.withdrawPrintRequest).toHaveBeenCalledTimes(1);
-      expect(fixture.withdrawPrintRequest.mock.calls[0]![0]).toMatchObject({
-        requestId: 'call-1',
-        resolvedBy: { kind: 'user', label: 'Declined in chat' },
-      });
+      expect(fixture.withdrawPrintRequest.mock.calls).toEqual([
+        [{ requestId: 'call-1', resolvedBy: { kind: 'user', id: 'chat', label: 'Stopped with the chat turn' } }],
+      ]);
       expect(fixture.startPrint).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         isError: false,
-        content: { approval: outcome, request: { state: 'withdrawn' } },
+        content: { approval: 'cancelled', request: { requestId: 'call-1', state: 'withdrawn' } },
       });
     });
 

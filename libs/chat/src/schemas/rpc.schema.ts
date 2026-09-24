@@ -221,6 +221,13 @@ const runGeoSpecTestsRpc = defineRpc({
 const exportGeometryRpc = defineRpc({
   input: exportGeometryInputSchema.extend({
     toolCallId: zod.string(),
+    /**
+     * Transcoder options the host chose, such as the slicer settings of a
+     * print request; the runtime validates them against the export route's
+     * schema. The model-facing tool schema has no such field, so model input
+     * never reaches this one.
+     */
+    exportOptions: zod.record(zod.string(), zod.unknown()).optional(),
   }),
   success: exportGeometryOutputSchema,
 });

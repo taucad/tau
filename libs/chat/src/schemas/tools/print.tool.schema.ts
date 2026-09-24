@@ -21,6 +21,28 @@ const slicerOptionsSchema = z
   .describe('Slicer options: a JSON object mapping option names to JSON values.')
   .pipe(z.record(z.string().min(1).max(64), z.json()));
 
+/**
+ * The slicer options `request_print` accepts: print quality only. Slicing runs
+ * before anyone approves the print, so the slicer engine and its service
+ * endpoint stay with the host, and so do the keys that describe the machine
+ * (profile, plate, bed size, nozzle and filament diameters). The preset is not
+ * one of them: the call's top-level `preset` is its only way in. The machine
+ * tool registry refuses every other key.
+ *
+ * @public
+ */
+export const requestPrintOptionKeys = [
+  'layerHeight',
+  'walls',
+  'infillPercent',
+  'infillPattern',
+  'supports',
+  'nozzleTemperature',
+  'bedTemperature',
+  'printSpeed',
+  'travelSpeed',
+] as const;
+
 /** @public */
 export const getMachineInputSchema = z.strictObject({
   machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),

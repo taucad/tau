@@ -68,7 +68,7 @@ const isMachine = (value: unknown): boolean =>
 /*
  * Every stub is typed by the slot it fills.
  *
- * `PromiseActorLogic` carries its output *and* its input inside the snapshot
+ * `AsyncActorLogic` carries its output *and* its input inside the snapshot
  * type, which `transition` both takes and returns — so the slot is invariant in
  * both and a narrower stub (`{ remote: RemoteRecord }` for a slot declared
  * `{ remote: RemoteRecord | undefined }`, or a `never`-returning failure) is

@@ -1399,6 +1399,7 @@ describe('Workbench file reconciliation', () => {
     expect(workbenchSurfaces.map(({ id }) => id)).toEqual([
       'parameters',
       'model',
+      'print',
       'revisions',
       'agents',
       'jobs',
@@ -1447,6 +1448,19 @@ describe('Workbench file reconciliation', () => {
     restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
 
     expect(dockview.removePanel).toHaveBeenCalledExactlyOnceWith(legacyFiles);
+  });
+
+  it('replaces a legacy Machines utility with the Print pane in its group', () => {
+    const legacyMachines = panel('workbench:machines');
+    const dockview = createTestDockview([legacyMachines]);
+
+    restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
+
+    expect(dockview.addPanel).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: workbenchPanels.print.id, component: 'print', title: 'Print' }),
+    );
+    expect(dockview.removePanel).toHaveBeenCalledExactlyOnceWith(legacyMachines);
+    expect(dockview.panels.map(({ id }) => id)).toEqual([workbenchPanels.print.id]);
   });
 
   it('keeps Share in a restored editor layout', () => {

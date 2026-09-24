@@ -656,7 +656,8 @@ const connectionContextSchema = z.strictObject({
  * Open one protected Node authority journal and its machine directory.
  *
  * Unknown committed record kinds fail closed. Future machine effect records extend
- * this same private authority parser and share this host's writer and commit topic.
+ * this same private authority parser and share this host's writer. Live machine
+ * observations stay in the directory's memory; the journal keeps recovery facts.
  *
  * @param input - Trusted host identity, storage root, providers and connected sessions.
  * @returns The owning host service and authenticated channel attachment point.
@@ -750,7 +751,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     const owned: OwnedPrintRequest = Object.freeze({ workspaceId, request: event.request });
     requests.set(requestKey(workspaceId, event.request.requestId), owned);
     requestCommits.emit(owned);
-    commits.emit();
     return event.request;
   };
   /** Fold the durable effect ledger into one in-flight request; `undefined` means nothing settled yet. */
@@ -895,7 +895,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     directory = await createMachineDirectory({
       hostId,
       authorityId,
-      generation,
       journal,
       commits,
       onError,
@@ -1000,7 +999,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     state.status = receipt.status;
     state.updatedAt = receipt.observedAt;
     state.receipt = receipt;
-    commits.emit();
     await syncRequests(state.intent.operationId);
   };
   const executeEffect = async (
@@ -1074,7 +1072,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       await ownedJournal.append(intent);
       state = { intent, status: 'planned', updatedAt: plannedAt };
       effects.set(operationId, state);
-      commits.emit();
     }
     effectInput.signal.throwIfAborted();
     effectInput.admitted.assertCurrent();
@@ -1085,7 +1082,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     await ownedJournal.append({ type: 'machine-effect-sending', operationId, observedAt: sendingAt });
     state.status = 'sending';
     state.updatedAt = sendingAt;
-    commits.emit();
     let receipt: MachineOperationReceipt;
     try {
       receipt = publicOperationReceipt({
@@ -1305,7 +1301,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         );
         await ownedJournal.append(event);
         preparations.set(preparedId, event);
-        commits.emit();
         return prepared;
       },
       async uploadPrint(operationInput) {
@@ -1945,7 +1940,6 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       committedBindings.set(machineKey, event);
       connectedSessions.set(machineKey, session);
       ceremonies.delete(ceremonyId);
-      commits.emit();
       return Object.freeze({ status: 'bound', machineId: pending.machineId });
     } catch (error) {
       if (connectedSessions.get(machineKey) !== session) {

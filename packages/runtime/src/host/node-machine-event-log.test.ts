@@ -45,6 +45,25 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('N
     expect(await readFile(path)).toEqual(committed);
   });
 
+  it('should refuse an over-limit record without poisoning later appends or replay', async () => {
+    const root = await directory();
+    const log = await createNodeMachineEventLog({ authorityRoot: root, owner, parse: eventSchema.parse });
+    await log.append({ type: 'fixture', value: 'one' });
+    await expect(log.append({ type: 'fixture', value: 'x'.repeat(1024 * 1024) })).rejects.toThrow(
+      'MACHINE_EVENT_LOG_FILE_LIMIT',
+    );
+    await log.append({ type: 'fixture', value: 'two' });
+    await expect(log.replay({ cursor: 0, limit: 10 })).resolves.toEqual({
+      records: [
+        { sequence: 0, event: { type: 'fixture', value: 'one' } },
+        { sequence: 1, event: { type: 'fixture', value: 'two' } },
+      ],
+      nextCursor: 2,
+      endCursor: 2,
+    });
+    await log.close();
+  });
+
   it('fences operations after authority ownership is lost', async () => {
     const root = await directory();
     let current = true;

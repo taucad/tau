@@ -88,9 +88,11 @@ export type TauMcpHostCall = TauMcpRpcCall | TauMcpToolCall;
 /**
  * One host tool exposed over MCP beside the CAD four.
  *
- * The input schema is the JSON Schema the host registry already publishes to
- * models; it is converted for the SDK, which validates arguments before the
- * host sees them and serializes the same schema back to `tools/list`.
+ * The input schema is the draft-07 JSON Schema the host registry already
+ * publishes to models (`$schema` may be omitted; shared definitions live under
+ * `definitions`). It is converted for the SDK once, when the server or handler
+ * is created; the SDK validates arguments before the host sees them and
+ * serializes the same schema back to `tools/list`.
  *
  * @public
  */
@@ -295,16 +297,42 @@ const artifactWriteAnnotations = {
   openWorldHint: false,
 } as const;
 
+/** A host tool beside the SDK schema converted from its JSON Schema. */
+type SdkHostTool = Readonly<{ tool: TauMcpHostTool; inputSchema: ZodType }>;
+
 /**
- * Register Tau's CAD tools on an MCP server.
+ * Convert host tool schemas for the SDK.
+ *
+ * Host schemas are draft-07 without `$schema`; read without a dialect, a shared
+ * definition's `#/definitions/...` reference cannot resolve. A schema that
+ * still cannot convert is a host bug, reported here with the tool's name.
+ *
+ * @param tools - Host tools as the host registry publishes them.
+ * @returns Each tool with its SDK input schema.
+ * @throws Error naming the first tool whose schema cannot convert.
+ */
+const toSdkHostTools = (tools: readonly TauMcpHostTool[] = []): readonly SdkHostTool[] =>
+  tools.map((tool) => {
+    try {
+      return { tool, inputSchema: z.fromJSONSchema(tool.inputSchema, { defaultTarget: 'draft-7' }) };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Tau MCP host tool ${tool.name} has an input schema the MCP server cannot use: ${reason}`, {
+        cause: error,
+      });
+    }
+  });
+
+/**
+ * Register the CAD four and already converted host tools.
  *
  * @param server - MCP server that owns the transport lifecycle.
- * @param options - Canonical RPC dispatch function for one authorized run.
+ * @param dispatch - Canonical RPC dispatch function for one authorized run.
+ * @param hostTools - Host tools with their SDK schemas.
  * @returns Nothing.
- * @public
  */
-export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOptions): void => {
-  const adapter = createTauMcpAdapter({ dispatch: options.dispatch });
+const registerTools = (server: McpServer, dispatch: TauMcpDispatch, hostTools: readonly SdkHostTool[]): void => {
+  const adapter = createTauMcpAdapter({ dispatch });
 
   server.registerTool(
     toolName.getKernelResult,
@@ -350,17 +378,17 @@ export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOpti
         signal: extra.signal,
       }),
   );
-  for (const tool of options.hostTools ?? []) {
+  for (const { tool, inputSchema } of hostTools) {
     server.registerTool(
       tool.name,
       {
         description: tool.description,
-        inputSchema: z.fromJSONSchema(tool.inputSchema),
+        inputSchema,
         ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
       },
       async (args, extra) => {
         extra.signal.throwIfAborted();
-        const result = await options.dispatch(
+        const result = await dispatch(
           /* The SDK validated `args` against the tool's own schema; this only recovers the object type (CL11). */
           { toolName: tool.name, args: hostToolArgumentsSchema.parse(args) },
           { toolCallId: randomUUID(), signal: extra.signal },
@@ -372,6 +400,32 @@ export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOpti
 };
 
 /**
+ * Register Tau's CAD tools on an MCP server.
+ *
+ * @param server - MCP server that owns the transport lifecycle.
+ * @param options - Canonical RPC dispatch function for one authorized run.
+ * @returns Nothing.
+ * @throws Error naming a host tool whose input schema cannot convert.
+ * @public
+ */
+export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOptions): void => {
+  registerTools(server, options.dispatch, toSdkHostTools(options.hostTools));
+};
+
+/**
+ * Create an unconnected server over already converted host tools.
+ *
+ * @param dispatch - Canonical RPC dispatch function for one authorized run.
+ * @param hostTools - Host tools with their SDK schemas.
+ * @returns A tool-only MCP server that has not yet been connected to a transport.
+ */
+const createServer = (dispatch: TauMcpDispatch, hostTools: readonly SdkHostTool[]): McpServer => {
+  const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' }, { instructions: tauMcpInstructions });
+  registerTools(server, dispatch, hostTools);
+  return server;
+};
+
+/**
  * Create one tool-only Tau MCP server.
  *
  * The supplied dispatcher must already be bound to one authorized Tau run.
@@ -380,13 +434,11 @@ export const registerTauMcpTools = (server: McpServer, options: TauMcpServerOpti
  *
  * @param options - Canonical RPC dispatch function for one authorized run.
  * @returns A tool-only MCP server that has not yet been connected to a transport.
+ * @throws Error naming a host tool whose input schema cannot convert.
  * @public
  */
-export const createTauMcpServer = (options: TauMcpServerOptions): McpServer => {
-  const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' }, { instructions: tauMcpInstructions });
-  registerTauMcpTools(server, options);
-  return server;
-};
+export const createTauMcpServer = (options: TauMcpServerOptions): McpServer =>
+  createServer(options.dispatch, toSdkHostTools(options.hostTools));
 
 /**
  * Create an MCP Streamable HTTP handler with standard session semantics.
@@ -394,15 +446,19 @@ export const createTauMcpServer = (options: TauMcpServerOptions): McpServer => {
  * MCP cancellation notifications arrive on a request after the tool-call POST,
  * so the SDK server and transport live for the session rather than one HTTP
  * request. Every request must present the same server-verified authority key;
- * a session id alone never grants access.
+ * a session id alone never grants access. Host tool schemas are converted here,
+ * once, so a schema the SDK cannot use fails the handler's creation rather than
+ * every client's `initialize`.
  *
  * @param handlerOptions - Host tools every session of this handler exposes beside the CAD four.
  * @returns A stateful HTTP handler and its process-lifetime cleanup function.
+ * @throws Error naming a host tool whose input schema cannot convert.
  * @public
  */
 export const createTauMcpHttpHandler = (
   handlerOptions: Readonly<{ hostTools?: readonly TauMcpHostTool[] | undefined }> = {},
 ): TauMcpHttpHandler => {
+  const hostTools = toSdkHostTools(handlerOptions.hostTools);
   type Session = {
     readonly server: McpServer;
     readonly transport: StreamableHTTPServerTransport;
@@ -450,16 +506,13 @@ export const createTauMcpHttpHandler = (
         sessions.delete(closedSessionId);
       },
     });
-    const server = createTauMcpServer({
-      hostTools: handlerOptions.hostTools,
-      dispatch: async (call, dispatchOptions) => {
-        const dispatch = requestDispatch.getStore();
-        if (!dispatch) {
-          return { errorCode: 'MCP_RUN_INACTIVE', message: 'This MCP request has no active Tau authority.' };
-        }
-        return dispatch(call, dispatchOptions);
-      },
-    });
+    const server = createServer(async (call, dispatchOptions) => {
+      const dispatch = requestDispatch.getStore();
+      if (!dispatch) {
+        return { errorCode: 'MCP_RUN_INACTIVE', message: 'This MCP request has no active Tau authority.' };
+      }
+      return dispatch(call, dispatchOptions);
+    }, hostTools);
     const session: Session = { server, transport, authorityKey: options.authorityKey };
     // oxlint-disable-next-line unicorn/prefer-add-event-listener -- The SDK transport exposes an onclose callback, not EventTarget.
     transport.onclose = () => {

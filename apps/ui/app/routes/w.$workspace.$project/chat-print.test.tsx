@@ -458,6 +458,17 @@ describe('Print pane slice summary', () => {
 });
 
 describe('Print pane agent requests', () => {
+  it('does not say Tau is waiting when an external agent asked and no chat is paused on it', async () => {
+    const external = agentRequest({ requestedBy: { kind: 'agent', id: 'external-agent', label: 'External agent' } });
+    const fixture = createFixture({ requests: [external] });
+    renderPane(fixture.client);
+
+    const region = await screen.findByRole('region', { name: requestRegionName });
+    expect(within(region).getByRole('heading', { name: 'Waiting for your approval' })).toBeInTheDocument();
+    expect(within(region).getByText('Requested by External agent')).toBeInTheDocument();
+    expect(within(region).queryByText('Answering here also answers the chat.')).not.toBeInTheDocument();
+  });
+
   it('shows the interrupt prompt verbatim and accepts through it after one confirmation', async () => {
     const fixture = createFixture({ requests: [agentRequest()] });
     const { bridge, respond } = createBridge({

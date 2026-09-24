@@ -327,7 +327,14 @@ function ApprovalCard({
           <ShieldCheck aria-hidden className='mt-0.5 size-4 shrink-0 text-warning' />
         )}
         <div className='min-w-0 flex-1'>
-          <h4 className='text-sm font-medium'>{isAgent ? 'Tau is waiting for approval' : 'Ready to start'}</h4>
+          <h4 className='text-sm font-medium'>
+            {/* Only a Tau turn pauses on a chat interrupt; any other agent is named on the line below. */}
+            {isAgent
+              ? pendingPrompt === undefined
+                ? 'Waiting for your approval'
+                : 'Tau is waiting for approval'
+              : 'Ready to start'}
+          </h4>
           <p className='text-xs'>{pendingPrompt ?? describeApprovalPrompt(request, machineName)}</p>
           <p className='text-xs text-muted-foreground'>Requested by {request.requestedBy.label}</p>
         </div>

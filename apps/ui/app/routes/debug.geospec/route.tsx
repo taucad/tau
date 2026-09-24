@@ -15,7 +15,10 @@ import {
 import type { PerformanceLabSelectionCase } from '#services/geospec-performance.js';
 /* oxlint-disable no-restricted-imports -- Debug-only private benchmark source import; deliberately no public package export. */
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This debug route consumes the private benchmark catalog without adding a public API.
-import { performanceLabFixtures } from '../../../../../packages/geospec-engine-native/bench/performance-lab.js';
+import {
+  classifyPerformanceLabDifference,
+  performanceLabFixtures,
+} from '../../../../../packages/geospec-engine-native/bench/performance-lab.js';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only private fixture metadata.
 import type { LabFixture } from '../../../../../packages/geospec-engine-native/bench/performance-lab.js';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only private benchmark result contract.
@@ -367,6 +370,14 @@ function GeoSpecLab(): React.JSX.Element {
                         const cellError = cellErrors[`${key(fixture.id, engine)}/${entry.id}`];
                         const rows = cell?.result.perCase.filter((row) => row.caseId === entry.id) ?? [];
                         const latest = rows.at(-1);
+                        const difference = latest ? classifyPerformanceLabDifference({ engine, ...latest }) : undefined;
+                        const hasUnexpectedMismatch = rows.some(
+                          (row) =>
+                            row.status !== 'unsupported' &&
+                            row.expectedStatus !== 'unverified' &&
+                            row.status !== row.expectedStatus &&
+                            !classifyPerformanceLabDifference({ engine, ...row }),
+                        );
                         return (
                           <td key={engine} className='p-2'>
                             {engine === 'native-desktop' && !desktop ? (
@@ -377,7 +388,7 @@ function GeoSpecLab(): React.JSX.Element {
                               </span>
                             ) : latest ? (
                               <>
-                                <strong className={latest.status === 'passed' ? 'text-foreground' : 'text-destructive'}>
+                                <strong className={hasUnexpectedMismatch ? 'text-destructive' : 'text-foreground'}>
                                   {[...new Set(rows.map(({ status }) => status))].join(' / ')}
                                 </strong>
                                 <div className='font-mono text-xs text-muted-foreground'>
@@ -386,10 +397,15 @@ function GeoSpecLab(): React.JSX.Element {
                                 </div>
                                 <div className='font-mono text-xs text-muted-foreground'>
                                   Expected {latest.expectedStatus}
-                                  {latest.expectedStatus !== 'unverified' && latest.status !== latest.expectedStatus
-                                    ? ' · mismatch'
-                                    : ''}
+                                  {latest.status === 'unsupported'
+                                    ? ' · unsupported'
+                                    : hasUnexpectedMismatch
+                                      ? ' · unexpected mismatch'
+                                      : ''}
                                 </div>
+                                {difference ? (
+                                  <p className='text-xs text-muted-foreground'>{difference.reason}</p>
+                                ) : null}
                                 <div className='font-mono text-xs text-muted-foreground'>
                                   startup {duration(cell?.result.timing.startup)} · admit{' '}
                                   {duration(cell?.result.timing.admission)} · engine{' '}

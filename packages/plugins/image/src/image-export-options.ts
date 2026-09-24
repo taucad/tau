@@ -99,6 +99,23 @@ const lightingSchema = z.union([
     .strict()
     .meta({ title: 'Directional lights' }),
 ]);
+const aoSchema = z
+  .object({
+    radiusPixels: pixels().min(1).max(128).optional(),
+    intensity: ratio().min(0).max(8).optional(),
+    distanceFalloff: ratio().min(0.01).max(1).optional(),
+  })
+  .strict();
+const defaultImageLighting = {
+  lights: [
+    { direction: [1, 1, 1], color: [2.5, 2.5, 2.5] },
+    { direction: [2.3, 0, 3], color: [1, 1, 1] },
+  ],
+  ambient: 0.13,
+  environment: 'studio',
+  space: 'view',
+  exposure: 0.5,
+} satisfies z.output<typeof lightingSchema>;
 const imageExportModeSchema = z.enum(['single', 'batch']);
 const imageLabelSchema = z
   .string()
@@ -262,7 +279,10 @@ const baseImageShape = {
     .boolean()
     .default(false)
     .describe('Include a physical scale bar at the fitted centre or fixed camera target plane'),
-  lighting: lightingSchema.optional().describe('Studio lighting or an explicit directional-light rig'),
+  lighting: lightingSchema
+    .default(defaultImageLighting)
+    .describe('Studio lighting or an explicit directional-light rig'),
+  ao: aoSchema.optional().describe('Screen-space ambient occlusion for opaque contact shadows'),
 } as const;
 
 const validateAnnotatedDimensions = (

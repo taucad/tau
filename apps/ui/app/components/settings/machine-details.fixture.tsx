@@ -356,7 +356,7 @@ export const boundEntry = ({
     id: `serial-${machineId}`,
     name,
     vendor: 'Bambu Lab',
-    model: 'X1 Carbon',
+    model: 'X1C',
     technology: 'additive.fff',
     firmware,
     accepts: x1cProvider.accepts,

@@ -203,7 +203,7 @@ describe('MachinesSettings', () => {
     const rows = within(list).getAllByRole('listitem');
     expect(rows).toHaveLength(1);
     /* The desktop dry-run spec reads exactly this line. */
-    expect(rows[0]?.textContent).toMatch(/^Simulated X1C\s*Bambu Lab X1 Carbon · Simulated$/u);
+    expect(rows[0]?.textContent).toMatch(/^Simulated X1C\s*Bambu Lab X1C · Simulated$/u);
     expect(screen.getByText('Removing a machine is not available yet.')).toBeInTheDocument();
     unmount();
 
@@ -220,7 +220,7 @@ describe('MachinesSettings', () => {
   it('should open a bound machine onto its provider manifest and fold it away again', async () => {
     state.project = projectWith(facetWith([simulatedEntry]));
     renderSettings();
-    const row = await screen.findByRole('button', { name: 'Simulated X1C Bambu Lab X1 Carbon · Simulated' });
+    const row = await screen.findByRole('button', { name: 'Simulated X1C Bambu Lab X1C · Simulated' });
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('button', { name: /^Identity and firmware/u })).not.toBeInTheDocument();
 
@@ -250,7 +250,7 @@ describe('MachinesSettings', () => {
     state.project = projectWith(facetWith([orphan]));
     renderSettings();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Old printer Bambu Lab X1 Carbon' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Old printer Bambu Lab X1C' }));
 
     expect(
       screen.getByText('This host no longer offers the retired-provider provider, so its manifest cannot be shown.'),

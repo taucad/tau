@@ -1,5 +1,5 @@
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
-import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import { KHRMaterialsAnisotropy, KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { describe, expect, it, vi } from 'vitest';
 import { readGltfSceneBounds } from '#gltf-scene-bounds.js';
 
@@ -36,12 +36,17 @@ describe('readGltfSceneBounds', () => {
       .setArray(new Float32Array([0, 0, 0, 1, 1, 1]))
       .setBuffer(buffer);
     const unlit = document.createExtension(KHRMaterialsUnlit).createUnlit();
-    const material = document.createMaterial().setExtension(KHRMaterialsUnlit.EXTENSION_NAME, unlit);
+    const anisotropy = document.createExtension(KHRMaterialsAnisotropy).createAnisotropy();
+    const unlitMaterial = document.createMaterial().setExtension(KHRMaterialsUnlit.EXTENSION_NAME, unlit);
+    const physicalMaterial = document.createMaterial().setExtension(KHRMaterialsAnisotropy.EXTENSION_NAME, anisotropy);
     const mesh = document
       .createMesh()
-      .addPrimitive(document.createPrimitive().setAttribute('POSITION', position).setMaterial(material));
+      .addPrimitive(document.createPrimitive().setAttribute('POSITION', position).setMaterial(unlitMaterial))
+      .addPrimitive(document.createPrimitive().setAttribute('POSITION', position).setMaterial(physicalMaterial));
     document.getRoot().setDefaultScene(document.createScene().addChild(document.createNode().setMesh(mesh)));
-    const bytes = await new WebIO().registerExtensions([KHRMaterialsUnlit]).writeBinary(document);
+    const bytes = await new WebIO()
+      .registerExtensions([KHRMaterialsUnlit, KHRMaterialsAnisotropy])
+      .writeBinary(document);
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     await readGltfSceneBounds({ bytes, targetWorld: { up: '+z', forward: '-y', metersPerUnit: 1 } });

@@ -13,12 +13,18 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
+  classifyPerformanceLabDifference,
   performanceLabCases,
   performanceLabFixtures,
   performanceLabNativeQueries,
   performanceLabScaleCases,
 } from '#bench/performance-lab';
-import type { LabFixture, PerformanceLabCase, PerformanceLabQuery } from '#bench/performance-lab';
+import type {
+  LabFixture,
+  PerformanceLabCase,
+  PerformanceLabDifference,
+  PerformanceLabQuery,
+} from '#bench/performance-lab';
 import type { Artifact } from '#bench/lib';
 import type {
   PerformanceLabModules,
@@ -69,6 +75,7 @@ Results: run.json, artifacts.json, rows.jsonl, summary.json, cells/*/{result.jso
 Runner repeats=1/cache=cold. Wall spans spawn through close, including Node/import startup and I/O.
 maxRSS is process.resourceUsage().maxRSS * 1024 (KiB to bytes), child process only, through cleanup.
 Unsupported and unverified cells remain raw; unexpected statuses and worker errors exit 1.
+Target differences, retained legacy numerical outcomes and known legacy defects have separate counts, never expected matches.
 `;
 
 /**
@@ -414,6 +421,9 @@ const runParent = async (options: Options): Promise<void> => {
     cells: 0,
     workerErrors: 0,
     expectedMatches: 0,
+    qualifiedTargetDifferences: 0,
+    retainedLegacyNumericalOutcomes: 0,
+    knownLegacyDefects: 0,
     unexpectedStatuses: 0,
     unsupported: 0,
     unverifiedExpectations: 0,
@@ -421,23 +431,23 @@ const runParent = async (options: Options): Promise<void> => {
   for (const cell of cells) {
     // oxlint-disable-next-line no-await-in-loop -- Measurements must run serially in fresh children, with no overlapping engines.
     const row = await invokeCell(cell, options);
+    const { counts, knownDifferences } = summarizeLabCaseResults(row.engine, row.result?.perCase ?? []);
     // oxlint-disable-next-line no-await-in-loop -- Retain each raw cell before starting the next one.
-    await appendFile(resolvePath(options.outputDir, 'rows.jsonl'), JSON.stringify({ ...row, artifacts }) + '\n');
+    await appendFile(
+      resolvePath(options.outputDir, 'rows.jsonl'),
+      JSON.stringify({ ...row, artifacts, knownDifferences }) + '\n',
+    );
     summary.cells += 1;
     if (row.error !== undefined || row.childExit?.code !== 0 || row.result === undefined) {
       summary.workerErrors += 1;
     }
-    for (const entry of row.result?.perCase ?? []) {
-      if (entry.status === 'unsupported') {
-        summary.unsupported += 1;
-      } else if (entry.expectedStatus === 'unverified') {
-        summary.unverifiedExpectations += 1;
-      } else if (entry.status === entry.expectedStatus) {
-        summary.expectedMatches += 1;
-      } else {
-        summary.unexpectedStatuses += 1;
-      }
-    }
+    summary.expectedMatches += counts.expectedMatches;
+    summary.qualifiedTargetDifferences += counts.qualifiedTargetDifferences;
+    summary.retainedLegacyNumericalOutcomes += counts.retainedLegacyNumericalOutcomes;
+    summary.knownLegacyDefects += counts.knownLegacyDefects;
+    summary.unexpectedStatuses += counts.unexpectedStatuses;
+    summary.unsupported += counts.unsupported;
+    summary.unverifiedExpectations += counts.unverifiedExpectations;
     console.log(
       `${summary.cells}/${cells.length} round=${cell.round} ${cell.module.engine} ${cell.selection.fixture.id} ${row.error?.message ?? 'recorded'}`,
     );
@@ -447,6 +457,66 @@ const runParent = async (options: Options): Promise<void> => {
   if (summary.workerErrors > 0 || summary.unexpectedStatuses > 0) {
     process.exitCode = 1;
   }
+};
+
+/**
+ * Count source-backed differences separately while preserving every raw status.
+ * @internal
+ * @param engine - Actual selected engine.
+ * @param cases - Unchanged shared-runner case status records.
+ * @returns Diagnostic counters and separate reason/source annotations.
+ */
+export const summarizeLabCaseResults = (
+  engine: Engine,
+  cases: ReadonlyArray<
+    Pick<PerformanceLabRunResult['perCase'][number], 'caseId' | 'repeat' | 'status' | 'expectedStatus'>
+  >,
+): {
+  counts: {
+    expectedMatches: number;
+    qualifiedTargetDifferences: number;
+    retainedLegacyNumericalOutcomes: number;
+    knownLegacyDefects: number;
+    unexpectedStatuses: number;
+    unsupported: number;
+    unverifiedExpectations: number;
+  };
+  knownDifferences: Array<PerformanceLabDifference & { caseId: string; repeat: number }>;
+} => {
+  const counts = {
+    expectedMatches: 0,
+    qualifiedTargetDifferences: 0,
+    retainedLegacyNumericalOutcomes: 0,
+    knownLegacyDefects: 0,
+    unexpectedStatuses: 0,
+    unsupported: 0,
+    unverifiedExpectations: 0,
+  };
+  const knownDifferences: Array<PerformanceLabDifference & { caseId: string; repeat: number }> = [];
+  for (const entry of cases) {
+    if (entry.status === 'unsupported') {
+      counts.unsupported += 1;
+    } else if (entry.expectedStatus === 'unverified') {
+      counts.unverifiedExpectations += 1;
+    } else if (entry.status === entry.expectedStatus) {
+      counts.expectedMatches += 1;
+    } else {
+      const difference = classifyPerformanceLabDifference({ engine, ...entry });
+      if (difference) {
+        knownDifferences.push({ caseId: entry.caseId, repeat: entry.repeat, ...difference });
+        if (difference.kind === 'qualified-target-difference') {
+          counts.qualifiedTargetDifferences += 1;
+        } else if (difference.kind === 'known-legacy-defect') {
+          counts.knownLegacyDefects += 1;
+        } else {
+          counts.retainedLegacyNumericalOutcomes += 1;
+        }
+      } else {
+        counts.unexpectedStatuses += 1;
+      }
+    }
+  }
+  return { counts, knownDifferences };
 };
 
 const main = async (): Promise<void> => {

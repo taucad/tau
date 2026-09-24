@@ -10,6 +10,7 @@ import {
   toRunCase,
   verifyLabArtifacts,
   loadLegacyWithoutPersistence,
+  summarizeLabCaseResults,
 } from '#bench/performance-lab-cli';
 import {
   performanceLabCases,
@@ -17,6 +18,59 @@ import {
   performanceLabNativeQueries,
   performanceLabScaleCases,
 } from '#bench/performance-lab';
+
+void it('counts known differences separately and preserves unsupported, unverified and unexpected statuses', () => {
+  const legacyCases = ['toHaveBoundingBox', 'toHaveCenterOfMass', 'toHaveCircularHole', 'toHaveChamferFeature'].map(
+    (matcher) =>
+      ({
+        caseId: `m3-${matcher}-positive`,
+        repeat: 0,
+        status: 'passed',
+        expectedStatus: 'failed',
+      }) as const,
+  );
+  const original = structuredClone(legacyCases);
+  const legacy = summarizeLabCaseResults('legacy-wasm', legacyCases);
+  assert.deepStrictEqual(legacyCases, original);
+  assert.deepStrictEqual(legacy.counts, {
+    expectedMatches: 0,
+    qualifiedTargetDifferences: 0,
+    retainedLegacyNumericalOutcomes: 2,
+    knownLegacyDefects: 2,
+    unexpectedStatuses: 0,
+    unsupported: 0,
+    unverifiedExpectations: 0,
+  });
+  assert.equal(legacy.knownDifferences.length, 4);
+  assert.ok(legacy.knownDifferences.every(({ reason, sources }) => reason.length > 0 && sources.length > 0));
+  const mixed = summarizeLabCaseResults('combined-wasm', [
+    ...legacyCases.slice(0, 2),
+    ...['toHaveBoundingBox', 'toHaveCenterOfMass'].map(
+      (matcher) =>
+        ({
+          caseId: `m3-${matcher}-negative`,
+          repeat: 0,
+          status: 'failed',
+          expectedStatus: 'passed',
+        }) as const,
+    ),
+    { caseId: 'm3-toHaveCircularHole-positive', repeat: 0, status: 'failed', expectedStatus: 'failed' },
+    { caseId: 'm3-toHaveCircularHole-negative', repeat: 0, status: 'failed', expectedStatus: 'passed' },
+    { caseId: 'm3-toHaveBoundingBox-negative', repeat: 1, status: 'unsupported', expectedStatus: 'passed' },
+    { caseId: 'involute-gear-glb', repeat: 0, status: 'passed', expectedStatus: 'unverified' },
+  ]);
+  assert.deepStrictEqual(mixed.counts, {
+    expectedMatches: 1,
+    qualifiedTargetDifferences: 4,
+    retainedLegacyNumericalOutcomes: 0,
+    knownLegacyDefects: 0,
+    unexpectedStatuses: 1,
+    unsupported: 1,
+    unverifiedExpectations: 1,
+  });
+  assert.equal(mixed.knownDifferences.length, 4);
+  assert.equal(summarizeLabCaseResults('native-desktop', legacyCases).counts.unexpectedStatuses, 4);
+});
 
 void it('plans the shared authored catalog and verifies a pinned ordinary input without loading engines', async () => {
   const options = parseCliArguments([

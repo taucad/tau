@@ -10,6 +10,7 @@ import { describe, it } from 'node:test';
 // oxlint-disable-next-line no-restricted-imports -- Test reads the private catalog manifest.
 import manifest from './fixtures/performance-lab/manifest.json' with { type: 'json' };
 import {
+  classifyPerformanceLabDifference,
   performanceLabAnalyticCases,
   performanceLabCases,
   performanceLabFixtures,
@@ -21,6 +22,131 @@ import {
 const root = resolve(import.meta.dirname, '../../..');
 
 void describe('performance lab catalog', () => {
+  void it('explains only source-bound target outcomes and legacy records without changing claims', async () => {
+    const currentHash = 'fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51';
+    const referenceHash = '0d0da6ad2b5c7beca4eced08d489f2d4da6fc56baeb3270cdf8481a3979dcd9e';
+    const [currentBytes, referenceBytes] = await Promise.all(
+      [currentHash, referenceHash].map(async (sha256) => {
+        const bytes = await readFile(resolve(root, 'packages/geospec/host-tests/fixtures/data', sha256));
+        assert.equal(createHash('sha256').update(bytes).digest('hex'), sha256);
+        return bytes;
+      }),
+    );
+    assert.ok(currentBytes && referenceBytes);
+    const current = JSON.parse(currentBytes.toString()) as {
+      mixedStatusOverrides: Record<string, 'passed' | 'failed'>;
+      rows: Array<{
+        id: string;
+        authoredRequestUtf8: string;
+        expected: { status: string };
+        sourceRow: { transport: { primaryBuffer: { sha256: string } } };
+      }>;
+    };
+    const reference = JSON.parse(referenceBytes.toString()) as {
+      rows: Array<{
+        id: string;
+        authoredRequestJson: string;
+        evaluatePlanResultUtf8: string;
+        subject: { ingestTransport: { primaryBuffer: { sha256: string } } };
+        applicability: { numericCertification: string };
+      }>;
+    };
+    let mixedCount = 0;
+    for (const entry of performanceLabQualifiedCases) {
+      const status = entry.expectedStatus === 'passed' ? 'failed' : 'passed';
+      const observed = {
+        engine: 'combined-wasm',
+        caseId: entry.id,
+        status,
+        expectedStatus: entry.expectedStatus,
+      } as const;
+      const difference = classifyPerformanceLabDifference(observed);
+      const override = current.mixedStatusOverrides[entry.authority.rowId];
+      if (override === undefined) {
+        assert.equal(difference, undefined, entry.id);
+      } else {
+        assert.equal(status, override);
+        assert.ok(difference);
+        assert.equal(difference.kind, 'qualified-target-difference');
+        assert.equal(difference.sources[0]?.sha256, currentHash);
+        assert.equal(
+          difference.sources[0].jsonPointer,
+          `/mixedStatusOverrides/${entry.authority.rowId.replaceAll('/', '~1')}`,
+        );
+        const native = current.rows.find(({ id }) => id === entry.authority.rowId);
+        assert.ok(native);
+        assert.deepStrictEqual(JSON.parse(native.authoredRequestUtf8).plan.claims[0], entry.claim);
+        assert.equal(native.expected.status, entry.expectedStatus);
+        assert.equal(native.sourceRow.transport.primaryBuffer.sha256, entry.authority.subjectSha256);
+        assert.deepStrictEqual(difference.sources[1], {
+          path: `packages/geospec/host-tests/fixtures/data/${currentHash}`,
+          sha256: currentHash,
+          jsonPointer: `/rows/${current.rows.indexOf(native)}/expected/status`,
+        });
+        mixedCount += 1;
+      }
+      assert.equal(classifyPerformanceLabDifference({ ...observed, engine: 'native-desktop' }), undefined);
+      assert.equal(classifyPerformanceLabDifference({ ...observed, status: 'unsupported' }), undefined);
+      assert.equal(classifyPerformanceLabDifference({ ...observed, expectedStatus: 'unverified' }), undefined);
+      assert.equal(classifyPerformanceLabDifference({ ...observed, status: entry.expectedStatus }), undefined);
+    }
+    assert.equal(mixedCount, 4);
+    for (const [matcher, kind] of [
+      ['toHaveBoundingBox', 'retained-legacy-numerical-outcome'],
+      ['toHaveCenterOfMass', 'retained-legacy-numerical-outcome'],
+      ['toHaveCircularHole', 'known-legacy-defect'],
+      ['toHaveChamferFeature', 'known-legacy-defect'],
+    ] as const) {
+      const entry = performanceLabQualifiedCases.find(({ id }) => id === `m3-${matcher}-positive`);
+      assert.ok(entry);
+      const historical = reference.rows.find(({ id }) => id === entry.authority.rowId);
+      const native = current.rows.find(({ id }) => id === entry.authority.rowId);
+      assert.ok(historical && native);
+      assert.deepStrictEqual(JSON.parse(historical.authoredRequestJson).plan.claims[0], entry.claim);
+      assert.deepStrictEqual(JSON.parse(native.authoredRequestUtf8).plan.claims[0], entry.claim);
+      assert.equal(historical.subject.ingestTransport.primaryBuffer.sha256, entry.authority.subjectSha256);
+      assert.equal(native.sourceRow.transport.primaryBuffer.sha256, entry.authority.subjectSha256);
+      assert.equal(JSON.parse(historical.evaluatePlanResultUtf8).results[0].status, 'passed');
+      assert.equal(native.expected.status, 'failed');
+      assert.equal(entry.expectedStatus, 'failed');
+      const observed = {
+        engine: 'legacy-wasm',
+        caseId: entry.id,
+        status: 'passed',
+        expectedStatus: entry.expectedStatus,
+      } as const;
+      const difference = classifyPerformanceLabDifference(observed);
+      assert.ok(difference);
+      assert.equal(difference.kind, kind);
+      assert.equal(difference.sources[0]?.sha256, referenceHash);
+      assert.equal(
+        difference.sources[0].jsonPointer,
+        `/rows/${reference.rows.indexOf(historical)}/evaluatePlanResultUtf8`,
+      );
+      assert.equal(difference.sources[1]?.sha256, currentHash);
+      assert.equal(difference.sources[1].jsonPointer, `/rows/${current.rows.indexOf(native)}/expected/status`);
+      if (kind === 'retained-legacy-numerical-outcome') {
+        assert.equal(
+          historical.applicability.numericCertification,
+          'none-reference-numerics-require-later-profile-comparison',
+        );
+        assert.match(difference.reason, /not an accuracy certificate/);
+      }
+      assert.equal(classifyPerformanceLabDifference({ ...observed, expectedStatus: 'passed' }), undefined);
+      assert.equal(classifyPerformanceLabDifference({ ...observed, status: 'failed' }), undefined);
+      assert.equal(classifyPerformanceLabDifference({ ...observed, status: 'unsupported' }), undefined);
+      assert.equal(
+        classifyPerformanceLabDifference({
+          ...observed,
+          caseId: `m3-${matcher}-negative`,
+          status: 'failed',
+          expectedStatus: 'passed',
+        }),
+        undefined,
+      );
+    }
+  });
+
   void it('covers every exported matcher with independently authored ordinary positive and negative claims', async () => {
     const names = Object.keys(geoSpecNativeMatcherDescriptors).sort();
     assert.deepStrictEqual([...new Set(performanceLabQualifiedCases.map((entry) => entry.matcher))].sort(), names);

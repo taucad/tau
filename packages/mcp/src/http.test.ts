@@ -229,6 +229,68 @@ describe('Tau MCP Streamable HTTP transport', () => {
     await client.close();
   });
 
+  it('should serve a draft-07 host schema whose shared definition is reached by $ref', async () => {
+    const calls: TauMcpHostCall[] = [];
+    const dispatch: TauMcpDispatch = async (call) => {
+      calls.push(call);
+      return { success: true, requestId: 'req-1', state: 'awaiting-approval' };
+    };
+    /* What a host registry publishes for a recursive JSON value: draft-07 with
+     * `$schema` removed and the value shared under `definitions`. */
+    const jsonValue = { $ref: '#/definitions/value' };
+    const requestPrint: TauMcpHostTool = {
+      name: 'request_print',
+      description: 'Ask the person to approve one print.',
+      inputSchema: {
+        type: 'object',
+        properties: { targetFile: { type: 'string' }, options: { type: 'object', additionalProperties: jsonValue } },
+        required: ['targetFile'],
+        additionalProperties: false,
+        definitions: {
+          value: {
+            anyOf: [
+              { type: 'string' },
+              { type: 'number' },
+              { type: 'boolean' },
+              { type: 'null' },
+              { type: 'array', items: jsonValue },
+              { type: 'object', additionalProperties: jsonValue },
+            ],
+          },
+        },
+      },
+    };
+    const client = await connect(await serve(dispatch, [requestPrint]));
+
+    const listed = await client.listTools();
+    expect(listed.tools.find(({ name }) => name === 'request_print')?.inputSchema).toMatchObject({
+      type: 'object',
+      required: ['targetFile'],
+    });
+    const options = { plate: 1, filament: { slots: [2, 'PLA', null], dry: true } };
+    await expect(
+      client.callTool({ name: 'request_print', arguments: { targetFile: 'pyramid.gcode.3mf', options } }),
+    ).resolves.toMatchObject({ structuredContent: { requestId: 'req-1', state: 'awaiting-approval' } });
+    expect(calls).toEqual([{ toolName: 'request_print', args: { targetFile: 'pyramid.gcode.3mf', options } }]);
+    await expect(
+      client.callTool({ name: 'request_print', arguments: { targetFile: 'pyramid.gcode.3mf', options: 'fast' } }),
+    ).resolves.toMatchObject({ isError: true });
+    expect(calls).toHaveLength(1);
+    await client.close();
+  });
+
+  it('should refuse a host schema it cannot use when the handler is created, naming the tool', () => {
+    const broken: TauMcpHostTool = {
+      name: 'broken_tool',
+      description: 'Refers to a definition that does not exist.',
+      inputSchema: { type: 'object', properties: { value: { $ref: '#/definitions/missing' } } },
+    };
+
+    expect(() => createTauMcpHttpHandler({ hostTools: [broken] })).toThrow(
+      'Tau MCP host tool broken_tool has an input schema the MCP server cannot use: Reference not found: #/definitions/missing',
+    );
+  });
+
   it('forwards client cancellation to the run-bound dispatcher', async () => {
     const aborted = vi.fn();
     let markStarted!: () => void;

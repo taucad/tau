@@ -18,6 +18,11 @@ export const toolName = {
   screenshot: 'screenshot',
   revisions: 'revisions',
   updateTodos: 'update_todos',
+  getMachine: 'get_machine',
+  requestPrint: 'request_print',
+  getPrintRequest: 'get_print_request',
+  listPrintRequests: 'list_print_requests',
+  cancelPrint: 'cancel_print',
 } as const satisfies Record<string, string>;
 
 /** @public */

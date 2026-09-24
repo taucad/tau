@@ -17,6 +17,18 @@ import type { ScreenshotInput, ScreenshotOutput } from '#schemas/tools/screensho
 import type { RevisionsInput, RevisionsOutput } from '#schemas/tools/revisions.tool.schema.js';
 import type { UpdateTodosInput, UpdateTodosOutput } from '#schemas/tools/update-todos.tool.schema.js';
 import type {
+  CancelPrintInput,
+  CancelPrintOutput,
+  GetMachineInput,
+  GetMachineOutput,
+  GetPrintRequestInput,
+  GetPrintRequestOutput,
+  ListPrintRequestsInput,
+  ListPrintRequestsOutput,
+  RequestPrintInput,
+  RequestPrintOutput,
+} from '#schemas/tools/print.tool.schema.js';
+import type {
   ApplyParameterOperationInput,
   ApplyParameterOperationOutput,
   GetParametersInput,
@@ -214,6 +226,11 @@ export type MyTools = InferUITools<{
   [toolName.getParameters]: AiTool<GetParametersInput, GetParametersOutput>;
   [toolName.applyParameterOperation]: AiTool<ApplyParameterOperationInput, ApplyParameterOperationOutput>;
   [toolName.updateTodos]: AiTool<UpdateTodosInput, UpdateTodosOutput>;
+  [toolName.getMachine]: AiTool<GetMachineInput, GetMachineOutput>;
+  [toolName.requestPrint]: AiTool<RequestPrintInput, RequestPrintOutput>;
+  [toolName.getPrintRequest]: AiTool<GetPrintRequestInput, GetPrintRequestOutput>;
+  [toolName.listPrintRequests]: AiTool<ListPrintRequestsInput, ListPrintRequestsOutput>;
+  [toolName.cancelPrint]: AiTool<CancelPrintInput, CancelPrintOutput>;
 }>;
 
 /**

@@ -18,6 +18,7 @@ export * from '#schemas/tools/export-geometry.tool.schema.js';
 export * from '#schemas/tools/screenshot.tool.schema.js';
 export * from '#schemas/tools/revisions.tool.schema.js';
 export * from '#schemas/tools/update-todos.tool.schema.js';
+export * from '#schemas/tools/print.tool.schema.js';
 export * from '#schemas/todo-list.schema.js';
 export * from '#schemas/agent-config.schema.js';
 export * from '#schemas/chat-record.schema.js';

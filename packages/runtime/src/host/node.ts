@@ -319,13 +319,20 @@ const publicOperationReceipt = (
   input: Readonly<{
     operationId: string;
     machineId: string;
-    kind: MachineOperationReceipt['kind'];
+    intent: NodeMachineEffectIntentEvent['intent'];
     receipt: MachineSubmissionReceipt | MachineTransferReceipt;
   }>,
 ): MachineOperationReceipt => {
-  const base = { operationId: input.operationId, machineId: input.machineId, kind: input.kind };
-  if (input.kind !== 'upload') {
-    return operationReceiptSchema.parse({ ...base, ...providerReceiptSchema.parse(input.receipt) });
+  const { intent } = input;
+  const base = { operationId: input.operationId, machineId: input.machineId, kind: intent.kind };
+  if (intent.kind !== 'upload') {
+    const receipt = providerReceiptSchema.parse(input.receipt);
+    // A control's preflight matched its run, so an accepted control names that run when the provider's reply does not.
+    const addressed =
+      'expectedProviderRunId' in intent && receipt.status === 'accepted' && receipt.providerRunId === undefined
+        ? { providerRunId: intent.expectedProviderRunId }
+        : {};
+    return operationReceiptSchema.parse({ ...base, ...receipt, ...addressed });
   }
   const transfer = transferReceiptSchema.parse(input.receipt);
   return operationReceiptSchema.parse(
@@ -1087,7 +1094,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       receipt = publicOperationReceipt({
         operationId,
         machineId: effectInput.machineId,
-        kind: effectInput.intent.kind,
+        intent: effectInput.intent,
         receipt: await effectInput.send(),
       });
     } catch {
@@ -1632,7 +1639,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
             receipt = publicOperationReceipt({
               operationId,
               machineId,
-              kind: state.intent.intent.kind,
+              intent: state.intent.intent,
               receipt: providerReceipt,
             });
           } catch {

@@ -653,7 +653,8 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       command: 'pause',
       expectedProviderRunId: 'manual-run',
     });
-    expect(paused).toMatchObject({ status: 'accepted', kind: 'pause' });
+    // The provider's reply names no run; the receipt names the one the preflight matched.
+    expect(paused).toMatchObject({ status: 'accepted', kind: 'pause', providerRunId: 'manual-run' });
     await expect(
       client.controlRun({
         machineId: 'workshop-x1c',

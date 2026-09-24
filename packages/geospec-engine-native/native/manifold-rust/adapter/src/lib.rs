@@ -154,23 +154,27 @@ impl Solid {
     }
 
     pub fn union_all(solids: &[Self]) -> Result<Self, BackendError> {
-        Self::batch(solids, OpType::Add)
+        Self::batch(solids.iter(), OpType::Add)
     }
 
     pub fn difference_all(solids: &[Self]) -> Result<Self, BackendError> {
-        Self::batch(solids, OpType::Subtract)
+        Self::batch(solids.iter(), OpType::Subtract)
     }
 
     pub fn intersection_all(solids: &[Self]) -> Result<Self, BackendError> {
-        Self::batch(solids, OpType::Intersect)
+        Self::batch(solids.iter(), OpType::Intersect)
     }
 
-    fn batch(solids: &[Self], operation: OpType) -> Result<Self, BackendError> {
-        let operands: Vec<_> = solids.iter().map(|s| s.0.clone()).collect();
-        checked(
-            Manifold::batch_boolean_with_engine(&operands, operation, BooleanEngine::Exact),
-            BackendErrorKind::ComputationFailed,
-        )
+    fn batch<'a>(
+        solids: impl Iterator<Item = &'a Self>,
+        operation: OpType,
+    ) -> Result<Self, BackendError> {
+        let mut solids = solids;
+        let mut result = solids.next().map_or_else(Manifold::empty, |s| s.0.clone());
+        for solid in solids {
+            result = result.boolean_with_engine(&solid.0, operation, BooleanEngine::Exact);
+        }
+        checked(result, BackendErrorKind::ComputationFailed)
     }
 
     pub fn to_mesh(&self) -> Result<TriangleMesh, BackendError> {
@@ -371,13 +375,14 @@ impl CsgConnector for ManifoldCsgConnector {
     ) -> Result<SolidId, BackendError> {
         let solids = operands
             .iter()
-            .map(|&id| self.solid(id).cloned())
+            .map(|&id| self.solid(id))
             .collect::<Result<Vec<_>, _>>()?;
-        let result = match operation {
-            BooleanOp::Union => Solid::union_all(&solids),
-            BooleanOp::Difference => Solid::difference_all(&solids),
-            BooleanOp::Intersection => Solid::intersection_all(&solids),
-        }?;
+        let operation = match operation {
+            BooleanOp::Union => OpType::Add,
+            BooleanOp::Difference => OpType::Subtract,
+            BooleanOp::Intersection => OpType::Intersect,
+        };
+        let result = Solid::batch(solids.into_iter(), operation)?;
         self.insert(result)
     }
 

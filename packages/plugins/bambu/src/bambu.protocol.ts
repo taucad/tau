@@ -128,7 +128,7 @@ const temperature = (value: unknown, maximum: number): Quantity | undefined => {
   const parsed = finite({ value, minimum: -50, maximum });
   return parsed === undefined
     ? undefined
-    : quantity({
+    : bambuQuantity({
         value: parsed,
         unit: 'Cel',
         kind: quantityKinds.temperature,
@@ -217,7 +217,11 @@ const alertCodes = (
     : Object.freeze([...codes].map((code) => Object.freeze({ code })));
 };
 
-const quantity = (
+/** Build one declared-only physical quantity without undefined fields, so bounded JSON clones admit it. @internal
+ * @param input - Native value, unit, quantity kind and space.
+ * @returns Frozen quantity.
+ */
+export const bambuQuantity = (
   input: Readonly<{
     value: number;
     unit: string;
@@ -469,7 +473,7 @@ export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuSt
     ...(nozzleDiameter === undefined
       ? {}
       : {
-          nozzleDiameter: quantity({
+          nozzleDiameter: bambuQuantity({
             value: nozzleDiameter,
             unit: 'mm',
             kind: quantityKinds.diameter,

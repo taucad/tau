@@ -16,6 +16,7 @@ import type {
   MachineSnapshot,
   MachineStill,
   MachineSubmissionReceipt,
+  MachineTransferReceipt,
   MachineTransportTrust,
 } from '@taucad/runtime/machine';
 import { checkOperation, createQuantity, quantityKinds } from '@taucad/units/quantity';
@@ -36,8 +37,6 @@ import {
   parseBambuStill,
   parseBambuVersionPayload,
 } from '#bambu.protocol.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
-import { createBambuSimulator } from '#bambu.simulator.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { prepareBambuArtifact } from '#bambu.archive.js';
 
@@ -333,7 +332,7 @@ export const captureBambuStill = async (
 /** Connect one host-owned, pinned MQTTS observation session.
  * @param input - Admitted connection input.
  * @param runtime - Host-owned secret, clock, log and bounded network services.
- * @returns Read-only machine session; physical writes remain unavailable until later runway stages.
+ * @returns One live machine session. The simulator is a separate provider (`bambuSimulatorMachine`).
  */
 export const connectBambuMachine = async (
   input: MachineConnectInput<Binding>,
@@ -702,6 +701,7 @@ export const connectBambuMachine = async (
           operations: [
             'observe',
             'prepare',
+            'upload',
             'submit',
             'pause',
             'resume',
@@ -754,14 +754,6 @@ export const connectBambuMachine = async (
             observedAt: runtime.clock.now(),
           };
         }
-        if (!runtime.uploadFile) {
-          return {
-            status: 'rejected',
-            code: 'TRANSFER_UNAVAILABLE',
-            message: 'The host does not provide bounded FTPS transfer.',
-            observedAt: runtime.clock.now(),
-          };
-        }
         const { configuration } = prepareInput;
         const observedStatus = status;
         const actualModel = observedStatus?.model ?? input.candidate.claimedIdentity.model;
@@ -796,23 +788,9 @@ export const connectBambuMachine = async (
             runtime,
             signal: prepareInput.signal,
           });
-          const remoteName = bambuRemoteName(prepareInput.operationId);
-          const transfer = await runtime.uploadFile({
-            endpoint: { address: input.candidate.endpoint.address, port: 990 },
-            trust: input.connection.serviceTrust['ftp'] ?? trust,
-            secretRef: input.connection.secretRef,
-            username: 'bblp',
-            remoteName,
-            bytes: artifact.bytes,
-            connectTimeout: 15_000,
-            signal: prepareInput.signal,
-          });
-          if (transfer.bytesWritten !== artifact.length) {
-            throw new Error('BAMBU_TRANSFER_PARTIAL');
-          }
           return {
-            status: 'transferred',
-            remoteName,
+            status: 'ready',
+            remoteName: bambuRemoteName(prepareInput.operationId),
             digest: artifact.digest,
             length: artifact.length,
             parser: artifact.parser,
@@ -822,11 +800,88 @@ export const connectBambuMachine = async (
         } catch {
           return {
             status: 'rejected',
-            code: 'TRANSFER_FAILED',
-            message: 'The artifact failed bounded verification or transfer.',
+            code: 'ARTIFACT_INVALID',
+            message: 'The artifact failed bounded verification.',
             observedAt: runtime.clock.now(),
           };
         }
+      },
+      async uploadPrint(uploadInput): Promise<MachineTransferReceipt> {
+        const providerRecord = isRecord(uploadInput.providerData) ? uploadInput.providerData : undefined;
+        if (uploadInput.expectedMachineId !== serial || !remoteNamePattern.test(uploadInput.remoteName)) {
+          return {
+            status: 'rejected',
+            code: 'PREPARATION_INVALID',
+            message: 'The prepared artifact identity is invalid.',
+            observedAt: runtime.clock.now(),
+          };
+        }
+        if (!runtime.uploadFile) {
+          return {
+            status: 'rejected',
+            code: 'TRANSFER_UNAVAILABLE',
+            message: 'The host does not provide bounded FTPS transfer.',
+            observedAt: runtime.clock.now(),
+          };
+        }
+        let artifact;
+        try {
+          artifact = await prepareBambuArtifact({
+            artifact: uploadInput.artifact,
+            runtime,
+            signal: uploadInput.signal,
+          });
+        } catch {
+          return {
+            status: 'rejected',
+            code: 'ARTIFACT_INVALID',
+            message: 'The artifact failed bounded verification.',
+            observedAt: runtime.clock.now(),
+          };
+        }
+        if (providerRecord?.['memberMd5'] !== artifact.memberMd5) {
+          return {
+            status: 'rejected',
+            code: 'PREPARATION_INVALID',
+            message: 'The artifact changed since it was prepared.',
+            observedAt: runtime.clock.now(),
+          };
+        }
+        let bytesWritten: number;
+        try {
+          ({ bytesWritten } = await runtime.uploadFile({
+            endpoint: { address: input.candidate.endpoint.address, port: 990 },
+            trust: input.connection.serviceTrust['ftp'] ?? trust,
+            secretRef: input.connection.secretRef,
+            username: 'bblp',
+            remoteName: uploadInput.remoteName,
+            bytes: artifact.bytes,
+            connectTimeout: 15_000,
+            signal: uploadInput.signal,
+          }));
+        } catch {
+          return {
+            status: 'unknown',
+            reason: 'transfer-result-unavailable',
+            observedAt: runtime.clock.now(),
+          };
+        }
+        if (bytesWritten !== artifact.length) {
+          return {
+            status: 'rejected',
+            code: 'TRANSFER_PARTIAL',
+            message: 'The transfer ended before the whole artifact was written.',
+            observedAt: runtime.clock.now(),
+          };
+        }
+        // The printer holds exactly one object per remote name, so the name is the transfer evidence.
+        return {
+          status: 'transferred',
+          transferId: uploadInput.remoteName,
+          digest: artifact.digest,
+          length: artifact.length,
+          observedAt: runtime.clock.now(),
+        };
       },
       async submit(submitInput) {
         const { providerData } = submitInput;
@@ -835,6 +890,7 @@ export const connectBambuMachine = async (
         if (
           submitInput.expectedMachineId !== serial ||
           !remoteNamePattern.test(submitInput.remoteName) ||
+          submitInput.transferId !== submitInput.remoteName ||
           !providerRecord ||
           Object.keys(providerRecord).length !== 1 ||
           typeof memberMd5 !== 'string' ||
@@ -923,5 +979,5 @@ export const connectBambuMachine = async (
     };
     return Object.freeze(session);
   }
-  return createBambuSimulator().session;
+  throw new Error('BAMBU_SIMULATOR_IS_A_SEPARATE_PROVIDER');
 };

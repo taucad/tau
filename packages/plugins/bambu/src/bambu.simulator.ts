@@ -1,17 +1,26 @@
-import { createQuantity, quantityKinds } from '@taucad/units/quantity';
+import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineMachine } from '@taucad/runtime/machine';
 import type {
   MachineCommandReceipt,
   MachineDescriptor,
   MachineSession,
   MachineSnapshot,
   MachineSubmissionReceipt,
+  MachineTransferReceipt,
 } from '@taucad/runtime/machine';
+import { quantityKinds } from '@taucad/units/quantity';
+import { z } from 'zod';
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
-import { bambuRemoteName, parseBambuStill } from '#bambu.protocol.js';
+import { bambuAcceptedContainers, bambuSubmissionConfiguration } from '#bambu.machine.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+import { bambuX1cManifest } from '#bambu.manifest.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+import { bambuQuantity, bambuRemoteName, parseBambuStill } from '#bambu.protocol.js';
 
 /** Deterministic fault switches accepted by the simulator. @internal */
 export type BambuSimulatorFault =
+  | 'approval-required-not-honored'
   | 'camera-unavailable'
   | 'certificate-changed'
   | 'partial-transfer'
@@ -47,41 +56,25 @@ export type BambuSimulator = Readonly<{
     }>
   >;
   reconnect(): void;
+  /** Remote names the simulator holds after an accepted upload; a start never adds one. */
   uploadedNames(): readonly string[];
+  /** Every physical write in order: `upload:<remoteName>`, `start:<operationId>`, `<command>:<operationId>`. */
   writes(): readonly string[];
 }>;
 
-const simulatedQuantity = (
-  input: Readonly<{
-    value: number;
-    unit: string;
-    kind: string;
-    space: 'linear' | 'point';
-  }>,
-) => {
-  const result = createQuantity({
-    ...input,
-    semanticMode: 'declared-only',
-  });
-  if (result.status !== 'success') {
-    throw new Error('BAMBU_SIMULATOR_UNITS');
-  }
-  return result.value;
-};
-
-const nozzle = simulatedQuantity({
+const nozzle = bambuQuantity({
   value: 0.4,
   unit: 'mm',
   kind: quantityKinds.diameter,
   space: 'linear',
 });
-const nozzleTemperature = simulatedQuantity({
+const nozzleTemperature = bambuQuantity({
   value: 215,
   unit: 'Cel',
   kind: quantityKinds.temperature,
   space: 'point',
 });
-const bedTemperature = simulatedQuantity({
+const bedTemperature = bambuQuantity({
   value: 60,
   unit: 'Cel',
   kind: quantityKinds.temperature,
@@ -89,6 +82,7 @@ const bedTemperature = simulatedQuantity({
 });
 
 const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+const simulatedSerial = 'simulated-x1c';
 
 /** Create one deterministic, socket-free X1C simulator for conformance and UI fixtures.
  * @param input - Optional closed fault selection.
@@ -102,6 +96,18 @@ export const createBambuSimulator = (
   const writeLog: string[] = [];
   const observations: MachineSnapshot[] = [];
   const commandResults = new Map<string, Readonly<{ command: string; receipt: MachineSubmissionReceipt }>>();
+  let wake: (() => void) | undefined;
+  const idle = async (signal: AbortSignal): Promise<void> =>
+    new Promise<void>((resolve) => {
+      wake = resolve;
+      signal.addEventListener(
+        'abort',
+        () => {
+          resolve();
+        },
+        { once: true },
+      );
+    });
   let generation = 1;
   let closed = false;
   let runId: string | undefined;
@@ -129,6 +135,18 @@ export const createBambuSimulator = (
         bed: bedTemperature,
       }),
     });
+  const observe = (): void => {
+    observations.push(snapshot());
+    wake?.();
+    wake = undefined;
+  };
+  const guardApproval = (write: string): void => {
+    // The tripwire proves a host never touches the device before an explicit approval.
+    if (faults.has('approval-required-not-honored')) {
+      writeLog.push(`unapproved-${write}`);
+      throw new Error('BAMBU_SIMULATOR_UNAPPROVED_WRITE');
+    }
+  };
   const receipt = (operation: string, command: string): MachineSubmissionReceipt => {
     const accepted: MachineSubmissionReceipt = Object.freeze({
       status: 'accepted',
@@ -146,25 +164,14 @@ export const createBambuSimulator = (
     return accepted;
   };
   const descriptor: MachineDescriptor = Object.freeze({
-    id: 'simulated-x1c',
+    id: simulatedSerial,
     name: 'Simulated X1C',
     vendor: 'Bambu Lab',
     model: 'X1 Carbon',
     technology: 'additive.fff',
     firmware: 'simulator-1',
-    accepts: Object.freeze([
-      Object.freeze({
-        contract: Object.freeze({
-          id: 'manufacturing.toolpath.bambu-gcode-3mf',
-          version: 1,
-        }),
-        mediaType: 'application/vnd.bambulab.gcode-3mf',
-        requiredMembers: Object.freeze(['Metadata/plate_1.gcode']),
-        payloadSelection: 'plate',
-        technology: 'additive.fff',
-      }),
-    ]),
-    operations: Object.freeze(['prepare', 'submit', 'pause', 'resume', 'cancel', 'urgent-stop', 'still']),
+    accepts: bambuAcceptedContainers,
+    operations: Object.freeze(['prepare', 'upload', 'submit', 'pause', 'resume', 'cancel', 'urgent-stop', 'still']),
     ratedEnvelope: Object.freeze({
       width: 0.256,
       depth: 0.256,
@@ -208,16 +215,39 @@ export const createBambuSimulator = (
       return snapshot();
     },
     async *observe(input_) {
-      while (!input_.signal.aborted && observations.length > 0) {
+      while (!input_.signal.aborted) {
         const next = observations.shift();
         if (next) {
           yield Object.freeze({ type: 'snapshot', snapshot: next });
+          continue;
         }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- the stream idles until the next physical change or abort.
+        await idle(input_.signal);
       }
     },
     async preparePrint(input_) {
-      const remoteName = bambuRemoteName(input_.operationId);
-      writeLog.push(`upload:${remoteName}`);
+      if (input_.expectedMachineId !== simulatedSerial) {
+        return Object.freeze({
+          status: 'rejected',
+          code: 'IDENTITY_MISMATCH',
+          message: 'The prepared machine identity changed.',
+          observedAt: now(),
+        });
+      }
+      return Object.freeze({
+        status: 'ready',
+        remoteName: bambuRemoteName(input_.operationId),
+        digest: input_.artifact.digest,
+        length: input_.artifact.length,
+        parser: Object.freeze({ id: 'tau.bambu.gcode-3mf', version: '1' }),
+        providerData: Object.freeze({
+          memberMd5: '00000000000000000000000000000000',
+        }),
+        observedAt: now(),
+      });
+    },
+    async uploadPrint(input_): Promise<MachineTransferReceipt> {
+      guardApproval(`upload:${input_.remoteName}`);
       if (faults.has('storage-full')) {
         return Object.freeze({
           status: 'rejected',
@@ -234,21 +264,19 @@ export const createBambuSimulator = (
           observedAt: now(),
         });
       }
-      uploaded.add(remoteName);
+      writeLog.push(`upload:${input_.remoteName}`);
+      uploaded.add(input_.remoteName);
       return Object.freeze({
         status: 'transferred',
-        remoteName,
+        transferId: input_.remoteName,
         digest: input_.artifact.digest,
         length: input_.artifact.length,
-        parser: Object.freeze({ id: 'tau.bambu.gcode-3mf', version: '1' }),
-        providerData: Object.freeze({
-          memberMd5: '00000000000000000000000000000000',
-        }),
         observedAt: now(),
       });
     },
     async submit(input_) {
-      if (!uploaded.has(input_.remoteName)) {
+      guardApproval(`start:${input_.operationId}`);
+      if (!uploaded.has(input_.remoteName) || input_.transferId !== input_.remoteName) {
         return Object.freeze({
           status: 'rejected',
           code: 'PREPARATION_MISSING',
@@ -258,7 +286,7 @@ export const createBambuSimulator = (
       }
       writeLog.push(`start:${input_.operationId}`);
       runId = input_.operationId;
-      observations.push(snapshot());
+      observe();
       return receipt(input_.operationId, 'project_file');
     },
     async control(input_): Promise<MachineCommandReceipt> {
@@ -274,7 +302,7 @@ export const createBambuSimulator = (
       if (input_.command === 'cancel' || input_.command === 'urgent-stop') {
         runId = undefined;
       }
-      observations.push(snapshot());
+      observe();
       const command = input_.command === 'cancel' || input_.command === 'urgent-stop' ? 'stop' : input_.command;
       return receipt(input_.operationId, command);
     },
@@ -304,9 +332,13 @@ export const createBambuSimulator = (
         }),
     async close() {
       closed = true;
+      wake?.();
+      wake = undefined;
     },
     async dispose() {
       closed = true;
+      wake?.();
+      wake = undefined;
     },
   });
 
@@ -315,9 +347,60 @@ export const createBambuSimulator = (
     reconnect() {
       generation += 1;
       closed = false;
-      observations.push(snapshot());
+      observe();
     },
     uploadedNames: () => Object.freeze([...uploaded]),
     writes: () => Object.freeze([...writeLog]),
   });
 };
+
+const simulatorBindingConfiguration = defineConfiguration({
+  id: 'bambu.simulator.binding',
+  version: '1.0.0',
+  schema: z.object({ logicalId: z.string().min(1).max(64) }),
+  ui: { version: 1, rjsf: {} },
+});
+
+const defineSimulator = (input: Readonly<{ simulator?: BambuSimulator }>) =>
+  defineMachine({
+    id: 'bambu-simulator',
+    name: 'Simulated X1C',
+    version: '1.0.0',
+    protocolVersion: 1,
+    vendor: 'Bambu Lab',
+    technologies: ['additive.fff'],
+    accepts: bambuAcceptedContainers,
+    manifest: { ...bambuX1cManifest, identity: { ...bambuX1cManifest.identity, displayName: 'Simulated X1C' } },
+    bindingConfiguration: simulatorBindingConfiguration,
+    submissionConfiguration: bambuSubmissionConfiguration,
+    async *discover(discoveryInput, runtime) {
+      discoveryInput.signal.throwIfAborted();
+      const observedAt = runtime.clock.now();
+      yield {
+        type: 'found',
+        candidate: {
+          id: 'bambu-simulator',
+          name: 'Simulated X1C',
+          endpoint: { address: 'simulator.invalid', interface: 'simulator' },
+          claimedIdentity: { serial: simulatedSerial, model: 'X1C' },
+          observedAt,
+          expiresAt: new Date(Date.parse(observedAt) + 5 * 60_000).toISOString(),
+        },
+      };
+    },
+    async connect() {
+      return (input.simulator ?? createBambuSimulator()).session;
+    },
+  });
+
+/** Define the simulator provider around one explicit simulator, so a test can read its write ledger.
+ * @param input - Optional simulator every connection returns; omitted means one fresh simulator per connection.
+ * @returns The `bambu-simulator` provider factory.
+ * @internal
+ */
+export const defineBambuSimulatorMachine = (
+  input: Readonly<{ simulator?: BambuSimulator }> = {},
+): ReturnType<typeof defineSimulator> => defineSimulator(input);
+
+/** Selectable, explicitly labeled simulated X1C provider (blueprint D10); no sockets, no hardware. @public */
+export const bambuSimulatorMachine = defineBambuSimulatorMachine();

@@ -10,6 +10,7 @@ import type {
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
+import { toRpcError } from '@taucad/chat/rpc';
 import type { JsonValue } from '@taucad/agent-host';
 import { ResourceQueue } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -19,6 +20,8 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
+import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
+import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
 const emptyFileSystem = (): RpcFileSystem => ({
   readFile: async () => 'export const main = 1;\n',
@@ -275,6 +278,33 @@ describe('createChatToolRegistry invocation', () => {
         success: true,
         files: [{ artifactPath: '.tau/artifacts/call-1__main.ts-stl/model.stl' }],
       },
+    });
+  });
+
+  it('should drop the exportOptions a model adds to export_geometry before the runtime export', async () => {
+    const exportModel = vi.fn<RuntimeAgentClient['export']>(async () => ({
+      success: true,
+      data: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
+      issues: [],
+    }));
+    const { graphics } = createRuntimeAgentClients({
+      runtime: { evaluate: vi.fn<RuntimeAgentClient['evaluate']>(), export: exportModel },
+      exportImage: vi.fn(),
+      mapRuntimeError: (error) => toRpcError(error),
+    });
+
+    const result = await invoke(build({ graphics }), 'export_geometry', {
+      input: {
+        targetFile: 'main.ts',
+        format: 'stl',
+        exportOptions: { engine: 'service', service: { url: 'https://slicer.example.com', token: 'stolen-token' } },
+      },
+    });
+
+    expect(result).toMatchObject({ isError: false, content: { success: true } });
+    expect(exportModel).toHaveBeenCalledExactlyOnceWith('stl', {
+      source: { path: 'main.ts' },
+      signal: expect.any(AbortSignal) as AbortSignal,
     });
   });
 

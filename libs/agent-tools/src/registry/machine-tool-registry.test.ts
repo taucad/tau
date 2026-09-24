@@ -1,17 +1,33 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type { HostToolInvocation, InterruptResolution, JsonValue } from '@taucad/agent-host';
+import { ResourceQueue } from '@taucad/filesystem';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type {
   MachineArtifactReference,
   MachineClient,
   MachineDirectoryEntry,
+  MachineProvider,
   PrintRequest,
 } from '@taucad/runtime/machine';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import { slicerOptionsSchema, slicerTranscoder } from '@taucad/slicer';
+import { assertRootedPath } from '@taucad/utils/path';
 import { requestPrintInputSchema } from '@taucad/chat';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
+import { toRpcError } from '@taucad/chat/rpc';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
+import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import { createMachineToolRegistry } from '#registry/machine-tool-registry.js';
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
+import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
+import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
 const timestamp = '2026-09-14T00:00:00.000Z';
 // SAFETY: a well-formed sha256 literal for the branded digest a fixture reference carries.
@@ -39,7 +55,20 @@ const entry = (machineId: string, name: string): MachineDirectoryEntry =>
   ({
     machineId,
     providerId: 'bambu',
-    descriptor: { id: `physical-${machineId}`, name, model: 'X1C' },
+    descriptor: {
+      id: `physical-${machineId}`,
+      name,
+      model: 'X1C',
+      accepts: [
+        {
+          contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+          mediaType: 'application/vnd.bambulab.gcode-3mf',
+          requiredMembers: ['Metadata/plate_1.gcode'],
+          payloadSelection: 'plate',
+          technology: 'additive.fff',
+        },
+      ],
+    },
     snapshot: {
       connection: 'connected',
       readiness: 'idle',
@@ -575,5 +604,118 @@ describe('machine tool registry', () => {
     expect(fixture.controlRun).not.toHaveBeenCalled();
     expect(fixture.requestPrint).not.toHaveBeenCalled();
     expect(fixture.startPrint).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * `request_print` as a host builds it: the chat registry, its own planner and
+ * export route, and a runtime whose slicing leg is the real reference engine
+ * over the slicer package's 20 mm cube. Only the kernel is a fixture.
+ */
+describe('request_print slicer options through the chat registry', () => {
+  const cube = {
+    name: 'cube.glb',
+    mimeType: 'model/gltf-binary',
+    bytes: Uint8Array.from(
+      readFileSync(new URL('../../../../packages/plugins/slicer/src/__fixtures__/cube.glb', import.meta.url)),
+    ),
+  } as const;
+  const provider = {
+    id: 'bambu',
+    name: 'Bambu Lab',
+    manifest: {
+      toolhead: {
+        filamentDiameter: { value: 1.75, unit: 'mm' },
+        nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }],
+      },
+      bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+    },
+  } as unknown as MachineProvider;
+
+  const printHost = async () => {
+    const definition = await resolveRuntimePluginDefinition('transcoder', slicerTranscoder());
+    const transcoderRuntime = mock<TranscoderRuntime>({
+      logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      tracer: { startSpan: vi.fn(() => ({ end: vi.fn() })) },
+      signal: new AbortController().signal,
+    });
+    const slicerContext = await definition.initialize({}, transcoderRuntime);
+    /* The runtime validates export options against the edge's schema, then transcodes. */
+    const exportModel = vi.fn<RuntimeAgentClient['export']>(async (_format, { exportOptions }) =>
+      definition.transcode(
+        { from: 'glb', to: 'gcode.3mf', files: [cube], options: slicerOptionsSchema.parse(exportOptions ?? {}) },
+        transcoderRuntime,
+        slicerContext,
+      ),
+    );
+    const clients = createRuntimeAgentClients({
+      runtime: { evaluate: vi.fn<RuntimeAgentClient['evaluate']>(), export: exportModel },
+      exportImage: vi.fn(),
+      mapRuntimeError: (error) => toRpcError(error),
+    });
+    const ledger = clientFixture();
+    const recordView = composeView({ filesystem: new MemoryProvider() }, { consumer: 'user', policy: tauPathPolicy });
+    const mutations = new ResourceQueue();
+    const registry = createChatToolRegistry({
+      fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
+      recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
+      ...clients,
+      machines: { available: true, ...ledger.client, listProviders: async () => [provider] },
+      print: {
+        revisions: { describe: async () => ({ revisionId: 'revision-7' }) },
+        readArtifact: async ({ path }) => recordView.readFile(assertRootedPath(path)),
+      },
+      testingEnabled: false,
+    });
+    const requestPrint = async (toolCallId: string, input: JsonValue) =>
+      registry.invoke({ toolCallId, toolName: 'request_print', input, signal: new AbortController().signal });
+    return { exportModel, ledger, requestPrint };
+  };
+
+  it('should hand runtime.export exactly the preset and options the agent chose', async () => {
+    const host = await printHost();
+
+    const result = await host.requestPrint('call-fine', {
+      targetFile: 'main.ts',
+      preset: 'fine',
+      options: { walls: 3 },
+    });
+
+    expect(result).toMatchObject({ isError: false, content: { request: { state: 'awaiting-approval' } } });
+    expect(host.exportModel).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+      source: { path: 'main.ts' },
+      signal: expect.any(AbortSignal) as AbortSignal,
+      exportOptions: { walls: 3, preset: 'fine' },
+    });
+  });
+
+  it('should record more layers for a fine print of the cube than a fast one', async () => {
+    const host = await printHost();
+
+    await host.requestPrint('call-fast', { targetFile: 'main.ts', preset: 'fast' });
+    await host.requestPrint('call-fine', { targetFile: 'main.ts', preset: 'fine' });
+
+    expect(host.ledger.requests.get('call-fast')?.summary.layers).toBe(72);
+    expect(host.ledger.requests.get('call-fine')?.summary.layers).toBe(167);
+  });
+
+  it.each([
+    ['engine', 'service'],
+    ['service', { url: 'https://slicer.example.com', token: 'stolen-token' }],
+    ['bedSize', { x: 300, y: 300 }],
+    // The preset has one way in, the call's top-level `preset`.
+    ['preset', 'fine'],
+  ])('should refuse options.%s before any export, naming it, and leave the ledger untouched', async (key, value) => {
+    const host = await printHost();
+
+    const result = await host.requestPrint('call-1', { targetFile: 'main.ts', options: { [key]: value } });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED', message: expect.stringContaining(`"${key}"`) as string },
+    });
+    expect(host.exportModel).not.toHaveBeenCalled();
+    expect(host.ledger.requestPrint).not.toHaveBeenCalled();
+    expect(host.ledger.requests.size).toBe(0);
   });
 });

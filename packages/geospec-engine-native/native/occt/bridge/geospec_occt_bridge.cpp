@@ -847,19 +847,39 @@ void populate_occurrence_geometry(OccurrenceFacts& occurrence) {
   }
 }
 
-size_t product_index(const std::vector<ProductFacts>& products,
-                     const std::string& label) {
+std::map<std::string, size_t> index_products(
+    const std::vector<ProductFacts>& products) {
+  std::map<std::string, size_t> indices;
   for (size_t index = 0; index < products.size(); ++index) {
-    if (products[index].label == label) return index;
+    indices.emplace(products[index].label, index);
   }
+  return indices;
+}
+
+size_t product_index(const std::map<std::string, size_t>& products,
+                     const std::string& label) {
+  const auto found = products.find(label);
+  if (found != products.end()) return found->second;
   throw Standard_Failure("Occurrence product is absent from product facts.");
+}
+
+std::vector<std::vector<int>> index_product_owners(
+    size_t product_count, const std::vector<OccurrenceFacts>& occurrences) {
+  std::vector<std::vector<int>> owners(product_count);
+  for (size_t occurrence = 0; occurrence < occurrences.size(); ++occurrence) {
+    const size_t product = occurrences[occurrence].product;
+    if (product < product_count) {
+      owners[product].push_back(static_cast<int>(occurrence));
+    }
+  }
+  return owners;
 }
 
 void append_free_shape_occurrence(
     const occ::handle<XCAFDoc_ShapeTool>& shape_tool, const TDF_Label& root,
     size_t ordinal, const std::string& path,
     const ProductIdentityIndex& identity,
-    const std::vector<ProductFacts>& products,
+    const std::map<std::string, size_t>& products,
     std::vector<OccurrenceFacts>& output) {
   OccurrenceFacts occurrence;
   occurrence.label = label_entry(root);
@@ -892,7 +912,7 @@ void append_occurrences(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
                         std::vector<uint32_t> ordinal_prefix,
                         int parent_index,
                         const ProductIdentityIndex& identity,
-                        const std::vector<ProductFacts>& products,
+                        const std::map<std::string, size_t>& products,
                         std::vector<OccurrenceFacts>& output) {
   NCollection_Sequence<TDF_Label> components;
   if (!XCAFDoc_ShapeTool::GetComponents(assembly, components)) return;
@@ -1101,6 +1121,8 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
                       std::vector<FaceFacts>& whole_query_faces,
                       const std::vector<FaceView>& whole_faces,
                       std::vector<SubshapeFacts>& output) {
+  std::vector<std::vector<int>> owners = index_product_owners(
+      static_cast<size_t>(product_labels.Length()), occurrences);
   for (int product_index = 1; product_index <= product_labels.Length();
        ++product_index) {
     const TDF_Label& product = product_labels.Value(product_index);
@@ -1108,21 +1130,16 @@ void append_subshapes(const occ::handle<XCAFDoc_ShapeTool>& shape_tool,
     if (!XCAFDoc_ShapeTool::GetSubShapes(product, labels)) continue;
     const TopoDS_Shape product_shape = shape_tool->GetShape(product);
 
-    std::vector<int> owners;
-    for (size_t occurrence = 0; occurrence < occurrences.size(); ++occurrence) {
-      if (occurrences[occurrence].product ==
-          static_cast<size_t>(product_index - 1)) {
-        owners.push_back(static_cast<int>(occurrence));
-      }
-    }
-    if (owners.empty()) owners.push_back(-1);
+    std::vector<int>& product_owners =
+        owners[static_cast<size_t>(product_index - 1)];
+    if (product_owners.empty()) product_owners.push_back(-1);
 
     for (const TDF_Label& label : labels) {
       const std::string name = label_name(label);
       const TopoDS_Shape shape = XCAFDoc_ShapeTool::GetShape(label);
       const int type = shape.IsNull() ? -1 : subshape_type(shape.ShapeType());
       if (name.empty() || type < 0) continue;
-      for (const int owner : owners) {
+      for (const int owner : product_owners) {
         int face = -1;
         if (shape.ShapeType() == TopAbs_FACE) {
           if (owner >= 0) {
@@ -5714,6 +5731,7 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
       result->products.push_back(
           {label_entry(product), resolved_product_name(product, identity)});
     }
+    const auto product_indices = index_products(result->products);
     std::vector<std::string> root_names;
     std::map<std::string, size_t> root_totals;
     for (const TDF_Label& root : roots) {
@@ -5737,11 +5755,11 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                   "]";
         }
         append_free_shape_occurrence(shape_tool, root, root_index + 1, path,
-                                     identity, result->products,
+                                     identity, product_indices,
                                      result->occurrences);
       }
       append_occurrences(shape_tool, root, XCAFDoc_ShapeTool::GetLocation(root),
-                         "", {}, -1, identity, result->products,
+                         "", {}, -1, identity, product_indices,
                          result->occurrences);
       ++root_index;
     }

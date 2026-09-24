@@ -1653,6 +1653,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       { route: 'machines', operation: 'machines.list' },
       { route: 'machines', operation: 'machines.get' },
       { route: 'machines', operation: 'machines.preparePrint' },
+      { route: 'machines', operation: 'machines.uploadPrint' },
       { route: 'machines', operation: 'machines.startPrint' },
       { route: 'machines', operation: 'machines.reconcileOperation' },
     ],
@@ -1751,6 +1752,16 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       },
       signal: cancellation.signal,
     });
+    const uploaded = await client.uploadPrint({
+      machineId: activeConfiguration.logicalId,
+      preparedId: prepared.preparedId,
+      preparedDigest: prepared.preparedDigest,
+      operationId: `${printOperationId}-upload`,
+      signal: cancellation.signal,
+    });
+    if (uploaded.status !== 'accepted' || uploaded.kind !== 'upload') {
+      throw new QualificationError('X1C_UPLOAD_NOT_ACCEPTED');
+    }
     process.stdout.write(
       `${JSON.stringify({ stage: 'print-cube', status: 'uploaded', artifactSha256: cubeArtifactDigest.slice(7), amsSlot: 0, bedType: 'hot_plate', nozzleDiameterMm: 0.4 })}\n`,
     );
@@ -1759,6 +1770,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       machineId: activeConfiguration.logicalId,
       preparedId: prepared.preparedId,
       preparedDigest: prepared.preparedDigest,
+      transferId: uploaded.evidence.transferId,
       expectedSetupDigest: prepared.setupDigest,
       operationId: printOperationId,
       signal: cancellation.signal,
@@ -1777,7 +1789,7 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       }
     }
     if (receipt.status === 'rejected') {
-      if (receipt.message?.toLowerCase().includes('verify failed')) {
+      if (receipt.message.toLowerCase().includes('verify failed')) {
         throw new QualificationError('X1C_DEVELOPER_MODE_REQUIRED');
       }
       throw new QualificationError('X1C_START_REJECTED');

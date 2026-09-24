@@ -1,6 +1,10 @@
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
+import type { MachineAcceptedContainer } from '@taucad/runtime/machine';
 import { z } from 'zod';
+
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+import { bambuX1cManifest } from '#bambu.manifest.js';
 
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
@@ -13,7 +17,8 @@ const bindingConfiguration = defineConfiguration({
   ui: { version: 1, rjsf: {} },
 });
 
-const submissionConfiguration = defineConfiguration({
+/** Submission schema shared by the LAN provider and the simulator. @internal */
+export const bambuSubmissionConfiguration = defineConfiguration({
   id: 'bambu.machine.submission',
   version: '1.0.0',
   schema: z.object({
@@ -44,6 +49,17 @@ const submissionConfiguration = defineConfiguration({
   ui: { version: 1, rjsf: {} },
 });
 
+/** The one container contract the X1C accepts. @internal */
+export const bambuAcceptedContainers: readonly MachineAcceptedContainer[] = [
+  {
+    contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+    mediaType: 'application/vnd.bambulab.gcode-3mf',
+    requiredMembers: ['Metadata/plate_1.gcode'],
+    payloadSelection: 'plate',
+    technology: 'additive.fff',
+  },
+];
+
 /** `bambu` physical-machine capability. @public */
 export const bambuMachine = defineMachine({
   id: 'bambu',
@@ -52,17 +68,10 @@ export const bambuMachine = defineMachine({
   protocolVersion: 1,
   vendor: 'Bambu Lab',
   technologies: ['additive.fff'],
-  accepts: [
-    {
-      contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-      mediaType: 'application/vnd.bambulab.gcode-3mf',
-      requiredMembers: ['Metadata/plate_1.gcode'],
-      payloadSelection: 'plate',
-      technology: 'additive.fff',
-    },
-  ],
+  accepts: bambuAcceptedContainers,
+  manifest: bambuX1cManifest,
   bindingConfiguration,
-  submissionConfiguration,
+  submissionConfiguration: bambuSubmissionConfiguration,
   async *discover(input, runtime) {
     // eslint-disable-next-line import-x/no-extraneous-dependencies -- lazy package-import self-reference resolves this package's host source.
     const { discoverBambuMachines } = await import('#bambu.host.js');

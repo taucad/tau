@@ -292,9 +292,6 @@ describe('Bambu read-only controller', () => {
     );
     expect(JSON.stringify({ descriptor, snapshot })).not.toMatch(/access-code|192\.0\.2\.10|sha256:/u);
     expect(published).toEqual(expect.arrayContaining([expect.stringContaining('"command":"get_version"')]));
-    if (!session.preparePrint) {
-      throw new Error('Expected prepared-print capability');
-    }
     const prepared = await session.preparePrint({
       operationId: 'prepared-1',
       expectedMachineId: '00M00A391800004',
@@ -303,11 +300,12 @@ describe('Bambu read-only controller', () => {
       signal: new AbortController().signal,
     });
     expect(prepared).toMatchObject({
-      status: 'transferred',
+      status: 'ready',
       remoteName: 'tau-prepared-1.gcode.3mf',
       digest: artifactDigest,
       length: bytes.byteLength,
     });
+    expect(uploadFile).not.toHaveBeenCalled();
     await expect(
       session.preparePrint({
         operationId: 'prepared-2',
@@ -320,6 +318,25 @@ describe('Bambu read-only controller', () => {
         signal: new AbortController().signal,
       }),
     ).resolves.toMatchObject({ status: 'rejected', code: 'SETUP_UNQUALIFIED' });
+    if (prepared.status !== 'ready') {
+      throw new Error('Expected ready preparation');
+    }
+    const transfer = await session.uploadPrint({
+      operationId: 'upload-1',
+      expectedMachineId: '00M00A391800004',
+      artifact,
+      remoteName: prepared.remoteName,
+      providerData: prepared.providerData,
+      configuration,
+      signal: new AbortController().signal,
+    });
+    expect(transfer).toEqual({
+      status: 'transferred',
+      transferId: 'tau-prepared-1.gcode.3mf',
+      digest: artifactDigest,
+      length: bytes.byteLength,
+      observedAt: '2026-09-14T00:00:01.000Z',
+    });
     expect(uploadFile).toHaveBeenCalledWith(
       expect.objectContaining({
         endpoint: { address: '192.0.2.10', port: 990 },
@@ -330,8 +347,8 @@ describe('Bambu read-only controller', () => {
     );
     expect(uploadFile).toHaveBeenCalledOnce();
     expect(published).not.toEqual(expect.arrayContaining([expect.stringContaining('project_file')]));
-    if (prepared.status !== 'transferred') {
-      throw new Error('Expected transferred preparation');
+    if (transfer.status !== 'transferred') {
+      throw new Error('Expected transferred upload');
     }
     await expect(
       session.submit({
@@ -339,6 +356,7 @@ describe('Bambu read-only controller', () => {
         expectedMachineId: '00M00A391800004',
         artifact,
         remoteName: prepared.remoteName,
+        transferId: transfer.transferId,
         providerData: prepared.providerData,
         configuration,
         signal: new AbortController().signal,

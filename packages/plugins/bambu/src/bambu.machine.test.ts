@@ -12,9 +12,11 @@ vi.mock('#bambu.host.js', () => {
   };
 });
 
+// Importing the provider module is not the behavior under test; keep it outside the per-test budget.
+const { bambuMachine } = await import('#bambu.machine.js');
+
 describe('bambuMachine', () => {
   it('should keep host dependencies lazy until an explicit operation', async () => {
-    const { bambuMachine } = await import('#bambu.machine.js');
     expect(loaded.count).toBe(0);
     const registration = bambuMachine();
     expect(() => structuredClone(registration)).not.toThrow();

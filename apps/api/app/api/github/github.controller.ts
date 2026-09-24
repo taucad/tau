@@ -7,6 +7,8 @@ import {
   Delete,
   Get,
   Header,
+  HttpCode,
+  HttpStatus,
   Param,
   Post,
   Query,
@@ -20,6 +22,7 @@ import { GithubService } from '#api/github/github.service.js';
 import type { Environment } from '#config/environment.config.js';
 
 type AuthenticatedRequest = FastifyRequest & { session: { session: { id: string } } };
+type StartBody = Readonly<{ returnTo?: unknown; completionMode?: unknown }>;
 const pageOf = (value: string | undefined): number => {
   const page = Number(value ?? '1');
   if (!Number.isSafeInteger(page) || page < 1 || page > 10_000) {
@@ -51,24 +54,26 @@ export class GithubController {
   public async start(
     @User('id') userId: string,
     @Req() request: AuthenticatedRequest,
-    @Body() body: { returnTo?: string; completionMode?: 'browser' | 'desktop-poll' },
+    @Body() body: unknown,
   ): ReturnType<GithubService['start']> {
     const { origin } = request.headers;
     if (origin !== this.frontendOrigin && origin !== 'app://tau') {
       throw new BadRequestException({ code: 'ORIGIN_INVALID' });
     }
-    return this.github.start(userId, request.session.session.id, body.returnTo, body.completionMode);
+    const { returnTo, completionMode } = typeof body === 'object' && body !== null ? (body as StartBody) : {};
+    return this.github.start(userId, request.session.session.id, returnTo, completionMode);
   }
 
+  /** GitHub's redirect target: always answers with a redirect to the completion page, never with JSON. */
   @Get('callback')
   @PublicAuth()
   public async callback(
-    @Query('state') state: string,
-    @Query('code') code: string,
+    @Query() query: Readonly<{ state?: unknown; code?: unknown; error?: unknown }>,
     @Res() reply: FastifyReply,
   ): Promise<void> {
-    const result = await this.github.callback(state, code);
-    void reply.redirect(this.github.completionUrl(result.attemptId, result.returnTo, result.completionMode));
+    const location = await this.github.callback(query);
+    // Explicit status: Nest has already set 200 on the reply, and Fastify's redirect keeps a status set earlier.
+    void reply.redirect(location, HttpStatus.FOUND);
   }
 
   @Get('configuration')
@@ -82,9 +87,11 @@ export class GithubController {
   public async complete(
     @User('id') userId: string,
     @Req() request: AuthenticatedRequest,
-    @Body() body: { attemptId: string },
+    @Body() body: unknown,
   ): ReturnType<GithubService['complete']> {
-    return this.github.complete(userId, request.session.session.id, body.attemptId);
+    const attemptId =
+      typeof body === 'object' && body !== null ? (body as { attemptId?: unknown }).attemptId : undefined;
+    return this.github.complete(userId, request.session.session.id, typeof attemptId === 'string' ? attemptId : '');
   }
 
   @Get('connections')
@@ -104,11 +111,13 @@ export class GithubController {
   }
 
   @Delete('connections/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
   public async remove(@User('id') userId: string, @Param('id') id: string): ReturnType<GithubService['remove']> {
     return this.github.remove(userId, id);
   }
 
   @Delete('connection-attempts/:attemptId')
+  @HttpCode(HttpStatus.NO_CONTENT)
   public async cancel(
     @User('id') userId: string,
     @Req() request: AuthenticatedRequest,
@@ -147,6 +156,27 @@ export class GithubController {
     @Query('page') page?: string,
   ): ReturnType<GithubService['branches']> {
     return this.github.branches(userId, connectionId, idOf(id), pageOf(page));
+  }
+
+  @Get('repositories/:id')
+  @Header('Cache-Control', 'no-store')
+  public async repository(
+    @User('id') userId: string,
+    @Param('id') id: string,
+    @Query('connectionId') connectionId: string,
+  ): ReturnType<GithubService['repository']> {
+    return this.github.repository(userId, connectionId, idOf(id));
+  }
+
+  @Get('repositories/:id/branch')
+  @Header('Cache-Control', 'no-store')
+  public async branch(
+    @User('id') userId: string,
+    @Param('id') id: string,
+    @Query('connectionId') connectionId: string,
+    @Query('name') name: unknown,
+  ): ReturnType<GithubService['branch']> {
+    return this.github.branch(userId, connectionId, idOf(id), name);
   }
 
   @Get('repositories/:id/tree')

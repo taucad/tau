@@ -115,6 +115,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       errorResponse = this.fromHttpException(exception, request.url, requestId);
+      /* A structured refusal may carry its own retry estimate (`GITHUB_RATE_LIMITED`);
+       * it travels as the standard header, not as an extra body member. */
+      const body = exception.getResponse();
+      const retryAfterSeconds =
+        typeof body === 'object' ? (body as { retryAfterSeconds?: unknown }).retryAfterSeconds : undefined;
+      if (typeof retryAfterSeconds === 'number' && Number.isSafeInteger(retryAfterSeconds) && retryAfterSeconds >= 0) {
+        void response.header('retry-after', String(retryAfterSeconds));
+      }
     } else if (exception instanceof Error) {
       // Handle unknown errors
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;

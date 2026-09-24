@@ -16,6 +16,7 @@ import { AppModule } from '#app.module.js';
 import { getEnvironment } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
+import { redactUrlQuery } from '#logger/logger-factory.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { createTauCorsOriginValidator } from '#utils/cors.utils.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
@@ -62,7 +63,12 @@ async function createApiApp() {
   });
 
   const fastifyInstance = app.getHttpAdapter().getInstance();
-  const fastifyOtel = new FastifyOtelInstrumentation();
+  const fastifyOtel = new FastifyOtelInstrumentation({
+    // The request span records `url.path` with its query; OAuth callbacks carry `code` and `state` there.
+    requestHook: (span, request) => {
+      span.setAttribute('url.path', redactUrlQuery(request.url));
+    },
+  });
   await fastifyInstance.register(fastifyOtel.plugin());
 
   const viewCookieSecret = appConfig.get('TAU_VIEW_COOKIE_SECRET', { infer: true });

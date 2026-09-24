@@ -34,5 +34,11 @@ export const loggingRedactPaths = [
 ];
 export const redactionCensor = '**REDACTED**';
 
+// OAuth callbacks carry a single-use `code` and `state` in the query; request logs keep only these paths.
+export const loggingRedactQueryPaths: readonly RegExp[] = [
+  /^\/v1\/github\/callback\/?$/iu,
+  /^\/v1\/auth\/callback\/[^/]+\/?$/iu,
+];
+
 export const defaultPageLimit = 10;
 export const defaultCurrentPage = 1;

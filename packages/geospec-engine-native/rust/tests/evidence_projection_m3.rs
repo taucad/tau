@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use geospec_engine_native_core::{
     backend::{
@@ -22,17 +22,26 @@ fn unsupported() -> BackendError {
     unreachable!("projection-only mock does not call geometry operations")
 }
 
-struct ProjectionBrepConnector;
+#[derive(Default)]
+struct ProjectionBrepConnector {
+    opens: Rc<Cell<u32>>,
+    alternate_profile: Rc<Cell<bool>>,
+}
 
 impl BrepConnector for ProjectionBrepConnector {
     fn identity_profile(&self) -> BrepIdentityProfile {
         BrepIdentityProfile {
             ingest_profile: "projection-test-step-v1",
-            backend_profile: "projection-test-brep-v1",
+            backend_profile: if self.alternate_profile.get() {
+                "projection-test-brep-v2"
+            } else {
+                "projection-test-brep-v1"
+            },
         }
     }
 
     fn open_step(&self, _: &[u8]) -> Result<Box<dyn BrepSubject>, BackendError> {
+        self.opens.set(self.opens.get() + 1);
         Ok(Box::new(ProjectionBrep))
     }
 }
@@ -229,6 +238,98 @@ fn claim(engine: &Engine, subject: Value, capability: &str, payload: Value) -> V
     .unwrap()
 }
 
+fn step_request(bytes: &[u8], name: Option<&str>) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "method": "ingestSubject", "requestId": "step",
+        "protocolVersion": 3, "registryVersion": 5,
+        "canonicalProfile": "geospec-jcs-v1", "format": "step",
+        "frame": {"coordinateSystem": "z-up", "sourceUnit": "auto", "outputUnit": "mm"},
+        "ingestOptions": name.map_or_else(|| json!({}), |name| json!({"name": name})),
+        "primaryByteLength": bytes.len(), "resources": []
+    }))
+    .unwrap()
+}
+
+#[test]
+fn should_skip_step_open_only_for_exact_retained_source_options_and_profile() {
+    let opens = Rc::new(Cell::new(0));
+    let alternate_profile = Rc::new(Cell::new(false));
+    let mut engine = Engine::with_backends(
+        EngineConfig::entry(),
+        Box::new(ProjectionBrepConnector {
+            opens: Rc::clone(&opens),
+            alternate_profile: Rc::clone(&alternate_profile),
+        }),
+        Box::new(UnusedCsg),
+    );
+    let bytes = b"raw STEP A";
+    let first = engine
+        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .unwrap();
+    let repeat = engine
+        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .unwrap();
+    assert_eq!(first, repeat);
+    assert_eq!(opens.get(), 1);
+
+    let mut invalid: Value = serde_json::from_slice(&step_request(bytes, None)).unwrap();
+    invalid["frame"]["outputUnit"] = json!("m");
+    assert_eq!(
+        engine
+            .ingest_subject(
+                &serde_json::to_vec(&invalid).unwrap(),
+                bytes.to_vec(),
+                vec![]
+            )
+            .unwrap_err()
+            .code(),
+        "invalid-request"
+    );
+    assert_eq!(opens.get(), 1);
+
+    let changed_bytes = engine
+        .ingest_subject(
+            &step_request(b"raw STEP B", None),
+            b"raw STEP B".to_vec(),
+            vec![],
+        )
+        .unwrap();
+    let named = engine
+        .ingest_subject(&step_request(bytes, Some("named")), bytes.to_vec(), vec![])
+        .unwrap();
+    alternate_profile.set(true);
+    let changed_profile = engine
+        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .unwrap();
+    assert_ne!(first, changed_bytes);
+    assert_ne!(first, named);
+    assert_ne!(first, changed_profile);
+    assert_eq!(opens.get(), 4);
+    let observations: Value = serde_json::from_slice(&engine.observations()).unwrap();
+    assert_eq!(observations["physical"]["admissions"], "5");
+    assert_eq!(observations["physical"]["parses"], "4");
+    assert_eq!(observations["physical"]["identityBuilds"], "4");
+    assert_eq!(observations["copies"]["inputCopies"], "0");
+
+    let mut limits = EngineConfig::entry();
+    limits.analysis.max_mesh_bytes = 0;
+    let mut uncached = Engine::with_backends(
+        limits,
+        Box::new(ProjectionBrepConnector {
+            opens: Rc::clone(&opens),
+            alternate_profile,
+        }),
+        Box::new(UnusedCsg),
+    );
+    uncached
+        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .unwrap();
+    uncached
+        .ingest_subject(&step_request(bytes, None), bytes.to_vec(), vec![])
+        .unwrap();
+    assert_eq!(opens.get(), 6);
+}
+
 #[test]
 fn should_project_analyze_mesh_stats_into_the_source_operation_envelope() {
     let manifest: Value = serde_json::from_str(include_str!("fixtures/mesh-entry.json")).unwrap();
@@ -273,7 +374,7 @@ fn should_project_analyze_mesh_stats_into_the_source_operation_envelope() {
 fn should_refuse_requested_validity_measurements_that_are_absent() {
     let mut engine = Engine::with_backends(
         EngineConfig::entry(),
-        Box::new(ProjectionBrepConnector),
+        Box::new(ProjectionBrepConnector::default()),
         Box::new(UnusedCsg),
     );
     let bytes = b"projection-only STEP mock".to_vec();

@@ -635,6 +635,36 @@ describe('composite fields', () => {
   });
 });
 
+describe('field labels', () => {
+  it('should name every widget by the label its row shows', () => {
+    renderSchemaForm({
+      schema: {
+        type: 'object',
+        properties: {
+          speed: { type: 'number', title: 'Demo speed' },
+          host: { type: 'string', title: 'Printer address' },
+          lit: { type: 'boolean', title: 'Chamber light' },
+          quality: { type: 'string', title: 'Print quality', enum: ['draft', 'fine'] },
+          tags: { type: 'array', title: 'Tags', items: { type: 'string' } },
+        },
+      },
+      formData: { speed: 1, host: 'printer.local', lit: false, quality: 'draft', tags: ['one'] },
+    });
+
+    /* WCAG 2.5.3: each control's accessible name contains the label its row shows. */
+    for (const [role, name, label] of [
+      ['textbox', 'Input for Demo Speed', 'Demo Speed'],
+      ['textbox', 'Input for Printer Address', 'Printer Address'],
+      ['switch', 'Toggle for Chamber Light', 'Chamber Light'],
+      ['combobox', 'Select for Print Quality', 'Print Quality'],
+      ['textbox', 'Input for Tags 1', 'Tags 1'],
+    ] as const) {
+      expect(screen.getByLabelText(`Parameter: ${label}`)).toHaveTextContent(label);
+      expect(screen.getByRole(role, { name })).toBeInTheDocument();
+    }
+  });
+});
+
 describe('root presentation', () => {
   const schema: RJSFSchema = {
     type: 'object',

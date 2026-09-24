@@ -112,8 +112,8 @@ describe('MachinesSettings', () => {
     await waitFor(() => {
       expect(add).toBeEnabled();
     });
-    /* Left at real time, the demo speed stays the simulator's own default and is not sent. */
-    expect(await screen.findByRole('textbox', { name: 'Input for Speed' })).toHaveValue('1');
+    /* Left at its declared real-time default, the demo speed is not sent. */
+    expect(await screen.findByRole('textbox', { name: 'Input for Demo Speed' })).toHaveValue('1');
 
     fireEvent.click(add);
 
@@ -136,9 +136,9 @@ describe('MachinesSettings', () => {
     renderSettings();
     const simulator = screen.getByRole('region', { name: 'Simulated X1C' });
     expect(simulator).toHaveTextContent('Its settings only change the simulation; they are not printer settings.');
-    const speed = await within(simulator).findByRole('textbox', { name: 'Input for Speed' });
+    const speed = await within(simulator).findByRole('textbox', { name: 'Input for Demo Speed' });
     expect(speed).toHaveValue('1');
-    expect(within(simulator).getByText('Demo Speed')).toBeInTheDocument();
+    expect(within(simulator).getByLabelText('Parameter: Demo Speed')).toHaveTextContent('Demo Speed');
     expect(
       within(simulator).getByText('Simulated seconds per real second, so a long print can be watched in minutes'),
     ).toBeInTheDocument();

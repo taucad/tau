@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react';
 import type { RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { getSchemaType } from '@rjsf/utils';
 import { projectParameterField, resolveParameterBinding } from '@taucad/parameters';
@@ -34,6 +35,18 @@ const isLengthUnit = (unit: string | undefined): boolean => {
   );
 };
 
+/** The label a field's row shows, provided by the field template around its widget. */
+export const FieldLabelContext = createContext<string | undefined>(undefined);
+
+/**
+ * The label a widget names itself by: the one its row shows, so the accessible name contains the
+ * visible label (WCAG 2.5.3), else its formatted property name outside a field row.
+ *
+ * @param name - The widget's property name.
+ * @returns The label.
+ */
+export const useFieldLabel = (name: string): string => useContext(FieldLabelContext) ?? formatDisplayLabel(name);
+
 export function ParametersWidget(
   props: WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.JSX.Element {
@@ -44,7 +57,7 @@ export function ParametersWidget(
   const { formContext } = registry;
   const fieldPath = useRenderedFieldPath()?.path;
 
-  const prettyLabel = name ? formatDisplayLabel(name) : '';
+  const prettyLabel = useFieldLabel(name);
   const defaultValue = schema.default as string | number | boolean | undefined;
   const type =
     Array.isArray(schema.type) && !(schema.type.length === 2 && schema.type.includes('null'))

@@ -27,7 +27,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { ConfigurationFields, MachineDetails, isSimulatedProvider } from '#components/settings/machine-details.js';
-import type { ConfigurationFieldsView } from '#components/settings/machine-details.js';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { useMachineDirectory } from '#hooks/use-machines.js';
@@ -47,28 +46,8 @@ type BindInput = {
   readonly fields?: Readonly<Record<string, unknown>>;
 };
 
-/**
- * How the add flow shows the simulator's binding fields: the host names the machine itself, and
- * the demo speed says it is one and starts at real time.
- *
- * ponytail: keyed to `bambu.simulator.binding` 1.1.0, which declares `speed` with no title or
- * default. Once the provider declares both, only the `logicalId` omission is needed here.
- *
- * @param view - The declared fields.
- * @returns The fields as the add flow shows them.
- */
-const presentSimulatorBinding = ({ schema, values }: ConfigurationFieldsView): ConfigurationFieldsView => {
-  const properties = Object.fromEntries(Object.entries(schema.properties ?? {}).filter(([key]) => key !== 'logicalId'));
-  const { speed } = properties;
-  const required = schema.required?.filter((key) => key !== 'logicalId');
-  if (typeof speed !== 'object') {
-    return { schema: { ...schema, properties, required }, values };
-  }
-  return {
-    schema: { ...schema, properties: { ...properties, speed: { title: 'Demo speed', ...speed } }, required },
-    values: { speed: 1, ...values },
-  };
-};
+/** The bind flow names the machine itself, so its binding form does not offer the logical id. */
+const flowFilledFields: readonly string[] = ['logicalId'];
 
 /**
  * Bind one machine end to end: discover it, begin the host-local ceremony and,
@@ -242,7 +221,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             name='binding'
             configuration={simulator.bindingConfiguration}
             values={simulatorFields}
-            present={presentSimulatorBinding}
+            omit={flowFilledFields}
             onChange={setSimulatorFields}
           />
         )}

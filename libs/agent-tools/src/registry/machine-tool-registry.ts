@@ -234,12 +234,14 @@ const resolveMachine = async (
   signal: AbortSignal,
 ): Promise<Readonly<{ entry: MachineDirectoryEntry; cursor: MachineDirectoryCursor }>> => {
   const { cursor, entries } = await client.list({ signal });
-  if (machineId !== undefined) {
-    const found = entries.find((entry) => entry.machineId === machineId);
+  // Models fill an optional field with a blank instead of omitting it.
+  const wanted = machineId?.trim();
+  if (wanted !== undefined && wanted !== '') {
+    const found = entries.find((entry) => entry.machineId === wanted);
     if (found) {
       return { entry: found, cursor };
     }
-    throw new Error(`No machine ${machineId} is bound. Bound machines: ${describeMachines(entries) || 'none'}.`);
+    throw new Error(`No machine ${wanted} is bound. Bound machines: ${describeMachines(entries) || 'none'}.`);
   }
   if (entries.length === 1) {
     return { entry: entries[0]!, cursor };
@@ -461,10 +463,7 @@ const invokeMachine = async (
     }
     case 'get_machine': {
       const { machineId } = inputs.get_machine.parse(input);
-      if (machineId !== undefined) {
-        return asJson(await client.get({ machineId, signal }));
-      }
-      const { entry } = await resolveMachine(client, undefined, signal);
+      const { entry } = await resolveMachine(client, machineId, signal);
       return asJson(entry);
     }
     case 'request_print': {

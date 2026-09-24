@@ -415,9 +415,10 @@ const runLifecycle = ({ context, event }: ChatSessionArgs<EventOf<'runLifecycle'
     return {
       target: '.finishing',
       context: {
+        /* After `identity`: a new run id has already cleared the old reason. */
         ...identity,
+        ...(event.phase === 'failed' ? { failureReason: event.reason } : {}),
         outcome: event.phase,
-        failureReason: event.phase === 'failed' ? event.reason : context.failureReason,
         ...clearRunDetail,
       },
     };

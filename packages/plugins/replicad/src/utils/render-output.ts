@@ -2,7 +2,7 @@ import type { AnyShape, Drawing } from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
 import type { GeometrySvg, RuntimeSpanTracer } from '@taucad/runtime/types';
-import type { ShapeConfig, Model } from '#model.js';
+import type { ShapeConfig } from '#model.js';
 import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
 import { normalizeColor } from '#utils/normalize-color.js';
 import type { GeometryReplicad } from '#replicad.types.js';
@@ -81,9 +81,6 @@ type PrototypeGroup = {
   prototype: MeshableInstance;
   instances: MeshableInstance[];
 };
-
-/** Union of all valid return types from a Replicad model's main function. */
-export type MainResultShapes = AnyShape | AnyShape[] | InputShape | InputShape[] | Model | undefined;
 
 const isSvgable = (shape: unknown): shape is Svgable => {
   return (

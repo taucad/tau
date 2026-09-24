@@ -46,6 +46,18 @@ export const quitChannels = {
  */
 export const externalAgentsChannel = 'tau:external-agents';
 
+/**
+ * The native half of the machine binding ceremony (blueprint D9, D10).
+ *
+ * `beginBinding` travels over the brokered `machines` port and answers with a
+ * ceremony id; the secret that completes it never rides that channel. The
+ * renderer posts it here, main forwards it to the services utility, and the
+ * utility keeps it in its own protected store under an opaque reference.
+ */
+export const machinesChannels = {
+  completeBinding: 'tau:machines:complete-binding',
+} as const;
+
 /** IPC methods for bounded compute-store authority controls. */
 export const computeControlChannels = {
   inspect: 'tau:compute:inspect',

@@ -7,9 +7,12 @@
  * `process.parentPort`, which Electron exposes as a process global rather than
  * through the `electron` module, so the invariant survives the transport.
  *
- * It hosts three concerns, one dedicated port each. Renderer filesystem,
+ * It hosts four concerns, one dedicated port each. Renderer filesystem,
  * runtime filesystem, agent tools, and revision preparation all derive rooted
- * clients from one internal authority channel. The agent host is ruling C3's
+ * clients from one internal authority channel. The machines concern (blueprint
+ * D9) serves the node machine host — the real Bambu provider beside the
+ * simulator (D10) — over the same broker, one journal per utility lifetime
+ * under the app's protected machine directory. The agent host is ruling C3's
  * **launcher 2**: `createNodeAgentLauncher` from `@taucad/agent-host`, bound to
  * main's `MessagePortMain` by the port-agnostic `serveAgentChannel` the daemon's
  * WebSocket route also calls. Same host, same T0 vocabulary, different wire —
@@ -24,6 +27,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -37,13 +41,34 @@ import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { createNodeAgentLauncher, serveAgentChannel } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
 import {
   createAcpExternalAgentPort,
   createHostMcpEndpoint,
+  createMachineSecretStore,
+  createNodeMachineRuntime,
   createProjectRevisions,
   hostRevisionActor,
+  localMachineFacet,
+  machineRouteGrants,
+  machineWorkspaceId,
+  openMachineHostIdentity,
+  probeCertificateTrust,
 } from '@taucad/host';
-import type { AcpAdapter, HostMcpEndpoint, ProjectRevisions, TurnCheckout } from '@taucad/host';
+import type {
+  AcpAdapter,
+  HostMcpEndpoint,
+  MachineHostIdentity,
+  MachineSecretStore,
+  ProjectRevisions,
+  TurnCheckout,
+} from '@taucad/host';
+import { wrapMessagePortMain } from '@taucad/rpc';
+import { createHostAdmissionAuthority } from '@taucad/runtime/host';
+import type { HostAdmissionAuthority } from '@taucad/runtime/host';
+import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import type { NodeMachineHost } from '@taucad/runtime/host/node';
+import type { MachineBindingOutcome, MachineTransportTrust } from '@taucad/runtime/machine';
 import { createHostGeoSpecRunner, createHostToolRegistry } from '@taucad/host/agent-tools';
 import type { HostGeoSpecRuntimeClient, HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -88,6 +113,23 @@ export const refusedRuntimePortMessage = (reason: unknown): string =>
   typeof reason === 'string' && reason.length > 0
     ? `Main refused the desktop runtime-port request: ${reason}`
     : 'Main refused the desktop runtime-port request.';
+
+/**
+ * Every operation the renderer's machines channel may perform on this host.
+ *
+ * The whole served surface: the person at the desktop is the operator, and the
+ * physical gate is the host's own print-request approval, not a narrower grant.
+ */
+/** The native completion of one binding ceremony (D10); the secret lives here and nowhere else. */
+export type MachineBindingCompletion = Readonly<{ ceremonyId: string; address?: string; accessCode?: string }>;
+
+/** The machine host and the trusted seams only this utility may call. */
+type MachineHostServices = Readonly<{
+  host: NodeMachineHost;
+  admission: HostAdmissionAuthority;
+  identity: MachineHostIdentity;
+  secrets: MachineSecretStore;
+}>;
 
 /** What `createAcpExternalAgentPort` is handed to offer an agent the `tau` server. */
 type McpBinding = NonNullable<Parameters<typeof createAcpExternalAgentPort>[0]['mcp']>;
@@ -192,6 +234,11 @@ export type ServicesHostOptions = {
   /** Host-owned authority metadata directory, outside every authored root. */
   readonly authorityDirectory?: string;
   /**
+   * Protected directory for the machine host's journal, identity and secret
+   * custody (D9). Absent, the `machines` concern is refused.
+   */
+  readonly machinesDirectory?: string;
+  /**
    * Diagnostics sink; defaults to stdout, which main forwards to
    * `userData/logs`. `level` is omitted for the ordinary informational trace
    * and named only where a line is a refusal an operator has to find.
@@ -236,6 +283,11 @@ export type ServicesHostOptions = {
   readonly quiesced?: (outcome: ServicesHostQuiesceOutcome) => void;
   /** Reply to main once one project launcher has fully stopped. */
   readonly agentHostReleased?: (requestId: string, error?: string) => void;
+  /** Reply to main with one binding ceremony's outcome, or why it failed. */
+  readonly machineBindingCompleted?: (
+    requestId: string,
+    result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string }>,
+  ) => void;
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -288,6 +340,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     agentHostReleased,
     authorityDirectory,
     gitExecutable,
+    machineBindingCompleted,
+    machinesDirectory,
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
@@ -315,6 +369,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * point of the portable host. */
   const launchers = new Map<string, NodeAgentLauncher>();
   const launcherGenerations = new Map<string, number>();
+  /** The machines facet each project's tool registry was offered, closed with its launcher. */
+  const machineFacets = new Map<string, ReturnType<typeof localMachineFacet>>();
   const launcherProjectIds = new Map<string, string>();
   const revisionRoots = new Map<string, ProjectRevisions>();
   type DesktopRuntime = ReturnType<typeof createDesktopRuntime>;
@@ -326,6 +382,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let quiescence: Promise<void> | undefined;
   let authToken: string | undefined;
   let agentHostConfig: AgentHostConfig | undefined;
+  /* One machine host per utility lifetime (D9): opened on the first machines
+   * concern or ceremony, surviving every renderer reload, closed on quiesce.
+   * Workspace ids are digests of the roots that asked, so a provider's
+   * artifact read resolves back to the tree that owns the file. */
+  let machineHost: Promise<MachineHostServices> | undefined;
+  const machineWorkspaceRoots = new Map<string, string>();
   /** Connections parked until main's `agentHost` frame lands. @see serveAgentHost */
   const agentHostConfigWaiters = new Set<() => void>();
   let internalAuthorityStopped: Promise<void> | undefined;
@@ -483,6 +545,145 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     return internalAuthorityStopped;
   };
 
+  const openMachineHost = async (directory: string): Promise<MachineHostServices> => {
+    const identity = await openMachineHostIdentity(directory);
+    const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
+    const secrets = createMachineSecretStore(directory);
+    const authorityRoot = join(directory, 'authority');
+    await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
+    const host = await createNodeMachineHost({
+      authorityRoot,
+      ...identity,
+      admission,
+      providers: [bambuMachine(), bambuSimulatorMachine()],
+      runtime: createNodeMachineRuntime({
+        secrets,
+        readArtifact: async (workspaceId, artifact) => {
+          const root = machineWorkspaceRoots.get(workspaceId);
+          if (root === undefined) {
+            throw new Error('MACHINE_WORKSPACE_UNKNOWN');
+          }
+          const bytes = await providerForAgentRoot(root).readFile(artifact.path);
+          if (typeof bytes === 'string') {
+            throw new TypeError('MACHINE_ARTIFACT_MISMATCH');
+          }
+          return bytes;
+        },
+        log: (workspaceId, entry) => {
+          log(
+            'machines.provider',
+            { workspaceId, ...entry },
+            entry.level === 'error' || entry.level === 'warning' ? 'warn' : undefined,
+          );
+        },
+      }),
+      onError: (error) => {
+        log('machines.error', error instanceof Error ? error.message : String(error), 'warn');
+      },
+    });
+    log('machine-host-opened', { hostId: identity.hostId });
+    return { host, admission, identity, secrets };
+  };
+
+  // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the once-per-utility contract.
+  const ensureMachineHost = (): Promise<MachineHostServices> => {
+    if (machinesDirectory === undefined) {
+      return Promise.reject(new Error('The desktop services host has no machine directory.'));
+    }
+    machineHost ??= (async (): Promise<MachineHostServices> => {
+      try {
+        return await openMachineHost(machinesDirectory);
+      } catch (error) {
+        /* A failed open is forgotten, so the next concern retries rather than
+         * inheriting a rejection for the rest of the utility's life. */
+        machineHost = undefined;
+        throw error;
+      }
+    })();
+    return machineHost;
+  };
+
+  const closeMachineHost = async (): Promise<void> => {
+    const pending = machineHost;
+    machineHost = undefined;
+    if (pending === undefined) {
+      return;
+    }
+    const { host } = await pending;
+    await host.close();
+    log('machine-host-closed');
+  };
+
+  /**
+   * Complete one binding ceremony with this host's own secret custody (D10).
+   *
+   * Trust is pinned on first use from the address the person typed: MQTT is
+   * required (the provider refuses to connect without it), the camera pin is
+   * best-effort (without it stills stay unsupported), and the FTPS transfer
+   * falls back to the MQTT pin inside the provider. The simulator has neither
+   * an address nor a secret.
+   *
+   * ponytail: pins are taken silently; when an operator review of the digest
+   * is wanted, return the probed trust to the settings form before committing.
+   */
+  const completeMachineBinding = async (input: MachineBindingCompletion): Promise<MachineBindingOutcome> => {
+    const { host, secrets } = await ensureMachineHost();
+    const secretRef = input.accessCode === undefined ? 'none' : await secrets.store(input.accessCode);
+    const serviceTrust: Record<string, MachineTransportTrust> = {};
+    if (input.address !== undefined) {
+      serviceTrust['mqtt'] = await probeCertificateTrust({ address: input.address, port: 8883 });
+      try {
+        serviceTrust['camera'] = await probeCertificateTrust({ address: input.address, port: 322 });
+      } catch {
+        /* Stills stay unsupported on this binding. */
+      }
+    }
+    return host.completeBinding({ ceremonyId: input.ceremonyId, secretRef, serviceTrust });
+  };
+
+  /**
+   * Bind one renderer connection to the machine host over the transferred port.
+   *
+   * @param port - The utility's leg of main's `MessageChannelMain`.
+   * @param context - The connection's context; `workspaceRoot` scopes the session.
+   */
+  const serveMachines = async (port: UtilityPort, context: Record<string, unknown> | undefined): Promise<void> => {
+    const requested = context?.['workspaceRoot'];
+    if (typeof requested !== 'string' || !isTrustedRoot(requested)) {
+      log('machines.untrusted-root', { workspaceRoot: requested }, 'warn');
+      port.close();
+      return;
+    }
+    const workspaceRoot = canonicalPath(requested);
+    const workspaceId = machineWorkspaceId(workspaceRoot);
+    machineWorkspaceRoots.set(workspaceId, workspaceRoot);
+    let services: MachineHostServices;
+    try {
+      services = await ensureMachineHost();
+    } catch (error) {
+      log('machines.unavailable', error instanceof Error ? error.message : String(error), 'warn');
+      port.close();
+      return;
+    }
+    if (quiescing || disposed) {
+      port.close();
+      return;
+    }
+    const session = services.admission.issueTrustedSession({
+      actor: { kind: 'user', id: 'desktop' },
+      authorityId: services.identity.authorityId,
+      workspaceId,
+      grants: machineRouteGrants,
+    });
+    /* `@taucad/rpc` reports the port's death to the channel server, which
+     * closes itself; the session is revoked with it. */
+    const channel = services.host.serve({ port: wrapMessagePortMain(port), session, workspaceId });
+    channel.onClose(() => {
+      services.admission.revoke(session);
+    });
+    log('machines-served', { workspaceRoot });
+  };
+
   /** Stop one project's launcher and every utility resource rooted beneath it. */
   const releaseAgentHost = async (
     workspaceRoot: string,
@@ -504,6 +705,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
     launchers.delete(workspaceRoot);
     launcherGenerations.delete(workspaceRoot);
+    machineFacets.get(workspaceRoot)?.close();
+    machineFacets.delete(workspaceRoot);
     launcherProjectIds.delete(workspaceRoot);
     revisionRoots.delete(workspaceRoot);
     const checkoutsRoot = resolve(join(dirname(workspaceRoot), '.tau', 'checkouts', projectId));
@@ -574,6 +777,28 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         for (const waiting of agentHostConfigWaiters) {
           waiting();
         }
+        return;
+      }
+      case 'machine-binding-complete': {
+        const { requestId, ceremonyId, address, accessCode } = frame;
+        if (typeof requestId !== 'string' || typeof ceremonyId !== 'string') {
+          return;
+        }
+        // async-iife: bootstrap -- a control frame has no caller to await the ceremony.
+        void (async () => {
+          try {
+            const outcome = await completeMachineBinding({
+              ceremonyId,
+              ...(typeof address === 'string' ? { address } : {}),
+              ...(typeof accessCode === 'string' ? { accessCode } : {}),
+            });
+            machineBindingCompleted?.(requestId, { outcome });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            log('machines.binding-failed', message, 'warn');
+            machineBindingCompleted?.(requestId, { error: message });
+          }
+        })();
         return;
       }
       case 'agent-host-release': {
@@ -904,11 +1129,17 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         });
         projectRevisions = revisions;
         revisionRoots.set(workspaceRoot, revisions);
+        /* The agent's own machines facet: served by this utility's machine host
+         * over an in-process channel once it opens, on a session of its own
+         * beside the window's (D9). */
+        const machines = localMachineFacet(async (port) => serveMachines(port, { workspaceRoot }));
+        machineFacets.set(workspaceRoot, machines);
         const toolRegistry = createHostToolRegistry({
           workspaceRoot,
           checkouts,
           systemSkillBundles,
           revisions: revisions.history,
+          machines,
           ...(internalChannel === undefined ? {} : { filesystem: providerForAgentRoot }),
           /* Rooted per run, exactly as the daemon does it: a candidate turn's kernel
            * and GeoSpec tools read the checkout its file tools write, because the
@@ -1026,6 +1257,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       ),
     );
     await settleAll(closingLaunchers, failures);
+    /* After the launchers: a print in flight is the host's own journaled
+     * effect, and closing drains its queue before the writer lock is released. */
+    await settleAll([closeMachineHost()], failures);
     await settleAll([stopAuthority()], failures);
     if (failures.length > 0) {
       throw new AggregateError(failures, 'The services host could not quiesce every accepted operation.');
@@ -1082,6 +1316,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
        * up until these closes finish. */
       const closingLaunchers = [...launchers.values()].map(async (launcher) => closeForDispose(launcher));
       launchers.clear();
+      const closingMachines = (async (): Promise<void> => {
+        try {
+          await closeMachineHost();
+        } catch (error) {
+          log('machine-host-close-failed', error instanceof Error ? error.message : String(error));
+        }
+      })();
       for (const disposeFileSystem of nodeFileSystemDisposers) {
         closingFileSystems.push(reportForcedFileSystemDisposal(disposeFileSystem));
       }
@@ -1106,8 +1347,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       const settleForcedCleanup = async (): Promise<void> => {
         await Promise.allSettled(
           gracefulSettlement === undefined
-            ? [...closingFileSystems, ...closingLaunchers]
-            : [gracefulSettlement, ...closingFileSystems, ...closingLaunchers],
+            ? [...closingFileSystems, ...closingLaunchers, closingMachines]
+            : [gracefulSettlement, ...closingFileSystems, ...closingLaunchers, closingMachines],
         );
         try {
           await stopAuthority();
@@ -1228,6 +1469,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           // async-iife: bootstrap -- a port that outran main's config frame
           // parks inside; a control frame has no caller to return to.
           void serveAgentHost(port, context);
+          return;
+        }
+        case 'machines': {
+          // async-iife: bootstrap -- the host opens on first use; a control frame has no caller to return to.
+          void serveMachines(port, context);
           return;
         }
         default: {

@@ -30,6 +30,9 @@ const authorityDirectory = process.env['TAU_DESKTOP_AUTHORITY_DIR'];
 if (!authorityDirectory) {
   throw new Error('The Tau services host requires a host-owned filesystem authority directory.');
 }
+/* Optional on purpose: a build that names no machine directory serves every
+ * other concern and answers the machines concern by closing its port. */
+const machinesDirectory = process.env['TAU_DESKTOP_MACHINES_DIR'];
 const diagnostics =
   logDirectory === undefined ? undefined : createDiagnosticsLog({ directory: logDirectory, producer: 'services' });
 const pendingRuntimePorts = new Map<
@@ -79,6 +82,7 @@ const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
 
 const host = createServicesHost({
   authorityDirectory,
+  ...(machinesDirectory === undefined || machinesDirectory === '' ? {} : { machinesDirectory }),
   requestRuntimePort,
   ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
   runtimeContext: (action, workspaceRoot, projectRoot) => {
@@ -94,6 +98,13 @@ const host = createServicesHost({
       type: error === undefined ? 'agent-host-released' : 'agent-host-release-failed',
       requestId,
     });
+  },
+  machineBindingCompleted: (requestId, result) => {
+    parentPort.postMessage(
+      'error' in result
+        ? { type: 'machine-binding-complete-failed', requestId, message: result.error }
+        : { type: 'machine-binding-completed', requestId, outcome: result.outcome },
+    );
   },
   ...(diagnostics === undefined
     ? {}

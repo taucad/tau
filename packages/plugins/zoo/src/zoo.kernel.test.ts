@@ -48,12 +48,14 @@ const createTrianglePrimitive = (materialName?: string): GlbPrimitive => ({
   normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
   indices: new Uint32Array([0, 1, 2]),
   material: {
-    baseColorFactor: [1, 1, 1, 1],
-    metallicFactor: 0,
-    roughnessFactor: 1,
     doubleSided: true,
     alphaMode: 'OPAQUE',
     ...(materialName ? { name: materialName } : {}),
+    pbrMetallicRoughness: {
+      baseColorFactor: [1, 1, 1, 1],
+      metallicFactor: 0,
+      roughnessFactor: 1,
+    },
   },
 });
 

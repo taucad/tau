@@ -4223,11 +4223,12 @@ const serializeHandle = (nativeHandle: NativeHandleEntry[]): unknown => {
   if (!replicadDefinition.serializeNativeHandle) {
     throw new Error('The replicad kernel declares serializeNativeHandle.');
   }
-  return replicadDefinition.serializeNativeHandle(
-    { nativeHandle },
+  const serialized = replicadDefinition.serializeNativeHandle(
+    { nativeHandle: { shapes: nativeHandle } },
     createMockKernelRuntime(),
     mock<ReplicadKernelContext>(),
   );
+  return (serialized as { shapes: unknown[] }).shapes;
 };
 
 describe('serializeNativeHandle', () => {

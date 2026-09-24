@@ -1,6 +1,7 @@
 import { transformMesh, transformPrimitive } from '@gltf-transform/functions';
 import type { Accessor, mat4, vec4, Document, Mesh, Primitive, PrimitiveTarget } from '@gltf-transform/core';
 import { resolveCoordinateTransform } from '@taucad/spatial';
+import type { Volume } from '@gltf-transform/extensions';
 
 /**
  * Shared gltf-transform utilities for applying coordinate system and scaling transformations.
@@ -155,6 +156,13 @@ function applyUniformScaleToDocument(document: Document, matrix: mat4, factor: n
   for (const node of document.getRoot().listNodes()) {
     const t = node.getTranslation();
     node.setTranslation([t[0] * factor, t[1] * factor, t[2] * factor]);
+  }
+  for (const material of document.getRoot().listMaterials()) {
+    const volume = material.getExtension<Volume>('KHR_materials_volume');
+    if (volume) {
+      volume.setThicknessFactor(volume.getThicknessFactor() * factor);
+      volume.setAttenuationDistance(volume.getAttenuationDistance() * factor);
+    }
   }
 }
 

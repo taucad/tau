@@ -11,7 +11,12 @@ import type {
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
 import type { JsonValue } from '@taucad/agent-host';
+import { ResourceQueue } from '@taucad/filesystem';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 
+import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
 
@@ -342,6 +347,64 @@ describe('createChatToolRegistry invocation', () => {
           '',
         ].join('\n'),
       );
+    });
+
+    /* Composed exactly as both hosts compose it (`packages/host/src/agent-tools.ts`,
+     * `apps/ui/app/workers/agent-host.impl.ts`): the agent's view and the record
+     * view over one checkout, under Tau's own path policy, which keeps
+     * `.tau/chats` read-only to the agent. */
+    it('should write the list through the record view that the agent view refuses', async () => {
+      const checkout = new MemoryProvider();
+      await checkout.writeFile('.tau/chats/chat_01/events.jsonl', '{"type":"run.lifecycle"}\n');
+      const agentView = composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
+      const recordView = composeView({ filesystem: checkout }, { consumer: 'user', policy: tauPathPolicy });
+      const mutations = new ResourceQueue();
+      const fileSystemFor = (signal: AbortSignal) =>
+        createProviderRpcFileSystem({ provider: agentView, mutations, signal });
+      const recordFileSystemFor = (signal: AbortSignal) =>
+        createProviderRpcFileSystem({ provider: recordView, mutations, signal });
+      const input = { chatId: 'chat_01', items };
+
+      await expect(invoke(build({ fileSystemFor }), 'update_todos', { input })).resolves.toStrictEqual({
+        isError: true,
+        content: {
+          success: false,
+          errorCode: 'PERMISSION_DENIED',
+          message: 'EROFS: this agent may read but not write .tau/chats/chat_01/todo.yaml; Tau records that itself.',
+        },
+      });
+      expect(await checkout.exists('.tau/chats/chat_01/todo.yaml')).toBe(false);
+
+      const result = await invoke(build({ fileSystemFor, recordFileSystemFor }), 'update_todos', { input });
+
+      expect(result).toStrictEqual({
+        isError: false,
+        content: {
+          success: true,
+          path: '.tau/chats/chat_01/todo.yaml',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+          counts: { pending: 1, in_progress: 1, done: 1 },
+        },
+      });
+      expect(await checkout.readFile('.tau/chats/chat_01/todo.yaml', 'utf8')).toBe(
+        [
+          'version: 1',
+          'items:',
+          '  - id: model-pyramid',
+          '    title: Model the pyramid',
+          '    status: done',
+          '  - id: slice-pyramid',
+          '    title: Slice the pyramid',
+          '    status: in_progress',
+          '    note: 0.2 mm layers',
+          '  - id: request-print',
+          '    title: Request the print',
+          '    status: pending',
+          '',
+        ].join('\n'),
+      );
+      /* The record route writes the list and nothing else of the chat's. */
+      expect(await checkout.readFile('.tau/chats/chat_01/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
     });
 
     it.each([

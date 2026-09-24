@@ -69,6 +69,13 @@ const rpcForTool: Readonly<Record<string, { readonly rpc: RpcName; readonly need
 };
 
 /**
+ * Records Tau writes on the agent's behalf. The agent's own composed view keeps
+ * `.tau/artifacts` and `.tau/chats` read-only, so these writes go through the
+ * host's record filesystem; each handler fences its own target path.
+ */
+const recordRpcNames = new Set<RpcName>([rpcName.exportGeometry, rpcName.writeTodos]);
+
+/**
  * The verdict tools whose answers the gate checks.
  *
  * Each one reports a kernel-computed outcome the agent reasons from, and each
@@ -161,7 +168,12 @@ export type ChatToolRegistryOptions = {
    * Always required: the file tools are the floor of every host.
    */
   readonly fileSystemFor: (signal: AbortSignal) => RpcFileSystem;
-  /** Host-owned record writer used only to persist `export_geometry` artifacts. */
+  /**
+   * Host-owned record writer, used only for the records Tau writes on the
+   * agent's behalf: `export_geometry` artifacts under `.tau/artifacts` and the
+   * `update_todos` list at `.tau/chats/<chatId>/todo.yaml`, both read-only in
+   * the agent's own view. Without it those writes go through `fileSystemFor`.
+   */
   readonly recordFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Backs `get_kernel_result`. */
   readonly kernelClient?: RpcRuntimeClient | undefined;
@@ -271,7 +283,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
       const preserveMutatingOutcome = mutatingRpcNames.has(mapped.rpc);
       try {
         const fileSystemFor =
-          mapped.rpc === rpcName.exportGeometry && options.recordFileSystemFor !== undefined
+          recordRpcNames.has(mapped.rpc) && options.recordFileSystemFor !== undefined
             ? options.recordFileSystemFor
             : options.fileSystemFor;
         const fileSystem = fileSystemFor(invocation.signal);

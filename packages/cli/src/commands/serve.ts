@@ -38,6 +38,18 @@ const computeStoreWorkerModulePath = (): string =>
     ),
   );
 
+/**
+ * The machine providers `--machines` serves: the Bambu Lab X1C and its
+ * socket-free simulator, the operator's dry-run device. Loaded on demand so a
+ * daemon without the flag never touches the vendor package.
+ *
+ * @returns The daemon's machines option.
+ */
+const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
+  const { bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
+  return { providers: [bambuMachine(), bambuSimulatorMachine()] };
+};
+
 const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {
   const plugins = Array.isArray(options.plugin)
     ? options.plugin.filter((value): value is string => typeof value === 'string')
@@ -281,6 +293,12 @@ export const serveCommand = defineCommand({
         'Offer external ACP agents (Claude Code, Codex) that resolve and whose CLI is installed; --no-external-agents withholds them',
       default: process.env['TAU_HOST_EXTERNAL_AGENTS'] !== 'false',
     },
+    machines: {
+      type: 'boolean',
+      description:
+        'Serve the machines route beside the agent channel with the Bambu Lab X1C provider and its simulator (TAU_HOST_MACHINES=true)',
+      default: process.env['TAU_HOST_MACHINES'] === 'true',
+    },
   },
   async run({ args }) {
     if (!args.trustProjects) {
@@ -297,6 +315,10 @@ export const serveCommand = defineCommand({
       throw new TypeError('--compute-mode must be off, memory, or durable');
     }
     const agent = agentOptions(args);
+    if (args.machines && !agent) {
+      throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
+    }
+    const machines = args.machines ? await machineProviders() : undefined;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;
@@ -337,6 +359,7 @@ export const serveCommand = defineCommand({
     const configuredAgent = agent
       ? {
           ...agent,
+          ...(machines ? { machines } : {}),
           compute: compute!,
           ...(args.computeMode === 'durable'
             ? {

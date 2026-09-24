@@ -20,6 +20,7 @@ import type {
 import { zipSync } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { bambuSubmissionConfiguration } from '#bambu.machine.js';
 import { bambuX1cManifest } from '#bambu.manifest.js';
 import { createBambuSimulator, defineBambuSimulatorMachine, readBambuSimulatedPlate } from '#bambu.simulator.js';
 import type { BambuSimulator } from '#bambu.simulator.js';
@@ -527,6 +528,26 @@ describe('Simulated X1C run progression', () => {
     });
     await expect(control(simulator, 'pause')).resolves.toMatchObject({ status: 'rejected', code: 'STALE_RUN' });
     expect(simulator.writes()).toEqual(['upload:tau-prepared-1.gcode.3mf', 'start:run-1', 'urgent-stop:urgent-stop-1']);
+  });
+
+  it('should name the run it controlled on every control receipt', async () => {
+    const simulator = createBambuSimulator({ clock: manualClock().clock });
+    await startRun(simulator);
+
+    await expect(control(simulator, 'pause')).resolves.toMatchObject({ status: 'accepted', providerRunId: 'run-1' });
+    await expect(control(simulator, 'resume')).resolves.toMatchObject({ status: 'accepted', providerRunId: 'run-1' });
+    await expect(control(simulator, 'urgent-stop')).resolves.toMatchObject({
+      status: 'accepted',
+      providerRunId: 'run-1',
+    });
+  });
+
+  it('should describe itself by the model its own submission schema expects, as the LAN provider does', async () => {
+    const descriptor = await createBambuSimulator().session.getDescriptor({ signal });
+
+    // A planner copies the reported model into `expectedModel`; the schema pins the normalized code.
+    expect(descriptor.model).toBe('X1C');
+    expect(bambuSubmissionConfiguration.schema.shape.expectedModel.safeParse(descriptor.model).success).toBe(true);
   });
 
   it('should declare the demo speed as a titled binding field that starts at real time', () => {

@@ -502,10 +502,10 @@ export const createBambuSimulator = (
       throw new Error('BAMBU_SIMULATOR_UNAPPROVED_WRITE');
     }
   };
-  const receipt = (operation: string, command: string): MachineSubmissionReceipt => {
+  const receipt = (operation: string, command: string, providerRunId?: string): MachineSubmissionReceipt => {
     const accepted: MachineSubmissionReceipt = Object.freeze({
       status: 'accepted',
-      providerRunId: operation,
+      ...(providerRunId ? { providerRunId } : {}),
       observedAt: clock.now(),
     });
     commandResults.set(operation, Object.freeze({ command, receipt: accepted }));
@@ -522,7 +522,7 @@ export const createBambuSimulator = (
     id: simulatedSerial,
     name: 'Simulated X1C',
     vendor: 'Bambu Lab',
-    model: 'X1 Carbon',
+    model: 'X1C',
     technology: 'additive.fff',
     firmware: 'simulator-1',
     accepts: bambuAcceptedContainers,
@@ -665,7 +665,7 @@ export const createBambuSimulator = (
       run = { id: input_.operationId, file: input_.remoteName, plate, startedAt: at, preheat, pausedFor: 0 };
       finished = undefined;
       changed();
-      return receipt(input_.operationId, 'project_file');
+      return receipt(input_.operationId, 'project_file', input_.operationId);
     },
     async control(input_): Promise<MachineCommandReceipt> {
       const at = simulated(clock.now());
@@ -679,6 +679,8 @@ export const createBambuSimulator = (
         });
       }
       writeLog.push(`${input_.command}:${input_.operationId}`);
+      // A stop clears the run, so the receipt names it from here.
+      const controlled = run?.id;
       switch (input_.command) {
         case 'pause': {
           if (run) {
@@ -704,7 +706,7 @@ export const createBambuSimulator = (
       }
       changed();
       const command = input_.command === 'cancel' || input_.command === 'urgent-stop' ? 'stop' : input_.command;
-      return receipt(input_.operationId, command);
+      return receipt(input_.operationId, command, controlled);
     },
     async reconcile(input_) {
       const stored = commandResults.get(input_.operationId);

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { logLevels } from '@taucad/types/constants';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 import type { OnWorkerLog } from '@taucad/types';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { WatchEvent } from '@taucad/filesystem';
 import type {
   CapabilitiesManifest,
@@ -4691,15 +4692,17 @@ describe('transcoder loading', () => {
 
     const { routes, renderCapabilities } = worker.capabilitiesManifest;
     expect(routes.some((route) => route.targetFormat === 'stl' && route.transcoderId !== undefined)).toBe(true);
-    const schemas = [
-      ...routes.flatMap((route) => [
-        [`${route.targetFormat} export options`, route.exportOptions.schema],
-        ...(route.content ? [[`${route.targetFormat} content`, route.content.schema] as const] : []),
-      ]),
+    const schemas: Array<readonly [string, JSONSchema7]> = [
+      ...routes.flatMap(
+        (route): Array<readonly [string, JSONSchema7]> => [
+          [`${route.targetFormat} export options`, route.exportOptions.schema],
+          ...(route.content ? [[`${route.targetFormat} content`, route.content.schema] as const] : []),
+        ],
+      ),
       ...Object.entries(renderCapabilities).flatMap(([kernelId, capability]) =>
         capability ? [[`${kernelId} render options`, capability.renderOptions.schema] as const] : [],
       ),
-    ] as ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]>;
+    ];
     for (const [label, schema] of schemas) {
       expect(Reflect.ownKeys(schema), label).toEqual(Object.keys(schema));
       expect(Object.values(schema).includes(undefined), label).toBe(false);

@@ -1,5 +1,6 @@
 import { countBillableModelInput } from '#api/billing/billable-model-input-count.js';
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
+import { maximumModelRequestBytes } from '#api/billing/billable-model-request.js';
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
 import { createHmac } from 'node:crypto';
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
@@ -52,7 +53,17 @@ const environment = (value: string): BillingEnvironment => {
   }
   throw new Error('Stored billing environment is invalid');
 };
-const assertDigestBoundary = (value: unknown): void => {
+const requestTooLarge = (): LlmGatewayError =>
+  new LlmGatewayError(HttpStatus.PAYLOAD_TOO_LARGE, 'REQUEST_TOO_LARGE', 'Model request is larger than Tau accepts.', {
+    maximumBytes: maximumModelRequestBytes,
+  });
+/**
+ * Refuse a body the request digest will not walk: deeper than 64, more than
+ * 100,000 objects, cyclic, or over the funded request contract's UTF-8 bytes.
+ * The byte bound is the contract's own, so no body the contract admits is
+ * refused here first.
+ */
+const assertRequestBound = (value: unknown): void => {
   const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   // oxlint-disable-next-line typescript/no-restricted-types -- WeakSet accepts arrays and records
   const seen = new WeakSet<object>();
@@ -63,12 +74,15 @@ const assertDigestBoundary = (value: unknown): void => {
       continue;
     }
     if (current.depth > 64 || ++nodes > 100_000 || seen.has(current.value)) {
-      throw new Error('Model request exceeds its digest boundary');
+      throw requestTooLarge();
     }
     seen.add(current.value);
     for (const child of Object.values(current.value)) {
       pending.push({ value: child, depth: current.depth + 1 });
     }
+  }
+  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > maximumModelRequestBytes) {
+    throw requestTooLarge();
   }
 };
 /** A provider-account refusal in the body, with its provider narrowed to the gateway's own set. */
@@ -118,10 +132,7 @@ export class BillableModelInvocationService {
   ) {}
 
   public async invoke(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
-    assertDigestBoundary(suppliedIntent.body);
-    if (Buffer.byteLength(JSON.stringify(suppliedIntent.body), 'utf8') > 4_000_000) {
-      throw new Error('Model request exceeds its digest boundary');
-    }
+    assertRequestBound(suppliedIntent.body);
     const intent = {
       ...suppliedIntent,
       body: structuredClone(suppliedIntent.body),
@@ -690,11 +701,6 @@ export class BillableModelInvocationService {
     const secret = this.config.get<string>('BILLING_REQUEST_DIGEST_SECRET');
     if (!secret || secret.length < 32) {
       throw new Error('BILLING_REQUEST_DIGEST_SECRET is required');
-    }
-    assertDigestBoundary(intent.body);
-    const bounded = JSON.stringify(intent.body);
-    if (bounded.length > 4_000_000) {
-      throw new Error('Model request exceeds its digest boundary');
     }
     const canonical = canonicalize({
       owner: intent.authUserId,

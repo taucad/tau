@@ -36,8 +36,15 @@ archive="${GEOSPEC_OCCT_ARCHIVE:-${REPO_ROOT}/node_modules/.cache/geospec-engine
 expected_archive_hash="ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3"
 build_dir="${GEOSPEC_OCCT_CACHE}/build"
 install_dir="${GEOSPEC_OCCT_CACHE}/install"
+build_source="${GEOSPEC_OCCT_CACHE}/patched-source"
+patch_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/shape-fix-outer-edge.patch"
+expected_patch_hash="e01565c2c9569c4dd8e2f849ac98987f4e0e74d142035c85c3ba1e1a97cb4279"
+expected_patched_source_hash="5b259d58f50501568cba43b931afa67f8ecf531d1ecfe93d559e294f8d33f8ba"
+stepcaf_patch_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/stepcaf-early-assembly.patch"
+expected_stepcaf_patch_hash="66a654da50c40708a6b621722cb17e7cc0e925ea41c5d88af3ab717f9f8ac47e"
+expected_stepcaf_source_hash="0397354846ddcd0f8c5fbdd090343f823aec1ab078bc160596239377c7037972"
 
-for tool in cmake diff find ninja shasum tar; do
+for tool in cmake diff find ninja patch shasum tar; do
   command -v "${tool}" >/dev/null || { printf 'ERROR: %s is required\n' "${tool}" >&2; exit 3; }
 done
 if [[ -d "${GEOSPEC_OCCT_CACHE}" && -n "$(find "${GEOSPEC_OCCT_CACHE}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
@@ -76,8 +83,42 @@ chmod -R a-w "${verification_source}"
 trap - EXIT
 printf '✓ OCCT source tree matches archive %s\n' "${expected_archive_hash}"
 
+[[ -f "${patch_file}" ]] || { printf 'ERROR: OCCT patch is missing: %s\n' "${patch_file}" >&2; exit 1; }
+actual_patch_hash="$(shasum -a 256 "${patch_file}" | awk '{print $1}')"
+[[ "${actual_patch_hash}" == "${expected_patch_hash}" ]] || {
+  printf 'ERROR: OCCT patch hash mismatch: %s\n' "${actual_patch_hash}" >&2
+  exit 1
+}
+mkdir -p "${build_source}"
+tar -xzf "${archive}" --strip-components=1 -C "${build_source}"
+patch -t -F 0 -p1 -d "${build_source}" -i "${patch_file}"
+patched_source="${build_source}/src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx"
+actual_patched_source_hash="$(shasum -a 256 "${patched_source}" | awk '{print $1}')"
+[[ "${actual_patched_source_hash}" == "${expected_patched_source_hash}" ]] || {
+  printf 'ERROR: patched OCCT source hash mismatch: %s\n' "${actual_patched_source_hash}" >&2
+  exit 1
+}
+printf '✓ OCCT patch %s applied to fresh verified source\n' "${expected_patch_hash}"
+
+[[ -f "${stepcaf_patch_file}" ]] || { printf 'ERROR: STEPCAF patch is missing: %s\n' "${stepcaf_patch_file}" >&2; exit 1; }
+actual_stepcaf_patch_hash="$(shasum -a 256 "${stepcaf_patch_file}" | awk '{print $1}')"
+[[ "${actual_stepcaf_patch_hash}" == "${expected_stepcaf_patch_hash}" ]] || {
+  printf 'ERROR: STEPCAF patch hash mismatch: %s\n' "${actual_stepcaf_patch_hash}" >&2
+  exit 1
+}
+patch -t -F 0 -p1 -d "${build_source}" -i "${stepcaf_patch_file}"
+stepcaf_source="${build_source}/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx"
+actual_stepcaf_source_hash="$(shasum -a 256 "${stepcaf_source}" | awk '{print $1}')"
+[[ "${actual_stepcaf_source_hash}" == "${expected_stepcaf_source_hash}" ]] || {
+  printf 'ERROR: patched STEPCAF source hash mismatch: %s\n' "${actual_stepcaf_source_hash}" >&2
+  exit 1
+}
+printf '✓ STEPCAF patch %s applied after B2a to fresh verified source\n' "${expected_stepcaf_patch_hash}"
+
 printf '%s\n' '→ configuring exact OCCT TKDESTEP static closure'
-cmake -S "${GEOSPEC_OCCT_SOURCE}" -B "${build_dir}" -G Ninja \
+cmake -S "${build_source}" -B "${build_dir}" -G Ninja \
+  -DGEOSPEC_OCCT_PATCH_SHA256:STRING="${expected_patch_hash}" \
+  -DGEOSPEC_OCCT_STEPCAF_PATCH_SHA256:STRING="${expected_stepcaf_patch_hash}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${install_dir}" \
   -DINSTALL_DIR="${install_dir}" \

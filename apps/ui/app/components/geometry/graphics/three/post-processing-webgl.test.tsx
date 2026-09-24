@@ -667,6 +667,9 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     mounted.unmount();
 
     expect(mocks.composers.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
+    for (const { passes } of mocks.composers) {
+      expect(passes.at(-1)?.['dispose']).toHaveBeenCalledOnce();
+    }
     expect(mocks.renderPasses.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
     expect(mocks.aoPasses.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
   });

@@ -312,6 +312,26 @@ describe('machine tool registry', () => {
     });
   });
 
+  it('should name every bound machine for an unknown id, and read a blank id as omitted', async () => {
+    const two = clientFixture({ entries: [entry('machine-1', 'Workshop X1C'), entry('machine-2', 'Bench X1C')] });
+    await expect(invoke(two.client, 'get_machine', { machineId: 'unknown' })).resolves.toEqual({
+      isError: true,
+      content: {
+        errorCode: 'MACHINE_TOOL_ERROR',
+        message: 'No machine unknown is bound. Bound machines: machine-1 (Workshop X1C), machine-2 (Bench X1C).',
+      },
+    });
+    await expect(invoke(two.client, 'get_machine', { machineId: 'machine-2' })).resolves.toMatchObject({
+      isError: false,
+      content: { machineId: 'machine-2', descriptor: { name: 'Bench X1C' } },
+    });
+    // Models fill an optional field with a blank instead of omitting it.
+    await expect(invoke(clientFixture().client, 'get_machine', { machineId: ' ' })).resolves.toMatchObject({
+      isError: false,
+      content: { machineId: 'machine-1' },
+    });
+  });
+
   it('collects bounded discovery and captures a still without touching run state', async () => {
     const { captureStill, client } = clientFixture();
     await expect(

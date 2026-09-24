@@ -834,6 +834,20 @@ describe('native parameter manifest', () => {
     });
   });
 
+  it('admits a manifest whose trusted resolution spells out the default mode', async () => {
+    const producerDeclaration = declaration();
+    const producer = await compile(producerDeclaration, { mode: 'default', inferenceLanguage: 'en-NZ' });
+
+    await expect(
+      admitParameterManifest(producer, {
+        scope: producer.scope,
+        source: producer.source,
+        identity: { ...producer.identity, resolution: { mode: 'default', inferenceLanguage: 'en-NZ' } },
+        producerDeclaration,
+      }),
+    ).resolves.toMatchObject({ identity: { resolution: { inferenceLanguage: 'en-NZ' } } });
+  });
+
   it.each(semanticAttributionFailures)(
     'rejects %s %s attribution when required values are %s',
     async (field, origin, mode) => {

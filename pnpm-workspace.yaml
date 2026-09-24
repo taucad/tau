@@ -385,6 +385,8 @@ patchedDependencies:
 overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': 'catalog:'
+  nanoraster: https://pkg.pr.new/taucad/nanoraster/nanoraster@b8c00291558b88cb659cb5f581d72779fadbabc2
+  nanoraster-darwin-arm64: https://pkg.pr.new/taucad/nanoraster/nanoraster-darwin-arm64@b8c00291558b88cb659cb5f581d72779fadbabc2
   replicad: 'catalog:'
   replicad-opencascadejs: 'catalog:'
   vitest: 'catalog:'

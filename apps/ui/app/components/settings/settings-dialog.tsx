@@ -14,6 +14,7 @@ import { AgentSettings } from '#components/settings/agent-settings.js';
 import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
 import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
 import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
+import { MachinesSettings } from '#components/settings/machines-settings.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 
 import { Button } from '@taucad/ui/components/button';
@@ -65,6 +66,9 @@ function SettingsContent({ section }: { readonly section: SettingsSection }): Re
         <>
           <SettingsItem settingId='compute-reuse'>
             <ComputeReuseSettings />
+          </SettingsItem>
+          <SettingsItem settingId='machines'>
+            <MachinesSettings />
           </SettingsItem>
           <SettingsAuthGate>
             <SettingsItem settingId='tau-host'>

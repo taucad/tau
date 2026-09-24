@@ -334,7 +334,7 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       await selectKernel(page, 'Build123d');
       await connectPickedFolder(session);
       if (nativeTurbojet) {
-        await selectChatModel(page, 'GPT-5.6 Luna');
+        await selectChatModel(page, 'GPT-6 Luna');
       } else {
         const rows = await openAgentList(page);
         expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));

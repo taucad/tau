@@ -48,7 +48,7 @@ import {
 const runtimeToolNames = new Set(['get_kernel_result', 'screenshot', 'test_model']);
 
 const live = process.env['TAU_E2E_LIVE_LLM'] === 'true';
-const modelName = process.env['TAU_E2E_LIVE_MODEL'] ?? 'GPT-5.6 Luna';
+const modelName = process.env['TAU_E2E_LIVE_MODEL'] ?? 'GPT-6 Luna';
 const fixturePdfPath = resolve(import.meta.dirname, '../fixtures/bracket-spec.pdf');
 const seedPrompt = 'Create a 20 mm cube in main.scad.';
 /** The decoy lives only here; the two real numbers live only in the PDF. */

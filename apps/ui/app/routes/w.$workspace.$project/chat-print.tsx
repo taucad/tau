@@ -179,8 +179,11 @@ export const nextAction = ({
   if (prepare.isSlicing) {
     return { label: 'Slicing…', kind: 'none' };
   }
-  if (prepare.slice && !prepare.isSliceStale && prepare.sendBlocker === undefined) {
-    return { label: `Send to ${entry.descriptor.name}`, kind: 'send' };
+  if (prepare.slice && !prepare.isSliceStale) {
+    // A fresh slice that cannot be sent says why (a busy machine, the wrong spool), not "slice again".
+    return prepare.sendBlocker === undefined
+      ? { label: `Send to ${entry.descriptor.name}`, kind: 'send' }
+      : { label: prepare.sendBlocker, kind: 'none' };
   }
   if (prepare.route === undefined) {
     return { label: 'Slicing unavailable', kind: 'none' };
@@ -583,7 +586,7 @@ function ConnectedPrintPanel({
             <PrepareSection entry={selected} provider={provider} manifest={manifest} prepare={prepare} />
             <MonitorSection client={client} entry={selected} manifest={manifest} />
             <ControlsSection client={client} entry={selected} manifest={manifest} onReceipt={recordReceipt} />
-            <ActivitySection requests={requests} ledger={ledger} />
+            <ActivitySection requests={requests} ledger={ledger} entry={selected} />
             <InspectSection entry={selected} provider={provider} manifest={manifest} />
           </div>
         ) : null}

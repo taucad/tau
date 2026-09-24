@@ -637,19 +637,76 @@ export type LedgerEntry =
   | Readonly<{ kind: 'receipt'; receipt: MachineOperationReceipt }>
   | Readonly<{ kind: 'reconciled'; snapshot: MachineOperationSnapshot }>;
 
+const activeRunLabel: Readonly<Partial<Record<string, string>>> = {
+  preparing: 'Preparing',
+  printing: 'Printing',
+  paused: 'Paused',
+  finishing: 'Finishing',
+};
+
+/**
+ * What a started request's run is doing now. A request ends at "started" by
+ * contract; the run's outcome lives in the machine's observation and the
+ * session's receipts, so a started request is read against them rather than
+ * saying "Started" after the run has gone.
+ *
+ * @param request - A request in the `started` state.
+ * @param entry - The machine as observed, when the pane shows it.
+ * @param ledger - The receipts the pane saw this session.
+ * @returns The label for the request's run.
+ * @public
+ */
+export const startedRunLabel = (
+  request: PrintRequest,
+  entry: MachineDirectoryEntry | undefined,
+  ledger: readonly LedgerEntry[],
+): string => {
+  const { receipt } = request;
+  const runId = receipt !== undefined && 'providerRunId' in receipt ? receipt.providerRunId : undefined;
+  // Only a current observation of this machine made after the start can say the run moved on.
+  if (
+    entry?.machineId !== request.machineId ||
+    entry.freshness !== 'current' ||
+    Date.parse(entry.snapshot.observedAt) <= Date.parse(receipt?.observedAt ?? request.updatedAt)
+  ) {
+    return 'Started';
+  }
+  const { activeRunId, run } = entry.snapshot;
+  if (activeRunId !== undefined) {
+    // Without the start's run id the active run may be another one, so say no more than "Started".
+    return activeRunId === runId ? (activeRunLabel[run?.state ?? 'unknown'] ?? 'Started') : 'Started';
+  }
+  const stop = ledger.find(
+    (item) =>
+      item.kind === 'receipt' &&
+      item.receipt.status === 'accepted' &&
+      (item.receipt.kind === 'urgent-stop' || item.receipt.kind === 'cancel') &&
+      runId !== undefined &&
+      'providerRunId' in item.receipt &&
+      item.receipt.providerRunId === runId,
+  );
+  if (stop?.kind === 'receipt') {
+    return stop.receipt.kind === 'urgent-stop' ? 'Stopped' : 'Run cancelled';
+  }
+  return 'Run ended';
+};
+
 /**
  * Activity: the print requests and the operation receipts, newest first.
  *
- * @param properties - The requests and the session ledger.
+ * @param properties - The requests, the session ledger and the observed machine.
  * @returns The disclosure.
  * @public
  */
 export function ActivitySection({
   requests,
   ledger,
+  entry,
 }: {
   readonly requests: readonly PrintRequest[];
   readonly ledger: readonly LedgerEntry[];
+  /** The machine as observed, so a started request reads against its run. */
+  readonly entry?: MachineDirectoryEntry;
 }): React.JSX.Element {
   const count = requests.length + ledger.length;
   return (
@@ -659,7 +716,11 @@ export function ActivitySection({
         <ul aria-label='Print requests' className='flex flex-col gap-1 text-xs'>
           {requests.map((request) => (
             <li key={request.requestId} className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
-              <span className='font-medium'>{requestStateLabel[request.state]}</span>
+              <span className='font-medium'>
+                {request.state === 'started'
+                  ? startedRunLabel(request, entry, ledger)
+                  : requestStateLabel[request.state]}
+              </span>
               <span className='min-w-0 truncate'>{request.summary.fileName}</span>
               <span className='text-muted-foreground'>
                 by {request.requestedBy.label} ·{' '}

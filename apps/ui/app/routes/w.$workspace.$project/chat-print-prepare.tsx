@@ -33,14 +33,14 @@ import {
 import {
   StartConfirmationCard,
   describeStartConfirmations,
-  materialMismatch,
+  startBlocker,
 } from '#routes/w.$workspace.$project/chat-print-send.js';
 import {
   fitsBuildVolume,
   formatDuration,
   formatFilament,
-  formatMillimetres,
   formatQuantity,
+  formatSize,
   materialSlotLabel,
   summarizeGcodeContainer,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
@@ -80,9 +80,10 @@ const schemaConstant = (schema: JSONSchema7 | boolean | undefined): unknown => {
 };
 
 /**
- * The submission configuration a provider needs, filled from what the machine
- * reports and the manifest declares. Only keys the provider's schema names are
- * written, so a provider without an AMS never receives a mapping.
+ * The submission configuration a provider needs: the schema's own defaults,
+ * then the provider's declared defaults, then what the machine reports and the
+ * manifest declares. Only keys the provider's schema names are written, so a
+ * provider without an AMS never receives a mapping.
  *
  * @param provider - The provider that owns the submission schema.
  * @param entry - The machine as observed.
@@ -99,6 +100,14 @@ export const submissionDefaults = (
   const declared = projection.status === 'usable' ? { ...projection.declaration.defaults } : {};
   const schema = provider.submissionConfiguration.legacyProjection.inputSchema as JSONSchema7;
   const properties = schema.properties ?? {};
+  // A provider whose required fields are observed cannot declare partial defaults, so its optional flags keep
+  // theirs only in the schema (Bambu: bed leveling and flow calibration on). Sending them explicitly equals what
+  // validation would apply, so a request from the agent, which omits them, starts the same way.
+  const schemaDefaults = Object.fromEntries(
+    Object.entries(properties).flatMap(([key, property]) =>
+      typeof property === 'object' && property.default !== undefined ? [[key, property.default] as const] : [],
+    ),
+  );
   const observed: Record<string, unknown> = {};
   const loaded = entry.snapshot.setup.materials.find(
     (material) => material.state === 'loaded' && material.materialId !== undefined,
@@ -133,7 +142,9 @@ export const submissionDefaults = (
   if ('expectedModel' in properties) {
     observed['expectedModel'] = schemaConstant(properties['expectedModel']) ?? entry.descriptor.model;
   }
-  return Object.fromEntries(Object.entries({ ...declared, ...observed }).filter(([, value]) => value !== undefined));
+  return Object.fromEntries(
+    Object.entries({ ...schemaDefaults, ...declared, ...observed }).filter(([, value]) => value !== undefined),
+  );
 };
 
 /**
@@ -375,16 +386,9 @@ export const usePrintPrepare = ({
       return 'The options changed since this slice. Slice again before sending.';
     }
     if (slice.fit && !slice.fit.fits) {
-      return `The part does not fit: ${slice.fit.reason}.`;
+      return `The toolpath does not fit the plate: ${slice.fit.reason}.`;
     }
-    const mismatch = materialMismatch(effectiveSubmission, entry, manifest);
-    if (mismatch !== undefined) {
-      return mismatch;
-    }
-    if (entry.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
-      return 'Wait for a current observation from the machine.';
-    }
-    return undefined;
+    return startBlocker(effectiveSubmission, entry, manifest);
   })();
 
   const send = useCallback(async (): Promise<void> => {
@@ -631,20 +635,26 @@ function SliceResult({
         </dd>
         <dt className='text-muted-foreground'>Filament</dt>
         <dd className='tabular-nums'>{formatFilament(summary.filamentLength)}</dd>
-        <dt className='text-muted-foreground'>Size</dt>
+        <dt className='text-muted-foreground'>Part</dt>
         <dd className='tabular-nums'>
-          {formatMillimetres(summary.bounds.max[0] - summary.bounds.min[0])} ×{' '}
-          {formatMillimetres(summary.bounds.max[1] - summary.bounds.min[1])} ×{' '}
-          {formatMillimetres(summary.bounds.max[2] - summary.bounds.min[2])} mm
+          {summary.partBounds === undefined ? (
+            <span className='text-muted-foreground'>Unknown: this G-code does not label walls or infill</span>
+          ) : (
+            formatSize(summary.partBounds)
+          )}
+        </dd>
+        <dt className='text-muted-foreground'>Toolpath</dt>
+        <dd className='tabular-nums'>
+          {formatSize(summary.bounds)} <span className='text-muted-foreground'>· every nozzle move</span>
         </dd>
       </dl>
       {fit === undefined ? null : fit.fits ? (
         <p className='flex items-center gap-1.5 text-xs'>
           <Check aria-hidden className='size-3.5 text-success' />
-          Fits the plate
+          The toolpath fits the plate
         </p>
       ) : (
-        <PrintNotice tone='warning'>Does not fit: {fit.reason}.</PrintNotice>
+        <PrintNotice tone='warning'>The toolpath does not fit the plate: {fit.reason}.</PrintNotice>
       )}
       {isSliceStale ? (
         <PrintNotice tone='neutral' role='status'>

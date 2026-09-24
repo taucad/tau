@@ -18,9 +18,11 @@ import {
   getPrintRequestInputSchema,
   listPrintRequestsInputSchema,
   requestPrintInputSchema,
+  requestPrintOptionKeys,
 } from '@taucad/chat';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
+import type { SlicerOptionsInput } from '@taucad/slicer';
 import { z } from 'zod';
 
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
@@ -65,6 +67,14 @@ const artifact = z.strictObject({
 const configuration = z.any().describe('Provider configuration: any JSON value.').pipe(z.json());
 
 /*
+ * The slicer keys an agent may set. `request_print` slices before anyone
+ * approves, so any other key (the engine, its service endpoint and token, the
+ * machine-bound keys) refuses at this boundary, for Tau turns and MCP callers
+ * alike. Typed against the slicer's own options so the list names real ones.
+ */
+const printOptionKeys: ReadonlySet<string> = new Set<keyof SlicerOptionsInput>(requestPrintOptionKeys);
+
+/*
  * The print tools a CAD agent is offered take their inputs and descriptions
  * from `@taucad/chat`, the provider-facing contract; the rest are host tools.
  */
@@ -73,7 +83,16 @@ const inputs = {
   begin_machine_binding: z.strictObject({ candidate, name: identity }),
   list_machines: z.strictObject({}),
   [toolName.getMachine]: getMachineInputSchema,
-  [toolName.requestPrint]: requestPrintInputSchema,
+  [toolName.requestPrint]: requestPrintInputSchema.superRefine(({ options = {} }, context) => {
+    const refused = Object.keys(options).filter((key) => !printOptionKeys.has(key));
+    if (refused.length > 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['options'],
+        message: `request_print options cannot include ${refused.map((key) => `"${key}"`).join(', ')}; they accept only ${requestPrintOptionKeys.join(', ')}.`,
+      });
+    }
+  }),
   [toolName.getPrintRequest]: getPrintRequestInputSchema,
   [toolName.listPrintRequests]: listPrintRequestsInputSchema,
   [toolName.cancelPrint]: cancelPrintInputSchema.refine(
@@ -161,7 +180,7 @@ export type MachinePrintPlanner = (
     /** Where the directory was read; qualifies the reference's authority and workspace. */
     cursor: MachineDirectoryCursor;
     preset?: 'fast' | 'standard' | 'fine' | undefined;
-    /** Slicer options, validated by the slicer transcoder's own schema. */
+    /** Slicer options, keys from `requestPrintOptionKeys` only; the slicer's own schema validates the values. */
     options?: JsonObject | undefined;
     signal: AbortSignal;
   }>,

@@ -1,4 +1,4 @@
-import type { HostToolResult } from '@taucad/agent-host';
+import type { HostToolResult, JsonObject } from '@taucad/agent-host';
 import type { RpcRevisionsClient } from '@taucad/chat/rpc';
 import type {
   MachineArtifactReference,
@@ -32,11 +32,19 @@ export type MachinePrintPlannerDependencies = Readonly<{
   /** Supplies the provider manifest the expected setup is composed from. */
   machines: Pick<MachineClient, 'listProviders'>;
   /**
-   * The registry's own `export_geometry` invocation. Going through it records
-   * the slice under `.tau/artifacts` exactly as a person's export is recorded.
+   * The registry's own `export_geometry` route, which also carries the slicer
+   * options the model-facing tool cannot. Going through it records the slice
+   * under `.tau/artifacts` exactly as a person's export is recorded.
    */
   exportGeometry(
-    input: Readonly<{ toolCallId: string; targetFile: string; format: typeof printFormat; signal: AbortSignal }>,
+    input: Readonly<{
+      toolCallId: string;
+      targetFile: string;
+      format: typeof printFormat;
+      /** The slicer options `request_print` admitted; the runtime validates them. */
+      exportOptions?: JsonObject | undefined;
+      signal: AbortSignal;
+    }>,
   ): Promise<HostToolResult>;
   /** Read the exported bytes back from the project by their recorded path. */
   readArtifact(input: Readonly<{ path: string; signal: AbortSignal }>): Promise<Uint8Array<ArrayBuffer>>;
@@ -127,10 +135,18 @@ export const createMachinePrintPlanner =
       throw new Error(`No provider ${machine.providerId} backs ${machine.descriptor.name}.`);
     }
     const configuration = expectedSetup(provider, machine);
+    /* A fresh object of the call's own keys, the preset from its own field
+     * (the registry refuses one inside `options`); nothing given leaves the
+     * slicer's defaults. */
+    const exportOptions =
+      input.preset === undefined && input.options === undefined
+        ? undefined
+        : { ...input.options, ...(input.preset === undefined ? {} : { preset: input.preset }) };
     const result = await deps.exportGeometry({
       toolCallId: input.toolCallId,
       targetFile: input.targetFile,
       format: printFormat,
+      exportOptions,
       signal,
     });
     const file = result.isError ? undefined : exported.safeParse(result.content).data?.files[0];

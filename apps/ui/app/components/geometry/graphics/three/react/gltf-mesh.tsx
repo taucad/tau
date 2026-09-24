@@ -1,24 +1,25 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import type { Camera, Group, Object3D, Material, Texture, Intersection, Ray, BufferGeometry, Mesh } from 'three';
-import {
-  Vector2,
-  Box3,
-  Vector3,
+import type {
+  Camera,
+  Group,
+  Object3D,
+  Material,
+  Texture,
+  Intersection,
   Raycaster,
-  PerspectiveCamera,
-  OrthographicCamera,
-  WebGLCoordinateSystem,
-  WebGPUCoordinateSystem,
+  BufferGeometry,
+  Mesh,
+  Scene,
 } from 'three';
+import { Vector2, Box3, Vector3, WebGLCoordinateSystem, WebGPUCoordinateSystem } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
 import {
   applyModelMaterialAppearance,
   getOrCaptureModelMaterialAppearance,
-  resolveModelComponentEmphasis,
   updateCapturedModelMaterialBaseColor,
 } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
@@ -49,7 +50,6 @@ import {
   getGltfPrimitiveComponentId,
   hasComponentOrAncestor,
   hasComponentOrDescendant,
-  isModelComponentVisible,
 } from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
 import {
   applyInPlaceGeometryUpdate,
@@ -252,22 +252,18 @@ function createGltfResourceDisposer(
 }
 
 /**
- * Clone and save all mesh materials from a scene so they can be restored
- * after destructive operations like matcap application.
+ * Retain parsed materials as immutable snapshots and give each surface its own
+ * clone, so initial PBR component opacity cannot mutate a sibling's material.
  */
 function saveOriginalMaterials(scene: Group): Map<number, Material | Material[]> {
   const saved = new Map<number, Material | Material[]>();
   scene.traverse((child) => {
     if ('isMesh' in child && child.isMesh && !isFatLineSegmentsMesh(child)) {
       const mesh = child as Mesh;
-      if (Array.isArray(mesh.material)) {
-        saved.set(
-          mesh.id,
-          mesh.material.map((m) => m.clone()),
-        );
-      } else {
-        saved.set(mesh.id, mesh.material.clone());
-      }
+      saved.set(mesh.id, mesh.material);
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((material) => material.clone())
+        : mesh.material.clone();
     }
   });
   return saved;
@@ -391,9 +387,13 @@ type ComponentVisualStateOptions = {
   readonly explicitOpacity?: number;
 };
 
-type ComponentVisualStateWithManifestOptions = ComponentVisualStateOptions & {
+type ComponentVisualStateWithManifestOptions = Omit<
+  ComponentVisualStateOptions,
+  'focusedComponentId' | 'explicitOpacity'
+> & {
   readonly manifest: GeometryComponentManifest;
-  readonly opacityByComponentId: Readonly<Record<string, number>>;
+  readonly focusedComponentIds: ReadonlySet<string>;
+  readonly opacityByComponentId: Readonly<Record<string, number>> | undefined;
 };
 
 export type ViewerHoverUpdate = {
@@ -624,7 +624,7 @@ function resolveComponentVisualStateWithManifest({
   manifest,
   hiddenComponentIds,
   isolatedComponentIds,
-  focusedComponentId,
+  focusedComponentIds,
   opacityByComponentId,
 }: ComponentVisualStateWithManifestOptions): {
   readonly visible: boolean;
@@ -634,60 +634,56 @@ function resolveComponentVisualStateWithManifest({
     isolatedComponentIds.size === 0 ||
     hasComponentOrAncestor(manifest, componentId, isolatedComponentIds) ||
     hasComponentOrDescendant(manifest, componentId, isolatedComponentIds);
-  const focusedSet = focusedComponentId ? new Set([focusedComponentId]) : undefined;
   const isDimmedByFocus =
-    focusedSet !== undefined &&
-    !hasComponentOrAncestor(manifest, componentId, focusedSet) &&
-    !hasComponentOrDescendant(manifest, componentId, focusedSet);
-  const explicitOpacity = resolveInheritedOpacity({
-    manifest,
-    componentId,
-    opacityByComponentId,
-  });
+    focusedComponentIds.size > 0 &&
+    !hasComponentOrAncestor(manifest, componentId, focusedComponentIds) &&
+    !hasComponentOrDescendant(manifest, componentId, focusedComponentIds);
+  const explicitOpacity = opacityByComponentId
+    ? resolveInheritedOpacity({ manifest, componentId, opacityByComponentId })
+    : undefined;
 
   return {
-    visible: isModelComponentVisible({
-      manifest,
-      componentId,
-      hiddenComponentIds,
-      isolatedComponentIds,
-    }),
+    visible:
+      isIncludedByIsolation &&
+      (hiddenComponentIds.size === 0 || !hasComponentOrAncestor(manifest, componentId, hiddenComponentIds)),
     opacity: explicitOpacity ?? (!isIncludedByIsolation || isDimmedByFocus ? 0.5 : 1),
   };
 }
 
 function resolveModelComponentEmphasisWithManifest(
-  unitState: Pick<ModelInteractionUnitState, 'hoveredComponentId' | 'selectedComponentIds' | 'focusedComponentId'>,
+  componentSets: {
+    readonly focused: ReadonlySet<string>;
+    readonly selected: ReadonlySet<string>;
+    readonly hovered: ReadonlySet<string>;
+  },
   manifest: GeometryComponentManifest,
   componentId: string,
 ): ModelComponentEmphasis {
-  const focusedSet = unitState.focusedComponentId ? new Set([unitState.focusedComponentId]) : undefined;
   if (
-    focusedSet &&
-    (hasComponentOrAncestor(manifest, componentId, focusedSet) ||
-      hasComponentOrDescendant(manifest, componentId, focusedSet))
+    componentSets.focused.size > 0 &&
+    (hasComponentOrAncestor(manifest, componentId, componentSets.focused) ||
+      hasComponentOrDescendant(manifest, componentId, componentSets.focused))
   ) {
     return 'focused';
   }
 
-  const selectedSet = new Set(unitState.selectedComponentIds);
   if (
-    hasComponentOrAncestor(manifest, componentId, selectedSet) ||
-    hasComponentOrDescendant(manifest, componentId, selectedSet)
+    componentSets.selected.size > 0 &&
+    (hasComponentOrAncestor(manifest, componentId, componentSets.selected) ||
+      hasComponentOrDescendant(manifest, componentId, componentSets.selected))
   ) {
     return 'selected';
   }
 
-  const hoveredSet = unitState.hoveredComponentId ? new Set([unitState.hoveredComponentId]) : undefined;
   if (
-    hoveredSet &&
-    (hasComponentOrAncestor(manifest, componentId, hoveredSet) ||
-      hasComponentOrDescendant(manifest, componentId, hoveredSet))
+    componentSets.hovered.size > 0 &&
+    (hasComponentOrAncestor(manifest, componentId, componentSets.hovered) ||
+      hasComponentOrDescendant(manifest, componentId, componentSets.hovered))
   ) {
     return 'hover';
   }
 
-  return resolveModelComponentEmphasis(unitState, componentId);
+  return 'none';
 }
 
 /**
@@ -787,22 +783,6 @@ export function resolveModelComponentHitFromRay({
 }): string | undefined {
   const hit = raycastFirstVisibleMeshHit({ raycaster, meshes, clipping });
   return getObjectComponentId(hit?.object);
-}
-
-function syncModelRaycasterFromPointerEvent({
-  raycaster,
-  ray,
-  camera,
-}: {
-  readonly raycaster: Raycaster;
-  readonly ray: Ray;
-  readonly camera: Camera;
-}): void {
-  raycaster.ray.copy(ray);
-  raycaster.camera = camera;
-  raycaster.near = 0;
-  raycaster.far =
-    camera instanceof PerspectiveCamera || camera instanceof OrthographicCamera ? camera.far : Number.POSITIVE_INFINITY;
 }
 
 export function annotateSceneComponents(
@@ -987,6 +967,13 @@ export function applyModelComponentVisualStateToScene({
 }: ApplyModelComponentVisualStateToSceneOptions): ModelEmphasisSet {
   const hidden = new Set(modelVisualState.hiddenComponentIds);
   const isolated = new Set(modelVisualState.isolatedComponentIds);
+  const emphasisComponents = {
+    focused: new Set(modelVisualState.focusedComponentId ? [modelVisualState.focusedComponentId] : []),
+    selected: new Set(modelVisualState.selectedComponentIds),
+    hovered: new Set(modelVisualState.hoveredComponentId ? [modelVisualState.hoveredComponentId] : []),
+  };
+  const opacityByComponentId =
+    Object.keys(modelVisualState.opacityByComponentId).length > 0 ? modelVisualState.opacityByComponentId : undefined;
   const hover: Mesh[] = [];
   const selected: Mesh[] = [];
 
@@ -1004,13 +991,12 @@ export function applyModelComponentVisualStateToScene({
       manifest: componentManifest,
       hiddenComponentIds: hidden,
       isolatedComponentIds: isolated,
-      focusedComponentId: modelVisualState.focusedComponentId,
-      explicitOpacity: modelVisualState.opacityByComponentId[componentId],
-      opacityByComponentId: modelVisualState.opacityByComponentId,
+      focusedComponentIds: emphasisComponents.focused,
+      opacityByComponentId,
     });
     object.visible = globallyVisible && visualState.visible;
 
-    const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
+    const emphasis = resolveModelComponentEmphasisWithManifest(emphasisComponents, componentManifest, componentId);
     if (isLine) {
       // Edges share one base material per presentation, so emphasis is a per-object material
       // swap rather than a tint on the shared material (which would let the last-visited
@@ -1082,7 +1068,7 @@ export function GltfMesh({
   const retiredPresentationsRef = useRef<PreparedGltfPresentation[]>([]);
   const frameProbeRef = useRef<{ revision: number; modelEmptyFrames: number } | undefined>(undefined);
   const [topologyScheduler] = useState(createSectionTopologyScheduler);
-  const { size, invalidate, gl, camera, scene: rootScene } = useThree();
+  const { size, invalidate, gl, scene: rootScene } = useThree();
   const { theme } = useTheme();
   const activeEdgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
@@ -1109,7 +1095,6 @@ export function GltfMesh({
 
   const lastHoveredComponentIdRef = useRef<string | undefined>(undefined);
   const lastFocusedComponentIdRef = useRef<string | undefined>(undefined);
-  const modelRaycasterRef = useRef(new Raycaster());
   const modelPickableMeshesSceneRef = useRef<Group | undefined>(undefined);
   const modelPickableMeshesRef = useRef<readonly Mesh[]>([]);
   const modelUnitState = useModelInteractionSelector((state) => getModelInteractionUnitState(state.context, unitId));
@@ -1144,6 +1129,30 @@ export function GltfMesh({
     modelPickableMeshesRef.current = meshes;
     return meshes;
   }, [scene]);
+
+  useLayoutEffect(() => {
+    if (!scene) {
+      return undefined;
+    }
+    const previousRaycast = scene.raycast;
+    // R3F recursively raycasts the event root before dispatching handlers. Return
+    // false to stop Three's descendant walk after the clipping-aware BVH query.
+    // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
+    scene.raycast = (raycaster, intersections): false => {
+      const hit = raycastFirstVisibleMeshHit({
+        raycaster,
+        meshes: getModelPickableMeshes(),
+        clipping: modelRaycastClipState,
+      });
+      if (hit) {
+        intersections.push(hit);
+      }
+      return false;
+    };
+    return () => {
+      scene.raycast = previousRaycast;
+    };
+  }, [getModelPickableMeshes, modelRaycastClipState, scene]);
 
   // Update resolution when size changes. Deferred via requestAnimationFrame
   // so that rapid resize events (e.g. dragging a Dockview divider) batch into
@@ -1379,6 +1388,7 @@ export function GltfMesh({
         timings.fatLines = performance.now() - fatLinesStartedAt;
 
         const originalMaterials = saveOriginalMaterials(gltf.scene);
+        unpreparedDispose = createGltfResourceDisposer(gltf.scene, originalMaterials);
         const materialsStartedAt = performance.now();
         const materialOptions = materialOptionsRef.current;
         if (materialOptions.enableMatcap) {
@@ -1387,7 +1397,6 @@ export function GltfMesh({
         applyGltfSurfaceDepthBiasToScene(gltf.scene, graphicsBackendThree);
         seedSceneMaterialAppearances(gltf.scene);
         timings.materials = performance.now() - materialsStartedAt;
-        unpreparedDispose = undefined;
         const bundle: PreparedGltfPresentation = {
           revision: presentationRevision,
           key: geometryHash ?? '',
@@ -1425,6 +1434,7 @@ export function GltfMesh({
           disposeResources();
         };
         candidatePresentationRef.current = bundle;
+        unpreparedDispose = undefined;
 
         graphicsActor.send({
           type: 'gltfDisplayReady',
@@ -1457,10 +1467,10 @@ export function GltfMesh({
         // in `docs/research/gltf-edges-fat-line-performance.md` (Finding 5). Mirror the
         // viewport-gizmo-cube.tsx precedent: capture `compileAsync` to a local for TS
         // narrowing, call via `compile.call(renderer, ...)`, and re-check cancellation
-        // after the await so a teardown mid-warmup is a no-op. On WebGL `compileAsync`
-        // is absent, so the guard skips the call entirely.
+        // after the await so a teardown mid-warmup is a no-op. Both backends need the
+        // destination scene so the detached model inherits its lights and environment.
         const renderer = gl as unknown as {
-          compileAsync?: (scene: Object3D, camera: Camera) => Promise<unknown>;
+          compileAsync?: (scene: Object3D, camera: Camera, targetScene?: Scene) => Promise<unknown>;
           coordinateSystem?: unknown;
         };
         const { compileAsync: compile, coordinateSystem } = renderer;
@@ -1475,7 +1485,9 @@ export function GltfMesh({
               }
             }
             await Promise.all(
-              endpointCameras.map(async (endpointCamera) => compile.call(renderer, gltf.scene, endpointCamera)),
+              endpointCameras.map(async (endpointCamera) =>
+                compile.call(renderer, gltf.scene, endpointCamera, rootScene),
+              ),
             );
           } catch (error) {
             console.error('GLTF pipeline warm-up failed', error);
@@ -1566,6 +1578,7 @@ export function GltfMesh({
     sourceFile,
     geometryHash,
     requestedUnitId,
+    rootScene,
     cameraRig,
     presentationRevision,
     ensureSectionAnalysis,
@@ -1780,16 +1793,8 @@ export function GltfMesh({
       }
 
       event.stopPropagation();
-      syncModelRaycasterFromPointerEvent({
-        raycaster: modelRaycasterRef.current,
-        ray: event.ray,
-        camera,
-      });
-      const componentId = resolveModelComponentHitFromRay({
-        raycaster: modelRaycasterRef.current,
-        meshes: getModelPickableMeshes(),
-        clipping: modelRaycastClipState,
-      });
+      // The scene's raycast owner already resolved the nearest visible, unclipped surface.
+      const componentId = getObjectComponentId(event.object);
       const hoverUpdate = resolveViewerHoverUpdate({
         isViewerHoverSuppressed: modelVisualState.isViewerHoverSuppressed,
         previousComponentId: lastHoveredComponentIdRef.current,
@@ -1805,14 +1810,7 @@ export function GltfMesh({
         });
       }
     },
-    [
-      camera,
-      getModelPickableMeshes,
-      graphicsActor,
-      modelRaycastClipState,
-      modelVisualState.isViewerHoverSuppressed,
-      unitId,
-    ],
+    [graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId],
   );
 
   const handlePointerOut = useCallback(() => {
@@ -1835,19 +1833,9 @@ export function GltfMesh({
   const handleClick = useCallback(
     (event: ThreeEvent<MouseEvent>) => {
       const graphicsContext = graphicsActor.getSnapshot().context;
-      syncModelRaycasterFromPointerEvent({
-        raycaster: modelRaycasterRef.current,
-        ray: event.ray,
-        camera,
-      });
-      const modelComponentId = resolveModelComponentHitFromRay({
-        raycaster: modelRaycasterRef.current,
-        meshes: getModelPickableMeshes(),
-        clipping: modelRaycastClipState,
-      });
       const clickAction = resolveModelPointerClickAction({
         intersections: event.intersections,
-        modelComponentId,
+        modelComponentId: getObjectComponentId(event.object),
         suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
         isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
       });
@@ -1864,30 +1852,20 @@ export function GltfMesh({
         graphicsActor.send(dispatchEvent);
       }
     },
-    [camera, getModelPickableMeshes, graphicsActor, modelRaycastClipState, unitId],
+    [graphicsActor, unitId],
   );
 
   const resolveContextMenuActionFromEvent = useCallback(
     (event: ThreeEvent<MouseEvent | PointerEvent>): ModelContextMenuAction => {
       const graphicsContext = graphicsActor.getSnapshot().context;
-      syncModelRaycasterFromPointerEvent({
-        raycaster: modelRaycasterRef.current,
-        ray: event.ray,
-        camera,
-      });
-      const modelComponentId = resolveModelComponentHitFromRay({
-        raycaster: modelRaycasterRef.current,
-        meshes: getModelPickableMeshes(),
-        clipping: modelRaycastClipState,
-      });
       return resolveModelContextMenuAction({
         intersections: event.intersections,
-        modelComponentId,
+        modelComponentId: getObjectComponentId(event.object),
         suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
         isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
       });
     },
-    [camera, getModelPickableMeshes, graphicsActor, modelRaycastClipState],
+    [graphicsActor],
   );
 
   const publishSecondaryPointerAction = useCallback(

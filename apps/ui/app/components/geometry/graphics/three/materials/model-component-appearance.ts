@@ -152,13 +152,19 @@ export function applyModelMaterialAppearance(
   snapshot: ModelMaterialAppearanceSnapshot,
   opacity: number,
 ): void {
+  const previousTransparent = material.transparent;
+  const previousDepthWrite = material.depthWrite;
   restoreModelMaterialAppearance(material, snapshot);
 
   if (opacity < 1) {
     applyModelMaterialOpacityOverride(material, opacity);
   }
 
-  material.needsUpdate = true;
+  // Hover/selection reapply this state to every surface; uniform-only changes do not
+  // invalidate compiled programs. Transparency and depth writes change render state.
+  if (material.transparent !== previousTransparent || material.depthWrite !== previousDepthWrite) {
+    material.needsUpdate = true;
+  }
 }
 
 function mixChannel(base: number, target: number, amount: number): number {

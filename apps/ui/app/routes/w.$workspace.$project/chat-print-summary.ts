@@ -2,6 +2,7 @@ import { readBambuContainer } from '@taucad/slicer/container';
 import { parseGcode } from '@taucad/slicer/toolpath';
 import type { MachineManifest } from '@taucad/runtime/machine';
 import type { Quantity } from '@taucad/units/quantity';
+import { partBounds } from '#components/printer/printer-geometry.js';
 
 /** Axis-aligned bounds in millimetres, plate origin front-left. @public */
 export type SliceBounds = Readonly<{
@@ -16,7 +17,10 @@ export type SliceSummary = Readonly<{
   estimatedDuration: number;
   /** Millimetres of filament. */
   filamentLength: number;
+  /** Every move the nozzle makes, from home through the purge line to the end lift; the plate-fit check reads these. */
   bounds: SliceBounds;
+  /** The part alone: wall, infill and support extrusions standing on the plate; absent when the G-code labels none. */
+  partBounds: SliceBounds | undefined;
   /** False when the parser met motion it could not time; the numbers are then a floor. */
   coverageComplete: boolean;
 }>;
@@ -36,6 +40,7 @@ export const summarizeGcodeContainer = (bytes: Uint8Array<ArrayBuffer>): SliceSu
     estimatedDuration: program.duration,
     filamentLength: program.filamentLength,
     bounds: program.bounds,
+    partBounds: partBounds(program),
     coverageComplete: program.coverage.complete,
   };
 };
@@ -86,6 +91,16 @@ export const fitsBuildVolume = (
  * @public
  */
 export const formatMillimetres = (value: number): string => String(Math.round(value * 10) / 10);
+
+/**
+ * Width × depth × height of some bounds: "40 × 40 × 30 mm".
+ *
+ * @param bounds - Millimetres.
+ * @returns The three extents with the unit.
+ * @public
+ */
+export const formatSize = (bounds: SliceBounds): string =>
+  `${[0, 1, 2].map((axis) => formatMillimetres(bounds.max[axis]! - bounds.min[axis]!)).join(' × ')} mm`;
 
 /**
  * Human duration: "about 42 min", "about 1 h 5 min", "under a minute".

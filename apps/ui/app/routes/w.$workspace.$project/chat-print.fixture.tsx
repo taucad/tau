@@ -23,6 +23,9 @@ import type {
   PrintRequest,
 } from '@taucad/runtime/machine';
 import type { Quantity } from '@taucad/units/quantity';
+import type { RJSFSchema } from '@rjsf/utils';
+import { mergeFormDefaults } from '#components/geometry/parameters/rjsf-utils.js';
+import { formatDisplayLabel } from '#utils/string.utils.js';
 import type { PendingAgentHostApproval } from '#components/chat/chat-approval-banner.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { SlicedArtifact } from '#routes/w.$workspace.$project/chat-print-prepare.js';
@@ -121,7 +124,9 @@ export const summarizeGcodeContainerMock = (): SliceSummary => ({
   layers: 125,
   estimatedDuration: 2520,
   filamentLength: 3200,
-  bounds: { min: [10, 10, 0], max: [60, 60, 20] },
+  // Every move: from home along the front-edge purge line to the end lift above the part.
+  bounds: { min: [0, 0, 0], max: [236, 153, 35] },
+  partBounds: { min: [103, 103, 0], max: [153, 153, 25] },
   coverageComplete: true,
 });
 
@@ -132,17 +137,39 @@ const observed = (value: number, code: string): Quantity => {
   return quantity as Quantity;
 };
 
-/** A stand-in for the shared Parameters renderer: shows the draft and offers one edit. */
+/**
+ * A stand-in for the shared Parameters renderer: shows the draft, offers one
+ * edit, and shows each boolean field as the real form does: a switch named
+ * "Toggle for <Label>" holding the draft over the defaults.
+ */
 export function ParametersFake({
   parameters,
+  defaultParameters,
+  jsonSchema,
   onParametersChange,
 }: {
   readonly parameters: Record<string, unknown>;
+  readonly defaultParameters: Record<string, unknown>;
+  readonly jsonSchema: RJSFSchema;
   readonly onParametersChange: (value: Record<string, unknown>) => void;
 }): React.JSX.Element {
+  const shown = mergeFormDefaults(jsonSchema, defaultParameters, parameters);
+  const toggles = Object.entries(jsonSchema.properties ?? {}).filter(
+    ([, property]) => typeof property === 'object' && property.type === 'boolean',
+  );
   return (
     <div>
       <output data-testid='parameters'>{JSON.stringify(parameters)}</output>
+      {toggles.map(([key]) => (
+        <input
+          key={key}
+          type='checkbox'
+          role='switch'
+          aria-label={`Toggle for ${formatDisplayLabel(key)}`}
+          checked={shown[key] === true}
+          readOnly
+        />
+      ))}
       <button
         type='button'
         onClick={() => {
@@ -226,6 +253,10 @@ const submissionConfiguration = defineConfiguration({
   version: '1',
   schema: z.object({
     amsMapping: z.array(z.number().int()).default([]),
+    // Mirrors `bambu.machine.submission` (packages/plugins/bambu/src/bambu.machine.ts): both flags default on,
+    // and only the schema says so; apps/ui does not depend on @taucad/bambu.
+    bedLeveling: z.boolean().default(true),
+    flowCalibration: z.boolean().default(true),
     expectedBedType: z.string().min(1),
     expectedMaterials: z.array(z.object({ slot: z.number().int(), materialId: z.string() })).default([]),
     expectedNozzleDiameter: z.object({ value: z.number(), unit: z.string() }).optional(),

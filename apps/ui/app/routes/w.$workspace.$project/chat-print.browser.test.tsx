@@ -15,9 +15,10 @@ import { PrintPanel } from '#routes/w.$workspace.$project/chat-print.js';
 
 /**
  * Screenshot evidence for the reviewed styling: the Print pane at a workbench
- * width and at 320 px, light and dark, in its two orientation states (a ready
- * machine with a fresh slice; a printing machine with an agent's request
- * awaiting approval). PNGs land under `out/research/.../D/`.
+ * width and at 320 px, light and dark, in three states (a ready machine with a
+ * fresh slice; a ready machine with an agent's request awaiting approval; the
+ * same request while a run is in progress, so the start waits with its reason).
+ * PNGs land under `out/research/.../K/` (Lane D's first pass wrote `.../D/`).
  */
 
 vi.mock('#hooks/use-project.js', async () => {
@@ -52,11 +53,11 @@ vi.mock('#hooks/use-machines-approvals.js', () => ({
   usePrintApprovalBridge: () => ({ pendingFor: () => undefined, respond: async () => undefined }),
 }));
 
-const outputDirectory = '../../../../../out/research/design-to-print-workbench-blueprint/2026-09-24-implementation/D';
+const outputDirectory = '../../../../../out/research/design-to-print-workbench-blueprint/2026-09-24-implementation/K';
 const widths = { desktop: 480, narrow: 320 } as const;
 const themes = ['light', 'dark'] as const;
 
-type Scenario = 'prepare' | 'approval';
+type Scenario = 'prepare' | 'approval' | 'busy';
 
 /** The fixture machine observed just now, so the freshness budgets read as current rather than stale. */
 const observedNow = (machine: ReturnType<typeof entry>): ReturnType<typeof entry> => ({
@@ -68,7 +69,10 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
   const fixture =
     scenario === 'prepare'
       ? createFixture({ entries: [observedNow(entry())] })
-      : createFixture({ entries: [observedNow(printing())], requests: [agentRequest()] });
+      : createFixture({
+          entries: [observedNow(scenario === 'busy' ? printing() : entry())],
+          requests: [agentRequest()],
+        });
   const { bridge } = createBridge();
   const { container } = render(
     <TooltipProvider>
@@ -82,9 +86,16 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     await page.getByRole('region', { name: 'Prepare' }).getByRole('button', { name: 'Slice and preview' }).click();
     await screen.findByLabelText('Slice result');
   } else {
-    const region = await screen.findByRole('region', { name: 'Approval required' });
-    await page.getByRole('region', { name: 'Approval required' }).getByRole('button', { name: 'Accept' }).click();
-    await within(region).findByRole('group', { name: 'Confirm before starting' });
+    const name = 'Print request awaiting you: pyramid.gcode.3mf';
+    const region = await screen.findByRole('region', { name });
+    expect(within(region).getByRole('button', { name: 'Open printer preview' })).toBeEnabled();
+    await page.getByRole('region', { name }).getByRole('button', { name: 'Accept' }).click();
+    const confirmation = await within(region).findByRole('group', { name: 'Confirm before starting' });
+    if (scenario === 'busy') {
+      expect(
+        within(confirmation).getByText('Workshop X1C has a run in progress. Start another print once it ends.'),
+      ).toBeInTheDocument();
+    }
   }
   return container;
 };
@@ -95,7 +106,7 @@ afterEach(() => {
 });
 
 describe('Print pane screenshots', () => {
-  for (const scenario of ['prepare', 'approval'] as const) {
+  for (const scenario of ['prepare', 'approval', 'busy'] as const) {
     for (const [size, width] of Object.entries(widths)) {
       for (const theme of themes) {
         it(`captures ${scenario} at ${size} in ${theme}`, async () => {

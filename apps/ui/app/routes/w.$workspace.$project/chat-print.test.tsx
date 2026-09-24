@@ -4,7 +4,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineClient } from '@taucad/runtime/machine';
+import { writeBambuContainer } from '@taucad/slicer/container';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type * as PrintSummary from '#routes/w.$workspace.$project/chat-print-summary.js';
 import {
@@ -20,10 +22,14 @@ import {
   mockExport,
   mockSaveRevision,
   mockWriteFiles,
+  manifest,
   printing,
+  provider,
   sliceFixture,
   timestamp,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
+import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import { startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { PrintPanel, nextAction, presentMachine } from '#routes/w.$workspace.$project/chat-print.js';
 
 vi.mock('#hooks/use-project.js', async () => {
@@ -63,6 +69,14 @@ const renderPane = (client: MachineClient, bridge: PrintApprovalBridge = createB
 
 /** The Prepare section, whose slice and send buttons share their names with the orientation card's primary action. */
 const prepareRegion = (): HTMLElement => screen.getByRole('region', { name: 'Prepare' });
+
+/** The pane's own name for the agent's pending request; the chat banner keeps "Approval required". */
+const requestRegionName = 'Print request awaiting you: pyramid.gcode.3mf';
+
+const paused = (): ReturnType<typeof entry> => {
+  const run = printing();
+  return { ...run, snapshot: { ...run.snapshot, run: { ...run.snapshot.run, state: 'paused' } } };
+};
 
 /** Tick every physical check; the Radix checkbox toggles on click. */
 const confirmAll = (card: HTMLElement): void => {
@@ -115,6 +129,36 @@ describe('Print pane orientation', () => {
     });
     expect(nextAction({ entry: entry({ freshness: 'stale' }), openRequest: undefined, prepare }).kind).toBe('none');
     expect(nextAction({ entry: printing(), openRequest: undefined, prepare }).kind).toBe('none');
+    expect(
+      nextAction({
+        entry: entry(),
+        openRequest: undefined,
+        prepare: { ...prepare, slice: sliceFixture, sendBlocker: 'Workshop X1C is busy. Wait until it reports ready.' },
+      }),
+    ).toEqual({ label: 'Workshop X1C is busy. Wait until it reports ready.', kind: 'none' });
+  });
+
+  it('names the one reason a physical start must wait, in the order a person resolves them', () => {
+    const { configuration } = agentRequest();
+    expect(startBlocker(configuration, entry(), undefined)).toBeUndefined();
+    expect(startBlocker(configuration, entry({ freshness: 'stale' }), undefined)).toBe(
+      'Wait for a current observation from Workshop X1C before starting.',
+    );
+    expect(startBlocker(configuration, printing(), undefined)).toBe(
+      'Workshop X1C has a run in progress. Start another print once it ends.',
+    );
+    expect(startBlocker(configuration, paused(), undefined)).toBe(
+      'Workshop X1C has a paused run. Resume or cancel it before starting another print.',
+    );
+    expect(
+      startBlocker(configuration, entry({ snapshot: { ...entry().snapshot, readiness: 'busy' } }), undefined),
+    ).toBe('Workshop X1C is busy. Wait until it reports ready.');
+    expect(
+      startBlocker(configuration, entry({ snapshot: { ...entry().snapshot, readiness: 'not-ready' } }), undefined),
+    ).toBe('Workshop X1C is not ready. Wait until it reports ready.');
+    expect(startBlocker({ expectedMaterials: [{ slot: 0, materialId: 'pla-white' }] }, entry(), undefined)).toBe(
+      'pla-white is not loaded in Slot 1 (pla-black is).',
+    );
   });
 
   it('renders explicit grant refusals instead of a broken control surface', () => {
@@ -169,8 +213,12 @@ describe('Print pane prepare and send', () => {
     expect(within(result).getByText('125')).toBeInTheDocument();
     expect(within(result).getByText('about 42 min')).toBeInTheDocument();
     expect(within(result).getByText('3.2 m')).toBeInTheDocument();
-    expect(within(result).getByText('50 × 50 × 20 mm')).toBeInTheDocument();
-    expect(within(result).getByText('Fits the plate')).toBeInTheDocument();
+    // The part alone, then every move with the purge line: the plate fit is checked on the latter.
+    expect(within(result).getByText('Part').nextElementSibling).toHaveTextContent('50 × 50 × 25 mm');
+    expect(within(result).getByText('Toolpath').nextElementSibling).toHaveTextContent(
+      '236 × 153 × 35 mm · every nozzle move',
+    );
+    expect(within(result).getByText('The toolpath fits the plate')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Open printer preview' }));
     expect(mockEditorSend).toHaveBeenCalledExactlyOnceWith({
@@ -235,7 +283,7 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(screen.queryByRole('group', { name: 'Confirm before starting' })).not.toBeInTheDocument();
     });
-    expect(screen.queryByRole('region', { name: 'Approval required' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /^Print request awaiting you/u })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /^Activity/u }));
     expect(within(screen.getByRole('list', { name: 'Print requests' })).getByText('Started')).toBeInTheDocument();
@@ -301,6 +349,24 @@ describe('Print pane prepare and send', () => {
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
   });
 
+  it("starts the machine mapping from the provider schema's own defaults, so bed leveling and flow calibration show on", async () => {
+    // Bambu declares both flags `.default(true)` in its submission schema; its declared defaults stay empty.
+    expect(submissionDefaults(provider, entry(), manifest)).toMatchObject({
+      bedLeveling: true,
+      flowCalibration: true,
+      timelapse: false,
+      expectedBedType: 'textured-pei',
+    });
+    const user = userEvent.setup();
+    renderPane(createFixture().client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await user.click(screen.getByRole('button', { name: /^Advanced/u }));
+    const mapping = await screen.findByLabelText('Machine mapping');
+    expect(await within(mapping).findByRole('switch', { name: 'Toggle for Bed Leveling' })).toBeChecked();
+    expect(within(mapping).getByRole('switch', { name: 'Toggle for Flow Calibration' })).toBeChecked();
+    expect(within(mapping).getByRole('switch', { name: 'Toggle for Timelapse' })).not.toBeChecked();
+  });
+
   it('disables sending, not slicing, when the chosen material is no longer the loaded one', async () => {
     const fixture = createFixture();
     const user = userEvent.setup();
@@ -329,6 +395,66 @@ describe('Print pane prepare and send', () => {
     expect(send).toHaveAccessibleDescription('pla-black is not loaded in A1 (petg-red is).');
     expect(within(prepareRegion()).getByRole('button', { name: 'Slice again' })).toBeEnabled();
   });
+
+  it('keeps Send disabled with its reason while the machine runs a print or is not ready', async () => {
+    const fixture = createFixture();
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+
+    const send = (): HTMLElement => within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' });
+    const expectSendHeld = async (next: ReturnType<typeof entry>, reason: string): Promise<void> => {
+      act(() => {
+        fixture.observe(next);
+      });
+      await waitFor(() => {
+        expect(send()).toHaveAccessibleDescription(reason);
+      });
+      expect(send()).toBeDisabled();
+    };
+
+    await expectSendHeld(printing(), 'Workshop X1C has a run in progress. Start another print once it ends.');
+    const printingCard = screen.getByRole('article', { name: 'Workshop X1C, Printing' });
+    expect(within(printingCard).getByRole('status')).toHaveTextContent('Monitor the run');
+    await expectSendHeld(paused(), 'Workshop X1C has a paused run. Resume or cancel it before starting another print.');
+    await expectSendHeld(
+      entry({ snapshot: { ...entry().snapshot, readiness: 'busy' } }),
+      'Workshop X1C is busy. Wait until it reports ready.',
+    );
+    // The orientation card states the same reason instead of offering to slice again.
+    const card = screen.getByRole('article', { name: 'Workshop X1C, Busy' });
+    expect(within(card).getByRole('status')).toHaveTextContent('Workshop X1C is busy. Wait until it reports ready.');
+    expect(within(card).queryByRole('button', { name: /^Send|^Slice/u })).not.toBeInTheDocument();
+
+    act(() => {
+      fixture.observe(entry());
+    });
+    await waitFor(() => {
+      expect(send()).toBeEnabled();
+    });
+    expect(fixture.requestPrint).not.toHaveBeenCalled();
+  });
+});
+
+describe('Print pane slice summary', () => {
+  it('should measure the part apart from the purge line and end lift and check the plate fit on every move', async () => {
+    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
+    const bytes = writeBambuContainer({
+      gcode: fixtureGcode({ layers: 10, size: 40 }),
+      modelName: 'tube',
+      plate: 'textured-pei',
+    });
+
+    const result = summary.summarizeGcodeContainer(bytes);
+
+    expect(result.bounds).toEqual({ min: [0, 0, 0], max: [148, 148, 50] });
+    expect(result.partBounds).toEqual({ min: [108, 108, 0], max: [148, 148, 2] });
+    expect(summary.formatSize(result.bounds)).toBe('148 × 148 × 50 mm');
+    expect(result.partBounds && summary.formatSize(result.partBounds)).toBe('40 × 40 × 2 mm');
+    expect(summary.fitsBuildVolume(result.bounds, manifest.geometry.buildVolume)).toEqual({ fits: true });
+  });
 });
 
 describe('Print pane agent requests', () => {
@@ -346,7 +472,9 @@ describe('Print pane agent requests', () => {
     const user = userEvent.setup();
     renderPane(fixture.client, bridge);
 
-    const region = await screen.findByRole('region', { name: 'Approval required' });
+    const region = await screen.findByRole('region', { name: requestRegionName });
+    // The chat banner owns "Approval required"; the pane never reuses it.
+    expect(screen.queryByRole('region', { name: 'Approval required' })).not.toBeInTheDocument();
     expect(within(region).getByRole('heading', { name: 'Tau is waiting for approval' })).toBeInTheDocument();
     expect(
       within(region).getByText('Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 42 min.'),
@@ -355,6 +483,15 @@ describe('Print pane agent requests', () => {
     expect(within(region).getByText('Answering here also answers the chat.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review the print request' })).toBeInTheDocument();
     expect(fixture.uploadPrint).not.toHaveBeenCalled();
+
+    // Preview the exact recorded artifact before deciding, the way Prepare opens a fresh slice.
+    await user.click(within(region).getByRole('button', { name: 'Open printer preview' }));
+    expect(mockEditorSend).toHaveBeenCalledExactlyOnceWith({
+      type: 'openFile',
+      path: 'exports/pyramid.gcode.3mf',
+      source: 'user',
+    });
+    expect(respond).not.toHaveBeenCalled();
 
     await user.click(within(region).getByRole('button', { name: 'Accept' }));
     const confirmation = within(region).getByRole('group', { name: 'Confirm before starting' });
@@ -378,7 +515,7 @@ describe('Print pane agent requests', () => {
     const user = userEvent.setup();
     renderPane(fixture.client, bridge);
 
-    const region = await screen.findByRole('region', { name: 'Approval required' });
+    const region = await screen.findByRole('region', { name: requestRegionName });
     expect(
       within(region).getByText('Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 42 min.'),
     ).toBeInTheDocument();
@@ -391,7 +528,7 @@ describe('Print pane agent requests', () => {
     });
     expect(respond).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(screen.queryByRole('region', { name: 'Approval required' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: requestRegionName })).not.toBeInTheDocument();
     });
     await user.click(screen.getByRole('button', { name: /^Activity/u }));
     expect(within(screen.getByRole('list', { name: 'Print requests' })).getByText('Denied')).toBeInTheDocument();
@@ -408,7 +545,7 @@ describe('Print pane agent requests', () => {
     const user = userEvent.setup();
     renderPane(fixture.client);
 
-    const region = await screen.findByRole('region', { name: 'Approval required' });
+    const region = await screen.findByRole('region', { name: requestRegionName });
     expect(within(region).getByText('pla-white is not loaded in A1 (pla-black is).')).toBeInTheDocument();
     await user.click(within(region).getByRole('button', { name: 'Accept' }));
     const confirmation = within(region).getByRole('group', { name: 'Confirm before starting' });
@@ -507,18 +644,69 @@ describe('Print pane monitor and controls', () => {
     expect(screen.getByRole('button', { name: 'Format storage' })).toHaveAccessibleDescription('Not supported');
   });
 
-  it('disables every physical action while the observation is stale', async () => {
-    const fixture = createFixture({ entries: [printing()], requests: [agentRequest()] });
+  it('stops calling a started request "Started" once the machine reports idle after an urgent stop', async () => {
+    // The request ends at "started" by contract; the run's outcome lives in the observation and the receipts.
+    const started = agentRequest({
+      state: 'started',
+      receipt: {
+        operationId: 'operation-start-1',
+        machineId: 'machine-1',
+        kind: 'start',
+        status: 'accepted',
+        providerRunId: 'provider-run-1',
+        observedAt: timestamp,
+      },
+    });
+    const fixture = createFixture({
+      entries: [{ ...printing(), snapshot: { ...printing().snapshot, observedAt: later } }],
+      requests: [started],
+    });
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Printing' });
+    await user.click(screen.getByRole('button', { name: /^Activity/u }));
+    const activity = screen.getByRole('list', { name: 'Print requests' });
+    expect(within(activity).getByRole('listitem')).toHaveTextContent(/^Printingpyramid\.gcode\.3mf/u);
+
+    await user.click(screen.getByRole('button', { name: 'Urgent stop' }));
+    await user.click(
+      within(screen.getByRole('alertdialog', { name: 'Confirm urgent stop' })).getByRole('button', {
+        name: 'Confirm urgent stop',
+      }),
+    );
+    expect(await screen.findByText('urgent-stop accepted for machine-1')).toBeInTheDocument();
+    act(() => {
+      fixture.observe(entry({ snapshot: { ...entry().snapshot, observedAt: later } }));
+    });
+
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    const item = within(screen.getByRole('list', { name: 'Print requests' })).getByRole('listitem');
+    expect(item).toHaveTextContent(/^Stoppedpyramid\.gcode\.3mf/u);
+    expect(within(item).queryByText('Started')).not.toBeInTheDocument();
+  });
+
+  it('holds an accepted start while a run is in progress and disables every physical action while stale', async () => {
+    const fixture = createFixture({ requests: [agentRequest()] });
     const user = userEvent.setup();
     renderPane(fixture.client);
 
-    const region = await screen.findByRole('region', { name: 'Approval required' });
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+    const region = await screen.findByRole('region', { name: requestRegionName });
     await user.click(within(region).getByRole('button', { name: 'Accept' }));
     const confirmation = within(region).getByRole('group', { name: 'Confirm before starting' });
     confirmAll(confirmation);
     const start = within(confirmation).getByRole('button', { name: 'Start print on Workshop X1C' });
     expect(start).toBeEnabled();
+
+    act(() => {
+      fixture.observe(printing());
+    });
+    await waitFor(() => {
+      expect(start).toBeDisabled();
+    });
+    expect(
+      within(confirmation).getByText('Workshop X1C has a run in progress. Start another print once it ends.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
 
     act(() => {
       fixture.goStale();

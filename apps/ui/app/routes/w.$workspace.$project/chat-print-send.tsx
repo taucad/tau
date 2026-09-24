@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { Bot, Check, Circle, LoaderCircle, Play, SearchCheck, ShieldCheck, X } from 'lucide-react';
+import { Bot, Check, Circle, Eye, LoaderCircle, Play, SearchCheck, ShieldCheck, X } from 'lucide-react';
 import type {
   MachineClient,
   MachineDirectoryEntry,
@@ -15,6 +15,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { isRecord } from '@taucad/utils/schema';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenPrintRequest } from '#hooks/use-machines-print-requests.js';
+import { useProject } from '#hooks/use-project.js';
 import { PrintNotice, PrintSection, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   formatDuration,
@@ -118,6 +119,43 @@ export const materialMismatch = (
     }
   }
   return undefined;
+};
+
+/** Run states in which the machine is working on a run and cannot take another start. */
+const activeRunStates: ReadonlySet<string> = new Set(['preparing', 'printing', 'finishing']);
+
+/**
+ * Why the machine cannot take a physical start right now, or nothing when it
+ * can. Send in Prepare and Accept on a request both start a print, so both wait
+ * for the same facts: a current observation, no run in progress, a machine that
+ * reports ready, and the material the request expects loaded.
+ *
+ * @param configuration - The submission configuration with its expected materials.
+ * @param entry - The machine as observed.
+ * @param manifest - The machine's manifest, for slot names.
+ * @returns The first blocker in the person's words.
+ * @public
+ */
+export const startBlocker = (
+  configuration: unknown,
+  entry: MachineDirectoryEntry,
+  manifest: MachineManifest | undefined,
+): string | undefined => {
+  const { name } = entry.descriptor;
+  if (entry.freshness !== 'current' || entry.snapshot.connection !== 'connected') {
+    return `Wait for a current observation from ${name} before starting.`;
+  }
+  const { run, readiness, activeRunId } = entry.snapshot;
+  if (run?.state === 'paused') {
+    return `${name} has a paused run. Resume or cancel it before starting another print.`;
+  }
+  if (activeRunId !== undefined || (run !== undefined && activeRunStates.has(run.state))) {
+    return `${name} has a run in progress. Start another print once it ends.`;
+  }
+  if (readiness !== 'idle') {
+    return `${name} is ${readiness === 'busy' ? 'busy' : 'not ready'}. Wait until it reports ready.`;
+  }
+  return materialMismatch(configuration, entry, manifest);
 };
 
 /**
@@ -257,6 +295,7 @@ function ApprovalCard({
   error,
   onStart,
   onDecline,
+  onPreview,
 }: {
   readonly request: PrintRequest;
   readonly entry: MachineDirectoryEntry;
@@ -267,18 +306,18 @@ function ApprovalCard({
   readonly error: string | undefined;
   readonly onStart: () => void;
   readonly onDecline: () => void;
+  /** Open the recorded artifact in the printer viewer. */
+  readonly onPreview: () => void;
 }): React.JSX.Element {
   const [isConfirming, setIsConfirming] = useState(false);
   const isAgent = request.requestedBy.kind === 'agent';
   const machineName = entry.descriptor.name;
-  const isCurrent = entry.freshness === 'current' && entry.snapshot.connection === 'connected';
-  const blocker = isCurrent
-    ? materialMismatch(request.configuration, entry, manifest)
-    : `Wait for a current observation from ${machineName} before starting.`;
+  const blocker = startBlocker(request.configuration, entry, manifest);
 
   return (
     <section
-      aria-label='Approval required'
+      // Distinct from the chat banner's "Approval required": this is one print request awaiting the person.
+      aria-label={`Print request awaiting you: ${request.summary.fileName}`}
       className='flex min-w-0 flex-col gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3'
     >
       <div className='flex min-w-0 items-start gap-2'>
@@ -294,6 +333,10 @@ function ApprovalCard({
         </div>
       </div>
       <ArtifactDetails request={request} />
+      <Button type='button' size='sm' variant='outline' className='self-start' onClick={onPreview}>
+        <Eye aria-hidden />
+        Open printer preview
+      </Button>
       {isConfirming ? (
         <StartConfirmationCard
           digest={request.artifact.digest}
@@ -505,6 +548,7 @@ export function SendSection({
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const [reconciled, setReconciled] = useState<Readonly<Record<string, MachineOperationSnapshot>>>({});
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
+  const { editorRef } = useProject();
   const operationIdsRef = useRef(
     new Map<string, { readonly uploadOperationId: string; readonly startOperationId: string }>(),
   );
@@ -576,6 +620,14 @@ export function SendSection({
     [client, onReconciled, run],
   );
 
+  // The same open request the Prepare step sends for a fresh slice, pointed at the recorded artifact.
+  const preview = useCallback(
+    (request: PrintRequest): void => {
+      editorRef.send({ type: 'openFile', path: request.artifact.path, source: 'user' });
+    },
+    [editorRef],
+  );
+
   const open = requests.filter((request) => isOpenPrintRequest(request));
   const latest = requests[0];
   const failure =
@@ -609,6 +661,9 @@ export function SendSection({
               }}
               onDecline={() => {
                 void decline(request);
+              }}
+              onPreview={() => {
+                preview(request);
               }}
             />
           );

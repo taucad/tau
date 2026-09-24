@@ -1,3 +1,4 @@
+import type { GLTF } from '@gltf-transform/core';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import type {
   GeometryComponentAppearance,
@@ -56,7 +57,7 @@ type GltfScene = {
 };
 
 /** The glTF JSON chunk, narrowed to what the manifest and the in-place update path read. @public */
-export type GltfJson = {
+export type GltfJson = Pick<GLTF.IGLTF, 'images' | 'textures' | 'samplers'> & {
   scene?: number;
   scenes?: GltfScene[];
   nodes?: GltfNode[];

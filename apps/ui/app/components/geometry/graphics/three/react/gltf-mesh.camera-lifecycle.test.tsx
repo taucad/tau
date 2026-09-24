@@ -1,3 +1,5 @@
+import { useLayoutEffect } from 'react';
+import type { RenderFrame } from '@taucad/spatial';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -9,6 +11,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  MeshPhysicalMaterial,
   Plane,
   PerspectiveCamera,
   Raycaster,
@@ -78,7 +81,7 @@ const mocks = vi.hoisted(() => {
     },
     renderFrame: {
       anchorFrameId: 'tau:root',
-      originMeters: [0, 0, 0],
+      originMeters: [0, 0, 0] as [number, number, number],
       metersPerRenderUnit: 1,
     },
     sectionView: { enableMesh: false, isActive: false, plane: undefined },
@@ -117,6 +120,11 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useGraphics: () => mocks.graphicsActor,
   useGraphicsSelector: () => false,
   useRenderFrame: () => mocks.renderFrame,
+  useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
+    useLayoutEffect(() => {
+      handler(mocks.renderFrame);
+    }, [handler, mocks.renderFrame]);
+  },
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),
@@ -188,7 +196,7 @@ describe('GltfMesh camera lifecycle', () => {
     mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: undefined };
     mocks.renderFrame = {
       anchorFrameId: 'tau:root',
-      originMeters: [0, 0, 0],
+      originMeters: [0, 0, 0] as [number, number, number],
       metersPerRenderUnit: 1,
     };
     delete mocks.gl.compileAsync;
@@ -484,6 +492,31 @@ describe('GltfMesh camera lifecycle', () => {
     expect(geometryDispose).toHaveBeenCalledTimes(1);
     expect(materialDispose).toHaveBeenCalledTimes(1);
     expect(textureDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps glass attenuation invariant across render scales without mutating authored materials', async () => {
+    const gltf = createGltf();
+    const authored = new MeshPhysicalMaterial({ transmission: 1, thickness: 0.0008, attenuationDistance: 0.02 });
+    const mesh = new Mesh(new BoxGeometry(), authored);
+    gltf.scene.add(mesh);
+    const parse = vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const bytes = new Uint8Array([1]);
+    mocks.renderFrame = { ...mocks.renderFrame, metersPerRenderUnit: 0.001 };
+    const view = render(<GltfMesh gltfFile={bytes} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(mesh.material.attenuationDistance).toBe(20);
+    });
+    expect(mesh.material.thickness).toBe(0.0008);
+    expect(authored.attenuationDistance).toBe(0.02);
+    const { material } = mesh;
+    for (const metersPerRenderUnit of [1, 1e-6, 1000, 0.001]) {
+      mocks.renderFrame = { ...mocks.renderFrame, metersPerRenderUnit };
+      view.rerender(<GltfMesh gltfFile={bytes} enableMatcap={false} />);
+      expect(mesh.material).toBe(material);
+      expect(mesh.material.attenuationDistance * metersPerRenderUnit).toBeCloseTo(0.02, 12);
+      expect(mesh.material.thickness).toBe(0.0008);
+    }
+    expect(parse).toHaveBeenCalledTimes(1);
   });
 
   it('should isolate initially shared PBR materials for component dimming and dispose their owned resources once', async () => {

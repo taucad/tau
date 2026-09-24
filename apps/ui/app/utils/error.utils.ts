@@ -219,7 +219,9 @@ function parseError(error: Error): ChatError {
     const compactionMessage =
       parsed.code === 'SESSION_LOG_INTEGRITY' || parsed.code === 'SUMMARY_REQUIRED'
         ? chatHistoryTidyFailureMessage
-        : parsed.code === 'NO_EVICTABLE_HISTORY' || parsed.code === 'CIRCUIT_BREAKER_OPEN'
+        : parsed.code === 'NO_EVICTABLE_HISTORY' ||
+            parsed.code === 'CIRCUIT_BREAKER_OPEN' ||
+            parsed.code === 'REQUEST_TOO_LARGE'
           ? chatTooLongMessage
           : undefined;
     return compactionMessage === undefined

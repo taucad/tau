@@ -125,6 +125,7 @@ describe('createRenderer', () => {
         const created = hoisted.createdRenderers.at(0);
         expect(created?.kind).toBe('webgl');
         expect(created?.setTransparentSort).not.toHaveBeenCalled();
+        expect(created?.options).toMatchObject({ premultipliedAlpha: false });
       },
     );
   });

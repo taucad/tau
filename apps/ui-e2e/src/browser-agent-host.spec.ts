@@ -12,6 +12,8 @@ import type { StoredProjectConfig } from '#support/project-storage-state.js';
 import { settlementTypes } from '#support/chat-admission-log.js';
 import { continueAction } from '#support/chat-admission.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
+import { placeChatOnNewBranch } from '#support/chat-branch.js';
+import { editComposerSelector } from '#support/chat-attachments.js';
 
 type TestBackend = 'indexeddb' | 'opfs' | 'webaccess';
 /**
@@ -98,11 +100,9 @@ const prepareBrowserHost = async (backend: ActiveBackend, script?: readonly Gate
   await target.setViewport({ width: 1440, height: 900 });
   await openSeededProject(backend);
   // No flag and no placement pick: the browser host IS the Tau placement.
-  // One agent is not a choice (Q12.6), so the trigger is not rendered at all;
-  // its absence together with the absent "Tau (Browser)" row is what proves the
-  // API placement is gone — a surviving row would mean the split still exists.
+  // The absent "Tau (Browser)" row is what proves the API placement is gone —
+  // a surviving row would mean the split still exists.
   // (`ensureChatOpen` already waited on the composer, so the row is rendered.)
-  expect(await target.isVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }))).toBe(false);
   expect(await target.isVisible(selectors.getByText('Tau (Browser)', { exact: true }))).toBe(false);
 };
 
@@ -651,7 +651,7 @@ describe.each([
     await waitForLocalPublishedTree(backend);
 
     await target.click(selectors.getByRole('button', { name: /Create the browser-host proof file/u }).first());
-    const editComposer = selectors.getByCss(`article ${composer}`).first();
+    const editComposer = selectors.getByCss(editComposerSelector).first();
     await target.expectVisible(editComposer, 30_000);
     await target.type(editComposer, ' Again.');
     await target.press(editComposer, 'Enter');
@@ -896,25 +896,12 @@ describe('durable log reattach after a reload', () => {
 });
 
 describe('branch revision mode', () => {
-  test('materializes an isolated run tree when the composer selects New branch', async () => {
+  test('materializes an isolated run tree for a chat placed on a new branch', async () => {
     await prepareBrowserHost('home');
-    /* The composer picker replaced the deleted revision-mode selector (W7): a
-       branch is made by name, not chosen as a mode. */
-    await target.click(selectors.getByCss('[data-slot="chat-branch-picker"]'));
-    await target.click(selectors.getByText('New branch', { exact: true }));
-    await target.fill(selectors.getByLabelText('Name for the new branch'), 'isolated-run');
-    await target.click(selectors.getByRole('button', { name: 'Create' }));
-    /* Sent the instant the branch is asked for, on purpose (P1): the branch is
-       not instant — a fresh project records its files first — and the
-       admission is what waits for it. A send that landed on the project here
-       would be the race this row exists to catch. */
+    /* The composer offers no branch (C3): the Revisions pane makes it by name,
+       and its row places this chat there. */
+    await placeChatOnNewBranch('isolated-run');
     await submitAndWaitForPartial();
-    /* The chip reads the chat's own `checkoutId`, which only the workspace
-       authority writes, once the branch exists. */
-    await target.expectVisible(
-      selectors.getByCss('[data-slot="chat-branch-picker"][aria-label^="Work in isolated-run."]'),
-      60_000,
-    );
 
     await expect
       .poll(async () => Object.keys(await readActiveCheckoutTree('home')).length, { timeout: 60_000 })

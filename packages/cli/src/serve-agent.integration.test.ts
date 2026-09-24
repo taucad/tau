@@ -485,9 +485,16 @@ describe('tau serve compute owner', () => {
     const after = await control.inspect({});
     expect(after.generation).toBe(before.generation);
 
+    /* A refused final revision is reported, not thrown: a throw from serve's
+     * `finally` would replace whatever brought the daemon down. */
     ownerState.closeFailure = new Error('daemon close failed');
     ownerState.closed!.resolve({ cause: 'requested' });
-    await expect(running).rejects.toThrow('daemon close failed');
+    try {
+      await expect(running).resolves.toBeDefined();
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = undefined;
+    }
     expect(ownerState.workers[1]!.threadId).toBe(-1);
   });
 });

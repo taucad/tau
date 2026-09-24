@@ -94,7 +94,7 @@ const dependencyAction = (
 
 const buildCodec: CacheCodec<CreateGeometryResult> = {
   id: '@taucad/middleware/geometry-build',
-  version: '1',
+  version: '2',
   mediaType: 'application/vnd.taucad.geometry-build+msgpack',
   encode: ({ value }) => {
     if (!value.success) {
@@ -119,11 +119,16 @@ const buildCodec: CacheCodec<CreateGeometryResult> = {
       serializeNativeHandleSnapshot: _serializeNativeHandleSnapshot,
       ...publicResult
     } = result;
-    return msgpackEncode({
-      schemaVersion: 1,
-      result: { ...publicResult, ...(serializedNativeHandle === undefined ? {} : { serializedNativeHandle }) },
-      nativeBuildInput,
-    });
+    // GlTF optional fields use absence. MessagePack's default turns undefined into
+    // null, which changes restored material semantics and breaks later exports.
+    return msgpackEncode(
+      {
+        schemaVersion: 1,
+        result: { ...publicResult, ...(serializedNativeHandle === undefined ? {} : { serializedNativeHandle }) },
+        nativeBuildInput,
+      },
+      { ignoreUndefined: true },
+    );
   },
   decode: ({ bytes }) => {
     const entry = buildEntrySchema.parse(msgpackDecode(bytes));

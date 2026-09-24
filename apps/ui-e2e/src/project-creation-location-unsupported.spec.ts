@@ -13,11 +13,8 @@ test('Playwright WebKit exposes Home-only creation with no location picker', asy
   await target.expectVisible(editor, 60_000);
 
   expect(await target.evaluate(() => 'showDirectoryPicker' in globalThis)).toBe(false);
+  // The phone composer is the same bar: no location control anywhere in it.
   await target.expectCount(selectors.getByRole('button', { name: /^Create in/u }), 0);
-  await target.click(selectors.getByRole('button', { name: 'Open chat options' }));
-  await target.expectCount(selectors.getByRole('button', { name: /^Create in/u }), 0);
-  await target.expectCount(selectors.getByText('Location', { exact: true }), 0);
-  await target.keyboardPress('Escape');
 
   await target.fill(editor, 'Create in the only available Home location');
   await target.press(editor, 'Enter');

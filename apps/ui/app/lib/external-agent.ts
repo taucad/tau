@@ -20,4 +20,28 @@ export const externalAgentRefusalReasons: Readonly<Record<ExternalAgentRefusalCo
   EXTERNAL_AGENT_UNAVAILABLE: 'That host cannot start it right now',
   EXTERNAL_AGENT_CONTENT_UNSUPPORTED: 'It cannot read the content this turn carries',
 };
+
+/* ponytail: a UI-side table for the pinned adapters; move it onto the
+ * descriptor (the host knows each adapter's CLI) when another agent lands.
+ * Only commands each vendor documents are listed. */
+const fixCommands: Readonly<Record<string, Partial<Record<ExternalAgentRefusalCode, string>>>> = {
+  claude: { CLI_NOT_FOUND: 'npm install -g @anthropic-ai/claude-code', CLI_TOO_OLD: 'claude update' },
+  codex: {
+    CLI_NOT_FOUND: 'npm install -g @openai/codex',
+    CLI_TOO_OLD: 'npm install -g @openai/codex@latest',
+    EXTERNAL_AGENT_AUTH_REQUIRED: 'codex login',
+  },
+};
 /* eslint-enable @typescript-eslint/naming-convention -- end refusal codes */
+
+/**
+ * The command that clears a refusal, when there is one to give; otherwise the
+ * surface shows the reason and the code alone.
+ *
+ * @param agentId - The descriptor's agent id.
+ * @param refusal - The host's refusal code.
+ * @returns A copyable command, or `undefined`.
+ * @public
+ */
+export const externalAgentFixCommand = (agentId: string, refusal: ExternalAgentRefusalCode): string | undefined =>
+  fixCommands[agentId]?.[refusal];

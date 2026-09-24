@@ -1,0 +1,26 @@
+diff --git a/dist/N8AO.js b/dist/N8AO.js
+index 443ef736547ab095e5eb2d81c2274066e0493eba..8b5eb2c3702ebf15f8ade5be9f78f61c4b871cc0 100644
+--- a/dist/N8AO.js
++++ b/dist/N8AO.js
+@@ -1682,7 +1682,7 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
+                 this.depthDownsampleQuad.material.uniforms["far"].value = this.camera.far;
+                 this.depthDownsampleQuad.material.uniforms["projectionMatrixInv"].value = this.camera.projectionMatrixInverse;
+                 this.depthDownsampleQuad.material.uniforms["viewMatrixInv"].value = this.camera.matrixWorld;
+-                this.depthDownsampleQuad.material.uniforms["logDepth"].value = this.configuration.logarithmicDepthBuffer;
++                this.depthDownsampleQuad.material.uniforms["logDepth"].value = this.configuration.depthBufferType === (0, $05f6997e4b65da14$export$ed4ee5d1e55474a5).Log;
+                 this.depthDownsampleQuad.material.uniforms["ortho"].value = this.camera.isOrthographicCamera;
+                 this.depthDownsampleQuad.render(renderer);
+             }
+diff --git a/src/N8AOPostPass.js b/src/N8AOPostPass.js
+index f6a653f69cd52f990dbc8b32f77de50b04eb8f0d..869b37c81b0fc4b3b7fb2db754474f3d198c06b7 100644
+--- a/src/N8AOPostPass.js
++++ b/src/N8AOPostPass.js
+@@ -605,7 +605,7 @@ class N8AOPostPass extends Pass {
+                     this.depthDownsampleQuad.material.uniforms["far"].value = this.camera.far;
+                     this.depthDownsampleQuad.material.uniforms["projectionMatrixInv"].value = this.camera.projectionMatrixInverse;
+                     this.depthDownsampleQuad.material.uniforms["viewMatrixInv"].value = this.camera.matrixWorld;
+-                    this.depthDownsampleQuad.material.uniforms["logDepth"].value = this.configuration.logarithmicDepthBuffer;
++                    this.depthDownsampleQuad.material.uniforms["logDepth"].value = this.configuration.depthBufferType === DepthType.Log;
+                     this.depthDownsampleQuad.material.uniforms["ortho"].value = this.camera.isOrthographicCamera;
+                     this.depthDownsampleQuad.render(renderer);
+                 }

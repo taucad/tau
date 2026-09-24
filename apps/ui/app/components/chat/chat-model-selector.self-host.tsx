@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
 import { useModels } from '#hooks/use-models.js';
@@ -6,10 +6,6 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
-
-export const openModelSelectorKeyCombination = { key: '/', modKey: true } satisfies KeyCombination;
 
 type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
   readonly onSelect?: (modelId: string) => void;
@@ -17,7 +13,6 @@ type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'childr
   readonly children: (props: { selectedModel: ResolvedModel }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
   readonly isNested?: boolean;
-  readonly enableShortcut?: boolean;
 };
 
 export const ChatModelSelector = memo(function ({
@@ -25,17 +20,9 @@ export const ChatModelSelector = memo(function ({
   onClose,
   children,
   isNested,
-  enableShortcut = true,
   ...properties
 }: ChatModelSelectorProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
-  useKeybinding(
-    openModelSelectorKeyCombination,
-    useCallback(() => {
-      setOpen(true);
-    }, []),
-    { enabled: enableShortcut },
-  );
   const {
     model: { model: selectedModel, setActiveModel },
   } = useChatComposer();

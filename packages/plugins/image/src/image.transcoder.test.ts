@@ -92,7 +92,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('10.0.0');
+      expect(imageDefinition.version).toBe('11.0.0');
     });
 
     it('should load the renderer and describe its adapter once during initialize', () => {
@@ -508,6 +508,7 @@ describe('image transcoder', () => {
               space: 'world',
               exposure: 1.5,
             },
+            ao: { radiusPixels: 12, intensity: 2, distanceFalloff: 0.25 },
             visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
             sections: {
               planes: [
@@ -535,6 +536,7 @@ describe('image transcoder', () => {
             space: 'world',
             exposure: 1.5,
           },
+          ao: { radiusPixels: 12, intensity: 2, distanceFalloff: 0.25 },
           visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
           sections: {
             planes: [

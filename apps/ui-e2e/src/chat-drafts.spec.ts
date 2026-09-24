@@ -4,8 +4,11 @@ import * as target from '#support/external-target.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 import type { RecordFile } from '#support/chat-attachments.js';
 import {
+  agentTrigger,
   composerSelector,
+  editComposerSelector,
   dismissCookies,
+  imageOnlyModelName,
   pdfModelName,
   prepareComposerPage,
   readHomeJson,
@@ -13,18 +16,18 @@ import {
   recordPaths,
   seededChatIds,
   selectModel,
+  selectReasoningLevel,
   sendDraft,
 } from '#support/chat-attachments.js';
 
 /**
  * The blueprint's browser proof for composer records (W15): every composer field
  * and the project's unread record live in Home files, so a reload restores them,
- * and a chat's selection never leaks into another chat.
+ * and a chat's draft never leaks into another chat.
  */
 
 const replyText = 'Draft reply.';
 const replyScript: readonly GatewayScriptTurn[] = [{ text: replyText, usage: { inputTokens: 20, outputTokens: 3 } }];
-const toolLabels = ['Auto', 'No tools', 'Any tool', 'Custom'];
 
 const openSeededChats = async (
   script: readonly GatewayScriptTurn[] = replyScript,
@@ -38,16 +41,6 @@ const openSeededChats = async (
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   return seededChatIds();
 };
-
-/** The tool selector's label: its trigger is rendered but hidden in the product until MCP ships. */
-const toolChoiceLabel = async (): Promise<string | undefined> =>
-  target.evaluate(
-    (labels) =>
-      [...document.querySelectorAll('button')]
-        .map((button) => button.textContent.trim())
-        .find((text) => labels.includes(text)),
-    toolLabels,
-  );
 
 const chatMark = async (name: string): Promise<string | undefined> =>
   target.evaluate(
@@ -74,44 +67,36 @@ const openChat = async (name: string): Promise<void> => {
     .toBe(true);
 };
 
-test('restores draft text, mode and tool choice after a reload, and keeps mode per chat', async () => {
+test('restores draft text and the reasoning level after a reload, and keeps the draft per chat', async () => {
   const { projectId, chatIds } = await openSeededChats();
   const recordPath = recordPaths.chat(projectId, chatIds[0]!);
 
-  // The seeded record hydrates a pristine composer (D7).
-  await expect.poll(toolChoiceLabel, { timeout: 30_000 }).toBe('No tools');
+  // A model that offers levels, so the sheet shows its reasoning control.
+  await selectModel(imageOnlyModelName);
+  await selectReasoningLevel('Low');
+  await target.expectVisible(
+    selectors.getByRole('button', { name: `Agent and model: ${imageOnlyModelName}, reasoning Low` }),
+  );
 
   const draftText = 'Draft that must survive a reload.';
   await target.type(selectors.getByCss(composerSelector).first(), draftText);
-  await target.click(selectors.getByRole('button', { name: 'Select mode (Agent)' }));
-  await target.click(selectors.getByRole('option', { name: 'Plan' }));
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select mode (Plan)' }));
-
   await expect
-    .poll(
-      async () => {
-        const record = await readHomeJson<RecordFile>(recordPath);
-        return { text: recordDraftText(record), mode: record?.mode, toolChoice: record?.toolChoice };
-      },
-      { timeout: 30_000 },
-    )
-    .toEqual({ text: draftText, mode: 'plan', toolChoice: 'none' });
+    .poll(async () => recordDraftText(await readHomeJson<RecordFile>(recordPath)), { timeout: 30_000 })
+    .toBe(draftText);
 
   await target.reload();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await target.expectContainingText(selectors.getByCss(composerSelector).first(), draftText, 30_000);
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select mode (Plan)' }), 30_000);
-  await expect.poll(toolChoiceLabel).toBe('No tools');
+  await expect
+    .poll(async () => target.getAttribute(agentTrigger(), 'aria-label'), { timeout: 30_000 })
+    .toBe(`Agent and model: ${imageOnlyModelName}, reasoning Low`);
 
-  // The other chat has its own record: no draft, and the default mode.
+  // The other chat has its own record: no draft.
   await openChat('Second chat');
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select mode (Agent)' }), 30_000);
+  await target.expectVisible(agentTrigger(), 30_000);
   expect(await target.textContent(selectors.getByCss(composerSelector).first())).not.toContain(draftText);
-  const secondRecord = await readHomeJson<RecordFile>(recordPaths.chat(projectId, chatIds[1]!));
-  expect(secondRecord?.mode).toBeUndefined();
 
   await openChat('Attachments chat');
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select mode (Plan)' }), 30_000);
   await target.expectContainingText(selectors.getByCss(composerSelector).first(), draftText, 30_000);
 });
 
@@ -123,7 +108,7 @@ test('restores an open message edit after a reload', async () => {
   await target.expectVisible(selectors.getByText(replyText, { exact: true }).last(), 120_000);
 
   const bubble = selectors.getByRole('button', { name: original, exact: true });
-  const editComposer = selectors.getByCss(`article ${composerSelector}`).first();
+  const editComposer = selectors.getByCss(editComposerSelector).first();
   await target.click(bubble);
   await target.expectVisible(editComposer);
   const revision = ' Revised before the reload.';

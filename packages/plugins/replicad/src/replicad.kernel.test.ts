@@ -294,9 +294,9 @@ describe('ReplicadWorker', () => {
         expect(schema).toMatchObject({
           type: 'object',
           properties: {
-            width: { type: 'integer', default: 100 },
-            height: { type: 'integer', default: 50 },
-            depth: { type: 'integer', default: 30 },
+            width: { type: 'double', default: 100 },
+            height: { type: 'double', default: 50 },
+            depth: { type: 'double', default: 30 },
           },
         });
       });
@@ -336,15 +336,15 @@ describe('ReplicadWorker', () => {
             dimensions: {
               type: 'object',
               properties: {
-                width: { type: 'integer', default: 100 },
-                height: { type: 'integer', default: 50 },
+                width: { type: 'double', default: 100 },
+                height: { type: 'double', default: 50 },
               },
             },
             options: {
               type: 'object',
               properties: {
                 rounded: { type: 'boolean', default: true },
-                radius: { type: 'integer', default: 5 },
+                radius: { type: 'double', default: 5 },
               },
             },
           },
@@ -402,8 +402,8 @@ describe('ReplicadWorker', () => {
         expect(schema).toMatchObject({
           type: 'object',
           properties: {
-            width: { type: 'integer', default: 80 },
-            height: { type: 'integer', default: 40 },
+            width: { type: 'double', default: 80 },
+            height: { type: 'double', default: 40 },
           },
         });
       });
@@ -4217,10 +4217,19 @@ describe('Normal consistency', () => {
 
 // A display render no longer carries the durable snapshot (charter D12/W6b), so these tests call the
 // kernel's serializer the way the framework does: on the native handle `createGeometry` produces.
-type ReplicadKernelContext = Parameters<typeof replicadDefinition.serializeNativeHandle>[2];
+type ReplicadKernelContext = Parameters<NonNullable<typeof replicadDefinition.serializeNativeHandle>>[2];
 
-const serializeHandle = (nativeHandle: NativeHandleEntry[]): unknown =>
-  replicadDefinition.serializeNativeHandle({ nativeHandle }, createMockKernelRuntime(), mock<ReplicadKernelContext>());
+const serializeHandle = (nativeHandle: NativeHandleEntry[]): unknown => {
+  if (!replicadDefinition.serializeNativeHandle) {
+    throw new Error('The replicad kernel declares serializeNativeHandle.');
+  }
+  const serialized = replicadDefinition.serializeNativeHandle(
+    { nativeHandle: { shapes: nativeHandle } },
+    createMockKernelRuntime(),
+    mock<ReplicadKernelContext>(),
+  );
+  return (serialized as { shapes: unknown[] }).shapes;
+};
 
 describe('serializeNativeHandle', () => {
   // The `replicad` library binds its OpenCASCADE instance process-globally through `setOC`, so one render

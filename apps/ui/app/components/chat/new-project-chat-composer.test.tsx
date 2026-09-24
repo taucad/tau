@@ -21,8 +21,7 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
     capturedTextarea = properties;
     return (
       <>
-        {properties.creationLocationControls?.toolbar}
-        {properties.creationLocationControls?.field}
+        {properties.creationLocationControl}
         <button type='button'>Submit draft</button>
       </>
     );
@@ -135,13 +134,9 @@ describe('NewProjectChatComposer', () => {
       { hash: 'b'.repeat(64), mediaType: 'application/pdf', byteLength: 9, filename: 'spec.pdf' },
     ];
     render(<NewProjectChatComposer />);
-    expect(capturedTextarea?.creationLocationControls?.toolbar).toBeDefined();
-    expect(capturedTextarea?.creationLocationControls?.field).toBeDefined();
+    expect(capturedTextarea?.creationLocationControl).toBeDefined();
     expect(capturedTextarea?.isSubmitDisabled).toBe(false);
-    expect(screen.getByTestId('location-toolbar')).toHaveAttribute('data-is-nested', 'false');
-    expect(screen.getByTestId('location-field')).toHaveAttribute('data-is-nested', 'true');
     expect(screen.getByTestId('location-toolbar')).toHaveAttribute('data-is-inside-focus-trap', 'true');
-    expect(screen.getByTestId('location-field')).toHaveAttribute('data-is-inside-focus-trap', 'true');
 
     await act(async () => {
       await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
@@ -215,7 +210,7 @@ describe('NewProjectChatComposer', () => {
       canCreate: true,
     };
     render(<NewProjectChatComposer />);
-    expect(capturedTextarea?.creationLocationControls).toBeUndefined();
+    expect(capturedTextarea?.creationLocationControl).toBeUndefined();
     expect(screen.queryByText(/Location/)).not.toBeInTheDocument();
   });
 });

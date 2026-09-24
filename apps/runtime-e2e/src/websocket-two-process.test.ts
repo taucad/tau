@@ -398,7 +398,9 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
       await geometryHelpers.expectValidGltf(outcome.geometry);
       await geometryHelpers.expectMeshCount(outcome.geometry, 1);
 
-      const remote = extractGltfFromExportResult(await client.export('glb', { source: { path: 'main.ts' } }));
+      const exported = await client.export('glb', { source: { path: 'main.ts' } });
+      expect(exported.success, JSON.stringify(exported)).toBe(true);
+      const remote = extractGltfFromExportResult(exported);
       expect(remote?.byteLength).toBeGreaterThan(0);
 
       /* Hash-Parity: the same source through the same runtime definition, in

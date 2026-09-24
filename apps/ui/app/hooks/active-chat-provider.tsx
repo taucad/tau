@@ -66,7 +66,8 @@ import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
 import { attachmentUrl } from '#utils/attachment.utils.js';
-import type { ChatMode } from '@taucad/chat/constants';
+import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
+import { effectiveEffort } from '#utils/model-reasoning.js';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 
 type ChatInstance = Chat<MyUIMessage>;
@@ -95,6 +96,14 @@ export type ActiveChatModel = {
    * the composer provider writes the cookie only.
    */
   setActiveModel: (modelId: string) => void;
+  /**
+   * The reasoning level this chat runs its model at — its own choice clamped
+   * to what the model offers, else the model's default. `undefined` when the
+   * model offers no levels, which is what hides the control.
+   */
+  effort: ReasoningLevel | undefined;
+  /** Choose the reasoning level; remembered for new chats like the model. */
+  setActiveEffort: (effort: ReasoningLevel) => void;
 };
 
 /** Durable execution target for the active chat. */
@@ -255,8 +264,8 @@ export function ChatComposerProvider({
 
   useDraftImageErrorToast(draftActorRef);
 
-  const model = useCookieModel();
-  const execution = useCookieExecution(model);
+  const execution = useCookieExecution();
+  const model = useExecutionModel(execution);
   const kernel = useCookieKernel();
   const owner = useMemo(() => ({ attachments }), [attachments]);
   const consumeDraft = useConsumeDraft(draftActorRef, owner);
@@ -481,44 +490,20 @@ export function useActiveChatSession(): ActiveChatSessionContextValue {
 // ---------------------------------------------------------------------------
 
 /**
- * Cookie-only model resolver. Used by `<ChatComposerProvider>` to populate
- * `ChatComposerContextValue.model` without a chat session in scope. Setters
- * write only to the cookie default — there is no chat row to patch.
- */
-function useCookieModel(): ActiveChatModel {
-  const { selectedModelId, selectedModel, setSelectedModelId } = useModels();
-  const setActiveModel = useCallback(
-    (next: string) => {
-      setSelectedModelId(next);
-    },
-    [setSelectedModelId],
-  );
-  return useMemo<ActiveChatModel>(
-    () => ({ modelId: selectedModelId, model: selectedModel, setActiveModel }),
-    [selectedModelId, selectedModel, setActiveModel],
-  );
-}
-
-/**
  * Cookie-only execution resolver for ephemeral composer surfaces. Those
- * surfaces do not offer execution selection, so the cookie model and browser
- * host are the complete contract.
+ * surfaces do not offer execution selection, so the remembered model and
+ * level on the browser host are the complete contract.
  */
-function useCookieExecution(model: ActiveChatModel): ActiveChatExecution {
-  const execution = useMemo<CadAgentExecution>(() => ({ kind: 'tau', model: model.modelId }), [model.modelId]);
-  const setActiveExecution = useCallback(
-    (next: CadAgentExecution) => {
-      if (next.kind === 'tau') {
-        model.setActiveModel(next.model);
-      }
-    },
-    [model],
+function useCookieExecution(): ActiveChatExecution {
+  const { defaultExecution, rememberExecution } = useModels();
+  return useMemo(
+    () => ({ execution: defaultExecution, setActiveExecution: rememberExecution }),
+    [defaultExecution, rememberExecution],
   );
-  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
 }
 
 /**
- * Cookie-only kernel resolver. Same role as {@link useCookieModel} for the
+ * Cookie-only kernel resolver. Same role as {@link useCookieExecution} for the
  * CAD kernel. The cookie boundary is already healed by `useKernel` itself,
  * so the resolved `kernel` is a definite `KernelConfiguration`.
  */
@@ -563,7 +548,23 @@ function useExecutionModel(activeExecution: ActiveChatExecution): ActiveChatMode
     },
     [activeExecution],
   );
-  return useMemo<ActiveChatModel>(() => ({ modelId, model, setActiveModel }), [modelId, model, setActiveModel]);
+  /* The chosen level stays on the execution across model changes and is
+   * clamped where it is read, so a detour through a model with fewer levels
+   * does not lose it. */
+  const chosenEffort = activeExecution.execution.kind === 'tau' ? activeExecution.execution.effort : undefined;
+  const effort = effectiveEffort(model.model, chosenEffort);
+  const setActiveEffort = useCallback(
+    (next: ReasoningLevel) => {
+      if (activeExecution.execution.kind === 'tau') {
+        activeExecution.setActiveExecution({ ...activeExecution.execution, effort: next });
+      }
+    },
+    [activeExecution],
+  );
+  return useMemo<ActiveChatModel>(
+    () => ({ modelId, model, setActiveModel, effort, setActiveEffort }),
+    [modelId, model, setActiveModel, effort, setActiveEffort],
+  );
 }
 
 /**
@@ -571,22 +572,17 @@ function useExecutionModel(activeExecution: ActiveChatExecution): ActiveChatMode
  * else the cookie model. A late read never replaces a choice already made.
  */
 function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
-  const { selectedModelId, setSelectedModelId } = useModels();
+  const { defaultExecution, rememberExecution } = useModels();
   const stored = useSelector(recordRef, (snapshot) => snapshot.context.record?.execution);
   const [chosen, setChosen] = useState<CadAgentExecution>();
-  const execution = useMemo<CadAgentExecution>(
-    () => chosen ?? stored ?? { kind: 'tau', model: selectedModelId },
-    [chosen, stored, selectedModelId],
-  );
+  const execution = chosen ?? stored ?? defaultExecution;
   const setActiveExecution = useCallback(
     (next: CadAgentExecution) => {
       setChosen(next);
-      if (next.kind === 'tau') {
-        setSelectedModelId(next.model);
-      }
+      rememberExecution(next);
       recordRef.send({ type: 'patch', fields: { execution: next } });
     },
-    [recordRef, setSelectedModelId],
+    [recordRef, rememberExecution],
   );
   return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
 }
@@ -620,19 +616,14 @@ function useConsumeDraft(
 
 function useSessionExecution(session: ChatSession): ActiveChatExecution {
   const persisted = useSelector(session.persistenceActorRef, (state) => state.context.activeExecution);
-  const { selectedModelId, setSelectedModelId } = useModels();
-  const execution = useMemo<CadAgentExecution>(
-    () => persisted ?? { kind: 'tau', model: selectedModelId },
-    [persisted, selectedModelId],
-  );
+  const { defaultExecution, rememberExecution } = useModels();
+  const execution = persisted ?? defaultExecution;
   const setActiveExecution = useCallback(
     (next: CadAgentExecution) => {
-      if (next.kind === 'tau') {
-        setSelectedModelId(next.model);
-      }
+      rememberExecution(next);
       session.persistenceActorRef.send({ type: 'setActiveExecution', execution: next });
     },
-    [session.persistenceActorRef, setSelectedModelId],
+    [session.persistenceActorRef, rememberExecution],
   );
   return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
 }

@@ -1,3 +1,18 @@
+import {
+  KHRMaterialsAnisotropy,
+  KHRMaterialsClearcoat,
+  KHRMaterialsDispersion,
+  KHRMaterialsEmissiveStrength,
+  KHRMaterialsIOR,
+  KHRMaterialsIridescence,
+  KHRMaterialsSheen,
+  KHRMaterialsSpecular,
+  KHRMaterialsTransmission,
+  KHRMaterialsUnlit,
+  KHRMaterialsVolume,
+  KHRTextureTransform,
+  EXTTextureWebP,
+} from '@gltf-transform/extensions';
 import type { Extension, PlatformIO } from '@gltf-transform/core';
 import { EXTManifold } from 'manifold-3d/manifold-gltf';
 import { FbNgonEncodingExtension } from '#extensions/fb-ngon-encoding.js';
@@ -11,6 +26,19 @@ import { TauCadTopology } from '#extensions/tau-cad-topology.js';
  */
 export const tauCadGltfExtensions = [
   EXTManifold,
+  KHRMaterialsAnisotropy,
+  KHRMaterialsClearcoat,
+  KHRMaterialsDispersion,
+  KHRMaterialsEmissiveStrength,
+  KHRMaterialsIOR,
+  KHRMaterialsIridescence,
+  KHRMaterialsSheen,
+  KHRMaterialsSpecular,
+  KHRMaterialsTransmission,
+  KHRMaterialsUnlit,
+  KHRMaterialsVolume,
+  KHRTextureTransform,
+  EXTTextureWebP,
   KittyCadBoundaryRepresentation,
   TauCadTopology,
   FbNgonEncodingExtension,

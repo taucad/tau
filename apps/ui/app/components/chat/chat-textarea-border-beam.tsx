@@ -60,7 +60,8 @@ export function ChatTextareaBorderBeam({
           // so the conic-gradient's centre stays well inside the comet's
           // painted area regardless of host aspect ratio.
           'absolute top-1/2 left-1/2 aspect-square w-[max(200%,200vh)] -translate-x-1/2 -translate-y-1/2',
-          'animate-spin animation-duration-[3s]',
+          // F12: the beam holds still under reduced motion.
+          'animate-spin animation-duration-[3s] motion-reduce:animate-none',
           // Comet wedge: 35% of the gradient (~126°), peak at 90% with
           // a long ~90° trail and a sharper ~36° leading edge so the
           // ring reads as a moving beam, not a wedge of light.

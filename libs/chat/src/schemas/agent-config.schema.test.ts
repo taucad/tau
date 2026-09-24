@@ -145,6 +145,23 @@ describe('agentConfigSchema', () => {
       );
     });
 
+    it('should carry an optional reasoning level and refuse one outside the shared vocabulary', () => {
+      expect(cadAgentExecutionSchema.parse({ kind: 'tau', model: 'openai/gpt-5.5', effort: 'low' })).toEqual({
+        kind: 'tau',
+        model: 'openai/gpt-5.5',
+        effort: 'low',
+      });
+      // Absent is the model's own default; rows persisted before the field existed parse unchanged.
+      expect(cadAgentExecutionSchema.parse({ kind: 'tau', model: 'openai/gpt-5.5' })).not.toHaveProperty('effort');
+      expect(
+        cadAgentExecutionSchema.safeParse({ kind: 'tau', model: 'openai/gpt-5.5', effort: 'minimal' }).success,
+      ).toBe(false);
+      // An external agent's level is its own ACP option, never Tau's field.
+      expect(
+        cadAgentExecutionSchema.safeParse({ kind: 'acp', hostId: 'origin', agentId: 'codex', effort: 'low' }).success,
+      ).toBe(false);
+    });
+
     it('should parse an external ACP execution and require the host that spawns it', () => {
       expect(
         cadAgentConfigSchema.parse({

@@ -1,4 +1,4 @@
-import type { Model, ModelModalities } from '#api/models/model.schema.js';
+import type { Model, ModelModalities, ModelReasoningSupport } from '#api/models/model.schema.js';
 import type { ProviderId } from '#api/providers/provider.schema.js';
 
 // 'ollama' is runtime-discovered and never part of the static cloud catalog.
@@ -8,6 +8,17 @@ const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies Model
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
 /** Vision models on an Anthropic or OpenAI codec; providers rasterise PDF pages, so `pdf` never appears without `image`. */
 const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] } satisfies ModelModalities;
+
+/*
+ * User-selectable reasoning levels, per row (`support.reasoning`). A row
+ * declares levels only when its codec forwards an effort — Anthropic adaptive
+ * thinking, the Responses wire (OpenAI, xAI) and Vertex's thinking level; the
+ * OpenAI-compatible completions providers carry none, so they get no menu.
+ * `xhigh` is Anthropic Opus 4.7+ / Fable 5 and GPT-6 Astra only, and Vertex
+ * refuses anything past `high`.
+ */
+const lowToHighReasoning = { levels: ['low', 'medium', 'high'] } satisfies ModelReasoningSupport;
+const lowToExtraHighReasoning = { levels: ['low', 'medium', 'high', 'xhigh'] } satisfies ModelReasoningSupport;
 
 /** Catalog row; omit {@link ModelListEntry.enabled} or set `true` to expose via GET `/v1/models`. */
 export type ModelListEntry = Model & { readonly enabled?: boolean };
@@ -37,6 +48,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-fable-5-1',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -83,6 +95,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-fable-5',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -128,6 +141,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-5-5',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -173,6 +187,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-5',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -218,6 +233,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-opus-4-8',
       support: {
+        reasoning: lowToExtraHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -262,6 +278,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-sonnet-5',
       support: {
+        reasoning: lowToHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -306,6 +323,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'claude-sonnet-4-6',
       support: {
+        reasoning: lowToHighReasoning,
         toolChoice: false,
         modalities: pdfInputModalities,
       },
@@ -395,6 +413,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-astra',
       support: {
+        reasoning: lowToExtraHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -434,6 +453,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-sol',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -472,6 +492,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-luna',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -512,6 +533,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-sol',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -551,6 +573,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-terra',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -590,6 +613,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-luna',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -629,6 +653,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.5',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
@@ -703,6 +728,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.1-pro-preview-customtools',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -738,6 +764,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.8-flash',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -756,7 +783,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         // Google's own default for this model; it rejects MINIMAL outright.
-        thinkingLevel: 'MEDIUM',
+        thinkingLevel: 'HIGH',
       },
     },
     'gemini-3.5-flash-lite': {
@@ -772,6 +799,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.5-flash-lite',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -789,7 +817,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'MEDIUM',
+        thinkingLevel: 'HIGH',
       },
     },
     'gemini-3.5-flash': {
@@ -806,6 +834,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gemini-3.5-flash',
       support: {
+        reasoning: lowToHighReasoning,
         modalities: imageInputModalities,
       },
       details: {
@@ -823,7 +852,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'MEDIUM',
+        thinkingLevel: 'HIGH',
       },
     },
   },
@@ -1094,7 +1123,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'medium',
+          effort: 'high',
         },
       },
     },
@@ -1129,7 +1158,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'medium',
+          effort: 'high',
         },
       },
     },
@@ -1164,7 +1193,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'medium',
+          effort: 'high',
         },
       },
     },
@@ -1186,6 +1215,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'grok-4.7',
       support: {
+        reasoning: lowToHighReasoning,
         tools: true,
         toolChoice: false,
         modalities: imageInputModalities,
@@ -1227,6 +1257,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'grok-4.6',
       support: {
+        reasoning: lowToHighReasoning,
         tools: true,
         toolChoice: false,
         modalities: imageInputModalities,

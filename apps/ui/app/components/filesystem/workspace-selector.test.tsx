@@ -79,7 +79,7 @@ describe('WorkspaceSelector', () => {
     expect(trigger.querySelector('svg')).toHaveClass('size-3.5');
   });
 
-  it('matches the model selector geometry and explains the storage choice', async () => {
+  it('matches the composer’s ghost pill and explains the storage choice', async () => {
     const user = userEvent.setup();
     renderPicker(readyState());
 
@@ -87,7 +87,9 @@ describe('WorkspaceSelector', () => {
     expect(trigger).toHaveClass('h-7', 'rounded-full');
     expect(trigger).not.toHaveClass('border');
     expect(trigger).not.toHaveClass('bg-background');
-    expect(trigger.querySelector('svg')).toHaveClass('size-3.5');
+    /* Glyph first at the bar's 16 px, its label the first to leave when the bar needs room (D6). */
+    expect(trigger.querySelector('svg')).toHaveClass('size-4');
+    expect(trigger.querySelector('span')).toHaveClass('group-data-[hide-kernel]/bar:hidden');
     expect(trigger).toHaveTextContent('Home');
     expect(trigger).not.toHaveTextContent('in this browser');
     expect(trigger.querySelector('[title]')).toBeNull();

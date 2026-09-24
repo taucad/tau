@@ -1541,6 +1541,12 @@ const admitSourceFiles = (value: unknown): Readonly<Record<string, ContentDigest
   return files as Readonly<Record<string, ContentDigest | 'missing'>>;
 };
 
+// `mode: 'default'` is the absent mode; normalising it keeps one identity for one semantics.
+const withoutDefaultMode = (resolution: ParameterResolutionOptions = {}): ParameterResolutionOptions => {
+  const { mode, ...rest } = resolution;
+  return mode === 'declared-only' ? { ...rest, mode } : rest;
+};
+
 const admitResolution = (value: unknown): ParameterResolutionOptions => {
   if (!isRecord(value)) {
     fail(diagnostic('INVALID_SCHEMA', 'invalid parameter resolution identity', rootResource, '/identity/resolution'));
@@ -1796,11 +1802,7 @@ export const compileParameterManifest = async (input: CompileParameterManifestIn
   const declaration = admitParameterDeclaration(input.declaration);
   requireDigest(input.dependency, 'dependency');
   requireDigest(input.middleware, 'middleware');
-  // `mode: 'default'` is the absent mode; normalising it keeps one identity for one semantics.
-  const { mode, ...resolutionRest } = input.resolution ?? {};
-  const resolution = admitResolution(
-    deepFreeze(cloneBoundedJson(mode === 'declared-only' ? { ...resolutionRest, mode } : resolutionRest, limits)),
-  );
+  const resolution = admitResolution(deepFreeze(cloneBoundedJson(withoutDefaultMode(input.resolution), limits)));
   const scope = admitScope(cloneBoundedJson(input.scope, limits));
   const source = admitSource(cloneBoundedJson(input.source, limits));
   const sourceFiles = admitSourceFiles(cloneBoundedJson(input.sourceFiles ?? {}, limits));
@@ -2116,7 +2118,8 @@ export const admitParameterManifest = async (
     expectation !== undefined &&
     (canonical(candidate.scope) !== canonical(expectation.scope) ||
       canonical(candidate.source) !== canonical(expectation.source) ||
-      canonical(candidate.identity) !== canonical(expectation.identity))
+      canonical(candidate.identity) !==
+        canonical({ ...expectation.identity, resolution: withoutDefaultMode(expectation.identity.resolution) }))
   ) {
     fail(
       diagnostic(

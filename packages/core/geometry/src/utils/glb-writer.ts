@@ -12,26 +12,15 @@
 
 import { packageName, packageVersion } from '#utils/package-info.js';
 import type { GeometryGltf, JSONObject } from '@taucad/runtime/types';
+import type { GLTF } from '@gltf-transform/core';
+import { collectGltfExtensions, validateGlbMaterial, validateGlbResources } from '#utils/glb-material.js';
+import type { GlbMaterial, GlbResources } from '#utils/glb-material.js';
+// oxlint-disable-next-line no-barrel-files/no-barrel-files -- Preserve the existing writer material type export.
+export type { GlbMaterial } from '#utils/glb-material.js';
 
 // =============================================================================
 // Types
 // =============================================================================
-
-/**
- * Material properties for a glTF primitive.
- *
- * @public
- */
-export type GlbMaterial = {
-  baseColorFactor: [number, number, number, number];
-  metallicFactor: number;
-  roughnessFactor: number;
-  doubleSided: boolean;
-  alphaMode: 'OPAQUE' | 'BLEND';
-  name?: string;
-  extras?: JSONObject;
-  extensions?: Record<string, JSONObject>;
-};
 
 /**
  * A single mesh primitive with geometry data and material.
@@ -43,6 +32,10 @@ export type GlbPrimitive = {
   mode: number;
   positions: Float32Array;
   normals?: Float32Array;
+  /** Per-vertex texture coordinates, indexed by glTF TEXCOORD set. */
+  texCoords?: Float32Array[];
+  /** Per-vertex tangent xyz and bitangent handedness w. */
+  tangents?: Float32Array;
   /**
    * Triangle or line indices. Omit them for a de-indexed soup: glTF draws arrays when a primitive
    * has no `indices`, so an identity buffer only costs four bytes per vertex and an accessor.
@@ -90,7 +83,7 @@ export type GlbInputExtensions =
  *
  * @public
  */
-export type GlbInput = {
+export type GlbInput = GlbResources & {
   nodes: GlbNode[];
   extras?: JSONObject;
   extensions?: GlbInputExtensions;
@@ -163,7 +156,10 @@ type GltfJson = {
   accessors: GltfJsonAccessor[];
   bufferViews: GltfJsonBufferView[];
   buffers: Array<{ byteLength: number; uri?: string }>;
-  materials: GltfJsonMaterial[];
+  materials: GlbMaterial[];
+  images?: GLTF.IImage[];
+  textures?: GLTF.ITexture[];
+  samplers?: GLTF.ISampler[];
   extras?: JSONObject;
   extensions?: Record<string, JSONObject>;
   extensionsUsed?: string[];
@@ -199,19 +195,6 @@ type GltfJsonBufferView = {
   byteOffset: number;
   byteLength: number;
   target?: number;
-};
-
-type GltfJsonMaterial = {
-  doubleSided: boolean;
-  pbrMetallicRoughness: {
-    baseColorFactor: [number, number, number, number];
-    metallicFactor: number;
-    roughnessFactor?: number;
-  };
-  alphaMode?: string;
-  name?: string;
-  extras?: JSONObject;
-  extensions?: Record<string, JSONObject>;
 };
 
 type BufferEntry = {
@@ -259,10 +242,16 @@ const validateManifoldTopology = (node: GlbNode): ValidatedManifoldTopology => {
   if (
     node.primitives.some(
       (primitive) =>
-        !arraysEqual(primitive.positions, first.positions) || !arraysEqual(primitive.normals, first.normals),
+        !arraysEqual(primitive.positions, first.positions) ||
+        !arraysEqual(primitive.normals, first.normals) ||
+        !arraysEqual(primitive.tangents, first.tangents) ||
+        (primitive.texCoords?.length ?? 0) !== (first.texCoords?.length ?? 0) ||
+        (primitive.texCoords ?? []).some((coordinates, index) => !arraysEqual(coordinates, first.texCoords?.[index])),
     )
   ) {
-    throw new Error('manifoldTopology primitives must share identical POSITION and NORMAL attributes');
+    throw new Error(
+      'manifoldTopology primitives must share identical POSITION, NORMAL, TANGENT and TEXCOORD attributes',
+    );
   }
 
   const renderIndices = new Uint32Array(
@@ -373,7 +362,7 @@ const validateManifoldTopology = (node: GlbNode): ValidatedManifoldTopology => {
 function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<ArrayBuffer> } {
   const accessors: GltfJsonAccessor[] = [];
   const bufferViews: GltfJsonBufferView[] = [];
-  const materials: GltfJsonMaterial[] = [];
+  const materials: GlbMaterial[] = [];
   const meshes: GltfJson['meshes'] = [];
   const nodes: GltfJson['nodes'] = [];
   const sceneNodes: number[] = [];
@@ -385,44 +374,32 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
   /**
    * Deduplicate materials by their property key.
    *
-   * @param mat - material properties to deduplicate
+   * @param primitive - primitive whose material is validated and deduplicated
    * @returns index into the materials array
    */
-  function getOrCreateMaterial(mat: GlbMaterial): number {
-    const key = `${mat.baseColorFactor.join(',')}|${mat.metallicFactor}|${mat.roughnessFactor}|${mat.doubleSided}|${mat.alphaMode}|${mat.name ?? ''}|${JSON.stringify(mat.extras ?? {})}|${JSON.stringify(mat.extensions ?? {})}`;
+  function getOrCreateMaterial(primitive: GlbPrimitive): number {
+    const mat = primitive.material;
+    validateGlbMaterial(mat, {
+      textureCount: input.textures?.length ?? 0,
+      texCoordCount: primitive.texCoords?.length ?? 0,
+      hasTangents: primitive.tangents !== undefined,
+    });
+    const key = JSON.stringify(mat, (_property, value: unknown) => {
+      if (
+        (typeof value === 'number' && !Number.isFinite(value)) ||
+        ['bigint', 'function', 'symbol'].includes(typeof value)
+      ) {
+        throw new TypeError('Material properties, extras and extensions must contain finite JSON values');
+      }
+      return value;
+    });
     const existing = materialCache.get(key);
     if (existing !== undefined) {
       return existing;
     }
 
-    const materialJson: GltfJsonMaterial = {
-      doubleSided: mat.doubleSided,
-      pbrMetallicRoughness: {
-        baseColorFactor: mat.baseColorFactor,
-        metallicFactor: mat.metallicFactor,
-      },
-    };
-
-    if (mat.roughnessFactor !== 1) {
-      materialJson.pbrMetallicRoughness.roughnessFactor = mat.roughnessFactor;
-    }
-
-    if (mat.alphaMode !== 'OPAQUE') {
-      materialJson.alphaMode = mat.alphaMode;
-    }
-
-    if (mat.name) {
-      materialJson.name = mat.name;
-    }
-    if (mat.extras) {
-      materialJson.extras = mat.extras;
-    }
-    if (mat.extensions) {
-      materialJson.extensions = mat.extensions;
-    }
-
     const index = materials.length;
-    materials.push(materialJson);
+    materials.push(mat);
     materialCache.set(key, index);
     return index;
   }
@@ -454,6 +431,37 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
     bufferEntries.push({ data: padded, byteOffset: currentByteOffset });
     currentByteOffset += aligned;
     return viewIndex;
+  }
+
+  function addMaterialAttributes(primitive: GlbPrimitive, attributes: Record<string, number>): void {
+    const add = (semantic: string, data: Float32Array, size: number): void => {
+      if (data.length / size !== primitive.positions.length / 3 || data.some((value) => !Number.isFinite(value))) {
+        throw new TypeError(`${semantic} count must match POSITION and contain finite components`);
+      }
+      attributes[semantic] = accessors.length;
+      accessors.push({
+        bufferView: addBufferView(data, targetArrayBuffer),
+        byteOffset: 0,
+        componentType: componentTypeFloat,
+        count: data.length / size,
+        type: `VEC${size}`,
+      });
+    };
+    for (const [index, coordinates] of (primitive.texCoords ?? []).entries()) {
+      add(`TEXCOORD_${index}`, coordinates, 2);
+    }
+    if (primitive.tangents) {
+      if (!primitive.normals || primitive.normals.length !== primitive.positions.length) {
+        throw new TypeError('TANGENT requires matching NORMAL attributes');
+      }
+      for (let index = 0; index < primitive.tangents.length; index += 4) {
+        const [x, y, z, w] = primitive.tangents.subarray(index, index + 4);
+        if (Math.abs(Math.hypot(x!, y!, z!) - 1) > 0.001 || (w !== -1 && w !== 1)) {
+          throw new TypeError('TANGENT must contain unit XYZ vectors and W of -1 or 1');
+        }
+      }
+      add('TANGENT', primitive.tangents, 4);
+    }
   }
 
   for (const node of input.nodes) {
@@ -490,6 +498,7 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
         attributes['NORMAL'] = normalAccessorIndex;
       }
       const indexViewIndex = addBufferView(renderIndices, targetElementArrayBuffer);
+      addMaterialAttributes(first, attributes);
       let indexOffset = 0;
       for (const primitive of node.primitives) {
         const indexAccessorIndex = accessors.length;
@@ -505,7 +514,7 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
         primitiveJsons.push({
           attributes,
           mode: primitive.mode,
-          material: getOrCreateMaterial(primitive.material),
+          material: getOrCreateMaterial(primitive),
           indices: indexAccessorIndex,
           ...(primitive.extras ? { extras: primitive.extras } : {}),
           ...(primitive.extensions ? { extensions: primitive.extensions } : {}),
@@ -557,7 +566,7 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
     }
 
     for (const primitive of node.manifoldTopology ? [] : node.primitives) {
-      const materialIndex = getOrCreateMaterial(primitive.material);
+      const materialIndex = getOrCreateMaterial(primitive);
 
       const positionViewIndex = addBufferView(primitive.positions, targetArrayBuffer);
       const { min, max } = computeMinMax(primitive.positions);
@@ -589,6 +598,7 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
       }
 
       let indexAccessorIndex: number | undefined;
+      addMaterialAttributes(primitive, attributes);
       if (primitive.indices !== undefined && primitive.indices.length > 0) {
         const indexViewIndex = addBufferView(primitive.indices, targetElementArrayBuffer);
         indexAccessorIndex = accessors.length;
@@ -640,6 +650,12 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
     extraBufferViewIndices[extraBufferView.key] = addBufferView(extraBufferView.data, extraBufferView.target);
   }
 
+  const images = input.images?.map(({ data, mimeType, name }) => ({
+    bufferView: addBufferView(data),
+    mimeType,
+    ...(name ? { name } : {}),
+  }));
+  validateGlbResources(input);
   const totalBinSize = currentByteOffset;
   const binBuffer = new Uint8Array(totalBinSize);
   for (const entry of bufferEntries) {
@@ -660,6 +676,9 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
     bufferViews,
     buffers: [{ byteLength: totalBinSize }],
     materials,
+    ...(images ? { images } : {}),
+    ...(input.textures ? { textures: input.textures } : {}),
+    ...(input.samplers ? { samplers: input.samplers } : {}),
   };
 
   if (input.extensions) {
@@ -667,15 +686,18 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
       typeof input.extensions === 'function' ? input.extensions(extraBufferViewIndices) : input.extensions;
   }
 
-  const extensionsUsed = input.nodes.some((node) => node.manifoldTopology)
-    ? [...(input.extensionsUsed ?? []), 'EXT_mesh_manifold']
-    : input.extensionsUsed;
-  if (extensionsUsed && extensionsUsed.length > 0) {
-    json.extensionsUsed = [...new Set(extensionsUsed)];
+  const extensionsUsed = new Set([...(input.extensionsUsed ?? []), ...(input.extensionsRequired ?? [])]);
+  collectGltfExtensions(json, extensionsUsed);
+  if (extensionsUsed.size > 0) {
+    json.extensionsUsed = [...extensionsUsed];
   }
 
   if (input.extensionsRequired && input.extensionsRequired.length > 0) {
     json.extensionsRequired = [...new Set(input.extensionsRequired)];
+  }
+
+  if (input.textures?.some((texture) => texture.extensions?.['EXT_texture_webp'] && texture.source === undefined)) {
+    json.extensionsRequired = [...new Set([...(json.extensionsRequired ?? []), 'EXT_texture_webp'])];
   }
 
   return { json, binBuffer };

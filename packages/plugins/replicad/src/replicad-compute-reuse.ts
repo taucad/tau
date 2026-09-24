@@ -433,6 +433,24 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
     },
   };
 
+  const unwrap = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      const entries: readonly unknown[] = value;
+      return entries.map((shape) => unwrap(shape));
+    }
+    if (value !== null && typeof value === 'object' && 'shapes' in value && Array.isArray(value.shapes)) {
+      return { ...value, shapes: value.shapes.map((shape) => unwrap(shape)) };
+    }
+    if (value !== null && typeof value === 'object' && !isShapeLike(value) && 'shape' in value) {
+      const record = value as Record<string, unknown>;
+      return {
+        ...record,
+        shape: rawShape(record['shape']) ?? record['shape'],
+      };
+    }
+    return rawShape(value) ?? value;
+  };
+
   return {
     library,
     resident,
@@ -444,20 +462,7 @@ export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
         activeScope = undefined;
       }
     },
-    unwrap(value) {
-      if (Array.isArray(value)) {
-        const entries: readonly unknown[] = value;
-        return entries.map((entry) => rawShape(entry) ?? entry);
-      }
-      if (value !== null && typeof value === 'object' && !isShapeLike(value) && 'shape' in value) {
-        const record = value as Record<string, unknown>;
-        return {
-          ...record,
-          shape: rawShape(record['shape']) ?? record['shape'],
-        };
-      }
-      return rawShape(value) ?? value;
-    },
+    unwrap,
   };
 };
 

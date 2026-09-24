@@ -22,6 +22,7 @@ import type {
   KernelStackFrame,
 } from '@taucad/runtime/types';
 import { SourceMapConsumer } from 'source-map-js';
+import { converter, serializeHex } from 'culori';
 import type { RawSourceMap } from 'source-map-js';
 import {
   asBuffer,
@@ -74,6 +75,7 @@ import * as tauReplicadAnnotations from '#annotations/index.js';
 import { exportSTEP } from '#export/interface-export.js';
 import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#interface-resolution.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
+import type { GlbResources } from '@taucad/geometry-core';
 
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import { createReplicadComputeReuse, replicadComputeNamespace } from '#replicad-compute-reuse.js';
@@ -83,7 +85,17 @@ import type { GeometryReplicad } from '#replicad.types.js';
 import { replicadDetectPattern } from '#replicad.constants.js';
 import { loadReplicadSingleWasm } from '#replicad-wasm-single-loader.js';
 import { loadReplicadMultiWasm } from '#replicad-wasm-multi-loader.js';
-import { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry, resolveShapeName } from '@taucad/geometry-core';
+import {
+  createEmptyGlb,
+  createEmptyGltf,
+  createEmptyGltfGeometry,
+  resolveShapeName,
+  validateGlbResources,
+} from '@taucad/geometry-core';
+
+type NativeHandle = GlbResources & { shapes: NativeHandleEntry[] };
+
+const toSrgb = converter('rgb');
 
 const tracedStep = <T>(tracer: RuntimeSpanTracer, label: string, operation: () => T): T => {
   const span = tracer.startSpan(label);
@@ -442,7 +454,7 @@ export const replicadKernel = defineKernel({
   detectImport: replicadDetectPattern,
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
   name: 'ReplicadKernel',
-  version: '1.0.0',
+  version: '1.1.0',
   optionsSchema: replicadOptionsSchema,
   render: {
     optionsSchema: replicadRenderSchema,
@@ -705,25 +717,33 @@ export const replicadKernel = defineKernel({
           runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
             data: { filePath: relativeFilePath },
           });
-          return finalizeRenderOutput({
+          return finalizeRenderOutput<NativeHandle>({
             artifacts: [createEmptyGltfGeometry()],
-            nativeHandle: [],
+            nativeHandle: { shapes: [] },
           });
         }
 
+        const model = isRecordObject(shapes) && 'shapes' in shapes ? shapes : undefined;
+        if (model && !Array.isArray(model['shapes'])) {
+          throw new TypeError('Model.shapes must be an array of shape configurations.');
+        }
+        const modelShapes = model?.['shapes'];
+        if (model) {
+          validateGlbResources(model);
+        }
         const defaultName = extractDefaultName(executeResult.value);
 
         // Build phase ends here: normalize main() output and resolve GeoSpec
         // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
         // all export-facing evidence — tessellation is deferred to meshGeometry
         // and never runs on a BRep-only export path.
-        const nativeHandle: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
+        const entries: NativeHandleEntry[] = await tracedPhase(tracer, 'create.resolveInterfaces', () => {
           const interfaceSpan = tracer.startSpan('replicad.resolve-interfaces', {
             phase: 'computingGeometry',
             stage: 'brep',
           });
           try {
-            return normalizeRenderShapes(shapes, defaultName).map((entry) =>
+            return normalizeRenderShapes(model ? modelShapes : shapes, defaultName).map((entry) =>
               resolveEntryInterfaces(entry, context.replicadLibrary),
             );
           } finally {
@@ -732,6 +752,10 @@ export const replicadKernel = defineKernel({
         });
 
         runtime.signal.throwIfAborted();
+        const nativeHandle: NativeHandle = {
+          shapes: entries,
+          ...(model ? { images: model.images, textures: model.textures, samplers: model.samplers } : {}),
+        };
         return { nativeHandle };
       });
 
@@ -771,7 +795,7 @@ export const replicadKernel = defineKernel({
 
   async meshGeometry({ nativeHandle, options, content }, runtime, context) {
     const { tracer } = runtime;
-    if (nativeHandle.length === 0) {
+    if (nativeHandle.shapes.length === 0) {
       return { geometry: createEmptyGltfGeometry() };
     }
 
@@ -779,7 +803,7 @@ export const replicadKernel = defineKernel({
       const { tessellation } = options;
       const includeEdges = content?.includeEdges === true;
       const includeTopology = content?.includeTopology === true;
-      const namedShapes = nativeHandle.map((entry, index) => ({
+      const namedShapes = nativeHandle.shapes.map((entry, index) => ({
         ...entry,
         name: resolveShapeName({ index, name: entry.name, source: 'authored' }),
       }));
@@ -816,7 +840,7 @@ export const replicadKernel = defineKernel({
       if (shapes3d.length === 0 && shapes2d.length === 0) {
         runtime.logger.warn('meshGeometry returning empty: render-output-filtered-empty', {
           data: {
-            rawShapeCount: nativeHandle.length,
+            rawShapeCount: nativeHandle.shapes.length,
             renderedShapeCount: renderedShapes.length,
           },
         });
@@ -833,6 +857,9 @@ export const replicadKernel = defineKernel({
           });
           try {
             return convertReplicadGeometriesToGltf({
+              images: nativeHandle.images,
+              textures: nativeHandle.textures,
+              samplers: nativeHandle.samplers,
               geometries: includeEdges
                 ? shapes3d
                 : shapes3d.map((geometry) => ({
@@ -898,13 +925,13 @@ export const replicadKernel = defineKernel({
           case 'glb':
           case 'gltf': {
             const { options, content } = input;
-            if (nativeHandle.length === 0) {
+            if (nativeHandle.shapes.length === 0) {
               return emptyGltfExport();
             }
 
             const { linearTolerance, angularTolerance } = options.tessellation;
             const { coordinateSystem, unit } = options;
-            const namedShapes = nativeHandle.map((shapeConfig, index) => ({
+            const namedShapes = nativeHandle.shapes.map((shapeConfig, index) => ({
               ...shapeConfig,
               name: resolveShapeName({
                 index,
@@ -931,6 +958,9 @@ export const replicadKernel = defineKernel({
 
             const gltfData = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
               convertReplicadGeometriesToGltf({
+                images: nativeHandle.images,
+                textures: nativeHandle.textures,
+                samplers: nativeHandle.samplers,
                 geometries:
                   content?.includeEdges === true
                     ? temporaryShapes
@@ -952,22 +982,33 @@ export const replicadKernel = defineKernel({
 
           case 'step': {
             const { options } = input;
-            if (nativeHandle.length === 0) {
+            if (nativeHandle.shapes.length === 0) {
               return noGeometryExportError();
             }
 
             const { coordinateSystem } = options;
 
             const shapes =
-              coordinateSystem === 'y-up' ? nativeHandle.map((entry) => rotateNativeEntryToYup(entry)) : nativeHandle;
+              coordinateSystem === 'y-up'
+                ? nativeHandle.shapes.map((entry) => rotateNativeEntryToYup(entry))
+                : nativeHandle.shapes;
 
             const stepShapes = shapes.map((s) => ({
               shape: s.shape,
               name: s.name,
-              color: s.color,
-              alpha: s.opacity,
-              metalness: s.metalness,
-              roughness: s.roughness,
+              color: s.material?.pbrMetallicRoughness?.baseColorFactor
+                ? serializeHex(
+                    toSrgb({
+                      mode: 'lrgb',
+                      r: s.material.pbrMetallicRoughness.baseColorFactor[0]!,
+                      g: s.material.pbrMetallicRoughness.baseColorFactor[1]!,
+                      b: s.material.pbrMetallicRoughness.baseColorFactor[2]!,
+                    }),
+                  )
+                : s.color,
+              alpha: s.material?.pbrMetallicRoughness?.baseColorFactor?.[3] ?? s.opacity,
+              metalness: s.material?.pbrMetallicRoughness?.metallicFactor ?? s.metalness,
+              roughness: s.material?.pbrMetallicRoughness?.roughnessFactor ?? s.roughness,
               density: s.density,
               resolvedInterfaces: s.resolvedInterfaces,
             }));
@@ -987,7 +1028,7 @@ export const replicadKernel = defineKernel({
 
           case 'stl': {
             const { options } = input;
-            if (nativeHandle.length === 0) {
+            if (nativeHandle.shapes.length === 0) {
               return noGeometryExportError();
             }
 
@@ -997,11 +1038,11 @@ export const replicadKernel = defineKernel({
 
             const shapes =
               coordinateSystem === 'y-up'
-                ? nativeHandle.map((s) => ({
+                ? nativeHandle.shapes.map((s) => ({
                     ...s,
                     shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
                   }))
-                : nativeHandle;
+                : nativeHandle.shapes;
 
             const result = await Promise.all(
               shapes.map(async ({ shape, name }, index) => {
@@ -1037,15 +1078,21 @@ export const replicadKernel = defineKernel({
   },
 
   deserializeNativeHandle({ serializedNativeHandle }, _runtime, context) {
-    return serializedNativeHandle.map((entry) => ({
-      shape: context.replicadLibrary.deserializeShape(entry.brep),
-      ...entry.metadata,
-    }));
+    return {
+      ...serializedNativeHandle,
+      shapes: serializedNativeHandle.shapes.map((entry) => ({
+        shape: context.replicadLibrary.deserializeShape(entry.brep),
+        ...entry.metadata,
+      })),
+    };
   },
 });
 
-const serializeReplicadHandle = (nativeHandle: NativeHandleEntry[]) =>
-  nativeHandle.map((entry) => ({
+const serializeReplicadHandle = (nativeHandle: NativeHandle) => ({
+  images: nativeHandle.images,
+  textures: nativeHandle.textures,
+  samplers: nativeHandle.samplers,
+  shapes: nativeHandle.shapes.map((entry) => ({
     brep: entry.shape.serialize(),
     metadata: {
       name: entry.name,
@@ -1053,10 +1100,12 @@ const serializeReplicadHandle = (nativeHandle: NativeHandleEntry[]) =>
       opacity: entry.opacity,
       metalness: entry.metalness,
       roughness: entry.roughness,
+      material: entry.material,
       density: entry.density,
       resolvedInterfaces: entry.resolvedInterfaces,
     },
-  }));
+  })),
+});
 
 async function buildExportBytes(
   shape: AnyShape,

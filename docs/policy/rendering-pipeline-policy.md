@@ -117,7 +117,7 @@ The main CAD viewer uses an `<Environment>` component with `<Lightformer>` child
 - **No background**: The environment map contributes PBR lighting and reflections (`background` is not set). The app's CSS background shows through, consistent with standard CAD viewer behaviour.
 - **Conditional on matcap**: When matcap is enabled, the environment is skipped entirely since `MeshMatcapMaterial` ignores environment maps. This avoids unnecessary GPU work.
 - **Camera-relative rig**: Five asymmetric Lightformers provide key, left fill, top, ground, and back-fill panels; the complete camera quaternion rotates the environment through tilt, roll, and pole crossings, keeping the rig fixed in view space.
-- **Headlamp and ambient floor**: Use a view-space directional key along `normalize([1, 1, 1])` at intensity `2.5`, ambient intensity `1.17`, and environment intensity `0.09`. Keep all light energy independent of field of view and projection. The key reflection panel uses intensity `192`, position `[2.3, 0, 3] × sceneRadius`, and size `[0.8, 1.2] × sceneRadius`; the other four panels provide low-energy fill.
+- **Headlamp and ambient floor**: The default view-space directional key follows `normalize([1, 1, 1])` at intensity `1.5`, with ambient intensity `0.1` and environment intensity `1`. Keep all light energy independent of field of view and projection. The key reflection panel uses intensity `64`, position `[1, 1, 1] × sceneRadius`, and size `[1.2, 1.2] × sceneRadius`; the other four panels provide low-energy fill.
 - **Environment resolution**: `512px` for sharp, defined reflections on surfaces.
 - **Material ownership**: Preserve authored glTF roughness and metalness; do not add a post-load global material override merely to fit one reference part.
 

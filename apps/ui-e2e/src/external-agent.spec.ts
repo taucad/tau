@@ -77,12 +77,22 @@ const createProject = async (origin: string): Promise<void> => {
 
 /** Pick the daemon's advertised Codex row and place the chat on it. */
 const selectCodex = async (): Promise<void> => {
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }), 60_000);
-  await target.click(selectors.getByRole('button', { name: 'Select agent: Tau' }));
-  const row = selectors.getByRole('option', { name: /^Codex/u });
-  await target.expectVisible(row, 60_000);
-  await target.click(row);
-  await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Codex' }), 30_000);
+  const trigger = selectors.getByRole('button', { name: /^Agent and model: /u });
+  await target.expectVisible(trigger, 60_000);
+  await target.click(trigger);
+  await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
+  const tab = selectors.getByRole('tab', { name: /^Codex/u });
+  await target.expectVisible(tab, 60_000);
+  await target.click(tab);
+  await target.click(selectors.getByRole('option').first());
+  /* The copy the user reads once the chat is placed: their own login, and the
+   * project's tree — never a promise of per-action approval (SP-4 Result 3). */
+  await target.expectVisible(
+    selectors.getByText(/^Runs with your local Codex login on .+, in this project's tree\.$/u),
+    10_000,
+  );
+  await target.keyboardPress('Escape');
+  await target.expectVisible(selectors.getByRole('button', { name: /^Agent and model: Codex, /u }), 30_000);
 };
 
 const durableEvents = async (): Promise<readonly LogEvent[]> => {
@@ -188,19 +198,8 @@ describe('external agent (AV-5)', () => {
     await createProject(origin);
 
     /* The advertisement chain: the daemon probed its adapter, published it on
-     * its descriptor, and the page turned it into a row of its own. */
-    await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Tau' }), 60_000);
-    await target.click(selectors.getByRole('button', { name: 'Select agent: Tau' }));
-    const row = selectors.getByRole('option', { name: /^Codex/u });
-    await target.expectVisible(row, 60_000);
-    /* The copy the user reads before placing a turn: their own login, and the
-     * project's tree — never a promise of per-action approval (SP-4 Result 3). */
-    await target.expectVisible(
-      selectors.getByText("Runs with your local Codex login in this project's tree", { exact: true }),
-      10_000,
-    );
-    await target.click(row);
-    await target.expectVisible(selectors.getByRole('button', { name: 'Select agent: Codex' }), 30_000);
+     * its descriptor, and the page turned it into a tab of its own. */
+    await selectCodex();
 
     await target.type(composer, proofPrompt);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());

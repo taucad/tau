@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- tool identifiers are an external wire contract */
-import type { HostToolInvocation, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import type { HostToolInvocation, InterruptResolution, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import type {
   MachineArtifactReference,
   MachineBeginBindingInput,
@@ -12,6 +12,15 @@ import type {
   PrintRequester,
   PrintRequestSummary,
 } from '@taucad/runtime/machine';
+import {
+  cancelPrintInputSchema,
+  getMachineInputSchema,
+  getPrintRequestInputSchema,
+  listPrintRequestsInputSchema,
+  requestPrintInputSchema,
+} from '@taucad/chat';
+import { toolDescriptions, toolName } from '@taucad/chat/constants';
+import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import { z } from 'zod';
 
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
@@ -51,35 +60,29 @@ const artifact = z.strictObject({
   }),
   selectedMember: z.string().min(1).max(512),
 });
-const configuration = z.json();
-const preset = z.enum(['fast', 'standard', 'fine']);
+/* A typeless input side keeps the recursive JSON check off the wire, where it
+ * would serialize as the `definitions` ref loops providers refuse. */
+const configuration = z.any().describe('Provider configuration: any JSON value.').pipe(z.json());
 
+/*
+ * The print tools a CAD agent is offered take their inputs and descriptions
+ * from `@taucad/chat`, the provider-facing contract; the rest are host tools.
+ */
 const inputs = {
   discover_machines: z.strictObject({ providerId: identity, configuration }),
   begin_machine_binding: z.strictObject({ candidate, name: identity }),
   list_machines: z.strictObject({}),
-  get_machine: z.strictObject({ machineId: identity }),
-  request_print: z.strictObject({
-    machineId: identity.optional(),
-    targetFile: z.string().min(1).max(512),
-    preset: preset.optional(),
-    options: z.record(z.string().min(1).max(64), z.json()).optional(),
-  }),
-  get_print_request: z.strictObject({ requestId: identity }),
-  list_print_requests: z.strictObject({ machineId: identity.optional() }),
-  cancel_print: z
-    .strictObject({
-      requestId: identity.optional(),
-      machineId: identity.optional(),
-      expectedProviderRunId: identity.optional(),
-    })
-    .refine(
-      (value) =>
-        value.requestId === undefined
-          ? value.machineId !== undefined && value.expectedProviderRunId !== undefined
-          : value.machineId === undefined && value.expectedProviderRunId === undefined,
-      { message: 'Give requestId alone, or machineId together with expectedProviderRunId.' },
-    ),
+  [toolName.getMachine]: getMachineInputSchema,
+  [toolName.requestPrint]: requestPrintInputSchema,
+  [toolName.getPrintRequest]: getPrintRequestInputSchema,
+  [toolName.listPrintRequests]: listPrintRequestsInputSchema,
+  [toolName.cancelPrint]: cancelPrintInputSchema.refine(
+    (value) =>
+      value.requestId === undefined
+        ? value.machineId !== undefined && value.expectedProviderRunId !== undefined
+        : value.machineId === undefined && value.expectedProviderRunId === undefined,
+    { message: 'Give requestId alone, or machineId together with expectedProviderRunId.' },
+  ),
   prepare_machine_print: z.strictObject({
     machineId: identity,
     artifact,
@@ -112,13 +115,11 @@ const descriptions: Readonly<Record<MachineToolName, string>> = {
   begin_machine_binding:
     'Begin the trusted host-local binding ceremony for one discovered candidate. Credentials remain outside this tool.',
   list_machines: 'List the current workspace machine directory, including freshness and observed run state.',
-  get_machine: 'Read one logical machine by its exact machine ID.',
-  request_print:
-    "The only way to print. Slices one CAD source file to a .gcode.3mf recorded in the project and opens a print request on a bound machine; nothing is uploaded or started until a person accepts it, and accepting starts the print. Under a Tau-hosted turn this waits for their answer; elsewhere it returns the request awaiting-approval for them to accept in the Print pane. Never retry a pending request or work around it with other machine tools; a denial or withdrawal is the person's decision. Before requesting, run test_model and check the part fits the printable envelope get_machine reports. Omit machineId when exactly one machine is bound.",
-  get_print_request: 'Read one print request by its exact request ID: state, summary, receipts and any failure.',
-  list_print_requests: 'List print requests, newest first, optionally for one machine.',
-  cancel_print:
-    'Stop a print. Withdraws a request that has not started, or cancels the exact observed provider run of a started one, which stops the printer. Give requestId alone, or machineId with expectedProviderRunId.',
+  [toolName.getMachine]: toolDescriptions[toolName.getMachine],
+  [toolName.requestPrint]: toolDescriptions[toolName.requestPrint],
+  [toolName.getPrintRequest]: toolDescriptions[toolName.getPrintRequest],
+  [toolName.listPrintRequests]: toolDescriptions[toolName.listPrintRequests],
+  [toolName.cancelPrint]: toolDescriptions[toolName.cancelPrint],
   prepare_machine_print:
     'Preflight one immutable revision-owned artifact against a machine: archive, digest, setup and materials are checked and nothing is transferred or started. Host paths and raw G-code are not accepted.',
   upload_machine_print:
@@ -182,16 +183,19 @@ export type MachineToolRegistryOptions = {
 /** Request states in which there is nothing left to stop. */
 const settledStates = new Set<PrintRequest['state']>(['denied', 'withdrawn', 'rejected', 'failed']);
 
-const definitionFor = (name: MachineToolName) => {
-  const inputSchema = z.toJSONSchema(inputs[name], {
-    target: 'draft-7',
-    io: 'input',
-  }) as JsonObject & {
-    $schema?: unknown;
-  };
-  delete inputSchema.$schema;
-  return { name, description: descriptions[name], inputSchema };
-};
+/** Who settled a paused request, as the ledger records it, per answer. */
+const resolutionLabels = {
+  approved: 'Accepted in chat',
+  denied: 'Declined in chat',
+  cancelled: 'Stopped with the chat turn',
+} as const satisfies Record<InterruptResolution['outcome'], string>;
+
+const definitionFor = (name: MachineToolName) => ({
+  name,
+  description: descriptions[name],
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- draft-7 JSON Schema is JSON by construction.
+  inputSchema: toProviderToolJsonSchema(inputs[name]) as JsonObject,
+});
 
 const describeMachines = (entries: readonly MachineDirectoryEntry[]): string =>
   entries.map((entry) => `${entry.machineId} (${entry.descriptor.name})`).join(', ');
@@ -293,6 +297,7 @@ const requestPrint = async (
   const { client } = host;
   const { signal } = invocation;
   const { entry: machine, cursor } = await resolveMachine(client, parsed.machineId, signal);
+  const machineName = machine.descriptor.name;
   const plan = await host.planPrint({
     toolCallId: invocation.toolCallId,
     targetFile: parsed.targetFile,
@@ -319,11 +324,12 @@ const requestPrint = async (
   if (request.state !== 'awaiting-approval') {
     /* Preflight refused, or the retry found a request already past its
      * approval: the record says which. */
-    return asJson({ request });
+    return asJson({ request, machineName });
   }
   if (invocation.approve === undefined) {
     return asJson({
       request,
+      machineName,
       nextStep: `Waiting for a person to accept print request ${requestId} in Tau's Print pane; accepting uploads the file and starts the print. Do not retry; call get_print_request to observe it.`,
     });
   }
@@ -337,18 +343,17 @@ const requestPrint = async (
       artifactDigest: plan.artifact.digest,
     },
   });
-  const resolvedBy: PrintRequester = {
-    kind: 'user',
-    id: 'chat',
-    label: resolution.outcome === 'approved' ? 'Accepted in chat' : 'Declined in chat',
-  };
-  /* A withdrawal is the safety action and must land even when the answer was
-   * "the run is being cancelled" — so it takes no cancellation signal. */
+  const resolvedBy: PrintRequester = { kind: 'user', id: 'chat', label: resolutionLabels[resolution.outcome] };
+  /* A denial is the person's decision and ends the request `denied`; only a run
+   * that was aborted or closed withdraws it. Both are safety answers that must
+   * land even while the run is being cancelled, so neither takes the signal. */
   const settled =
     resolution.outcome === 'approved'
       ? await client.resolvePrintRequest({ requestId, decision: 'approve', resolvedBy, signal })
-      : await client.withdrawPrintRequest({ requestId, resolvedBy });
-  return asJson({ request: settled, approval: resolution.outcome });
+      : resolution.outcome === 'denied'
+        ? await client.resolvePrintRequest({ requestId, decision: 'deny', resolvedBy })
+        : await client.withdrawPrintRequest({ requestId, resolvedBy });
+  return asJson({ request: settled, machineName, approval: resolution.outcome });
 };
 
 /**
@@ -436,7 +441,12 @@ const invokeMachine = async (
       return asJson(await client.list({ signal }));
     }
     case 'get_machine': {
-      return asJson(await client.get({ ...inputs.get_machine.parse(input), signal }));
+      const { machineId } = inputs.get_machine.parse(input);
+      if (machineId !== undefined) {
+        return asJson(await client.get({ machineId, signal }));
+      }
+      const { entry } = await resolveMachine(client, undefined, signal);
+      return asJson(entry);
     }
     case 'request_print': {
       const parsed = inputs.request_print.parse(input);

@@ -793,6 +793,7 @@ patchedDependencies:
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
   '@taulabs/replicad@0.23.4-beta.2': 4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b
+  n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
   vite-plugin-mkcert@2.0.0: 03b480d5b58a772a5b8d09aa61601839139c389c323e1d4fe6e70d399a4a2128
   zod@4.4.3: d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315
 
@@ -1288,7 +1289,7 @@ importers:
         version: 12.40.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       n8ao:
         specifier: 'catalog:'
-        version: 1.10.2(postprocessing@6.39.1(three@0.184.0))(three@0.184.0)
+        version: 1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0))(three@0.184.0)
       nanoid:
         specifier: ^5.1.14
         version: 5.1.14
@@ -35654,7 +35655,7 @@ snapshots:
     dependencies:
       '@react-three/fiber': 9.6.1(@types/react@19.0.12)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0)
       maath: 0.6.0(@types/three@0.184.1)(three@0.184.0)
-      n8ao: 1.10.2(postprocessing@6.39.1(three@0.184.0))(three@0.184.0)
+      n8ao: 1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0))(three@0.184.0)
       postprocessing: 6.39.1(three@0.184.0)
       react: 19.2.7
       three: 0.184.0
@@ -46687,7 +46688,7 @@ snapshots:
       object-assign: 4.1.1
       thenify-all: 1.6.0
 
-  n8ao@1.10.2(postprocessing@6.39.1(three@0.184.0))(three@0.184.0):
+  n8ao@1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0))(three@0.184.0):
     dependencies:
       postprocessing: 6.39.1(three@0.184.0)
       three: 0.184.0

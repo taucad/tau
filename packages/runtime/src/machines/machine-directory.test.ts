@@ -134,7 +134,6 @@ const fixture = async () => {
     const directory = await createMachineDirectory({
       hostId: 'host',
       authorityId: 'authority',
-      generation: 'log-1',
       journal: borrowed,
       commits,
       onError: errors,
@@ -203,17 +202,43 @@ describe('host-owned machine directory', () => {
     expect(() => parseMachineDirectorySnapshot({ ...value, secret: true })).toThrow();
   });
 
-  it('should suppress timestamp-only heartbeats but commit readiness, setup and run changes', async () => {
+  it('should keep an idle machine current past its 15 s budget while it repeats itself, without journal writes', async () => {
     const { directory, attach, journal } = await fixture();
     const device = await attach();
-    device.push({ ...observation, observedAt: '2026-09-06T00:01:00Z' });
-    await vi.waitFor(() => {
-      expect(device.consumed).toHaveBeenCalledTimes(1);
-    });
-    expect(await directory.snapshot({ workspaceId: 'workspace' })).toMatchObject({
-      cursor: { revision: 1 },
-      entries: [{ snapshot: { observedAt: observation.observedAt } }],
-    });
+    const { cursor } = await directory.snapshot({ workspaceId: 'workspace' });
+    const abort = new AbortController();
+    const watch = directory.watch({ workspaceId: 'workspace', cursor, signal: abort.signal })[Symbol.asyncIterator]();
+    const reportedAt = (second: number): string =>
+      new Date(Date.parse(observation.observedAt) + second * 1000).toISOString();
+    try {
+      for (let second = 1; second <= 20; second += 1) {
+        device.push({ ...observation, observedAt: reportedAt(second) });
+      }
+      await vi.waitFor(() => {
+        expect(device.consumed).toHaveBeenCalledTimes(20);
+      });
+      // The UI marks a machine stale once `now - snapshot.observedAt` exceeds its budget (15 s for the X1C), so 20 s
+      // of unchanged reports must carry the latest report time, not the time of the last change.
+      await expect(directory.snapshot({ workspaceId: 'workspace' })).resolves.toMatchObject({
+        cursor: { revision: 21 },
+        entries: [{ freshness: 'current', snapshot: { ...observation, observedAt: reportedAt(20) } }],
+      });
+      const frame = await watch.next();
+      expect(frame.value).toMatchObject({
+        type: 'event',
+        cursor: { revision: 2 },
+        event: { type: 'machine-directory-upserted', entry: { snapshot: { observedAt: reportedAt(1) } } },
+      });
+      await expect(journal.replay({ cursor: 0, limit: 10 })).resolves.toMatchObject({ endCursor: 1 });
+    } finally {
+      abort.abort();
+      await watch.return?.();
+    }
+  });
+
+  it('should serve readiness, setup and run changes from memory and journal only the machine identity', async () => {
+    const { directory, attach, journal } = await fixture();
+    const device = await attach();
     device.push({
       ...observation,
       observedAt: '2026-09-06T00:02:00Z',
@@ -233,7 +258,7 @@ describe('host-owned machine directory', () => {
       activeRunId: 'run',
     });
     await vi.waitFor(() => {
-      expect(device.consumed).toHaveBeenCalledTimes(4);
+      expect(device.consumed).toHaveBeenCalledTimes(3);
     });
     const snapshot = await directory.snapshot({ workspaceId: 'workspace' });
     expect(snapshot).toMatchObject({
@@ -250,8 +275,13 @@ describe('host-owned machine directory', () => {
       ],
     });
     const replay = await journal.replay({ cursor: 0, limit: 10 });
-    expect(replay.endCursor).toBe(4);
+    expect(replay.endCursor).toBe(1);
+    expect(replay.records[0]?.event).toMatchObject({
+      type: 'machine-directory-upserted',
+      entry: { machineId: 'selected-id', providerId: 'provider', snapshot: observation },
+    });
   });
+
   it('should retain host-selected identities and publish only committed observations', async () => {
     const { directory, attach, journal } = await fixture();
     await attach('one');
@@ -260,10 +290,10 @@ describe('host-owned machine directory', () => {
     expect(snapshot.cursor).toMatchObject({
       hostId: 'host',
       authorityId: 'authority',
-      generation: 'log-1',
       position: 2,
       revision: 2,
     });
+    expect(snapshot.cursor.generation).toMatch(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u);
     expect(snapshot.entries.map((entry) => [entry.machineId, entry.descriptor.id])).toEqual([
       ['one', 'provider-claimed-id'],
       ['two', 'provider-claimed-id'],
@@ -313,34 +343,37 @@ describe('host-owned machine directory', () => {
     expect(device.session.close).toHaveBeenCalledOnce();
   });
 
-  it('should replay identity but persist stale status after host restart until a new session observes it', async () => {
-    const { directory, attach, open, disk } = await fixture();
+  it('should recover journaled identities as stale without writes until a new session observes them', async () => {
+    const { directory, attach, open, disk, journal } = await fixture();
     const original = await attach();
+    const before = await directory.snapshot({ workspaceId: 'workspace' });
+    original.push({ ...observation, observedAt: '2026-09-06T00:05:00Z', readiness: 'busy' });
+    await vi.waitFor(() => {
+      expect(original.consumed).toHaveBeenCalledOnce();
+    });
     await directory.close();
     expect(disk.close).not.toHaveBeenCalled();
     expect(original.session.close).toHaveBeenCalledOnce();
     const recovered = await open();
-    expect(await recovered.snapshot({ workspaceId: 'workspace' })).toMatchObject({
-      cursor: { position: 2, revision: 2 },
-      entries: [
-        {
-          machineId: 'selected-id',
-          freshness: 'stale',
-          snapshot: { observedAt: observation.observedAt },
-        },
-      ],
+    const restarted = await recovered.snapshot({ workspaceId: 'workspace' });
+    // Telemetry never reached the journal, so the restart shows the attach-time snapshot, marked stale.
+    expect(restarted).toMatchObject({
+      cursor: { position: 0, revision: 1 },
+      entries: [{ machineId: 'selected-id', freshness: 'stale', snapshot: observation }],
     });
+    expect(restarted.cursor.generation).not.toBe(before.cursor.generation);
     await attach('selected-id', 'workspace', recovered);
     expect(await recovered.snapshot({ workspaceId: 'workspace' })).toMatchObject({
-      cursor: { revision: 3 },
+      cursor: { position: 1, revision: 2 },
       entries: [{ freshness: 'current' }],
     });
+    await expect(journal.replay({ cursor: 0, limit: 10 })).resolves.toMatchObject({ endCursor: 1 });
   });
 
   it.each(['getDescriptor', 'getSnapshot'] as const)(
-    'should persist stale history when replacement %s fails',
+    'should mark the machine stale in memory when replacement %s fails',
     async (method) => {
-      const { directory, attach } = await fixture();
+      const { directory, attach, journal } = await fixture();
       const old = await attach();
       const replacement = sessionFixture();
       vi.mocked(replacement.session[method]).mockRejectedValue(new Error('replacement failed'));
@@ -364,6 +397,7 @@ describe('host-owned machine directory', () => {
           },
         ],
       });
+      await expect(journal.replay({ cursor: 0, limit: 10 })).resolves.toMatchObject({ endCursor: 1 });
     },
   );
 
@@ -390,19 +424,18 @@ describe('host-owned machine directory', () => {
   });
 
   it('should give an explicit bounded-lag snapshot without claiming cursor expiry', async () => {
-    const { directory, journal, commits } = await fixture();
+    const { directory, attach } = await fixture();
     const before = await directory.snapshot({ workspaceId: 'workspace' });
-    for (let revision = 1; revision <= 1025; revision += 1) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- the fixture creates a committed ordered backlog.
-      await journal.append({
-        type: 'machine-directory-stale',
-        hostId: 'host',
-        authorityId: 'authority',
-        workspaceId: 'other-workspace',
-        revision,
+    const device = await attach('other', 'other-workspace');
+    for (let second = 1; second <= 257; second += 1) {
+      device.push({
+        ...observation,
+        observedAt: new Date(Date.parse(observation.observedAt) + second * 1000).toISOString(),
       });
     }
-    commits.emit();
+    await vi.waitFor(() => {
+      expect(device.consumed).toHaveBeenCalledTimes(257);
+    });
     const abort = new AbortController();
     const watch = directory
       .watch({
@@ -416,7 +449,7 @@ describe('host-owned machine directory', () => {
       expect(frame.value).toMatchObject({
         type: 'resync-required',
         reason: 'lag',
-        snapshot: { cursor: { position: 1025, revision: 0 }, entries: [] },
+        snapshot: { cursor: { position: 258, revision: 0 }, entries: [] },
       });
     } finally {
       abort.abort();
@@ -424,22 +457,53 @@ describe('host-owned machine directory', () => {
     }
   });
 
-  it('should refuse publication when durable append fails', async () => {
-    const { directory, disk, attach, journal, commits } = await fixture();
-    const device = await attach();
+  it('should surface a refused append on its own write and keep serving reads, watches and observations', async () => {
+    const { directory, disk, attach, journal, errors } = await fixture();
+    const device = await attach('one');
     const before = disk.bytes();
-    const notified = vi.fn();
-    const off = commits.subscribe(notified);
     disk.failNextAppend();
-    device.push({ ...observation, readiness: 'busy' });
-    await vi.waitFor(() => {
-      expect(device.session.close).toHaveBeenCalledOnce();
-    });
+    const refused = sessionFixture();
+    await expect(
+      directory.attach({
+        workspaceId: 'workspace',
+        machineId: 'two',
+        providerId: 'provider',
+        session: refused.session,
+      }),
+    ).rejects.toThrow('fixture append failure');
+    expect(refused.session.close).toHaveBeenCalledOnce();
     expect(disk.bytes()).toEqual(before);
-    const replay = await journal.replay({ cursor: 0, limit: 10 });
-    expect(replay.records).toHaveLength(1);
-    await expect(directory.snapshot({ workspaceId: 'workspace' })).rejects.toThrow('MACHINE_DIRECTORY_UNAVAILABLE');
-    off();
+    device.push({ ...observation, observedAt: '2026-09-06T00:01:00Z', readiness: 'busy' });
+    await vi.waitFor(() => {
+      expect(device.consumed).toHaveBeenCalledOnce();
+    });
+    await expect(directory.snapshot({ workspaceId: 'workspace' })).resolves.toMatchObject({
+      cursor: { revision: 2 },
+      entries: [
+        { machineId: 'one', freshness: 'current', snapshot: { readiness: 'busy', observedAt: '2026-09-06T00:01:00Z' } },
+      ],
+    });
+    disk.failNextAppend();
+    await expect(directory.remove({ workspaceId: 'workspace', machineId: 'one' })).rejects.toThrow(
+      'fixture append failure',
+    );
+    expect(device.session.close).toHaveBeenCalledOnce();
+    await expect(directory.snapshot({ workspaceId: 'workspace' })).resolves.toMatchObject({
+      cursor: { revision: 3 },
+      entries: [{ machineId: 'one', freshness: 'stale', snapshot: { readiness: 'busy' } }],
+    });
+    const abort = new AbortController();
+    const watch = directory.watch({ workspaceId: 'workspace', signal: abort.signal })[Symbol.asyncIterator]();
+    try {
+      await expect(watch.next()).resolves.toMatchObject({
+        value: { type: 'snapshot', snapshot: { entries: [{ machineId: 'one', freshness: 'stale' }] } },
+      });
+    } finally {
+      abort.abort();
+      await watch.return?.();
+    }
+    await expect(journal.replay({ cursor: 0, limit: 10 })).resolves.toMatchObject({ endCursor: 1 });
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it('should fence an old observer when the host replaces its session', async () => {

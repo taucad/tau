@@ -813,7 +813,30 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
         ? { status: 'accepted', providerRunId: 'run-late', observedAt: currentTimestamp() }
         : { status: 'unknown', reason: 'no-correlated-provider-reply', observedAt: currentTimestamp() },
   );
-  const provider_ = bindingProvider(() => undefined, { uploadPrint, submit, reconcile });
+  /** Reports every bound session streams once resolved; each session idles until its signal aborts. */
+  let telemetry = Promise.withResolvers<Iterable<MachineSnapshot>>();
+  const provider_ = bindingProvider(() => undefined, {
+    uploadPrint,
+    submit,
+    reconcile,
+    async *observe({ signal }) {
+      if (signal.aborted) {
+        return;
+      }
+      const stopped = Promise.withResolvers<Iterable<MachineSnapshot>>();
+      signal.addEventListener(
+        'abort',
+        () => {
+          stopped.resolve([]);
+        },
+        { once: true },
+      );
+      for (const snapshot of await Promise.race([telemetry.promise, stopped.promise])) {
+        yield { type: 'snapshot', snapshot };
+      }
+      await stopped.promise;
+    },
+  });
   const runtime: NodeMachineRuntime = {
     discovery: {
       clock: { now: currentTimestamp },
@@ -1161,4 +1184,84 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     expect(submit).not.toHaveBeenCalled();
     await complete.close();
   });
+
+  it(
+    'should journal no telemetry from four hours of 1 Hz reports and recover bindings, operations and requests',
+    { timeout: 120_000 },
+    async () => {
+      uploadPrint.mockClear();
+      submit.mockClear();
+      telemetry = Promise.withResolvers();
+      const root = await authorityRoot();
+      const journalPath = join(root, 'machine-events.jsonl');
+      const first = await openLedgerHost(root);
+      await bind(first.host, first.client);
+      await request(first.client, 'request-1');
+      await expect(
+        first.client.resolvePrintRequest({
+          requestId: 'request-1',
+          decision: 'approve',
+          resolvedBy: operator,
+          uploadOperationId: 'upload-1',
+          startOperationId: 'start-1',
+        }),
+      ).resolves.toMatchObject({ state: 'started' });
+      await request(first.client, 'request-2');
+      const { size: ledgerBytes } = await stat(journalPath);
+      const seconds = 4 * 60 * 60;
+      const startedAt = currentTime;
+      const reportedAt = (second: number): string => new Date(startedAt + second * 1000).toISOString();
+      const delivered = Promise.withResolvers<void>();
+      const reports = function* (): Generator<MachineSnapshot> {
+        for (let second = 1; second <= seconds; second += 1) {
+          yield {
+            connection: 'connected',
+            readiness: 'busy',
+            activeRunId: 'run-start-1',
+            observedAt: reportedAt(second),
+            setup: { materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+            run: {
+              state: 'printing',
+              progress: Math.floor(second / 144),
+              remainingSeconds: seconds - second,
+              currentLayer: 1 + Math.floor(second / 60),
+              totalLayers: 241,
+            },
+            fans: { part: 60 + (second % 5) },
+            network: { wifiSignalDbm: -47 - (second % 3) },
+          };
+        }
+        delivered.resolve();
+      };
+      telemetry.resolve(reports());
+      await delivered.promise;
+      await expect(first.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
+        freshness: 'current',
+        snapshot: { observedAt: reportedAt(seconds), run: { state: 'printing', progress: 100, remainingSeconds: 0 } },
+      });
+      // Every report differs, yet the journal holds only the binding, operations and print requests.
+      const { size: afterReports } = await stat(journalPath);
+      expect(afterReports).toBe(ledgerBytes);
+      expect(ledgerBytes).toBeLessThan(1024 * 1024);
+      await first.close();
+
+      const restarted = await openLedgerHost(root);
+      await expect(restarted.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
+        freshness: 'current',
+      });
+      const recovered = await restarted.client.listPrintRequests({});
+      expect(recovered.map(({ requestId, state }) => `${requestId}:${state}`)).toEqual([
+        'request-2:awaiting-approval',
+        'request-1:started',
+      ]);
+      await expect(
+        restarted.client.reconcileOperation({ machineId: 'workshop-x1c', operationId: 'start-1' }),
+      ).resolves.toMatchObject({ status: 'accepted', receipt: { providerRunId: 'run-start-1' } });
+      expect(uploadPrint).toHaveBeenCalledOnce();
+      expect(submit).toHaveBeenCalledOnce();
+      const { size: afterRestart } = await stat(journalPath);
+      expect(afterRestart).toBe(ledgerBytes);
+      await restarted.close();
+    },
+  );
 });

@@ -4,7 +4,7 @@ import { isIPv4, isIPv6 } from 'node:net';
 import type { LookupFunction } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
-import { randomUUID } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { Readable } from 'node:stream';
 import { request as httpRequest } from 'node:http';
@@ -79,6 +79,33 @@ const lfsRelayRecordSchema = z.object({
   expiresAt: z.number().int().positive(),
 });
 const relayHandlePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const relayKeyPattern = /^[\w-]{43}$/u;
+
+/*
+ * A relay record holds a third party's presigned URL and headers for five
+ * minutes (D22). It is sealed with a key made for that one handle and handed
+ * to the caller as an LFS action header, never stored: Redis alone holds only
+ * ciphertext, the caller alone holds only a key, and the handle is the
+ * additional data, so a sealed record cannot be replayed under another handle.
+ */
+export const sealRelayRecord = (handle: string, record: LfsRelayRecord): { sealed: string; key: string } => {
+  const key = randomBytes(32);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv).setAAD(Buffer.from(handle));
+  const body = Buffer.concat([cipher.update(JSON.stringify(record)), cipher.final()]);
+  return {
+    sealed: Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64'),
+    key: key.toString('base64url'),
+  };
+};
+
+const openRelayRecord = (handle: string, sealed: string, key: string): unknown => {
+  const bytes = Buffer.from(sealed, 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', Buffer.from(key, 'base64url'), bytes.subarray(0, 12))
+    .setAAD(Buffer.from(handle))
+    .setAuthTag(bytes.subarray(12, 28));
+  return JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString('utf8'));
+};
 
 /**
  * The remote's credential travels in its own header, never in the query string
@@ -584,10 +611,11 @@ export class GitProxyController {
           headers,
           expiresAt: Date.now() + lfsHandleTtlSeconds * 1000,
         };
+        const { sealed, key } = sealRelayRecord(handle, record);
         // oxlint-disable-next-line no-await-in-loop -- each independently expiring action needs its own opaque handle.
-        await this.redis.client.set(`git:lfs:relay:${handle}`, JSON.stringify(record), 'EX', lfsHandleTtlSeconds, 'NX');
+        await this.redis.client.set(`git:lfs:relay:${handle}`, sealed, 'EX', lfsHandleTtlSeconds, 'NX');
         action.href = `${this.#apiUrl}/v1/git/lfs/${handle}`;
-        action.header = {};
+        action.header = { [httpHeader.xTauLfsKey]: key };
       }
     }
     void reply.status(response.status).header('content-type', lfsMediaType).header('cache-control', 'no-store');
@@ -653,11 +681,21 @@ export class GitProxyController {
     if (!relayHandlePattern.test(handle)) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_INVALID' });
     }
-    const raw = await this.redis.client.get(`git:lfs:relay:${handle}`);
-    if (raw === null) {
+    const key = request.headers[httpHeader.xTauLfsKey];
+    if (typeof key !== 'string' || !relayKeyPattern.test(key)) {
+      throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
+    }
+    const sealed = await this.redis.client.get(`git:lfs:relay:${handle}`);
+    if (sealed === null) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_EXPIRED' });
     }
-    const record = lfsRelayRecordSchema.parse(JSON.parse(raw));
+    let opened: unknown;
+    try {
+      opened = openRelayRecord(handle, sealed, key);
+    } catch {
+      throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
+    }
+    const record = lfsRelayRecordSchema.parse(opened);
     if (record.userId !== userId || record.method !== method || record.expiresAt <= Date.now()) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
     }

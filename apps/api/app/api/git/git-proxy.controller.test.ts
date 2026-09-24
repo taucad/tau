@@ -9,7 +9,8 @@ import type { ConfigService } from '@nestjs/config';
 import { PayloadTooLargeException } from '@nestjs/common';
 import type { StreamableFile } from '@nestjs/common';
 import type { Environment } from '#config/environment.config.js';
-import { GitProxyController } from '#api/git/git-proxy.controller.js';
+import { z } from 'zod';
+import { GitProxyController, sealRelayRecord } from '#api/git/git-proxy.controller.js';
 import type { RedisService } from '#redis/redis.service.js';
 
 /* Hermetic DNS: every hostname answers one public address unless a test says otherwise. */
@@ -53,25 +54,29 @@ const text = async (file: StreamableFile): Promise<string> => {
 
 const relayHandle = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
-/** A Redis holding one verify relay record for `user-1`, aimed at `url`. */
-const verifyRelayRedis = (url: string): RedisService =>
-  ({
+/** The key the batch issued for the relay record in {@link verifyRelayRedis}. */
+let relayKey = '';
+
+/** A Redis holding one sealed verify relay record for `user-1`, aimed at `url`. */
+const verifyRelayRedis = (url: string): RedisService => {
+  const { sealed, key } = sealRelayRecord(relayHandle, {
+    userId: 'user-1',
+    oid: 'a'.repeat(64),
+    size: 3,
+    url,
+    method: 'POST',
+    headers: { Authorization: 'signed' },
+    expiresAt: Date.now() + 60_000,
+  });
+  relayKey = key;
+  return {
     client: {
-      get: vi.fn(async () =>
-        JSON.stringify({
-          userId: 'user-1',
-          oid: 'a'.repeat(64),
-          size: 3,
-          url,
-          method: 'POST',
-          headers: { Authorization: 'signed' },
-          expiresAt: Date.now() + 60_000,
-        }),
-      ),
+      get: vi.fn(async () => sealed),
       set: vi.fn(),
       eval: vi.fn(async () => 1),
     },
-  }) as unknown as RedisService;
+  } as unknown as RedisService;
+};
 
 const lfsMediaType = 'application/vnd.git-lfs+json';
 
@@ -370,17 +375,33 @@ describe('GitProxyController', () => {
     expect(body).toContain('https://api.tau.test/v1/git/lfs/');
     expect(body).not.toContain('secret=yes');
     expect(records.size).toBe(1);
+    /* Sealed at rest (D22): nothing of the signed action is readable in Redis. */
     const stored = [...records.values()][0] ?? '';
-    expect(stored).toContain('Authorization');
-    expect(stored).not.toContain('metadata.internal');
-    expect(stored).not.toContain('secret=cookie');
+    for (const secret of ['Authorization', 'signed', '127.0.0.1', 'metadata.internal', 'secret=cookie']) {
+      expect(stored).not.toContain(secret);
+    }
+    const issued = z
+      .object({
+        objects: z.array(
+          z.object({ actions: z.object({ download: z.object({ header: z.record(z.string(), z.string()) }) }) }),
+        ),
+      })
+      .parse(JSON.parse(body)).objects[0]?.actions.download.header['x-tau-lfs-key'];
+    expect(issued).toMatch(/^[\w-]{43}$/u);
 
-    const key = [...records.keys()][0];
-    if (key === undefined) {
+    const storedKey = [...records.keys()][0];
+    if (storedKey === undefined || issued === undefined) {
       throw new Error('Missing LFS relay record');
     }
-    const handle = key.slice('git:lfs:relay:'.length);
-    await expect(controller.relayGet('user-2', handle, request({}), reply())).rejects.toThrow();
+    const handle = storedKey.slice('git:lfs:relay:'.length);
+    const refused = { response: { code: 'GIT_LFS_HANDLE_REFUSED' } };
+    await expect(controller.relayGet('user-1', handle, request({}), reply())).rejects.toMatchObject(refused);
+    await expect(
+      controller.relayGet('user-1', handle, request({ 'x-tau-lfs-key': 'A'.repeat(43) }), reply()),
+    ).rejects.toMatchObject(refused);
+    await expect(
+      controller.relayGet('user-2', handle, request({ 'x-tau-lfs-key': issued }), reply()),
+    ).rejects.toMatchObject(refused);
     vi.unstubAllGlobals();
   });
 
@@ -410,7 +431,7 @@ describe('GitProxyController', () => {
     await proxyController(false, verifyRelayRedis('https://lfs.example.com/verify')).relayPost(
       'user-1',
       relayHandle,
-      request({ accept: lfsMediaType }, 'POST', Readable.from([Buffer.from('{}')])),
+      request({ accept: lfsMediaType, 'x-tau-lfs-key': relayKey }, 'POST', Readable.from([Buffer.from('{}')])),
       reply(),
     );
 
@@ -669,7 +690,11 @@ describe('GitProxyController', () => {
         controller.relayPost(
           'user-1',
           relayHandle,
-          request({ accept: lfsMediaType }, 'POST', Readable.from([Buffer.alloc(128 * 1024)])),
+          request(
+            { accept: lfsMediaType, 'x-tau-lfs-key': relayKey },
+            'POST',
+            Readable.from([Buffer.alloc(128 * 1024)]),
+          ),
           reply(),
         ),
       ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_REQUEST_TOO_LARGE' } });

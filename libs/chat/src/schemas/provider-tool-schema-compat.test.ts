@@ -104,6 +104,7 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.webSearch,
       toolName.webBrowser,
       toolName.revisions,
+      toolName.updateTodos,
     ]);
   });
 

@@ -27,6 +27,7 @@ type Closure = {
   inputs: Input[];
   linkOptimization?: string;
   wasmSimd: { rustFlags: string[]; cxxFlag: string; linkFlag: string };
+  wasmEh: { compileFlags: string[]; linkFlags: string[] };
 };
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -47,7 +48,8 @@ const main = (): void => {
   const manifestPath =
     process.env['GEOSPEC_MIXED_INPUTS'] ??
     resolve(
-      process.env['GEOSPEC_DELIVERY_CACHE'] ?? resolve(root, 'node_modules/.cache/geospec-engine-native/delivery'),
+      process.env['GEOSPEC_DELIVERY_CACHE'] ??
+        resolve(root, 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh'),
       'mixed-inputs-simd128.json',
     );
   const manifestBytes = readFileSync(manifestPath);
@@ -87,11 +89,13 @@ const main = (): void => {
   if (linkOptimization !== 'O0' && linkOptimization !== 'O3') {
     throw new Error('Mixed link optimization must be O0 or O3.');
   }
+  const ehFlags = ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'];
   if (
     JSON.stringify(closure.wasmSimd) !==
-    JSON.stringify({ rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' })
+      JSON.stringify({ rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' }) ||
+    JSON.stringify(closure.wasmEh) !== JSON.stringify({ compileFlags: ehFlags, linkFlags: ehFlags })
   ) {
-    throw new Error('Prepared closure must select fixed WASM SIMD for Rust, C++ and link.');
+    throw new Error('Prepared closure must select fixed SIMD, native legacy WASM EH and matching WASM longjmp.');
   }
   const packageRoot = resolve(closure.sourceRoot, 'packages/geospec-engine-native');
   if (
@@ -119,7 +123,7 @@ const main = (): void => {
     AR_wasm32_unknown_emscripten: closure.emar,
     CARGO_ENCODED_RUSTFLAGS: closure.wasmSimd.rustFlags.join('\u001F'),
     GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
-    CXXFLAGS_wasm32_unknown_emscripten: `${closure.wasmSimd.cxxFlag} -fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten`,
+    CXXFLAGS_wasm32_unknown_emscripten: [closure.wasmSimd.cxxFlag, '-frtti', ...closure.wasmEh.compileFlags].join(' '),
   };
   /* eslint-enable @typescript-eslint/naming-convention -- Resume normal identifier checks after external keys. */
   const commands: Array<{ executable: string; args: string[]; status: ReturnType<typeof spawnSync>['status'] }> = [];
@@ -167,19 +171,18 @@ const main = (): void => {
   ]);
   const staticlib = resolve(target, 'wasm32-unknown-emscripten/release/libgeospec_engine_native_emscripten.a');
   const modulePath = resolve(output, 'geospec_engine_native.mjs');
+  const linkerMap = resolve(cache, 'geospec_engine_native.map');
   run('link', closure.emxx, [
     `-${linkOptimization}`,
     closure.wasmSimd.linkFlag,
-    '-fexceptions',
+    ...closure.wasmEh.linkFlags,
     '-frtti',
     '--no-entry',
     '-Wl,--start-group',
     staticlib,
     ...closure.libraries,
     '-Wl,--end-group',
-    `-Wl,-Map,${resolve(cache, 'geospec_engine_native.map')}`,
-    '-sDISABLE_EXCEPTION_CATCHING=0',
-    '-sSUPPORT_LONGJMP=emscripten',
+    `-Wl,-Map,${linkerMap}`,
     '-sMODULARIZE=1',
     '-sEXPORT_ES6=1',
     '-sINCOMING_MODULE_JS_API=["locateFile","wasmBinary"]',
@@ -195,6 +198,19 @@ const main = (): void => {
     '-o',
     modulePath,
   ]);
+  const systemCache = closure.environment['EM_CACHE'];
+  const linkedSystemLibraries = [
+    ...new Set(
+      [...readFileSync(linkerMap, 'utf8').matchAll(/\s(\/\S+\.a)\([^)]*\):\(/g)]
+        .flatMap((match) => (match[1] === undefined ? [] : [match[1]]))
+        .filter((path) => path.startsWith(`${systemCache}/`)),
+    ),
+  ]
+    .sort((left, right) => left.localeCompare(right))
+    .map((path) => ({ path, sha256: digest(readFileSync(path)) }));
+  if (!linkedSystemLibraries.some(({ path }) => path.endsWith('/libc++abi-legacyexcept.a'))) {
+    throw new Error('Linker map does not select the native legacy EH C++ ABI library.');
+  }
   const artifacts = ['geospec_engine_native.mjs', 'geospec_engine_native.wasm'].map((name) => {
     const path = resolve(output, name);
     const bytes = readFileSync(path);
@@ -218,6 +234,9 @@ const main = (): void => {
         rustVersion,
         emVersion,
         wasmSimd: closure.wasmSimd,
+        wasmEh: closure.wasmEh,
+        linkerMap: { path: linkerMap, sha256: digest(readFileSync(linkerMap)) },
+        linkedSystemLibraries,
         /* eslint-disable @typescript-eslint/naming-convention -- Exact Cargo and cc-rs environment keys. */
         buildEnvironment: {
           CARGO_ENCODED_RUSTFLAGS: environment.CARGO_ENCODED_RUSTFLAGS,
@@ -225,7 +244,7 @@ const main = (): void => {
           GEOSPEC_WASM_SIMD_PROFILE: environment.GEOSPEC_WASM_SIMD_PROFILE,
         },
         /* eslint-enable @typescript-eslint/naming-convention -- Resume ordinary receipt keys. */
-        profile: `emscripten-6.0.5-js-exceptions-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-${linkOptimization}`,
+        profile: `emscripten-6.0.5-wasm-legacy-exceptions-wasm-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-${linkOptimization}`,
         artifacts,
         qualification: 'Current-source compile/link only; runtime and target parity require independent checks.',
       },

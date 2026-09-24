@@ -27,10 +27,14 @@ const checkTransport = (context, reusePrefixes) => {
   const productPath = process.env.PATH;
   const nativePrefixPath = '/inert-native-node-26.7/bin:/inert-native-tools/bin';
   const wasmSimd = { rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' };
+  const wasmEh = {
+    compileFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
+    linkFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
+  };
   const buildEnvironment = {
     CARGO_ENCODED_RUSTFLAGS: '-C\u001Ftarget-feature=+simd128',
     CXXFLAGS_wasm32_unknown_emscripten:
-      '-msimd128 -fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
+      '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
     GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
   };
   /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
@@ -63,7 +67,7 @@ const checkTransport = (context, reusePrefixes) => {
   );
   /** @type {string[]} */
   const targets = [];
-  const mixedCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery');
+  const mixedCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
   const buildCache = join(mixedCache, 'mixed-build-simd128');
   put(join(buildCache, 'attempt-0/commands.json'), 'old attempt must not be selected');
   put(join(mixedCache, 'mixed-inputs.json'), 'historical inputs must not be selected or overwritten');
@@ -203,6 +207,7 @@ const checkTransport = (context, reusePrefixes) => {
               emxx: '/inert-tools/em++',
               linkOptimization: 'O3',
               wasmSimd,
+              wasmEh,
             },
             null,
             2,
@@ -229,8 +234,9 @@ const checkTransport = (context, reusePrefixes) => {
             bindingSha256: digest(readFileSync(join(producer, bindingPath))),
             artifacts,
             wasmSimd,
+            wasmEh,
             buildEnvironment,
-            profile: 'emscripten-6.0.5-js-exceptions-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3',
+            profile: 'emscripten-6.0.5-wasm-legacy-exceptions-wasm-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3',
           }),
         );
         if (!omitCommands) {
@@ -258,7 +264,13 @@ const checkTransport = (context, reusePrefixes) => {
                 },
                 {
                   executable: '/inert-tools/em++',
-                  args: ['-O3', '-msimd128', '-o', join(producer, mixedPath, 'geospec_engine_native.mjs')],
+                  args: [
+                    '-O3',
+                    '-msimd128',
+                    ...wasmEh.linkFlags,
+                    '-o',
+                    join(producer, mixedPath, 'geospec_engine_native.mjs'),
+                  ],
                   status: 0,
                 },
               ],
@@ -413,6 +425,8 @@ const checkTransport = (context, reusePrefixes) => {
     { receiptChanges: { schema: 'geospec-mixed-build-receipt-v1' }, message: /Unsupported mixed build receipt/ },
     { inputChanges: { wasmSimd: { ...wasmSimd, cxxFlag: '' } }, message: /inputs lack selected fixed-SIMD/ },
     { receiptChanges: { wasmSimd: { ...wasmSimd, rustFlags: [] } }, message: /receipt fixed-SIMD flags differ/ },
+    { inputChanges: { wasmEh: { ...wasmEh, compileFlags: [] } }, message: /inputs lack selected native WASM EH/ },
+    { receiptChanges: { wasmEh: { ...wasmEh, linkFlags: [] } }, message: /receipt native WASM EH flags differ/ },
     {
       receiptChanges: { buildEnvironment: { ...buildEnvironment, CARGO_ENCODED_RUSTFLAGS: '' } },
       message: /compile environment differs/,
@@ -424,6 +438,7 @@ const checkTransport = (context, reusePrefixes) => {
     { inputChanges: { occtPrefix: join(mixedCache, 'occt-mixed/install') }, message: /isolated fixed-SIMD prefix/ },
     { inputChanges: { cache: join(mixedCache, 'mixed-build') }, message: /isolated fixed-SIMD prefix/ },
     { commands: validCommands.replace('"-msimd128",', ''), message: /link profile\/output differs/ },
+    { commands: validCommands.replace('"-fwasm-exceptions",', ''), message: /link profile\/output differs/ },
     { commands: validCommands.replace('"-msimd128"', '"-msimd128", "-pthread"'), message: /unselected threading/ },
     { commands: validCommands.replace('"-msimd128"', '"-msimd128", "-ffast-math"'), message: /floating-point flags/ },
     { commands: validCommands.replace('"-msimd128"', '"-msimd128", "-mno-simd128"'), message: /floating-point flags/ },

@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = ROOT / 'packages/geospec-engine-native'
 RECIPE_PATH = PACKAGE / 'scripts/selected-delivery.json'
 RECIPE = json.loads(RECIPE_PATH.read_text())
-CACHE = Path(os.environ.get('GEOSPEC_DELIVERY_CACHE', ROOT / 'node_modules/.cache/geospec-engine-native/delivery')).resolve()
+CACHE = Path(os.environ.get('GEOSPEC_DELIVERY_CACHE', ROOT / 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh')).resolve()
 RUST = Path(os.environ.get('GEOSPEC_DELIVERY_RUST_PREFIX', CACHE / 'rust')).resolve()
 SDK = Path(os.environ.get('GEOSPEC_DELIVERY_EMSDK_PREFIX', CACHE / 'sdk/install')).resolve()
 SOURCE = CACHE / 'sources/occt'
@@ -220,7 +220,7 @@ def tool_paths():
         found = shutil.which(os.environ.get('GEOSPEC_GIT', 'git') if name == 'git' else name)
         require(found is not None, f'Missing prerequisite: {name}')
         paths[name] = Path(found).resolve()
-    for name in ['llvm-readobj', 'llvm-objdump']:
+    for name in ['llvm-readobj', 'llvm-objdump', 'wasm-ld', 'wasm-opt']:
         candidate = SDK / 'bin' / name
         if candidate.is_file():
             paths[name] = candidate
@@ -373,10 +373,19 @@ def prefix_contract(kind, paths, env, context, producing_builder=None):
         require(RECIPE['wasmSimd'] == {'rustFlags': ['-C', 'target-feature=+simd128'],
                                       'cxxFlag': '-msimd128', 'linkFlag': '-msimd128'},
                 'Unsupported fixed SIMD recipe')
-        require(all(any(option.startswith(flag) and '-msimd128' in option
+        eh = ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm']
+        require(RECIPE['wasmEh'] == {'compileFlags': eh, 'linkFlags': eh},
+                'Unsupported native WASM EH recipe')
+        require(all(any(option.startswith(flag) and all(selected in option.split('=', 1)[1].split()
+                                                      for selected in ['-msimd128', *eh])
                         for option in RECIPE['mixedOcctOptions'])
                     for flag in ('-DCMAKE_C_FLAGS=', '-DCMAKE_CXX_FLAGS=')),
-                'OCCT C and C++ must compile with fixed SIMD')
+                'OCCT C and C++ must compile with fixed SIMD and native WASM EH')
+        require(not any(incompatible in option.split('=', 1)[1].split()
+                        for option in RECIPE['mixedOcctOptions'] if option.startswith('-DCMAKE_C')
+                        for incompatible in ('-fexceptions', '-sDISABLE_EXCEPTION_CATCHING=0',
+                                             '-sSUPPORT_LONGJMP=emscripten')),
+                'OCCT native WASM EH cannot mix with JavaScript EH or longjmp')
         options = RECIPE['mixedOcctOptions'] + [
             f'-DCMAKE_TOOLCHAIN_FILE={SDK}/emscripten/cmake/Modules/Platform/Emscripten.cmake',
             f'-DCMAKE_CROSSCOMPILING_EMULATOR={paths["node"]}',
@@ -657,7 +666,7 @@ def prepare_inputs(paths, env):
         'prefixSupportMigration': receipt.get('supportMigration'),
         'prefixProducerRecipe': str(recipe_path),
         'inputRoots': list(map(str, input_roots())), 'linkOptimization': RECIPE['linkOptimization'],
-        'wasmSimd': RECIPE['wasmSimd'],
+        'wasmSimd': RECIPE['wasmSimd'], 'wasmEh': RECIPE['wasmEh'],
         'recipeSha256': digest(RECIPE_PATH),
         'sourceRevision': run([paths['git'], '-C', ROOT, 'rev-parse', 'HEAD'], env, timeout=30).strip(),
         'qualification': 'Prepared build inputs only; bound prefix recovery qualifications remain applicable. Not built or runtime qualified.',
@@ -690,6 +699,7 @@ def verify_manifest(path):
     require(manifest['cache'] == str(CACHE / 'mixed-build-simd128'), 'Wrong isolated build cache')
     require(manifest['linkOptimization'] == RECIPE['linkOptimization'], 'Wrong selected link profile')
     require(manifest['wasmSimd'] == RECIPE['wasmSimd'], 'Wrong fixed SIMD flags')
+    require(manifest['wasmEh'] == RECIPE['wasmEh'], 'Wrong native WASM EH flags')
     require(manifest['occtPrefix'] == str(MIXED), 'Wrong mixed prefix')
     require(manifest['libraries'] == list(map(str, libraries(MIXED))), 'Selected libraries differ from installed CMake closure')
     require(manifest['inputRoots'] == list(map(str, input_roots())), 'Input roots were reduced')

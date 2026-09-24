@@ -128,6 +128,7 @@ const checkReceipt = (root, inventory) => {
     artifacts,
     output,
     wasmSimd,
+    wasmEh,
     buildEnvironment,
     profile,
   } = readJson(resolve(root, receiptPath));
@@ -140,12 +141,18 @@ const checkReceipt = (root, inventory) => {
   const fixedSimd = { rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' };
   assert.deepEqual(inputs.wasmSimd, fixedSimd, 'Mixed inputs lack selected fixed-SIMD flags.');
   assert.deepEqual(wasmSimd, fixedSimd, 'Mixed receipt fixed-SIMD flags differ from inputs.');
+  const nativeEh = {
+    compileFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
+    linkFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
+  };
+  assert.deepEqual(inputs.wasmEh, nativeEh, 'Mixed inputs lack selected native WASM EH flags.');
+  assert.deepEqual(wasmEh, nativeEh, 'Mixed receipt native WASM EH flags differ from inputs.');
   assert.deepEqual(
     buildEnvironment,
     {
       CARGO_ENCODED_RUSTFLAGS: '-C\u001Ftarget-feature=+simd128',
       CXXFLAGS_wasm32_unknown_emscripten:
-        '-msimd128 -fexceptions -frtti -sDISABLE_EXCEPTION_CATCHING=0 -sSUPPORT_LONGJMP=emscripten',
+        '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
       GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
     },
     'Mixed receipt compile environment differs from fixed-SIMD selection.',
@@ -169,7 +176,7 @@ const checkReceipt = (root, inventory) => {
   assert.ok(inputs.linkOptimization === 'O3', 'Unsupported mixed link profile.');
   assert.equal(
     profile,
-    'emscripten-6.0.5-js-exceptions-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3',
+    'emscripten-6.0.5-wasm-legacy-exceptions-wasm-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3',
     'Mixed receipt compiler profile differs.',
   );
   /** @type {unknown} */
@@ -211,6 +218,7 @@ const checkReceipt = (root, inventory) => {
   );
   assert.ok(
     isDeepStrictEqual(commandArguments[3].slice(0, 2), [`-${inputs.linkOptimization}`, fixedSimd.linkFlag]) &&
+      nativeEh.linkFlags.every((flag) => commandArguments[3].includes(flag)) &&
       isDeepStrictEqual(commandArguments[3].slice(-2), ['-o', posix.join(output, 'geospec_engine_native.mjs')]),
     'Mixed link profile/output differs from inputs.',
   );
@@ -302,7 +310,7 @@ export const prepareArtifacts = (root) => {
   rmSync(resolve(root, inventoryPath), { force: true });
   const source = sourceIdentity(root);
   const { GEOSPEC_DELIVERY_CACHE: deliveryCache } = process.env;
-  const cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery');
+  const cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
   const reusePrefixes = process.env.GEOSPEC_NATIVE_DELIVERY_CACHE !== undefined;
   const nativeCache = resolve(root, process.env.GEOSPEC_NATIVE_DELIVERY_CACHE ?? cache);
   const nativeBuilder = resolve(

@@ -46,6 +46,7 @@
       "node": "./src/node.ts"
     },
     "./wasm": "./src/wasm.ts",
+    "./wasm-binary": "./bindings/emscripten/generated/geospec_engine_native.wasm",
     "./trust": {
       "types": "./trust/index.d.mts",
       "node": "./trust/run.mjs"
@@ -69,6 +70,7 @@
         "import": "./dist/wasm.mjs",
         "default": "./dist/wasm.mjs"
       },
+      "./wasm-binary": "./dist/bindings/mixed-wasm/geospec_engine_native.wasm",
       "./trust": {
         "types": "./trust/index.d.mts",
         "node": "./trust/run.mjs"

@@ -24,6 +24,7 @@ export const loggingRedactPaths = [
   // live credentials and neither is covered by `authorization`.
   'req.headers["x-api-key"]',
   'req.headers["x-tau-proxy-authorization"]',
+  'req.headers["x-tau-lfs-key"]',
   'req.headers.cookie',
   'req.headers["set-cookie"]',
   'req.body.token',

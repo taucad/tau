@@ -13,10 +13,13 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
+import { bambuMachine } from '@taucad/bambu';
 import { tauRemoteUrl } from '@taucad/revisions';
+import { connectMachineChannel } from '@taucad/runtime/machine';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
+import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
@@ -29,7 +32,7 @@ import type { HostJobWorkerFactory } from '#job-worker.js';
  * it: the captured thunk is the connection that child's bridge opens. */
 const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@taucad/runtime/filesystem')>();
+  const original = await importOriginal<typeof RuntimeFileSystem>();
   return {
     ...original,
     fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {
@@ -608,6 +611,53 @@ describe('startHostDaemon', () => {
       expect(events).toContainEqual(expect.objectContaining({ type: 'warning', code: 'RUNTIME_CHILD_FAILED' }));
     });
     await expect(Promise.race([daemon.closed, delay(50).then(() => 'still-running')])).resolves.toBe('still-running');
+
+    await daemon.close();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 20_000);
+
+  it('should admit the machines route and list the configured providers when machines are on', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+
+    const events: HostDaemonEvent[] = [];
+    const daemon = startHostDaemon({
+      relayUrl: new URL('http://127.0.0.1:1'),
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+      agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [bambuMachine()] } },
+      onEvent: (event) => events.push(event),
+    });
+    await daemon.ready;
+    const agentReady = events.find(
+      (event): event is Extract<HostDaemonEvent, { readonly type: 'agent' }> => event.type === 'agent',
+    );
+    const origin = new URL(agentReady?.url ?? 'http://127.0.0.1:0');
+
+    /* `tau serve --machines`: the probe answers, the socket upgrades, the host
+     * lists what the flag admitted — and the tool registry was offered the
+     * same facet. */
+    const probe = await fetch(new URL('/machines', origin), { headers: { authorization: `Bearer ${agentToken}` } });
+    expect(probe.status).toBe(204);
+    const socket = new WebSocket(new URL('/machines', origin).href.replace('http:', 'ws:'), {
+      headers: { authorization: `Bearer ${agentToken}` },
+    });
+    /* Wrapped before `open`, as the browser transport does: the host greets
+     * the socket the instant the upgrade completes, and `ws` drops a frame
+     * that lands with no listener. */
+    const client = connectMachineChannel(socket);
+    try {
+      const providers = await client.listProviders({});
+      expect(providers.map((provider) => provider.id)).toEqual(['bambu']);
+    } finally {
+      client.close();
+    }
+    expect(registrySpy.mock.calls.at(-1)?.[0].machines).toMatchObject({ available: true });
 
     await daemon.close();
     expect(await daemon.closed).toEqual({ cause: 'requested' });

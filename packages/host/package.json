@@ -68,6 +68,7 @@
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",
     "@taucad/parameters": "workspace:*",
+    "basic-ftp": "catalog:",
     "ws": "catalog:",
     "xstate": "catalog:"
   },
@@ -88,6 +89,7 @@
   },
   "devDependencies": {
     "@taucad/agent-tools": "workspace:*",
+    "@taucad/bambu": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",

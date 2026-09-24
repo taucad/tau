@@ -59,6 +59,16 @@ export type {
 } from '#revisions.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
+export {
+  createMachineSecretStore,
+  createNodeMachineRuntime,
+  localMachineFacet,
+  machineRouteGrants,
+  machineWorkspaceId,
+  openMachineHostIdentity,
+  probeCertificateTrust,
+} from '#machine-host.js';
+export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
 export { createHostToolRegistry } from '#agent-tools.js';
 export type { HostToolRegistryOptions } from '#agent-tools.js';
 export {

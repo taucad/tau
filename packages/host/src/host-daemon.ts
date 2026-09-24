@@ -16,6 +16,9 @@ import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
+import { createHostAdmissionAuthority } from '@taucad/runtime/host';
+import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
@@ -28,7 +31,7 @@ import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types'
 import { parameterEntryPath } from '@taucad/types';
 
 import { startAgentServer } from '#agent-server.js';
-import type { AgentServerHandle } from '#agent-server.js';
+import type { AgentServerHandle, AgentServerOptions } from '#agent-server.js';
 import { createAcpExternalAgentPort, discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
 import { createHostMcpEndpoint } from '#mcp-server.js';
 import type { HostMcpEndpoint } from '#mcp-server.js';
@@ -45,6 +48,14 @@ import {
   writeHostCredential,
 } from '#credential-store.js';
 import type { HostCredential } from '#credential-store.js';
+import {
+  createMachineSecretStore,
+  createNodeMachineRuntime,
+  localMachineFacet,
+  machineRouteGrants,
+  machineWorkspaceId,
+  openMachineHostIdentity,
+} from '#machine-host.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
@@ -117,6 +128,10 @@ export type HostDaemonEvent =
         | 'JOB_WORKER_FAILED'
         | 'TRUSTED_PROJECTS_ONLY'
         | 'AGENT_SERVER_FAILED'
+        /* The machine host or one of its providers reported a problem; the
+         * route keeps serving and the person sees it in the directory. */
+        | 'MACHINE_HOST'
+        | 'MACHINE_PROVIDER'
         /* Retriable, never fatal: the compute child backs the relay sessions and
          * the geometry tools, and nothing else. The agent channel and its file
          * tools keep serving while the loop retries the child. */
@@ -188,6 +203,15 @@ export type HostDaemonAgentOptions = {
    * into. Absent, `tau serve` runs Tau's own agent only.
    */
   readonly externalAgents?: { readonly resolveFrom: string } | undefined;
+  /**
+   * Machine providers served on the `/machines` route (`tau serve --machines`).
+   * Absent, the route answers 404 and a client's machines facet negotiates
+   * `unsupported`. Identity, secrets and the directory journal live under
+   * `<config>/machines`; the binding ceremony's native half (the secret) has no
+   * daemon surface yet, so only providers that bind without one — the
+   * simulator — complete here.
+   */
+  readonly machines?: { readonly providers: CreateNodeMachineHostInput['providers'] } | undefined;
 };
 
 /** Options for {@link startHostDaemon}. @public */
@@ -434,6 +458,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   let agentExternalAgents: readonly ExternalAgentDescriptor[] = [];
   let agentRunReporter: RunReporter | undefined;
   let agentFileSystem: AgentFileSystemAuthority | undefined;
+  let agentMachines: NonNullable<AgentServerOptions['machines']> | undefined;
   /**
    * The geometry tools' runtime client, one per root a turn works in.
    *
@@ -775,6 +800,70 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    *
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
+  /**
+   * Compose the node machine host for one served workspace.
+   *
+   * One identity and one secret store per config directory, one journal
+   * authority beside them, and one trusted session scoped to this workspace's
+   * id — the same shape the desktop services utility serves per project.
+   *
+   * @param providers - The providers `--machines` admitted.
+   * @param canonicalWorkspaceRoot - Real path the workspace id is derived from.
+   * @param artifactProvider - The admitted filesystem an artifact is read through.
+   * @returns What the agent server needs to answer the machines route.
+   */
+  const openMachineHost = async (
+    providers: CreateNodeMachineHostInput['providers'],
+    canonicalWorkspaceRoot: string,
+    artifactProvider: () => NodeFsProviderClient,
+  ): Promise<NonNullable<AgentServerOptions['machines']>> => {
+    const directory = join(defaultConfigDirectory(), 'machines');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const identity = await openMachineHostIdentity(directory);
+    const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
+    const authorityRoot = join(directory, 'authority');
+    await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
+    const workspaceId = machineWorkspaceId(canonicalWorkspaceRoot);
+    const host = await createNodeMachineHost({
+      authorityRoot,
+      ...identity,
+      admission,
+      providers,
+      runtime: createNodeMachineRuntime({
+        secrets: createMachineSecretStore(directory),
+        readArtifact: async (requestedWorkspaceId, artifact) => {
+          if (requestedWorkspaceId !== workspaceId) {
+            throw new Error('MACHINE_WORKSPACE_UNKNOWN');
+          }
+          const bytes = await artifactProvider().readFile(artifact.path);
+          if (typeof bytes === 'string') {
+            throw new TypeError('MACHINE_ARTIFACT_MISMATCH');
+          }
+          return bytes;
+        },
+        log: (logWorkspaceId, entry) => {
+          if (entry.level === 'error' || entry.level === 'warning') {
+            emit({ type: 'warning', code: 'MACHINE_PROVIDER', message: `${logWorkspaceId}: ${entry.message}` });
+          }
+        },
+      }),
+      onError: (error) => {
+        emit({
+          type: 'warning',
+          code: 'MACHINE_HOST',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      },
+    });
+    const session = admission.issueTrustedSession({
+      actor: { kind: 'user', id: 'daemon' },
+      authorityId: identity.authorityId,
+      workspaceId,
+      grants: machineRouteGrants,
+    });
+    return { host, session, workspaceId };
+  };
+
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
@@ -944,10 +1033,24 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         });
       },
     });
+    /* Before the registry: the machine tools are offered only over a facet the
+     * host already serves, the same rule the revisions history follows. */
+    const machines = agent.machines
+      ? await openMachineHost(agent.machines.providers, canonicalWorkspaceRoot, () =>
+          providerForAgentRoot(agent.workspaceRoot),
+        )
+      : undefined;
     const toolRegistry = createHostToolRegistry({
       workspaceRoot: agent.workspaceRoot,
       checkouts,
       revisions: revisions.history,
+      ...(machines
+        ? {
+            machines: localMachineFacet((port) =>
+              machines.host.serve({ port, session: machines.session, workspaceId: machines.workspaceId }),
+            ),
+          }
+        : {}),
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* Per root, not per host: a candidate turn's kernel must read the tree
        * that turn is writing, which is its checkout and not the project. */
@@ -1024,6 +1127,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       revisions: revisions.channel,
       token: agent.token,
       workspaceRoot: agent.workspaceRoot,
+      ...(machines ? { machines } : {}),
       ...(agent.label ? { label: agent.label } : {}),
       ...(agent.port === undefined ? {} : { port: agent.port }),
       ...(agent.uiRoot ? { uiRoot: agent.uiRoot } : {}),
@@ -1037,11 +1141,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     } catch (error) {
       await launcher.close();
       await mcp?.close();
+      await machines?.host.close();
       throw error;
     }
     agentLauncher = launcher;
     agentServer = server;
     agentMcp = mcp;
+    agentMachines = machines;
     agentExternalAgents = externalAgents;
     /* PH19 ruling 2: the API keeps a run *directory*. The reporter reads the
      * launcher's own durable stream — the same stream the log is written from —
@@ -1080,6 +1186,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const server = agentServer;
     const launcher = agentLauncher;
     const mcp = agentMcp;
+    const machines = agentMachines;
     const filesystem = agentFileSystem;
     agentRunReporter?.close();
     agentRunReporter = undefined;
@@ -1095,6 +1202,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     };
     await settle(server?.close(), () => {
       agentServer = undefined;
+    });
+    await settle(machines?.host.close(), () => {
+      agentMachines = undefined;
     });
     await settle(launcher?.close(), () => {
       agentLauncher = undefined;

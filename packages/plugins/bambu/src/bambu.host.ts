@@ -24,9 +24,7 @@ import type { Quantity } from '@taucad/units/quantity';
 import type { Client as FtpClientConstructor } from 'basic-ftp';
 import type { MqttClient as MqttClientConstructor } from 'mqtt';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import type { BambuCommandResult } from '#bambu.protocol.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import {
   bambuRemoteName,
   bambuTopic,
@@ -37,7 +35,6 @@ import {
   parseBambuStill,
   parseBambuVersionPayload,
 } from '#bambu.protocol.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import { prepareBambuArtifact } from '#bambu.archive.js';
 
 type Binding = Readonly<{

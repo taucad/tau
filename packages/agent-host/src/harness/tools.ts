@@ -18,6 +18,7 @@ const pathFields = new Map<string, string>([
   ['get_kernel_result', 'targetFile'],
   ['export_geometry', 'targetFile'],
   ['screenshot', 'targetFile'],
+  ['request_print', 'targetFile'],
   ['list_directory', 'path'],
   ['grep', 'path'],
   ['glob_search', 'path'],
@@ -56,6 +57,12 @@ export const tauToolKinds = new Map<string, string>([
   ['screenshot', 'other'],
   ['revisions', 'read'],
   ['use_skill', 'other'],
+  ['update_todos', 'edit'],
+  ['get_machine', 'read'],
+  ['request_print', 'other'],
+  ['get_print_request', 'read'],
+  ['list_print_requests', 'read'],
+  ['cancel_print', 'other'],
 ]);
 
 const normalizeBracketArrays = (input: Record<string, unknown>): Record<string, unknown> => {
